@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 
 export const Route = createFileRoute("/about")({
@@ -55,19 +55,21 @@ function About() {
       </section>
 
       <section className="mx-auto max-w-4xl px-4 pb-24">
-        <div className="rounded-2xl border bg-card p-8 md:p-12">
-          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Head instructor</p>
-          <h2 className="mt-2 text-3xl font-bold">Sensei Franck</h2>
+        <div className="rounded-2xl border bg-card p-8 md:p-12 text-center">
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Coaching team</p>
+          <h2 className="mt-2 text-3xl font-bold">Led by Sensei Franck</h2>
           <p className="mt-4 text-muted-foreground">
-            Sensei Franck has 25 years of training in Japanese Jiu-Jitsu and other martial
-            arts, including Krav Maga, Judo, kickboxing and Brazilian Jiu-Jitsu. His
-            emphasis on critical thinking ensures a well-rounded approach to self-defence
-            and martial arts, tailored to each individual student.
+            25+ years of martial arts experience, backed by a team of assistant instructors
+            who help make every class approachable — whatever your starting point.
           </p>
-          <p className="mt-3 text-muted-foreground">
-            Franck holds a black belt in Shorinji Kan Jiu-Jitsu, a purple belt in BJJ, and
-            level 1 grey belt in KEF–IC.
-          </p>
+          <div className="mt-6">
+            <Link
+              to="/instructors"
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Meet the instructors
+            </Link>
+          </div>
         </div>
       </section>
     </SiteLayout>

@@ -13,6 +13,7 @@ import { Route as WaiverRouteImport } from './routes/waiver'
 import { Route as ThankYouRouteImport } from './routes/thank-you'
 import { Route as RegisterInterestRouteImport } from './routes/register-interest'
 import { Route as PricingRouteImport } from './routes/pricing'
+import { Route as InstructorsRouteImport } from './routes/instructors'
 import { Route as FaqRouteImport } from './routes/faq'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as ClassesRouteImport } from './routes/classes'
@@ -37,6 +38,11 @@ const RegisterInterestRoute = RegisterInterestRouteImport.update({
 const PricingRoute = PricingRouteImport.update({
   id: '/pricing',
   path: '/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InstructorsRoute = InstructorsRouteImport.update({
+  id: '/instructors',
+  path: '/instructors',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FaqRoute = FaqRouteImport.update({
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
+  '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/thank-you': typeof ThankYouRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByTo {
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
+  '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/thank-you': typeof ThankYouRoute
@@ -94,6 +102,7 @@ export interface FileRoutesById {
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
+  '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/thank-you': typeof ThankYouRoute
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
     | '/classes'
     | '/contact'
     | '/faq'
+    | '/instructors'
     | '/pricing'
     | '/register-interest'
     | '/thank-you'
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/classes'
     | '/contact'
     | '/faq'
+    | '/instructors'
     | '/pricing'
     | '/register-interest'
     | '/thank-you'
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/classes'
     | '/contact'
     | '/faq'
+    | '/instructors'
     | '/pricing'
     | '/register-interest'
     | '/thank-you'
@@ -141,6 +153,7 @@ export interface RootRouteChildren {
   ClassesRoute: typeof ClassesRoute
   ContactRoute: typeof ContactRoute
   FaqRoute: typeof FaqRoute
+  InstructorsRoute: typeof InstructorsRoute
   PricingRoute: typeof PricingRoute
   RegisterInterestRoute: typeof RegisterInterestRoute
   ThankYouRoute: typeof ThankYouRoute
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/pricing'
       fullPath: '/pricing'
       preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/instructors': {
+      id: '/instructors'
+      path: '/instructors'
+      fullPath: '/instructors'
+      preLoaderRoute: typeof InstructorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/faq': {
@@ -221,6 +241,7 @@ const rootRouteChildren: RootRouteChildren = {
   ClassesRoute: ClassesRoute,
   ContactRoute: ContactRoute,
   FaqRoute: FaqRoute,
+  InstructorsRoute: InstructorsRoute,
   PricingRoute: PricingRoute,
   RegisterInterestRoute: RegisterInterestRoute,
   ThankYouRoute: ThankYouRoute,
