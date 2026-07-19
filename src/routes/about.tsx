@@ -63,21 +63,28 @@ function About() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-4xl px-4 pb-24">
-        <div className="rounded-2xl border bg-card p-8 md:p-12 text-center">
-          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Coaching team</p>
-          <h2 className="mt-2 text-3xl font-bold">Led by Sensei Franck</h2>
-          <p className="mt-4 text-muted-foreground">
-            25+ years of martial arts experience, backed by a team of assistant instructors
-            who help make every class approachable — whatever your starting point.
-          </p>
-          <div className="mt-6">
-            <Link
-              to="/instructors"
-              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Meet the instructors
-            </Link>
+      <section className="mx-auto max-w-6xl px-4 pb-24">
+        <div className="grid gap-8 overflow-hidden rounded-2xl border bg-card md:grid-cols-2">
+          <img
+            src={teamImg.url}
+            alt="Sensei Franck with UTS Jitsu students"
+            className="h-full min-h-[280px] w-full object-cover"
+          />
+          <div className="p-8 md:p-12">
+            <p className="text-sm font-semibold uppercase tracking-wider text-primary">Coaching team</p>
+            <h2 className="mt-2 text-3xl font-bold">Led by Sensei Franck</h2>
+            <p className="mt-4 text-muted-foreground">
+              25+ years of martial arts experience, backed by a team of assistant instructors
+              who help make every class approachable — whatever your starting point.
+            </p>
+            <div className="mt-6">
+              <Link
+                to="/instructors"
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Meet the instructors
+              </Link>
+            </div>
           </div>
         </div>
       </section>
