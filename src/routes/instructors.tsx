@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import franckImg from "@/assets/training3.jpg.asset.json";
 
 export const Route = createFileRoute("/instructors")({
   head: () => ({
