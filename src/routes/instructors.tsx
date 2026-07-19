@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import franckImg from "@/assets/training3.jpg.asset.json";
 
 export const Route = createFileRoute("/instructors")({
   head: () => ({
@@ -47,8 +48,14 @@ function Instructors() {
         </p>
       </section>
 
-      <section className="mx-auto max-w-4xl px-4 pb-16">
-        <div className="rounded-2xl border bg-card p-8 md:p-12">
+      <section className="mx-auto max-w-5xl px-4 pb-16">
+        <div className="overflow-hidden rounded-2xl border bg-card md:grid md:grid-cols-[2fr_3fr]">
+          <img
+            src={franckImg.url}
+            alt="Sensei Franck on the mat"
+            className="h-full min-h-[320px] w-full object-cover md:aspect-auto"
+          />
+          <div className="p-8 md:p-12">
           <p className="text-sm font-semibold uppercase tracking-wider text-primary">Head instructor</p>
           <h2 className="mt-2 text-3xl font-bold">Sensei Franck</h2>
           <p className="mt-4 text-muted-foreground">
@@ -81,6 +88,7 @@ function Instructors() {
                 </li>
               ))}
             </ul>
+          </div>
           </div>
         </div>
       </section>

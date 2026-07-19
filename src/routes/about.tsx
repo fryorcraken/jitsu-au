@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import aboutImg from "@/assets/training2.jpg.asset.json";
+import teamImg from "@/assets/training4.jpg.asset.json";
 
 export const Route = createFileRoute("/about")({
   head: () => ({
@@ -33,14 +35,21 @@ const pillars = [
 function About() {
   return (
     <SiteLayout>
-      <section className="mx-auto max-w-4xl px-4 py-16 md:py-24">
-        <p className="text-sm font-semibold uppercase tracking-wider text-primary">About us</p>
-        <h1 className="mt-3 text-4xl font-bold md:text-5xl">A modern dojo, rooted in tradition.</h1>
-        <p className="mt-5 text-lg text-muted-foreground">
-          UTS Jitsu brings Sydney Jitsu's practical Japanese Jiu-Jitsu training to the UTS
-          Ultimo campus — an accessible, welcoming space for students, professionals and
-          anyone in the CBD looking for a martial art that actually works.
-        </p>
+      <section className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2 md:items-center md:py-24">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">About us</p>
+          <h1 className="mt-3 text-4xl font-bold md:text-5xl">A modern dojo, rooted in tradition.</h1>
+          <p className="mt-5 text-lg text-muted-foreground">
+            UTS Jitsu brings Sydney Jitsu's practical Japanese Jiu-Jitsu training to the UTS
+            Ultimo campus — an accessible, welcoming space for students, professionals and
+            anyone in the CBD looking for a martial art that actually works.
+          </p>
+        </div>
+        <img
+          src={aboutImg.url}
+          alt="UTS Jitsu class training together"
+          className="aspect-[16/9] w-full rounded-2xl object-cover shadow-lg ring-1 ring-black/5"
+        />
       </section>
 
       <section className="mx-auto max-w-6xl px-4 pb-16">
@@ -54,21 +63,28 @@ function About() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-4xl px-4 pb-24">
-        <div className="rounded-2xl border bg-card p-8 md:p-12 text-center">
-          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Coaching team</p>
-          <h2 className="mt-2 text-3xl font-bold">Led by Sensei Franck</h2>
-          <p className="mt-4 text-muted-foreground">
-            25+ years of martial arts experience, backed by a team of assistant instructors
-            who help make every class approachable — whatever your starting point.
-          </p>
-          <div className="mt-6">
-            <Link
-              to="/instructors"
-              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Meet the instructors
-            </Link>
+      <section className="mx-auto max-w-6xl px-4 pb-24">
+        <div className="grid gap-8 overflow-hidden rounded-2xl border bg-card md:grid-cols-2">
+          <img
+            src={teamImg.url}
+            alt="Sensei Franck with UTS Jitsu students"
+            className="h-full min-h-[280px] w-full object-cover"
+          />
+          <div className="p-8 md:p-12">
+            <p className="text-sm font-semibold uppercase tracking-wider text-primary">Coaching team</p>
+            <h2 className="mt-2 text-3xl font-bold">Led by Sensei Franck</h2>
+            <p className="mt-4 text-muted-foreground">
+              25+ years of martial arts experience, backed by a team of assistant instructors
+              who help make every class approachable — whatever your starting point.
+            </p>
+            <div className="mt-6">
+              <Link
+                to="/instructors"
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Meet the instructors
+              </Link>
+            </div>
           </div>
         </div>
       </section>

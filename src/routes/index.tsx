@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Shield, Users, Dumbbell, Award, MapPin, Clock } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
-import heroImg from "@/assets/hero-jitsu.jpg";
+import heroAsset from "@/assets/training1.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -58,10 +58,10 @@ function Home() {
           <div className="relative">
             <div className="absolute -inset-4 -z-10 rounded-3xl bg-primary/10 blur-2xl" />
             <img
-              src={heroImg}
-              alt="Two practitioners training a wrist lock in a modern dojo"
+              src={heroAsset.url}
+              alt="UTS Jitsu students training on the mat"
               width={1600}
-              height={1000}
+              height={1205}
               className="aspect-[4/3] w-full rounded-2xl object-cover shadow-xl ring-1 ring-black/5"
             />
           </div>
