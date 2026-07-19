@@ -89,6 +89,7 @@ function Instructors() {
               ))}
             </ul>
           </div>
+          </div>
         </div>
       </section>
 
