@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Shield, Users, Dumbbell, Award, MapPin, Clock } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
-import heroImg from "@/assets/hero-jitsu.jpg";
+import heroAsset from "@/assets/training1.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
   head: () => ({
