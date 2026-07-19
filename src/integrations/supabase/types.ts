@@ -14,7 +14,114 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      contact_messages: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          message: string
+          name: string
+          subject: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          message: string
+          name: string
+          subject?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          message?: string
+          name?: string
+          subject?: string | null
+        }
+        Relationships: []
+      }
+      interest_registrations: {
+        Row: {
+          created_at: string
+          email: string
+          experience: string | null
+          id: string
+          message: string | null
+          name: string
+          phone: string | null
+          uts_student: boolean
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          experience?: string | null
+          id?: string
+          message?: string | null
+          name: string
+          phone?: string | null
+          uts_student?: boolean
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          experience?: string | null
+          id?: string
+          message?: string | null
+          name?: string
+          phone?: string | null
+          uts_student?: boolean
+        }
+        Relationships: []
+      }
+      waivers: {
+        Row: {
+          acknowledgements: Json
+          address: string
+          created_at: string
+          date_of_birth: string
+          email: string
+          emergency_contact_name: string
+          emergency_contact_phone: string
+          full_name: string
+          id: string
+          medical_notes: string | null
+          phone: string
+          signature_name: string
+          signed_at: string
+        }
+        Insert: {
+          acknowledgements?: Json
+          address: string
+          created_at?: string
+          date_of_birth: string
+          email: string
+          emergency_contact_name: string
+          emergency_contact_phone: string
+          full_name: string
+          id?: string
+          medical_notes?: string | null
+          phone: string
+          signature_name: string
+          signed_at?: string
+        }
+        Update: {
+          acknowledgements?: Json
+          address?: string
+          created_at?: string
+          date_of_birth?: string
+          email?: string
+          emergency_contact_name?: string
+          emergency_contact_phone?: string
+          full_name?: string
+          id?: string
+          medical_notes?: string | null
+          phone?: string
+          signature_name?: string
+          signed_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
