@@ -35,14 +35,21 @@ const pillars = [
 function About() {
   return (
     <SiteLayout>
-      <section className="mx-auto max-w-4xl px-4 py-16 md:py-24">
-        <p className="text-sm font-semibold uppercase tracking-wider text-primary">About us</p>
-        <h1 className="mt-3 text-4xl font-bold md:text-5xl">A modern dojo, rooted in tradition.</h1>
-        <p className="mt-5 text-lg text-muted-foreground">
-          UTS Jitsu brings Sydney Jitsu's practical Japanese Jiu-Jitsu training to the UTS
-          Ultimo campus — an accessible, welcoming space for students, professionals and
-          anyone in the CBD looking for a martial art that actually works.
-        </p>
+      <section className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:grid-cols-2 md:items-center md:py-24">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">About us</p>
+          <h1 className="mt-3 text-4xl font-bold md:text-5xl">A modern dojo, rooted in tradition.</h1>
+          <p className="mt-5 text-lg text-muted-foreground">
+            UTS Jitsu brings Sydney Jitsu's practical Japanese Jiu-Jitsu training to the UTS
+            Ultimo campus — an accessible, welcoming space for students, professionals and
+            anyone in the CBD looking for a martial art that actually works.
+          </p>
+        </div>
+        <img
+          src={aboutImg.url}
+          alt="UTS Jitsu class training together"
+          className="aspect-[16/9] w-full rounded-2xl object-cover shadow-lg ring-1 ring-black/5"
+        />
       </section>
 
       <section className="mx-auto max-w-6xl px-4 pb-16">
