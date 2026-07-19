@@ -26,7 +26,7 @@ const copy = {
   interest: { title: "We got your details!", body: "Thanks for registering your interest. We'll be in touch shortly to lock in your first free session." },
   waiver: { title: "Waiver received.", body: "Thanks — your signed waiver has been recorded. See you on the mat!" },
   contact: { title: "Message sent.", body: "Thanks for reaching out. We'll get back to you soon." },
-} as const;
+} as const satisfies Record<z.infer<typeof searchSchema>["kind"], { title: string; body: string }>;
 
 function ThankYou() {
   const { kind } = Route.useSearch();
