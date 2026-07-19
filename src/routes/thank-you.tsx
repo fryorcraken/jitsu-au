@@ -30,7 +30,7 @@ const copy = {
 
 function ThankYou() {
   const { kind } = Route.useSearch();
-  const c = copy[kind];
+  const c = copy[kind as keyof typeof copy];
   return (
     <SiteLayout>
       <section className="mx-auto flex max-w-xl flex-col items-center px-4 py-24 text-center">
