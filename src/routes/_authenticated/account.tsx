@@ -54,8 +54,8 @@ function AccountPage() {
               <CardDescription>Waiver template and signed waivers.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
-              <Button asChild variant="outline"><Link to="/_authenticated/manager/waiver-template">Edit waiver template</Link></Button>
-              <Button asChild variant="outline"><Link to="/_authenticated/manager/waivers">View signed waivers</Link></Button>
+              <Button asChild variant="outline"><Link to="/manager/waiver-template">Edit waiver template</Link></Button>
+              <Button asChild variant="outline"><Link to="/manager/waivers">View signed waivers</Link></Button>
             </CardContent>
           </Card>
         )}
