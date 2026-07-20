@@ -77,6 +77,15 @@ function Waiver() {
       return;
     }
     const fd = new FormData(e.currentTarget);
+    if (isMinor) {
+      const gn = String(fd.get("guardian_name") || "").trim();
+      const gr = String(fd.get("guardian_relationship") || "").trim();
+      const gs = String(fd.get("guardian_signature") || "").trim();
+      if (!gn || !gr || !gs) {
+        toast.error("Parent/guardian name, relationship and signature are required for participants under 18.");
+        return;
+      }
+    }
     setLoading(true);
     try {
       const res = await submit({
@@ -93,6 +102,10 @@ function Waiver() {
           ack_release: true,
           ack_media: ackMedia,
           signature_name: String(fd.get("signature_name") || ""),
+          is_minor: isMinor,
+          guardian_name: String(fd.get("guardian_name") || ""),
+          guardian_relationship: String(fd.get("guardian_relationship") || ""),
+          guardian_signature: String(fd.get("guardian_signature") || ""),
           hp: String(fd.get("hp") || ""),
         },
       });
