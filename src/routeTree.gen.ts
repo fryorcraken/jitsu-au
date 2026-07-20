@@ -10,24 +10,39 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WaiverRouteImport } from './routes/waiver'
+import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as ThankYouRouteImport } from './routes/thank-you'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RegisterInterestRouteImport } from './routes/register-interest'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as InstructorsRouteImport } from './routes/instructors'
 import { Route as FaqRouteImport } from './routes/faq'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as ClassesRouteImport } from './routes/classes'
+import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 
 const WaiverRoute = WaiverRouteImport.update({
   id: '/waiver',
   path: '/waiver',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UpdatePasswordRoute = UpdatePasswordRouteImport.update({
+  id: '/update-password',
+  path: '/update-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ThankYouRoute = ThankYouRouteImport.update({
   id: '/thank-you',
   path: '/thank-you',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegisterInterestRoute = RegisterInterestRouteImport.update({
@@ -60,9 +75,18 @@ const ClassesRoute = ClassesRouteImport.update({
   path: '/classes',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -70,93 +94,128 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/auth': typeof AuthRoute
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
   '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/thank-you': typeof ThankYouRoute
+  '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
+  '/account': typeof AuthenticatedAccountRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/auth': typeof AuthRoute
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
   '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/thank-you': typeof ThankYouRoute
+  '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
+  '/account': typeof AuthenticatedAccountRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/about': typeof AboutRoute
+  '/auth': typeof AuthRoute
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
   '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/thank-you': typeof ThankYouRoute
+  '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
+  '/_authenticated/account': typeof AuthenticatedAccountRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/about'
+    | '/auth'
     | '/classes'
     | '/contact'
     | '/faq'
     | '/instructors'
     | '/pricing'
     | '/register-interest'
+    | '/reset-password'
     | '/thank-you'
+    | '/update-password'
     | '/waiver'
+    | '/account'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/about'
+    | '/auth'
     | '/classes'
     | '/contact'
     | '/faq'
     | '/instructors'
     | '/pricing'
     | '/register-interest'
+    | '/reset-password'
     | '/thank-you'
+    | '/update-password'
     | '/waiver'
+    | '/account'
   id:
     | '__root__'
     | '/'
+    | '/_authenticated'
     | '/about'
+    | '/auth'
     | '/classes'
     | '/contact'
     | '/faq'
     | '/instructors'
     | '/pricing'
     | '/register-interest'
+    | '/reset-password'
     | '/thank-you'
+    | '/update-password'
     | '/waiver'
+    | '/_authenticated/account'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AboutRoute: typeof AboutRoute
+  AuthRoute: typeof AuthRoute
   ClassesRoute: typeof ClassesRoute
   ContactRoute: typeof ContactRoute
   FaqRoute: typeof FaqRoute
   InstructorsRoute: typeof InstructorsRoute
   PricingRoute: typeof PricingRoute
   RegisterInterestRoute: typeof RegisterInterestRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   ThankYouRoute: typeof ThankYouRoute
+  UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
 }
 
@@ -169,11 +228,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WaiverRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/update-password': {
+      id: '/update-password'
+      path: '/update-password'
+      fullPath: '/update-password'
+      preLoaderRoute: typeof UpdatePasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/thank-you': {
       id: '/thank-you'
       path: '/thank-you'
       fullPath: '/thank-you'
       preLoaderRoute: typeof ThankYouRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/register-interest': {
@@ -218,11 +291,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClassesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about': {
       id: '/about'
       path: '/about'
       fullPath: '/about'
       preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -232,19 +319,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/account': {
+      id: '/_authenticated/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AuthenticatedAccountRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAccountRoute: AuthenticatedAccountRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AboutRoute: AboutRoute,
+  AuthRoute: AuthRoute,
   ClassesRoute: ClassesRoute,
   ContactRoute: ContactRoute,
   FaqRoute: FaqRoute,
   InstructorsRoute: InstructorsRoute,
   PricingRoute: PricingRoute,
   RegisterInterestRoute: RegisterInterestRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   ThankYouRoute: ThankYouRoute,
+  UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
 }
 export const routeTree = rootRouteImport
