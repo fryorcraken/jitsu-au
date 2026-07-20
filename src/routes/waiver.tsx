@@ -268,29 +268,24 @@ function Waiver() {
               electronic signature dated {new Date().toLocaleDateString()}.
             </p>
 
-            <label className="mt-4 flex items-start gap-3 text-sm">
-              <Checkbox checked={isMinor} onCheckedChange={(v) => setIsMinor(v === true)} className="mt-0.5" />
-              <span>Participant is under 18. A parent or guardian must also sign.</span>
-            </label>
-
             {isMinor && (
-              <div className="mt-3 space-y-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
-                <p className="text-xs text-muted-foreground">
-                  Parent or legal guardian details and signature are required for participants under 18.
+              <div className="mt-4 space-y-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                <p className="text-sm font-medium text-primary">
+                  Participant is under 18. A parent or legal guardian must also sign.
                 </p>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <Label htmlFor="guardian_name">Parent/guardian full name</Label>
-                    <Input id="guardian_name" name="guardian_name" maxLength={120} className="mt-1.5" />
+                    <Input id="guardian_name" name="guardian_name" required maxLength={120} className="mt-1.5" />
                   </div>
                   <div>
                     <Label htmlFor="guardian_relationship">Relationship</Label>
-                    <Input id="guardian_relationship" name="guardian_relationship" maxLength={80} placeholder="Parent, guardian, etc." className="mt-1.5" />
+                    <Input id="guardian_relationship" name="guardian_relationship" required maxLength={80} placeholder="Parent, guardian, etc." className="mt-1.5" />
                   </div>
                 </div>
                 <div>
                   <Label htmlFor="guardian_signature">Parent/guardian signature (type full name)</Label>
-                  <Input id="guardian_signature" name="guardian_signature" maxLength={120} placeholder="Full name" className="mt-1.5" />
+                  <Input id="guardian_signature" name="guardian_signature" required maxLength={120} placeholder="Full name" className="mt-1.5" />
                 </div>
               </div>
             )}
