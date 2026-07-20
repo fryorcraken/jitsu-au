@@ -166,17 +166,8 @@ function Waiver() {
           kept private and used only for club administration.
         </p>
 
-        {templateQ.data && (
-          <article className="mt-8 rounded-2xl border bg-muted/30 p-6 text-sm leading-relaxed">
-            <h2 className="text-lg font-bold">{templateQ.data.title}</h2>
-            <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-muted-foreground">
-              {templateQ.data.body_md}
-            </pre>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Placeholders like {"{{full_name}}"} will be filled in from your details on the signed PDF.
-            </p>
-          </article>
-        )}
+
+
 
         <form onSubmit={onSubmit} className="mt-8 space-y-6 rounded-2xl border bg-card p-6 md:p-8">
           <input type="text" name="hp" tabIndex={-1} autoComplete="off" className="hidden" />
