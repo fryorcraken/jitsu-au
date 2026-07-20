@@ -226,7 +226,21 @@ function Waiver() {
             <Textarea id="medical_notes" name="medical_notes" maxLength={2000} rows={4} defaultValue={prefill.medical_notes ?? ""} key={`m-${prefill.medical_notes ?? ""}`} />
           </fieldset>
 
+          {templateQ.data && (
+            <fieldset className="space-y-3 border-t pt-6">
+              <legend className="text-sm font-semibold">Waiver</legend>
+              <article className="max-h-96 overflow-y-auto rounded-lg border bg-muted/30 p-4 prose prose-sm max-w-none prose-headings:font-bold prose-headings:text-foreground prose-p:text-muted-foreground">
+                <h2 className="!mt-0">{templateQ.data.title}</h2>
+                <ReactMarkdown>{templateQ.data.body_md}</ReactMarkdown>
+              </article>
+              <p className="text-xs text-muted-foreground">
+                Placeholders like {"{{full_name}}"} will be filled in from your details on the signed PDF.
+              </p>
+            </fieldset>
+          )}
+
           <fieldset className="space-y-4 border-t pt-6">
+
             <legend className="text-sm font-semibold">Acknowledgements</legend>
             <label className="flex items-start gap-3 text-sm">
               <Checkbox checked={ackRisk} onCheckedChange={(v) => setAckRisk(v === true)} className="mt-0.5" />
