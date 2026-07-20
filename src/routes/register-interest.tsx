@@ -14,9 +14,9 @@ export const Route = createFileRoute("/register-interest")({
   head: () => ({
     meta: [
       { title: "Register your interest | UTS Jitsu" },
-      { name: "description", content: "Book a free trial class at UTS Jitsu. We'll be in touch to confirm your first session." },
+      { name: "description", content: "Register your interest at UTS Jitsu. We'll be in touch to confirm your first session." },
       { property: "og:title", content: "Register your interest | UTS Jitsu" },
-      { property: "og:description", content: "Book a free trial class at UTS Jitsu." },
+      { property: "og:description", content: "Register your interest at UTS Jitsu." },
       { property: "og:url", content: "/register-interest" },
     ],
     links: [{ rel: "canonical", href: "/register-interest" }],
@@ -57,7 +57,7 @@ function RegisterInterest() {
     <SiteLayout>
       <section className="mx-auto max-w-2xl px-4 py-16 md:py-20">
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Register interest</p>
-        <h1 className="mt-3 text-4xl font-bold">Book your free trial.</h1>
+        <h1 className="mt-3 text-4xl font-bold">Register your interest.</h1>
         <p className="mt-3 text-muted-foreground">
           Leave your details and we'll be in touch to lock in your first session. Your
           first two classes are on us.

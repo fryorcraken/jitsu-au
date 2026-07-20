@@ -85,7 +85,7 @@ function Classes() {
           </div>
           <div className="mt-6 flex flex-wrap gap-3 md:mt-0">
             <Button asChild>
-              <Link to="/register-interest">Book a free trial</Link>
+              <Link to="/register-interest">Register interest</Link>
             </Button>
             <Button asChild variant="outline">
               <Link to="/pricing">View pricing</Link>

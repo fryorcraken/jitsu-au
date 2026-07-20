@@ -44,7 +44,7 @@ function Home() {
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
                 <Link to="/register-interest">
-                  Book a free trial <ArrowRight className="ml-1 h-4 w-4" />
+                  Register interest <ArrowRight className="ml-1 h-4 w-4" />
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">
