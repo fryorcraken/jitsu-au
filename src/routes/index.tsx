@@ -38,7 +38,7 @@ function Home() {
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
               Build real self-defence skills in a fun and welcoming environment. Japanese
-              Jiu-Jitsu at the UTS Ultimo campus — for beginners and experienced martial
+              Jiu-Jitsu at the UTS Ultimo campus. Classes are for beginners and experienced martial
               artists alike.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
