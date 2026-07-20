@@ -69,30 +69,42 @@ function AuthPage() {
 }
 
 function SignInForms({ redirect }: { redirect?: string }) {
-  const [mode, setMode] = useState<"password" | "magic">("password");
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant={mode === "password" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setMode("password")}
-        >
-          Password
-        </Button>
-        <Button
-          type="button"
-          variant={mode === "magic" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setMode("magic")}
-        >
-          Magic link
+  const [view, setView] = useState<"magic" | "password">("magic");
+  const [sentEmail, setSentEmail] = useState<string | null>(null);
+
+  if (sentEmail && view === "magic") {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          If <strong>{sentEmail}</strong> matches an account, we've sent a sign-in link. Check your inbox to sign in.
+        </p>
+        <Button type="button" variant="outline" className="w-full" onClick={() => setView("password")}>
+          Login with password
         </Button>
       </div>
-      {mode === "password" ? <PasswordSignIn redirect={redirect} /> : <MagicLinkSignIn />}
-    </div>
-  );
+    );
+  }
+
+  if (view === "password") {
+    return (
+      <div className="space-y-3">
+        <PasswordSignIn redirect={redirect} />
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full"
+          onClick={() => {
+            setSentEmail(null);
+            setView("magic");
+          }}
+        >
+          Back to email sign-in
+        </Button>
+      </div>
+    );
+  }
+
+  return <MagicLinkSignIn onSent={(email) => setSentEmail(email)} />;
 }
 
 function PasswordSignIn({ redirect }: { redirect?: string }) {
@@ -133,29 +145,27 @@ function PasswordSignIn({ redirect }: { redirect?: string }) {
   );
 }
 
-function MagicLinkSignIn() {
+function MagicLinkSignIn({ onSent }: { onSent: (email: string) => void }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/account` },
-    });
+    // Fire and forget: never surface whether the address matches an account.
+    try {
+      await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/account`,
+          shouldCreateUser: false,
+        },
+      });
+    } catch {
+      // swallow: response must not differ for valid vs invalid emails
+    }
     setBusy(false);
-    if (error) return toast.error(error.message);
-    setSent(true);
-  }
-
-  if (sent) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Check your inbox at <strong>{email}</strong> for a sign-in link.
-      </p>
-    );
+    onSent(email);
   }
 
   return (
@@ -165,11 +175,12 @@ function MagicLinkSignIn() {
         <Input id="magic-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
       </div>
       <Button type="submit" className="w-full" disabled={busy}>
-        {busy ? "Sending..." : "Send magic link"}
+        {busy ? "Sending..." : "Sign in"}
       </Button>
     </form>
   );
 }
+
 
 function SignUpForm() {
   const [email, setEmail] = useState("");
