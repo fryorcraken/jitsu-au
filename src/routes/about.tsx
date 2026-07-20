@@ -41,7 +41,7 @@ function About() {
           <h1 className="mt-3 text-4xl font-bold md:text-5xl">A modern dojo, rooted in tradition.</h1>
           <p className="mt-5 text-lg text-muted-foreground">
             UTS Jitsu brings Sydney Jitsu's practical Japanese Jiu-Jitsu training to the UTS
-            Ultimo campus — an accessible, welcoming space for students, professionals and
+            Ultimo campus, an accessible, welcoming space for students, professionals and
             anyone in the CBD looking for a martial art that actually works.
           </p>
         </div>
