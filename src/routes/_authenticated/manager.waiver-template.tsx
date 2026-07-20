@@ -135,7 +135,10 @@ function EditorPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">Preview (with sample values)</CardTitle></CardHeader>
           <CardContent>
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{preview}</pre>
+            <div className="prose prose-sm max-w-none prose-headings:font-bold prose-headings:text-foreground prose-p:leading-relaxed prose-strong:text-foreground">
+              <ReactMarkdown>{preview}</ReactMarkdown>
+            </div>
+
           </CardContent>
         </Card>
       </section>
