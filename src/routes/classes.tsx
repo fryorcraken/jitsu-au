@@ -55,7 +55,7 @@ function Classes() {
             <h2 className="text-2xl font-bold">What to expect</h2>
             <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
               <li>• Warm-up, drills, techniques and pressure-tested practice.</li>
-              <li>• A friendly training partner assigned on your first day.</li>
+              <li>• Welcoming instructors who will cater for your skills.</li>
               <li>• Emphasis on control and safety. Nobody trains injured.</li>
               <li>• Progress at your pace: from your very first class to grading.</li>
             </ul>
