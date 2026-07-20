@@ -77,7 +77,7 @@ function Waiver() {
   useEffect(() => {
     if (authLoading || !user) return;
     fetchMine()
-      .then((row) => { if (row) setPrefill(row as Prefill); })
+      .then((row) => { if (row) { setPrefill(row as Prefill); if ((row as Prefill).date_of_birth) setDob((row as Prefill).date_of_birth!); } })
       .catch(() => { /* no prior waiver */ });
   }, [authLoading, user, fetchMine]);
 
