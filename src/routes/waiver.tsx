@@ -53,6 +53,7 @@ function Waiver() {
   const [ackRisk, setAckRisk] = useState(false);
   const [ackRelease, setAckRelease] = useState(false);
   const [ackMedia, setAckMedia] = useState(false);
+  const [isMinor, setIsMinor] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<Prefill>({});
 
