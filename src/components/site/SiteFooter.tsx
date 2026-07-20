@@ -7,9 +7,14 @@ export function SiteFooter() {
     <footer className="mt-24 border-t bg-muted/30">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 md:grid-cols-4">
         <div className="md:col-span-2">
-          <div className="flex items-center gap-2 font-display text-lg font-bold text-primary">
-            <span className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground">道</span>
-            UTS Jitsu
+          <div className="flex items-center gap-2">
+            <img
+              src={logoAsset.url}
+              alt="UTS Jitsu logo"
+              width={96}
+              height={40}
+              className="h-10 w-auto rounded bg-white p-1"
+            />
           </div>
           <p className="mt-3 max-w-sm text-sm text-muted-foreground">
             Practical Japanese Jiu-Jitsu in the heart of Sydney. Beginners welcome. First two sessions are free, all year round.

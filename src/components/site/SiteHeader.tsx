@@ -20,9 +20,14 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2 font-display text-lg font-bold text-primary">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground">道</span>
-          UTS Jitsu
+        <Link to="/" className="flex items-center gap-2">
+          <img
+            src={logoAsset.url}
+            alt="UTS Jitsu logo"
+            width={96}
+            height={40}
+            className="h-10 w-auto rounded bg-white p-1"
+          />
         </Link>
         <nav className="hidden items-center gap-6 md:flex">
           {nav.map((n) => (
