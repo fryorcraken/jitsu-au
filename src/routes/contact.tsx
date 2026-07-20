@@ -17,9 +17,9 @@ export const Route = createFileRoute("/contact")({
       { name: "description", content: "Get in touch with UTS Jitsu by phone, WhatsApp, or message." },
       { property: "og:title", content: "Contact UTS Jitsu" },
       { property: "og:description", content: "Phone, WhatsApp, or send us a message." },
-      { property: "og:url", content: "/contact" },
+      { property: "og:url", content: "https://jitsu.au/contact" },
     ],
-    links: [{ rel: "canonical", href: "/contact" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/contact" }],
   }),
   component: Contact,
 });

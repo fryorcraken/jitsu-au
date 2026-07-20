@@ -11,9 +11,9 @@ export const Route = createFileRoute("/instructors")({
       { name: "description", content: "Meet the instructors at UTS Jitsu, led by Franck Royer with 25+ years of martial arts experience." },
       { property: "og:title", content: "Instructors | UTS Jitsu" },
       { property: "og:description", content: "Meet Franck Royer and the coaching team at UTS Jitsu." },
-      { property: "og:url", content: "/instructors" },
+      { property: "og:url", content: "https://jitsu.au/instructors" },
     ],
-    links: [{ rel: "canonical", href: "/instructors" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/instructors" }],
   }),
   component: Instructors,
 });

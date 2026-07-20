@@ -17,10 +17,10 @@ export const Route = createFileRoute("/waiver")({
       { name: "description", content: "Complete the UTS Jitsu training waiver before your first class." },
       { property: "og:title", content: "Sign waiver | UTS Jitsu" },
       { property: "og:description", content: "Complete the UTS Jitsu training waiver online." },
-      { property: "og:url", content: "/waiver" },
+      { property: "og:url", content: "https://jitsu.au/waiver" },
       { name: "robots", content: "noindex" },
     ],
-    links: [{ rel: "canonical", href: "/waiver" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/waiver" }],
   }),
   component: Waiver,
 });

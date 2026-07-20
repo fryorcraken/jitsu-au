@@ -9,9 +9,9 @@ export const Route = createFileRoute("/faq")({
       { name: "description", content: "Answers to common questions about starting Japanese Jiu-Jitsu at UTS Jitsu." },
       { property: "og:title", content: "FAQ | UTS Jitsu" },
       { property: "og:description", content: "Trial classes, gear, experience needed, and more." },
-      { property: "og:url", content: "/faq" },
+      { property: "og:url", content: "https://jitsu.au/faq" },
     ],
-    links: [{ rel: "canonical", href: "/faq" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/faq" }],
     scripts: [{
       type: "application/ld+json",
       children: JSON.stringify({
