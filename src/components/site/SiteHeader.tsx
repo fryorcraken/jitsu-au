@@ -44,7 +44,7 @@ export function SiteHeader() {
         </nav>
         <div className="hidden md:block">
           <Button asChild size="sm">
-            <Link to="/register-interest">Book a free trial</Link>
+            <Link to="/register-interest">Register interest</Link>
           </Button>
         </div>
         <button
@@ -70,7 +70,7 @@ export function SiteHeader() {
             </Link>
           ))}
           <Button asChild size="sm" className="mt-2">
-            <Link to="/register-interest" onClick={() => setOpen(false)}>Book a free trial</Link>
+            <Link to="/register-interest" onClick={() => setOpen(false)}>Register interest</Link>
           </Button>
         </nav>
       </div>
