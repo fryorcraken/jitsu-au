@@ -18,6 +18,7 @@ const nav = [
 
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
+  const { user } = useAuth();
   return (
     <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
@@ -43,7 +44,16 @@ export function SiteHeader() {
             </Link>
           ))}
         </nav>
-        <div className="hidden md:block">
+        <div className="hidden items-center gap-2 md:flex">
+          {user ? (
+            <Button asChild size="sm" variant="outline">
+              <Link to="/account"><User className="mr-1 h-4 w-4" />Account</Link>
+            </Button>
+          ) : (
+            <Button asChild size="sm" variant="ghost">
+              <Link to="/auth">Sign in</Link>
+            </Button>
+          )}
           <Button asChild size="sm">
             <Link to="/register-interest">Register interest</Link>
           </Button>
@@ -70,6 +80,23 @@ export function SiteHeader() {
               {n.label}
             </Link>
           ))}
+          {user ? (
+            <Link
+              to="/account"
+              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setOpen(false)}
+            >
+              Account
+            </Link>
+          ) : (
+            <Link
+              to="/auth"
+              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setOpen(false)}
+            >
+              Sign in
+            </Link>
+          )}
           <Button asChild size="sm" className="mt-2">
             <Link to="/register-interest" onClick={() => setOpen(false)}>Register interest</Link>
           </Button>
