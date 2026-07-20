@@ -150,6 +150,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       template_body: tpl.body_md,
       template_version: tpl.version,
       club_name: CLUB_NAME,
+      is_minor: data.is_minor ?? false,
+      guardian_name: data.guardian_name || "",
+      guardian_relationship: data.guardian_relationship || "",
+      guardian_signature: data.guardian_signature || "",
     });
 
     const path = `${inserted.id}.pdf`;
