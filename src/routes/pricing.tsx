@@ -20,13 +20,13 @@ export const Route = createFileRoute("/pricing")({
 type Tier = { title: string; price: string; period?: string; features: string[]; highlight?: boolean };
 
 const student: Tier[] = [
-  { title: "Casual class", price: "$20", period: "per session", features: ["Any regular class", "Great for trying us out", "No commitment"] },
   { title: "One semester", price: "$245", period: "per half-year", features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"], highlight: true },
+  { title: "Casual class", price: "$20", period: "per session", features: ["Any regular class", "Great for trying us out", "No commitment"] },
 ];
 
 const public_: Tier[] = [
-  { title: "Casual class", price: "$30", period: "per session", features: ["Any regular class", "Flexible, no commitment"] },
   { title: "One semester", price: "$445", period: "per half-year", features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"], highlight: true },
+  { title: "Casual class", price: "$30", period: "per session", features: ["Any regular class", "Flexible, no commitment"] },
 ];
 
 const extras = [
