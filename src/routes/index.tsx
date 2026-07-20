@@ -15,9 +15,9 @@ export const Route = createFileRoute("/")({
       },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       { property: "og:description", content: "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free." },
-      { property: "og:url", content: "/" },
+      { property: "og:url", content: "https://jitsu.au/" },
     ],
-    links: [{ rel: "canonical", href: "/" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/" }],
   }),
   component: Home,
 });

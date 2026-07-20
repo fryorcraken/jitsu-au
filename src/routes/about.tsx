@@ -10,9 +10,9 @@ export const Route = createFileRoute("/about")({
       { name: "description", content: "Meet Franck Royer and learn about our approach to self-defence, community and fitness at UTS Jitsu." },
       { property: "og:title", content: "About UTS Jitsu" },
       { property: "og:description", content: "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience." },
-      { property: "og:url", content: "/about" },
+      { property: "og:url", content: "https://jitsu.au/about" },
     ],
-    links: [{ rel: "canonical", href: "/about" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/about" }],
   }),
   component: About,
 });

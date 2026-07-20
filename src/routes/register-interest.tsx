@@ -17,9 +17,9 @@ export const Route = createFileRoute("/register-interest")({
       { name: "description", content: "Register your interest at UTS Jitsu. We'll be in touch to confirm your first session." },
       { property: "og:title", content: "Register your interest | UTS Jitsu" },
       { property: "og:description", content: "Register your interest at UTS Jitsu." },
-      { property: "og:url", content: "/register-interest" },
+      { property: "og:url", content: "https://jitsu.au/register-interest" },
     ],
-    links: [{ rel: "canonical", href: "/register-interest" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/register-interest" }],
   }),
   component: RegisterInterest,
 });

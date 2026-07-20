@@ -15,9 +15,9 @@ export const Route = createFileRoute("/thank-you")({
       { title: "Thank you | UTS Jitsu" },
       { name: "description", content: "Thanks for reaching out to UTS Jitsu." },
       { name: "robots", content: "noindex" },
-      { property: "og:url", content: "/thank-you" },
+      { property: "og:url", content: "https://jitsu.au/thank-you" },
     ],
-    links: [{ rel: "canonical", href: "/thank-you" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/thank-you" }],
   }),
   component: ThankYou,
 });

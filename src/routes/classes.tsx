@@ -10,9 +10,9 @@ export const Route = createFileRoute("/classes")({
       { name: "description", content: "Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. Monday, Wednesday and Saturday." },
       { property: "og:title", content: "Classes & Schedule | UTS Jitsu" },
       { property: "og:description", content: "Monday, Wednesday and Saturday classes at ActivateFit Gym, Ultimo." },
-      { property: "og:url", content: "/classes" },
+      { property: "og:url", content: "https://jitsu.au/classes" },
     ],
-    links: [{ rel: "canonical", href: "/classes" }],
+    links: [{ rel: "canonical", href: "https://jitsu.au/classes" }],
   }),
   component: Classes,
 });
