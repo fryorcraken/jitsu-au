@@ -23,6 +23,25 @@ function serverSupabase() {
   });
 }
 
+function composeFullName(first: string, middle: string, last: string) {
+  return [first, middle, last].map((s) => s.trim()).filter(Boolean).join(" ");
+}
+
+function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
+  if (!dataUrl) return null;
+  const m = /^data:image\/png;base64,(.+)$/.exec(dataUrl.trim());
+  if (!m) return null;
+  try {
+    const b64 = m[1];
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 // ---- Current template (public) ----
 export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handler(async () => {
   const supabase = serverSupabase();
@@ -41,7 +60,7 @@ export const getMyLatestWaiver = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("waivers")
-      .select("full_name, date_of_birth, address, phone, email, emergency_contact_name, emergency_contact_phone, medical_notes")
+      .select("full_name, first_name, middle_name, last_name, date_of_birth, address, phone, email, emergency_contact_name, emergency_contact_phone, medical_notes")
       .eq("user_id", context.userId)
       .order("signed_at", { ascending: false })
       .limit(1)
@@ -51,8 +70,12 @@ export const getMyLatestWaiver = createServerFn({ method: "GET" })
   });
 
 // ---- Submit waiver + generate PDF ----
+const sigImage = z.string().max(500_000).optional().or(z.literal(""));
+
 const waiverSchema = z.object({
-  full_name: z.string().trim().min(1).max(120),
+  first_name: z.string().trim().min(1).max(60),
+  middle_name: z.string().trim().max(60).optional().or(z.literal("")),
+  last_name: z.string().trim().min(1).max(60),
   date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   address: z.string().trim().min(1).max(300),
   phone: z.string().trim().min(1).max(30),
@@ -63,14 +86,19 @@ const waiverSchema = z.object({
   ack_risk: z.literal(true),
   ack_release: z.literal(true),
   ack_media: z.boolean(),
-  signature_name: z.string().trim().min(1).max(120),
+  signature_name: z.string().trim().max(120).optional().or(z.literal("")),
+  signature_image: sigImage,
   is_minor: z.boolean().optional().default(false),
   guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
   guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
   guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
+  guardian_signature_image: sigImage,
   hp: z.string().max(0).optional(),
 }).refine(
-  (d) => !d.is_minor || (d.guardian_name && d.guardian_relationship && d.guardian_signature),
+  (d) => Boolean((d.signature_name && d.signature_name.trim()) || (d.signature_image && d.signature_image.trim())),
+  { message: "A signature is required — draw or type your name.", path: ["signature_name"] },
+).refine(
+  (d) => !d.is_minor || (d.guardian_name && d.guardian_relationship && ((d.guardian_signature && d.guardian_signature.trim()) || (d.guardian_signature_image && d.guardian_signature_image.trim()))),
   { message: "Parent/guardian name, relationship and signature are required for participants under 18.", path: ["guardian_name"] },
 );
 
@@ -80,7 +108,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     if (data.hp) return { ok: true as const, pdf_url: null };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { renderWaiverPdf } = await import("./waiver-pdf.server");
+    const { renderWaiverPdf } = await import("./waiver-pdf");
+
+    const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
 
     // Try to attach user_id if caller has a bearer token
     let userId: string | null = null;
@@ -105,11 +135,17 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 
     const signed_at = new Date().toISOString();
 
+    const sigPng = decodeDataUrlPng(data.signature_image || "");
+    const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
+
     // Insert waiver row
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from("waivers")
       .insert({
-        full_name: data.full_name,
+        full_name,
+        first_name: data.first_name,
+        middle_name: data.middle_name || null,
+        last_name: data.last_name,
         date_of_birth: data.date_of_birth,
         address: data.address,
         phone: data.phone,
@@ -118,7 +154,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         emergency_contact_phone: data.emergency_contact_phone,
         medical_notes: data.medical_notes || null,
         acknowledgements: { risk: true, release: true, media: data.ack_media },
-        signature_name: data.signature_name,
+        signature_name: data.signature_name || full_name,
         signed_at,
         user_id: userId,
         template_version: tpl.version,
@@ -131,9 +167,23 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .single();
     if (insErr) throw new Error(insErr.message);
 
+    // Upload signature images (if any) so managers can view raw marks
+    let sigPath: string | null = null;
+    let gSigPath: string | null = null;
+    if (sigPng) {
+      sigPath = `${inserted.id}-signature.png`;
+      const { error } = await supabaseAdmin.storage.from(BUCKET).upload(sigPath, sigPng, { contentType: "image/png", upsert: true });
+      if (error) throw new Error(error.message);
+    }
+    if (gSigPng) {
+      gSigPath = `${inserted.id}-guardian-signature.png`;
+      const { error } = await supabaseAdmin.storage.from(BUCKET).upload(gSigPath, gSigPng, { contentType: "image/png", upsert: true });
+      if (error) throw new Error(error.message);
+    }
+
     // Generate PDF
     const pdf = await renderWaiverPdf({
-      full_name: data.full_name,
+      full_name,
       date_of_birth: data.date_of_birth,
       address: data.address,
       phone: data.phone,
@@ -144,7 +194,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       ack_risk: true,
       ack_release: true,
       ack_media: data.ack_media,
-      signature_name: data.signature_name,
+      signature_name: data.signature_name || "",
       signed_at,
       template_title: tpl.title,
       template_body: tpl.body_md,
@@ -154,6 +204,8 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       guardian_name: data.guardian_name || "",
       guardian_relationship: data.guardian_relationship || "",
       guardian_signature: data.guardian_signature || "",
+      signature_image_png: sigPng,
+      guardian_signature_image_png: gSigPng,
     });
 
     const path = `${inserted.id}.pdf`;
@@ -162,7 +214,11 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
     if (upErr) throw new Error(upErr.message);
 
-    await supabaseAdmin.from("waivers").update({ pdf_path: path }).eq("id", inserted.id);
+    await supabaseAdmin.from("waivers").update({
+      pdf_path: path,
+      signature_image_path: sigPath,
+      guardian_signature_image_path: gSigPath,
+    }).eq("id", inserted.id);
 
     const { data: signed, error: signErr } = await supabaseAdmin.storage
       .from(BUCKET)
