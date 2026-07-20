@@ -175,5 +175,30 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   y -= 22;
   page.drawText(`Electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`, { x: margin, y, size: 9, font, color: muted });
 
+  if (data.is_minor) {
+    y -= 24;
+    ensureSpace(90);
+    drawText("Parent / guardian consent", { size: 13, font: bold, color: primary });
+    const gRows: [string, string][] = [
+      ["Guardian name", data.guardian_name || ""],
+      ["Relationship to participant", data.guardian_relationship || ""],
+    ];
+    for (const [label, value] of gRows) {
+      ensureSpace(16);
+      page.drawText(label, { x: margin, y: y - 10, size: 9, font: bold, color: muted });
+      y -= 12;
+      page.drawText(value, { x: margin, y: y - 11, size: 11, font, color: ink });
+      y -= 16;
+    }
+    y -= 4;
+    ensureSpace(50);
+    page.drawLine({ start: { x: margin, y }, end: { x: margin + 260, y }, thickness: 0.5, color: muted });
+    y -= 14;
+    page.drawText(data.guardian_signature || "", { x: margin, y: y - 4, size: 14, font: bold, color: ink });
+    y -= 20;
+    page.drawText(`Guardian electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`, { x: margin, y, size: 9, font, color: muted });
+  }
+
+
   return await doc.save();
 }
