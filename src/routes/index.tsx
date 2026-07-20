@@ -105,7 +105,7 @@ function Home() {
             {[
               { day: "Monday", time: "17:30 to 19:00" },
               { day: "Wednesday", time: "18:00 to 19:30" },
-              { day: "Saturday", time: "09:00 to 10:30", note: "From March, invitation only" },
+              { day: "Saturday", time: "09:00 to 10:30", note: "Colour belts only" },
             ].map((s) => (
               <div key={s.day} className="rounded-xl border bg-card p-6">
                 <div className="flex items-center gap-2 text-primary">
