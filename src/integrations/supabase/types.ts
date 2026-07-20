@@ -135,8 +135,12 @@ export type Database = {
           emergency_contact_name: string
           emergency_contact_phone: string
           full_name: string
+          guardian_name: string | null
+          guardian_relationship: string | null
+          guardian_signature: string | null
           id: string
           ip_hash: string | null
+          is_minor: boolean
           medical_notes: string | null
           pdf_path: string | null
           phone: string
@@ -154,8 +158,12 @@ export type Database = {
           emergency_contact_name: string
           emergency_contact_phone: string
           full_name: string
+          guardian_name?: string | null
+          guardian_relationship?: string | null
+          guardian_signature?: string | null
           id?: string
           ip_hash?: string | null
+          is_minor?: boolean
           medical_notes?: string | null
           pdf_path?: string | null
           phone: string
@@ -173,8 +181,12 @@ export type Database = {
           emergency_contact_name?: string
           emergency_contact_phone?: string
           full_name?: string
+          guardian_name?: string | null
+          guardian_relationship?: string | null
+          guardian_signature?: string | null
           id?: string
           ip_hash?: string | null
+          is_minor?: boolean
           medical_notes?: string | null
           pdf_path?: string | null
           phone?: string
