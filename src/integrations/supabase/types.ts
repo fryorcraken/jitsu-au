@@ -134,16 +134,21 @@ export type Database = {
           email: string
           emergency_contact_name: string
           emergency_contact_phone: string
+          first_name: string | null
           full_name: string
           guardian_name: string | null
           guardian_relationship: string | null
           guardian_signature: string | null
+          guardian_signature_image_path: string | null
           id: string
           ip_hash: string | null
           is_minor: boolean
+          last_name: string | null
           medical_notes: string | null
+          middle_name: string | null
           pdf_path: string | null
           phone: string
+          signature_image_path: string | null
           signature_name: string
           signed_at: string
           template_version: number | null
@@ -157,16 +162,21 @@ export type Database = {
           email: string
           emergency_contact_name: string
           emergency_contact_phone: string
+          first_name?: string | null
           full_name: string
           guardian_name?: string | null
           guardian_relationship?: string | null
           guardian_signature?: string | null
+          guardian_signature_image_path?: string | null
           id?: string
           ip_hash?: string | null
           is_minor?: boolean
+          last_name?: string | null
           medical_notes?: string | null
+          middle_name?: string | null
           pdf_path?: string | null
           phone: string
+          signature_image_path?: string | null
           signature_name: string
           signed_at?: string
           template_version?: number | null
@@ -180,16 +190,21 @@ export type Database = {
           email?: string
           emergency_contact_name?: string
           emergency_contact_phone?: string
+          first_name?: string | null
           full_name?: string
           guardian_name?: string | null
           guardian_relationship?: string | null
           guardian_signature?: string | null
+          guardian_signature_image_path?: string | null
           id?: string
           ip_hash?: string | null
           is_minor?: boolean
+          last_name?: string | null
           medical_notes?: string | null
+          middle_name?: string | null
           pdf_path?: string | null
           phone?: string
+          signature_image_path?: string | null
           signature_name?: string
           signed_at?: string
           template_version?: number | null
