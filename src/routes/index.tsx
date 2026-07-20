@@ -128,9 +128,13 @@ function Home() {
         <div className="rounded-3xl bg-primary p-10 text-primary-foreground md:p-16">
           <h2 className="text-3xl font-bold md:text-4xl">Ready to step on the mat?</h2>
           <p className="mt-3 max-w-2xl text-primary-foreground/80">
-            Register your interest, sign the club waiver, or drop us a message. Whichever
-            way you start, we'll take it from there.
+            Register your interest,{" "}
+            <Link to="/waiver" className="underline underline-offset-4 hover:text-primary-foreground">
+              sign the club waiver
+            </Link>
+            , or drop us a message. Whichever way you start, we'll take it from there.
           </p>
+
           <div className="mt-8 flex flex-wrap gap-3">
             <Button asChild size="lg" variant="secondary">
               <Link to="/register-interest">Register interest</Link>
