@@ -10,12 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CheckCircle2, Download } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import {
   submitWaiverWithPdf,
   getCurrentWaiverTemplate,
   getMyLatestWaiver,
 } from "@/lib/waiver.functions";
 import { useAuth } from "@/hooks/useAuth";
+
 
 export const Route = createFileRoute("/waiver")({
   head: () => ({
@@ -164,17 +166,8 @@ function Waiver() {
           kept private and used only for club administration.
         </p>
 
-        {templateQ.data && (
-          <article className="mt-8 rounded-2xl border bg-muted/30 p-6 text-sm leading-relaxed">
-            <h2 className="text-lg font-bold">{templateQ.data.title}</h2>
-            <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-muted-foreground">
-              {templateQ.data.body_md}
-            </pre>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Placeholders like {"{{full_name}}"} will be filled in from your details on the signed PDF.
-            </p>
-          </article>
-        )}
+
+
 
         <form onSubmit={onSubmit} className="mt-8 space-y-6 rounded-2xl border bg-card p-6 md:p-8">
           <input type="text" name="hp" tabIndex={-1} autoComplete="off" className="hidden" />
@@ -233,7 +226,21 @@ function Waiver() {
             <Textarea id="medical_notes" name="medical_notes" maxLength={2000} rows={4} defaultValue={prefill.medical_notes ?? ""} key={`m-${prefill.medical_notes ?? ""}`} />
           </fieldset>
 
+          {templateQ.data && (
+            <fieldset className="space-y-3 border-t pt-6">
+              <legend className="text-sm font-semibold">Waiver</legend>
+              <article className="max-h-96 overflow-y-auto rounded-lg border bg-muted/30 p-4 prose prose-sm max-w-none prose-headings:font-bold prose-headings:text-foreground prose-p:text-muted-foreground">
+                <h2 className="!mt-0">{templateQ.data.title}</h2>
+                <ReactMarkdown>{templateQ.data.body_md}</ReactMarkdown>
+              </article>
+              <p className="text-xs text-muted-foreground">
+                Placeholders like {"{{full_name}}"} will be filled in from your details on the signed PDF.
+              </p>
+            </fieldset>
+          )}
+
           <fieldset className="space-y-4 border-t pt-6">
+
             <legend className="text-sm font-semibold">Acknowledgements</legend>
             <label className="flex items-start gap-3 text-sm">
               <Checkbox checked={ackRisk} onCheckedChange={(v) => setAckRisk(v === true)} className="mt-0.5" />
