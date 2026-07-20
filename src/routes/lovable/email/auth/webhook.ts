@@ -9,11 +9,10 @@ import { EmailChangeEmail } from '@/lib/email-templates/email-change'
 import { ReauthenticationEmail } from '@/lib/email-templates/reauthentication'
 
 // Configuration
-const SITE_NAME = "swift-stance"
+const SITE_NAME = "UTS Jitsu"
 const SENDER_DOMAIN = "notify.jitsu.au"
-const ROOT_DOMAIN = "jitsu.au"
 const FROM_DOMAIN = "jitsu.au"
-const SITE_URL = `https://${ROOT_DOMAIN}`
+const SITE_URL = "https://utsjitsu.com.au"
 
 // The SDK handler owns verification, dispatch, and retry semantics; this file
 // owns only the email decisions: subjects, templates, and per-type props.
