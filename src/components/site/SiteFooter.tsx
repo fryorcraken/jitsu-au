@@ -13,7 +13,7 @@ export function SiteFooter() {
               alt="UTS Jitsu logo"
               width={96}
               height={40}
-              className="h-10 w-auto rounded bg-white p-1"
+              className="h-10 w-auto"
             />
           </div>
           <p className="mt-3 max-w-sm text-sm text-muted-foreground">
