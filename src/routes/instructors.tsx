@@ -5,9 +5,9 @@ import franckImg from "@/assets/training3.jpg.asset.json";
 export const Route = createFileRoute("/instructors")({
   head: () => ({
     meta: [
-      { title: "Instructors — UTS Jitsu" },
-      { name: "description", content: "Meet the instructors at UTS Jitsu — led by Sensei Franck with 25+ years of martial arts experience." },
-      { property: "og:title", content: "Instructors — UTS Jitsu" },
+      { title: "Instructors | UTS Jitsu" },
+      { name: "description", content: "Meet the instructors at UTS Jitsu, led by Sensei Franck with 25+ years of martial arts experience." },
+      { property: "og:title", content: "Instructors | UTS Jitsu" },
       { property: "og:description", content: "Meet Sensei Franck and the coaching team at UTS Jitsu." },
       { property: "og:url", content: "/instructors" },
     ],
@@ -17,9 +17,9 @@ export const Route = createFileRoute("/instructors")({
 });
 
 const franckCredentials = [
-  "Black belt — Shorinji Kan Jiu-Jitsu",
-  "Purple belt — Brazilian Jiu-Jitsu",
-  "Level 1 Grey belt — KEF-IC (Krav Maga)",
+  "Black belt in Shorinji Kan Jiu-Jitsu",
+  "Purple belt in Brazilian Jiu-Jitsu",
+  "Level 1 Grey belt, KEF-IC (Krav Maga)",
   "25+ years training across Judo, kickboxing and Krav Maga",
 ];
 
@@ -60,8 +60,7 @@ function Instructors() {
           <h2 className="mt-2 text-3xl font-bold">Sensei Franck</h2>
           <p className="mt-4 text-muted-foreground">
             Sensei Franck has been training in martial arts for over 25 years, with a core
-            focus on Japanese Jiu-Jitsu. His journey spans Judo, kickboxing, Brazilian
-            Jiu-Jitsu and Krav Maga — a breadth of experience that shapes how he teaches
+            focus on Japanese Jiu-Jitsu. His training spans Judo, kickboxing, Brazilian Jiu-Jitsu and Krav Maga. This breadth of experience shapes how he teaches
             practical, pressure-tested self-defence.
           </p>
           <p className="mt-3 text-muted-foreground">
@@ -71,8 +70,7 @@ function Instructors() {
             students can adapt under pressure rather than memorising fixed responses.
           </p>
           <p className="mt-3 text-muted-foreground">
-            Off the mat, Franck is a strong believer in inclusive training environments —
-            classes are structured so beginners and advanced students can progress side by
+            Off the mat, Franck is a strong believer in inclusive training environments. Classes are structured so beginners and advanced students can progress side by
             side without anyone being left behind.
           </p>
 

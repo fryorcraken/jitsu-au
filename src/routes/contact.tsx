@@ -14,7 +14,7 @@ export const Route = createFileRoute("/contact")({
   head: () => ({
     meta: [
       { title: "Contact UTS Jitsu" },
-      { name: "description", content: "Get in touch with UTS Jitsu — phone, WhatsApp, or send us a message." },
+      { name: "description", content: "Get in touch with UTS Jitsu by phone, WhatsApp, or message." },
       { property: "og:title", content: "Contact UTS Jitsu" },
       { property: "og:description", content: "Phone, WhatsApp, or send us a message." },
       { property: "og:url", content: "/contact" },
@@ -57,7 +57,7 @@ function Contact() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Contact</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">Get in touch.</h1>
         <p className="mt-3 max-w-2xl text-muted-foreground">
-          Questions about classes, trials or membership? Reach out — we'll get back to you.
+          Questions about classes, trials or membership? Reach out and we'll get back to you.
         </p>
 
         <div className="mt-10 grid gap-8 md:grid-cols-[1fr_1.2fr]">

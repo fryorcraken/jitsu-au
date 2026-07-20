@@ -5,9 +5,9 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 export const Route = createFileRoute("/faq")({
   head: () => ({
     meta: [
-      { title: "FAQ — UTS Jitsu" },
+      { title: "FAQ | UTS Jitsu" },
       { name: "description", content: "Answers to common questions about starting Japanese Jiu-Jitsu at UTS Jitsu." },
-      { property: "og:title", content: "FAQ — UTS Jitsu" },
+      { property: "og:title", content: "FAQ | UTS Jitsu" },
       { property: "og:description", content: "Trial classes, gear, experience needed, and more." },
       { property: "og:url", content: "/faq" },
     ],
@@ -31,7 +31,7 @@ export const Route = createFileRoute("/faq")({
 const faq = [
   {
     q: "Is there a trial offer?",
-    a: "Absolutely — your first two sessions are on us. It's a great opportunity to experience our training firsthand and see if it's the right fit.",
+    a: "Absolutely. Your first two sessions are on us. It's a great opportunity to experience our training firsthand and see if it's the right fit.",
   },
   {
     q: "What equipment do I need?",
@@ -39,19 +39,19 @@ const faq = [
   },
   {
     q: "What should I wear to my first class?",
-    a: "Wear whatever you're comfortable in — we recommend pants and a long-sleeve t-shirt. Bring a water bottle too.",
+    a: "Wear whatever you're comfortable in. We recommend pants and a long-sleeve t-shirt. Bring a water bottle too.",
   },
   {
     q: "Do I need prior martial arts experience?",
-    a: "Not at all. Our training is tailored to accommodate every skill level, from complete beginner to experienced practitioner. We support your progress at your own pace.",
+    a: "Not at all. Our training is structured for every skill level, from complete beginner to experienced practitioner. We support your progress at your own pace.",
   },
   {
     q: "How is Japanese Jiu-Jitsu different from other martial arts?",
-    a: "Japanese Jiu-Jitsu is comprehensive — it includes striking, throws, joint locks and ground work, with a focus on self-defence techniques applicable to real-life situations.",
+    a: "Japanese Jiu-Jitsu is comprehensive. It includes striking, throws, joint locks and ground work, with a focus on self-defence techniques applicable to real-life situations.",
   },
   {
     q: "What's the difference between Japanese and Brazilian Jiu-Jitsu?",
-    a: "They share roots but have different focuses. Japanese Jiu-Jitsu covers a wide range — strikes, throws, joint locks and ground work — with a strong emphasis on practical self-defence. Brazilian Jiu-Jitsu concentrates on ground fighting and submissions.",
+    a: "They share roots but have different focuses. Japanese Jiu-Jitsu covers a wide range: strikes, throws, joint locks and ground work. Our focus is on practical self-defence. Brazilian Jiu-Jitsu concentrates on ground fighting and submissions.",
   },
 ];
 

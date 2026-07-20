@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 export const Route = createFileRoute("/pricing")({
   head: () => ({
     meta: [
-      { title: "Pricing — UTS Jitsu" },
+      { title: "Pricing | UTS Jitsu" },
       { name: "description", content: "UTS student and general public fees for Japanese Jiu-Jitsu at UTS Ultimo. Casual, semester, and yearly options." },
-      { property: "og:title", content: "Pricing — UTS Jitsu" },
+      { property: "og:title", content: "Pricing | UTS Jitsu" },
       { property: "og:description", content: "Casual, semester and yearly options. First two sessions are always free." },
       { property: "og:url", content: "/pricing" },
     ],
@@ -30,7 +30,7 @@ const public_: Tier[] = [
 ];
 
 const extras = [
-  { title: "First two sessions", price: "Free", note: "All year long — no gear needed" },
+  { title: "First two sessions", price: "Free", note: "All year long. No gear needed" },
   { title: "Sydney Jitsu yearly membership", price: "$60", note: "Insurance & club affiliation" },
   { title: "Uniform (Gi + belt)", price: "$90", note: "Jacket, pants and belt" },
 ];
@@ -62,7 +62,7 @@ function Pricing() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Pricing</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">Simple, honest fees.</h1>
         <p className="mt-5 text-lg text-muted-foreground">
-          Your first two sessions are free — every day of the year. When you're ready to
+          Your first two sessions are free, every day of the year. When you're ready to
           join, pick the option that suits how you want to train.
         </p>
       </section>
@@ -93,7 +93,7 @@ function Pricing() {
           ))}
         </div>
         <p className="mt-6 text-sm text-muted-foreground">
-          Saturday sessions are best-effort — included in semester price but not guaranteed.
+          Saturday sessions are best-effort and included in semester price, but not guaranteed.
           No classes during the UTS summer break.
         </p>
       </section>

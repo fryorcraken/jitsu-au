@@ -12,7 +12,7 @@ export const Route = createFileRoute("/thank-you")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "Thank you — UTS Jitsu" },
+      { title: "Thank you | UTS Jitsu" },
       { name: "description", content: "Thanks for reaching out to UTS Jitsu." },
       { name: "robots", content: "noindex" },
       { property: "og:url", content: "/thank-you" },
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/thank-you")({
 
 const copy = {
   interest: { title: "We got your details!", body: "Thanks for registering your interest. We'll be in touch shortly to lock in your first free session." },
-  waiver: { title: "Waiver received.", body: "Thanks — your signed waiver has been recorded. See you on the mat!" },
+  waiver: { title: "Waiver received.", body: "Thanks. Your signed waiver has been recorded. See you on the mat!" },
   contact: { title: "Message sent.", body: "Thanks for reaching out. We'll get back to you soon." },
 } as const satisfies Record<z.infer<typeof searchSchema>["kind"], { title: string; body: string }>;
 

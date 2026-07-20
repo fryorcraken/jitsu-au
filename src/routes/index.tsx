@@ -7,13 +7,13 @@ import heroAsset from "@/assets/training1.jpg.asset.json";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "UTS Jitsu — Practical Japanese Jiu-Jitsu in Sydney" },
+      { title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       {
         name: "description",
         content:
           "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
       },
-      { property: "og:title", content: "UTS Jitsu — Practical Japanese Jiu-Jitsu in Sydney" },
+      { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       { property: "og:description", content: "Beginner-friendly Japanese Jiu-Jitsu at UTS Ultimo. First two sessions free." },
       { property: "og:url", content: "/" },
     ],
@@ -34,7 +34,7 @@ function Home() {
               <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Now enrolling for the semester
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
-              Unlock your potential with <span className="text-primary">martial arts</span>.
+              Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
               Build real self-defence skills in a fun and welcoming environment. Japanese
@@ -52,7 +52,7 @@ function Home() {
               </Button>
             </div>
             <p className="mt-4 text-sm text-muted-foreground">
-              Your first two sessions are on us — no gear needed.
+              Your first two sessions are on us. No gear needed.
             </p>
           </div>
           <div className="relative">
@@ -74,7 +74,7 @@ function Home() {
           {[
             { icon: Shield, title: "Practical self-defence", body: "Techniques trained under pressure so they work when it matters." },
             { icon: Users, title: "Inclusive community", body: "All levels welcome. We move at your pace, together." },
-            { icon: Dumbbell, title: "Fitness through art", body: "Drills, conditioning and skill — sharper mind, stronger body." },
+            { icon: Dumbbell, title: "Fitness through art", body: "Drills, conditioning and skill for a sharper mind and stronger body." },
             { icon: Award, title: "Experienced coaches", body: "25+ years of martial-arts experience, led by Sensei Franck." },
           ].map((c) => (
             <div key={c.title} className="rounded-xl border bg-card p-6">

@@ -11,8 +11,7 @@ export function SiteFooter() {
             UTS Jitsu
           </div>
           <p className="mt-3 max-w-sm text-sm text-muted-foreground">
-            Practical Japanese Jiu-Jitsu in the heart of Sydney. Beginners welcome —
-            first two sessions are free, all year round.
+            Practical Japanese Jiu-Jitsu in the heart of Sydney. Beginners welcome. First two sessions are free, all year round.
           </p>
         </div>
         <div>
@@ -42,7 +41,7 @@ export function SiteFooter() {
       </div>
       <div className="border-t">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-muted-foreground md:flex-row">
-          <p>© {new Date().getFullYear()} Sydney Jitsu Inc — UTS Jitsu. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Sydney Jitsu Inc. UTS Jitsu. All rights reserved.</p>
           <p>ActivateFit Gym, Harris Street, Ultimo NSW</p>
         </div>
       </div>

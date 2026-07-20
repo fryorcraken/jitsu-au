@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 export const Route = createFileRoute("/classes")({
   head: () => ({
     meta: [
-      { title: "Classes & Schedule — UTS Jitsu" },
+      { title: "Classes & Schedule | UTS Jitsu" },
       { name: "description", content: "Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. Monday, Wednesday and Saturday." },
-      { property: "og:title", content: "Classes & Schedule — UTS Jitsu" },
+      { property: "og:title", content: "Classes & Schedule | UTS Jitsu" },
       { property: "og:description", content: "Monday, Wednesday and Saturday classes at ActivateFit Gym, Ultimo." },
       { property: "og:url", content: "/classes" },
     ],
@@ -18,9 +18,9 @@ export const Route = createFileRoute("/classes")({
 });
 
 const schedule = [
-  { day: "Monday", time: "17:30 — 19:00", note: "All levels welcome" },
-  { day: "Wednesday", time: "18:00 — 19:30", note: "All levels welcome" },
-  { day: "Saturday", time: "09:00 — 10:30", note: "From March — by invitation only" },
+  { day: "Monday", time: "17:30 – 19:00", note: "All levels welcome" },
+  { day: "Wednesday", time: "18:00 – 19:30", note: "All levels welcome" },
+  { day: "Saturday", time: "09:00 – 10:30", note: "From March, by invitation only" },
 ];
 
 function Classes() {
@@ -30,8 +30,7 @@ function Classes() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Classes</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">Train with us in Ultimo.</h1>
         <p className="mt-5 text-lg text-muted-foreground">
-          Sessions run at ActivateFit Gym on Harris Street — a modern, well-equipped
-          facility on the main UTS campus, easy to reach from the CBD.
+          Sessions run at ActivateFit Gym on Harris Street, a modern, well-equipped facility on the main UTS campus, easy to reach from the CBD.
         </p>
       </section>
 
@@ -57,7 +56,7 @@ function Classes() {
             <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
               <li>• Warm-up, drills, techniques and pressure-tested practice.</li>
               <li>• A friendly training partner assigned on your first day.</li>
-              <li>• Emphasis on control and safety — nobody trains injured.</li>
+              <li>• Emphasis on control and safety. Nobody trains injured.</li>
               <li>• Progress at your pace: from your very first class to grading.</li>
             </ul>
           </div>
@@ -66,8 +65,8 @@ function Classes() {
             <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
               <li>• Comfortable clothes (pants and long-sleeve t-shirt recommended).</li>
               <li>• A water bottle.</li>
-              <li>• Mouth guard once you decide to join — we can help you source one.</li>
-              <li>• Gi and belt for regular training — available through the club ($90).</li>
+              <li>• Mouth guard once you decide to join. We can help you source one.</li>
+              <li>• Gi and belt for regular training, available through the club ($90).</li>
             </ul>
           </div>
         </div>
