@@ -1,66 +1,52 @@
+## Waiver form improvements
 
-## Goal
+Three coordinated changes to `/waiver` and its backend.
 
-Turn the waiver flow into a real, signed PDF document. Managers can edit the waiver text (with placeholders like `{{full_name}}`). Members who are signed in get their form auto-filled from their previous waiver / profile. Every submission produces a stored PDF that both the member and managers can download.
+### 1. Split full name into three fields
 
-Note: the existing utsjitsu.com.au site outsources signup to Gymdesk and has no in-house waiver, so nothing to mirror. This plan uses the current `/waiver` form as the baseline.
+Replace the single "Full name" input with:
 
-## What we'll build
+- First name (required)
+- Middle name (optional)
+- Last name (required)
 
-### 1. Editable waiver template (manager-controlled)
+`full_name` is still used everywhere downstream (PDF, template placeholder `{{full_name}}`, admin list, prefill). We keep a computed `full_name = [first, middle, last].filter(Boolean).join(" ")` so nothing else has to change. The `waivers` table gains three new columns (`first_name`, `middle_name`, `last_name`) so the form can prefill them on return visits; `full_name` stays as the canonical display column.
 
-- New table `waiver_templates` (versioned): `id`, `version` (int, unique, auto), `body_md` (text, markdown with `{{placeholder}}` tokens), `title`, `is_current` (bool), `created_by`, `created_at`.
-- Only managers can insert/update; anyone can read the current template (needed to render on the public waiver page).
-- Supported placeholders: `{{full_name}}`, `{{date_of_birth}}`, `{{address}}`, `{{phone}}`, `{{email}}`, `{{emergency_contact_name}}`, `{{emergency_contact_phone}}`, `{{medical_notes}}`, `{{signature_name}}`, `{{signed_date}}`, `{{club_name}}`.
-- Seed migration inserts version 1 with the current hard-coded acknowledgement text converted to markdown + placeholders.
+### 2. Live PDF preview in the form
 
-### 2. Manager editor UI
+Replace the current markdown block with a live PDF preview embedded in the form that updates as the user types.
 
-- New route `/_authenticated/manager/waiver-template`:
-  - Textarea (markdown) with a live preview panel that substitutes placeholders with sample values.
-  - Placeholder cheat-sheet sidebar (click to insert).
-  - "Save as new version" button — never overwrites past versions (so historical signed waivers keep their exact text).
-- Add a link to it from `/account` manager card.
+- Client-side PDF generation using `pdf-lib` (already a project dep) built in a new `src/lib/waiver-pdf-client.ts` that mirrors the server layout. Shared layout helper so preview and signed PDF stay visually identical.
+- Rendered into an `<iframe>` via a blob URL, sized responsively (roughly A4 aspect, capped height with scroll). Debounced regeneration (~250 ms) on field changes.
+- Shows a "DRAFT — NOT SIGNED" watermark until the user submits. On submit the server still generates the authoritative signed PDF (with signature image, timestamp, IP).
+- The waiver template markdown is rendered into the PDF preview itself, so the user sees the actual document they are signing rather than a separate markdown block above.
 
-### 3. Public waiver page changes
+### 3. Signature: draw or type
 
-- Fetch current template server-side, render the body as read-only markdown above the form fields.
-- If the visitor is signed in, prefill form fields from their most recent waiver (fetched via a new `getMyLatestWaiver` server fn).
-- Keep the existing form fields, acknowledgements, and typed-signature.
+Add a tabbed signature control with two tabs, "Draw" and "Type":
 
-### 4. PDF generation + storage
+- Draw: HTML canvas pad using `signature_pad` (small, well-maintained lib). Mouse + touch. Clear button. Exports a trimmed PNG data URL.
+- Type: current typed-name input.
+- User picks either; submit requires one of them. Same UX for the guardian signature block when the participant is under 18.
 
-- On submit, server fn `submitWaiver`:
-  1. Loads current template row, records its `template_version` on the waiver.
-  2. Substitutes placeholders with submitted values.
-  3. Renders a PDF using `pdf-lib` (pure JS, works in the Cloudflare Worker runtime — `pdfkit`/`puppeteer` do not). Layout: club logo + title, rendered waiver body, filled details table, acknowledgements ticked, typed signature + timestamp + IP hash.
-  4. Uploads to a private storage bucket `waivers/{waiver_id}.pdf` using `supabaseAdmin`.
-  5. Stores `pdf_path` and `template_version` on the `waivers` row; optionally links `user_id` when signer is authenticated.
-- Waiver confirmation page gets a "Download your signed waiver" button (signed URL, 1h TTL).
+Backend stores the drawn signature as an image in the waiver PDF (embedded via `pdf-lib`) and persists the PNG bytes to the existing `waivers` storage bucket alongside the PDF, so managers can see the actual mark. Typed signatures continue to render as text.
 
-### 5. Schema changes to `waivers`
+### Technical details
 
-Add columns: `user_id uuid null` (fk auth.users), `template_version int not null`, `pdf_path text`, `ip_hash text null`.
-Add policies:
-- Authenticated user can SELECT their own rows (`auth.uid() = user_id`).
-- Managers can SELECT all rows.
-- Keep the existing anon INSERT policy.
+Files touched:
 
-### 6. Manager waiver list
+- `src/routes/waiver.tsx` — name fields split, live PDF preview iframe, signature tabs, guardian signature tabs.
+- `src/lib/waiver-pdf-client.ts` (new) — client-safe layout used by the preview.
+- `src/lib/waiver-pdf.server.ts` — accept optional signature PNG(s), embed as image; share layout constants with the client helper via a shared `waiver-pdf-layout.ts`.
+- `src/lib/waiver.functions.ts` — accept `first_name`, `middle_name`, `last_name`, `signature_image` (base64 PNG, optional), `guardian_signature_image` (optional). Validate that at least one of typed/drawn signature is present. Compose `full_name` server-side.
+- `src/routes/_authenticated/manager.waivers.tsx` — no schema-visible change; still shows `full_name`.
+- New dependency: `signature_pad` (~5 KB).
+- Migration: add `first_name text`, `middle_name text`, `last_name text`, `signature_image_path text`, `guardian_signature_image_path text` to `public.waivers` (all nullable for back-compat).
 
-- New route `/_authenticated/manager/waivers`: paginated table of waivers with download link (signed URL from a `getWaiverPdfUrl` server fn gated by `has_role('manager')`).
+Validation rules:
 
-## Technical details
+- First and last name: 1–60 chars each.
+- Middle name: 0–60 chars.
+- Signature: either `signature_name` (typed) OR `signature_image` (drawn) must be non-empty; same rule for guardian when `is_minor`.
 
-- **PDF library**: `pdf-lib` (Worker-compatible). Font: embed DejaVu-like via `@pdf-lib/fontkit` only if we need unicode; MVP uses built-in Helvetica.
-- **Storage bucket**: private, created via `supabase--storage_create_bucket`. RLS on `storage.objects` restricts SELECT to managers + owner via `user_id` path prefix; downloads always go through a server fn that mints a signed URL, so bucket policies can be manager-only.
-- **Template rendering**: simple `body.replace(/{{(\w+)}}/g, ...)`; unknown tokens left as-is with a lint warning in the editor preview.
-- **Versioning**: every save inserts a new row and flips `is_current`; old versions retained so re-generating a PDF for an old waiver uses the exact text signed.
-- **Autofill**: `getMyLatestWaiver` server fn (`requireSupabaseAuth`) returns the newest waiver row's contact fields; the client pre-populates form defaults.
-- **Anon signers**: still allowed. `user_id` stays null; the PDF is still generated and emailed/linked on the thank-you page via a short-lived signed URL returned from `submitWaiver`.
-
-## Out of scope for this iteration
-
-- Drawn (canvas) signatures — keep typed-name signature.
-- Emailing the PDF to the signer (can add later once auth email domain is verified).
-- Editing placeholders list from the UI (fixed set for now).
+Out of scope: changes to the manager waiver template editor, the account page, or other routes.
