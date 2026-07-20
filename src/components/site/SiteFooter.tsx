@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Facebook, Instagram, Youtube, Phone, MessageCircle } from "lucide-react";
+import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
 
 export function SiteFooter() {
   return (

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
 
 const nav = [
   { to: "/", label: "Home" },
