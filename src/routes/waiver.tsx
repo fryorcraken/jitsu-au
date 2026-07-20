@@ -194,7 +194,7 @@ function Waiver() {
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <Label htmlFor="date_of_birth">Date of birth</Label>
-                <Input id="date_of_birth" name="date_of_birth" type="date" required defaultValue={prefill.date_of_birth ?? ""} key={`d-${prefill.date_of_birth ?? ""}`} className="mt-1.5" />
+                <Input id="date_of_birth" name="date_of_birth" type="date" required defaultValue={prefill.date_of_birth ?? ""} key={`d-${prefill.date_of_birth ?? ""}`} onChange={(e) => setDob(e.target.value)} className="mt-1.5" />
               </div>
               <div>
                 <Label htmlFor="phone">Phone</Label>
