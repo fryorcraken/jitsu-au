@@ -69,7 +69,7 @@ function Contact() {
                 <p className="font-medium">0493 631 759</p>
               </div>
             </a>
-            <a href="https://wa.me/610493631759" className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted">
+            <a href="https://wa.me/61493631759" className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted">
               <MessageCircle className="h-5 w-5 text-primary" />
               <div>
                 <p className="text-xs font-semibold uppercase text-muted-foreground">WhatsApp</p>

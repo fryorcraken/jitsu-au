@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Facebook, Instagram, Youtube, Phone, MessageCircle } from "lucide-react";
+import { Instagram, Youtube, Phone, MessageCircle } from "lucide-react";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
 
 export function SiteFooter() {
@@ -36,11 +36,10 @@ export function SiteFooter() {
             <li><Link to="/waiver" className="hover:text-foreground">Sign waiver</Link></li>
             <li><Link to="/contact" className="hover:text-foreground">Contact us</Link></li>
             <li className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" /> <a href="tel:0493631759" className="hover:text-foreground">0493 631 759</a></li>
-            <li className="flex items-center gap-2"><MessageCircle className="h-3.5 w-3.5" /> <a href="https://wa.me/610493631759" className="hover:text-foreground">WhatsApp</a></li>
+            <li className="flex items-center gap-2"><MessageCircle className="h-3.5 w-3.5" /> <a href="https://wa.me/61493631759" className="hover:text-foreground">WhatsApp</a></li>
           </ul>
           <div className="mt-4 flex gap-3 text-muted-foreground">
-            <a href="https://www.facebook.com/sydneyjitsu" aria-label="Facebook" className="hover:text-foreground"><Facebook className="h-5 w-5" /></a>
-            <a href="https://www.instagram.com/sydneyjitsuinc" aria-label="Instagram" className="hover:text-foreground"><Instagram className="h-5 w-5" /></a>
+            <a href="https://www.instagram.com/utsjitsu" aria-label="Instagram" className="hover:text-foreground"><Instagram className="h-5 w-5" /></a>
             <a href="https://www.youtube.com/@sydneyjitsu" aria-label="YouTube" className="hover:text-foreground"><Youtube className="h-5 w-5" /></a>
           </div>
         </div>
