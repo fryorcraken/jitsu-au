@@ -8,9 +8,9 @@ export const Route = createFileRoute("/instructors")({
   head: () => ({
     meta: [
       { title: "Instructors | UTS Jitsu" },
-      { name: "description", content: "Meet the instructors at UTS Jitsu, led by Sensei Franck with 25+ years of martial arts experience." },
+      { name: "description", content: "Meet the instructors at UTS Jitsu, led by Franck Royer with 25+ years of martial arts experience." },
       { property: "og:title", content: "Instructors | UTS Jitsu" },
-      { property: "og:description", content: "Meet Sensei Franck and the coaching team at UTS Jitsu." },
+      { property: "og:description", content: "Meet Franck Royer and the coaching team at UTS Jitsu." },
       { property: "og:url", content: "/instructors" },
     ],
     links: [{ rel: "canonical", href: "/instructors" }],
@@ -243,7 +243,7 @@ const franckAwards = [
 const assistants = [
   {
     name: "James G",
-    role: "Assistant instructor",
+    role: "Instructor",
     bio: "Trained both in the UK and Australia, graded to brown belt 1st Kyu in June 2019.",
   },
   {
@@ -281,12 +281,12 @@ function Instructors() {
         <div className="overflow-hidden rounded-2xl border bg-card md:grid md:grid-cols-[2fr_3fr]">
           <img
             src={franckImg.url}
-            alt="Sensei Franck on the mat"
+            alt="Franck Royer on the mat"
             className="h-full min-h-[320px] w-full object-cover md:aspect-auto"
           />
           <div className="p-8 md:p-12">
             <p className="text-sm font-semibold uppercase tracking-wider text-primary">Head instructor</p>
-            <h2 className="mt-2 text-3xl font-bold">Sensei Franck</h2>
+            <h2 className="mt-2 text-3xl font-bold">Franck Royer</h2>
             <p className="mt-4 text-muted-foreground">
               Martial artist for more than 25 years, I am a dedicated teacher and student. I aim to pass on to my students what Japanese Jiu-Jitsu has given me: self-confidence, fitness and self-defence skills. It has been my passion since I started as a teenager, a passion I have conveyed as an instructor for the past 13 years. Over the years, I have trained many martial arts, with a more recent focus on Brazilian Jiu-Jitsu.
             </p>
@@ -362,7 +362,7 @@ function Instructors() {
       <section className="mx-auto max-w-6xl px-4 pb-24">
         <h2 className="text-2xl font-bold">Assistant instructors</h2>
         <p className="mt-2 text-muted-foreground">
-          Supporting Sensei Franck on the mat during classes and open sessions.
+          Supporting Franck Royer on the mat during classes and open sessions.
         </p>
         <div className="mt-6 grid gap-6 md:grid-cols-2">
           {assistants.map((a) => (
