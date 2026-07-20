@@ -53,9 +53,20 @@ function Waiver() {
   const [ackRisk, setAckRisk] = useState(false);
   const [ackRelease, setAckRelease] = useState(false);
   const [ackMedia, setAckMedia] = useState(false);
-  const [isMinor, setIsMinor] = useState(false);
+  const [dob, setDob] = useState<string>("");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<Prefill>({});
+
+  const isMinor = (() => {
+    if (!dob) return false;
+    const d = new Date(dob);
+    if (Number.isNaN(d.getTime())) return false;
+    const now = new Date();
+    let age = now.getFullYear() - d.getFullYear();
+    const m = now.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+    return age < 18;
+  })();
 
   const templateQ = useQuery({
     queryKey: ["waiver-template"],
