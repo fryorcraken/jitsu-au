@@ -14,7 +14,7 @@ export const Route = createFileRoute("/")({
           "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
       },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
-      { property: "og:description", content: "Beginner-friendly Japanese Jiu-Jitsu at UTS Ultimo. First two sessions free." },
+      { property: "og:description", content: "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free." },
       { property: "og:url", content: "/" },
     ],
     links: [{ rel: "canonical", href: "/" }],

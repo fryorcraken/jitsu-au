@@ -78,15 +78,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "UTS Jitsu | Japanese Jiu-Jitsu in Sydney" },
+      { title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       {
         name: "description",
         content:
-          "Practical Japanese Jiu-Jitsu at UTS Ultimo campus. Self-defence, fitness, and community. First two sessions free, all year round.",
+          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
       },
       { property: "og:site_name", content: "UTS Jitsu" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
+      { name: "twitter:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
+      { property: "og:description", content: "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free." },
+      { name: "twitter:description", content: "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/197babc4-6a9c-4994-a33f-acc4175d2ace/id-preview-65a184d9--7525cf23-c74c-47a2-a9fb-83d95bc7a78b.lovable.app-1784530506243.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/197babc4-6a9c-4994-a33f-acc4175d2ace/id-preview-65a184d9--7525cf23-c74c-47a2-a9fb-83d95bc7a78b.lovable.app-1784530506243.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
