@@ -13,7 +13,9 @@ import {
   saveWaiverTemplate,
 } from "@/lib/waiver.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
-import { applyPlaceholders } from "@/lib/waiver-pdf.server";
+function applyPlaceholders(body: string, values: Record<string, string>): string {
+  return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
+}
 
 const PLACEHOLDERS = [
   "full_name", "date_of_birth", "address", "phone", "email",
