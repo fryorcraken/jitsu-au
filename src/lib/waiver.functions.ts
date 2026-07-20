@@ -122,6 +122,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         signed_at,
         user_id: userId,
         template_version: tpl.version,
+        is_minor: data.is_minor ?? false,
+        guardian_name: data.guardian_name || null,
+        guardian_relationship: data.guardian_relationship || null,
+        guardian_signature: data.guardian_signature || null,
       })
       .select("id")
       .single();
