@@ -60,7 +60,7 @@ function EditorPage() {
   }, [fetchCurrent]);
 
   useEffect(() => {
-    if (!rolesLoading && user && !isManager) navigate({ to: "/_authenticated/account" as never });
+    if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
   const preview = useMemo(() => applyPlaceholders(body, SAMPLE), [body]);
@@ -93,7 +93,7 @@ function EditorPage() {
               Edit the waiver text. Saving creates a new version. Past versions stay linked to their signed waivers.
             </p>
           </div>
-          <Button asChild variant="outline"><Link to="/_authenticated/account" as never}>Back to account</Link></Button>
+          <Button asChild variant="outline"><Link to="/account">Back to account</Link></Button>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_260px]">

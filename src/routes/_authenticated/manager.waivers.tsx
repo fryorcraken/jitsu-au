@@ -33,7 +33,7 @@ function WaiversPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!rolesLoading && user && !isManager) navigate({ to: "/_authenticated/account" as never });
+    if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
   useEffect(() => {
@@ -59,7 +59,7 @@ function WaiversPage() {
             <h1 className="text-3xl font-black">Signed waivers</h1>
             <p className="text-sm text-muted-foreground">All waivers signed via the website.</p>
           </div>
-          <Button asChild variant="outline"><Link to="/_authenticated/account" as never}>Back to account</Link></Button>
+          <Button asChild variant="outline"><Link to="/account">Back to account</Link></Button>
         </div>
 
         {loading ? <p>Loading...</p> : rows.length === 0 ? (
