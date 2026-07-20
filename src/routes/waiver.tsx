@@ -1,6 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { submitWaiver } from "@/lib/submissions.functions";
+import { CheckCircle2, Download } from "lucide-react";
+import {
+  submitWaiverWithPdf,
+  getCurrentWaiverTemplate,
+  getMyLatestWaiver,
+} from "@/lib/waiver.functions";
+import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/waiver")({
   head: () => ({
@@ -25,13 +32,42 @@ export const Route = createFileRoute("/waiver")({
   component: Waiver,
 });
 
+type Prefill = {
+  full_name?: string;
+  date_of_birth?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  medical_notes?: string;
+};
+
 function Waiver() {
-  const navigate = useNavigate();
-  const submit = useServerFn(submitWaiver);
+  const submit = useServerFn(submitWaiverWithPdf);
+  const fetchTemplate = useServerFn(getCurrentWaiverTemplate);
+  const fetchMine = useServerFn(getMyLatestWaiver);
+  const { user, loading: authLoading } = useAuth();
+
   const [loading, setLoading] = useState(false);
   const [ackRisk, setAckRisk] = useState(false);
   const [ackRelease, setAckRelease] = useState(false);
   const [ackMedia, setAckMedia] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<Prefill>({});
+
+  const templateQ = useQuery({
+    queryKey: ["waiver-template"],
+    queryFn: () => fetchTemplate(),
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    fetchMine()
+      .then((row) => { if (row) setPrefill(row as Prefill); })
+      .catch(() => { /* no prior waiver */ });
+  }, [authLoading, user, fetchMine]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -42,7 +78,7 @@ function Waiver() {
     const fd = new FormData(e.currentTarget);
     setLoading(true);
     try {
-      await submit({
+      const res = await submit({
         data: {
           full_name: String(fd.get("full_name") || ""),
           date_of_birth: String(fd.get("date_of_birth") || ""),
@@ -59,12 +95,38 @@ function Waiver() {
           hp: String(fd.get("hp") || ""),
         },
       });
-      navigate({ to: "/thank-you", search: { kind: "waiver" } });
+      if (res.pdf_url) setPdfUrl(res.pdf_url);
+      toast.success("Waiver signed. Download your copy below.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
+  }
+
+  if (pdfUrl) {
+    return (
+      <SiteLayout>
+        <section className="mx-auto flex max-w-xl flex-col items-center px-4 py-24 text-center">
+          <CheckCircle2 className="h-16 w-16 text-primary" />
+          <h1 className="mt-6 text-3xl font-bold md:text-4xl">Waiver signed</h1>
+          <p className="mt-3 text-muted-foreground">
+            Thanks. A copy has been saved. Download your signed waiver PDF below.
+          </p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Button asChild size="lg">
+              <a href={pdfUrl} target="_blank" rel="noopener" download>
+                <Download className="mr-2 h-4 w-4" /> Download waiver PDF
+              </a>
+            </Button>
+            <Button asChild variant="outline"><Link to="/">Back home</Link></Button>
+          </div>
+          <p className="mt-6 text-xs text-muted-foreground">
+            The download link expires in 1 hour. Signed-in members can re-download from their account.
+          </p>
+        </section>
+      </SiteLayout>
+    );
   }
 
   return (
@@ -77,32 +139,50 @@ function Waiver() {
           kept private and used only for club administration.
         </p>
 
+        {templateQ.data && (
+          <article className="mt-8 rounded-2xl border bg-muted/30 p-6 text-sm leading-relaxed">
+            <h2 className="text-lg font-bold">{templateQ.data.title}</h2>
+            <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-muted-foreground">
+              {templateQ.data.body_md}
+            </pre>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Placeholders like {"{{full_name}}"} will be filled in from your details on the signed PDF.
+            </p>
+          </article>
+        )}
+
         <form onSubmit={onSubmit} className="mt-8 space-y-6 rounded-2xl border bg-card p-6 md:p-8">
           <input type="text" name="hp" tabIndex={-1} autoComplete="off" className="hidden" />
+
+          {user && (
+            <p className="rounded-md bg-primary/10 px-3 py-2 text-xs text-primary">
+              Signed in as {user.email}. Your details have been pre-filled from your last waiver.
+            </p>
+          )}
 
           <fieldset className="space-y-5">
             <legend className="text-sm font-semibold">Your details</legend>
             <div>
               <Label htmlFor="full_name">Full name</Label>
-              <Input id="full_name" name="full_name" required maxLength={120} className="mt-1.5" />
+              <Input id="full_name" name="full_name" required maxLength={120} defaultValue={prefill.full_name ?? ""} key={`n-${prefill.full_name ?? ""}`} className="mt-1.5" />
             </div>
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <Label htmlFor="date_of_birth">Date of birth</Label>
-                <Input id="date_of_birth" name="date_of_birth" type="date" required className="mt-1.5" />
+                <Input id="date_of_birth" name="date_of_birth" type="date" required defaultValue={prefill.date_of_birth ?? ""} key={`d-${prefill.date_of_birth ?? ""}`} className="mt-1.5" />
               </div>
               <div>
                 <Label htmlFor="phone">Phone</Label>
-                <Input id="phone" name="phone" type="tel" required maxLength={30} className="mt-1.5" />
+                <Input id="phone" name="phone" type="tel" required maxLength={30} defaultValue={prefill.phone ?? ""} key={`p-${prefill.phone ?? ""}`} className="mt-1.5" />
               </div>
             </div>
             <div>
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" required maxLength={255} className="mt-1.5" />
+              <Input id="email" name="email" type="email" required maxLength={255} defaultValue={prefill.email ?? user?.email ?? ""} key={`e-${prefill.email ?? user?.email ?? ""}`} className="mt-1.5" />
             </div>
             <div>
               <Label htmlFor="address">Address</Label>
-              <Input id="address" name="address" required maxLength={300} className="mt-1.5" />
+              <Input id="address" name="address" required maxLength={300} defaultValue={prefill.address ?? ""} key={`a-${prefill.address ?? ""}`} className="mt-1.5" />
             </div>
           </fieldset>
 
@@ -111,11 +191,11 @@ function Waiver() {
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <Label htmlFor="emergency_contact_name">Contact name</Label>
-                <Input id="emergency_contact_name" name="emergency_contact_name" required maxLength={120} className="mt-1.5" />
+                <Input id="emergency_contact_name" name="emergency_contact_name" required maxLength={120} defaultValue={prefill.emergency_contact_name ?? ""} key={`ecn-${prefill.emergency_contact_name ?? ""}`} className="mt-1.5" />
               </div>
               <div>
                 <Label htmlFor="emergency_contact_phone">Contact phone</Label>
-                <Input id="emergency_contact_phone" name="emergency_contact_phone" type="tel" required maxLength={30} className="mt-1.5" />
+                <Input id="emergency_contact_phone" name="emergency_contact_phone" type="tel" required maxLength={30} defaultValue={prefill.emergency_contact_phone ?? ""} key={`ecp-${prefill.emergency_contact_phone ?? ""}`} className="mt-1.5" />
               </div>
             </div>
           </fieldset>
@@ -125,7 +205,7 @@ function Waiver() {
             <Label htmlFor="medical_notes">
               Any injuries, conditions or medications we should know about? (optional)
             </Label>
-            <Textarea id="medical_notes" name="medical_notes" maxLength={2000} rows={4} />
+            <Textarea id="medical_notes" name="medical_notes" maxLength={2000} rows={4} defaultValue={prefill.medical_notes ?? ""} key={`m-${prefill.medical_notes ?? ""}`} />
           </fieldset>
 
           <fieldset className="space-y-4 border-t pt-6">
@@ -165,7 +245,7 @@ function Waiver() {
           </fieldset>
 
           <Button type="submit" size="lg" disabled={loading} className="w-full">
-            {loading ? "Submitting..." : "Sign and submit waiver"}
+            {loading ? "Generating PDF..." : "Sign and download waiver"}
           </Button>
         </form>
       </section>
