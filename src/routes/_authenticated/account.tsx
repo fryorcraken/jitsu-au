@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,9 +50,13 @@ function AccountPage() {
         {isManager && (
           <Card>
             <CardHeader>
-              <CardTitle>Manager</CardTitle>
-              <CardDescription>You have manager access. Membership tools coming soon.</CardDescription>
+              <CardTitle>Manager tools</CardTitle>
+              <CardDescription>Waiver template and signed waivers.</CardDescription>
             </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button asChild variant="outline"><Link to="/manager/waiver-template">Edit waiver template</Link></Button>
+              <Button asChild variant="outline"><Link to="/manager/waivers">View signed waivers</Link></Button>
+            </CardContent>
           </Card>
         )}
 

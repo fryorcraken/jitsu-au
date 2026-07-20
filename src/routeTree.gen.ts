@@ -24,6 +24,8 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
+import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
+import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
 import { Route as LovableEmailAuthWebhookRouteImport } from './routes/lovable/email/auth/webhook'
 import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
 
@@ -101,6 +103,18 @@ const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
   path: '/account',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedManagerWaiversRoute =
+  AuthenticatedManagerWaiversRouteImport.update({
+    id: '/manager/waivers',
+    path: '/manager/waivers',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerWaiverTemplateRoute =
+  AuthenticatedManagerWaiverTemplateRouteImport.update({
+    id: '/manager/waiver-template',
+    path: '/manager/waiver-template',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const LovableEmailAuthWebhookRoute = LovableEmailAuthWebhookRouteImport.update({
   id: '/lovable/email/auth/webhook',
   path: '/lovable/email/auth/webhook',
@@ -127,6 +141,8 @@ export interface FileRoutesByFullPath {
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
+  '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -145,6 +161,8 @@ export interface FileRoutesByTo {
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
+  '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -165,6 +183,8 @@ export interface FileRoutesById {
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
   '/_authenticated/account': typeof AuthenticatedAccountRoute
+  '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
+  '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -185,6 +205,8 @@ export interface FileRouteTypes {
     | '/update-password'
     | '/waiver'
     | '/account'
+    | '/manager/waiver-template'
+    | '/manager/waivers'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   fileRoutesByTo: FileRoutesByTo
@@ -203,6 +225,8 @@ export interface FileRouteTypes {
     | '/update-password'
     | '/waiver'
     | '/account'
+    | '/manager/waiver-template'
+    | '/manager/waivers'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   id:
@@ -222,6 +246,8 @@ export interface FileRouteTypes {
     | '/update-password'
     | '/waiver'
     | '/_authenticated/account'
+    | '/_authenticated/manager/waiver-template'
+    | '/_authenticated/manager/waivers'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   fileRoutesById: FileRoutesById
@@ -352,6 +378,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAccountRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/waivers': {
+      id: '/_authenticated/manager/waivers'
+      path: '/manager/waivers'
+      fullPath: '/manager/waivers'
+      preLoaderRoute: typeof AuthenticatedManagerWaiversRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/waiver-template': {
+      id: '/_authenticated/manager/waiver-template'
+      path: '/manager/waiver-template'
+      fullPath: '/manager/waiver-template'
+      preLoaderRoute: typeof AuthenticatedManagerWaiverTemplateRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/lovable/email/auth/webhook': {
       id: '/lovable/email/auth/webhook'
       path: '/lovable/email/auth/webhook'
@@ -371,10 +411,15 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
+  AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
+  AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAccountRoute: AuthenticatedAccountRoute,
+  AuthenticatedManagerWaiverTemplateRoute:
+    AuthenticatedManagerWaiverTemplateRoute,
+  AuthenticatedManagerWaiversRoute: AuthenticatedManagerWaiversRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -401,13 +446,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
