@@ -75,7 +75,7 @@ function Home() {
             { icon: Shield, title: "Practical self-defence", body: "Techniques trained under pressure so they work when it matters." },
             { icon: Users, title: "Inclusive community", body: "All levels welcome. We move at your pace, together." },
             { icon: Dumbbell, title: "Fitness through art", body: "Drills, conditioning and skill for a sharper mind and stronger body." },
-            { icon: Award, title: "Experienced coaches", body: "25+ years of martial-arts experience, led by Sensei Franck." },
+            { icon: Award, title: "Experienced coaches", body: "25+ years of martial-arts experience, led by Franck Royer." },
           ].map((c) => (
             <div key={c.title} className="rounded-xl border bg-card p-6">
               <c.icon className="h-6 w-6 text-primary" />

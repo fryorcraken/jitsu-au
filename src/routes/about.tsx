@@ -7,7 +7,7 @@ export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
       { title: "About UTS Jitsu | Practical Jiu-Jitsu in Sydney" },
-      { name: "description", content: "Meet Sensei Franck and learn about our approach to self-defence, community and fitness at UTS Jitsu." },
+      { name: "description", content: "Meet Franck Royer and learn about our approach to self-defence, community and fitness at UTS Jitsu." },
       { property: "og:title", content: "About UTS Jitsu" },
       { property: "og:description", content: "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience." },
       { property: "og:url", content: "/about" },
@@ -67,12 +67,12 @@ function About() {
         <div className="grid gap-8 overflow-hidden rounded-2xl border bg-card md:grid-cols-2">
           <img
             src={teamImg.url}
-            alt="Sensei Franck with UTS Jitsu students"
+            alt="Franck Royer with UTS Jitsu students"
             className="h-full min-h-[280px] w-full object-cover"
           />
           <div className="p-8 md:p-12">
             <p className="text-sm font-semibold uppercase tracking-wider text-primary">Coaching team</p>
-            <h2 className="mt-2 text-3xl font-bold">Led by Sensei Franck</h2>
+            <h2 className="mt-2 text-3xl font-bold">Led by Franck Royer</h2>
             <p className="mt-4 text-muted-foreground">
               25+ years of martial arts experience, backed by a team of assistant instructors
               who help make every class approachable, whatever your starting point.
