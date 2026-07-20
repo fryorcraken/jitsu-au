@@ -13,9 +13,9 @@ import { submitWaiver } from "@/lib/submissions.functions";
 export const Route = createFileRoute("/waiver")({
   head: () => ({
     meta: [
-      { title: "Sign waiver — UTS Jitsu" },
+      { title: "Sign waiver | UTS Jitsu" },
       { name: "description", content: "Complete the UTS Jitsu training waiver before your first class." },
-      { property: "og:title", content: "Sign waiver — UTS Jitsu" },
+      { property: "og:title", content: "Sign waiver | UTS Jitsu" },
       { property: "og:description", content: "Complete the UTS Jitsu training waiver online." },
       { property: "og:url", content: "/waiver" },
       { name: "robots", content: "noindex" },

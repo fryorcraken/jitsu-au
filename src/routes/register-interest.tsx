@@ -13,9 +13,9 @@ import { submitInterest } from "@/lib/submissions.functions";
 export const Route = createFileRoute("/register-interest")({
   head: () => ({
     meta: [
-      { title: "Register your interest — UTS Jitsu" },
+      { title: "Register your interest | UTS Jitsu" },
       { name: "description", content: "Book a free trial class at UTS Jitsu. We'll be in touch to confirm your first session." },
-      { property: "og:title", content: "Register your interest — UTS Jitsu" },
+      { property: "og:title", content: "Register your interest | UTS Jitsu" },
       { property: "og:description", content: "Book a free trial class at UTS Jitsu." },
       { property: "og:url", content: "/register-interest" },
     ],

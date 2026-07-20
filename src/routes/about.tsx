@@ -6,7 +6,7 @@ import teamImg from "@/assets/training4.jpg.asset.json";
 export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
-      { title: "About UTS Jitsu — Practical Jiu-Jitsu in Sydney" },
+      { title: "About UTS Jitsu | Practical Jiu-Jitsu in Sydney" },
       { name: "description", content: "Meet Sensei Franck and learn about our approach to self-defence, community and fitness at UTS Jitsu." },
       { property: "og:title", content: "About UTS Jitsu" },
       { property: "og:description", content: "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience." },
@@ -28,7 +28,7 @@ const pillars = [
   },
   {
     title: "Fitness through martial arts",
-    body: "Our sessions combine martial arts drills with strength and conditioning, improving your overall fitness, agility and endurance. Expect to be challenged — and to leave sharper than you came in.",
+    body: "Our sessions combine martial arts drills with strength and conditioning, improving your overall fitness, agility and endurance. Expect to be challenged, and leave sharper than you came in.",
   },
 ];
 
@@ -41,7 +41,7 @@ function About() {
           <h1 className="mt-3 text-4xl font-bold md:text-5xl">A modern dojo, rooted in tradition.</h1>
           <p className="mt-5 text-lg text-muted-foreground">
             UTS Jitsu brings Sydney Jitsu's practical Japanese Jiu-Jitsu training to the UTS
-            Ultimo campus — an accessible, welcoming space for students, professionals and
+            Ultimo campus, an accessible, welcoming space for students, professionals and
             anyone in the CBD looking for a martial art that actually works.
           </p>
         </div>
@@ -75,7 +75,7 @@ function About() {
             <h2 className="mt-2 text-3xl font-bold">Led by Sensei Franck</h2>
             <p className="mt-4 text-muted-foreground">
               25+ years of martial arts experience, backed by a team of assistant instructors
-              who help make every class approachable — whatever your starting point.
+              who help make every class approachable, whatever your starting point.
             </p>
             <div className="mt-6">
               <Link
