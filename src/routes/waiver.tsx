@@ -10,12 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CheckCircle2, Download } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import {
   submitWaiverWithPdf,
   getCurrentWaiverTemplate,
   getMyLatestWaiver,
 } from "@/lib/waiver.functions";
 import { useAuth } from "@/hooks/useAuth";
+
 
 export const Route = createFileRoute("/waiver")({
   head: () => ({
