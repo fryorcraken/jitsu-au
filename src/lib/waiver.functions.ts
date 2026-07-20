@@ -64,8 +64,15 @@ const waiverSchema = z.object({
   ack_release: z.literal(true),
   ack_media: z.boolean(),
   signature_name: z.string().trim().min(1).max(120),
+  is_minor: z.boolean().optional().default(false),
+  guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
+  guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+  guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
   hp: z.string().max(0).optional(),
-});
+}).refine(
+  (d) => !d.is_minor || (d.guardian_name && d.guardian_relationship && d.guardian_signature),
+  { message: "Parent/guardian name, relationship and signature are required for participants under 18.", path: ["guardian_name"] },
+);
 
 export const submitWaiverWithPdf = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => waiverSchema.parse(data))
@@ -115,6 +122,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         signed_at,
         user_id: userId,
         template_version: tpl.version,
+        is_minor: data.is_minor ?? false,
+        guardian_name: data.guardian_name || null,
+        guardian_relationship: data.guardian_relationship || null,
+        guardian_signature: data.guardian_signature || null,
       })
       .select("id")
       .single();
@@ -139,6 +150,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       template_body: tpl.body_md,
       template_version: tpl.version,
       club_name: CLUB_NAME,
+      is_minor: data.is_minor ?? false,
+      guardian_name: data.guardian_name || "",
+      guardian_relationship: data.guardian_relationship || "",
+      guardian_signature: data.guardian_signature || "",
     });
 
     const path = `${inserted.id}.pdf`;
