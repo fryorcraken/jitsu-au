@@ -26,25 +26,32 @@ export function useAuth() {
 }
 
 export function useRoles(userId: string | undefined) {
-  const [roles, setRoles] = useState<AppRole[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<{ userId: string | undefined; roles: AppRole[] }>({
+    userId: undefined,
+    roles: [],
+  });
 
   useEffect(() => {
     if (!userId) {
-      setRoles([]);
-      setLoading(false);
+      setState({ userId: undefined, roles: [] });
       return;
     }
-    setLoading(true);
+    let cancelled = false;
     supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", userId)
       .then(({ data }) => {
-        setRoles((data ?? []).map((r) => r.role as AppRole));
-        setLoading(false);
+        if (cancelled) return;
+        setState({ userId, roles: (data ?? []).map((r) => r.role as AppRole) });
       });
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
-  return { roles, loading, isManager: roles.includes("manager") };
+  const loaded = state.userId === userId && userId !== undefined;
+  const roles = loaded ? state.roles : [];
+  return { roles, loading: !loaded && userId !== undefined, isManager: roles.includes("manager") };
 }
+
