@@ -18,6 +18,10 @@ export type WaiverPdfData = {
   template_body: string;
   template_version: number;
   club_name: string;
+  is_minor: boolean;
+  guardian_name: string;
+  guardian_relationship: string;
+  guardian_signature: string;
 };
 
 export function applyPlaceholders(body: string, values: Record<string, string>): string {
