@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, degrees, type PDFFont, type PDFPage } from "pdf-lib";
 
 export type WaiverPdfData = {
   full_name: string;
@@ -22,6 +22,12 @@ export type WaiverPdfData = {
   guardian_name: string;
   guardian_relationship: string;
   guardian_signature: string;
+  /** Optional PNG bytes for drawn participant signature */
+  signature_image_png?: Uint8Array | null;
+  /** Optional PNG bytes for drawn guardian signature */
+  guardian_signature_image_png?: Uint8Array | null;
+  /** If true, overlay a DRAFT watermark and skip signed-at footer */
+  draft?: boolean;
 };
 
 export function applyPlaceholders(body: string, values: Record<string, string>): string {
@@ -41,14 +47,19 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   const ink = rgb(0.1, 0.12, 0.15);
   const muted = rgb(0.4, 0.42, 0.45);
 
+  const pages: PDFPage[] = [];
   let page: PDFPage = doc.addPage([pageWidth, pageHeight]);
+  pages.push(page);
   let y = pageHeight - margin;
 
+  const newPage = () => {
+    page = doc.addPage([pageWidth, pageHeight]);
+    pages.push(page);
+    y = pageHeight - margin;
+  };
+
   const ensureSpace = (needed: number) => {
-    if (y - needed < margin) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      y = pageHeight - margin;
-    }
+    if (y - needed < margin) newPage();
   };
 
   const wrap = (text: string, size: number, f: PDFFont): string[] => {
@@ -89,7 +100,10 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   y -= 2;
   drawText(data.template_title, { size: 22, font: bold });
   y -= 6;
-  drawText(`Template version ${data.template_version} · Signed ${new Date(data.signed_at).toLocaleString("en-AU")}`, { size: 9, color: muted });
+  const dateLabel = data.draft
+    ? "Draft preview"
+    : `Template version ${data.template_version} · Signed ${new Date(data.signed_at).toLocaleString("en-AU")}`;
+  drawText(dateLabel, { size: 9, color: muted });
   y -= 10;
 
   // Body: parse simple markdown-ish (# heading, **bold**, ---)
@@ -113,7 +127,6 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       drawText(block.slice(3), { size: 13, font: bold });
       continue;
     }
-    // Strip **bold** and render as regular (simple approach). Keep it readable.
     const clean = block.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\n/g, " ");
     drawText(clean, { size: 11 });
     y -= 4;
@@ -129,14 +142,14 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     ["Address", data.address],
     ["Phone", data.phone],
     ["Email", data.email],
-    ["Emergency contact", `${data.emergency_contact_name} (${data.emergency_contact_phone})`],
+    ["Emergency contact", `${data.emergency_contact_name}${data.emergency_contact_phone ? ` (${data.emergency_contact_phone})` : ""}`],
     ["Medical notes", data.medical_notes || "None provided"],
   ];
   for (const [label, value] of rows) {
     ensureSpace(16);
     page.drawText(label, { x: margin, y: y - 10, size: 9, font: bold, color: muted });
     y -= 12;
-    for (const line of wrap(value, 11, font)) {
+    for (const line of wrap(value || "—", 11, font)) {
       ensureSpace(14);
       page.drawText(line, { x: margin, y: y - 11, size: 11, font, color: ink });
       y -= 14;
@@ -168,16 +181,39 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
 
   // Signature
   y -= 10;
-  ensureSpace(60);
-  page.drawLine({ start: { x: margin, y }, end: { x: margin + 260, y }, thickness: 0.5, color: muted });
-  y -= 14;
-  page.drawText(data.signature_name, { x: margin, y: y - 4, size: 14, font: bold, color: ink });
-  y -= 22;
-  page.drawText(`Electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`, { x: margin, y, size: 9, font, color: muted });
+  ensureSpace(90);
+  const sigLineY = y;
+  page.drawLine({ start: { x: margin, y: sigLineY }, end: { x: margin + 260, y: sigLineY }, thickness: 0.5, color: muted });
+
+  if (data.signature_image_png && data.signature_image_png.byteLength > 0) {
+    try {
+      const img = await doc.embedPng(data.signature_image_png);
+      const maxW = 220;
+      const maxH = 60;
+      const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      page.drawImage(img, { x: margin, y: sigLineY + 4, width: w, height: h });
+      y = sigLineY - 14;
+      page.drawText(data.signature_name || data.full_name || "", { x: margin, y: y - 4, size: 10, font, color: muted });
+      y -= 18;
+    } catch {
+      y -= 14;
+      page.drawText(data.signature_name || "", { x: margin, y: y - 4, size: 14, font: bold, color: ink });
+      y -= 22;
+    }
+  } else {
+    y -= 14;
+    page.drawText(data.signature_name || "", { x: margin, y: y - 4, size: 14, font: bold, color: ink });
+    y -= 22;
+  }
+  if (!data.draft) {
+    page.drawText(`Electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`, { x: margin, y, size: 9, font, color: muted });
+  }
 
   if (data.is_minor) {
     y -= 24;
-    ensureSpace(90);
+    ensureSpace(120);
     drawText("Parent / guardian consent", { size: 13, font: bold, color: primary });
     const gRows: [string, string][] = [
       ["Guardian name", data.guardian_name || ""],
@@ -187,18 +223,54 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       ensureSpace(16);
       page.drawText(label, { x: margin, y: y - 10, size: 9, font: bold, color: muted });
       y -= 12;
-      page.drawText(value, { x: margin, y: y - 11, size: 11, font, color: ink });
+      page.drawText(value || "—", { x: margin, y: y - 11, size: 11, font, color: ink });
       y -= 16;
     }
     y -= 4;
-    ensureSpace(50);
-    page.drawLine({ start: { x: margin, y }, end: { x: margin + 260, y }, thickness: 0.5, color: muted });
-    y -= 14;
-    page.drawText(data.guardian_signature || "", { x: margin, y: y - 4, size: 14, font: bold, color: ink });
-    y -= 20;
-    page.drawText(`Guardian electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`, { x: margin, y, size: 9, font, color: muted });
+    ensureSpace(80);
+    const gLineY = y;
+    page.drawLine({ start: { x: margin, y: gLineY }, end: { x: margin + 260, y: gLineY }, thickness: 0.5, color: muted });
+    if (data.guardian_signature_image_png && data.guardian_signature_image_png.byteLength > 0) {
+      try {
+        const img = await doc.embedPng(data.guardian_signature_image_png);
+        const maxW = 220;
+        const maxH = 60;
+        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        page.drawImage(img, { x: margin, y: gLineY + 4, width: w, height: h });
+        y = gLineY - 14;
+        page.drawText(data.guardian_signature || data.guardian_name || "", { x: margin, y: y - 4, size: 10, font, color: muted });
+        y -= 18;
+      } catch {
+        y -= 14;
+        page.drawText(data.guardian_signature || "", { x: margin, y: y - 4, size: 14, font: bold, color: ink });
+        y -= 20;
+      }
+    } else {
+      y -= 14;
+      page.drawText(data.guardian_signature || "", { x: margin, y: y - 4, size: 14, font: bold, color: ink });
+      y -= 20;
+    }
+    if (!data.draft) {
+      page.drawText(`Guardian electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`, { x: margin, y, size: 9, font, color: muted });
+    }
   }
 
+  // DRAFT watermark on every page
+  if (data.draft) {
+    for (const p of pages) {
+      p.drawText("DRAFT — NOT SIGNED", {
+        x: 60,
+        y: 380,
+        size: 60,
+        font: bold,
+        color: rgb(0.85, 0.87, 0.9),
+        rotate: degrees(30),
+        opacity: 0.55,
+      });
+    }
+  }
 
   return await doc.save();
 }
