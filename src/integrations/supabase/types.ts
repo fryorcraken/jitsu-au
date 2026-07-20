@@ -95,6 +95,36 @@ export type Database = {
         }
         Relationships: []
       }
+      waiver_templates: {
+        Row: {
+          body_md: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_current: boolean
+          title: string
+          version: number
+        }
+        Insert: {
+          body_md: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_current?: boolean
+          title?: string
+          version: number
+        }
+        Update: {
+          body_md?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_current?: boolean
+          title?: string
+          version?: number
+        }
+        Relationships: []
+      }
       waivers: {
         Row: {
           acknowledgements: Json
@@ -106,10 +136,14 @@ export type Database = {
           emergency_contact_phone: string
           full_name: string
           id: string
+          ip_hash: string | null
           medical_notes: string | null
+          pdf_path: string | null
           phone: string
           signature_name: string
           signed_at: string
+          template_version: number | null
+          user_id: string | null
         }
         Insert: {
           acknowledgements?: Json
@@ -121,10 +155,14 @@ export type Database = {
           emergency_contact_phone: string
           full_name: string
           id?: string
+          ip_hash?: string | null
           medical_notes?: string | null
+          pdf_path?: string | null
           phone: string
           signature_name: string
           signed_at?: string
+          template_version?: number | null
+          user_id?: string | null
         }
         Update: {
           acknowledgements?: Json
@@ -136,10 +174,14 @@ export type Database = {
           emergency_contact_phone?: string
           full_name?: string
           id?: string
+          ip_hash?: string | null
           medical_notes?: string | null
+          pdf_path?: string | null
           phone?: string
           signature_name?: string
           signed_at?: string
+          template_version?: number | null
+          user_id?: string | null
         }
         Relationships: []
       }
