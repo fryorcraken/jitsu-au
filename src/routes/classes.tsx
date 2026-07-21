@@ -25,9 +25,9 @@ export const Route = createFileRoute("/classes")({
 });
 
 const schedule = [
-  { day: "Monday", time: "17:30 – 19:00", note: "All levels welcome" },
-  { day: "Wednesday", time: "18:00 – 19:30", note: "All levels welcome" },
-  { day: "Saturday", time: "09:00 – 10:30", note: "Colour belts only" },
+  { day: "Monday", time: "5:30 – 7:00pm", note: "All levels welcome" },
+  { day: "Wednesday", time: "6:00 – 7:30pm", note: "All levels welcome" },
+  { day: "Saturday", time: "9:00 – 10:30am", note: "Colour belts only" },
 ];
 
 function Classes() {
