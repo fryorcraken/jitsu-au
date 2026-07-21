@@ -7,6 +7,7 @@ import {
   composeFullName,
   decodeDataUrlPng,
   saveTemplateSchema,
+  waiverApprovalSchema,
   waiverSubmitSchema,
 } from "@/lib/validation";
 import {
@@ -211,6 +212,28 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .createSignedUrl(path, 60 * 60);
     if (signErr) throw new Error(signErr.message);
 
+    // Notify the member and every manager, with a longer-lived link to the PDF
+    // (Lovable's email API can't carry binary attachments, so we send a secure,
+    // expiring download link). Best-effort — a send failure must not fail the
+    // waiver submission, which is already durably saved.
+    try {
+      const { data: emailSigned } = await supabaseAdmin.storage
+        .from(BUCKET)
+        .createSignedUrl(path, 60 * 60 * 24 * 7);
+      if (emailSigned?.signedUrl) {
+        const { sendWaiverEmails } = await import("./waiver-email.server");
+        await sendWaiverEmails({
+          waiverId: inserted.id,
+          memberName: full_name,
+          memberEmail: data.email,
+          pdfUrl: emailSigned.signedUrl,
+          admin: supabaseAdmin,
+        });
+      }
+    } catch (e) {
+      console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);
+    }
+
     return { ok: true as const, pdf_url: signed.signedUrl, waiver_id: inserted.id };
   });
 
@@ -270,13 +293,58 @@ export const listWaivers = createServerFn({ method: "GET" })
       _role: "manager",
     });
     if (!isMgr) throw new Error("Forbidden");
+    // select("*") so the approval columns (absent from the stale generated
+    // types) come back; we then project to the list shape managers need.
     const { data, error } = await context.supabase
       .from("waivers")
-      .select("id, full_name, email, signed_at, template_version, pdf_path")
+      .select("*")
       .order("signed_at", { ascending: false })
       .limit(500);
     if (error) throw new Error(error.message);
-    return data ?? [];
+    return (data ?? []).map((w) => {
+      const row = w as typeof w & {
+        approval_status?: string | null;
+        approved_at?: string | null;
+      };
+      return {
+        id: row.id,
+        full_name: row.full_name,
+        email: row.email,
+        signed_at: row.signed_at,
+        template_version: row.template_version,
+        pdf_path: row.pdf_path,
+        approval_status: (row.approval_status ?? "pending") as "pending" | "approved",
+        approved_at: row.approved_at ?? null,
+      };
+    });
+  });
+
+// ---- Manager: approve / unapprove a signed waiver ----
+export const setWaiverApproval = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => waiverApprovalSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: isMgr, error: rErr } = await context.supabase.rpc("has_role", {
+      _user_id: context.userId,
+      _role: "manager",
+    });
+    if (rErr) throw new Error(rErr.message);
+    if (!isMgr) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const approved = data.status === "approved";
+    // Built as a variable so the approval keys (absent from the stale generated
+    // Update type) don't trip the excess-property check.
+    const patch = {
+      approval_status: data.status,
+      approved_at: approved ? new Date().toISOString() : null,
+      approved_by: approved ? context.userId : null,
+    };
+    const { error } = await supabaseAdmin.from("waivers").update(patch).eq("id", data.id);
+    if (error) throw new Error(error.message);
+
+    return { ok: true as const, id: data.id, status: data.status };
   });
 
 // ---- Signed URL for a waiver PDF (manager or owner) ----

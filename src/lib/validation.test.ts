@@ -6,6 +6,7 @@ import {
   interestSchema,
   saveTemplateSchema,
   splitFullName,
+  waiverApprovalSchema,
   waiverSubmitSchema,
 } from "./validation";
 
@@ -251,5 +252,33 @@ describe("saveTemplateSchema", () => {
         acknowledgements: [{ id: "x", label: "", required: true }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("waiverApprovalSchema", () => {
+  const id = "11111111-1111-1111-1111-111111111111";
+
+  it("accepts a valid uuid + approved status", () => {
+    const r = waiverApprovalSchema.safeParse({ id, status: "approved" });
+    expect(r.success && r.data).toEqual({ id, status: "approved" });
+  });
+
+  it("accepts a valid uuid + pending status", () => {
+    expect(waiverApprovalSchema.safeParse({ id, status: "pending" }).success).toBe(true);
+  });
+
+  it("rejects an unknown status", () => {
+    expect(waiverApprovalSchema.safeParse({ id, status: "rejected" }).success).toBe(false);
+  });
+
+  it("rejects a non-uuid id", () => {
+    expect(waiverApprovalSchema.safeParse({ id: "not-a-uuid", status: "approved" }).success).toBe(
+      false,
+    );
+  });
+
+  it("requires both fields", () => {
+    expect(waiverApprovalSchema.safeParse({ id }).success).toBe(false);
+    expect(waiverApprovalSchema.safeParse({ status: "approved" }).success).toBe(false);
   });
 });
