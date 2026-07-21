@@ -6,7 +6,19 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  {
+    // Build output and generated code (shadcn primitives, Supabase types, the
+    // router tree) are not hand-maintained, so they are exempt from lint. The
+    // one hand-written test under components/ui still runs under Vitest.
+    ignores: [
+      "dist",
+      ".output",
+      ".vinxi",
+      "src/components/ui/**",
+      "src/integrations/supabase/types.ts",
+      "src/routeTree.gen.ts",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
