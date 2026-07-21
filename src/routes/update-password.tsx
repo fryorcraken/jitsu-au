@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { PasswordInput } from "@/components/site/PasswordInput";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -51,9 +51,8 @@ function UpdatePasswordPage() {
               <form onSubmit={onSubmit} className="space-y-3">
                 <div>
                   <Label htmlFor="new-pw">New password</Label>
-                  <Input
+                  <PasswordInput
                     id="new-pw"
-                    type="password"
                     required
                     minLength={8}
                     value={password}

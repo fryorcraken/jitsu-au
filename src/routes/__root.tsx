@@ -139,6 +139,9 @@ function RootComponent() {
 
   useEffect(() => {
     let mounted = true;
+    import("@/lib/auth-persistence").then(({ applyRememberPreference }) => {
+      if (mounted) applyRememberPreference();
+    });
     import("@/integrations/supabase/client").then(({ supabase }) => {
       if (!mounted) return;
       const { data: sub } = supabase.auth.onAuthStateChange((event) => {
