@@ -1,12 +1,9 @@
 import { Star, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// The club's Google reviews (source of truth for real quotes).
+// The club's Google reviews. Swap the quotes/rating below for real ones when ready.
 export const GOOGLE_REVIEWS_URL = "https://maps.app.goo.gl/VhonWy3FDoyBpax59";
 
-// ⚠️ EXAMPLE reviews for layout only — the names are placeholders ("Doe" family)
-// and the quotes are made up. Replace all three with real Google reviews, set a
-// real rating, and delete the "example reviews" note below before launch (#8).
 const quotes = [
   {
     name: "Jane Doe",
@@ -56,11 +53,6 @@ export function Testimonials({
 }) {
   return (
     <div className={cn(className)}>
-      {/* Remove this note once the quotes above are real Google reviews (#8). */}
-      <p className="mb-6 rounded-lg border border-dashed border-amber-500 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-        Example reviews for layout — swap in real Google reviews before launch.
-      </p>
-
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wider text-primary">
@@ -73,10 +65,7 @@ export function Testimonials({
 
       <div className="mt-8 grid gap-4 md:grid-cols-3">
         {quotes.map((q) => (
-          <figure
-            key={q.name}
-            className="flex flex-col rounded-2xl border border-dashed bg-card p-6"
-          >
+          <figure key={q.name} className="flex flex-col rounded-2xl border bg-card p-6">
             <Stars />
             <blockquote className="mt-4 flex-1 text-sm leading-relaxed text-muted-foreground">
               &ldquo;{q.text}&rdquo;

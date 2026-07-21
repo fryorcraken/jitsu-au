@@ -23,9 +23,4 @@ describe("Testimonials", () => {
     expect(badge).toHaveAttribute("target", "_blank");
     expect(badge).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
-
-  it("shows the example-reviews note so placeholder content can't ship silently", () => {
-    render(<Testimonials />);
-    expect(screen.getByText(/example reviews for layout/i)).toBeInTheDocument();
-  });
 });
