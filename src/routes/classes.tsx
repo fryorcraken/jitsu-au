@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Clock, MapPin, Phone } from "lucide-react";
+import { ArrowRight, Clock, MapPin, Phone } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 
@@ -58,24 +58,21 @@ function Classes() {
       </section>
 
       <section className="mx-auto max-w-6xl px-4 py-16">
-        <div className="grid gap-8 md:grid-cols-2">
-          <div className="rounded-2xl border bg-card p-8">
-            <h2 className="text-2xl font-bold">What to expect</h2>
-            <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
-              <li>• Warm-up, drills, techniques and pressure-tested practice.</li>
-              <li>• Welcoming instructors who will cater for your skills.</li>
-              <li>• Emphasis on control and safety. Nobody trains injured.</li>
-              <li>• Progress at your pace: from your very first class to grading.</li>
-            </ul>
+        <div className="rounded-2xl border bg-card p-8 md:flex md:items-center md:justify-between md:p-10">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wider text-primary">New here?</p>
+            <h2 className="mt-2 text-2xl font-bold">Your first class, step by step</h2>
+            <p className="mt-2 max-w-xl text-muted-foreground">
+              What to expect, what to bring and exactly what happens on the mat — plus how the free,
+              no-commitment trial works.
+            </p>
           </div>
-          <div className="rounded-2xl border bg-card p-8">
-            <h2 className="text-2xl font-bold">What to bring</h2>
-            <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
-              <li>• Comfortable clothes (pants and long-sleeve t-shirt recommended).</li>
-              <li>• A water bottle.</li>
-              <li>• Mouth guard once you decide to join. We can help you source one.</li>
-              <li>• Gi and belt for regular training, available through the club ($90).</li>
-            </ul>
+          <div className="mt-6 md:mt-0">
+            <Button asChild>
+              <Link to="/first-class">
+                See what your first class looks like <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
           </div>
         </div>
       </section>
