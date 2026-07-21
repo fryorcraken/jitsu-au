@@ -77,9 +77,15 @@ function SignInForms({ redirect }: { redirect?: string }) {
     return (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          If <strong>{email}</strong> matches an account, we've sent a sign-in link. Check your inbox to sign in.
+          If <strong>{email}</strong> matches an account, we've sent a sign-in link. Check your
+          inbox to sign in.
         </p>
-        <Button type="button" variant="outline" className="w-full" onClick={() => setView("password")}>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={() => setView("password")}
+        >
           Login with password
         </Button>
       </div>
@@ -105,13 +111,7 @@ function SignInForms({ redirect }: { redirect?: string }) {
     );
   }
 
-  return (
-    <MagicLinkSignIn
-      email={email}
-      onEmailChange={setEmail}
-      onSent={() => setSent(true)}
-    />
-  );
+  return <MagicLinkSignIn email={email} onEmailChange={setEmail} onSent={() => setSent(true)} />;
 }
 
 function PasswordSignIn({ redirect, email }: { redirect?: string; email: string }) {
@@ -205,8 +205,6 @@ function MagicLinkSignIn({
   );
 }
 
-
-
 function SignUpForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -229,7 +227,8 @@ function SignUpForm() {
   if (sent) {
     return (
       <p className="text-sm text-muted-foreground">
-        Almost there. Check <strong>{email}</strong> for a confirmation link to activate your account.
+        Almost there. Check <strong>{email}</strong> for a confirmation link to activate your
+        account.
       </p>
     );
   }
@@ -238,7 +237,13 @@ function SignUpForm() {
     <form onSubmit={onSubmit} className="space-y-3">
       <div>
         <Label htmlFor="new-email">Email</Label>
-        <Input id="new-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input
+          id="new-email"
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
       </div>
       <div>
         <Label htmlFor="new-password">Password</Label>

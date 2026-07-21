@@ -14,7 +14,11 @@ export const Route = createFileRoute("/")({
           "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
       },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
-      { property: "og:description", content: "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free." },
+      {
+        property: "og:description",
+        content:
+          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+      },
       { property: "og:url", content: "https://jitsu.au/" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/" }],
@@ -31,15 +35,16 @@ function Home() {
         <div className="mx-auto grid max-w-6xl gap-10 px-4 pt-12 pb-16 md:grid-cols-2 md:items-center md:pt-20 md:pb-24">
           <div>
             <span className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Now enrolling for the semester
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Now enrolling for the
+              semester
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
               Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
-              Build real self-defence skills in a fun and welcoming environment. Japanese
-              Jiu-Jitsu at the UTS Ultimo campus. Classes are for beginners and experienced martial
-              artists alike.
+              Build real self-defence skills in a fun and welcoming environment. Japanese Jiu-Jitsu
+              at the UTS Ultimo campus. Classes are for beginners and experienced martial artists
+              alike.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
@@ -72,10 +77,26 @@ function Home() {
       <section className="mx-auto max-w-6xl px-4 py-16">
         <div className="grid gap-6 md:grid-cols-4">
           {[
-            { icon: Shield, title: "Practical self-defence", body: "Techniques trained under pressure so they work when it matters." },
-            { icon: Users, title: "Inclusive community", body: "All levels welcome. We move at your pace, together." },
-            { icon: Dumbbell, title: "Fitness through art", body: "Drills, conditioning and skill for a sharper mind and stronger body." },
-            { icon: Award, title: "Experienced coaches", body: "25+ years of martial-arts experience, led by Franck Royer." },
+            {
+              icon: Shield,
+              title: "Practical self-defence",
+              body: "Techniques trained under pressure so they work when it matters.",
+            },
+            {
+              icon: Users,
+              title: "Inclusive community",
+              body: "All levels welcome. We move at your pace, together.",
+            },
+            {
+              icon: Dumbbell,
+              title: "Fitness through art",
+              body: "Drills, conditioning and skill for a sharper mind and stronger body.",
+            },
+            {
+              icon: Award,
+              title: "Experienced coaches",
+              body: "25+ years of martial-arts experience, led by Franck Royer.",
+            },
           ].map((c) => (
             <div key={c.title} className="rounded-xl border bg-card p-6">
               <c.icon className="h-6 w-6 text-primary" />
@@ -129,7 +150,10 @@ function Home() {
           <h2 className="text-3xl font-bold md:text-4xl">Ready to step on the mat?</h2>
           <p className="mt-3 max-w-2xl text-primary-foreground/80">
             Register your interest,{" "}
-            <Link to="/waiver" className="underline underline-offset-4 hover:text-primary-foreground">
+            <Link
+              to="/waiver"
+              className="underline underline-offset-4 hover:text-primary-foreground"
+            >
               sign the club waiver
             </Link>
             , or drop us a message. Whichever way you start, we'll take it from there.
@@ -139,10 +163,20 @@ function Home() {
             <Button asChild size="lg" variant="secondary">
               <Link to="/register-interest">Register interest</Link>
             </Button>
-            <Button asChild size="lg" variant="outline" className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+            <Button
+              asChild
+              size="lg"
+              variant="outline"
+              className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+            >
               <Link to="/waiver">Sign waiver</Link>
             </Button>
-            <Button asChild size="lg" variant="outline" className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+            <Button
+              asChild
+              size="lg"
+              variant="outline"
+              className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+            >
               <Link to="/contact">Contact us</Link>
             </Button>
           </div>

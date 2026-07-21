@@ -54,4 +54,3 @@ export function useRoles(userId: string | undefined) {
   const roles = loaded ? state.roles : [];
   return { roles, loading: !loaded && userId !== undefined, isManager: roles.includes("manager") };
 }
-

@@ -43,18 +43,18 @@ This project is connected to [Lovable](https://lovable.dev) (see `AGENTS.md`).
 
 Use **Bun** (this is a Bun project — `bun install`, not npm/pnpm).
 
-| Command | Purpose |
-| --- | --- |
-| `bun install` | Install dependencies |
-| `bun run dev` | Start the Vite dev server |
-| `bun run build` | Production build (Nitro) |
-| `bun run build:dev` | Build in development mode |
-| `bun run preview` | Preview the production build |
-| `bun run lint` | ESLint over the repo |
-| `bun run format` | Prettier `--write` over the repo |
-| `bun run test` | Run the Vitest suite once (CI mode) |
-| `bun run test:watch` | Vitest in watch mode |
-| `bun run test:coverage` | Vitest with a V8 coverage report |
+| Command                 | Purpose                             |
+| ----------------------- | ----------------------------------- |
+| `bun install`           | Install dependencies                |
+| `bun run dev`           | Start the Vite dev server           |
+| `bun run build`         | Production build (Nitro)            |
+| `bun run build:dev`     | Build in development mode           |
+| `bun run preview`       | Preview the production build        |
+| `bun run lint`          | ESLint over the repo                |
+| `bun run format`        | Prettier `--write` over the repo    |
+| `bun run test`          | Run the Vitest suite once (CI mode) |
+| `bun run test:watch`    | Vitest in watch mode                |
+| `bun run test:coverage` | Vitest with a V8 coverage report    |
 
 Verify changes with `bun run test`, `bun run lint`, and `bun run build` (the
 build also type-checks). These three run in CI on every PR (see Testing & CI).
@@ -120,11 +120,11 @@ Read `src/routes/README.md` before touching routes. Key points:
 
 ## Supabase clients — pick the right one
 
-| Module | Runs where | Auth level | Use for |
-| --- | --- | --- | --- |
-| `integrations/supabase/client.ts` (`supabase`) | Browser (also SSR fallback) | Publishable/anon key, RLS-enforced, user session | Client components, `useAuth`, auth-gate `beforeLoad` |
-| `integrations/supabase/auth-middleware.ts` (`requireSupabaseAuth`) | Server fn | Verifies the caller's bearer token, RLS-enforced **as that user** | Authenticated server functions; exposes `context.supabase`, `context.userId`, `context.claims` |
-| `integrations/supabase/client.server.ts` (`supabaseAdmin`) | Server only | **Service role — bypasses RLS** | Trusted admin writes (waiver insert, PDF upload, signed URLs). Never ship to client. |
+| Module                                                             | Runs where                  | Auth level                                                        | Use for                                                                                        |
+| ------------------------------------------------------------------ | --------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `integrations/supabase/client.ts` (`supabase`)                     | Browser (also SSR fallback) | Publishable/anon key, RLS-enforced, user session                  | Client components, `useAuth`, auth-gate `beforeLoad`                                           |
+| `integrations/supabase/auth-middleware.ts` (`requireSupabaseAuth`) | Server fn                   | Verifies the caller's bearer token, RLS-enforced **as that user** | Authenticated server functions; exposes `context.supabase`, `context.userId`, `context.claims` |
+| `integrations/supabase/client.server.ts` (`supabaseAdmin`)         | Server only                 | **Service role — bypasses RLS**                                   | Trusted admin writes (waiver insert, PDF upload, signed URLs). Never ship to client.           |
 
 - `attachSupabaseAuth` (registered as a `functionMiddleware` in `start.ts`)
   attaches the browser's bearer token to every server-function RPC — without it,

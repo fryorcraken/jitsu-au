@@ -54,14 +54,19 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
     };
   }, [onChange]);
 
-  useImperativeHandle(ref, () => ({
-    isEmpty: () => padRef.current?.isEmpty() ?? true,
-    toDataURL: () => (padRef.current && !padRef.current.isEmpty() ? padRef.current.toDataURL("image/png") : ""),
-    clear: () => {
-      padRef.current?.clear();
-      onChange?.("");
-    },
-  }), [onChange]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      isEmpty: () => padRef.current?.isEmpty() ?? true,
+      toDataURL: () =>
+        padRef.current && !padRef.current.isEmpty() ? padRef.current.toDataURL("image/png") : "",
+      clear: () => {
+        padRef.current?.clear();
+        onChange?.("");
+      },
+    }),
+    [onChange],
+  );
 
   return (
     <div className="space-y-2">

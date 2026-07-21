@@ -8,9 +8,16 @@ export const Route = createFileRoute("/instructors")({
   head: () => ({
     meta: [
       { title: "Instructors | UTS Jitsu" },
-      { name: "description", content: "Meet the instructors at UTS Jitsu, led by Franck Royer with 25+ years of martial arts experience." },
+      {
+        name: "description",
+        content:
+          "Meet the instructors at UTS Jitsu, led by Franck Royer with 25+ years of martial arts experience.",
+      },
       { property: "og:title", content: "Instructors | UTS Jitsu" },
-      { property: "og:description", content: "Meet Franck Royer and the coaching team at UTS Jitsu." },
+      {
+        property: "og:description",
+        content: "Meet Franck Royer and the coaching team at UTS Jitsu.",
+      },
       { property: "og:url", content: "https://jitsu.au/instructors" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/instructors" }],
@@ -32,10 +39,7 @@ const franckTeaching = [
     hours: "3 teaching hours a week",
     org: "UTS Jitsu, Harris St, Australia",
     role: "Reopened as head instructor",
-    points: [
-      "Weekly classes, 3 hours a week",
-      "Running 3 gradings a year",
-    ],
+    points: ["Weekly classes, 3 hours a week", "Running 3 gradings a year"],
   },
   {
     period: "2026 - Present",
@@ -107,9 +111,7 @@ const franckTeaching = [
     hours: "10 teaching hours",
     org: "Straight Blast Gym Australia",
     role: "Assistant instructor, BJJ kids sessions",
-    points: [
-      "Assisted teaching Brazilian Jiu-Jitsu kids sessions",
-    ],
+    points: ["Assisted teaching Brazilian Jiu-Jitsu kids sessions"],
   },
   {
     period: "March 2017 - June 2021",
@@ -120,7 +122,7 @@ const franckTeaching = [
       "Preparation and teaching of weekly sessions",
       "Successfully promoted students during regional and in-house gradings",
       "Ad-hoc organisation of week-end seminars with martial artists of other styles",
-      "Guest instructor at \"Girl fight camp\", organised by Sensei Rosemary Smith",
+      'Guest instructor at "Girl fight camp", organised by Sensei Rosemary Smith',
       "Trained 2 students to brown belt, graded by senior UK TJJF instructor, Steve Donaghy (seven dan)",
     ],
   },
@@ -140,9 +142,7 @@ const franckTeaching = [
     hours: "Total of 25 teaching hours",
     org: "Outdoor sessions, Prince Alfred Park, Australia",
     role: "Lead instructor & organiser",
-    points: [
-      "Teaching lunch time sessions once a week in the park with 4-6 students",
-    ],
+    points: ["Teaching lunch time sessions once a week in the park with 4-6 students"],
   },
   {
     period: "July 2013 - January 2014",
@@ -210,16 +210,12 @@ const franckTraining = [
   {
     period: "September 2008 - September 2009",
     location: "Manchester, UK",
-    points: [
-      "Shorinji Kan Jiu-Jitsu at Manchester Met and Manchester Uni Jitsu Clubs, ~250 hours",
-    ],
+    points: ["Shorinji Kan Jiu-Jitsu at Manchester Met and Manchester Uni Jitsu Clubs, ~250 hours"],
   },
   {
     period: "September 1999 - September 2006",
     location: "Bordeaux, France",
-    points: [
-      "Mushin Ryu Jiu-Jitsu at the Dojo Aquitain, ~1100 hours",
-    ],
+    points: ["Mushin Ryu Jiu-Jitsu at the Dojo Aquitain, ~1100 hours"],
   },
 ];
 
@@ -272,8 +268,8 @@ function Instructors() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Instructors</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">The people on the mat with you.</h1>
         <p className="mt-5 text-lg text-muted-foreground">
-          Our coaching team blends decades of martial arts experience with a modern,
-          student-first approach. Every class is led or supervised by a qualified instructor.
+          Our coaching team blends decades of martial arts experience with a modern, student-first
+          approach. Every class is led or supervised by a qualified instructor.
         </p>
       </section>
 
@@ -285,10 +281,16 @@ function Instructors() {
             className="h-full min-h-[320px] w-full object-cover md:aspect-auto"
           />
           <div className="p-8 md:p-12">
-            <p className="text-sm font-semibold uppercase tracking-wider text-primary">Head instructor</p>
+            <p className="text-sm font-semibold uppercase tracking-wider text-primary">
+              Head instructor
+            </p>
             <h2 className="mt-2 text-3xl font-bold">Franck Royer</h2>
             <p className="mt-4 text-muted-foreground">
-              Martial artist for more than 25 years, I am a dedicated teacher and student. I aim to pass on to my students what Japanese Jiu-Jitsu has given me: self-confidence, fitness and self-defence skills. It has been my passion since I started as a teenager, a passion I have conveyed as an instructor for the past 13 years. Over the years, I have trained many martial arts, with a more recent focus on Brazilian Jiu-Jitsu.
+              Martial artist for more than 25 years, I am a dedicated teacher and student. I aim to
+              pass on to my students what Japanese Jiu-Jitsu has given me: self-confidence, fitness
+              and self-defence skills. It has been my passion since I started as a teenager, a
+              passion I have conveyed as an instructor for the past 13 years. Over the years, I have
+              trained many martial arts, with a more recent focus on Brazilian Jiu-Jitsu.
             </p>
 
             <div className="mt-6">
@@ -312,8 +314,13 @@ function Instructors() {
             <div className="space-y-6">
               {franckTeaching.map((t) => (
                 <div key={t.period + t.org}>
-                  <p className="font-semibold">{t.period}{t.hours ? ` - ${t.hours}` : ""}</p>
-                  <p className="text-sm text-primary">{t.org} - {t.role}</p>
+                  <p className="font-semibold">
+                    {t.period}
+                    {t.hours ? ` - ${t.hours}` : ""}
+                  </p>
+                  <p className="text-sm text-primary">
+                    {t.org} - {t.role}
+                  </p>
                   <ul className="mt-2 space-y-1">
                     {t.points.map((p, i) => (
                       <li key={i} className="flex gap-2 text-sm text-muted-foreground">
@@ -367,7 +374,9 @@ function Instructors() {
         <div className="mt-6 grid gap-6 md:grid-cols-2">
           {assistants.map((a) => (
             <article key={a.name} className="rounded-xl border bg-card p-6">
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary">{a.role}</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+                {a.role}
+              </p>
               <h3 className="mt-1 text-xl font-semibold">{a.name}</h3>
               <p className="mt-3 text-sm text-muted-foreground">{a.bio}</p>
             </article>
