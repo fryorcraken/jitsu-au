@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/pricing")({
@@ -153,6 +154,10 @@ function Pricing() {
           Saturday sessions are best-effort and included in semester price, but not guaranteed. No
           classes during the UTS summer break.
         </p>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 pb-16">
+        <Testimonials heading="Trusted by students like you" />
       </section>
 
       <section className="mx-auto max-w-6xl px-4 pb-24">

@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Shield, Users, Dumbbell, Award, MapPin, Clock, Sparkles } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
@@ -167,6 +168,11 @@ function Home() {
             ))}
           </div>
         </div>
+      </section>
+
+      {/* Social proof */}
+      <section className="mx-auto max-w-6xl px-4 py-16">
+        <Testimonials />
       </section>
 
       {/* CTA */}
