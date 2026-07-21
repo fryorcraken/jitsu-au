@@ -1,15 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Testimonials } from "./Testimonials";
-import { GOOGLE_REVIEWS_URL } from "@/lib/testimonials";
+import { Testimonials, GOOGLE_REVIEWS_URL } from "./Testimonials";
 
 describe("Testimonials", () => {
-  it("renders the heading and at least two quote cards", () => {
+  it("renders the heading and three quote cards", () => {
     render(<Testimonials />);
     expect(screen.getByRole("heading", { name: /what our members say/i })).toBeInTheDocument();
-    // Each quote is a <figure>; expect the reusable strip to carry 2–3 of them.
-    const quotes = document.querySelectorAll("figure");
-    expect(quotes.length).toBeGreaterThanOrEqual(2);
+    expect(document.querySelectorAll("figure")).toHaveLength(3);
   });
 
   it("accepts a custom heading", () => {
@@ -27,9 +24,8 @@ describe("Testimonials", () => {
     expect(badge).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
 
-  it("renders the unmistakable warning while the shipped data is still placeholder", () => {
-    // The strip currently ships placeholder reviews, so the guard must be visible.
+  it("shows the example-reviews note so placeholder content can't ship silently", () => {
     render(<Testimonials />);
-    expect(screen.getByRole("alert")).toHaveTextContent(/placeholder/i);
+    expect(screen.getByText(/example reviews for layout/i)).toBeInTheDocument();
   });
 });

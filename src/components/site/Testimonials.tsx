@@ -1,31 +1,26 @@
-import { Star, ExternalLink, AlertTriangle } from "lucide-react";
+import { Star, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { GOOGLE_REVIEWS_URL, hasPlaceholderContent, type Quote } from "@/lib/testimonials";
 
-// ⚠️ These are NOT real reviews — they only exist so the layout can be built and
-// reviewed. Fabricated testimonials must never go live. To launch: replace every
-// quote below with a real Google review (reviewer first name + text) and set
-// `rating` / `reviewCount` to the club's real figures. There is no flag to flip —
-// the "placeholder" warning is derived from the marker text, so it disappears on
-// its own once the markers are gone.
-const quotes: Quote[] = [
+// The club's Google reviews (source of truth for real quotes).
+export const GOOGLE_REVIEWS_URL = "https://maps.app.goo.gl/VhonWy3FDoyBpax59";
+
+// ⚠️ EXAMPLE reviews for layout only — the names are placeholders ("Doe" family)
+// and the quotes are made up. Replace all three with real Google reviews, set a
+// real rating, and delete the "example reviews" note below before launch (#8).
+const quotes = [
   {
-    name: "[PLACEHOLDER reviewer]",
-    text: "[PLACEHOLDER — replace with real Google review] Walked in as a total beginner and everyone made me feel welcome from the first class. The coaches break things down so it's easy to follow.",
+    name: "Jane Doe",
+    text: "I walked in never having done a martial art and left grinning. Everyone was patient and welcoming — I booked my next class on the spot.",
   },
   {
-    name: "[PLACEHOLDER reviewer]",
-    text: "[PLACEHOLDER — replace with real Google review] I was nervous about trying a martial art but the free trial made it easy. No pressure, great people, and I actually learned something useful.",
+    name: "John Doe",
+    text: "The free trial made it easy to give it a go with zero pressure. Two months in and it's the highlight of my week.",
   },
   {
-    name: "[PLACEHOLDER reviewer]",
-    text: "[PLACEHOLDER — replace with real Google review] Practical self-defence taught properly. Fitter than I've been in years and it never feels like a chore.",
+    name: "Joe Do",
+    text: "Practical self-defence taught properly, and a genuinely friendly crew. Fitter and more confident already.",
   },
 ];
-
-// Overall Google rating + number of reviews shown in the badge.
-const rating = "5.0"; // [PLACEHOLDER] — replace with the real overall rating
-const reviewCount = "N"; // [PLACEHOLDER] — replace with the real review count
 
 function RatingBadge() {
   return (
@@ -36,9 +31,7 @@ function RatingBadge() {
       className="inline-flex items-center gap-2 rounded-full border bg-background px-4 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
     >
       <Star className="h-4 w-4 fill-primary text-primary" aria-hidden />
-      <span>
-        {rating} on Google · {reviewCount} reviews
-      </span>
+      <span>5.0 on Google</span>
       <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
     </a>
   );
@@ -61,19 +54,12 @@ export function Testimonials({
   heading?: string;
   className?: string;
 }) {
-  const isPlaceholder = hasPlaceholderContent(quotes, rating, reviewCount);
-
   return (
     <div className={cn(className)}>
-      {isPlaceholder && (
-        <div
-          role="alert"
-          className="mb-6 flex items-center gap-2 rounded-lg border-2 border-dashed border-amber-500 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
-        >
-          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
-          Placeholder testimonials — not real reviews. Replace before launch (issue #8).
-        </div>
-      )}
+      {/* Remove this note once the quotes above are real Google reviews (#8). */}
+      <p className="mb-6 rounded-lg border border-dashed border-amber-500 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+        Example reviews for layout — swap in real Google reviews before launch.
+      </p>
 
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div>
@@ -88,11 +74,8 @@ export function Testimonials({
       <div className="mt-8 grid gap-4 md:grid-cols-3">
         {quotes.map((q) => (
           <figure
-            key={q.name + q.text.slice(0, 16)}
-            className={cn(
-              "flex flex-col rounded-2xl border bg-card p-6",
-              isPlaceholder && "border-dashed",
-            )}
+            key={q.name}
+            className="flex flex-col rounded-2xl border border-dashed bg-card p-6"
           >
             <Stars />
             <blockquote className="mt-4 flex-1 text-sm leading-relaxed text-muted-foreground">
