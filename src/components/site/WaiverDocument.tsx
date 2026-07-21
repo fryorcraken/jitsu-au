@@ -1,6 +1,10 @@
 import { Fragment, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { parseWaiverBlocks } from "@/lib/waiver-document";
+import {
+  applyWaiverPlaceholders,
+  buildWaiverPlaceholders,
+  parseWaiverBlocks,
+} from "@/lib/waiver-document";
 
 /**
  * Props for {@link WaiverDocument}. These mirror the fields that
@@ -150,10 +154,24 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     className,
   } = props;
 
-  const blocks = parseWaiverBlocks(templateBody);
-  const emergency = `${emergencyContactName}${
-    emergencyContactPhone ? ` (${emergencyContactPhone})` : ""
-  }`;
+  // Participant data appears only where the template body uses a {{placeholder}}.
+  const filledBody = applyWaiverPlaceholders(
+    templateBody,
+    buildWaiverPlaceholders({
+      fullName,
+      dateOfBirth,
+      address,
+      phone,
+      email,
+      emergencyContactName,
+      emergencyContactPhone,
+      medicalNotes,
+      signatureName,
+      clubName,
+      signedDate: signedAt ? new Date(signedAt).toLocaleDateString("en-AU") : "",
+    }),
+  );
+  const blocks = parseWaiverBlocks(filledBody);
   const metaLine = draft
     ? "Draft preview"
     : `Template version ${templateVersion ?? "—"}${
@@ -208,22 +226,6 @@ export function WaiverDocument(props: WaiverDocumentProps) {
             );
           })}
         </div>
-
-        {/* Participant details */}
-        <section className="mt-7">
-          <h3 className="text-base font-bold" style={{ color: PRIMARY }}>
-            Participant details
-          </h3>
-          <dl className="mt-2">
-            <DetailRow label="Full name" value={fullName} />
-            <DetailRow label="Date of birth" value={dateOfBirth} />
-            <DetailRow label="Address" value={address} />
-            <DetailRow label="Phone" value={phone} />
-            <DetailRow label="Email" value={email} />
-            <DetailRow label="Emergency contact" value={emergency.trim()} />
-            <DetailRow label="Medical notes" value={medicalNotes || "None provided"} />
-          </dl>
-        </section>
 
         {/* Acknowledgements */}
         <section className="mt-7">

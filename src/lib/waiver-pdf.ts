@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, degrees, type PDFFont, type PDFPage } from "pdf-lib";
+import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "./waiver-document";
 
 export type WaiverPdfData = {
   full_name: string;
@@ -29,10 +30,6 @@ export type WaiverPdfData = {
   /** If true, overlay a DRAFT watermark and skip signed-at footer */
   draft?: boolean;
 };
-
-export function applyPlaceholders(body: string, values: Record<string, string>): string {
-  return body.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (k in values ? values[k] : `{{${k}}}`));
-}
 
 export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -112,8 +109,25 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   drawText(dateLabel, { size: 9, color: muted });
   y -= 10;
 
-  // Body: parse simple markdown-ish (# heading, **bold**, ---)
-  const paragraphs = data.template_body.split(/\n{2,}/);
+  // Body: parse simple markdown-ish (# heading, **bold**, ---). Participant
+  // data appears only where the template body uses a {{placeholder}}.
+  const filledBody = applyWaiverPlaceholders(
+    data.template_body,
+    buildWaiverPlaceholders({
+      fullName: data.full_name,
+      dateOfBirth: data.date_of_birth,
+      address: data.address,
+      phone: data.phone,
+      email: data.email,
+      emergencyContactName: data.emergency_contact_name,
+      emergencyContactPhone: data.emergency_contact_phone,
+      medicalNotes: data.medical_notes,
+      signatureName: data.signature_name,
+      clubName: data.club_name,
+      signedDate: data.draft ? "" : new Date(data.signed_at).toLocaleDateString("en-AU"),
+    }),
+  );
+  const paragraphs = filledBody.split(/\n{2,}/);
   for (const raw of paragraphs) {
     const block = raw.trim();
     if (!block) continue;
@@ -141,34 +155,6 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     const clean = block.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\n/g, " ");
     drawText(clean, { size: 11 });
     y -= 4;
-  }
-
-  // Details table
-  y -= 8;
-  ensureSpace(20);
-  drawText("Participant details", { size: 13, font: bold, color: primary });
-  const rows: [string, string][] = [
-    ["Full name", data.full_name],
-    ["Date of birth", data.date_of_birth],
-    ["Address", data.address],
-    ["Phone", data.phone],
-    ["Email", data.email],
-    [
-      "Emergency contact",
-      `${data.emergency_contact_name}${data.emergency_contact_phone ? ` (${data.emergency_contact_phone})` : ""}`,
-    ],
-    ["Medical notes", data.medical_notes || "None provided"],
-  ];
-  for (const [label, value] of rows) {
-    ensureSpace(16);
-    page.drawText(label, { x: margin, y: y - 10, size: 9, font: bold, color: muted });
-    y -= 12;
-    for (const line of wrap(value || "—", 11, font)) {
-      ensureSpace(14);
-      page.drawText(line, { x: margin, y: y - 11, size: 11, font, color: ink });
-      y -= 14;
-    }
-    y -= 2;
   }
 
   // Acknowledgements

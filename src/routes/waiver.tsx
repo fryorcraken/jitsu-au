@@ -163,6 +163,9 @@ function Waiver() {
   const previewSignatureImage = signatureMode === "draw" ? signatureImage : "";
   const previewGuardianSignatureImage =
     guardianSignatureMode === "draw" ? guardianSignatureImage : "";
+  // Fills the {{signed_date}} token; the `draft` flag independently keeps the
+  // "signed on" footer and watermark in their unsigned state.
+  const previewSignedAt = useMemo(() => new Date().toISOString(), []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -552,6 +555,7 @@ function Waiver() {
                 templateTitle={templateQ.data.title}
                 templateBody={templateQ.data.body_md}
                 templateVersion={null}
+                signedAt={previewSignedAt}
                 fullName={fullName}
                 dateOfBirth={dob}
                 address={address}

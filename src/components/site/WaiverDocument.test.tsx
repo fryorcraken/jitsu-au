@@ -1,7 +1,11 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { WaiverDocument, type WaiverDocumentProps } from "./WaiverDocument";
-import { parseWaiverBlocks } from "@/lib/waiver-document";
+import {
+  applyWaiverPlaceholders,
+  buildWaiverPlaceholders,
+  parseWaiverBlocks,
+} from "@/lib/waiver-document";
 
 const base: WaiverDocumentProps = {
   fullName: "Jane Sample",
@@ -42,6 +46,37 @@ describe("parseWaiverBlocks", () => {
   });
 });
 
+describe("waiver placeholders", () => {
+  const values = buildWaiverPlaceholders({
+    fullName: "Jane Sample",
+    dateOfBirth: "1995-06-12",
+    address: "1 Broadway",
+    phone: "0400",
+    email: "jane@example.com",
+    emergencyContactName: "John",
+    emergencyContactPhone: "0411",
+    medicalNotes: "",
+    signatureName: "",
+    clubName: "UTS Jitsu",
+    signedDate: "21/07/2026",
+  });
+
+  it("empty medical notes become 'None provided'", () => {
+    expect(values.medical_notes).toBe("None provided");
+  });
+
+  it("signature_name falls back to the full name when not typed", () => {
+    expect(values.signature_name).toBe("Jane Sample");
+  });
+
+  it("fills known tokens and leaves unknown tokens intact", () => {
+    const body = "Hi {{full_name}} ({{club_name}}) on {{signed_date}}. {{mystery}}";
+    expect(applyWaiverPlaceholders(body, values)).toBe(
+      "Hi Jane Sample (UTS Jitsu) on 21/07/2026. {{mystery}}",
+    );
+  });
+});
+
 describe("WaiverDocument", () => {
   it("renders the title, meta line, and template body", () => {
     render(<WaiverDocument {...base} />);
@@ -53,12 +88,16 @@ describe("WaiverDocument", () => {
     expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument();
   });
 
-  it("shows participant details with a fallback for empty medical notes", () => {
-    render(<WaiverDocument {...base} />);
-    // Name appears in the details table and again as the typed signature.
+  it("shows form data only where the body uses a placeholder, with no auto details section", () => {
+    render(<WaiverDocument {...base} templateBody={"{{full_name}}\n\n{{email}}"} />);
+    // Values appear because the body referenced them...
     expect(screen.getAllByText("Jane Sample").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("John Sample (0400 111 222)")).toBeInTheDocument();
-    expect(screen.getByText("None provided")).toBeInTheDocument();
+    expect(screen.getByText("jane@example.com")).toBeInTheDocument();
+    // ...but there is no auto-generated "Participant details" section, and no
+    // fields (address/phone) the body did not reference.
+    expect(screen.queryByText("Participant details")).not.toBeInTheDocument();
+    expect(screen.queryByText("123 Broadway, Ultimo NSW 2007")).not.toBeInTheDocument();
+    expect(screen.queryByText(/\{\{/)).not.toBeInTheDocument();
   });
 
   it("marks checked acknowledgements and leaves optional ones unchecked", () => {
@@ -96,7 +135,6 @@ describe("WaiverDocument", () => {
       />,
     );
     expect(screen.getByText("Parent / guardian consent")).toBeInTheDocument();
-    // Guardian name shows in the guardian details and again as their typed signature.
     expect(screen.getAllByText("Pat Sample").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Parent")).toBeInTheDocument();
   });
