@@ -3,8 +3,11 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
+import { rememberSession } from "@/lib/auth-persistence";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { PasswordInput } from "@/components/site/PasswordInput";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -117,11 +120,15 @@ function SignInForms({ redirect }: { redirect?: string }) {
 function PasswordSignIn({ redirect, email }: { redirect?: string; email: string }) {
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
+    // Record the choice before sign-in so the session that follows is governed
+    // by the "remember me" preference from the moment it is persisted.
+    rememberSession(remember);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
     if (error) return toast.error(error.message);
@@ -136,14 +143,23 @@ function PasswordSignIn({ redirect, email }: { redirect?: string; email: string 
       </p>
       <div>
         <Label htmlFor="password">Password</Label>
-        <Input
+        <PasswordInput
           id="password"
-          type="password"
           required
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
+      </div>
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="remember"
+          checked={remember}
+          onCheckedChange={(value) => setRemember(value === true)}
+        />
+        <Label htmlFor="remember" className="cursor-pointer text-sm font-normal">
+          Keep me signed in
+        </Label>
       </div>
       <Button type="submit" className="w-full" disabled={busy}>
         {busy ? "Signing in..." : "Sign in"}
@@ -247,9 +263,8 @@ function SignUpForm() {
       </div>
       <div>
         <Label htmlFor="new-password">Password</Label>
-        <Input
+        <PasswordInput
           id="new-password"
-          type="password"
           required
           minLength={8}
           value={password}
