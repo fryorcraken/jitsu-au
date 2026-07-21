@@ -200,6 +200,13 @@ Signed waiver PDFs and signature PNGs are stored in the Supabase Storage
   import-free module shared by the `*.functions.ts` handlers. Keep new form
   rules there so they stay unit-testable; the server functions just import and
   `.parse()`.
+- **Maintain the suite as you change code — this is not optional.** Any change
+  to tested behavior must update or extend its tests in the same commit; new
+  business logic (validation rules, helpers, server-function logic, non-trivial
+  components) ships with tests. When you change a rule, add a case that would
+  have failed before your change. Never delete or `.skip` a test to get CI
+  green — fix the code or fix the test on purpose, and say which in the commit.
+  `bun run test` must pass before you push.
 - **CI:** `.github/workflows/ci.yml` runs lint → test → build on Linux with Bun
   for every PR and pushes to `main`. It uses `bun install` (not
   `--frozen-lockfile`): `bun.lock` is materialised in Lovable's build
@@ -248,4 +255,7 @@ Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
    lazy-`import` it inside server handlers only.
 4. Validate all server-function input with Zod; enforce manager access with
    `has_role` / `requireSupabaseAuth`, never trust the client.
-5. Verify with `bun run test`, `bun run lint`, and `bun run build`.
+5. **Keep the tests in step with the code** — update or add `*.test.ts(x)`
+   coverage for any behavior you change or add (see Testing & CI). A change that
+   touches tested logic without touching its tests is incomplete.
+6. Verify with `bun run test`, `bun run lint`, and `bun run build`.
