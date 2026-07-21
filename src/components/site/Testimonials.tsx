@@ -1,26 +1,13 @@
 import { Star, ExternalLink, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { GOOGLE_REVIEWS_URL, hasPlaceholderContent, type Quote } from "@/lib/testimonials";
 
-// The club's Google reviews (source of truth for the quotes below).
-export const GOOGLE_REVIEWS_URL = "https://maps.app.goo.gl/VhonWy3FDoyBpax59";
-
-// ⚠️ PLACEHOLDER CONTENT — see issue #8.
-//
-// The quotes, rating and review count below are NOT real. They exist only so the
-// layout can be built and reviewed. Fabricated testimonials must never go live.
-//
-// BEFORE PRODUCTION:
-//   1. Replace `quotes` with 2–3 real reviews (reviewer first name + text) from
-//      the Google reviews page above.
-//   2. Set `rating` and `reviewCount` to the club's real current figures.
-//   3. Flip `PLACEHOLDER` to `false`.
-//
-// While `PLACEHOLDER` is `true` the strip renders a loud, unmistakable warning so
-// it can't be shipped by accident (a test also fails if placeholders reach prod).
-export const PLACEHOLDER = true;
-
-type Quote = { name: string; text: string };
-
+// ⚠️ These are NOT real reviews — they only exist so the layout can be built and
+// reviewed. Fabricated testimonials must never go live. To launch: replace every
+// quote below with a real Google review (reviewer first name + text) and set
+// `rating` / `reviewCount` to the club's real figures. There is no flag to flip —
+// the "placeholder" warning is derived from the marker text, so it disappears on
+// its own once the markers are gone.
 const quotes: Quote[] = [
   {
     name: "[PLACEHOLDER reviewer]",
@@ -74,9 +61,11 @@ export function Testimonials({
   heading?: string;
   className?: string;
 }) {
+  const isPlaceholder = hasPlaceholderContent(quotes, rating, reviewCount);
+
   return (
     <div className={cn(className)}>
-      {PLACEHOLDER && (
+      {isPlaceholder && (
         <div
           role="alert"
           className="mb-6 flex items-center gap-2 rounded-lg border-2 border-dashed border-amber-500 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
@@ -102,7 +91,7 @@ export function Testimonials({
             key={q.name + q.text.slice(0, 16)}
             className={cn(
               "flex flex-col rounded-2xl border bg-card p-6",
-              PLACEHOLDER && "border-dashed",
+              isPlaceholder && "border-dashed",
             )}
           >
             <Stars />

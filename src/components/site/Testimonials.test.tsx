@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Testimonials, PLACEHOLDER, GOOGLE_REVIEWS_URL } from "./Testimonials";
+import { Testimonials } from "./Testimonials";
+import { GOOGLE_REVIEWS_URL } from "@/lib/testimonials";
 
 describe("Testimonials", () => {
   it("renders the heading and at least two quote cards", () => {
@@ -26,15 +27,9 @@ describe("Testimonials", () => {
     expect(badge).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
 
-  it("shows an unmistakable warning while placeholder content is in use", () => {
+  it("renders the unmistakable warning while the shipped data is still placeholder", () => {
+    // The strip currently ships placeholder reviews, so the guard must be visible.
     render(<Testimonials />);
-    if (PLACEHOLDER) {
-      // Guards the requirement that fabricated testimonials cannot ship silently:
-      // as long as the placeholders are live, a loud alert must be on screen.
-      expect(screen.getByRole("alert")).toHaveTextContent(/placeholder/i);
-    } else {
-      // Once real reviews replace the placeholders, no warning should render.
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    }
+    expect(screen.getByRole("alert")).toHaveTextContent(/placeholder/i);
   });
 });
