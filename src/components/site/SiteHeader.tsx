@@ -58,7 +58,7 @@ export function SiteHeader() {
             </Button>
           )}
           <Button asChild size="sm">
-            <Link to="/register-interest">Register interest</Link>
+            <Link to="/register-interest">Start your free trial</Link>
           </Button>
         </div>
         <button
@@ -102,7 +102,7 @@ export function SiteHeader() {
           )}
           <Button asChild size="sm" className="mt-2">
             <Link to="/register-interest" onClick={() => setOpen(false)}>
-              Register interest
+              Start your free trial
             </Link>
           </Button>
         </nav>

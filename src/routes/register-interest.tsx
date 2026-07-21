@@ -1,26 +1,31 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
+import { CheckCircle2, ChevronDown, FileSignature } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 import { submitInterest } from "@/lib/submissions.functions";
 
 export const Route = createFileRoute("/register-interest")({
   head: () => ({
     meta: [
-      { title: "Register your interest | UTS Jitsu" },
+      { title: "Start your free trial | UTS Jitsu" },
       {
         name: "description",
         content:
-          "Register your interest at UTS Jitsu. We'll be in touch to confirm your first session.",
+          "Start your free trial at UTS Jitsu. Tell us who you are and we'll get you on the mat — your first two classes are free.",
       },
-      { property: "og:title", content: "Register your interest | UTS Jitsu" },
-      { property: "og:description", content: "Register your interest at UTS Jitsu." },
+      { property: "og:title", content: "Start your free trial | UTS Jitsu" },
+      {
+        property: "og:description",
+        content: "Tell us who you are and we'll get you on the mat. First two classes free.",
+      },
       { property: "og:url", content: "https://jitsu.au/register-interest" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/register-interest" }],
@@ -28,28 +33,34 @@ export const Route = createFileRoute("/register-interest")({
   component: RegisterInterest,
 });
 
+type Captured = { name: string; email: string; phone: string };
+
 function RegisterInterest() {
-  const navigate = useNavigate();
   const submit = useServerFn(submitInterest);
   const [loading, setLoading] = useState(false);
+  const [showNote, setShowNote] = useState(false);
+  const [done, setDone] = useState<Captured | null>(null);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const name = String(fd.get("name") || "");
+    const email = String(fd.get("email") || "");
+    const phone = String(fd.get("phone") || "");
     setLoading(true);
     try {
       await submit({
         data: {
-          name: String(fd.get("name") || ""),
-          email: String(fd.get("email") || ""),
-          phone: String(fd.get("phone") || ""),
+          name,
+          email,
+          phone,
           uts_student: fd.get("uts_student") === "on",
           experience: String(fd.get("experience") || ""),
           message: String(fd.get("message") || ""),
           hp: String(fd.get("hp") || ""),
         },
       });
-      navigate({ to: "/thank-you", search: { kind: "interest" } });
+      setDone({ name, email, phone });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -57,16 +68,68 @@ function RegisterInterest() {
     }
   }
 
+  // ---- Step 2: lead captured, offer the (prefilled) waiver as the next step ----
+  if (done) {
+    return (
+      <SiteLayout>
+        <section className="mx-auto max-w-2xl px-4 py-16 md:py-20">
+          <p className="text-sm font-semibold uppercase tracking-wider text-primary">Step 2 of 2</p>
+          <div className="mt-3 flex items-start gap-3">
+            <CheckCircle2 className="mt-1 h-8 w-8 shrink-0 text-primary" />
+            <h1 className="text-3xl font-bold md:text-4xl">
+              You're on the list! One thing left to be mat-ready.
+            </h1>
+          </div>
+
+          <div className="mt-8 rounded-2xl border bg-card p-6 md:p-8">
+            <div className="flex items-center gap-2 text-primary">
+              <FileSignature className="h-5 w-5" />
+              <p className="text-sm font-semibold">Sign your waiver now — it's prefilled</p>
+            </div>
+            <p className="mt-2 text-muted-foreground">
+              Two minutes and you're done before you even arrive. We've filled in your details from
+              the last step to save you time.
+            </p>
+            <Button asChild size="lg" className="mt-5 w-full sm:w-auto">
+              <Link to="/waiver" search={{ name: done.name, email: done.email, phone: done.phone }}>
+                Sign my waiver
+              </Link>
+            </Button>
+          </div>
+
+          <div className="mt-6 rounded-2xl border bg-muted/30 p-6">
+            <p className="text-sm font-medium">Not ready? No problem.</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              We'll email you the link and you can sign before you come, or we'll sort it at the
+              gym. Either way, just turn up to any beginners class (Mon or Wed) — your first two are
+              free.
+            </p>
+          </div>
+
+          <div className="mt-8">
+            <Link
+              to="/classes"
+              className="text-sm text-muted-foreground underline hover:text-foreground"
+            >
+              See the class schedule
+            </Link>
+          </div>
+        </section>
+      </SiteLayout>
+    );
+  }
+
+  // ---- Step 1: quick details (low friction, everyone completes this) ----
   return (
     <SiteLayout>
       <section className="mx-auto max-w-2xl px-4 py-16 md:py-20">
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">
-          Register interest
+          Step 1 of 2 · takes 30 seconds
         </p>
-        <h1 className="mt-3 text-4xl font-bold">Register your interest.</h1>
+        <h1 className="mt-3 text-4xl font-bold">Start your free trial</h1>
         <p className="mt-3 text-muted-foreground">
-          Leave your details and we'll be in touch to lock in your first session. Your first two
-          classes are on us.
+          Tell us who you are and we'll get you on the mat. Your first two classes are free — no
+          gear needed.
         </p>
 
         <form onSubmit={onSubmit} className="mt-8 space-y-5 rounded-2xl border bg-card p-6 md:p-8">
@@ -98,22 +161,48 @@ function RegisterInterest() {
               I'm a UTS student
             </Label>
           </div>
+
           <div>
-            <Label htmlFor="experience">Martial arts experience (optional)</Label>
-            <Input
-              id="experience"
-              name="experience"
-              maxLength={500}
-              placeholder="e.g. total beginner, 2 years BJJ..."
-              className="mt-1.5"
-            />
+            <button
+              type="button"
+              onClick={() => setShowNote((v) => !v)}
+              aria-expanded={showNote}
+              aria-controls="note-fields"
+              className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+            >
+              <ChevronDown
+                className={cn("h-4 w-4 transition-transform", showNote && "rotate-180")}
+              />
+              Add a note (optional)
+            </button>
+            {showNote && (
+              <div id="note-fields" className="mt-5 space-y-5">
+                <div>
+                  <Label htmlFor="experience">Martial arts experience (optional)</Label>
+                  <Input
+                    id="experience"
+                    name="experience"
+                    maxLength={500}
+                    placeholder="e.g. total beginner, 2 years BJJ..."
+                    className="mt-1.5"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="message">Anything else? (optional)</Label>
+                  <Textarea
+                    id="message"
+                    name="message"
+                    maxLength={1000}
+                    rows={4}
+                    className="mt-1.5"
+                  />
+                </div>
+              </div>
+            )}
           </div>
-          <div>
-            <Label htmlFor="message">Anything else? (optional)</Label>
-            <Textarea id="message" name="message" maxLength={1000} rows={4} className="mt-1.5" />
-          </div>
+
           <Button type="submit" size="lg" disabled={loading} className="w-full">
-            {loading ? "Sending..." : "Send my details"}
+            {loading ? "Saving..." : "Continue"}
           </Button>
         </form>
       </section>

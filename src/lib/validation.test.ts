@@ -5,6 +5,7 @@ import {
   decodeDataUrlPng,
   interestSchema,
   saveTemplateSchema,
+  splitFullName,
   waiverSubmitSchema,
 } from "./validation";
 
@@ -24,6 +25,41 @@ describe("composeFullName", () => {
 
   it("returns empty string when everything is blank", () => {
     expect(composeFullName("", " ", "")).toBe("");
+  });
+});
+
+describe("splitFullName", () => {
+  it("returns first only for a single word", () => {
+    expect(splitFullName("Ada")).toEqual({ first: "Ada", middle: "", last: "" });
+  });
+
+  it("splits two words into first + last", () => {
+    expect(splitFullName("Ada Lovelace")).toEqual({ first: "Ada", middle: "", last: "Lovelace" });
+  });
+
+  it("folds the middle words into the middle name for three+ words", () => {
+    expect(splitFullName("Ada King Byron Lovelace")).toEqual({
+      first: "Ada",
+      middle: "King Byron",
+      last: "Lovelace",
+    });
+  });
+
+  it("collapses extra whitespace and ignores leading/trailing spaces", () => {
+    expect(splitFullName("  Ada   M   Lovelace  ")).toEqual({
+      first: "Ada",
+      middle: "M",
+      last: "Lovelace",
+    });
+  });
+
+  it("returns all-empty parts for a blank string", () => {
+    expect(splitFullName("   ")).toEqual({ first: "", middle: "", last: "" });
+  });
+
+  it("round-trips through composeFullName for a simple name", () => {
+    const { first, middle, last } = splitFullName("Ada Lovelace");
+    expect(composeFullName(first, middle, last)).toBe("Ada Lovelace");
   });
 });
 

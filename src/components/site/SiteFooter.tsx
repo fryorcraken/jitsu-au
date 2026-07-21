@@ -51,7 +51,7 @@ export function SiteFooter() {
           <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
             <li>
               <Link to="/register-interest" className="hover:text-foreground">
-                Register interest
+                Start your free trial
               </Link>
             </li>
             <li>
