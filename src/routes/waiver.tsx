@@ -19,6 +19,8 @@ import {
   getCurrentWaiverTemplate,
   getMyLatestWaiver,
 } from "@/lib/waiver.functions";
+import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
+import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { useAuth } from "@/hooks/useAuth";
 import { splitFullName } from "@/lib/validation";
 
@@ -71,9 +73,8 @@ function Waiver() {
   const prefillName = useMemo(() => splitFullName(search.name ?? ""), [search.name]);
 
   const [loading, setLoading] = useState(false);
-  const [ackRisk, setAckRisk] = useState(false);
-  const [ackRelease, setAckRelease] = useState(false);
-  const [ackMedia, setAckMedia] = useState(false);
+  // Accepted acknowledgements keyed by the template's acknowledgement id.
+  const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
   // Controlled form fields so we can render a live PDF preview. Seed name /
@@ -167,9 +168,26 @@ function Waiver() {
   // "signed on" footer and watermark in their unsigned state.
   const previewSignedAt = useMemo(() => new Date().toISOString(), []);
 
+  // Acknowledgements come from the current template; their labels may use
+  // {{placeholders}} (e.g. {{club_name}}), substituted the same way as the body.
+  const ackDefs = templateQ.data?.acknowledgements ?? [];
+  const ackPlaceholders = buildWaiverPlaceholders({
+    fullName,
+    dateOfBirth: dob,
+    address,
+    phone,
+    email,
+    emergencyContactName: ecName,
+    emergencyContactPhone: ecPhone,
+    medicalNotes: medical,
+    signatureName: signatureMode === "type" ? signatureName : "",
+    clubName: "UTS Jitsu",
+    signedDate: new Date(previewSignedAt).toLocaleDateString("en-AU"),
+  });
+
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!ackRisk || !ackRelease) {
+    if (missingRequiredAcks(ackDefs, acks).length > 0) {
       toast.error("Please read and accept the required acknowledgements.");
       return;
     }
@@ -203,9 +221,7 @@ function Waiver() {
           emergency_contact_name: ecName,
           emergency_contact_phone: ecPhone,
           medical_notes: medical,
-          ack_risk: true,
-          ack_release: true,
-          ack_media: ackMedia,
+          acknowledgements: acks,
           signature_name: sigName,
           signature_image: sigImg,
           is_minor: isMinor,
@@ -404,43 +420,26 @@ function Waiver() {
               />
             </fieldset>
 
-            <fieldset className="space-y-4 border-t pt-6">
-              <legend className="text-sm font-semibold">Acknowledgements</legend>
-              <label className="flex items-start gap-3 text-sm">
-                <Checkbox
-                  checked={ackRisk}
-                  onCheckedChange={(v) => setAckRisk(v === true)}
-                  className="mt-0.5"
-                />
-                <span>
-                  I understand that Japanese Jiu-Jitsu involves physical contact and risk of injury,
-                  and I participate voluntarily at my own risk.
-                </span>
-              </label>
-              <label className="flex items-start gap-3 text-sm">
-                <Checkbox
-                  checked={ackRelease}
-                  onCheckedChange={(v) => setAckRelease(v === true)}
-                  className="mt-0.5"
-                />
-                <span>
-                  I release Sydney Jitsu Inc, UTS Jitsu, its instructors and training partners from
-                  liability for injuries sustained during training, except where caused by gross
-                  negligence.
-                </span>
-              </label>
-              <label className="flex items-start gap-3 text-sm">
-                <Checkbox
-                  checked={ackMedia}
-                  onCheckedChange={(v) => setAckMedia(v === true)}
-                  className="mt-0.5"
-                />
-                <span>
-                  (Optional) I consent to photos and video taken during class being used for club
-                  promotion on social media and the club website.
-                </span>
-              </label>
-            </fieldset>
+            {ackDefs.length > 0 && (
+              <fieldset className="space-y-4 border-t pt-6">
+                <legend className="text-sm font-semibold">Acknowledgements</legend>
+                {ackDefs.map((ack) => (
+                  <label key={ack.id} className="flex items-start gap-3 text-sm">
+                    <Checkbox
+                      checked={acks[ack.id] === true}
+                      onCheckedChange={(v) =>
+                        setAcks((prev) => ({ ...prev, [ack.id]: v === true }))
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>
+                      {applyWaiverPlaceholders(ack.label, ackPlaceholders)}
+                      {!ack.required && <span className="text-muted-foreground"> (optional)</span>}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
 
             <fieldset className="space-y-3 border-t pt-6">
               <legend className="text-sm font-semibold">Signature</legend>
@@ -564,9 +563,7 @@ function Waiver() {
                 emergencyContactName={ecName}
                 emergencyContactPhone={ecPhone}
                 medicalNotes={medical}
-                ackRisk={ackRisk}
-                ackRelease={ackRelease}
-                ackMedia={ackMedia}
+                acknowledgements={resolveAcknowledgements(ackDefs, acks)}
                 signatureName={signatureMode === "type" ? signatureName : ""}
                 signatureImage={previewSignatureImage}
                 isMinor={isMinor}

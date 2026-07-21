@@ -10,9 +10,8 @@ export type WaiverPdfData = {
   emergency_contact_name: string;
   emergency_contact_phone: string;
   medical_notes: string;
-  ack_risk: boolean;
-  ack_release: boolean;
-  ack_media: boolean;
+  /** Template-defined acknowledgements + whether each was accepted. */
+  acknowledgements: { label: string; checked: boolean }[];
   signature_name: string;
   signed_at: string;
   template_title: string;
@@ -110,24 +109,21 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   y -= 10;
 
   // Body: parse simple markdown-ish (# heading, **bold**, ---). Participant
-  // data appears only where the template body uses a {{placeholder}}.
-  const filledBody = applyWaiverPlaceholders(
-    data.template_body,
-    buildWaiverPlaceholders({
-      fullName: data.full_name,
-      dateOfBirth: data.date_of_birth,
-      address: data.address,
-      phone: data.phone,
-      email: data.email,
-      emergencyContactName: data.emergency_contact_name,
-      emergencyContactPhone: data.emergency_contact_phone,
-      medicalNotes: data.medical_notes,
-      signatureName: data.signature_name,
-      clubName: data.club_name,
-      signedDate: data.draft ? "" : new Date(data.signed_at).toLocaleDateString("en-AU"),
-    }),
-  );
-  const paragraphs = filledBody.split(/\n{2,}/);
+  // data appears only where the body/labels use a {{placeholder}}.
+  const placeholders = buildWaiverPlaceholders({
+    fullName: data.full_name,
+    dateOfBirth: data.date_of_birth,
+    address: data.address,
+    phone: data.phone,
+    email: data.email,
+    emergencyContactName: data.emergency_contact_name,
+    emergencyContactPhone: data.emergency_contact_phone,
+    medicalNotes: data.medical_notes,
+    signatureName: data.signature_name,
+    clubName: data.club_name,
+    signedDate: data.draft ? "" : new Date(data.signed_at).toLocaleDateString("en-AU"),
+  });
+  const paragraphs = applyWaiverPlaceholders(data.template_body, placeholders).split(/\n{2,}/);
   for (const raw of paragraphs) {
     const block = raw.trim();
     if (!block) continue;
@@ -157,39 +153,30 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     y -= 4;
   }
 
-  // Acknowledgements
-  y -= 6;
-  ensureSpace(20);
-  drawText("Acknowledgements", { size: 13, font: bold, color: primary });
-  const acks: [boolean, string][] = [
-    [
-      data.ack_risk,
-      "I understand the risks of Japanese Jiu-Jitsu training and participate voluntarily.",
-    ],
-    [
-      data.ack_release,
-      "I release Sydney Jitsu Inc, UTS Jitsu, its instructors and training partners from liability, except for gross negligence.",
-    ],
-    [data.ack_media, "I consent to photos and video for club promotion (optional)."],
-  ];
-  for (const [checked, text] of acks) {
+  // Acknowledgements (defined on the template)
+  if (data.acknowledgements.length > 0) {
+    y -= 6;
     ensureSpace(20);
-    page.drawRectangle({
-      x: margin,
-      y: y - 12,
-      width: 10,
-      height: 10,
-      borderColor: ink,
-      borderWidth: 0.8,
-    });
-    if (checked) {
-      page.drawText("X", { x: margin + 2, y: y - 11, size: 9, font: bold, color: primary });
+    drawText("Acknowledgements", { size: 13, font: bold, color: primary });
+    for (const ack of data.acknowledgements) {
+      ensureSpace(20);
+      page.drawRectangle({
+        x: margin,
+        y: y - 12,
+        width: 10,
+        height: 10,
+        borderColor: ink,
+        borderWidth: 0.8,
+      });
+      if (ack.checked) {
+        page.drawText("X", { x: margin + 2, y: y - 11, size: 9, font: bold, color: primary });
+      }
+      const lines = wrap(applyWaiverPlaceholders(ack.label, placeholders), 10, font);
+      for (let i = 0; i < lines.length; i++) {
+        page.drawText(lines[i], { x: margin + 18, y: y - 10 - i * 12, size: 10, font, color: ink });
+      }
+      y -= Math.max(16, lines.length * 12 + 4);
     }
-    const lines = wrap(text, 10, font);
-    for (let i = 0; i < lines.length; i++) {
-      page.drawText(lines[i], { x: margin + 18, y: y - 10 - i * 12, size: 10, font, color: ink });
-    }
-    y -= Math.max(16, lines.length * 12 + 4);
   }
 
   // Signature

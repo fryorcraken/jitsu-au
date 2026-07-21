@@ -16,9 +16,7 @@ const base: WaiverDocumentProps = {
   emergencyContactName: "John Sample",
   emergencyContactPhone: "0400 111 222",
   medicalNotes: "",
-  ackRisk: true,
-  ackRelease: true,
-  ackMedia: false,
+  acknowledgements: [],
   signatureName: "Jane Sample",
   templateTitle: "Training Waiver",
   templateBody: "# Terms\n\nYou **must** train safely.\n\n---\n\n## Notes\n\nBe kind.",
@@ -100,12 +98,26 @@ describe("WaiverDocument", () => {
     expect(screen.queryByText(/\{\{/)).not.toBeInTheDocument();
   });
 
-  it("marks checked acknowledgements and leaves optional ones unchecked", () => {
-    render(<WaiverDocument {...base} />);
-    const risk = screen.getByText(/participate voluntarily/).closest("li")!;
-    const media = screen.getByText(/photos and video/).closest("li")!;
-    expect(within(risk).getByText("✓")).toBeInTheDocument();
-    expect(within(media).queryByText("✓")).not.toBeInTheDocument();
+  it("renders acknowledgements from the prop, marking checked state and filling label tokens", () => {
+    render(
+      <WaiverDocument
+        {...base}
+        clubName="UTS Jitsu"
+        acknowledgements={[
+          { label: "I accept the risks.", checked: true },
+          { label: "I release {{club_name}} from liability.", checked: false },
+        ]}
+      />,
+    );
+    const accepted = screen.getByText("I accept the risks.").closest("li")!;
+    const declined = screen.getByText("I release UTS Jitsu from liability.").closest("li")!;
+    expect(within(accepted).getByText("✓")).toBeInTheDocument();
+    expect(within(declined).queryByText("✓")).not.toBeInTheDocument();
+  });
+
+  it("omits the acknowledgements section when there are none", () => {
+    render(<WaiverDocument {...base} acknowledgements={[]} />);
+    expect(screen.queryByText("Acknowledgements")).not.toBeInTheDocument();
   });
 
   it("shows the draft watermark and hides the signed footer when draft", () => {

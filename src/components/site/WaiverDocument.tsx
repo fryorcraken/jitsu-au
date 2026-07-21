@@ -20,9 +20,8 @@ export type WaiverDocumentProps = {
   emergencyContactName: string;
   emergencyContactPhone: string;
   medicalNotes: string;
-  ackRisk: boolean;
-  ackRelease: boolean;
-  ackMedia: boolean;
+  /** Template-defined acknowledgements + whether each was accepted. */
+  acknowledgements: { label: string; checked: boolean }[];
   /** Typed signature name (used when the participant did not draw). */
   signatureName: string;
   /** Data URL (image/png) of the drawn participant signature, if any. */
@@ -44,13 +43,6 @@ export type WaiverDocumentProps = {
 };
 
 const PRIMARY = "#008eaa"; // matches the PDF header/accent colour
-
-const ACK_LABELS = {
-  risk: "I understand the risks of Japanese Jiu-Jitsu training and participate voluntarily.",
-  release:
-    "I release Sydney Jitsu Inc, UTS Jitsu, its instructors and training partners from liability, except for gross negligence.",
-  media: "I consent to photos and video for club promotion (optional).",
-} as const;
 
 /** Render `**bold**` spans within a line of body text. */
 function renderInline(text: string): ReactNode {
@@ -135,9 +127,7 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     emergencyContactName,
     emergencyContactPhone,
     medicalNotes,
-    ackRisk,
-    ackRelease,
-    ackMedia,
+    acknowledgements,
     signatureName,
     signatureImage,
     templateTitle,
@@ -154,24 +144,21 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     className,
   } = props;
 
-  // Participant data appears only where the template body uses a {{placeholder}}.
-  const filledBody = applyWaiverPlaceholders(
-    templateBody,
-    buildWaiverPlaceholders({
-      fullName,
-      dateOfBirth,
-      address,
-      phone,
-      email,
-      emergencyContactName,
-      emergencyContactPhone,
-      medicalNotes,
-      signatureName,
-      clubName,
-      signedDate: signedAt ? new Date(signedAt).toLocaleDateString("en-AU") : "",
-    }),
-  );
-  const blocks = parseWaiverBlocks(filledBody);
+  // Participant data appears only where the body/labels use a {{placeholder}}.
+  const placeholders = buildWaiverPlaceholders({
+    fullName,
+    dateOfBirth,
+    address,
+    phone,
+    email,
+    emergencyContactName,
+    emergencyContactPhone,
+    medicalNotes,
+    signatureName,
+    clubName,
+    signedDate: signedAt ? new Date(signedAt).toLocaleDateString("en-AU") : "",
+  });
+  const blocks = parseWaiverBlocks(applyWaiverPlaceholders(templateBody, placeholders));
   const metaLine = draft
     ? "Draft preview"
     : `Template version ${templateVersion ?? "—"}${
@@ -227,17 +214,21 @@ export function WaiverDocument(props: WaiverDocumentProps) {
           })}
         </div>
 
-        {/* Acknowledgements */}
-        <section className="mt-7">
-          <h3 className="text-base font-bold" style={{ color: PRIMARY }}>
-            Acknowledgements
-          </h3>
-          <ul className="mt-2 space-y-2">
-            <Acknowledgement checked={ackRisk}>{ACK_LABELS.risk}</Acknowledgement>
-            <Acknowledgement checked={ackRelease}>{ACK_LABELS.release}</Acknowledgement>
-            <Acknowledgement checked={ackMedia}>{ACK_LABELS.media}</Acknowledgement>
-          </ul>
-        </section>
+        {/* Acknowledgements (defined on the template) */}
+        {acknowledgements.length > 0 ? (
+          <section className="mt-7">
+            <h3 className="text-base font-bold" style={{ color: PRIMARY }}>
+              Acknowledgements
+            </h3>
+            <ul className="mt-2 space-y-2">
+              {acknowledgements.map((a, i) => (
+                <Acknowledgement key={i} checked={a.checked}>
+                  {applyWaiverPlaceholders(a.label, placeholders)}
+                </Acknowledgement>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         {/* Participant signature */}
         <section className="mt-7">

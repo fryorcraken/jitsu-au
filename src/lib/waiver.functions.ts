@@ -9,6 +9,11 @@ import {
   saveTemplateSchema,
   waiverSubmitSchema,
 } from "@/lib/validation";
+import {
+  missingRequiredAcks,
+  parseTemplateAcks,
+  resolveAcknowledgements,
+} from "@/lib/waiver-acknowledgements";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -33,13 +38,21 @@ function serverSupabase() {
 // ---- Current template (public) ----
 export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handler(async () => {
   const supabase = serverSupabase();
+  // select("*") so the (generated-types-unaware) `acknowledgements` column comes back.
   const { data, error } = await supabase
     .from("waiver_templates")
-    .select("id, version, title, body_md")
+    .select("*")
     .eq("is_current", true)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return data;
+  if (!data) return null;
+  return {
+    id: data.id,
+    version: data.version,
+    title: data.title,
+    body_md: data.body_md,
+    acknowledgements: parseTemplateAcks((data as { acknowledgements?: unknown }).acknowledgements),
+  };
 });
 
 // ---- Latest waiver for signed-in user (autofill) ----
@@ -87,11 +100,19 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // Load current template
     const { data: tpl, error: tplErr } = await supabaseAdmin
       .from("waiver_templates")
-      .select("version, title, body_md")
+      .select("*")
       .eq("is_current", true)
       .maybeSingle();
     if (tplErr) throw new Error(tplErr.message);
     if (!tpl) throw new Error("No active waiver template.");
+
+    // Acknowledgements are defined on the template; enforce the required ones.
+    const ackDefs = parseTemplateAcks((tpl as { acknowledgements?: unknown }).acknowledgements);
+    const answers = data.acknowledgements ?? {};
+    const missing = missingRequiredAcks(ackDefs, answers);
+    if (missing.length > 0) {
+      throw new Error(`Please accept: ${missing.map((a) => a.label).join(" ")}`);
+    }
 
     const signed_at = new Date().toISOString();
 
@@ -113,7 +134,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         emergency_contact_name: data.emergency_contact_name,
         emergency_contact_phone: data.emergency_contact_phone,
         medical_notes: data.medical_notes || null,
-        acknowledgements: { risk: true, release: true, media: data.ack_media },
+        acknowledgements: answers,
         signature_name: data.signature_name || full_name,
         signed_at,
         user_id: userId,
@@ -155,9 +176,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       emergency_contact_name: data.emergency_contact_name,
       emergency_contact_phone: data.emergency_contact_phone,
       medical_notes: data.medical_notes || "",
-      ack_risk: true,
-      ack_release: true,
-      ack_media: data.ack_media,
+      acknowledgements: resolveAcknowledgements(ackDefs, answers),
       signature_name: data.signature_name || "",
       signed_at,
       template_title: tpl.title,
@@ -223,15 +242,19 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
       .update({ is_current: false })
       .eq("is_current", true);
 
+    // Built as a variable so the `acknowledgements` key (absent from the stale
+    // generated Insert type) doesn't trip the excess-property check.
+    const templateRow = {
+      version: nextVersion,
+      title: data.title,
+      body_md: data.body_md,
+      acknowledgements: data.acknowledgements,
+      is_current: true,
+      created_by: context.userId,
+    };
     const { data: created, error } = await supabaseAdmin
       .from("waiver_templates")
-      .insert({
-        version: nextVersion,
-        title: data.title,
-        body_md: data.body_md,
-        is_current: true,
-        created_by: context.userId,
-      })
+      .insert(templateRow)
       .select("id, version")
       .single();
     if (error) throw new Error(error.message);

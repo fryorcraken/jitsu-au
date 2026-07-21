@@ -147,9 +147,6 @@ describe("waiverSubmitSchema", () => {
     email: "ada@example.com",
     emergency_contact_name: "Charles Babbage",
     emergency_contact_phone: "0400000001",
-    ack_risk: true as const,
-    ack_release: true as const,
-    ack_media: false,
     signature_name: "Ada Lovelace",
   };
 
@@ -178,9 +175,14 @@ describe("waiverSubmitSchema", () => {
     }
   });
 
-  it("requires ack_risk and ack_release to be literally true", () => {
-    expect(waiverSubmitSchema.safeParse({ ...validAdult, ack_risk: false }).success).toBe(false);
-    expect(waiverSubmitSchema.safeParse({ ...validAdult, ack_release: false }).success).toBe(false);
+  it("accepts an acknowledgements map and defaults it to {}", () => {
+    const withMap = waiverSubmitSchema.safeParse({
+      ...validAdult,
+      acknowledgements: { risk: true, media: false },
+    });
+    expect(withMap.success && withMap.data.acknowledgements).toEqual({ risk: true, media: false });
+    const without = waiverSubmitSchema.safeParse(validAdult);
+    expect(without.success && without.data.acknowledgements).toEqual({});
   });
 
   it("rejects a malformed date of birth", () => {
@@ -228,5 +230,26 @@ describe("saveTemplateSchema", () => {
   it("requires a non-empty title and body", () => {
     expect(saveTemplateSchema.safeParse({ title: "", body_md: "# Hi" }).success).toBe(false);
     expect(saveTemplateSchema.safeParse({ title: "T", body_md: "" }).success).toBe(false);
+  });
+
+  it("accepts acknowledgements and defaults them to []", () => {
+    const withAcks = saveTemplateSchema.safeParse({
+      title: "T",
+      body_md: "# Hi",
+      acknowledgements: [{ id: "risk", label: "I accept the risks.", required: true }],
+    });
+    expect(withAcks.success && withAcks.data.acknowledgements).toHaveLength(1);
+    const without = saveTemplateSchema.safeParse({ title: "T", body_md: "# Hi" });
+    expect(without.success && without.data.acknowledgements).toEqual([]);
+  });
+
+  it("rejects an acknowledgement with an empty label", () => {
+    expect(
+      saveTemplateSchema.safeParse({
+        title: "T",
+        body_md: "# Hi",
+        acknowledgements: [{ id: "x", label: "", required: true }],
+      }).success,
+    ).toBe(false);
   });
 });
