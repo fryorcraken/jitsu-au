@@ -52,9 +52,12 @@ Use **Bun** (this is a Bun project — `bun install`, not npm/pnpm).
 | `bun run preview` | Preview the production build |
 | `bun run lint` | ESLint over the repo |
 | `bun run format` | Prettier `--write` over the repo |
+| `bun run test` | Run the Vitest suite once (CI mode) |
+| `bun run test:watch` | Vitest in watch mode |
+| `bun run test:coverage` | Vitest with a V8 coverage report |
 
-There is **no test suite** configured. Verify changes with `bun run lint`,
-`bun run build`, and (for TS) the type checker via the build.
+Verify changes with `bun run test`, `bun run lint`, and `bun run build` (the
+build also type-checks). These three run in CI on every PR (see Testing & CI).
 
 `bunfig.toml` enforces a **24-hour supply-chain guard** (`minimumReleaseAge`):
 packages published less than a day ago are skipped. Only `@lovable.dev/*`
@@ -173,6 +176,41 @@ Signed waiver PDFs and signature PNGs are stored in the Supabase Storage
   `createAuthEmailHandler` dispatches React-email templates from
   `src/lib/email-templates/` for signup, invite, magic-link, recovery, etc.
 
+## Testing & CI
+
+- **Runner:** [Vitest](https://vitest.dev) with a **standalone `vitest.config.ts`**
+  (jsdom environment, React plugin, `@/` alias). It is deliberately **not** the
+  Lovable-wrapped `vite.config.ts` — that config injects TanStack Start / Nitro
+  SSR plugins that must not run under the test runner. `vitest.setup.ts` wires up
+  `@testing-library/jest-dom` matchers and per-test DOM cleanup.
+- **Layout:** tests live next to the code as `*.test.ts(x)` under `src/`.
+- **What's covered today:**
+  - `src/lib/validation.test.ts` — the form/validation business rules
+    (interest, contact, waiver, template schemas + `composeFullName` /
+    `decodeDataUrlPng`). This is the highest-value suite: it pins the honeypot,
+    signature-required, and minor/guardian rules.
+  - `src/lib/utils.test.ts` — the `cn()` class-merge helper.
+  - `src/components/ui/button.test.tsx` — a Testing Library smoke test proving
+    the jsdom/component setup works (render, variants, click, `asChild`).
+- **Where to add tests:** pure logic belongs in `src/lib/` modules (import and
+  test the real export — see how validation was extracted out of the
+  `*.functions.ts` handlers so it's testable without a server context). For
+  components, render with `@testing-library/react` and assert on roles/text.
+- **Validation lives in `src/lib/validation.ts`** — a side-effect-free, server-
+  import-free module shared by the `*.functions.ts` handlers. Keep new form
+  rules there so they stay unit-testable; the server functions just import and
+  `.parse()`.
+- **CI:** `.github/workflows/ci.yml` runs lint → test → build on Linux with Bun
+  for every PR and pushes to `main`. It uses `bun install` (not
+  `--frozen-lockfile`): `bun.lock` is materialised in Lovable's build
+  environment, so CI resolves against the public npm registry.
+
+> Note on installing deps: the default registry in `bun.lock` is Lovable's
+> private mirror. Some sandboxes block it; if `bun install` 403s on
+> `europe-west1-npm.pkg.dev`, install against public npm
+> (`bun install --registry=https://registry.npmjs.org`) — package contents are
+> identical.
+
 ## Conventions & style
 
 - **Formatting (Prettier):** `printWidth: 100`, semicolons, **double quotes**,
@@ -210,4 +248,4 @@ Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
    lazy-`import` it inside server handlers only.
 4. Validate all server-function input with Zod; enforce manager access with
    `has_role` / `requireSupabaseAuth`, never trust the client.
-5. Verify with `bun run lint` and `bun run build` (no test suite exists).
+5. Verify with `bun run test`, `bun run lint`, and `bun run build`.

@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
+import { contactSchema, interestSchema } from "@/lib/validation";
 
 function serverSupabase() {
   const url = process.env.SUPABASE_URL!;
@@ -11,7 +12,7 @@ function serverSupabase() {
     global: {
       fetch: (input, init) => {
         const h = new Headers(init?.headers);
-        if ((key.startsWith("sb_") ) && h.get("Authorization") === `Bearer ${key}`) {
+        if (key.startsWith("sb_") && h.get("Authorization") === `Bearer ${key}`) {
           h.delete("Authorization");
         }
         h.set("apikey", key);
@@ -20,16 +21,6 @@ function serverSupabase() {
     },
   });
 }
-
-const interestSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  email: z.string().trim().email().max(255),
-  phone: z.string().trim().max(30).optional().or(z.literal("")),
-  uts_student: z.boolean(),
-  experience: z.string().trim().max(500).optional().or(z.literal("")),
-  message: z.string().trim().max(1000).optional().or(z.literal("")),
-  hp: z.string().max(0).optional(), // honeypot
-});
 
 export const submitInterest = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => interestSchema.parse(data))
@@ -47,14 +38,6 @@ export const submitInterest = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
-
-const contactSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  email: z.string().trim().email().max(255),
-  subject: z.string().trim().max(150).optional().or(z.literal("")),
-  message: z.string().trim().min(1).max(2000),
-  hp: z.string().max(0).optional(),
-});
 
 export const submitContact = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => contactSchema.parse(data))
