@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
@@ -19,8 +20,17 @@ import {
   getMyLatestWaiver,
 } from "@/lib/waiver.functions";
 import { useAuth } from "@/hooks/useAuth";
+import { splitFullName } from "@/lib/validation";
+
+// Optional prefill carried over from Step 1 of the "Start your free trial" flow.
+const searchSchema = z.object({
+  name: z.string().max(120).optional().catch(undefined),
+  email: z.string().max(255).optional().catch(undefined),
+  phone: z.string().max(30).optional().catch(undefined),
+});
 
 export const Route = createFileRoute("/waiver")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "Sign waiver | UTS Jitsu" },
@@ -52,19 +62,13 @@ type Prefill = {
   medical_notes?: string;
 };
 
-function splitLegacyName(full: string): { first: string; middle: string; last: string } {
-  const parts = full.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { first: "", middle: "", last: "" };
-  if (parts.length === 1) return { first: parts[0], middle: "", last: "" };
-  if (parts.length === 2) return { first: parts[0], middle: "", last: parts[1] };
-  return { first: parts[0], middle: parts.slice(1, -1).join(" "), last: parts[parts.length - 1] };
-}
-
 function Waiver() {
   const submit = useServerFn(submitWaiverWithPdf);
   const fetchTemplate = useServerFn(getCurrentWaiverTemplate);
   const fetchMine = useServerFn(getMyLatestWaiver);
   const { user, loading: authLoading } = useAuth();
+  const search = Route.useSearch();
+  const prefillName = useMemo(() => splitFullName(search.name ?? ""), [search.name]);
 
   const [loading, setLoading] = useState(false);
   const [ackRisk, setAckRisk] = useState(false);
@@ -72,13 +76,14 @@ function Waiver() {
   const [ackMedia, setAckMedia] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
-  // Controlled form fields so we can render a live PDF preview
-  const [firstName, setFirstName] = useState("");
-  const [middleName, setMiddleName] = useState("");
-  const [lastName, setLastName] = useState("");
+  // Controlled form fields so we can render a live PDF preview. Seed name /
+  // contact fields from the Step 1 details when arriving via the trial flow.
+  const [firstName, setFirstName] = useState(prefillName.first);
+  const [middleName, setMiddleName] = useState(prefillName.middle);
+  const [lastName, setLastName] = useState(prefillName.last);
   const [dob, setDob] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState(search.phone ?? "");
+  const [email, setEmail] = useState(search.email ?? "");
   const [address, setAddress] = useState("");
   const [ecName, setEcName] = useState("");
   const [ecPhone, setEcPhone] = useState("");
@@ -132,7 +137,7 @@ function Waiver() {
           setMiddleName(r.middle_name || "");
           setLastName(r.last_name || "");
         } else if (r.full_name) {
-          const s = splitLegacyName(r.full_name);
+          const s = splitFullName(r.full_name);
           setFirstName(s.first);
           setMiddleName(s.middle);
           setLastName(s.last);

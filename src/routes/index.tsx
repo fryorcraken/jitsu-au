@@ -49,7 +49,7 @@ function Home() {
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
                 <Link to="/register-interest">
-                  Register interest <ArrowRight className="ml-1 h-4 w-4" />
+                  Start your free trial <ArrowRight className="ml-1 h-4 w-4" />
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">
@@ -149,36 +149,20 @@ function Home() {
         <div className="rounded-3xl bg-primary p-10 text-primary-foreground md:p-16">
           <h2 className="text-3xl font-bold md:text-4xl">Ready to step on the mat?</h2>
           <p className="mt-3 max-w-2xl text-primary-foreground/80">
-            Register your interest,{" "}
-            <Link
-              to="/waiver"
-              className="underline underline-offset-4 hover:text-primary-foreground"
-            >
-              sign the club waiver
-            </Link>
-            , or drop us a message. Whichever way you start, we'll take it from there.
+            Tell us who you are and we'll get you on the mat. Your first two classes are free — no
+            gear needed. Takes 30 seconds to start.
           </p>
 
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="mt-8 flex flex-wrap items-center gap-6">
             <Button asChild size="lg" variant="secondary">
-              <Link to="/register-interest">Register interest</Link>
+              <Link to="/register-interest">Start your free trial</Link>
             </Button>
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+            <Link
+              to="/contact"
+              className="text-sm font-medium text-primary-foreground/80 underline underline-offset-4 hover:text-primary-foreground"
             >
-              <Link to="/waiver">Sign waiver</Link>
-            </Button>
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
-            >
-              <Link to="/contact">Contact us</Link>
-            </Button>
+              Or contact us with a question
+            </Link>
           </div>
         </div>
       </section>

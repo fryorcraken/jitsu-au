@@ -17,6 +17,19 @@ export function composeFullName(first: string, middle: string, last: string): st
 }
 
 /**
+ * Split a single full-name string into first/middle/last parts.
+ * One word → first only; two words → first + last; three+ → everything
+ * between the first and last word becomes the middle name.
+ */
+export function splitFullName(full: string): { first: string; middle: string; last: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: "", middle: "", last: "" };
+  if (parts.length === 1) return { first: parts[0], middle: "", last: "" };
+  if (parts.length === 2) return { first: parts[0], middle: "", last: parts[1] };
+  return { first: parts[0], middle: parts.slice(1, -1).join(" "), last: parts[parts.length - 1] };
+}
+
+/**
  * Decode a `data:image/png;base64,...` URL into raw PNG bytes.
  * Returns null for empty input or anything that isn't a base64 PNG data URL.
  */

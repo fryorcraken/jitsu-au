@@ -159,12 +159,9 @@ function Pricing() {
         <div className="rounded-2xl bg-secondary p-8 text-center md:p-12">
           <h2 className="text-2xl font-bold">Come try a class first.</h2>
           <p className="mt-2 text-muted-foreground">Two free sessions, no commitment.</p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <div className="mt-6 flex justify-center">
             <Button asChild size="lg">
-              <Link to="/register-interest">Register interest</Link>
-            </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link to="/waiver">Sign waiver</Link>
+              <Link to="/register-interest">Start your free trial</Link>
             </Button>
           </div>
         </div>
