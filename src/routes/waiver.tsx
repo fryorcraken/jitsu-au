@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -12,12 +12,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CheckCircle2, Download } from "lucide-react";
 import { SignaturePad, type SignaturePadHandle } from "@/components/site/SignaturePad";
+import { WaiverDocument } from "@/components/site/WaiverDocument";
 import {
   submitWaiverWithPdf,
   getCurrentWaiverTemplate,
   getMyLatestWaiver,
 } from "@/lib/waiver.functions";
-import { renderWaiverPdf } from "@/lib/waiver-pdf";
 import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/waiver")({
@@ -154,94 +154,10 @@ function Waiver() {
     if (user?.email && !email) setEmail(user.email);
   }, [user, email]);
 
-  // ---- Live PDF preview ----
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const previewUrlRef = useRef<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const buildPreview = useCallback(async () => {
-    if (!templateQ.data) return;
-    try {
-      const sigDataUrl = signatureMode === "draw" ? signatureImage : "";
-      const gSigDataUrl = guardianSignatureMode === "draw" ? guardianSignatureImage : "";
-
-      const sigBytes = sigDataUrl ? dataUrlToBytes(sigDataUrl) : null;
-      const gSigBytes = gSigDataUrl ? dataUrlToBytes(gSigDataUrl) : null;
-
-      const bytes = await renderWaiverPdf({
-        full_name: fullName,
-        date_of_birth: dob,
-        address,
-        phone,
-        email,
-        emergency_contact_name: ecName,
-        emergency_contact_phone: ecPhone,
-        medical_notes: medical,
-        ack_risk: ackRisk,
-        ack_release: ackRelease,
-        ack_media: ackMedia,
-        signature_name: signatureMode === "type" ? signatureName : "",
-        signed_at: new Date().toISOString(),
-        template_title: templateQ.data.title,
-        template_body: templateQ.data.body_md,
-        template_version: 0,
-        club_name: "UTS Jitsu",
-        is_minor: isMinor,
-        guardian_name: guardianName,
-        guardian_relationship: guardianRelationship,
-        guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
-        signature_image_png: sigBytes,
-        guardian_signature_image_png: gSigBytes,
-        draft: true,
-      });
-      const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-      previewUrlRef.current = url;
-      setPreviewUrl(url);
-    } catch (err) {
-      console.error("Preview render failed", err);
-    }
-  }, [
-    templateQ.data,
-    fullName,
-    dob,
-    address,
-    phone,
-    email,
-    ecName,
-    ecPhone,
-    medical,
-    ackRisk,
-    ackRelease,
-    ackMedia,
-    signatureMode,
-    signatureName,
-    signatureImage,
-    isMinor,
-    guardianName,
-    guardianRelationship,
-    guardianSignatureMode,
-    guardianSignature,
-    guardianSignatureImage,
-  ]);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      void buildPreview();
-    }, 250);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [buildPreview]);
-
-  useEffect(
-    () => () => {
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    },
-    [],
-  );
+  // ---- Live preview (HTML rendering of the waiver, mirrors the PDF) ----
+  const previewSignatureImage = signatureMode === "draw" ? signatureImage : "";
+  const previewGuardianSignatureImage =
+    guardianSignatureMode === "draw" ? guardianSignatureImage : "";
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -621,39 +537,43 @@ function Waiver() {
 
           <aside className="lg:sticky lg:top-24 lg:self-start">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold">Live PDF preview</p>
+              <p className="text-sm font-semibold">Live preview</p>
               <p className="text-xs text-muted-foreground">Updates as you type</p>
             </div>
-            <div className="overflow-hidden rounded-2xl border bg-muted/30">
-              {previewUrl ? (
-                <iframe
-                  key="waiver-preview"
-                  src={previewUrl}
-                  title="Waiver preview"
-                  className="block h-[820px] w-full bg-white"
-                />
-              ) : (
-                <div className="flex h-[820px] items-center justify-center text-sm text-muted-foreground">
-                  Preparing preview...
-                </div>
-              )}
-            </div>
+            {templateQ.data ? (
+              <WaiverDocument
+                draft
+                clubName="UTS Jitsu"
+                templateTitle={templateQ.data.title}
+                templateBody={templateQ.data.body_md}
+                templateVersion={null}
+                fullName={fullName}
+                dateOfBirth={dob}
+                address={address}
+                phone={phone}
+                email={email}
+                emergencyContactName={ecName}
+                emergencyContactPhone={ecPhone}
+                medicalNotes={medical}
+                ackRisk={ackRisk}
+                ackRelease={ackRelease}
+                ackMedia={ackMedia}
+                signatureName={signatureMode === "type" ? signatureName : ""}
+                signatureImage={previewSignatureImage}
+                isMinor={isMinor}
+                guardianName={guardianName}
+                guardianRelationship={guardianRelationship}
+                guardianSignature={guardianSignatureMode === "type" ? guardianSignature : ""}
+                guardianSignatureImage={previewGuardianSignatureImage}
+              />
+            ) : (
+              <div className="flex h-64 items-center justify-center rounded-xl border bg-muted/30 text-sm text-muted-foreground">
+                Preparing preview...
+              </div>
+            )}
           </aside>
         </div>
       </section>
     </SiteLayout>
   );
-}
-
-function dataUrlToBytes(dataUrl: string): Uint8Array | null {
-  const m = /^data:image\/png;base64,(.+)$/.exec(dataUrl.trim());
-  if (!m) return null;
-  try {
-    const binary = atob(m[1]);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  } catch {
-    return null;
-  }
 }
