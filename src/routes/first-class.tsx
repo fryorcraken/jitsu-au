@@ -234,9 +234,9 @@ function FirstClass() {
           </div>
           <div className="mt-6 flex flex-wrap gap-3 md:mt-0">
             <Button asChild variant="outline">
-              <Link to="/contact">
+              <a href="mailto:sensei@utsjitsu.com.au">
                 <Mail className="mr-1.5 h-4 w-4" /> Email us
-              </Link>
+              </a>
             </Button>
             <Button asChild variant="outline">
               <a href="https://wa.me/61493631759">
