@@ -139,3 +139,15 @@ export const saveTemplateSchema = z.object({
   body_md: z.string().trim().min(1).max(30000),
   acknowledgements: templateAcknowledgementsSchema.default([]),
 });
+
+// ---- Manager: approve / unapprove a signed waiver ----
+
+/** The member-facing status a manager can set on a signed waiver. */
+export const waiverApprovalStatuses = ["pending", "approved"] as const;
+export type WaiverApprovalStatus = (typeof waiverApprovalStatuses)[number];
+
+export const waiverApprovalSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(waiverApprovalStatuses),
+});
+export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
