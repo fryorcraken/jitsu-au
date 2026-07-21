@@ -149,9 +149,9 @@ function Home() {
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {[
-              { day: "Monday", time: "17:30 to 19:00" },
-              { day: "Wednesday", time: "18:00 to 19:30" },
-              { day: "Saturday", time: "09:00 to 10:30", note: "Colour belts only" },
+              { day: "Monday", time: "5:30 – 7:00pm" },
+              { day: "Wednesday", time: "6:00 – 7:30pm" },
+              { day: "Saturday", time: "9:00 – 10:30am", note: "Colour belts only" },
             ].map((s) => (
               <div key={s.day} className="rounded-xl border bg-card p-6">
                 <div className="flex items-center gap-2 text-primary">
