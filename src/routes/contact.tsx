@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { submitContact } from "@/lib/submissions.functions";
-import { Phone, MessageCircle } from "lucide-react";
+import { VENUE_NAME, VENUE_ADDRESS, GOOGLE_MAPS_URL, APPLE_MAPS_URL } from "@/lib/venue";
+import { Phone, MessageCircle, MapPin, ExternalLink } from "lucide-react";
 
 export const Route = createFileRoute("/contact")({
   head: () => ({
@@ -87,8 +88,22 @@ function Contact() {
             </a>
             <div className="rounded-xl border bg-card p-5">
               <p className="text-xs font-semibold uppercase text-muted-foreground">Location</p>
-              <p className="mt-1 font-medium">ActivateFit Gym</p>
-              <p className="text-sm text-muted-foreground">Harris Street, Ultimo NSW</p>
+              <p className="mt-1 font-medium">{VENUE_NAME}</p>
+              <p className="text-sm text-muted-foreground">{VENUE_ADDRESS}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="outline">
+                  <a href={GOOGLE_MAPS_URL} target="_blank" rel="noopener noreferrer">
+                    <MapPin className="h-4 w-4" /> Google Maps
+                    <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                  </a>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <a href={APPLE_MAPS_URL} target="_blank" rel="noopener noreferrer">
+                    <MapPin className="h-4 w-4" /> Apple Maps
+                    <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                  </a>
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -130,6 +145,38 @@ function Contact() {
               {loading ? "Sending..." : "Send message"}
             </Button>
           </form>
+        </div>
+
+        <div className="mt-8 rounded-2xl border bg-secondary p-6 md:p-8">
+          <p className="flex items-center gap-2 text-sm font-semibold text-primary">
+            <MapPin className="h-4 w-4" /> Getting there
+          </p>
+          <h2 className="mt-2 text-2xl font-bold">Finding {VENUE_NAME}</h2>
+          <ul className="mt-4 max-w-2xl space-y-2 text-muted-foreground">
+            <li>
+              Enter via{" "}
+              <strong className="text-foreground">
+                Building 4, at the corner of Harris St and Thomas St
+              </strong>{" "}
+              — {VENUE_NAME} is right there, at street level.
+            </li>
+            <li>
+              Coming from the UTS campus? Head down the{" "}
+              <strong className="text-foreground">internal set of stairs</strong>.
+            </li>
+          </ul>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button asChild>
+              <a href={GOOGLE_MAPS_URL} target="_blank" rel="noopener noreferrer">
+                <MapPin className="h-4 w-4" /> Open in Google Maps
+              </a>
+            </Button>
+            <Button asChild variant="outline">
+              <a href={APPLE_MAPS_URL} target="_blank" rel="noopener noreferrer">
+                <MapPin className="h-4 w-4" /> Open in Apple Maps
+              </a>
+            </Button>
+          </div>
         </div>
       </section>
     </SiteLayout>
