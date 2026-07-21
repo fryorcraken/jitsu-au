@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 import { submitInterest } from "@/lib/submissions.functions";
 
 export const Route = createFileRoute("/register-interest")({
@@ -161,38 +162,44 @@ function RegisterInterest() {
             </Label>
           </div>
 
-          {showNote ? (
-            <div className="space-y-5">
-              <div>
-                <Label htmlFor="experience">Martial arts experience (optional)</Label>
-                <Input
-                  id="experience"
-                  name="experience"
-                  maxLength={500}
-                  placeholder="e.g. total beginner, 2 years BJJ..."
-                  className="mt-1.5"
-                />
-              </div>
-              <div>
-                <Label htmlFor="message">Anything else? (optional)</Label>
-                <Textarea
-                  id="message"
-                  name="message"
-                  maxLength={1000}
-                  rows={4}
-                  className="mt-1.5"
-                />
-              </div>
-            </div>
-          ) : (
+          <div>
             <button
               type="button"
-              onClick={() => setShowNote(true)}
+              onClick={() => setShowNote((v) => !v)}
+              aria-expanded={showNote}
+              aria-controls="note-fields"
               className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
             >
-              <ChevronDown className="h-4 w-4" /> Add a note (optional)
+              <ChevronDown
+                className={cn("h-4 w-4 transition-transform", showNote && "rotate-180")}
+              />
+              Add a note (optional)
             </button>
-          )}
+            {showNote && (
+              <div id="note-fields" className="mt-5 space-y-5">
+                <div>
+                  <Label htmlFor="experience">Martial arts experience (optional)</Label>
+                  <Input
+                    id="experience"
+                    name="experience"
+                    maxLength={500}
+                    placeholder="e.g. total beginner, 2 years BJJ..."
+                    className="mt-1.5"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="message">Anything else? (optional)</Label>
+                  <Textarea
+                    id="message"
+                    name="message"
+                    maxLength={1000}
+                    rows={4}
+                    className="mt-1.5"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
 
           <Button type="submit" size="lg" disabled={loading} className="w-full">
             {loading ? "Saving..." : "Continue"}
