@@ -69,16 +69,10 @@ function WaiversPage() {
     const status = row.approval_status === "approved" ? "pending" : "approved";
     setPendingId(row.id);
     try {
-      await approve({ data: { id: row.id, status } });
+      const res = await approve({ data: { id: row.id, status } });
       setRows((prev) =>
         prev.map((r) =>
-          r.id === row.id
-            ? {
-                ...r,
-                approval_status: status,
-                approved_at: status === "approved" ? new Date().toISOString() : null,
-              }
-            : r,
+          r.id === row.id ? { ...r, approval_status: status, approved_at: res.approved_at } : r,
         ),
       );
       toast.success(status === "approved" ? "Waiver approved" : "Approval removed");

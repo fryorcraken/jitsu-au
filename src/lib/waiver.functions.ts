@@ -334,17 +334,20 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const approved = data.status === "approved";
+    const approvedAt = approved ? new Date().toISOString() : null;
     // Built as a variable so the approval keys (absent from the stale generated
     // Update type) don't trip the excess-property check.
     const patch = {
       approval_status: data.status,
-      approved_at: approved ? new Date().toISOString() : null,
+      approved_at: approvedAt,
       approved_by: approved ? context.userId : null,
     };
     const { error } = await supabaseAdmin.from("waivers").update(patch).eq("id", data.id);
     if (error) throw new Error(error.message);
 
-    return { ok: true as const, id: data.id, status: data.status };
+    // Return the authoritative timestamp so the client doesn't have to guess it
+    // from its own clock.
+    return { ok: true as const, id: data.id, status: data.status, approved_at: approvedAt };
   });
 
 // ---- Signed URL for a waiver PDF (manager or owner) ----
