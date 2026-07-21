@@ -90,8 +90,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       { name: "twitter:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
-      { property: "og:description", content: "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free." },
-      { name: "twitter:description", content: "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free." },
+      {
+        property: "og:description",
+        content:
+          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+      },
+      {
+        name: "twitter:description",
+        content:
+          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+      },
     ],
     links: [
       { rel: "canonical", href: "https://jitsu.au/" },
@@ -140,7 +148,9 @@ function RootComponent() {
       });
       return () => sub.subscription.unsubscribe();
     });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [queryClient, router]);
 
   return (

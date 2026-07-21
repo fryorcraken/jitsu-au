@@ -10,10 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const Route = createFileRoute("/update-password")({
   head: () => ({
-    meta: [
-      { title: "Set new password | UTS Jitsu" },
-      { name: "robots", content: "noindex" },
-    ],
+    meta: [{ title: "Set new password | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
   component: UpdatePasswordPage,
 });

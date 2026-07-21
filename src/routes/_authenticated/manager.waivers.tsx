@@ -9,7 +9,9 @@ import { useAuth, useRoles } from "@/hooks/useAuth";
 import { Download } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/manager/waivers")({
-  head: () => ({ meta: [{ title: "Signed waivers | UTS Jitsu" }, { name: "robots", content: "noindex" }] }),
+  head: () => ({
+    meta: [{ title: "Signed waivers | UTS Jitsu" }, { name: "robots", content: "noindex" }],
+  }),
   component: WaiversPage,
 });
 
@@ -38,8 +40,15 @@ function WaiversPage() {
 
   useEffect(() => {
     if (!isManager) return;
-    fetchList().then((data) => { setRows(data as Row[]); setLoading(false); })
-      .catch((e) => { toast.error(e.message); setLoading(false); });
+    fetchList()
+      .then((data) => {
+        setRows(data as Row[]);
+        setLoading(false);
+      })
+      .catch((e) => {
+        toast.error(e.message);
+        setLoading(false);
+      });
   }, [isManager, fetchList]);
 
   async function download(id: string) {
@@ -59,10 +68,14 @@ function WaiversPage() {
             <h1 className="text-3xl font-black">Signed waivers</h1>
             <p className="text-sm text-muted-foreground">All waivers signed via the website.</p>
           </div>
-          <Button asChild variant="outline"><Link to="/account">Back to account</Link></Button>
+          <Button asChild variant="outline">
+            <Link to="/account">Back to account</Link>
+          </Button>
         </div>
 
-        {loading ? <p>Loading...</p> : rows.length === 0 ? (
+        {loading ? (
+          <p>Loading...</p>
+        ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No waivers signed yet.</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border">
@@ -88,7 +101,9 @@ function WaiversPage() {
                         <Button size="sm" variant="outline" onClick={() => download(r.id)}>
                           <Download className="mr-1 h-3 w-3" /> Download
                         </Button>
-                      ) : <span className="text-xs text-muted-foreground">—</span>}
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}

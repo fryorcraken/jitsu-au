@@ -24,7 +24,10 @@ export const Route = createFileRoute("/waiver")({
   head: () => ({
     meta: [
       { title: "Sign waiver | UTS Jitsu" },
-      { name: "description", content: "Complete the UTS Jitsu training waiver before your first class." },
+      {
+        name: "description",
+        content: "Complete the UTS Jitsu training waiver before your first class.",
+      },
       { property: "og:title", content: "Sign waiver | UTS Jitsu" },
       { property: "og:description", content: "Complete the UTS Jitsu training waiver online." },
       { property: "og:url", content: "https://jitsu.au/waiver" },
@@ -93,7 +96,11 @@ function Waiver() {
   const gSigPadRef = useRef<SignaturePadHandle | null>(null);
 
   const fullName = useMemo(
-    () => [firstName, middleName, lastName].map((s) => s.trim()).filter(Boolean).join(" "),
+    () =>
+      [firstName, middleName, lastName]
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(" "),
     [firstName, middleName, lastName],
   );
 
@@ -138,7 +145,9 @@ function Waiver() {
         if (r.emergency_contact_phone) setEcPhone(r.emergency_contact_phone);
         if (r.medical_notes) setMedical(r.medical_notes);
       })
-      .catch(() => { /* no prior waiver */ });
+      .catch(() => {
+        /* no prior waiver */
+      });
   }, [authLoading, user, fetchMine]);
 
   useEffect(() => {
@@ -153,12 +162,8 @@ function Waiver() {
   const buildPreview = useCallback(async () => {
     if (!templateQ.data) return;
     try {
-      const sigDataUrl =
-        signatureMode === "draw"
-          ? signatureImage
-          : "";
-      const gSigDataUrl =
-        guardianSignatureMode === "draw" ? guardianSignatureImage : "";
+      const sigDataUrl = signatureMode === "draw" ? signatureImage : "";
+      const gSigDataUrl = guardianSignatureMode === "draw" ? guardianSignatureImage : "";
 
       const sigBytes = sigDataUrl ? dataUrlToBytes(sigDataUrl) : null;
       const gSigBytes = gSigDataUrl ? dataUrlToBytes(gSigDataUrl) : null;
@@ -199,22 +204,44 @@ function Waiver() {
     }
   }, [
     templateQ.data,
-    fullName, dob, address, phone, email, ecName, ecPhone, medical,
-    ackRisk, ackRelease, ackMedia,
-    signatureMode, signatureName, signatureImage,
-    isMinor, guardianName, guardianRelationship,
-    guardianSignatureMode, guardianSignature, guardianSignatureImage,
+    fullName,
+    dob,
+    address,
+    phone,
+    email,
+    ecName,
+    ecPhone,
+    medical,
+    ackRisk,
+    ackRelease,
+    ackMedia,
+    signatureMode,
+    signatureName,
+    signatureImage,
+    isMinor,
+    guardianName,
+    guardianRelationship,
+    guardianSignatureMode,
+    guardianSignature,
+    guardianSignatureImage,
   ]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => { void buildPreview(); }, 250);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    debounceRef.current = setTimeout(() => {
+      void buildPreview();
+    }, 250);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [buildPreview]);
 
-  useEffect(() => () => {
-    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    },
+    [],
+  );
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -232,7 +259,9 @@ function Waiver() {
       const gImg = guardianSignatureMode === "draw" ? guardianSignatureImage : "";
       const gName = guardianSignatureMode === "type" ? guardianSignature : "";
       if (!guardianName.trim() || !guardianRelationship.trim() || (!gImg && !gName.trim())) {
-        toast.error("Parent/guardian name, relationship and signature are required for participants under 18.");
+        toast.error(
+          "Parent/guardian name, relationship and signature are required for participants under 18.",
+        );
         return;
       }
     }
@@ -287,10 +316,13 @@ function Waiver() {
                 <Download className="mr-2 h-4 w-4" /> Download waiver PDF
               </a>
             </Button>
-            <Button asChild variant="outline"><Link to="/">Back home</Link></Button>
+            <Button asChild variant="outline">
+              <Link to="/">Back home</Link>
+            </Button>
           </div>
           <p className="mt-6 text-xs text-muted-foreground">
-            The download link expires in 1 hour. Signed-in members can re-download from their account.
+            The download link expires in 1 hour. Signed-in members can re-download from their
+            account.
           </p>
         </section>
       </SiteLayout>
@@ -303,8 +335,8 @@ function Waiver() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Waiver</p>
         <h1 className="mt-3 text-4xl font-bold">Training waiver</h1>
         <p className="mt-3 max-w-2xl text-muted-foreground">
-          Please complete the waiver before your first training session. Your details are
-          kept private and used only for club administration.
+          Please complete the waiver before your first training session. Your details are kept
+          private and used only for club administration.
         </p>
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -322,34 +354,86 @@ function Waiver() {
               <div className="grid gap-5 sm:grid-cols-3">
                 <div>
                   <Label htmlFor="first_name">First name</Label>
-                  <Input id="first_name" required maxLength={60} value={firstName} onChange={(e) => setFirstName(e.target.value)} className="mt-1.5" />
+                  <Input
+                    id="first_name"
+                    required
+                    maxLength={60}
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    className="mt-1.5"
+                  />
                 </div>
                 <div>
-                  <Label htmlFor="middle_name">Middle name <span className="text-muted-foreground">(optional)</span></Label>
-                  <Input id="middle_name" maxLength={60} value={middleName} onChange={(e) => setMiddleName(e.target.value)} className="mt-1.5" />
+                  <Label htmlFor="middle_name">
+                    Middle name <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Input
+                    id="middle_name"
+                    maxLength={60}
+                    value={middleName}
+                    onChange={(e) => setMiddleName(e.target.value)}
+                    className="mt-1.5"
+                  />
                 </div>
                 <div>
                   <Label htmlFor="last_name">Last name</Label>
-                  <Input id="last_name" required maxLength={60} value={lastName} onChange={(e) => setLastName(e.target.value)} className="mt-1.5" />
+                  <Input
+                    id="last_name"
+                    required
+                    maxLength={60}
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="mt-1.5"
+                  />
                 </div>
               </div>
               <div className="grid gap-5 sm:grid-cols-2">
                 <div>
                   <Label htmlFor="date_of_birth">Date of birth</Label>
-                  <Input id="date_of_birth" type="date" required value={dob} onChange={(e) => setDob(e.target.value)} className="mt-1.5" />
+                  <Input
+                    id="date_of_birth"
+                    type="date"
+                    required
+                    value={dob}
+                    onChange={(e) => setDob(e.target.value)}
+                    className="mt-1.5"
+                  />
                 </div>
                 <div>
                   <Label htmlFor="phone">Phone</Label>
-                  <Input id="phone" type="tel" required maxLength={30} value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1.5" />
+                  <Input
+                    id="phone"
+                    type="tel"
+                    required
+                    maxLength={30}
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="mt-1.5"
+                  />
                 </div>
               </div>
               <div>
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" required maxLength={255} value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1.5" />
+                <Input
+                  id="email"
+                  type="email"
+                  required
+                  maxLength={255}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="mt-1.5"
+                />
               </div>
               <div>
                 <Label htmlFor="address">Address</Label>
-                <Input id="address" required maxLength={300} value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1.5" />
+                <Input
+                  id="address"
+                  required
+                  maxLength={300}
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  className="mt-1.5"
+                />
               </div>
             </fieldset>
 
@@ -358,11 +442,26 @@ function Waiver() {
               <div className="grid gap-5 sm:grid-cols-2">
                 <div>
                   <Label htmlFor="emergency_contact_name">Contact name</Label>
-                  <Input id="emergency_contact_name" required maxLength={120} value={ecName} onChange={(e) => setEcName(e.target.value)} className="mt-1.5" />
+                  <Input
+                    id="emergency_contact_name"
+                    required
+                    maxLength={120}
+                    value={ecName}
+                    onChange={(e) => setEcName(e.target.value)}
+                    className="mt-1.5"
+                  />
                 </div>
                 <div>
                   <Label htmlFor="emergency_contact_phone">Contact phone</Label>
-                  <Input id="emergency_contact_phone" type="tel" required maxLength={30} value={ecPhone} onChange={(e) => setEcPhone(e.target.value)} className="mt-1.5" />
+                  <Input
+                    id="emergency_contact_phone"
+                    type="tel"
+                    required
+                    maxLength={30}
+                    value={ecPhone}
+                    onChange={(e) => setEcPhone(e.target.value)}
+                    className="mt-1.5"
+                  />
                 </div>
               </div>
             </fieldset>
@@ -372,53 +471,85 @@ function Waiver() {
               <Label htmlFor="medical_notes">
                 Any injuries, conditions or medications we should know about? (optional)
               </Label>
-              <Textarea id="medical_notes" maxLength={2000} rows={4} value={medical} onChange={(e) => setMedical(e.target.value)} />
+              <Textarea
+                id="medical_notes"
+                maxLength={2000}
+                rows={4}
+                value={medical}
+                onChange={(e) => setMedical(e.target.value)}
+              />
             </fieldset>
 
             <fieldset className="space-y-4 border-t pt-6">
               <legend className="text-sm font-semibold">Acknowledgements</legend>
               <label className="flex items-start gap-3 text-sm">
-                <Checkbox checked={ackRisk} onCheckedChange={(v) => setAckRisk(v === true)} className="mt-0.5" />
+                <Checkbox
+                  checked={ackRisk}
+                  onCheckedChange={(v) => setAckRisk(v === true)}
+                  className="mt-0.5"
+                />
                 <span>
-                  I understand that Japanese Jiu-Jitsu involves physical contact and risk of
-                  injury, and I participate voluntarily at my own risk.
+                  I understand that Japanese Jiu-Jitsu involves physical contact and risk of injury,
+                  and I participate voluntarily at my own risk.
                 </span>
               </label>
               <label className="flex items-start gap-3 text-sm">
-                <Checkbox checked={ackRelease} onCheckedChange={(v) => setAckRelease(v === true)} className="mt-0.5" />
+                <Checkbox
+                  checked={ackRelease}
+                  onCheckedChange={(v) => setAckRelease(v === true)}
+                  className="mt-0.5"
+                />
                 <span>
-                  I release Sydney Jitsu Inc, UTS Jitsu, its instructors and training partners
-                  from liability for injuries sustained during training, except where caused
-                  by gross negligence.
+                  I release Sydney Jitsu Inc, UTS Jitsu, its instructors and training partners from
+                  liability for injuries sustained during training, except where caused by gross
+                  negligence.
                 </span>
               </label>
               <label className="flex items-start gap-3 text-sm">
-                <Checkbox checked={ackMedia} onCheckedChange={(v) => setAckMedia(v === true)} className="mt-0.5" />
+                <Checkbox
+                  checked={ackMedia}
+                  onCheckedChange={(v) => setAckMedia(v === true)}
+                  className="mt-0.5"
+                />
                 <span>
-                  (Optional) I consent to photos and video taken during class being used for
-                  club promotion on social media and the club website.
+                  (Optional) I consent to photos and video taken during class being used for club
+                  promotion on social media and the club website.
                 </span>
               </label>
             </fieldset>
 
             <fieldset className="space-y-3 border-t pt-6">
               <legend className="text-sm font-semibold">Signature</legend>
-              <Tabs value={signatureMode} onValueChange={(v) => setSignatureMode(v as "draw" | "type")}>
+              <Tabs
+                value={signatureMode}
+                onValueChange={(v) => setSignatureMode(v as "draw" | "type")}
+              >
                 <TabsList className="grid w-full max-w-xs grid-cols-2">
                   <TabsTrigger value="draw">Draw</TabsTrigger>
                   <TabsTrigger value="type">Type</TabsTrigger>
                 </TabsList>
                 <TabsContent value="draw" className="mt-3">
-                  <SignaturePad ref={sigPadRef} onChange={setSignatureImage} ariaLabel="Your signature" />
+                  <SignaturePad
+                    ref={sigPadRef}
+                    onChange={setSignatureImage}
+                    ariaLabel="Your signature"
+                  />
                 </TabsContent>
                 <TabsContent value="type" className="mt-3">
                   <Label htmlFor="signature_name">Type your full name to sign</Label>
-                  <Input id="signature_name" maxLength={120} value={signatureName} onChange={(e) => setSignatureName(e.target.value)} placeholder="Your full name" className="mt-1.5" />
+                  <Input
+                    id="signature_name"
+                    maxLength={120}
+                    value={signatureName}
+                    onChange={(e) => setSignatureName(e.target.value)}
+                    placeholder="Your full name"
+                    className="mt-1.5"
+                  />
                 </TabsContent>
               </Tabs>
               <p className="text-xs text-muted-foreground">
-                By signing and submitting this form, you agree it constitutes an
-                electronic signature dated {new Date().toLocaleDateString()}.
+                By signing and submitting this form, you agree it constitutes an electronic
+                signature dated {new Date().toLocaleDateString()}.
               </p>
 
               {isMinor && (
@@ -429,25 +560,53 @@ function Waiver() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <Label htmlFor="guardian_name">Parent/guardian full name</Label>
-                      <Input id="guardian_name" required maxLength={120} value={guardianName} onChange={(e) => setGuardianName(e.target.value)} className="mt-1.5" />
+                      <Input
+                        id="guardian_name"
+                        required
+                        maxLength={120}
+                        value={guardianName}
+                        onChange={(e) => setGuardianName(e.target.value)}
+                        className="mt-1.5"
+                      />
                     </div>
                     <div>
                       <Label htmlFor="guardian_relationship">Relationship</Label>
-                      <Input id="guardian_relationship" required maxLength={80} value={guardianRelationship} onChange={(e) => setGuardianRelationship(e.target.value)} placeholder="Parent, guardian, etc." className="mt-1.5" />
+                      <Input
+                        id="guardian_relationship"
+                        required
+                        maxLength={80}
+                        value={guardianRelationship}
+                        onChange={(e) => setGuardianRelationship(e.target.value)}
+                        placeholder="Parent, guardian, etc."
+                        className="mt-1.5"
+                      />
                     </div>
                   </div>
                   <div>
                     <Label>Parent/guardian signature</Label>
-                    <Tabs value={guardianSignatureMode} onValueChange={(v) => setGuardianSignatureMode(v as "draw" | "type")} className="mt-2">
+                    <Tabs
+                      value={guardianSignatureMode}
+                      onValueChange={(v) => setGuardianSignatureMode(v as "draw" | "type")}
+                      className="mt-2"
+                    >
                       <TabsList className="grid w-full max-w-xs grid-cols-2">
                         <TabsTrigger value="draw">Draw</TabsTrigger>
                         <TabsTrigger value="type">Type</TabsTrigger>
                       </TabsList>
                       <TabsContent value="draw" className="mt-3">
-                        <SignaturePad ref={gSigPadRef} onChange={setGuardianSignatureImage} ariaLabel="Guardian signature" />
+                        <SignaturePad
+                          ref={gSigPadRef}
+                          onChange={setGuardianSignatureImage}
+                          ariaLabel="Guardian signature"
+                        />
                       </TabsContent>
                       <TabsContent value="type" className="mt-3">
-                        <Input maxLength={120} value={guardianSignature} onChange={(e) => setGuardianSignature(e.target.value)} placeholder="Guardian full name" />
+                        <Input
+                          maxLength={120}
+                          value={guardianSignature}
+                          onChange={(e) => setGuardianSignature(e.target.value)}
+                          placeholder="Guardian full name"
+                        />
                       </TabsContent>
                     </Tabs>
                   </div>

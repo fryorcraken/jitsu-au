@@ -7,9 +7,16 @@ export const Route = createFileRoute("/pricing")({
   head: () => ({
     meta: [
       { title: "Pricing | UTS Jitsu" },
-      { name: "description", content: "UTS student and general public fees for Japanese Jiu-Jitsu at UTS Ultimo. Casual, semester, and yearly options." },
+      {
+        name: "description",
+        content:
+          "UTS student and general public fees for Japanese Jiu-Jitsu at UTS Ultimo. Casual, semester, and yearly options.",
+      },
       { property: "og:title", content: "Pricing | UTS Jitsu" },
-      { property: "og:description", content: "Casual, semester and yearly options. First two sessions are always free." },
+      {
+        property: "og:description",
+        content: "Casual, semester and yearly options. First two sessions are always free.",
+      },
       { property: "og:url", content: "https://jitsu.au/pricing" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/pricing" }],
@@ -17,16 +24,44 @@ export const Route = createFileRoute("/pricing")({
   component: Pricing,
 });
 
-type Tier = { title: string; price: string; period?: string; features: string[]; highlight?: boolean };
+type Tier = {
+  title: string;
+  price: string;
+  period?: string;
+  features: string[];
+  highlight?: boolean;
+};
 
 const student: Tier[] = [
-  { title: "One semester", price: "$245", period: "per half-year", features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"], highlight: true },
-  { title: "Casual class", price: "$20", period: "per session", features: ["Any regular class", "Great for trying us out", "No commitment"] },
+  {
+    title: "One semester",
+    price: "$245",
+    period: "per half-year",
+    features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"],
+    highlight: true,
+  },
+  {
+    title: "Casual class",
+    price: "$20",
+    period: "per session",
+    features: ["Any regular class", "Great for trying us out", "No commitment"],
+  },
 ];
 
 const public_: Tier[] = [
-  { title: "One semester", price: "$445", period: "per half-year", features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"], highlight: true },
-  { title: "Casual class", price: "$30", period: "per session", features: ["Any regular class", "Flexible, no commitment"] },
+  {
+    title: "One semester",
+    price: "$445",
+    period: "per half-year",
+    features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"],
+    highlight: true,
+  },
+  {
+    title: "Casual class",
+    price: "$30",
+    period: "per session",
+    features: ["Any regular class", "Flexible, no commitment"],
+  },
 ];
 
 const extras = [
@@ -37,17 +72,35 @@ const extras = [
 
 function TierCard({ tier }: { tier: Tier }) {
   return (
-    <div className={`rounded-2xl border p-6 ${tier.highlight ? "bg-primary text-primary-foreground shadow-lg" : "bg-card"}`}>
+    <div
+      className={`rounded-2xl border p-6 ${tier.highlight ? "bg-primary text-primary-foreground shadow-lg" : "bg-card"}`}
+    >
       <h3 className="text-lg font-semibold">{tier.title}</h3>
       <div className="mt-3 flex items-baseline gap-1.5">
         <span className="text-4xl font-bold tracking-tight">{tier.price}</span>
-        {tier.period && <span className={tier.highlight ? "text-primary-foreground/70 text-sm" : "text-muted-foreground text-sm"}>{tier.period}</span>}
+        {tier.period && (
+          <span
+            className={
+              tier.highlight
+                ? "text-primary-foreground/70 text-sm"
+                : "text-muted-foreground text-sm"
+            }
+          >
+            {tier.period}
+          </span>
+        )}
       </div>
       <ul className="mt-5 space-y-2 text-sm">
         {tier.features.map((f) => (
           <li key={f} className="flex items-start gap-2">
-            <Check className={`mt-0.5 h-4 w-4 shrink-0 ${tier.highlight ? "text-primary-foreground" : "text-primary"}`} />
-            <span className={tier.highlight ? "text-primary-foreground/90" : "text-muted-foreground"}>{f}</span>
+            <Check
+              className={`mt-0.5 h-4 w-4 shrink-0 ${tier.highlight ? "text-primary-foreground" : "text-primary"}`}
+            />
+            <span
+              className={tier.highlight ? "text-primary-foreground/90" : "text-muted-foreground"}
+            >
+              {f}
+            </span>
           </li>
         ))}
       </ul>
@@ -62,22 +115,26 @@ function Pricing() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Pricing</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">Simple, honest fees.</h1>
         <p className="mt-5 text-lg text-muted-foreground">
-          Your first two sessions are free, every day of the year. When you're ready to
-          join, pick the option that suits how you want to train.
+          Your first two sessions are free, every day of the year. When you're ready to join, pick
+          the option that suits how you want to train.
         </p>
       </section>
 
       <section className="mx-auto max-w-6xl px-4">
         <h2 className="text-2xl font-bold">For UTS students</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {student.map((t) => <TierCard key={t.title} tier={t} />)}
+          {student.map((t) => (
+            <TierCard key={t.title} tier={t} />
+          ))}
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-4 py-14">
         <h2 className="text-2xl font-bold">For the general public</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {public_.map((t) => <TierCard key={t.title} tier={t} />)}
+          {public_.map((t) => (
+            <TierCard key={t.title} tier={t} />
+          ))}
         </div>
       </section>
 
@@ -93,8 +150,8 @@ function Pricing() {
           ))}
         </div>
         <p className="mt-6 text-sm text-muted-foreground">
-          Saturday sessions are best-effort and included in semester price, but not guaranteed.
-          No classes during the UTS summer break.
+          Saturday sessions are best-effort and included in semester price, but not guaranteed. No
+          classes during the UTS summer break.
         </p>
       </section>
 
@@ -103,8 +160,12 @@ function Pricing() {
           <h2 className="text-2xl font-bold">Come try a class first.</h2>
           <p className="mt-2 text-muted-foreground">Two free sessions, no commitment.</p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Button asChild size="lg"><Link to="/register-interest">Register interest</Link></Button>
-            <Button asChild size="lg" variant="outline"><Link to="/waiver">Sign waiver</Link></Button>
+            <Button asChild size="lg">
+              <Link to="/register-interest">Register interest</Link>
+            </Button>
+            <Button asChild size="lg" variant="outline">
+              <Link to="/waiver">Sign waiver</Link>
+            </Button>
           </div>
         </div>
       </section>

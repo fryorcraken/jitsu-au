@@ -3,6 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  composeFullName,
+  decodeDataUrlPng,
+  saveTemplateSchema,
+  waiverSubmitSchema,
+} from "@/lib/validation";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -15,31 +21,13 @@ function serverSupabase() {
     global: {
       fetch: (input, init) => {
         const h = new Headers(init?.headers);
-        if (key.startsWith("sb_") && h.get("Authorization") === `Bearer ${key}`) h.delete("Authorization");
+        if (key.startsWith("sb_") && h.get("Authorization") === `Bearer ${key}`)
+          h.delete("Authorization");
         h.set("apikey", key);
         return fetch(input, { ...init, headers: h });
       },
     },
   });
-}
-
-function composeFullName(first: string, middle: string, last: string) {
-  return [first, middle, last].map((s) => s.trim()).filter(Boolean).join(" ");
-}
-
-function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
-  if (!dataUrl) return null;
-  const m = /^data:image\/png;base64,(.+)$/.exec(dataUrl.trim());
-  if (!m) return null;
-  try {
-    const b64 = m[1];
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  } catch {
-    return null;
-  }
 }
 
 // ---- Current template (public) ----
@@ -60,7 +48,9 @@ export const getMyLatestWaiver = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("waivers")
-      .select("full_name, first_name, middle_name, last_name, date_of_birth, address, phone, email, emergency_contact_name, emergency_contact_phone, medical_notes")
+      .select(
+        "full_name, first_name, middle_name, last_name, date_of_birth, address, phone, email, emergency_contact_name, emergency_contact_phone, medical_notes",
+      )
       .eq("user_id", context.userId)
       .order("signed_at", { ascending: false })
       .limit(1)
@@ -70,40 +60,8 @@ export const getMyLatestWaiver = createServerFn({ method: "GET" })
   });
 
 // ---- Submit waiver + generate PDF ----
-const sigImage = z.string().max(500_000).optional().or(z.literal(""));
-
-const waiverSchema = z.object({
-  first_name: z.string().trim().min(1).max(60),
-  middle_name: z.string().trim().max(60).optional().or(z.literal("")),
-  last_name: z.string().trim().min(1).max(60),
-  date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  address: z.string().trim().min(1).max(300),
-  phone: z.string().trim().min(1).max(30),
-  email: z.string().trim().email().max(255),
-  emergency_contact_name: z.string().trim().min(1).max(120),
-  emergency_contact_phone: z.string().trim().min(1).max(30),
-  medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
-  ack_risk: z.literal(true),
-  ack_release: z.literal(true),
-  ack_media: z.boolean(),
-  signature_name: z.string().trim().max(120).optional().or(z.literal("")),
-  signature_image: sigImage,
-  is_minor: z.boolean().optional().default(false),
-  guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
-  guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
-  guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
-  guardian_signature_image: sigImage,
-  hp: z.string().max(0).optional(),
-}).refine(
-  (d) => Boolean((d.signature_name && d.signature_name.trim()) || (d.signature_image && d.signature_image.trim())),
-  { message: "A signature is required — draw or type your name.", path: ["signature_name"] },
-).refine(
-  (d) => !d.is_minor || (d.guardian_name && d.guardian_relationship && ((d.guardian_signature && d.guardian_signature.trim()) || (d.guardian_signature_image && d.guardian_signature_image.trim()))),
-  { message: "Parent/guardian name, relationship and signature are required for participants under 18.", path: ["guardian_name"] },
-);
-
 export const submitWaiverWithPdf = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => waiverSchema.parse(data))
+  .inputValidator((data: unknown) => waiverSubmitSchema.parse(data))
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, pdf_url: null };
 
@@ -122,7 +80,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         const { data: userData } = await supabaseAdmin.auth.getUser(token);
         userId = userData.user?.id ?? null;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     // Load current template
     const { data: tpl, error: tplErr } = await supabaseAdmin
@@ -172,12 +132,16 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     let gSigPath: string | null = null;
     if (sigPng) {
       sigPath = `${inserted.id}-signature.png`;
-      const { error } = await supabaseAdmin.storage.from(BUCKET).upload(sigPath, sigPng, { contentType: "image/png", upsert: true });
+      const { error } = await supabaseAdmin.storage
+        .from(BUCKET)
+        .upload(sigPath, sigPng, { contentType: "image/png", upsert: true });
       if (error) throw new Error(error.message);
     }
     if (gSigPng) {
       gSigPath = `${inserted.id}-guardian-signature.png`;
-      const { error } = await supabaseAdmin.storage.from(BUCKET).upload(gSigPath, gSigPng, { contentType: "image/png", upsert: true });
+      const { error } = await supabaseAdmin.storage
+        .from(BUCKET)
+        .upload(gSigPath, gSigPng, { contentType: "image/png", upsert: true });
       if (error) throw new Error(error.message);
     }
 
@@ -214,11 +178,14 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
     if (upErr) throw new Error(upErr.message);
 
-    await supabaseAdmin.from("waivers").update({
-      pdf_path: path,
-      signature_image_path: sigPath,
-      guardian_signature_image_path: gSigPath,
-    }).eq("id", inserted.id);
+    await supabaseAdmin
+      .from("waivers")
+      .update({
+        pdf_path: path,
+        signature_image_path: sigPath,
+        guardian_signature_image_path: gSigPath,
+      })
+      .eq("id", inserted.id);
 
     const { data: signed, error: signErr } = await supabaseAdmin.storage
       .from(BUCKET)
@@ -229,11 +196,6 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
   });
 
 // ---- Manager: save new template version ----
-const saveTemplateSchema = z.object({
-  title: z.string().trim().min(1).max(200),
-  body_md: z.string().trim().min(1).max(30000),
-});
-
 export const saveWaiverTemplate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => saveTemplateSchema.parse(d))
@@ -256,7 +218,10 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
     const nextVersion = (maxRow?.version ?? 0) + 1;
 
     // Clear current flag on all rows
-    await supabaseAdmin.from("waiver_templates").update({ is_current: false }).eq("is_current", true);
+    await supabaseAdmin
+      .from("waiver_templates")
+      .update({ is_current: false })
+      .eq("is_current", true);
 
     const { data: created, error } = await supabaseAdmin
       .from("waiver_templates")

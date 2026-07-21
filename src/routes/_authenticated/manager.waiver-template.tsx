@@ -9,10 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  getCurrentWaiverTemplate,
-  saveWaiverTemplate,
-} from "@/lib/waiver.functions";
+import { getCurrentWaiverTemplate, saveWaiverTemplate } from "@/lib/waiver.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
@@ -20,9 +17,17 @@ function applyPlaceholders(body: string, values: Record<string, string>): string
 }
 
 const PLACEHOLDERS = [
-  "full_name", "date_of_birth", "address", "phone", "email",
-  "emergency_contact_name", "emergency_contact_phone", "medical_notes",
-  "signature_name", "signed_date", "club_name",
+  "full_name",
+  "date_of_birth",
+  "address",
+  "phone",
+  "email",
+  "emergency_contact_name",
+  "emergency_contact_phone",
+  "medical_notes",
+  "signature_name",
+  "signed_date",
+  "club_name",
 ];
 
 const SAMPLE: Record<string, string> = {
@@ -40,7 +45,9 @@ const SAMPLE: Record<string, string> = {
 };
 
 export const Route = createFileRoute("/_authenticated/manager/waiver-template")({
-  head: () => ({ meta: [{ title: "Waiver template | UTS Jitsu" }, { name: "robots", content: "noindex" }] }),
+  head: () => ({
+    meta: [{ title: "Waiver template | UTS Jitsu" }, { name: "robots", content: "noindex" }],
+  }),
   component: EditorPage,
 });
 
@@ -58,7 +65,10 @@ function EditorPage() {
 
   useEffect(() => {
     fetchCurrent().then((t) => {
-      if (t) { setTitle(t.title); setBody(t.body_md); }
+      if (t) {
+        setTitle(t.title);
+        setBody(t.body_md);
+      }
       setLoading(false);
     });
   }, [fetchCurrent]);
@@ -85,7 +95,12 @@ function EditorPage() {
     setBody((b) => `${b}${b.endsWith(" ") || b === "" ? "" : " "}{{${name}}}`);
   }
 
-  if (loading) return <SiteLayout><div className="p-8">Loading...</div></SiteLayout>;
+  if (loading)
+    return (
+      <SiteLayout>
+        <div className="p-8">Loading...</div>
+      </SiteLayout>
+    );
 
   return (
     <SiteLayout>
@@ -94,21 +109,36 @@ function EditorPage() {
           <div>
             <h1 className="text-3xl font-black">Waiver template</h1>
             <p className="text-sm text-muted-foreground">
-              Edit the waiver text. Saving creates a new version. Past versions stay linked to their signed waivers.
+              Edit the waiver text. Saving creates a new version. Past versions stay linked to their
+              signed waivers.
             </p>
           </div>
-          <Button asChild variant="outline"><Link to="/account">Back to account</Link></Button>
+          <Button asChild variant="outline">
+            <Link to="/account">Back to account</Link>
+          </Button>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
           <div className="space-y-4">
             <div>
               <Label htmlFor="title">Title</Label>
-              <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} className="mt-1.5" />
+              <Input
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                maxLength={200}
+                className="mt-1.5"
+              />
             </div>
             <div>
               <Label htmlFor="body">Body (Markdown, use {"{{placeholder}}"} tokens)</Label>
-              <Textarea id="body" value={body} onChange={(e) => setBody(e.target.value)} rows={22} className="mt-1.5 font-mono text-sm" />
+              <Textarea
+                id="body"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={22}
+                className="mt-1.5 font-mono text-sm"
+              />
             </div>
             <Button onClick={onSave} disabled={saving || !title || !body}>
               {saving ? "Saving..." : "Save as new version"}
@@ -117,7 +147,9 @@ function EditorPage() {
 
           <aside className="space-y-4">
             <Card>
-              <CardHeader><CardTitle className="text-base">Placeholders</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-base">Placeholders</CardTitle>
+              </CardHeader>
               <CardContent className="flex flex-wrap gap-2">
                 {PLACEHOLDERS.map((p) => (
                   <button
@@ -133,12 +165,13 @@ function EditorPage() {
         </div>
 
         <Card>
-          <CardHeader><CardTitle className="text-base">Preview (with sample values)</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">Preview (with sample values)</CardTitle>
+          </CardHeader>
           <CardContent>
             <div className="prose prose-sm max-w-none prose-headings:font-bold prose-headings:text-foreground prose-p:leading-relaxed prose-strong:text-foreground">
               <ReactMarkdown>{preview}</ReactMarkdown>
             </div>
-
           </CardContent>
         </Card>
       </section>

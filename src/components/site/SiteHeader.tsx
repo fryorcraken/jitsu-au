@@ -47,7 +47,10 @@ export function SiteHeader() {
         <div className="hidden items-center gap-2 md:flex">
           {user ? (
             <Button asChild size="sm" variant="outline">
-              <Link to="/account"><User className="mr-1 h-4 w-4" />Account</Link>
+              <Link to="/account">
+                <User className="mr-1 h-4 w-4" />
+                Account
+              </Link>
             </Button>
           ) : (
             <Button asChild size="sm" variant="ghost">
@@ -98,7 +101,9 @@ export function SiteHeader() {
             </Link>
           )}
           <Button asChild size="sm" className="mt-2">
-            <Link to="/register-interest" onClick={() => setOpen(false)}>Register interest</Link>
+            <Link to="/register-interest" onClick={() => setOpen(false)}>
+              Register interest
+            </Link>
           </Button>
         </nav>
       </div>

@@ -10,10 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const Route = createFileRoute("/reset-password")({
   head: () => ({
-    meta: [
-      { title: "Reset password | UTS Jitsu" },
-      { name: "robots", content: "noindex" },
-    ],
+    meta: [{ title: "Reset password | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
   component: ResetPasswordPage,
 });

@@ -14,7 +14,11 @@ export const Route = createFileRoute("/register-interest")({
   head: () => ({
     meta: [
       { title: "Register your interest | UTS Jitsu" },
-      { name: "description", content: "Register your interest at UTS Jitsu. We'll be in touch to confirm your first session." },
+      {
+        name: "description",
+        content:
+          "Register your interest at UTS Jitsu. We'll be in touch to confirm your first session.",
+      },
       { property: "og:title", content: "Register your interest | UTS Jitsu" },
       { property: "og:description", content: "Register your interest at UTS Jitsu." },
       { property: "og:url", content: "https://jitsu.au/register-interest" },
@@ -56,11 +60,13 @@ function RegisterInterest() {
   return (
     <SiteLayout>
       <section className="mx-auto max-w-2xl px-4 py-16 md:py-20">
-        <p className="text-sm font-semibold uppercase tracking-wider text-primary">Register interest</p>
+        <p className="text-sm font-semibold uppercase tracking-wider text-primary">
+          Register interest
+        </p>
         <h1 className="mt-3 text-4xl font-bold">Register your interest.</h1>
         <p className="mt-3 text-muted-foreground">
-          Leave your details and we'll be in touch to lock in your first session. Your
-          first two classes are on us.
+          Leave your details and we'll be in touch to lock in your first session. Your first two
+          classes are on us.
         </p>
 
         <form onSubmit={onSubmit} className="mt-8 space-y-5 rounded-2xl border bg-card p-6 md:p-8">
@@ -72,7 +78,14 @@ function RegisterInterest() {
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" required maxLength={255} className="mt-1.5" />
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                required
+                maxLength={255}
+                className="mt-1.5"
+              />
             </div>
             <div>
               <Label htmlFor="phone">Phone (optional)</Label>
@@ -81,11 +94,19 @@ function RegisterInterest() {
           </div>
           <div className="flex items-center gap-2">
             <Checkbox id="uts_student" name="uts_student" />
-            <Label htmlFor="uts_student" className="font-normal">I'm a UTS student</Label>
+            <Label htmlFor="uts_student" className="font-normal">
+              I'm a UTS student
+            </Label>
           </div>
           <div>
             <Label htmlFor="experience">Martial arts experience (optional)</Label>
-            <Input id="experience" name="experience" maxLength={500} placeholder="e.g. total beginner, 2 years BJJ..." className="mt-1.5" />
+            <Input
+              id="experience"
+              name="experience"
+              maxLength={500}
+              placeholder="e.g. total beginner, 2 years BJJ..."
+              className="mt-1.5"
+            />
           </div>
           <div>
             <Label htmlFor="message">Anything else? (optional)</Label>

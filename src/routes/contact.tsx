@@ -14,7 +14,10 @@ export const Route = createFileRoute("/contact")({
   head: () => ({
     meta: [
       { title: "Contact UTS Jitsu" },
-      { name: "description", content: "Get in touch with UTS Jitsu by phone, WhatsApp, or message." },
+      {
+        name: "description",
+        content: "Get in touch with UTS Jitsu by phone, WhatsApp, or message.",
+      },
       { property: "og:title", content: "Contact UTS Jitsu" },
       { property: "og:description", content: "Phone, WhatsApp, or send us a message." },
       { property: "og:url", content: "https://jitsu.au/contact" },
@@ -62,14 +65,20 @@ function Contact() {
 
         <div className="mt-10 grid gap-8 md:grid-cols-[1fr_1.2fr]">
           <div className="space-y-4">
-            <a href="tel:0493631759" className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted">
+            <a
+              href="tel:0493631759"
+              className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted"
+            >
               <Phone className="h-5 w-5 text-primary" />
               <div>
                 <p className="text-xs font-semibold uppercase text-muted-foreground">Phone</p>
                 <p className="font-medium">0493 631 759</p>
               </div>
             </a>
-            <a href="https://wa.me/61493631759" className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted">
+            <a
+              href="https://wa.me/61493631759"
+              className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted"
+            >
               <MessageCircle className="h-5 w-5 text-primary" />
               <div>
                 <p className="text-xs font-semibold uppercase text-muted-foreground">WhatsApp</p>
@@ -92,7 +101,14 @@ function Contact() {
               </div>
               <div>
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" required maxLength={255} className="mt-1.5" />
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  required
+                  maxLength={255}
+                  className="mt-1.5"
+                />
               </div>
             </div>
             <div>
@@ -101,7 +117,14 @@ function Contact() {
             </div>
             <div>
               <Label htmlFor="message">Message</Label>
-              <Textarea id="message" name="message" required maxLength={2000} rows={6} className="mt-1.5" />
+              <Textarea
+                id="message"
+                name="message"
+                required
+                maxLength={2000}
+                rows={6}
+                className="mt-1.5"
+              />
             </div>
             <Button type="submit" size="lg" disabled={loading} className="w-full">
               {loading ? "Sending..." : "Send message"}

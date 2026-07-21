@@ -7,9 +7,16 @@ export const Route = createFileRoute("/classes")({
   head: () => ({
     meta: [
       { title: "Classes & Schedule | UTS Jitsu" },
-      { name: "description", content: "Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. Monday, Wednesday and Saturday." },
+      {
+        name: "description",
+        content:
+          "Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. Monday, Wednesday and Saturday.",
+      },
       { property: "og:title", content: "Classes & Schedule | UTS Jitsu" },
-      { property: "og:description", content: "Monday, Wednesday and Saturday classes at ActivateFit Gym, Ultimo." },
+      {
+        property: "og:description",
+        content: "Monday, Wednesday and Saturday classes at ActivateFit Gym, Ultimo.",
+      },
       { property: "og:url", content: "https://jitsu.au/classes" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/classes" }],
@@ -30,7 +37,8 @@ function Classes() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Classes</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">Train with us in Ultimo.</h1>
         <p className="mt-5 text-lg text-muted-foreground">
-          Sessions run at ActivateFit Gym on Harris Street, a modern, well-equipped facility on the main UTS campus, easy to reach from the CBD.
+          Sessions run at ActivateFit Gym on Harris Street, a modern, well-equipped facility on the
+          main UTS campus, easy to reach from the CBD.
         </p>
       </section>
 
@@ -80,7 +88,10 @@ function Classes() {
             </p>
             <h2 className="mt-2 text-2xl font-bold">ActivateFit Gym, Harris Street, Ultimo NSW</h2>
             <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-              <Phone className="h-4 w-4" /> <a href="tel:0493631759" className="hover:text-foreground">0493 631 759</a>
+              <Phone className="h-4 w-4" />{" "}
+              <a href="tel:0493631759" className="hover:text-foreground">
+                0493 631 759
+              </a>
             </p>
           </div>
           <div className="mt-6 flex flex-wrap gap-3 md:mt-0">
