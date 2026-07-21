@@ -55,7 +55,7 @@ export function SiteHeader() {
             </Button>
           ) : (
             <Button asChild size="sm" variant="ghost">
-              <Link to="/auth">Sign in</Link>
+              <Link to="/auth">Member login</Link>
             </Button>
           )}
           <Button asChild size="sm">
@@ -98,7 +98,7 @@ export function SiteHeader() {
               className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={() => setOpen(false)}
             >
-              Sign in
+              Member login
             </Link>
           )}
           <Button asChild size="sm" className="mt-2">
