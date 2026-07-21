@@ -33,3 +33,47 @@ export function parseWaiverBlocks(body: string): WaiverBlock[] {
   }
   return blocks;
 }
+
+/** Waiver field values used to fill `{{placeholder}}` tokens in the body. */
+export type WaiverPlaceholderInput = {
+  fullName: string;
+  dateOfBirth: string;
+  address: string;
+  phone: string;
+  email: string;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+  medicalNotes: string;
+  signatureName: string;
+  clubName: string;
+  /** Pre-formatted signing date for `{{signed_date}}` (empty string if unsigned). */
+  signedDate: string;
+};
+
+/**
+ * Map waiver field values to the `{{token}}` names used in template bodies.
+ * The names match the placeholder chips in the waiver-template editor.
+ */
+export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<string, string> {
+  return {
+    full_name: v.fullName,
+    date_of_birth: v.dateOfBirth,
+    address: v.address,
+    phone: v.phone,
+    email: v.email,
+    emergency_contact_name: v.emergencyContactName,
+    emergency_contact_phone: v.emergencyContactPhone,
+    medical_notes: v.medicalNotes || "None provided",
+    signature_name: v.signatureName || v.fullName,
+    signed_date: v.signedDate,
+    club_name: v.clubName,
+  };
+}
+
+/**
+ * Replace `{{placeholder}}` tokens in a template body with the given values.
+ * Unknown tokens are left intact so authoring mistakes stay visible.
+ */
+export function applyWaiverPlaceholders(body: string, values: Record<string, string>): string {
+  return body.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (k in values ? values[k] : `{{${k}}}`));
+}

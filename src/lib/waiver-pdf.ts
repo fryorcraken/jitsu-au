@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, degrees, type PDFFont, type PDFPage } from "pdf-lib";
+import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "./waiver-document";
 
 export type WaiverPdfData = {
   full_name: string;
@@ -9,9 +10,8 @@ export type WaiverPdfData = {
   emergency_contact_name: string;
   emergency_contact_phone: string;
   medical_notes: string;
-  ack_risk: boolean;
-  ack_release: boolean;
-  ack_media: boolean;
+  /** Template-defined acknowledgements + whether each was accepted. */
+  acknowledgements: { label: string; checked: boolean }[];
   signature_name: string;
   signed_at: string;
   template_title: string;
@@ -29,10 +29,6 @@ export type WaiverPdfData = {
   /** If true, overlay a DRAFT watermark and skip signed-at footer */
   draft?: boolean;
 };
-
-export function applyPlaceholders(body: string, values: Record<string, string>): string {
-  return body.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (k in values ? values[k] : `{{${k}}}`));
-}
 
 export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -112,8 +108,22 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   drawText(dateLabel, { size: 9, color: muted });
   y -= 10;
 
-  // Body: parse simple markdown-ish (# heading, **bold**, ---)
-  const paragraphs = data.template_body.split(/\n{2,}/);
+  // Body: parse simple markdown-ish (# heading, **bold**, ---). Participant
+  // data appears only where the body/labels use a {{placeholder}}.
+  const placeholders = buildWaiverPlaceholders({
+    fullName: data.full_name,
+    dateOfBirth: data.date_of_birth,
+    address: data.address,
+    phone: data.phone,
+    email: data.email,
+    emergencyContactName: data.emergency_contact_name,
+    emergencyContactPhone: data.emergency_contact_phone,
+    medicalNotes: data.medical_notes,
+    signatureName: data.signature_name,
+    clubName: data.club_name,
+    signedDate: data.draft ? "" : new Date(data.signed_at).toLocaleDateString("en-AU"),
+  });
+  const paragraphs = applyWaiverPlaceholders(data.template_body, placeholders).split(/\n{2,}/);
   for (const raw of paragraphs) {
     const block = raw.trim();
     if (!block) continue;
@@ -143,67 +153,30 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     y -= 4;
   }
 
-  // Details table
-  y -= 8;
-  ensureSpace(20);
-  drawText("Participant details", { size: 13, font: bold, color: primary });
-  const rows: [string, string][] = [
-    ["Full name", data.full_name],
-    ["Date of birth", data.date_of_birth],
-    ["Address", data.address],
-    ["Phone", data.phone],
-    ["Email", data.email],
-    [
-      "Emergency contact",
-      `${data.emergency_contact_name}${data.emergency_contact_phone ? ` (${data.emergency_contact_phone})` : ""}`,
-    ],
-    ["Medical notes", data.medical_notes || "None provided"],
-  ];
-  for (const [label, value] of rows) {
-    ensureSpace(16);
-    page.drawText(label, { x: margin, y: y - 10, size: 9, font: bold, color: muted });
-    y -= 12;
-    for (const line of wrap(value || "—", 11, font)) {
-      ensureSpace(14);
-      page.drawText(line, { x: margin, y: y - 11, size: 11, font, color: ink });
-      y -= 14;
-    }
-    y -= 2;
-  }
-
-  // Acknowledgements
-  y -= 6;
-  ensureSpace(20);
-  drawText("Acknowledgements", { size: 13, font: bold, color: primary });
-  const acks: [boolean, string][] = [
-    [
-      data.ack_risk,
-      "I understand the risks of Japanese Jiu-Jitsu training and participate voluntarily.",
-    ],
-    [
-      data.ack_release,
-      "I release Sydney Jitsu Inc, UTS Jitsu, its instructors and training partners from liability, except for gross negligence.",
-    ],
-    [data.ack_media, "I consent to photos and video for club promotion (optional)."],
-  ];
-  for (const [checked, text] of acks) {
+  // Acknowledgements (defined on the template)
+  if (data.acknowledgements.length > 0) {
+    y -= 6;
     ensureSpace(20);
-    page.drawRectangle({
-      x: margin,
-      y: y - 12,
-      width: 10,
-      height: 10,
-      borderColor: ink,
-      borderWidth: 0.8,
-    });
-    if (checked) {
-      page.drawText("X", { x: margin + 2, y: y - 11, size: 9, font: bold, color: primary });
+    drawText("Acknowledgements", { size: 13, font: bold, color: primary });
+    for (const ack of data.acknowledgements) {
+      ensureSpace(20);
+      page.drawRectangle({
+        x: margin,
+        y: y - 12,
+        width: 10,
+        height: 10,
+        borderColor: ink,
+        borderWidth: 0.8,
+      });
+      if (ack.checked) {
+        page.drawText("X", { x: margin + 2, y: y - 11, size: 9, font: bold, color: primary });
+      }
+      const lines = wrap(applyWaiverPlaceholders(ack.label, placeholders), 10, font);
+      for (let i = 0; i < lines.length; i++) {
+        page.drawText(lines[i], { x: margin + 18, y: y - 10 - i * 12, size: 10, font, color: ink });
+      }
+      y -= Math.max(16, lines.length * 12 + 4);
     }
-    const lines = wrap(text, 10, font);
-    for (let i = 0; i < lines.length; i++) {
-      page.drawText(lines[i], { x: margin + 18, y: y - 10 - i * 12, size: 10, font, color: ink });
-    }
-    y -= Math.max(16, lines.length * 12 + 4);
   }
 
   // Signature

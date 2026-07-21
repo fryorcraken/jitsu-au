@@ -85,9 +85,9 @@ export const waiverSubmitSchema = z
     emergency_contact_name: z.string().trim().min(1).max(120),
     emergency_contact_phone: z.string().trim().min(1).max(30),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
-    ack_risk: z.literal(true),
-    ack_release: z.literal(true),
-    ack_media: z.boolean(),
+    // Map of acknowledgement id -> accepted. Which ids are *required* is defined
+    // on the template, so that check lives in `missingRequiredAcks`, not here.
+    acknowledgements: z.record(z.string(), z.boolean()).default({}),
     signature_name: z.string().trim().max(120).optional().or(z.literal("")),
     signature_image: sigImage,
     is_minor: z.boolean().optional().default(false),
@@ -121,9 +121,21 @@ export const waiverSubmitSchema = z
 
 export type WaiverSubmitInput = z.infer<typeof waiverSubmitSchema>;
 
+// ---- Acknowledgements (defined on the template, edited by managers) ----
+
+export const acknowledgementDefSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(500),
+  required: z.boolean(),
+});
+export type AcknowledgementDef = z.infer<typeof acknowledgementDefSchema>;
+
+export const templateAcknowledgementsSchema = z.array(acknowledgementDefSchema).max(20);
+
 // ---- Manager: save waiver template ----
 
 export const saveTemplateSchema = z.object({
   title: z.string().trim().min(1).max(200),
   body_md: z.string().trim().min(1).max(30000),
+  acknowledgements: templateAcknowledgementsSchema.default([]),
 });
