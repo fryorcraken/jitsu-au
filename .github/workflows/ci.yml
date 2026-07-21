@@ -21,10 +21,12 @@ jobs:
         with:
           bun-version: latest
 
-      # No frozen lockfile: bun.lock is materialised in Lovable's build
-      # environment, so let CI resolve/refresh it against the public registry.
+      # Lovable pins tarball URLs to its private mirror (unreachable in CI), so
+      # a plain `bun install` 403s here. This helper rewrites the pinned base
+      # URL to public npm and installs Lovable's exact locked versions, then
+      # restores bun.lock. See CLAUDE.md > Lock file strategy.
       - name: Install dependencies
-        run: bun install
+        run: bash scripts/bun-install.sh
 
       - name: Lint
         run: bun run lint
