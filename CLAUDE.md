@@ -208,15 +208,41 @@ Signed waiver PDFs and signature PNGs are stored in the Supabase Storage
   green — fix the code or fix the test on purpose, and say which in the commit.
   `bun run test` must pass before you push.
 - **CI:** `.github/workflows/ci.yml` runs lint → test → build on Linux with Bun
-  for every PR and pushes to `main`. It uses `bun install` (not
-  `--frozen-lockfile`): `bun.lock` is materialised in Lovable's build
-  environment, so CI resolves against the public npm registry.
+  for every PR and pushes to `main`. It installs via `bash scripts/bun-install.sh`
+  (see Lock file strategy below), not a plain `bun install`.
 
-> Note on installing deps: the default registry in `bun.lock` is Lovable's
-> private mirror. Some sandboxes block it; if `bun install` 403s on
-> `europe-west1-npm.pkg.dev`, install against public npm
-> (`bun install --registry=https://registry.npmjs.org`) — package contents are
-> identical.
+## Lock file strategy (Lovable ⇄ Claude/CI)
+
+`bun.lock` has to serve two environments that resolve dependencies differently,
+and **Lovable's copy is the single source of truth** — never commit a lockfile
+Claude or CI produced.
+
+- **Lovable** resolves against its **private Artifact Registry mirror**
+  (`*.pkg.dev/<project>/sandbox-npm-cache/…`) and pins those *absolute* tarball
+  URLs into `bun.lock` (~137 of them). That mirror is **unreachable** from
+  Claude sandboxes and GitHub CI (403 at the proxy), and needs no auth for
+  Lovable's own builds.
+- A lockfile resolved against **public npm** records *no* explicit tarball URLs
+  (they default implicitly), so the two forms are structurally incompatible:
+  whichever environment runs `bun install` rewrites the other's lock. That is
+  why `bun.lock` churns on Lovable "Changes" commits — leave it to Lovable.
+- ⚠️ `bun install --registry=https://registry.npmjs.org` **does not fix a cold
+  install**: `--registry` only changes the *resolution* registry, not the
+  absolute tarball URLs already pinned in a text lockfile, so bun still hits the
+  private mirror and 403s. (It appears to work only when packages are already in
+  bun's global cache.)
+
+**To install (Claude sandbox, local dev, CI): `bun run deps`**
+(`bash scripts/bun-install.sh`). It rewrites the private-mirror base URL to
+public npm — the path structure and integrity hashes are identical and every
+package (including `@lovable.dev/*`) is on public npm — installs Lovable's
+**exact locked versions**, then **restores `bun.lock`** so the rewrite is never
+committed. The 24h supply-chain guard in `bunfig.toml` still applies.
+
+**Never commit `bun.lock`.** If a stray `bun install` left it modified, restore
+it before committing: `git checkout bun.lock`. Add/remove dependencies by
+editing `package.json` and letting **Lovable** re-resolve the lockfile — do not
+hand-produce a public-npm lock.
 
 ## Conventions & style
 
