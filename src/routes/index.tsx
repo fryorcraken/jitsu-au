@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Shield, Users, Dumbbell, Award, MapPin, Clock } from "lucide-react";
+import { ArrowRight, Shield, Users, Dumbbell, Award, MapPin, Clock, Sparkles } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import heroAsset from "@/assets/training1.jpg.asset.json";
@@ -71,6 +71,31 @@ function Home() {
             />
           </div>
         </div>
+      </section>
+
+      {/* First-class teaser */}
+      <section className="mx-auto max-w-6xl px-4 pt-4">
+        <Link
+          to="/first-class"
+          className="group flex flex-col gap-3 rounded-2xl border bg-secondary p-6 transition-colors hover:bg-muted sm:flex-row sm:items-center sm:justify-between sm:gap-6 md:p-8"
+        >
+          <div className="flex items-start gap-4">
+            <Sparkles className="mt-0.5 h-6 w-6 shrink-0 text-primary" />
+            <div>
+              <p className="text-lg font-semibold">
+                New here? Here's exactly what your first class looks like
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                A step-by-step walkthrough — what to expect, what to bring and how the free trial
+                works.
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary">
+            Read the guide{" "}
+            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </Link>
       </section>
 
       {/* Value props */}

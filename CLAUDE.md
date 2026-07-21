@@ -218,16 +218,16 @@ and **Lovable's copy is the single source of truth** — never commit a lockfile
 Claude or CI produced.
 
 - **Lovable** resolves against its **private Artifact Registry mirror**
-  (`*.pkg.dev/<project>/sandbox-npm-cache/…`) and pins those *absolute* tarball
+  (`*.pkg.dev/<project>/sandbox-npm-cache/…`) and pins those _absolute_ tarball
   URLs into `bun.lock` (~137 of them). That mirror is **unreachable** from
   Claude sandboxes and GitHub CI (403 at the proxy), and needs no auth for
   Lovable's own builds.
-- A lockfile resolved against **public npm** records *no* explicit tarball URLs
+- A lockfile resolved against **public npm** records _no_ explicit tarball URLs
   (they default implicitly), so the two forms are structurally incompatible:
   whichever environment runs `bun install` rewrites the other's lock. That is
   why `bun.lock` churns on Lovable "Changes" commits — leave it to Lovable.
 - ⚠️ `bun install --registry=https://registry.npmjs.org` **does not fix a cold
-  install**: `--registry` only changes the *resolution* registry, not the
+  install**: `--registry` only changes the _resolution_ registry, not the
   absolute tarball URLs already pinned in a text lockfile, so bun still hits the
   private mirror and 403s. (It appears to work only when packages are already in
   bun's global cache.)
@@ -285,3 +285,14 @@ Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
    coverage for any behavior you change or add (see Testing & CI). A change that
    touches tested logic without touching its tests is incomplete.
 6. Verify with `bun run test`, `bun run lint`, and `bun run build`.
+
+## After pushing — always do this
+
+Once a change is pushed to its feature branch, always:
+
+1. **Open a pull request** for the branch (targeting `main`), using any repo PR
+   template if present. Do this without waiting to be asked.
+2. **Watch CI** on the PR (`subscribe_pr_activity`), and drive it green: on a
+   failure, diagnose and push the fix; keep going until CI passes.
+3. **Run a code review** of the PR's diff (the `/review` workflow) and address
+   or surface anything it raises.

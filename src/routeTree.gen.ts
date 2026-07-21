@@ -16,6 +16,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as FaqRouteImport } from './routes/faq'
+import { Route as FirstClassRouteImport } from './routes/first-class'
 import { Route as InstructorsRouteImport } from './routes/instructors'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as RegisterInterestRouteImport } from './routes/register-interest'
@@ -61,6 +62,11 @@ const ContactRoute = ContactRouteImport.update({
 const FaqRoute = FaqRouteImport.update({
   id: '/faq',
   path: '/faq',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FirstClassRoute = FirstClassRouteImport.update({
+  id: '/first-class',
+  path: '/first-class',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InstructorsRoute = InstructorsRouteImport.update({
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
+  '/first-class': typeof FirstClassRoute
   '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
@@ -153,6 +160,7 @@ export interface FileRoutesByTo {
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
+  '/first-class': typeof FirstClassRoute
   '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
@@ -175,6 +183,7 @@ export interface FileRoutesById {
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
+  '/first-class': typeof FirstClassRoute
   '/instructors': typeof InstructorsRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
@@ -197,6 +206,7 @@ export interface FileRouteTypes {
     | '/classes'
     | '/contact'
     | '/faq'
+    | '/first-class'
     | '/instructors'
     | '/pricing'
     | '/register-interest'
@@ -217,6 +227,7 @@ export interface FileRouteTypes {
     | '/classes'
     | '/contact'
     | '/faq'
+    | '/first-class'
     | '/instructors'
     | '/pricing'
     | '/register-interest'
@@ -238,6 +249,7 @@ export interface FileRouteTypes {
     | '/classes'
     | '/contact'
     | '/faq'
+    | '/first-class'
     | '/instructors'
     | '/pricing'
     | '/register-interest'
@@ -260,6 +272,7 @@ export interface RootRouteChildren {
   ClassesRoute: typeof ClassesRoute
   ContactRoute: typeof ContactRoute
   FaqRoute: typeof FaqRoute
+  FirstClassRoute: typeof FirstClassRoute
   InstructorsRoute: typeof InstructorsRoute
   PricingRoute: typeof PricingRoute
   RegisterInterestRoute: typeof RegisterInterestRoute
@@ -320,6 +333,13 @@ declare module '@tanstack/react-router' {
       path: '/faq'
       fullPath: '/faq'
       preLoaderRoute: typeof FaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/first-class': {
+      id: '/first-class'
+      path: '/first-class'
+      fullPath: '/first-class'
+      preLoaderRoute: typeof FirstClassRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/instructors': {
@@ -433,6 +453,7 @@ const rootRouteChildren: RootRouteChildren = {
   ClassesRoute: ClassesRoute,
   ContactRoute: ContactRoute,
   FaqRoute: FaqRoute,
+  FirstClassRoute: FirstClassRoute,
   InstructorsRoute: InstructorsRoute,
   PricingRoute: PricingRoute,
   RegisterInterestRoute: RegisterInterestRoute,
@@ -446,3 +467,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
