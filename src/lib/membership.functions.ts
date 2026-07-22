@@ -14,6 +14,7 @@ import {
   setMembershipStatusSchema,
   startMembershipSchema,
 } from "@/lib/validation";
+import type { MembershipPlanKind, MembershipStatus } from "@/lib/validation";
 import type {
   BankTransactionRow,
   MembershipClient,
@@ -210,9 +211,11 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const memberships = (rows ?? []).map((r) => projectMembership(r, planById.get(r.plan_id)));
     const lifecycle = deriveLifecycleStatus({
       hasWaiver: Boolean(waiver),
+      // The generated Supabase types widen these enum columns to `string`; the
+      // DB constrains them to the narrow unions deriveLifecycleStatus expects.
       memberships: (rows ?? []).map((r) => ({
-        status: r.status,
-        kind: planById.get(r.plan_id)?.kind ?? "session",
+        status: r.status as MembershipStatus,
+        kind: (planById.get(r.plan_id)?.kind ?? "session") as MembershipPlanKind,
         price_cents: r.price_cents,
       })),
     });
@@ -294,7 +297,7 @@ export const startMembership = createServerFn({ method: "POST" })
     if (existingPending) {
       inserted = existingPending;
     } else {
-      const insert: Partial<MembershipRow> = {
+      const insert = {
         user_id: context.userId,
         plan_id: plan.id,
         status: "pending",
@@ -351,7 +354,7 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
 
-    const values: Partial<MembershipPlanRow> = {
+    const values = {
       code: data.code,
       name: data.name,
       description: data.description || null,
