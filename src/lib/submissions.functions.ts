@@ -27,13 +27,20 @@ export const submitInterest = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true };
     const supabase = serverSupabase();
-    const { error } = await supabase.from("interest_registrations").insert({
+    // Providing a phone number here is implicit consent to SMS/WhatsApp contact
+    // (the phone field carries a consent note). Record it so later forms can
+    // prefill their consent checkbox. Built as a variable + cast so the
+    // `sms_whatsapp_consent` key (absent from the stale generated Insert type)
+    // doesn't trip the excess-property check.
+    const interestRow = {
       name: data.name,
       email: data.email,
       phone: data.phone || null,
+      sms_whatsapp_consent: Boolean(data.phone && data.phone.trim()),
       experience: data.experience || null,
       message: data.message || null,
-    });
+    };
+    const { error } = await supabase.from("interest_registrations").insert(interestRow as never);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

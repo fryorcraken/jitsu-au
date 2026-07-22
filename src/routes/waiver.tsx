@@ -60,6 +60,7 @@ type Prefill = {
   phone?: string;
   email?: string;
   uts_student_number?: string | null;
+  sms_whatsapp_consent?: boolean | null;
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   medical_notes?: string;
@@ -151,12 +152,10 @@ function Waiver() {
           setLastName(s.last);
         }
         if (r.date_of_birth) setDob(r.date_of_birth);
-        // We already hold this returning member's number, so default their
-        // SMS/WhatsApp consent to checked (they can still opt out).
-        if (r.phone) {
-          setPhone(r.phone);
-          setSmsConsent(true);
-        }
+        if (r.phone) setPhone(r.phone);
+        // Prefill the consent checkbox from the member's stored consent (they
+        // can still change it).
+        if (typeof r.sms_whatsapp_consent === "boolean") setSmsConsent(r.sms_whatsapp_consent);
         if (r.email) setEmail(r.email);
         if (r.address) setAddress(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
