@@ -6,14 +6,17 @@ import { Button } from "@/components/ui/button";
 import { formatCents } from "@/lib/validation";
 import { listMembershipPlans } from "@/lib/membership.functions";
 
+type PlanSummary = Awaited<ReturnType<typeof listMembershipPlans>>[number];
+
 export const Route = createFileRoute("/pricing")({
   // Prices come from the manager-editable plan catalog (single source of truth).
-  // Fall back to null on any error so the page still renders with static copy.
-  loader: async () => {
+  // Fall back to an empty list on any error so the page still renders with the
+  // static copy. The explicit return type keeps both branches on one shape.
+  loader: async (): Promise<{ plans: PlanSummary[] }> => {
     try {
       return { plans: await listMembershipPlans() };
     } catch {
-      return { plans: [] as Awaited<ReturnType<typeof listMembershipPlans>> };
+      return { plans: [] };
     }
   },
   head: () => ({
@@ -144,7 +147,8 @@ function TierCard({ tier }: { tier: Tier }) {
 }
 
 function Pricing() {
-  const { plans } = Route.useLoaderData();
+  // `useLoaderData` widens to `any` for this route, so pin the shape explicitly.
+  const { plans }: { plans: PlanSummary[] } = Route.useLoaderData();
   const byCode = new Map(plans.map((p) => [p.code, p]));
 
   // Prefer the live catalog price; fall back to the static copy on the tier.
