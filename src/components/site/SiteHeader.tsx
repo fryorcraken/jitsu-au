@@ -1,13 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Menu, X, User, CreditCard, ChevronDown } from "lucide-react";
+import { Menu, X, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
 import { useAuth } from "@/hooks/useAuth";
@@ -21,11 +15,6 @@ const nav = [
   { to: "/pricing", label: "Pricing" },
   { to: "/faq", label: "FAQ" },
   { to: "/contact", label: "Contact" },
-] as const;
-
-const memberSpaceNav = [
-  { to: "/account", label: "Account", icon: User },
-  { to: "/membership", label: "Membership", icon: CreditCard },
 ] as const;
 
 export function SiteHeader() {
@@ -58,25 +47,12 @@ export function SiteHeader() {
         </nav>
         <div className="hidden items-center gap-2 md:flex">
           {user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline">
-                  <User className="mr-1 h-4 w-4" />
-                  Member space
-                  <ChevronDown className="ml-1 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {memberSpaceNav.map((n) => (
-                  <DropdownMenuItem key={n.to} asChild>
-                    <Link to={n.to}>
-                      <n.icon className="mr-2 h-4 w-4" />
-                      {n.label}
-                    </Link>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/account">
+                <User className="mr-1 h-4 w-4" />
+                Member space
+              </Link>
+            </Button>
           ) : (
             <Button asChild size="sm" variant="ghost">
               <Link to="/auth">Member login</Link>
@@ -109,22 +85,13 @@ export function SiteHeader() {
             </Link>
           ))}
           {user ? (
-            <>
-              <div className="px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Member space
-              </div>
-              {memberSpaceNav.map((n) => (
-                <Link
-                  key={n.to}
-                  to={n.to}
-                  className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={() => setOpen(false)}
-                >
-                  <n.icon className="h-4 w-4" />
-                  {n.label}
-                </Link>
-              ))}
-            </>
+            <Link
+              to="/account"
+              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setOpen(false)}
+            >
+              Member space
+            </Link>
           ) : (
             <Link
               to="/auth"
