@@ -376,6 +376,74 @@ export const matchTransactionSchema = z.object({
 });
 export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 
+// ---- Manager agent API (see src/lib/manager-agent.ts + AGENTS.md) ----
+//
+// A small HTTP surface a manager's AI agent can drive (via MCP or a skill). The
+// action names below are the contract; keep them in sync with AGENT_MANIFEST in
+// manager-agent.ts and the skill at .claude/skills/uts-manager-agent/.
+
+/** Actions the manager agent endpoint accepts. Order mirrors AGENT_MANIFEST. */
+export const managerAgentActions = ["list_users", "list_invoices", "edit_invoice"] as const;
+export type ManagerAgentAction = (typeof managerAgentActions)[number];
+
+/** Payment methods an invoice can carry (mirrors the memberships CHECK). */
+export const invoicePaymentMethods = ["bank_transfer", "stripe", "manual"] as const;
+
+/**
+ * `edit_invoice` params. An "invoice" is a membership row — its price, payment
+ * reference and status ARE the invoice. Only correctable detail fields are
+ * editable, and `status` deliberately EXCLUDES "active": activation grants the
+ * member role and emails the member, so it must run through bank reconciliation
+ * / setMembershipStatus, never a raw field edit here.
+ */
+export const editInvoiceSchema = z
+  .object({
+    id: z.string().uuid(),
+    price_cents: z.number().int().min(0).max(1_000_000).optional(),
+    notes: z.string().trim().max(2000).optional(),
+    payment_reference: z.string().trim().min(1).max(64).optional(),
+    payment_method: z.enum(invoicePaymentMethods).optional(),
+    status: z.enum(["pending", "cancelled", "expired"]).optional(),
+  })
+  .refine(
+    (d) =>
+      d.price_cents !== undefined ||
+      d.notes !== undefined ||
+      d.payment_reference !== undefined ||
+      d.payment_method !== undefined ||
+      d.status !== undefined,
+    { message: "Provide at least one invoice field to edit." },
+  );
+export type EditInvoiceInput = z.infer<typeof editInvoiceSchema>;
+
+/** `list_users` params — optional lifecycle filter + result cap. */
+export const listAgentUsersSchema = z.object({
+  status: z.enum(lifecycleStatuses).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+});
+export type ListAgentUsersInput = z.infer<typeof listAgentUsersSchema>;
+
+/** `list_invoices` params — optional membership-status filter + result cap. */
+export const listAgentInvoicesSchema = z.object({
+  status: z.enum(membershipStatuses).optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+});
+export type ListAgentInvoicesInput = z.infer<typeof listAgentInvoicesSchema>;
+
+// ---- Manager API tokens (see src/lib/manager-api-tokens.ts) ----
+
+/** Mint a new manager API token — just a human label to tell tokens apart. */
+export const createApiTokenSchema = z.object({
+  label: z.string().trim().min(1, "Give the token a name.").max(80),
+});
+export type CreateApiTokenInput = z.infer<typeof createApiTokenSchema>;
+
+/** Revoke an existing token by id. */
+export const revokeApiTokenSchema = z.object({
+  id: z.string().uuid(),
+});
+export type RevokeApiTokenInput = z.infer<typeof revokeApiTokenSchema>;
+
 // ---- Manager: club settings (invoice payment instructions) ----
 
 /** Default invoice instructions used until a manager customizes them. */

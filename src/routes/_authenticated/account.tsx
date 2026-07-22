@@ -89,6 +89,9 @@ function AccountPage() {
               <Button asChild variant="outline">
                 <Link to="/manager/settings">Club settings</Link>
               </Button>
+              <Button asChild variant="outline">
+                <Link to="/manager/api-tokens">Agent access</Link>
+              </Button>
             </CardContent>
           </Card>
         )}
