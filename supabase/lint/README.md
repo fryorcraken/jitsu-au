@@ -28,6 +28,23 @@ without failing CI. To also gate performance, set
 `FAIL_CATEGORIES: SECURITY,PERFORMANCE`; to make the advisors report-only, set
 `FAIL_CATEGORIES:` (empty).
 
+## Acknowledged findings (allowlist)
+
+Some findings are intentional and reviewed, so they should be reported but not
+block. List them in `advisors-allowlist.txt`: each non-comment line is matched
+as a **substring of the finding's `cache_key`** (which starts with the lint
+name), so a bare lint name acknowledges every instance while a longer
+`lint_schema_object` prefix acknowledges just one object. Anything not listed
+still fails CI, so a genuinely new security regression is never silently
+ignored. Document why each entry is safe.
+
+Current entries:
+
+- `authenticated_security_definer_function_executable_public_has_role` — `has_role`
+  is a `SECURITY DEFINER` helper used by RLS policies **and** called directly as
+  a server RPC, so `authenticated` must keep `EXECUTE` (see migration
+  `20260721023901`). The lint's suggested fix would break every manager check.
+
 ## Updating the advisor query
 
 `splinter.sql` is a **vendored** copy of

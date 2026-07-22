@@ -19,9 +19,17 @@ in code):
                    above categories (default: "WARN,ERROR"). Splinter emits
                    ERROR, WARN and INFO.
 
+Acknowledged findings: some findings are intentional and reviewed (e.g. a
+SECURITY DEFINER helper deliberately exposed to `authenticated` for RLS). List
+them in an allowlist file (default: advisors-allowlist.txt next to this script,
+override with ADVISORS_ALLOWLIST) so they no longer block — while any NEW
+finding still fails CI. Each non-comment line is matched as a substring of a
+finding's `cache_key`; use the bare lint name to acknowledge every instance, or
+a longer object-scoped prefix to acknowledge just one object.
+
 Every finding is printed grouped by severity so non-blocking ones (e.g.
-performance INFO) stay visible in the logs; only findings matching BOTH a
-failing category and a failing level flip the exit code to 1.
+performance INFO) stay visible in the logs; only findings matching a failing
+category and level, and NOT acknowledged, flip the exit code to 1.
 
 Usage: check-advisors.py <findings.csv>
 """
@@ -31,6 +39,8 @@ from __future__ import annotations
 import csv
 import os
 import sys
+
+DEFAULT_ALLOWLIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "advisors-allowlist.txt")
 
 # Column order emitted by supabase/lint/splinter.sql.
 FIELDS = [
@@ -74,6 +84,29 @@ def load_findings(path: str) -> list[dict]:
     return findings
 
 
+def load_allowlist(path: str) -> list[str]:
+    """Read acknowledged-finding patterns; missing file means an empty allowlist."""
+    if not os.path.exists(path):
+        return []
+    entries: list[str] = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.split("#", 1)[0].strip()
+            if line:
+                entries.append(line)
+    return entries
+
+
+def is_acknowledged(row: dict, allowlist: list[str]) -> bool:
+    """A finding is acknowledged if any allowlist entry is a substring of its cache_key.
+
+    cache_key starts with the lint name, so a bare lint name acknowledges every
+    instance while a longer object-scoped prefix acknowledges just one object.
+    """
+    cache_key = row["cache_key"].strip()
+    return any(entry in cache_key for entry in allowlist)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print(f"usage: {argv[0]} <findings.csv>", file=sys.stderr)
@@ -89,6 +122,7 @@ def main(argv: list[str]) -> int:
         for l in os.environ.get("FAIL_LEVELS", "WARN,ERROR").split(",")
         if l.strip()
     }
+    allowlist = load_allowlist(os.environ.get("ADVISORS_ALLOWLIST", DEFAULT_ALLOWLIST))
 
     findings = load_findings(argv[1])
 
@@ -96,17 +130,24 @@ def main(argv: list[str]) -> int:
         print("✅ Supabase advisors: no findings.")
         return 0
 
-    blocking = [
-        row
-        for row in findings
-        if row["_level"] in fail_levels and (fail_categories & set(row["_categories"]))
-    ]
+    blocking: list[dict] = []
+    acknowledged: list[dict] = []
+    for row in findings:
+        gated = row["_level"] in fail_levels and bool(fail_categories & set(row["_categories"]))
+        if gated and is_acknowledged(row, allowlist):
+            row["_ack"] = True
+            acknowledged.append(row)
+        elif gated:
+            row["_ack"] = False
+            blocking.append(row)
+        else:
+            row["_ack"] = False
 
     # Report every finding, most severe first, so nothing is hidden.
     findings.sort(key=lambda r: (LEVEL_ORDER.get(r["_level"], 9), r["name"]))
     print(f"Supabase advisors: {len(findings)} finding(s).\n")
     for row in findings:
-        marker = "❌" if row in blocking else "•"
+        marker = "❌" if row in blocking else ("✓ack" if row.get("_ack") else "•")
         cats = ",".join(row["_categories"]) or "-"
         print(f"{marker} [{row['_level']}/{cats}] {row['name']}")
         detail = row["detail"].strip()
@@ -121,6 +162,8 @@ def main(argv: list[str]) -> int:
         f"categories={{{','.join(sorted(fail_categories)) or '(none)'}}} "
         f"levels={{{','.join(sorted(fail_levels)) or '(none)'}}}"
     )
+    if acknowledged:
+        print(f"ℹ️  {len(acknowledged)} acknowledged (allowlisted) finding(s) not blocking.")
     if blocking:
         print(f"❌ {len(blocking)} blocking advisor finding(s) [{gate}].")
         return 1

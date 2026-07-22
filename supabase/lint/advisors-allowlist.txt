@@ -1,0 +1,20 @@
+# Acknowledged Supabase advisor findings — reviewed and intentionally accepted.
+#
+# check-advisors.py treats a finding as acknowledged (reported, not blocking)
+# when any line below is a SUBSTRING of the finding's Splinter `cache_key`.
+# cache_key starts with the lint name, so:
+#   - a bare lint name        -> acknowledges every instance of that lint
+#   - a "lint_schema_object"  -> acknowledges just that one object
+# Blank lines and everything after '#' are ignored. Keep this list small and
+# document WHY each entry is safe; anything not listed still fails CI.
+
+# --- 0029 authenticated_security_definer_function_executable ---
+# public.has_role(_user_id, _role) is a SECURITY DEFINER helper that is called
+# BOTH inside RLS policies (evaluated as the querying role) and directly as an
+# RPC by the server functions (context.supabase.rpc("has_role", ...)) in
+# membership/waiver/google-drive/manager-token/manager-agent code. `authenticated`
+# must therefore keep EXECUTE — see migration 20260721023901, which deliberately
+# revoked it from anon/PUBLIC but granted it to authenticated + service_role.
+# The lint's suggested fix (revoke EXECUTE / SECURITY INVOKER) would break every
+# manager check and RLS policy, so this exposure is intentional and accepted.
+authenticated_security_definer_function_executable_public_has_role
