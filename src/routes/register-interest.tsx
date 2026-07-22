@@ -19,7 +19,7 @@ export const Route = createFileRoute("/register-interest")({
       {
         name: "description",
         content:
-          "Start your free trial at UTS Jitsu. Tell us who you are and we'll get you on the mat — your first two classes are free.",
+          "Start your free trial at UTS Jitsu. Tell us who you are and we'll get you on the mat. Your first two classes are free.",
       },
       { property: "og:title", content: "Start your free trial | UTS Jitsu" },
       {
@@ -84,7 +84,7 @@ function RegisterInterest() {
           <div className="mt-8 rounded-2xl border bg-card p-6 md:p-8">
             <div className="flex items-center gap-2 text-primary">
               <FileSignature className="h-5 w-5" />
-              <p className="text-sm font-semibold">Sign your waiver now — it's prefilled</p>
+              <p className="text-sm font-semibold">Sign your waiver now, it's prefilled</p>
             </div>
             <p className="mt-2 text-muted-foreground">
               Two minutes and you're done before you even arrive. We've filled in your details from
@@ -101,7 +101,7 @@ function RegisterInterest() {
             <p className="text-sm font-medium">Not ready? No problem.</p>
             <p className="mt-1 text-sm text-muted-foreground">
               We'll email you the link and you can sign before you come, or we'll sort it at the
-              gym. Either way, just turn up to any beginners class (Mon or Wed) — your first two are
+              gym. Either way, just turn up to any beginners class (Mon or Wed). Your first two are
               free.
             </p>
           </div>
@@ -128,8 +128,8 @@ function RegisterInterest() {
         </p>
         <h1 className="mt-3 text-4xl font-bold">Start your free trial</h1>
         <p className="mt-3 text-muted-foreground">
-          Tell us who you are and we'll get you on the mat. Your first two classes are free — no
-          gear needed.
+          Tell us who you are and we'll get you on the mat. Your first two classes are free, no gear
+          needed.
         </p>
 
         <form onSubmit={onSubmit} className="mt-8 space-y-5 rounded-2xl border bg-card p-6 md:p-8">

@@ -38,7 +38,7 @@ export function OfferBanner() {
         >
           <span aria-hidden="true">🥋</span>
           <span>
-            Your first 2 classes are free — no gear, no commitment.{" "}
+            Your first 2 classes are free. No gear, no commitment.{" "}
             <span className="underline underline-offset-2">Start your free trial</span>
           </span>
         </Link>

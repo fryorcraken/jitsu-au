@@ -88,7 +88,7 @@ function Home() {
                 New here? Here's exactly what your first class looks like
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                A step-by-step walkthrough — what to expect, what to bring and how the free trial
+                A step-by-step walkthrough of what to expect, what to bring and how the free trial
                 works.
               </p>
             </div>
@@ -186,7 +186,7 @@ function Home() {
         <div className="rounded-3xl bg-primary p-10 text-primary-foreground md:p-16">
           <h2 className="text-3xl font-bold md:text-4xl">Ready to step on the mat?</h2>
           <p className="mt-3 max-w-2xl text-primary-foreground/80">
-            Tell us who you are and we'll get you on the mat. Your first two classes are free — no
+            Tell us who you are and we'll get you on the mat. Your first two classes are free, no
             gear needed. Takes 30 seconds to start.
           </p>
 

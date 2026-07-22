@@ -63,7 +63,7 @@ function Classes() {
             <p className="text-sm font-semibold uppercase tracking-wider text-primary">New here?</p>
             <h2 className="mt-2 text-2xl font-bold">Your first class, step by step</h2>
             <p className="mt-2 max-w-xl text-muted-foreground">
-              What to expect, what to bring and exactly what happens on the mat — plus how the free,
+              What to expect, what to bring and exactly what happens on the mat, plus how the free,
               no-commitment trial works.
             </p>
           </div>

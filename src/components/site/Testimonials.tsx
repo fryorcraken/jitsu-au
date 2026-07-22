@@ -7,7 +7,7 @@ export const GOOGLE_REVIEWS_URL = "https://maps.app.goo.gl/VhonWy3FDoyBpax59";
 const quotes = [
   {
     name: "Jane Doe",
-    text: "I walked in never having done a martial art and left grinning. Everyone was patient and welcoming — I booked my next class on the spot.",
+    text: "I walked in never having done a martial art and left grinning. Everyone was patient and welcoming, and I booked my next class on the spot.",
   },
   {
     name: "John Doe",
