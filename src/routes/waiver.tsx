@@ -194,7 +194,7 @@ function Waiver() {
     const sigImg = signatureMode === "draw" ? signatureImage : "";
     const sigName = signatureMode === "type" ? signatureName : "";
     if (!sigImg && !sigName.trim()) {
-      toast.error("Please add your signature — draw it or type your name.");
+      toast.error("Please add your signature by drawing it or typing your name.");
       return;
     }
     if (isMinor) {

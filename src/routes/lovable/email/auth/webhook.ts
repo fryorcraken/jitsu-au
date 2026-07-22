@@ -11,7 +11,8 @@ import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
 // Configuration
 const SITE_NAME = "UTS Jitsu";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const FROM_DOMAIN = "jitsu.au";
+// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
+const FROM_DOMAIN = "notify.jitsu.au";
 const SITE_URL = "https://jitsu.au";
 
 // The SDK handler owns verification, dispatch, and retry semantics; this file

@@ -17,6 +17,10 @@ Lovable's TanStack Start template.
 
 This project is connected to [Lovable](https://lovable.dev) (see `AGENTS.md`).
 
+- **Read `AGENTS.md` before you start.** It holds cross-tool directives that
+  apply to every agent working in this repo, including the writing-style rules
+  for public website copy (e.g. no em dashes in prose). Follow it alongside this
+  file.
 - **Never rewrite published git history** — no force-push, and no
   rebasing/amending/squashing commits that are already pushed. Doing so
   rewrites history on Lovable's side and the user can lose project history.
@@ -260,6 +264,11 @@ hand-produce a public-npm lock.
   `text-muted-foreground`, etc.) come from `styles.css`.
 - Every public page sets SEO `head()` meta (title/description/og/canonical);
   manager pages set `robots: noindex`. Match the existing pattern when adding pages.
+- **Copy voice:** user-facing website copy must read like a person wrote it, not
+  an AI. **No em dashes (`—`) in prose** — rewrite with a full stop, comma,
+  colon, or "and"/"but". See the "Writing style for website copy" section in
+  `AGENTS.md` for the full rules and allowed exceptions (numeric en-dash ranges,
+  empty-value placeholder glyphs).
 
 ## Environment variables
 
