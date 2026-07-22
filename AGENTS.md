@@ -22,11 +22,22 @@ driven directly by the bundled skill.
   - `GET  /api/manager/agent` → the self-describing **manifest** (the runtime
     source of truth for the current action set).
   - `POST /api/manager/agent` with `{ "action", "params" }` → dispatch.
-- **Auth:** `Authorization: Bearer <MANAGER_AGENT_API_KEY>`. Set the
-  `MANAGER_AGENT_API_KEY` env var (a random opaque string) on the server; when
-  it's unset the endpoint returns `503 not_configured`. The endpoint runs actions
-  with the service-role client, so the token grants manager-level access to the
-  exposed actions only — treat it as a secret.
+- **Auth:** `Authorization: Bearer <token>`. Tokens are **manager-issued and
+  revocable** — a manager mints them at `/manager/api-tokens` (route
+  `_authenticated/manager.api-tokens.tsx`). Only a SHA-256 hash is stored
+  (`manager_api_tokens` table); the raw token is shown once at creation. On each
+  request the endpoint looks the token up by hash, confirms it isn't revoked, and
+  re-checks the owner still holds the `manager` role. A `MANAGER_AGENT_API_KEY`
+  env var is accepted as an **optional break-glass fallback** (e.g. bootstrap /
+  CI); it is not required. The endpoint runs actions with the service-role
+  client, so a token grants manager-level access to the exposed actions — treat
+  it as a secret.
+  - Token management server functions: `src/lib/manager-api-tokens.functions.ts`
+    (`listApiTokens` / `createApiToken` / `revokeApiToken`); token crypto +
+    the paste-able agent prompt: `src/lib/manager-api-tokens.ts`.
+  - The `/manager/api-tokens` screen also renders a copy-paste **agent prompt**
+    (`buildAgentPrompt`) for Claude Code / opencode / Cursor and points at the
+    `uts-manager-agent` skill.
 - **Actions** (an "invoice" is a `memberships` row — its price/reference/status
   _are_ the invoice):
   - `list_users` — members and their lifecycle status, roles, and invoices.

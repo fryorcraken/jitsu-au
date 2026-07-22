@@ -89,6 +89,9 @@ function ManagerMembershipsPage() {
               <Link to="/manager/settings">Settings</Link>
             </Button>
             <Button asChild variant="outline">
+              <Link to="/manager/api-tokens">Agent access</Link>
+            </Button>
+            <Button asChild variant="outline">
               <Link to="/account">Back to account</Link>
             </Button>
           </div>

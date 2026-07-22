@@ -69,6 +69,17 @@ export type ClubSettingRow = {
   updated_by: string | null;
 };
 
+export type ManagerApiTokenRow = {
+  id: string;
+  label: string;
+  token_prefix: string;
+  token_hash: string;
+  created_by: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+
 // Loose Insert/Update: the server functions build explicit literal objects, so a
 // permissive partial shape is enough to satisfy the Supabase client generics.
 type TableDef<Row> = { Row: Row; Insert: Partial<Row>; Update: Partial<Row>; Relationships: [] };
@@ -78,6 +89,7 @@ type MembershipTables = {
   memberships: TableDef<MembershipRow>;
   bank_transactions: TableDef<BankTransactionRow>;
   club_settings: TableDef<ClubSettingRow>;
+  manager_api_tokens: TableDef<ManagerApiTokenRow>;
 };
 
 /** The generated Database, with the memberships tables layered into `public`. */

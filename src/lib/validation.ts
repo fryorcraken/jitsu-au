@@ -430,6 +430,20 @@ export const listAgentInvoicesSchema = z.object({
 });
 export type ListAgentInvoicesInput = z.infer<typeof listAgentInvoicesSchema>;
 
+// ---- Manager API tokens (see src/lib/manager-api-tokens.ts) ----
+
+/** Mint a new manager API token — just a human label to tell tokens apart. */
+export const createApiTokenSchema = z.object({
+  label: z.string().trim().min(1, "Give the token a name.").max(80),
+});
+export type CreateApiTokenInput = z.infer<typeof createApiTokenSchema>;
+
+/** Revoke an existing token by id. */
+export const revokeApiTokenSchema = z.object({
+  id: z.string().uuid(),
+});
+export type RevokeApiTokenInput = z.infer<typeof revokeApiTokenSchema>;
+
 // ---- Manager: club settings (invoice payment instructions) ----
 
 /** Default invoice instructions used until a manager customizes them. */

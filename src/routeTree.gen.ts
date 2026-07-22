@@ -26,6 +26,7 @@ import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as WaiverRouteImport } from './routes/waiver'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
+import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
@@ -120,6 +121,12 @@ const AuthenticatedMembershipRoute = AuthenticatedMembershipRouteImport.update({
   path: '/membership',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedManagerApiTokensRoute =
+  AuthenticatedManagerApiTokensRouteImport.update({
+    id: '/manager/api-tokens',
+    path: '/manager/api-tokens',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerMembershipPlansRoute =
   AuthenticatedManagerMembershipPlansRouteImport.update({
     id: '/manager/membership-plans',
@@ -189,6 +196,7 @@ export interface FileRoutesByFullPath {
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
+  '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -216,6 +224,7 @@ export interface FileRoutesByTo {
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
+  '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -245,6 +254,7 @@ export interface FileRoutesById {
   '/waiver': typeof WaiverRoute
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
+  '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -274,6 +284,7 @@ export interface FileRouteTypes {
     | '/waiver'
     | '/account'
     | '/membership'
+    | '/manager/api-tokens'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -301,6 +312,7 @@ export interface FileRouteTypes {
     | '/waiver'
     | '/account'
     | '/membership'
+    | '/manager/api-tokens'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -329,6 +341,7 @@ export interface FileRouteTypes {
     | '/waiver'
     | '/_authenticated/account'
     | '/_authenticated/membership'
+    | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
@@ -482,6 +495,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMembershipRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/api-tokens': {
+      id: '/_authenticated/manager/api-tokens'
+      path: '/manager/api-tokens'
+      fullPath: '/manager/api-tokens'
+      preLoaderRoute: typeof AuthenticatedManagerApiTokensRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/membership-plans': {
       id: '/_authenticated/manager/membership-plans'
       path: '/manager/membership-plans'
@@ -551,6 +571,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
   AuthenticatedMembershipRoute: typeof AuthenticatedMembershipRoute
+  AuthenticatedManagerApiTokensRoute: typeof AuthenticatedManagerApiTokensRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
@@ -562,6 +583,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAccountRoute: AuthenticatedAccountRoute,
   AuthenticatedMembershipRoute: AuthenticatedMembershipRoute,
+  AuthenticatedManagerApiTokensRoute: AuthenticatedManagerApiTokensRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,

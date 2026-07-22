@@ -22,8 +22,10 @@ of truth for the current action set.
 ## Configuration
 
 - `UTS_MANAGER_API_URL` — the site's base URL, e.g. `https://jitsu.au`
-- `UTS_MANAGER_API_KEY` — the shared manager agent token (server env
-  `MANAGER_AGENT_API_KEY`)
+- `UTS_MANAGER_API_KEY` — a manager agent token. A manager mints one at
+  **`/manager/api-tokens`** on the site (it's shown once — copy it then). A
+  server-side `MANAGER_AGENT_API_KEY` env var also works as a break-glass
+  fallback.
 
 The endpoint is `POST $UTS_MANAGER_API_URL/api/manager/agent`. Every request
 sends `Authorization: Bearer $UTS_MANAGER_API_KEY`.

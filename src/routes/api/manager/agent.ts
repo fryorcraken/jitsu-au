@@ -4,9 +4,11 @@
 //   GET  /api/manager/agent   -> the self-describing manifest (source of truth)
 //   POST /api/manager/agent   -> { action, params } dispatch
 //
-// Auth is a single opaque bearer token (MANAGER_AGENT_API_KEY) rather than a
-// manager's Supabase JWT: agents can't run the email/password login flow, and
-// this endpoint only ever exposes the whitelisted manager actions below. All DB
+// Auth is an opaque bearer token rather than a manager's Supabase JWT: agents
+// can't run the email/password login flow, and this endpoint only ever exposes
+// the whitelisted manager actions below. Tokens are manager-issued and revocable
+// (the manager_api_tokens table, minted from /manager/api-tokens); an optional
+// MANAGER_AGENT_API_KEY env var is accepted as a break-glass fallback. All DB
 // access uses the service-role admin client, so it is lazy-imported inside the
 // handler (route files are bundled to the client — never top-level import it).
 import { createFileRoute } from "@tanstack/react-router";
@@ -27,6 +29,7 @@ import {
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
+import { hashToken } from "@/lib/manager-api-tokens";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 
 function json(body: unknown, status = 200): Response {
@@ -36,26 +39,56 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Reject the request unless it carries the configured bearer token. */
-function authorize(request: Request): void {
-  const configured = process.env.MANAGER_AGENT_API_KEY;
-  if (!configured) {
-    throw new AgentError(
-      503,
-      "not_configured",
-      "Manager agent API is not configured. Set the MANAGER_AGENT_API_KEY environment variable.",
-    );
-  }
-  const token = bearerToken(request.headers.get("authorization"));
-  if (!token || !safeEqual(token, configured)) {
-    throw new AgentError(401, "unauthorized", "Invalid or missing API token.");
-  }
-}
-
 /** The service-role client, typed with the memberships-aware Database. */
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin as unknown as MembershipClient;
+}
+
+/**
+ * Authenticate the request. Accepts either a manager-issued token (looked up by
+ * SHA-256 hash in manager_api_tokens, whose owner must still be a manager) or,
+ * as a break-glass fallback, the MANAGER_AGENT_API_KEY env var. Throws
+ * AgentError on any failure. On success, best-effort stamps last_used_at.
+ */
+async function authenticate(request: Request): Promise<void> {
+  const token = bearerToken(request.headers.get("authorization"));
+  if (!token) throw new AgentError(401, "unauthorized", "Missing bearer token.");
+
+  // Break-glass env key (optional; constant-time compared).
+  const envKey = process.env.MANAGER_AGENT_API_KEY;
+  if (envKey && safeEqual(token, envKey)) return;
+
+  const db = await adminClient();
+  const tokenHash = await hashToken(token);
+  const { data: row, error } = await db
+    .from("manager_api_tokens")
+    .select("*")
+    .eq("token_hash", tokenHash)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (!row) throw new AgentError(401, "unauthorized", "Invalid or revoked API token.");
+
+  // Defense in depth: the token is only as privileged as its owner is today.
+  if (!row.created_by) {
+    throw new AgentError(403, "forbidden", "Token has no owner.");
+  }
+  const { data: isMgr } = await db.rpc("has_role", {
+    _user_id: row.created_by,
+    _role: "manager",
+  });
+  if (!isMgr) throw new AgentError(403, "forbidden", "Token owner is no longer a manager.");
+
+  // Best-effort usage stamp — never fail the request on this.
+  void db
+    .from("manager_api_tokens")
+    .update({ last_used_at: new Date().toISOString() })
+    .eq("id", row.id)
+    .then(
+      () => {},
+      () => {},
+    );
 }
 
 /** Shape any thrown value into a stable JSON error response. */
@@ -252,9 +285,9 @@ export const Route = createFileRoute("/api/manager/agent")({
   server: {
     handlers: {
       // Self-description: agents read this to discover the current action set.
-      GET: ({ request }) => {
+      GET: async ({ request }) => {
         try {
-          authorize(request);
+          await authenticate(request);
           return json({ ok: true, ...AGENT_MANIFEST });
         } catch (e) {
           return errorResponse(e);
@@ -262,7 +295,7 @@ export const Route = createFileRoute("/api/manager/agent")({
       },
       POST: async ({ request }) => {
         try {
-          authorize(request);
+          await authenticate(request);
           const body = (await request.json().catch(() => {
             throw new AgentError(400, "bad_json", "Request body must be valid JSON.");
           })) as { action?: unknown; params?: unknown };
