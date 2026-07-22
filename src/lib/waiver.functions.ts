@@ -60,11 +60,17 @@ export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handle
 export const getMyLatestWaiver = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // select("*") so the (generated-types-unaware) `uts_student_number` column
-    // comes back; the client narrows to the fields it prefills.
+    // Fetch only the columns the prefill needs — keep the row's storage paths
+    // (pdf_path, signature image paths) and acknowledgements off the wire. The
+    // two newest columns (uts_student_number, sms_whatsapp_consent) are absent
+    // from the stale generated types, so the select string is cast to satisfy
+    // the type-checker; the runtime query still fetches just these columns and
+    // the client narrows the result to its Prefill shape.
+    const prefillColumns =
+      "full_name, first_name, middle_name, last_name, date_of_birth, address, phone, email, uts_student_number, sms_whatsapp_consent, emergency_contact_name, emergency_contact_phone, medical_notes";
     const { data, error } = await context.supabase
       .from("waivers")
-      .select("*")
+      .select(prefillColumns as "*")
       .eq("user_id", context.userId)
       .order("signed_at", { ascending: false })
       .limit(1)

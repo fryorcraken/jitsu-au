@@ -7,6 +7,7 @@ import {
   DEFAULT_INVOICE_INSTRUCTIONS,
   formatCents,
   importBankStatementSchema,
+  isUtsStudent,
   matchesMembershipReference,
   matchTransactionSchema,
   saveClubSettingsSchema,
@@ -266,7 +267,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // number is the single source of truth: a non-empty UTS student number gets
     // the student rate. The client's is_student flag is not trusted for pricing.
     const utsStudentNumber = data.uts_student_number?.trim() || null;
-    const isStudent = utsStudentNumber !== null;
+    const isStudent = isUtsStudent(utsStudentNumber);
     const price = computeMembershipPrice(plan, isStudent);
 
     // Resolve the member's name once: the surname drives the human-friendly

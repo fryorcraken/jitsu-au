@@ -4,6 +4,7 @@ import {
   contactSchema,
   decodeDataUrlPng,
   interestSchema,
+  isUtsStudent,
   saveTemplateSchema,
   splitFullName,
   waiverApprovalSchema,
@@ -313,5 +314,24 @@ describe("waiverApprovalSchema", () => {
   it("requires both fields", () => {
     expect(waiverApprovalSchema.safeParse({ id }).success).toBe(false);
     expect(waiverApprovalSchema.safeParse({ status: "approved" }).success).toBe(false);
+  });
+});
+
+describe("isUtsStudent", () => {
+  // The single rule both the membership page (price preview) and the server
+  // (authoritative pricing) rely on. A non-empty UTS number means student.
+  it("is a student when a non-empty number is present", () => {
+    expect(isUtsStudent("12345678")).toBe(true);
+  });
+
+  it("trims surrounding whitespace before deciding", () => {
+    expect(isUtsStudent("  12345678  ")).toBe(true);
+    expect(isUtsStudent("   ")).toBe(false);
+  });
+
+  it("is not a student for empty, null, or undefined", () => {
+    expect(isUtsStudent("")).toBe(false);
+    expect(isUtsStudent(null)).toBe(false);
+    expect(isUtsStudent(undefined)).toBe(false);
   });
 });

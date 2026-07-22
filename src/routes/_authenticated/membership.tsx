@@ -8,7 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { computeMembershipPrice, formatCents, type LifecycleStatus } from "@/lib/validation";
+import {
+  computeMembershipPrice,
+  formatCents,
+  isUtsStudent,
+  type LifecycleStatus,
+} from "@/lib/validation";
 import { getMyMemberships, listMembershipPlans, startMembership } from "@/lib/membership.functions";
 
 export const Route = createFileRoute("/_authenticated/membership")({
@@ -59,8 +64,9 @@ function MembershipPage() {
   const [pendingCode, setPendingCode] = useState<string | null>(null);
 
   // A non-empty UTS student number is what makes someone a student; there is no
-  // separate "I'm a student" flag. It unlocks the discounted student rate.
-  const isStudent = studentNumber.trim().length > 0;
+  // separate "I'm a student" flag. It unlocks the discounted student rate. Same
+  // rule the server uses for authoritative pricing, so the two can't disagree.
+  const isStudent = isUtsStudent(studentNumber);
 
   const reload = useMemo(
     () => () => {

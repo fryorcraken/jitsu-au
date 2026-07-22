@@ -183,6 +183,17 @@ export function computeMembershipPrice(plan: PlanPricing, isStudent: boolean): n
   return plan.public_price_cents;
 }
 
+/**
+ * Student status is trust-based on the UTS student number: a non-empty number
+ * (after trimming) means the person is a UTS student and unlocks the student
+ * rate. There is no separate boolean flag. Shared by the membership page (live
+ * price preview) and the server (authoritative pricing) so the two can never
+ * disagree, and it matches the `memberships` DB CHECK constraint.
+ */
+export function isUtsStudent(utsStudentNumber: string | null | undefined): boolean {
+  return Boolean(utsStudentNumber && utsStudentNumber.trim());
+}
+
 /** Format integer cents as AUD for display: 24500 -> "$245", 2050 -> "$20.50", 0 -> "Free". */
 export function formatCents(cents: number): string {
   if (cents === 0) return "Free";
