@@ -500,8 +500,9 @@ export const listClubUsers = createServerFn({ method: "GET" })
       admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
       admin.from("membership_plans").select("*"),
       // select("*") so the (generated-types-unaware) `uts_student_number` column
-      // comes back — it marks whether the signer is a UTS student.
-      admin.from("waivers").select("*"),
+      // comes back — it marks whether the signer is a UTS student. Capped to match
+      // the memberships read (the existing ~500-2000 row scope).
+      admin.from("waivers").select("*").order("signed_at", { ascending: false }).limit(2000),
     ]);
     if (error) throw new Error(error.message);
 

@@ -246,10 +246,10 @@ function ManagerUsersPage() {
                       <td className="px-3 py-2">
                         {r.roles.length ? (
                           <div className="flex flex-wrap gap-1">
-                            {r.roles.map((role) => (
+                            {r.roles.map((roleName) => (
                               <Pill
-                                key={role}
-                                label={role}
+                                key={roleName}
+                                label={roleName}
                                 className="bg-indigo-100 text-indigo-800"
                               />
                             ))}
