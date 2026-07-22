@@ -14,7 +14,9 @@ import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notificati
 
 // Mirror the sender configuration used by the auth-email webhook.
 const SITE_NAME = "UTS Jitsu";
-const FROM_DOMAIN = "jitsu.au";
+// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC (Gmail flags
+// misaligned From-domains as spam).
+const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
 const SITE_URL = "https://jitsu.au";
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
