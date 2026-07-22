@@ -4,10 +4,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
-import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
+import { listWaivers, getWaiverPdfUrl } from "@/lib/waiver.functions";
+import {
+  getGoogleDriveStatus,
+  listMyDriveUploads,
+  uploadWaiverToDrive,
+} from "@/lib/google-drive.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
-import { cn } from "@/lib/utils";
-import { Check, Download, Undo2 } from "lucide-react";
+import { Download, Cloud, CloudCheck } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/manager/waivers")({
   head: () => ({
@@ -23,8 +27,13 @@ type Row = {
   signed_at: string;
   template_version: number | null;
   pdf_path: string | null;
-  approval_status: "pending" | "approved" | null;
-  approved_at: string | null;
+};
+
+type DriveUpload = {
+  waiver_id: string;
+  drive_file_id: string | null;
+  drive_web_view_link: string | null;
+  uploaded_at: string | null;
 };
 
 function WaiversPage() {
@@ -33,11 +42,15 @@ function WaiversPage() {
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchList = useServerFn(listWaivers);
   const getUrl = useServerFn(getWaiverPdfUrl);
-  const approve = useServerFn(setWaiverApproval);
+  const fetchDriveStatus = useServerFn(getGoogleDriveStatus);
+  const fetchDriveUploads = useServerFn(listMyDriveUploads);
+  const upload = useServerFn(uploadWaiverToDrive);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [uploads, setUploads] = useState<Record<string, DriveUpload>>({});
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -54,7 +67,17 @@ function WaiversPage() {
         toast.error(e.message);
         setLoading(false);
       });
-  }, [isManager, fetchList]);
+    fetchDriveStatus()
+      .then((s) => setDriveConnected(s.connected))
+      .catch(() => setDriveConnected(false));
+    fetchDriveUploads()
+      .then((list) => {
+        const map: Record<string, DriveUpload> = {};
+        for (const u of list) map[u.waiver_id] = u;
+        setUploads(map);
+      })
+      .catch(() => {});
+  }, [isManager, fetchList, fetchDriveStatus, fetchDriveUploads]);
 
   async function download(id: string) {
     try {
@@ -65,21 +88,24 @@ function WaiversPage() {
     }
   }
 
-  async function toggleApproval(row: Row) {
-    const status = row.approval_status === "approved" ? "pending" : "approved";
-    setPendingId(row.id);
+  async function saveToDrive(id: string) {
+    setUploadingId(id);
     try {
-      const res = await approve({ data: { id: row.id, status } });
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id ? { ...r, approval_status: status, approved_at: res.approved_at } : r,
-        ),
-      );
-      toast.success(status === "approved" ? "Waiver approved" : "Approval removed");
+      const res = await upload({ data: { waiverId: id } });
+      setUploads((prev) => ({
+        ...prev,
+        [id]: {
+          waiver_id: id,
+          drive_file_id: res.driveFileId,
+          drive_web_view_link: res.webViewLink,
+          uploaded_at: new Date().toISOString(),
+        },
+      }));
+      toast.success("Saved to Google Drive");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update approval");
+      toast.error(e instanceof Error ? e.message : "Upload failed");
     } finally {
-      setPendingId(null);
+      setUploadingId(null);
     }
   }
 
@@ -96,6 +122,16 @@ function WaiversPage() {
           </Button>
         </div>
 
+        {!driveConnected && (
+          <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            Connect Google Drive on your{" "}
+            <Link to="/account" className="underline">
+              account page
+            </Link>{" "}
+            to save waivers directly to your Drive.
+          </div>
+        )}
+
         {loading ? (
           <p>Loading...</p>
         ) : rows.length === 0 ? (
@@ -109,14 +145,12 @@ function WaiversPage() {
                   <th className="px-3 py-2">Email</th>
                   <th className="px-3 py-2">Signed</th>
                   <th className="px-3 py-2">Version</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2 text-right">PDF</th>
-                  <th className="px-3 py-2 text-right">Approval</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const approved = r.approval_status === "approved";
+                  const up = uploads[r.id];
                   return (
                     <tr key={r.id} className="border-t">
                       <td className="px-3 py-2 font-medium">{r.full_name}</td>
@@ -124,48 +158,38 @@ function WaiversPage() {
                       <td className="px-3 py-2">{new Date(r.signed_at).toLocaleString("en-AU")}</td>
                       <td className="px-3 py-2">v{r.template_version ?? "—"}</td>
                       <td className="px-3 py-2">
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                            approved
-                              ? "bg-green-100 text-green-800"
-                              : "bg-amber-100 text-amber-800",
-                          )}
-                          title={
-                            approved && r.approved_at
-                              ? `Approved ${new Date(r.approved_at).toLocaleString("en-AU")}`
-                              : undefined
-                          }
-                        >
-                          {approved ? "Approved" : "Pending"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {r.pdf_path ? (
-                          <Button size="sm" variant="outline" onClick={() => download(r.id)}>
-                            <Download className="mr-1 h-3 w-3" /> Download
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <Button
-                          size="sm"
-                          variant={approved ? "outline" : "default"}
-                          disabled={pendingId === r.id}
-                          onClick={() => toggleApproval(r)}
-                        >
-                          {approved ? (
-                            <>
-                              <Undo2 className="mr-1 h-3 w-3" /> Unapprove
-                            </>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          {r.pdf_path ? (
+                            <Button size="sm" variant="outline" onClick={() => download(r.id)}>
+                              <Download className="mr-1 h-3 w-3" /> PDF
+                            </Button>
                           ) : (
-                            <>
-                              <Check className="mr-1 h-3 w-3" /> Approve
-                            </>
+                            <span className="text-xs text-muted-foreground">—</span>
                           )}
-                        </Button>
+                          {driveConnected && r.pdf_path ? (
+                            up?.drive_web_view_link ? (
+                              <Button size="sm" variant="outline" asChild>
+                                <a
+                                  href={up.drive_web_view_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  <CloudCheck className="mr-1 h-3 w-3" /> In Drive
+                                </a>
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => saveToDrive(r.id)}
+                                disabled={uploadingId === r.id}
+                              >
+                                <Cloud className="mr-1 h-3 w-3" />
+                                {uploadingId === r.id ? "Saving..." : "Save to Drive"}
+                              </Button>
+                            )
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );

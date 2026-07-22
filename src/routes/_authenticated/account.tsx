@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteLayout } from "@/components/site/SiteLayout";
@@ -8,6 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { connectAppUser } from "@/integrations/lovable/appUserConnectorClient";
+import {
+  disconnectGoogleDrive,
+  getGoogleDriveStatus,
+  saveGoogleDriveConnection,
+  startGoogleDriveConnect,
+} from "@/lib/google-drive.functions";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({
@@ -61,10 +69,116 @@ function AccountPage() {
           </Card>
         )}
 
+        {isManager && <GoogleDriveCard />}
+
+
         <ChangePasswordCard />
         <ChangeEmailCard currentEmail={user.email ?? ""} />
       </section>
     </SiteLayout>
+  );
+}
+
+function GoogleDriveCard() {
+  const status = useServerFn(getGoogleDriveStatus);
+  const start = useServerFn(startGoogleDriveConnect);
+  const save = useServerFn(saveGoogleDriveConnection);
+  const disconnect = useServerFn(disconnectGoogleDrive);
+
+  const [loading, setLoading] = useState(true);
+  const [connected, setConnected] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () =>
+    status()
+      .then((s) => {
+        setConnected(s.connected);
+        setEmail(s.connected ? (s.email ?? null) : null);
+      })
+      .catch(() => {
+        setConnected(false);
+        setEmail(null);
+      })
+      .finally(() => setLoading(false));
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function onConnect() {
+    setBusy(true);
+    try {
+      const result = await connectAppUser({
+        connectorId: "google_drive",
+        gatewayBaseUrl: "https://connector-gateway.lovable.dev",
+        start: (targetOrigin) => start({ data: targetOrigin }),
+      });
+      if (!result.success) {
+        toast.error(result.error ?? "Connection cancelled");
+        return;
+      }
+      if (!result.connectionAPIKey) {
+        toast.error("Google did not grant offline access. Contact support.");
+        return;
+      }
+      const saved = await save({ data: { connectionAPIKey: result.connectionAPIKey } });
+      toast.success(saved.email ? `Connected as ${saved.email}` : "Google Drive connected");
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to connect");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDisconnect() {
+    setBusy(true);
+    try {
+      await disconnect();
+      toast.success("Google Drive disconnected");
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to disconnect");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Google Drive</CardTitle>
+        <CardDescription>
+          Connect your Google account to save signed waivers to a &ldquo;UTS Jitsu Waivers&rdquo;
+          folder in your Drive.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : connected ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm">
+              Connected{email ? <> as <strong>{email}</strong></> : null}.
+            </p>
+            <Button variant="outline" onClick={onDisconnect} disabled={busy}>
+              {busy ? "Working..." : "Disconnect"}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Not connected. Only files this app creates will be visible to it.
+            </p>
+            <Button onClick={onConnect} disabled={busy}>
+              {busy ? "Opening..." : "Connect Google Drive"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

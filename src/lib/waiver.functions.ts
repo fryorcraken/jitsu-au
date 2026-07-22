@@ -277,7 +277,7 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
     };
     const { data: created, error } = await supabaseAdmin
       .from("waiver_templates")
-      .insert(templateRow)
+      .insert(templateRow as never)
       .select("id, version")
       .single();
     if (error) throw new Error(error.message);
