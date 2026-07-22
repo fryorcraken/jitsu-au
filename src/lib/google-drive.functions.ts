@@ -11,10 +11,8 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
-async function requireManager(ctx: {
-  supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }> };
-  userId: string;
-}) {
+type AuthCtx = { supabase: { rpc: typeof import("@/integrations/supabase/client").supabase.rpc }; userId: string };
+async function requireManager(ctx: AuthCtx) {
   const { data, error } = await ctx.supabase.rpc("has_role", {
     _user_id: ctx.userId,
     _role: "manager",
