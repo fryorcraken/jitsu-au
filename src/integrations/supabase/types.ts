@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_user_connections: {
+        Row: {
+          connected_email: string | null
+          connection_key_ciphertext: string
+          connector_id: string
+          created_at: string
+          id: string
+          metadata: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          connected_email?: string | null
+          connection_key_ciphertext: string
+          connector_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          connected_email?: string | null
+          connection_key_ciphertext?: string
+          connector_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       contact_messages: {
         Row: {
           created_at: string
@@ -94,6 +127,41 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      waiver_drive_uploads: {
+        Row: {
+          drive_file_id: string
+          drive_web_view_link: string | null
+          id: string
+          manager_user_id: string
+          uploaded_at: string
+          waiver_id: string
+        }
+        Insert: {
+          drive_file_id: string
+          drive_web_view_link?: string | null
+          id?: string
+          manager_user_id: string
+          uploaded_at?: string
+          waiver_id: string
+        }
+        Update: {
+          drive_file_id?: string
+          drive_web_view_link?: string | null
+          id?: string
+          manager_user_id?: string
+          uploaded_at?: string
+          waiver_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "waiver_drive_uploads_waiver_id_fkey"
+            columns: ["waiver_id"]
+            isOneToOne: false
+            referencedRelation: "waivers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       waiver_templates: {
         Row: {
