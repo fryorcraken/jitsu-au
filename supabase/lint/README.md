@@ -45,6 +45,13 @@ Current entries:
   a server RPC, so `authenticated` must keep `EXECUTE` (see migration
   `20260721023901`). The lint's suggested fix would break every manager check.
 
+## Testing the checker
+
+`check-advisors.py --selftest` runs inline fixtures over the gating logic (CSV
+parsing, category/level thresholds, allowlist matching) with no database
+required. CI runs it first, before spinning up Docker, so a regression in the
+gate fails fast. Run it locally the same way after editing the script.
+
 ## Updating the advisor query
 
 `splinter.sql` is a **vendored** copy of

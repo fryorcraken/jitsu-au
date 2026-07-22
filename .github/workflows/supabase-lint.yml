@@ -40,6 +40,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Guards the gating logic itself (CSV parsing, thresholds, allowlist
+      # matching) with inline fixtures — no database needed, so it runs first
+      # and fails fast if the checker regresses.
+      - name: Self-test the advisor checker
+        run: python3 supabase/lint/check-advisors.py --selftest
+
       - uses: supabase/setup-cli@v3
         with:
           version: latest

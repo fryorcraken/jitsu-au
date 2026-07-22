@@ -107,29 +107,18 @@ def is_acknowledged(row: dict, allowlist: list[str]) -> bool:
     return any(entry in cache_key for entry in allowlist)
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print(f"usage: {argv[0]} <findings.csv>", file=sys.stderr)
-        return 2
+def parse_set(value: str) -> set:
+    """Parse a comma-separated env value into an upper-cased set (drops blanks)."""
+    return {token.strip().upper() for token in value.split(",") if token.strip()}
 
-    fail_categories = {
-        c.strip().upper()
-        for c in os.environ.get("FAIL_CATEGORIES", "SECURITY").split(",")
-        if c.strip()
-    }
-    fail_levels = {
-        l.strip().upper()
-        for l in os.environ.get("FAIL_LEVELS", "WARN,ERROR").split(",")
-        if l.strip()
-    }
-    allowlist = load_allowlist(os.environ.get("ADVISORS_ALLOWLIST", DEFAULT_ALLOWLIST))
 
-    findings = load_findings(argv[1])
+def classify(findings, fail_categories, fail_levels, allowlist):
+    """Tag each finding with `_ack` and split into (blocking, acknowledged).
 
-    if not findings:
-        print("✅ Supabase advisors: no findings.")
-        return 0
-
+    A finding is gated when its level is in fail_levels and it shares a category
+    with fail_categories. Gated findings that are allowlisted are acknowledged
+    (not blocking); gated findings that are not allowlisted block.
+    """
     blocking: list[dict] = []
     acknowledged: list[dict] = []
     for row in findings:
@@ -142,6 +131,27 @@ def main(argv: list[str]) -> int:
             blocking.append(row)
         else:
             row["_ack"] = False
+    return blocking, acknowledged
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[1] == "--selftest":
+        return run_selftest()
+    if len(argv) != 2:
+        print(f"usage: {argv[0]} <findings.csv | --selftest>", file=sys.stderr)
+        return 2
+
+    fail_categories = parse_set(os.environ.get("FAIL_CATEGORIES", "SECURITY"))
+    fail_levels = parse_set(os.environ.get("FAIL_LEVELS", "WARN,ERROR"))
+    allowlist = load_allowlist(os.environ.get("ADVISORS_ALLOWLIST", DEFAULT_ALLOWLIST))
+
+    findings = load_findings(argv[1])
+
+    if not findings:
+        print("✅ Supabase advisors: no findings.")
+        return 0
+
+    blocking, acknowledged = classify(findings, fail_categories, fail_levels, allowlist)
 
     # Report every finding, most severe first, so nothing is hidden.
     findings.sort(key=lambda r: (LEVEL_ORDER.get(r["_level"], 9), r["name"]))
@@ -170,6 +180,94 @@ def main(argv: list[str]) -> int:
 
     print(f"✅ No blocking advisor findings [{gate}].")
     return 0
+
+
+def run_selftest() -> int:
+    """Assert the gating logic on inline fixtures. Returns 0 if all pass, else 1.
+
+    Runs in CI (a cheap guard on the checker itself) with no database needed.
+    """
+    import tempfile
+
+    failures: list[str] = []
+
+    def check(label: str, cond: bool) -> None:
+        if not cond:
+            failures.append(label)
+
+    # parse_categories: braces, quotes, multi-value, empty.
+    check("categories: single", parse_categories("{SECURITY}") == ["SECURITY"])
+    check("categories: multi", parse_categories("{SECURITY,PERFORMANCE}") == ["SECURITY", "PERFORMANCE"])
+    check("categories: quoted", parse_categories('{"SECURITY"}') == ["SECURITY"])
+    check("categories: empty", parse_categories("{}") == [])
+
+    # parse_set: blanks dropped, upper-cased.
+    check("parse_set", parse_set("security, ,Warn") == {"SECURITY", "WARN"})
+
+    # load_findings: skip stray tags/header, keep well-formed rows incl. commas & newlines.
+    csv_text = (
+        "SET\n"
+        "name,title,level,facing,categories,description,detail,remediation,metadata,cache_key\n"
+        'sec_fn,SecFn,WARN,EXTERNAL,{SECURITY},"d, with comma","detail",http://x,{},sec_fn_public_has_role_args\n'
+        'perf,Perf,INFO,EXTERNAL,{PERFORMANCE},d,"multi\nline",http://y,{},perf_public_t\n'
+        "DO\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as fh:
+        fh.write(csv_text)
+        tmp = fh.name
+    try:
+        rows = load_findings(tmp)
+    finally:
+        os.remove(tmp)
+    check("load_findings: row count", len(rows) == 2)
+    check("load_findings: header skipped", all(r["name"] != "name" for r in rows))
+    check("load_findings: comma preserved", any(r["description"] == "d, with comma" for r in rows))
+
+    # is_acknowledged: object-scoped substring vs bare lint name; no false match.
+    sec = next(r for r in rows if r["name"] == "sec_fn")
+    check("ack: object prefix", is_acknowledged(sec, ["sec_fn_public_has_role"]))
+    check("ack: bare lint name", is_acknowledged(sec, ["sec_fn"]))
+    check("ack: no match", not is_acknowledged(sec, ["other_lint_public_x"]))
+    check("ack: empty allowlist", not is_acknowledged(sec, []))
+
+    # classify: default policy blocks SECURITY/WARN; PERFORMANCE/INFO is not gated.
+    fc, fl = {"SECURITY"}, {"WARN", "ERROR"}
+    blk, ack = classify(load_findings_from_text(csv_text), fc, fl, [])
+    check("classify: security blocks", len(blk) == 1 and blk[0]["name"] == "sec_fn")
+    check("classify: perf not gated", len(ack) == 0)
+
+    # classify: allowlisting the security finding clears the block.
+    blk2, ack2 = classify(load_findings_from_text(csv_text), fc, fl, ["sec_fn_public_has_role"])
+    check("classify: acknowledged not blocking", len(blk2) == 0 and len(ack2) == 1)
+
+    # classify: a different, non-allowlisted object still blocks under the same lint.
+    other = (
+        "name,title,level,facing,categories,description,detail,remediation,metadata,cache_key\n"
+        "sec_fn,SecFn,WARN,EXTERNAL,{SECURITY},d,detail,http://x,{},sec_fn_public_other_fn\n"
+    )
+    blk3, _ = classify(load_findings_from_text(other), fc, fl, ["sec_fn_public_has_role"])
+    check("classify: new object still blocks", len(blk3) == 1)
+
+    if failures:
+        print("❌ check-advisors self-test FAILED:")
+        for f in failures:
+            print(f"    - {f}")
+        return 1
+    print("✅ check-advisors self-test passed.")
+    return 0
+
+
+def load_findings_from_text(text: str) -> list[dict]:
+    """Parse findings from an in-memory CSV string (used by the self-test)."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as fh:
+        fh.write(text)
+        tmp = fh.name
+    try:
+        return load_findings(tmp)
+    finally:
+        os.remove(tmp)
 
 
 if __name__ == "__main__":
