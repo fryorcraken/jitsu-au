@@ -31,7 +31,6 @@ export const submitInterest = createServerFn({ method: "POST" })
       name: data.name,
       email: data.email,
       phone: data.phone || null,
-      uts_student: data.uts_student,
       experience: data.experience || null,
       message: data.message || null,
     });

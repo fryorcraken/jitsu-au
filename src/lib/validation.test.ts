@@ -90,11 +90,18 @@ describe("interestSchema", () => {
   const valid = {
     name: "Sam Trainee",
     email: "sam@example.com",
-    uts_student: true,
   };
 
   it("accepts a minimal valid submission", () => {
     expect(interestSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("no longer requires a uts_student field (moved to the waiver)", () => {
+    // Before this change the schema demanded `uts_student: z.boolean()`, so a
+    // submission without it failed. Student status now lives on the waiver.
+    const result = interestSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+    expect(result.success && "uts_student" in result.data).toBe(false);
   });
 
   it("rejects an invalid email", () => {
@@ -189,6 +196,22 @@ describe("waiverSubmitSchema", () => {
   it("rejects a malformed date of birth", () => {
     expect(
       waiverSubmitSchema.safeParse({ ...validAdult, date_of_birth: "10/12/1990" }).success,
+    ).toBe(false);
+  });
+
+  it("accepts an optional UTS student number", () => {
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, uts_student_number: "12345678" });
+    expect(result.success && result.data.uts_student_number).toBe("12345678");
+  });
+
+  it("allows the UTS student number to be omitted", () => {
+    const result = waiverSubmitSchema.safeParse(validAdult);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a UTS student number over 20 chars", () => {
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, uts_student_number: "1".repeat(21) }).success,
     ).toBe(false);
   });
 

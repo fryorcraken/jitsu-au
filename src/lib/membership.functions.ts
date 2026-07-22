@@ -203,9 +203,20 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         .eq("user_id", context.userId)
         .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("*"),
-      admin.from("waivers").select("id").eq("user_id", context.userId).limit(1).maybeSingle(),
+      // select("*") so the (generated-types-unaware) `uts_student_number` column
+      // comes back; used to prefill the student rate on the membership page.
+      admin
+        .from("waivers")
+        .select("*")
+        .eq("user_id", context.userId)
+        .order("signed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     if (error) throw new Error(error.message);
+
+    const utsStudentNumber =
+      (waiver as { uts_student_number?: string | null } | null)?.uts_student_number ?? null;
 
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
     const memberships = (rows ?? []).map((r) => projectMembership(r, planById.get(r.plan_id)));
@@ -219,7 +230,7 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         price_cents: r.price_cents,
       })),
     });
-    return { lifecycle, memberships };
+    return { lifecycle, memberships, uts_student_number: utsStudentNumber };
   });
 
 // ---- Member: start a membership ----

@@ -59,6 +59,7 @@ type Prefill = {
   address?: string;
   phone?: string;
   email?: string;
+  uts_student_number?: string | null;
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   medical_notes?: string;
@@ -86,6 +87,7 @@ function Waiver() {
   const [phone, setPhone] = useState(search.phone ?? "");
   const [email, setEmail] = useState(search.email ?? "");
   const [address, setAddress] = useState("");
+  const [utsStudentNumber, setUtsStudentNumber] = useState("");
   const [ecName, setEcName] = useState("");
   const [ecPhone, setEcPhone] = useState("");
   const [medical, setMedical] = useState("");
@@ -147,6 +149,7 @@ function Waiver() {
         if (r.phone) setPhone(r.phone);
         if (r.email) setEmail(r.email);
         if (r.address) setAddress(r.address);
+        if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);
         if (r.emergency_contact_phone) setEcPhone(r.emergency_contact_phone);
         if (r.medical_notes) setMedical(r.medical_notes);
@@ -218,6 +221,7 @@ function Waiver() {
           address,
           phone,
           email,
+          uts_student_number: utsStudentNumber,
           emergency_contact_name: ecName,
           emergency_contact_phone: ecPhone,
           medical_notes: medical,
@@ -350,6 +354,10 @@ function Waiver() {
                     onChange={(e) => setPhone(e.target.value)}
                     className="mt-1.5"
                   />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    By giving us your number you agree we can contact you by SMS or WhatsApp, and
+                    add you to club WhatsApp groups.
+                  </p>
                 </div>
               </div>
               <div>
@@ -374,6 +382,23 @@ function Waiver() {
                   onChange={(e) => setAddress(e.target.value)}
                   className="mt-1.5"
                 />
+              </div>
+              <div>
+                <Label htmlFor="uts_student_number">
+                  UTS student number <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="uts_student_number"
+                  maxLength={20}
+                  value={utsStudentNumber}
+                  onChange={(e) => setUtsStudentNumber(e.target.value)}
+                  placeholder="e.g. 12345678"
+                  className="mt-1.5"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  UTS students train at a discounted rate. Add your number here and the student rate
+                  applies when you join.
+                </p>
               </div>
             </fieldset>
 

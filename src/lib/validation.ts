@@ -53,7 +53,6 @@ export const interestSchema = z.object({
   name: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
-  uts_student: z.boolean(),
   experience: z.string().trim().max(500).optional().or(z.literal("")),
   message: z.string().trim().max(1000).optional().or(z.literal("")),
   hp: z.string().max(0).optional(), // honeypot — must stay empty
@@ -82,6 +81,9 @@ export const waiverSubmitSchema = z
     address: z.string().trim().min(1).max(300),
     phone: z.string().trim().min(1).max(30),
     email: z.string().trim().email().max(255),
+    // Optional UTS student number. Non-empty means the person is a UTS student
+    // (there is no separate "is a student" flag); it unlocks the student rate.
+    uts_student_number: z.string().trim().max(20).optional().or(z.literal("")),
     emergency_contact_name: z.string().trim().min(1).max(120),
     emergency_contact_phone: z.string().trim().min(1).max(30),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),

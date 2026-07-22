@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { submitInterest } from "@/lib/submissions.functions";
 
@@ -54,7 +53,6 @@ function RegisterInterest() {
           name,
           email,
           phone,
-          uts_student: fd.get("uts_student") === "on",
           experience: String(fd.get("experience") || ""),
           message: String(fd.get("message") || ""),
           hp: String(fd.get("hp") || ""),
@@ -153,13 +151,11 @@ function RegisterInterest() {
             <div>
               <Label htmlFor="phone">Phone (optional)</Label>
               <Input id="phone" name="phone" type="tel" maxLength={30} className="mt-1.5" />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                By giving us your number you agree we can contact you by SMS or WhatsApp, and add
+                you to club WhatsApp groups.
+              </p>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Checkbox id="uts_student" name="uts_student" />
-            <Label htmlFor="uts_student" className="font-normal">
-              I'm a UTS student
-            </Label>
           </div>
 
           <div>
