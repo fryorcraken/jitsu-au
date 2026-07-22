@@ -209,9 +209,12 @@ function FirstClass() {
             <li className="flex gap-3">
               <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary-foreground" />
               <span>
-                We'll enter you properly into the system{" "}
-                <strong className="text-primary-foreground">once you decide to join</strong>.
-                Nothing to set up for the trial.
+                For your trial you just{" "}
+                <strong className="text-primary-foreground">
+                  sign the paper sheet at reception
+                </strong>{" "}
+                each time. Once you decide to join, the ActivateFit reception enters you into the
+                system, so you won't need to sign in on every visit.
               </span>
             </li>
           </ul>
