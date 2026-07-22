@@ -203,9 +203,20 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         .eq("user_id", context.userId)
         .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("*"),
-      admin.from("waivers").select("id").eq("user_id", context.userId).limit(1).maybeSingle(),
+      // select("*") so the (generated-types-unaware) `uts_student_number` column
+      // comes back; used to prefill the student rate on the membership page.
+      admin
+        .from("waivers")
+        .select("*")
+        .eq("user_id", context.userId)
+        .order("signed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     if (error) throw new Error(error.message);
+
+    const utsStudentNumber =
+      (waiver as { uts_student_number?: string | null } | null)?.uts_student_number ?? null;
 
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
     const memberships = (rows ?? []).map((r) => projectMembership(r, planById.get(r.plan_id)));
@@ -219,7 +230,7 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         price_cents: r.price_cents,
       })),
     });
-    return { lifecycle, memberships };
+    return { lifecycle, memberships, uts_student_number: utsStudentNumber };
   });
 
 // ---- Member: start a membership ----
@@ -251,7 +262,12 @@ export const startMembership = createServerFn({ method: "POST" })
       if (existing) throw new Error("You've already started your free trial.");
     }
 
-    const price = computeMembershipPrice(plan, data.is_student);
+    // Student status is derived server-side from the number's presence, so the
+    // number is the single source of truth: a non-empty UTS student number gets
+    // the student rate. The client's is_student flag is not trusted for pricing.
+    const utsStudentNumber = data.uts_student_number?.trim() || null;
+    const isStudent = utsStudentNumber !== null;
+    const price = computeMembershipPrice(plan, isStudent);
 
     // Resolve the member's name once: the surname drives the human-friendly
     // reference, and the full name is used in emails. Falls back gracefully when
@@ -301,8 +317,8 @@ export const startMembership = createServerFn({ method: "POST" })
         user_id: context.userId,
         plan_id: plan.id,
         status: "pending",
-        is_student: data.is_student,
-        uts_student_number: data.is_student ? data.uts_student_number || null : null,
+        is_student: isStudent,
+        uts_student_number: utsStudentNumber,
         price_cents: price,
         payment_reference: reference,
         payment_method: "bank_transfer",

@@ -59,6 +59,8 @@ type Prefill = {
   address?: string;
   phone?: string;
   email?: string;
+  uts_student_number?: string | null;
+  sms_whatsapp_consent?: boolean | null;
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   medical_notes?: string;
@@ -86,6 +88,12 @@ function Waiver() {
   const [phone, setPhone] = useState(search.phone ?? "");
   const [email, setEmail] = useState(search.email ?? "");
   const [address, setAddress] = useState("");
+  const [utsStudentNumber, setUtsStudentNumber] = useState("");
+  // SMS/WhatsApp consent is a checkbox here (page 2). It defaults to checked
+  // only when the phone number was already collected on the previous page —
+  // i.e. the person already gave us their number (and saw the consent note)
+  // during the "Start your free trial" step. Otherwise they must opt in.
+  const [smsConsent, setSmsConsent] = useState(Boolean(search.phone && search.phone.trim()));
   const [ecName, setEcName] = useState("");
   const [ecPhone, setEcPhone] = useState("");
   const [medical, setMedical] = useState("");
@@ -145,8 +153,12 @@ function Waiver() {
         }
         if (r.date_of_birth) setDob(r.date_of_birth);
         if (r.phone) setPhone(r.phone);
+        // Prefill the consent checkbox from the member's stored consent (they
+        // can still change it).
+        if (typeof r.sms_whatsapp_consent === "boolean") setSmsConsent(r.sms_whatsapp_consent);
         if (r.email) setEmail(r.email);
         if (r.address) setAddress(r.address);
+        if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);
         if (r.emergency_contact_phone) setEcPhone(r.emergency_contact_phone);
         if (r.medical_notes) setMedical(r.medical_notes);
@@ -218,6 +230,8 @@ function Waiver() {
           address,
           phone,
           email,
+          uts_student_number: utsStudentNumber,
+          sms_whatsapp_consent: smsConsent,
           emergency_contact_name: ecName,
           emergency_contact_phone: ecPhone,
           medical_notes: medical,
@@ -350,6 +364,17 @@ function Waiver() {
                     onChange={(e) => setPhone(e.target.value)}
                     className="mt-1.5"
                   />
+                  <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+                    <Checkbox
+                      checked={smsConsent}
+                      onCheckedChange={(v) => setSmsConsent(v === true)}
+                      className="mt-0.5"
+                      aria-label="Consent to SMS or WhatsApp contact"
+                    />
+                    <span>
+                      I agree to be contacted by SMS or WhatsApp, and added to club WhatsApp groups.
+                    </span>
+                  </label>
                 </div>
               </div>
               <div>
@@ -374,6 +399,23 @@ function Waiver() {
                   onChange={(e) => setAddress(e.target.value)}
                   className="mt-1.5"
                 />
+              </div>
+              <div>
+                <Label htmlFor="uts_student_number">
+                  UTS student number <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="uts_student_number"
+                  maxLength={20}
+                  value={utsStudentNumber}
+                  onChange={(e) => setUtsStudentNumber(e.target.value)}
+                  placeholder="e.g. 12345678"
+                  className="mt-1.5"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  UTS students train at a discounted rate. Add your number here and the student rate
+                  applies when you join.
+                </p>
               </div>
             </fieldset>
 

@@ -7,7 +7,6 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { computeMembershipPrice, formatCents, type LifecycleStatus } from "@/lib/validation";
@@ -56,16 +55,22 @@ function MembershipPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isStudent, setIsStudent] = useState(false);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [pendingCode, setPendingCode] = useState<string | null>(null);
+
+  // A non-empty UTS student number is what makes someone a student; there is no
+  // separate "I'm a student" flag. It unlocks the discounted student rate.
+  const isStudent = studentNumber.trim().length > 0;
 
   const reload = useMemo(
     () => () => {
       return Promise.all([fetchPlans(), fetchMine()]).then(([p, m]) => {
         setPlans(p);
         setMine(m);
+        // Prefill the student number from the member's waiver so they don't
+        // retype it (blank there means they never gave one).
+        if (m.uts_student_number) setStudentNumber(m.uts_student_number);
       });
     },
     [fetchPlans, fetchMine],
@@ -78,17 +83,13 @@ function MembershipPage() {
   }, [reload]);
 
   async function choose(plan: Plan) {
-    if (isStudent && !studentNumber.trim()) {
-      toast.error("Enter your UTS student number to take the student rate.");
-      return;
-    }
     setPendingCode(plan.code);
     try {
       const res = await start({
         data: {
           plan_code: plan.code,
           is_student: isStudent,
-          uts_student_number: isStudent ? studentNumber.trim() : "",
+          uts_student_number: studentNumber.trim(),
           session_date: plan.kind === "session" ? sessionDate : "",
           hp: "",
         },
@@ -205,29 +206,20 @@ function MembershipPage() {
               </p>
             </div>
             <div className="rounded-lg border bg-card p-3">
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <Checkbox
-                  checked={isStudent}
-                  onCheckedChange={(v) => setIsStudent(v === true)}
-                  aria-label="I'm a UTS student"
-                />
-                I'm a UTS student
-              </label>
-              {isStudent && (
-                <div className="mt-2">
-                  <Label htmlFor="sid" className="text-xs">
-                    UTS student number
-                  </Label>
-                  <Input
-                    id="sid"
-                    value={studentNumber}
-                    onChange={(e) => setStudentNumber(e.target.value)}
-                    maxLength={20}
-                    placeholder="e.g. 12345678"
-                    className="mt-1 h-8"
-                  />
-                </div>
-              )}
+              <Label htmlFor="sid" className="text-xs">
+                UTS student number <span className="text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="sid"
+                value={studentNumber}
+                onChange={(e) => setStudentNumber(e.target.value)}
+                maxLength={20}
+                placeholder="e.g. 12345678"
+                className="mt-1 h-8"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Add it to get the student rate.
+              </p>
             </div>
           </div>
 
