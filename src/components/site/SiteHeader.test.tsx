@@ -39,23 +39,19 @@ describe("SiteHeader", () => {
     expect(screen.queryByText(/^sign in$/i)).not.toBeInTheDocument();
   });
 
-  it('consolidates Membership and Account into a single "Member space" menu when logged in', () => {
+  it('replaces the Membership and Account links with a single "Member space" link when logged in', () => {
     mockUseAuth.mockReturnValue({ user: { id: "u1" } });
     render(<SiteHeader />);
 
-    // The two separate desktop buttons are replaced by one "Member space" entry point.
-    expect(screen.getAllByText(/member space/i).length).toBeGreaterThanOrEqual(1);
-    // Both destinations remain reachable (mobile nav renders them, desktop via the menu).
-    const accountLinks = screen.getAllByRole("link", { name: /account/i });
-    expect(accountLinks.length).toBeGreaterThanOrEqual(1);
-    for (const link of accountLinks) {
+    // One consolidated entry point, rendered in both the desktop and mobile nav,
+    // pointing at the member area.
+    const memberSpaceLinks = screen.getAllByRole("link", { name: /member space/i });
+    expect(memberSpaceLinks.length).toBeGreaterThanOrEqual(1);
+    for (const link of memberSpaceLinks) {
       expect(link).toHaveAttribute("href", "/account");
     }
-    const membershipLinks = screen.getAllByRole("link", { name: /membership/i });
-    expect(membershipLinks.length).toBeGreaterThanOrEqual(1);
-    for (const link of membershipLinks) {
-      expect(link).toHaveAttribute("href", "/membership");
-    }
+    // No standalone "Membership" item remains in the header.
+    expect(screen.queryByRole("link", { name: /^membership$/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/member login/i)).not.toBeInTheDocument();
   });
 });
