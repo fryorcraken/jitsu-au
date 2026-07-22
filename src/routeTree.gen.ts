@@ -25,6 +25,11 @@ import { Route as ThankYouRouteImport } from './routes/thank-you'
 import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as WaiverRouteImport } from './routes/waiver'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
+import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
+import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
+import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
+import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
+import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
 import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
@@ -109,6 +114,35 @@ const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
   path: '/account',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMembershipRoute = AuthenticatedMembershipRouteImport.update({
+  id: '/membership',
+  path: '/membership',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedManagerMembershipPlansRoute =
+  AuthenticatedManagerMembershipPlansRouteImport.update({
+    id: '/manager/membership-plans',
+    path: '/manager/membership-plans',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerMembershipsRoute =
+  AuthenticatedManagerMembershipsRouteImport.update({
+    id: '/manager/memberships',
+    path: '/manager/memberships',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerReconciliationRoute =
+  AuthenticatedManagerReconciliationRouteImport.update({
+    id: '/manager/reconciliation',
+    path: '/manager/reconciliation',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerSettingsRoute =
+  AuthenticatedManagerSettingsRouteImport.update({
+    id: '/manager/settings',
+    path: '/manager/settings',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerWaiverTemplateRoute =
   AuthenticatedManagerWaiverTemplateRouteImport.update({
     id: '/manager/waiver-template',
@@ -148,6 +182,11 @@ export interface FileRoutesByFullPath {
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/membership': typeof AuthenticatedMembershipRoute
+  '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
+  '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
+  '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
+  '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
@@ -169,6 +208,11 @@ export interface FileRoutesByTo {
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
+  '/membership': typeof AuthenticatedMembershipRoute
+  '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
+  '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
+  '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
+  '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
@@ -192,6 +236,11 @@ export interface FileRoutesById {
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
   '/_authenticated/account': typeof AuthenticatedAccountRoute
+  '/_authenticated/membership': typeof AuthenticatedMembershipRoute
+  '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
+  '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
+  '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
+  '/_authenticated/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
@@ -215,6 +264,11 @@ export interface FileRouteTypes {
     | '/update-password'
     | '/waiver'
     | '/account'
+    | '/membership'
+    | '/manager/membership-plans'
+    | '/manager/memberships'
+    | '/manager/reconciliation'
+    | '/manager/settings'
     | '/manager/waiver-template'
     | '/manager/waivers'
     | '/lovable/email/auth/preview'
@@ -236,6 +290,11 @@ export interface FileRouteTypes {
     | '/update-password'
     | '/waiver'
     | '/account'
+    | '/membership'
+    | '/manager/membership-plans'
+    | '/manager/memberships'
+    | '/manager/reconciliation'
+    | '/manager/settings'
     | '/manager/waiver-template'
     | '/manager/waivers'
     | '/lovable/email/auth/preview'
@@ -258,6 +317,11 @@ export interface FileRouteTypes {
     | '/update-password'
     | '/waiver'
     | '/_authenticated/account'
+    | '/_authenticated/membership'
+    | '/_authenticated/manager/membership-plans'
+    | '/_authenticated/manager/memberships'
+    | '/_authenticated/manager/reconciliation'
+    | '/_authenticated/manager/settings'
     | '/_authenticated/manager/waiver-template'
     | '/_authenticated/manager/waivers'
     | '/lovable/email/auth/preview'
@@ -398,6 +462,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAccountRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/membership': {
+      id: '/_authenticated/membership'
+      path: '/membership'
+      fullPath: '/membership'
+      preLoaderRoute: typeof AuthenticatedMembershipRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/membership-plans': {
+      id: '/_authenticated/manager/membership-plans'
+      path: '/manager/membership-plans'
+      fullPath: '/manager/membership-plans'
+      preLoaderRoute: typeof AuthenticatedManagerMembershipPlansRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/memberships': {
+      id: '/_authenticated/manager/memberships'
+      path: '/manager/memberships'
+      fullPath: '/manager/memberships'
+      preLoaderRoute: typeof AuthenticatedManagerMembershipsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/reconciliation': {
+      id: '/_authenticated/manager/reconciliation'
+      path: '/manager/reconciliation'
+      fullPath: '/manager/reconciliation'
+      preLoaderRoute: typeof AuthenticatedManagerReconciliationRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/settings': {
+      id: '/_authenticated/manager/settings'
+      path: '/manager/settings'
+      fullPath: '/manager/settings'
+      preLoaderRoute: typeof AuthenticatedManagerSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/waiver-template': {
       id: '/_authenticated/manager/waiver-template'
       path: '/manager/waiver-template'
@@ -431,12 +530,24 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
+  AuthenticatedMembershipRoute: typeof AuthenticatedMembershipRoute
+  AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
+  AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
+  AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
+  AuthenticatedManagerSettingsRoute: typeof AuthenticatedManagerSettingsRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
   AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAccountRoute: AuthenticatedAccountRoute,
+  AuthenticatedMembershipRoute: AuthenticatedMembershipRoute,
+  AuthenticatedManagerMembershipPlansRoute:
+    AuthenticatedManagerMembershipPlansRoute,
+  AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,
+  AuthenticatedManagerReconciliationRoute:
+    AuthenticatedManagerReconciliationRoute,
+  AuthenticatedManagerSettingsRoute: AuthenticatedManagerSettingsRoute,
   AuthenticatedManagerWaiverTemplateRoute:
     AuthenticatedManagerWaiverTemplateRoute,
   AuthenticatedManagerWaiversRoute: AuthenticatedManagerWaiversRoute,

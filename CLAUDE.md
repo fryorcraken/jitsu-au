@@ -277,6 +277,12 @@ Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
    syncs the branch). **Never** force-push or rewrite pushed history.
 2. Don't hand-edit generated files: `routeTree.gen.ts`, the Supabase
    `integrations/supabase/*` clients/types, or `components/ui/*` primitives.
+   That list is exhaustive — **every other file is normal, editable source**,
+   including Lovable-scaffolded code (`src/integrations/lovable/*`,
+   `src/lib/*.functions.ts`, connector/Drive helpers). There is no broad
+   "Lovable-owned, do-not-touch" category; `bun run format` (Prettier) is the
+   sanctioned way to fix formatting on any file, and CI failures in scaffolded
+   files are usually a stale branch — merge `main` and re-format, don't avoid them.
 3. Keep the service-role client (`client.server.ts`) off the client bundle —
    lazy-`import` it inside server handlers only.
 4. Validate all server-function input with Zod; enforce manager access with

@@ -22,14 +22,19 @@ export async function connectAppUser(opts: {
   const targetOrigin = window.location.origin;
 
   const popup = window.open("", "lovable-oauth", "width=600,height=720");
-  if (!popup) return { success: false, connectorId, error: "Popup blocked. Allow popups and try again." };
+  if (!popup)
+    return { success: false, connectorId, error: "Popup blocked. Allow popups and try again." };
 
   let authorizationUrl: string;
   try {
     authorizationUrl = (await start(targetOrigin)).authorizationUrl;
   } catch (e) {
     popup.close();
-    return { success: false, connectorId, error: e instanceof Error ? e.message : "Failed to start OAuth" };
+    return {
+      success: false,
+      connectorId,
+      error: e instanceof Error ? e.message : "Failed to start OAuth",
+    };
   }
   popup.location.href = authorizationUrl;
 
@@ -49,7 +54,12 @@ export async function connectAppUser(opts: {
         return;
       }
       if (data.success && data.api_key) {
-        resolve({ success: true, connectorId, connectionAPIKey: data.api_key, offlineAccessAllowed: true });
+        resolve({
+          success: true,
+          connectorId,
+          connectionAPIKey: data.api_key,
+          offlineAccessAllowed: true,
+        });
         return;
       }
       resolve({ success: false, connectorId, error: data.error ?? "OAuth failed" });

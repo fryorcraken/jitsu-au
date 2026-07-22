@@ -11,7 +11,10 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
-type AuthCtx = { supabase: { rpc: typeof import("@/integrations/supabase/client").supabase.rpc }; userId: string };
+type AuthCtx = {
+  supabase: { rpc: typeof import("@/integrations/supabase/client").supabase.rpc };
+  userId: string;
+};
 async function requireManager(ctx: AuthCtx) {
   const { data, error } = await ctx.supabase.rpc("has_role", {
     _user_id: ctx.userId,
@@ -99,9 +102,8 @@ export const disconnectGoogleDrive = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context);
-    const { getConnectionForUser, deleteConnectionForUser } = await import(
-      "./app-user-connections.server"
-    );
+    const { getConnectionForUser, deleteConnectionForUser } =
+      await import("./app-user-connections.server");
     const conn = await getConnectionForUser(context.userId, CONNECTOR_ID);
     if (conn) {
       try {
@@ -196,9 +198,8 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { getConnectionForUser, updateConnectionMetadata } = await import(
-      "./app-user-connections.server"
-    );
+    const { getConnectionForUser, updateConnectionMetadata } =
+      await import("./app-user-connections.server");
 
     const conn = await getConnectionForUser(context.userId, CONNECTOR_ID);
     if (!conn) throw new Error("Connect your Google account first.");

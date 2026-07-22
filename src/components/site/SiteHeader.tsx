@@ -47,12 +47,17 @@ export function SiteHeader() {
         </nav>
         <div className="hidden items-center gap-2 md:flex">
           {user ? (
-            <Button asChild size="sm" variant="outline">
-              <Link to="/account">
-                <User className="mr-1 h-4 w-4" />
-                Account
-              </Link>
-            </Button>
+            <>
+              <Button asChild size="sm" variant="ghost">
+                <Link to="/membership">Membership</Link>
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/account">
+                  <User className="mr-1 h-4 w-4" />
+                  Account
+                </Link>
+              </Button>
+            </>
           ) : (
             <Button asChild size="sm" variant="ghost">
               <Link to="/auth">Member login</Link>
@@ -85,13 +90,22 @@ export function SiteHeader() {
             </Link>
           ))}
           {user ? (
-            <Link
-              to="/account"
-              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={() => setOpen(false)}
-            >
-              Account
-            </Link>
+            <>
+              <Link
+                to="/membership"
+                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => setOpen(false)}
+              >
+                Membership
+              </Link>
+              <Link
+                to="/account"
+                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => setOpen(false)}
+              >
+                Account
+              </Link>
+            </>
           ) : (
             <Link
               to="/auth"

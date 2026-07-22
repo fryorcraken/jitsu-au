@@ -52,11 +52,23 @@ function AccountPage() {
           </Button>
         </div>
 
+        <Card>
+          <CardHeader>
+            <CardTitle>Membership</CardTitle>
+            <CardDescription>View your status, pick a plan, or renew.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link to="/membership">Manage membership</Link>
+            </Button>
+          </CardContent>
+        </Card>
+
         {isManager && (
           <Card>
             <CardHeader>
               <CardTitle>Manager tools</CardTitle>
-              <CardDescription>Waiver template and signed waivers.</CardDescription>
+              <CardDescription>Waivers, memberships and reconciliation.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
               <Button asChild variant="outline">
@@ -65,12 +77,23 @@ function AccountPage() {
               <Button asChild variant="outline">
                 <Link to="/manager/waivers">View signed waivers</Link>
               </Button>
+              <Button asChild variant="outline">
+                <Link to="/manager/memberships">Memberships</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/manager/membership-plans">Membership plans</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/manager/reconciliation">Bank reconciliation</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/manager/settings">Club settings</Link>
+              </Button>
             </CardContent>
           </Card>
         )}
 
         {isManager && <GoogleDriveCard />}
-
 
         <ChangePasswordCard />
         <ChangeEmailCard currentEmail={user.email ?? ""} />
@@ -161,7 +184,14 @@ function GoogleDriveCard() {
         ) : connected ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm">
-              Connected{email ? <> as <strong>{email}</strong></> : null}.
+              Connected
+              {email ? (
+                <>
+                  {" "}
+                  as <strong>{email}</strong>
+                </>
+              ) : null}
+              .
             </p>
             <Button variant="outline" onClick={onDisconnect} disabled={busy}>
               {busy ? "Working..." : "Disconnect"}

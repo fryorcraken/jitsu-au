@@ -3,8 +3,19 @@ import { Check } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
+import { formatCents } from "@/lib/validation";
+import { listMembershipPlans } from "@/lib/membership.functions";
 
 export const Route = createFileRoute("/pricing")({
+  // Prices come from the manager-editable plan catalog (single source of truth).
+  // Fall back to null on any error so the page still renders with static copy.
+  loader: async () => {
+    try {
+      return { plans: await listMembershipPlans() };
+    } catch {
+      return { plans: [] as Awaited<ReturnType<typeof listMembershipPlans>> };
+    }
+  },
   head: () => ({
     meta: [
       { title: "Pricing | UTS Jitsu" },
@@ -25,12 +36,17 @@ export const Route = createFileRoute("/pricing")({
   component: Pricing,
 });
 
+type Rate = "student" | "public";
 type Tier = {
   title: string;
   price: string;
   period?: string;
   features: string[];
   highlight?: boolean;
+  // When set, the displayed price is taken from the plan catalog (falling back
+  // to the static `price` above if the plan is unavailable).
+  planCode?: string;
+  rate?: Rate;
 };
 
 const student: Tier[] = [
@@ -40,12 +56,16 @@ const student: Tier[] = [
     period: "per half-year",
     features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"],
     highlight: true,
+    planCode: "semester",
+    rate: "student",
   },
   {
     title: "Casual class",
     price: "$20",
     period: "per session",
     features: ["Any regular class", "Great for trying us out", "No commitment"],
+    planCode: "casual_session",
+    rate: "student",
   },
 ];
 
@@ -56,18 +76,32 @@ const public_: Tier[] = [
     period: "per half-year",
     features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"],
     highlight: true,
+    planCode: "semester",
+    rate: "public",
   },
   {
     title: "Casual class",
     price: "$30",
     period: "per session",
     features: ["Any regular class", "Flexible, no commitment"],
+    planCode: "casual_session",
+    rate: "public",
   },
 ];
 
 const extras = [
-  { title: "First two sessions", price: "Free", note: "All year long. No gear needed" },
-  { title: "Sydney Jitsu yearly membership", price: "$60", note: "Insurance & club affiliation" },
+  {
+    title: "First two sessions",
+    price: "Free",
+    note: "All year long. No gear needed",
+    planCode: "trial_2_session",
+  },
+  {
+    title: "Sydney Jitsu yearly membership",
+    price: "$60",
+    note: "Insurance & club affiliation",
+    planCode: "insurance_yearly",
+  },
   { title: "Uniform (Gi + belt)", price: "$90", note: "Jacket, pants and belt" },
 ];
 
@@ -110,6 +144,27 @@ function TierCard({ tier }: { tier: Tier }) {
 }
 
 function Pricing() {
+  const { plans } = Route.useLoaderData();
+  const byCode = new Map(plans.map((p) => [p.code, p]));
+
+  // Prefer the live catalog price; fall back to the static copy on the tier.
+  const priceFor = (tier: Tier): string => {
+    if (!tier.planCode) return tier.price;
+    const plan = byCode.get(tier.planCode);
+    if (!plan) return tier.price;
+    const cents =
+      tier.rate === "student" && plan.student_price_cents != null
+        ? plan.student_price_cents
+        : plan.public_price_cents;
+    return formatCents(cents);
+  };
+  const extraPrice = (e: (typeof extras)[number]): string => {
+    if (!e.planCode) return e.price;
+    const plan = byCode.get(e.planCode);
+    if (!plan) return e.price;
+    return formatCents(plan.public_price_cents);
+  };
+
   return (
     <SiteLayout>
       <section className="mx-auto max-w-4xl px-4 py-16 md:py-20">
@@ -125,7 +180,7 @@ function Pricing() {
         <h2 className="text-2xl font-bold">For UTS students</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {student.map((t) => (
-            <TierCard key={t.title} tier={t} />
+            <TierCard key={t.title} tier={{ ...t, price: priceFor(t) }} />
           ))}
         </div>
       </section>
@@ -134,7 +189,7 @@ function Pricing() {
         <h2 className="text-2xl font-bold">For the general public</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {public_.map((t) => (
-            <TierCard key={t.title} tier={t} />
+            <TierCard key={t.title} tier={{ ...t, price: priceFor(t) }} />
           ))}
         </div>
       </section>
@@ -145,7 +200,7 @@ function Pricing() {
           {extras.map((e) => (
             <div key={e.title} className="rounded-xl border bg-card p-6">
               <h3 className="text-base font-semibold">{e.title}</h3>
-              <p className="mt-2 text-2xl font-bold text-primary">{e.price}</p>
+              <p className="mt-2 text-2xl font-bold text-primary">{extraPrice(e)}</p>
               <p className="mt-1 text-sm text-muted-foreground">{e.note}</p>
             </div>
           ))}
@@ -154,6 +209,11 @@ function Pricing() {
           Saturday sessions are best-effort and included in semester price, but not guaranteed. No
           classes during the UTS summer break.
         </p>
+        <div className="mt-6">
+          <Button asChild variant="outline">
+            <Link to="/membership">Join or manage your membership</Link>
+          </Button>
+        </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-4 pb-16">
