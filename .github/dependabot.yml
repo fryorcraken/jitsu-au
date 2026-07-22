@@ -1,0 +1,24 @@
+version: 2
+
+# We deliberately scope Dependabot to GitHub Actions ONLY.
+#
+# The npm/bun dependency set is intentionally excluded: `bun.lock` is owned by
+# Lovable (its private-mirror tarball URLs are the source of truth), and Claude
+# / CI must never commit a lockfile they produced (see CLAUDE.md > Lock file
+# strategy). Dependabot version-updates for npm/bun would rewrite package.json
+# *and* the lockfile against public npm, fighting that ownership and churning
+# the lock on every Lovable sync. Dependency advisories are instead surfaced by
+# Dependabot security *alerts* (a repo Security-tab toggle, notifications only)
+# and by the `bun audit` step in CI; upgrades flow through package.json ->
+# Lovable re-resolve.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
