@@ -1,0 +1,78 @@
+name: Supabase lint
+
+# Applies every migration to a throwaway local Postgres, then runs both
+# Supabase linters against it:
+#   1. `supabase db lint` (plpgsql_check) — PL/pgSQL function errors.
+#   2. The Security/Performance Advisors (Splinter) — the same checks as the
+#      Supabase dashboard, including function_search_path_mutable. See
+#      supabase/lint/ for the vendored query and the gating policy.
+#
+# Path-filtered to database changes so frontend-only PRs don't spin up Docker.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - ".github/workflows/supabase-lint.yml"
+  pull_request:
+    paths:
+      - "supabase/**"
+      - ".github/workflows/supabase-lint.yml"
+
+# Cancel superseded runs on the same ref (saves private-repo Actions minutes).
+concurrency:
+  group: supabase-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  db-lint:
+    name: Advisors + plpgsql_check
+    runs-on: ubuntu-latest
+    env:
+      # Default local database started by `supabase db start`. The port is the
+      # CLI default (54322); our supabase/config.toml does not override it.
+      DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+      # Advisor gating policy (see supabase/lint/check-advisors.py). Security
+      # findings at WARN or higher fail the build; performance findings are
+      # reported but do not block. Widen FAIL_CATEGORIES/FAIL_LEVELS to tighten.
+      FAIL_CATEGORIES: SECURITY
+      FAIL_LEVELS: WARN,ERROR
+    steps:
+      - uses: actions/checkout@v4
+
+      # Guards the gating logic itself (CSV parsing, thresholds, allowlist
+      # matching) with inline fixtures — no database needed, so it runs first
+      # and fails fast if the checker regresses.
+      - name: Self-test the advisor checker
+        run: python3 supabase/lint/check-advisors.py --selftest
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+
+      # Spins up the local Postgres container and applies every migration in
+      # supabase/migrations in order. A migration that fails to apply fails here.
+      - name: Start local database (applies all migrations)
+        run: supabase db start
+
+      # Advisors (Splinter): the same lints as the dashboard's Database >
+      # Advisors, run against the local schema. Tuples-only CSV so the checker
+      # gets a fixed column order; --single-transaction is required because the
+      # query sets transaction-local config before its final SELECT.
+      - name: Security & performance advisors (Splinter)
+        run: |
+          psql "$DB_URL" \
+            -v ON_ERROR_STOP=1 \
+            --single-transaction --csv --tuples-only --quiet \
+            --pset pager=off \
+            -f supabase/lint/splinter.sql \
+            -o "$RUNNER_TEMP/advisors.csv"
+          python3 supabase/lint/check-advisors.py "$RUNNER_TEMP/advisors.csv"
+
+      # plpgsql_check: PL/pgSQL function body errors. Scoped to `public` (our
+      # own functions) so warnings in Supabase-managed schemas like storage
+      # don't fail the build. Runs even if the advisor step failed so both
+      # reports show up in one run.
+      - name: plpgsql_check (supabase db lint)
+        if: always()
+        run: supabase db lint --level warning --schema public --fail-on warning

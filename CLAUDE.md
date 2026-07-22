@@ -216,6 +216,13 @@ Signed waiver PDFs and signature PNGs are stored in the Supabase Storage
 - **CI:** `.github/workflows/ci.yml` runs lint → test → build on Linux with Bun
   for every PR and pushes to `main`. It installs via `bash scripts/bun-install.sh`
   (see Lock file strategy below), not a plain `bun install`.
+- **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
+  `supabase/**`) starts a local Postgres, applies every migration, and runs the
+  **Advisors** (Splinter — the dashboard's Security/Performance lints, e.g.
+  `function_search_path_mutable`) plus `supabase db lint` (plpgsql_check on
+  `public`). Security findings at WARN+ fail the build; performance findings are
+  reported only. The vendored query and gating policy live in `supabase/lint/`
+  (see its README before changing the threshold or refreshing `splinter.sql`).
 
 ## Lock file strategy (Lovable ⇄ Claude/CI)
 
