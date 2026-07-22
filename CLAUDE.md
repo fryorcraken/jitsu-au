@@ -268,6 +268,8 @@ meaningfully). The app reads:
   `VITE_SUPABASE_PROJECT_ID`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
+- Server, optional: `MANAGER_AGENT_API_KEY` — bearer token for the manager agent
+  API (`/api/manager/agent`); unset disables the endpoint (see AGENTS.md).
 
 Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 

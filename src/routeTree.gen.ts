@@ -32,6 +32,7 @@ import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes
 import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
+import { Route as ApiManagerAgentRouteImport } from './routes/api/manager/agent'
 import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
 import { Route as LovableEmailAuthWebhookRouteImport } from './routes/lovable/email/auth/webhook'
 
@@ -155,6 +156,11 @@ const AuthenticatedManagerWaiversRoute =
     path: '/manager/waivers',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiManagerAgentRoute = ApiManagerAgentRouteImport.update({
+  id: '/api/manager/agent',
+  path: '/api/manager/agent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LovableEmailAuthPreviewRoute = LovableEmailAuthPreviewRouteImport.update({
   id: '/lovable/email/auth/preview',
   path: '/lovable/email/auth/preview',
@@ -189,6 +195,7 @@ export interface FileRoutesByFullPath {
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
+  '/api/manager/agent': typeof ApiManagerAgentRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -215,6 +222,7 @@ export interface FileRoutesByTo {
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
+  '/api/manager/agent': typeof ApiManagerAgentRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -243,6 +251,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
+  '/api/manager/agent': typeof ApiManagerAgentRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -271,6 +280,7 @@ export interface FileRouteTypes {
     | '/manager/settings'
     | '/manager/waiver-template'
     | '/manager/waivers'
+    | '/api/manager/agent'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   fileRoutesByTo: FileRoutesByTo
@@ -297,6 +307,7 @@ export interface FileRouteTypes {
     | '/manager/settings'
     | '/manager/waiver-template'
     | '/manager/waivers'
+    | '/api/manager/agent'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   id:
@@ -324,6 +335,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/settings'
     | '/_authenticated/manager/waiver-template'
     | '/_authenticated/manager/waivers'
+    | '/api/manager/agent'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   fileRoutesById: FileRoutesById
@@ -344,6 +356,7 @@ export interface RootRouteChildren {
   ThankYouRoute: typeof ThankYouRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
+  ApiManagerAgentRoute: typeof ApiManagerAgentRoute
   LovableEmailAuthPreviewRoute: typeof LovableEmailAuthPreviewRoute
   LovableEmailAuthWebhookRoute: typeof LovableEmailAuthWebhookRoute
 }
@@ -511,6 +524,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerWaiversRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/manager/agent': {
+      id: '/api/manager/agent'
+      path: '/api/manager/agent'
+      fullPath: '/api/manager/agent'
+      preLoaderRoute: typeof ApiManagerAgentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/lovable/email/auth/preview': {
       id: '/lovable/email/auth/preview'
       path: '/lovable/email/auth/preview'
@@ -572,6 +592,7 @@ const rootRouteChildren: RootRouteChildren = {
   ThankYouRoute: ThankYouRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
+  ApiManagerAgentRoute: ApiManagerAgentRoute,
   LovableEmailAuthPreviewRoute: LovableEmailAuthPreviewRoute,
   LovableEmailAuthWebhookRoute: LovableEmailAuthWebhookRoute,
 }
