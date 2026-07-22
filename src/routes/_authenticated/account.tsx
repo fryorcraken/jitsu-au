@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteLayout } from "@/components/site/SiteLayout";
@@ -8,6 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { connectAppUser } from "@/integrations/lovable/appUserConnectorClient";
+import {
+  disconnectGoogleDrive,
+  getGoogleDriveStatus,
+  saveGoogleDriveConnection,
+  startGoogleDriveConnect,
+} from "@/lib/google-drive.functions";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({
@@ -60,6 +68,9 @@ function AccountPage() {
             </CardContent>
           </Card>
         )}
+
+        {isManager && <GoogleDriveCard />}
+
 
         <ChangePasswordCard />
         <ChangeEmailCard currentEmail={user.email ?? ""} />
