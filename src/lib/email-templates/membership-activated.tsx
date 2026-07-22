@@ -36,7 +36,7 @@ export const MembershipActivatedEmail = ({
     <Preview>Your {planName} is active</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Heading style={h1}>You're all set — welcome to the mat</Heading>
+        <Heading style={h1}>You're all set, welcome to the mat</Heading>
         <Text style={text}>
           Hi {memberName || "there"}, your <strong>{planName}</strong> at{" "}
           <Link href={siteUrl} style={link}>

@@ -31,7 +31,7 @@ export const WaiverNotificationEmail = ({
   <Html lang="en" dir="ltr">
     <Head />
     <Preview>
-      New waiver signed by {memberName || memberEmail} — {siteName}
+      New waiver signed by {memberName || memberEmail}: {siteName}
     </Preview>
     <Body style={main}>
       <Container style={container}>

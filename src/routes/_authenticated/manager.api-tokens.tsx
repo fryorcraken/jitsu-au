@@ -45,7 +45,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         } catch {
-          toast.error("Couldn't copy — select and copy manually.");
+          toast.error("Couldn't copy. Select and copy manually.");
         }
       }}
     >
@@ -153,7 +153,7 @@ function ApiTokensPage() {
         {freshToken && (
           <Alert>
             <KeyRound className="size-4" />
-            <AlertTitle>Copy your new token now — it won't be shown again</AlertTitle>
+            <AlertTitle>Copy your new token now: it won't be shown again</AlertTitle>
             <AlertDescription>
               <div className="mt-2 space-y-3">
                 <p className="text-sm text-muted-foreground">
