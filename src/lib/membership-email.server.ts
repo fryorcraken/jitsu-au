@@ -164,7 +164,7 @@ export async function sendMembershipPaymentEmail({
         apiKey,
         sendUrl,
         to,
-        subject: `New membership pending payment — ${memberName || memberEmail}`,
+        subject: `New membership pending payment: ${memberName || memberEmail}`,
         html: managerHtml,
         text: managerText,
         idempotencyKey: `membership-pending-${membershipId}-${to}`,

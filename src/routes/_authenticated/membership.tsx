@@ -95,7 +95,7 @@ function MembershipPage() {
       });
       await reload();
       if (res.activated) {
-        toast.success("You're all set — your membership is active.");
+        toast.success("You're all set. Your membership is active.");
       } else {
         toast.success("Check your email for bank-transfer instructions.");
       }
@@ -201,7 +201,7 @@ function MembershipPage() {
             <div>
               <h2 className="text-2xl font-bold">Choose a plan</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                UTS students pay a discounted rate — just add your student number.
+                UTS students pay a discounted rate. Just add your student number.
               </p>
             </div>
             <div className="rounded-lg border bg-card p-3">

@@ -46,7 +46,7 @@ export const MembershipPaymentEmail = ({
     </Preview>
     <Body style={main}>
       <Container style={container}>
-        <Heading style={h1}>Almost there — pay to activate your membership</Heading>
+        <Heading style={h1}>Almost there. Pay to activate your membership</Heading>
         <Text style={text}>
           Hi {memberName || "there"}, thanks for signing up for <strong>{planName}</strong> at{" "}
           <Link href={siteUrl} style={link}>

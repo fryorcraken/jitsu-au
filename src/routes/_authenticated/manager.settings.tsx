@@ -106,7 +106,7 @@ function SettingsPage() {
             <CardContent>
               <div className="prose prose-sm max-w-none prose-headings:font-bold prose-headings:text-foreground prose-p:leading-relaxed prose-strong:text-foreground">
                 <ReactMarkdown>
-                  {instructions || "_Nothing yet — add your instructions._"}
+                  {instructions || "_Nothing yet. Add your instructions._"}
                 </ReactMarkdown>
               </div>
             </CardContent>
