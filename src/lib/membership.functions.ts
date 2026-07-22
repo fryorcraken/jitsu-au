@@ -262,7 +262,12 @@ export const startMembership = createServerFn({ method: "POST" })
       if (existing) throw new Error("You've already started your free trial.");
     }
 
-    const price = computeMembershipPrice(plan, data.is_student);
+    // Student status is derived server-side from the number's presence, so the
+    // number is the single source of truth: a non-empty UTS student number gets
+    // the student rate. The client's is_student flag is not trusted for pricing.
+    const utsStudentNumber = data.uts_student_number?.trim() || null;
+    const isStudent = utsStudentNumber !== null;
+    const price = computeMembershipPrice(plan, isStudent);
 
     // Resolve the member's name once: the surname drives the human-friendly
     // reference, and the full name is used in emails. Falls back gracefully when
@@ -312,8 +317,8 @@ export const startMembership = createServerFn({ method: "POST" })
         user_id: context.userId,
         plan_id: plan.id,
         status: "pending",
-        is_student: data.is_student,
-        uts_student_number: data.is_student ? data.uts_student_number || null : null,
+        is_student: isStudent,
+        uts_student_number: utsStudentNumber,
         price_cents: price,
         payment_reference: reference,
         payment_method: "bank_transfer",
