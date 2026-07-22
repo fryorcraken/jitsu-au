@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Instagram, Youtube, Phone, MessageCircle } from "lucide-react";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
+import { GOOGLE_MAPS_URL } from "@/lib/venue";
 
 export function SiteFooter() {
   return (
@@ -98,7 +99,14 @@ export function SiteFooter() {
       <div className="border-t">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-6 text-xs text-muted-foreground md:flex-row">
           <p>© {new Date().getFullYear()} Sydney Jitsu Inc. UTS Jitsu. All rights reserved.</p>
-          <p>ActivateFit Gym, Harris Street, Ultimo NSW</p>
+          <a
+            href={GOOGLE_MAPS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-foreground"
+          >
+            ActivateFit Gym, Harris Street, Ultimo NSW
+          </a>
         </div>
       </div>
     </footer>

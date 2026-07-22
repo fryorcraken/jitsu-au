@@ -90,6 +90,12 @@ function Classes() {
                 0493 631 759
               </a>
             </p>
+            <Link
+              to="/contact"
+              className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              Getting there & map <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
           <div className="mt-6 flex flex-wrap gap-3 md:mt-0">
             <Button asChild>
