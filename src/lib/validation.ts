@@ -103,7 +103,7 @@ export const waiverSubmitSchema = z
         (d.signature_name && d.signature_name.trim()) ||
         (d.signature_image && d.signature_image.trim()),
       ),
-    { message: "A signature is required — draw or type your name.", path: ["signature_name"] },
+    { message: "A signature is required. Draw or type your name.", path: ["signature_name"] },
   )
   .refine(
     (d) =>

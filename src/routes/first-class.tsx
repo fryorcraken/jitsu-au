@@ -28,7 +28,7 @@ export const Route = createFileRoute("/first-class")({
       {
         property: "og:description",
         content:
-          "A step-by-step walkthrough of your first Japanese Jiu-Jitsu session in Ultimo — what to expect, what to bring and how the free trial works.",
+          "A step-by-step walkthrough of your first Japanese Jiu-Jitsu session in Ultimo: what to expect, what to bring and how the free trial works.",
       },
       { property: "og:url", content: "https://jitsu.au/first-class" },
     ],
@@ -41,7 +41,7 @@ const beforeSteps = [
   {
     icon: ClipboardCheck,
     title: "Sign your waiver",
-    body: "Do it online ahead of time, or we'll sort it at the gym — whatever's easier.",
+    body: "Do it online ahead of time, or we'll sort it at the gym. Whatever's easier.",
   },
   {
     icon: Clock,
@@ -102,7 +102,7 @@ function FirstClass() {
         <p className="mt-5 text-lg text-muted-foreground">
           Walking into a martial-arts gym for the first time can feel intimidating. It shouldn't be.
           Here's a step-by-step run-through of a session, so you know exactly what to expect before
-          you arrive — no surprises, no pressure.
+          you arrive. No surprises, no pressure.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
           <Button asChild size="lg">
@@ -149,8 +149,8 @@ function FirstClass() {
           <p className="mt-4 max-w-2xl text-muted-foreground">
             At the <strong className="text-foreground">ActivateFit reception</strong>, tell them
             you're <strong className="text-foreground">here for the jitsu trial</strong>. They'll
-            ask you to <strong className="text-foreground">sign the paper sign-in sheet</strong> —
-            that's all you need to get in for the session.
+            ask you to <strong className="text-foreground">sign the paper sign-in sheet</strong>.
+            That's all you need to get in for the session.
           </p>
         </div>
       </section>
@@ -186,8 +186,8 @@ function FirstClass() {
             <li className="flex gap-3">
               <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary-foreground" />
               <span>
-                The trial is <strong className="text-primary-foreground">completely free</strong> —
-                no payment, no card or payment details, no commitment required.
+                The trial is <strong className="text-primary-foreground">completely free</strong>.
+                No payment, no card or payment details, no commitment required.
               </span>
             </li>
             <li className="flex gap-3">
@@ -195,7 +195,7 @@ function FirstClass() {
               <span>
                 Use your{" "}
                 <strong className="text-primary-foreground">2 free sessions at any point</strong>{" "}
-                during the semester — they don't have to be back-to-back.
+                during the semester. They don't have to be back-to-back.
               </span>
             </li>
             <li className="flex gap-3">
@@ -210,8 +210,8 @@ function FirstClass() {
               <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary-foreground" />
               <span>
                 We'll enter you properly into the system{" "}
-                <strong className="text-primary-foreground">once you decide to join</strong> —
-                nothing to set up for the trial.
+                <strong className="text-primary-foreground">once you decide to join</strong>.
+                Nothing to set up for the trial.
               </span>
             </li>
           </ul>
@@ -229,7 +229,7 @@ function FirstClass() {
           <div>
             <h2 className="text-2xl font-bold">Got a question before you come?</h2>
             <p className="mt-2 text-muted-foreground">
-              Ask us by email, WhatsApp or phone — we're happy to help.
+              Ask us by email, WhatsApp or phone. We're happy to help.
             </p>
           </div>
           <div className="mt-6 flex flex-wrap gap-3 md:mt-0">

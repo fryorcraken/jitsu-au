@@ -157,8 +157,8 @@ function Contact() {
               Enter via{" "}
               <strong className="text-foreground">
                 Building 4, at the corner of Harris St and Thomas St
-              </strong>{" "}
-              — {VENUE_NAME} is right there, at street level.
+              </strong>
+              . {VENUE_NAME} is right there, at street level.
             </li>
             <li>
               Coming from the UTS campus? Head down the{" "}
