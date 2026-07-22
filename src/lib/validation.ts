@@ -84,6 +84,9 @@ export const waiverSubmitSchema = z
     // Optional UTS student number. Non-empty means the person is a UTS student
     // (there is no separate "is a student" flag); it unlocks the student rate.
     uts_student_number: z.string().trim().max(20).optional().or(z.literal("")),
+    // Consent to be contacted by SMS/WhatsApp and added to club WhatsApp groups.
+    // Optional (not required to submit); defaults to no consent.
+    sms_whatsapp_consent: z.boolean().optional().default(false),
     emergency_contact_name: z.string().trim().min(1).max(120),
     emergency_contact_phone: z.string().trim().min(1).max(30),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),

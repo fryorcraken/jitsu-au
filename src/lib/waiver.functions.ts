@@ -133,6 +133,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       phone: data.phone,
       email: data.email,
       uts_student_number: data.uts_student_number?.trim() || null,
+      sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
       emergency_contact_name: data.emergency_contact_name,
       emergency_contact_phone: data.emergency_contact_phone,
       medical_notes: data.medical_notes || null,

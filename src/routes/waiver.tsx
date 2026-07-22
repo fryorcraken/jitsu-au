@@ -88,6 +88,11 @@ function Waiver() {
   const [email, setEmail] = useState(search.email ?? "");
   const [address, setAddress] = useState("");
   const [utsStudentNumber, setUtsStudentNumber] = useState("");
+  // SMS/WhatsApp consent is a checkbox here (page 2). It defaults to checked
+  // only when the phone number was already collected on the previous page —
+  // i.e. the person already gave us their number (and saw the consent note)
+  // during the "Start your free trial" step. Otherwise they must opt in.
+  const [smsConsent, setSmsConsent] = useState(Boolean(search.phone && search.phone.trim()));
   const [ecName, setEcName] = useState("");
   const [ecPhone, setEcPhone] = useState("");
   const [medical, setMedical] = useState("");
@@ -146,7 +151,12 @@ function Waiver() {
           setLastName(s.last);
         }
         if (r.date_of_birth) setDob(r.date_of_birth);
-        if (r.phone) setPhone(r.phone);
+        // We already hold this returning member's number, so default their
+        // SMS/WhatsApp consent to checked (they can still opt out).
+        if (r.phone) {
+          setPhone(r.phone);
+          setSmsConsent(true);
+        }
         if (r.email) setEmail(r.email);
         if (r.address) setAddress(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
@@ -222,6 +232,7 @@ function Waiver() {
           phone,
           email,
           uts_student_number: utsStudentNumber,
+          sms_whatsapp_consent: smsConsent,
           emergency_contact_name: ecName,
           emergency_contact_phone: ecPhone,
           medical_notes: medical,
@@ -354,10 +365,17 @@ function Waiver() {
                     onChange={(e) => setPhone(e.target.value)}
                     className="mt-1.5"
                   />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    By giving us your number you agree we can contact you by SMS or WhatsApp, and
-                    add you to club WhatsApp groups.
-                  </p>
+                  <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+                    <Checkbox
+                      checked={smsConsent}
+                      onCheckedChange={(v) => setSmsConsent(v === true)}
+                      className="mt-0.5"
+                      aria-label="Consent to SMS or WhatsApp contact"
+                    />
+                    <span>
+                      I agree to be contacted by SMS or WhatsApp, and added to club WhatsApp groups.
+                    </span>
+                  </label>
                 </div>
               </div>
               <div>

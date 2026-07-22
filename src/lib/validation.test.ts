@@ -215,6 +215,16 @@ describe("waiverSubmitSchema", () => {
     ).toBe(false);
   });
 
+  it("defaults sms_whatsapp_consent to false when omitted", () => {
+    const result = waiverSubmitSchema.safeParse(validAdult);
+    expect(result.success && result.data.sms_whatsapp_consent).toBe(false);
+  });
+
+  it("accepts sms_whatsapp_consent when opted in", () => {
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, sms_whatsapp_consent: true });
+    expect(result.success && result.data.sms_whatsapp_consent).toBe(true);
+  });
+
   it("defaults is_minor to false when omitted", () => {
     const result = waiverSubmitSchema.safeParse(validAdult);
     expect(result.success && result.data.is_minor).toBe(false);
