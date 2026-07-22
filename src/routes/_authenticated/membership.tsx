@@ -3,14 +3,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Check, Mail } from "lucide-react";
-import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { computeMembershipPrice, formatCents, type LifecycleStatus } from "@/lib/validation";
+import {
+  computeMembershipPrice,
+  formatCents,
+  isUtsStudent,
+  type LifecycleStatus,
+} from "@/lib/validation";
 import { getMyMemberships, listMembershipPlans, startMembership } from "@/lib/membership.functions";
 
 export const Route = createFileRoute("/_authenticated/membership")({
@@ -56,16 +59,23 @@ function MembershipPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isStudent, setIsStudent] = useState(false);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [pendingCode, setPendingCode] = useState<string | null>(null);
+
+  // A non-empty UTS student number is what makes someone a student; there is no
+  // separate "I'm a student" flag. It unlocks the discounted student rate. Same
+  // rule the server uses for authoritative pricing, so the two can't disagree.
+  const isStudent = isUtsStudent(studentNumber);
 
   const reload = useMemo(
     () => () => {
       return Promise.all([fetchPlans(), fetchMine()]).then(([p, m]) => {
         setPlans(p);
         setMine(m);
+        // Prefill the student number from the member's waiver so they don't
+        // retype it (blank there means they never gave one).
+        if (m.uts_student_number) setStudentNumber(m.uts_student_number);
       });
     },
     [fetchPlans, fetchMine],
@@ -78,17 +88,13 @@ function MembershipPage() {
   }, [reload]);
 
   async function choose(plan: Plan) {
-    if (isStudent && !studentNumber.trim()) {
-      toast.error("Enter your UTS student number to take the student rate.");
-      return;
-    }
     setPendingCode(plan.code);
     try {
       const res = await start({
         data: {
           plan_code: plan.code,
           is_student: isStudent,
-          uts_student_number: isStudent ? studentNumber.trim() : "",
+          uts_student_number: studentNumber.trim(),
           session_date: plan.kind === "session" ? sessionDate : "",
           hp: "",
         },
@@ -108,9 +114,9 @@ function MembershipPage() {
 
   if (loading) {
     return (
-      <SiteLayout>
+      <>
         <div className="p-8">Loading...</div>
-      </SiteLayout>
+      </>
     );
   }
 
@@ -118,7 +124,7 @@ function MembershipPage() {
   const status = LIFECYCLE_COPY[lifecycle];
 
   return (
-    <SiteLayout>
+    <>
       <section className="mx-auto max-w-4xl space-y-8 px-4 py-12">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -205,29 +211,20 @@ function MembershipPage() {
               </p>
             </div>
             <div className="rounded-lg border bg-card p-3">
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <Checkbox
-                  checked={isStudent}
-                  onCheckedChange={(v) => setIsStudent(v === true)}
-                  aria-label="I'm a UTS student"
-                />
-                I'm a UTS student
-              </label>
-              {isStudent && (
-                <div className="mt-2">
-                  <Label htmlFor="sid" className="text-xs">
-                    UTS student number
-                  </Label>
-                  <Input
-                    id="sid"
-                    value={studentNumber}
-                    onChange={(e) => setStudentNumber(e.target.value)}
-                    maxLength={20}
-                    placeholder="e.g. 12345678"
-                    className="mt-1 h-8"
-                  />
-                </div>
-              )}
+              <Label htmlFor="sid" className="text-xs">
+                UTS student number <span className="text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="sid"
+                value={studentNumber}
+                onChange={(e) => setStudentNumber(e.target.value)}
+                maxLength={20}
+                placeholder="e.g. 12345678"
+                className="mt-1 h-8"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Add it to get the student rate.
+              </p>
             </div>
           </div>
 
@@ -310,6 +307,6 @@ function MembershipPage() {
           before your first class.
         </p>
       </section>
-    </SiteLayout>
+    </>
   );
 }

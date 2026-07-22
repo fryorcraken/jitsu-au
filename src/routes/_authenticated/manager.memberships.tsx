@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Check, Undo2 } from "lucide-react";
-import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatCents } from "@/lib/validation";
@@ -69,7 +68,7 @@ function ManagerMembershipsPage() {
   }
 
   return (
-    <SiteLayout>
+    <>
       <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -79,6 +78,9 @@ function ManagerMembershipsPage() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link to="/manager/users">Users</Link>
+            </Button>
             <Button asChild variant="outline">
               <Link to="/manager/reconciliation">Reconcile bank statement</Link>
             </Button>
@@ -165,6 +167,6 @@ function ManagerMembershipsPage() {
           </div>
         )}
       </section>
-    </SiteLayout>
+    </>
   );
 }

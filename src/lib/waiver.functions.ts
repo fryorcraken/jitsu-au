@@ -60,11 +60,17 @@ export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handle
 export const getMyLatestWaiver = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    // Fetch only the columns the prefill needs — keep the row's storage paths
+    // (pdf_path, signature image paths) and acknowledgements off the wire. The
+    // two newest columns (uts_student_number, sms_whatsapp_consent) are absent
+    // from the stale generated types, so the select string is cast to satisfy
+    // the type-checker; the runtime query still fetches just these columns and
+    // the client narrows the result to its Prefill shape.
+    const prefillColumns =
+      "full_name, first_name, middle_name, last_name, date_of_birth, address, phone, email, uts_student_number, sms_whatsapp_consent, emergency_contact_name, emergency_contact_phone, medical_notes";
     const { data, error } = await context.supabase
       .from("waivers")
-      .select(
-        "full_name, first_name, middle_name, last_name, date_of_birth, address, phone, email, emergency_contact_name, emergency_contact_phone, medical_notes",
-      )
+      .select(prefillColumns as "*")
       .eq("user_id", context.userId)
       .order("signed_at", { ascending: false })
       .limit(1)
@@ -120,31 +126,36 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
 
-    // Insert waiver row
+    // Insert waiver row. Built as a variable + cast so the `uts_student_number`
+    // key (absent from the stale generated Insert type) doesn't trip the
+    // excess-property check.
+    const waiverRow = {
+      full_name,
+      first_name: data.first_name,
+      middle_name: data.middle_name || null,
+      last_name: data.last_name,
+      date_of_birth: data.date_of_birth,
+      address: data.address,
+      phone: data.phone,
+      email: data.email,
+      uts_student_number: data.uts_student_number?.trim() || null,
+      sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+      emergency_contact_name: data.emergency_contact_name,
+      emergency_contact_phone: data.emergency_contact_phone,
+      medical_notes: data.medical_notes || null,
+      acknowledgements: answers,
+      signature_name: data.signature_name || full_name,
+      signed_at,
+      user_id: userId,
+      template_version: tpl.version,
+      is_minor: data.is_minor ?? false,
+      guardian_name: data.guardian_name || null,
+      guardian_relationship: data.guardian_relationship || null,
+      guardian_signature: data.guardian_signature || null,
+    };
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from("waivers")
-      .insert({
-        full_name,
-        first_name: data.first_name,
-        middle_name: data.middle_name || null,
-        last_name: data.last_name,
-        date_of_birth: data.date_of_birth,
-        address: data.address,
-        phone: data.phone,
-        email: data.email,
-        emergency_contact_name: data.emergency_contact_name,
-        emergency_contact_phone: data.emergency_contact_phone,
-        medical_notes: data.medical_notes || null,
-        acknowledgements: answers,
-        signature_name: data.signature_name || full_name,
-        signed_at,
-        user_id: userId,
-        template_version: tpl.version,
-        is_minor: data.is_minor ?? false,
-        guardian_name: data.guardian_name || null,
-        guardian_relationship: data.guardian_relationship || null,
-        guardian_signature: data.guardian_signature || null,
-      })
+      .insert(waiverRow as never)
       .select("id")
       .single();
     if (insErr) throw new Error(insErr.message);

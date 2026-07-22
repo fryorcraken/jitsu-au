@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: this workflow only reads the repo. Without this block the
+# job inherits the repository default token scope (often read/write).
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Lint, test, build
@@ -27,6 +32,14 @@ jobs:
       # restores bun.lock. See CLAUDE.md > Lock file strategy.
       - name: Install dependencies
         run: bash scripts/bun-install.sh
+
+      # Surface known-vulnerable dependencies without blocking the build:
+      # advisories often land on transitive deps with no fix available yet, and
+      # upgrades here must go through package.json -> Lovable re-resolve (see
+      # CLAUDE.md > Lock file strategy), not a CI-side lockfile edit.
+      - name: Audit dependencies
+        run: bun audit
+        continue-on-error: true
 
       - name: Lint
         run: bun run lint

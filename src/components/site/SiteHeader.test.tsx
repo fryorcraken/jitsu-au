@@ -39,11 +39,23 @@ describe("SiteHeader", () => {
     expect(screen.queryByText(/^sign in$/i)).not.toBeInTheDocument();
   });
 
-  it('shows the "Account" link when logged in instead of the auth link', () => {
+  it('consolidates Membership and Account into a single "Member space" menu when logged in', () => {
     mockUseAuth.mockReturnValue({ user: { id: "u1" } });
     render(<SiteHeader />);
 
-    expect(screen.getAllByRole("link", { name: /account/i }).length).toBeGreaterThanOrEqual(1);
+    // The two separate desktop buttons are replaced by one "Member space" entry point.
+    expect(screen.getAllByText(/member space/i).length).toBeGreaterThanOrEqual(1);
+    // Both destinations remain reachable (mobile nav renders them, desktop via the menu).
+    const accountLinks = screen.getAllByRole("link", { name: /account/i });
+    expect(accountLinks.length).toBeGreaterThanOrEqual(1);
+    for (const link of accountLinks) {
+      expect(link).toHaveAttribute("href", "/account");
+    }
+    const membershipLinks = screen.getAllByRole("link", { name: /membership/i });
+    expect(membershipLinks.length).toBeGreaterThanOrEqual(1);
+    for (const link of membershipLinks) {
+      expect(link).toHaveAttribute("href", "/membership");
+    }
     expect(screen.queryByText(/member login/i)).not.toBeInTheDocument();
   });
 });

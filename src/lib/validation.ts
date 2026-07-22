@@ -53,7 +53,6 @@ export const interestSchema = z.object({
   name: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
-  uts_student: z.boolean(),
   experience: z.string().trim().max(500).optional().or(z.literal("")),
   message: z.string().trim().max(1000).optional().or(z.literal("")),
   hp: z.string().max(0).optional(), // honeypot — must stay empty
@@ -82,6 +81,12 @@ export const waiverSubmitSchema = z
     address: z.string().trim().min(1).max(300),
     phone: z.string().trim().min(1).max(30),
     email: z.string().trim().email().max(255),
+    // Optional UTS student number. Non-empty means the person is a UTS student
+    // (there is no separate "is a student" flag); it unlocks the student rate.
+    uts_student_number: z.string().trim().max(20).optional().or(z.literal("")),
+    // Consent to be contacted by SMS/WhatsApp and added to club WhatsApp groups.
+    // Optional (not required to submit); defaults to no consent.
+    sms_whatsapp_consent: z.boolean().optional().default(false),
     emergency_contact_name: z.string().trim().min(1).max(120),
     emergency_contact_phone: z.string().trim().min(1).max(30),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
@@ -176,6 +181,17 @@ type PlanPricing = { public_price_cents: number; student_price_cents: number | n
 export function computeMembershipPrice(plan: PlanPricing, isStudent: boolean): number {
   if (isStudent && plan.student_price_cents != null) return plan.student_price_cents;
   return plan.public_price_cents;
+}
+
+/**
+ * Student status is trust-based on the UTS student number: a non-empty number
+ * (after trimming) means the person is a UTS student and unlocks the student
+ * rate. There is no separate boolean flag. Shared by the membership page (live
+ * price preview) and the server (authoritative pricing) so the two can never
+ * disagree, and it matches the `memberships` DB CHECK constraint.
+ */
+export function isUtsStudent(utsStudentNumber: string | null | undefined): boolean {
+  return Boolean(utsStudentNumber && utsStudentNumber.trim());
 }
 
 /** Format integer cents as AUD for display: 24500 -> "$245", 2050 -> "$20.50", 0 -> "Free". */

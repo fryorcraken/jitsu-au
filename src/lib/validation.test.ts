@@ -4,6 +4,7 @@ import {
   contactSchema,
   decodeDataUrlPng,
   interestSchema,
+  isUtsStudent,
   saveTemplateSchema,
   splitFullName,
   waiverApprovalSchema,
@@ -90,11 +91,18 @@ describe("interestSchema", () => {
   const valid = {
     name: "Sam Trainee",
     email: "sam@example.com",
-    uts_student: true,
   };
 
   it("accepts a minimal valid submission", () => {
     expect(interestSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("no longer requires a uts_student field (moved to the waiver)", () => {
+    // Before this change the schema demanded `uts_student: z.boolean()`, so a
+    // submission without it failed. Student status now lives on the waiver.
+    const result = interestSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+    expect(result.success && "uts_student" in result.data).toBe(false);
   });
 
   it("rejects an invalid email", () => {
@@ -192,6 +200,32 @@ describe("waiverSubmitSchema", () => {
     ).toBe(false);
   });
 
+  it("accepts an optional UTS student number", () => {
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, uts_student_number: "12345678" });
+    expect(result.success && result.data.uts_student_number).toBe("12345678");
+  });
+
+  it("allows the UTS student number to be omitted", () => {
+    const result = waiverSubmitSchema.safeParse(validAdult);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a UTS student number over 20 chars", () => {
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, uts_student_number: "1".repeat(21) }).success,
+    ).toBe(false);
+  });
+
+  it("defaults sms_whatsapp_consent to false when omitted", () => {
+    const result = waiverSubmitSchema.safeParse(validAdult);
+    expect(result.success && result.data.sms_whatsapp_consent).toBe(false);
+  });
+
+  it("accepts sms_whatsapp_consent when opted in", () => {
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, sms_whatsapp_consent: true });
+    expect(result.success && result.data.sms_whatsapp_consent).toBe(true);
+  });
+
   it("defaults is_minor to false when omitted", () => {
     const result = waiverSubmitSchema.safeParse(validAdult);
     expect(result.success && result.data.is_minor).toBe(false);
@@ -280,5 +314,24 @@ describe("waiverApprovalSchema", () => {
   it("requires both fields", () => {
     expect(waiverApprovalSchema.safeParse({ id }).success).toBe(false);
     expect(waiverApprovalSchema.safeParse({ status: "approved" }).success).toBe(false);
+  });
+});
+
+describe("isUtsStudent", () => {
+  // The single rule both the membership page (price preview) and the server
+  // (authoritative pricing) rely on. A non-empty UTS number means student.
+  it("is a student when a non-empty number is present", () => {
+    expect(isUtsStudent("12345678")).toBe(true);
+  });
+
+  it("trims surrounding whitespace before deciding", () => {
+    expect(isUtsStudent("  12345678  ")).toBe(true);
+    expect(isUtsStudent("   ")).toBe(false);
+  });
+
+  it("is not a student for empty, null, or undefined", () => {
+    expect(isUtsStudent("")).toBe(false);
+    expect(isUtsStudent(null)).toBe(false);
+    expect(isUtsStudent(undefined)).toBe(false);
   });
 });

@@ -2,7 +2,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,14 +87,14 @@ function PlansPage() {
 
   if (loading) {
     return (
-      <SiteLayout>
+      <>
         <div className="p-8">Loading...</div>
-      </SiteLayout>
+      </>
     );
   }
 
   return (
-    <SiteLayout>
+    <>
       <section className="mx-auto max-w-4xl space-y-6 px-4 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -207,6 +206,6 @@ function PlansPage() {
           ))}
         </div>
       </section>
-    </SiteLayout>
+    </>
   );
 }
