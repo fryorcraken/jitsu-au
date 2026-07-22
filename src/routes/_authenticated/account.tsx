@@ -1,9 +1,8 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,83 +24,38 @@ export const Route = createFileRoute("/_authenticated/account")({
 });
 
 function AccountPage() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { roles, isManager } = useRoles(user?.id);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-    navigate({ to: "/auth" });
-  }
 
   if (!user) return null;
 
   return (
-    <SiteLayout>
-      <section className="mx-auto max-w-2xl space-y-6 px-4 py-12">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-black">Your account</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Signed in as <strong>{user.email}</strong>
-              {roles.length > 0 && <> · Roles: {roles.join(", ")}</>}
-            </p>
-          </div>
-          <Button variant="outline" onClick={signOut}>
-            Sign out
+    <section className="mx-auto max-w-2xl space-y-6 px-4 py-12">
+      <div>
+        <h1 className="text-3xl font-black">Your account</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Signed in as <strong>{user.email}</strong>
+          {roles.length > 0 && <> · Roles: {roles.join(", ")}</>}
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Membership</CardTitle>
+          <CardDescription>View your status, pick a plan, or renew.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild>
+            <Link to="/membership">Manage membership</Link>
           </Button>
-        </div>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Membership</CardTitle>
-            <CardDescription>View your status, pick a plan, or renew.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild>
-              <Link to="/membership">Manage membership</Link>
-            </Button>
-          </CardContent>
-        </Card>
+      {isManager && <GoogleDriveCard />}
 
-        {isManager && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Manager tools</CardTitle>
-              <CardDescription>Waivers, memberships and reconciliation.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <Button asChild variant="outline">
-                <Link to="/manager/waiver-template">Edit waiver template</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/manager/waivers">View signed waivers</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/manager/memberships">Memberships</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/manager/membership-plans">Membership plans</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/manager/reconciliation">Bank reconciliation</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/manager/settings">Club settings</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/manager/api-tokens">Agent access</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {isManager && <GoogleDriveCard />}
-
-        <ChangePasswordCard />
-        <ChangeEmailCard currentEmail={user.email ?? ""} />
-      </section>
-    </SiteLayout>
+      <ChangePasswordCard />
+      <ChangeEmailCard currentEmail={user.email ?? ""} />
+    </section>
   );
 }
 
