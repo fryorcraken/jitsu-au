@@ -47,6 +47,83 @@ export type Database = {
         }
         Relationships: []
       }
+      bank_transactions: {
+        Row: {
+          amount_cents: number
+          created_at: string
+          dedupe_hash: string
+          description: string
+          id: string
+          import_batch: string
+          matched_at: string | null
+          matched_by: string | null
+          matched_membership_id: string | null
+          posted_at: string | null
+          raw: Json
+          reference: string | null
+          status: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string
+          dedupe_hash: string
+          description?: string
+          id?: string
+          import_batch: string
+          matched_at?: string | null
+          matched_by?: string | null
+          matched_membership_id?: string | null
+          posted_at?: string | null
+          raw?: Json
+          reference?: string | null
+          status?: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string
+          dedupe_hash?: string
+          description?: string
+          id?: string
+          import_batch?: string
+          matched_at?: string | null
+          matched_by?: string | null
+          matched_membership_id?: string | null
+          posted_at?: string | null
+          raw?: Json
+          reference?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_transactions_matched_membership_id_fkey"
+            columns: ["matched_membership_id"]
+            isOneToOne: false
+            referencedRelation: "memberships"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      club_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          updated_by: string | null
+          value: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: string
+        }
+        Relationships: []
+      }
       contact_messages: {
         Row: {
           created_at: string
@@ -106,6 +183,116 @@ export type Database = {
           uts_student?: boolean
         }
         Relationships: []
+      }
+      membership_plans: {
+        Row: {
+          code: string
+          created_at: string
+          description: string | null
+          duration_days: number | null
+          id: string
+          is_active: boolean
+          kind: string
+          name: string
+          public_price_cents: number
+          session_credits: number | null
+          sort_order: number
+          student_price_cents: number | null
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          description?: string | null
+          duration_days?: number | null
+          id?: string
+          is_active?: boolean
+          kind: string
+          name: string
+          public_price_cents: number
+          session_credits?: number | null
+          sort_order?: number
+          student_price_cents?: number | null
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          description?: string | null
+          duration_days?: number | null
+          id?: string
+          is_active?: boolean
+          kind?: string
+          name?: string
+          public_price_cents?: number
+          session_credits?: number | null
+          sort_order?: number
+          student_price_cents?: number | null
+        }
+        Relationships: []
+      }
+      memberships: {
+        Row: {
+          created_at: string
+          ends_at: string | null
+          id: string
+          is_student: boolean
+          notes: string | null
+          paid_at: string | null
+          payment_method: string
+          payment_reference: string
+          plan_id: string
+          price_cents: number
+          session_date: string | null
+          sessions_remaining: number | null
+          starts_at: string | null
+          status: string
+          user_id: string | null
+          uts_student_number: string | null
+        }
+        Insert: {
+          created_at?: string
+          ends_at?: string | null
+          id?: string
+          is_student?: boolean
+          notes?: string | null
+          paid_at?: string | null
+          payment_method?: string
+          payment_reference: string
+          plan_id: string
+          price_cents: number
+          session_date?: string | null
+          sessions_remaining?: number | null
+          starts_at?: string | null
+          status?: string
+          user_id?: string | null
+          uts_student_number?: string | null
+        }
+        Update: {
+          created_at?: string
+          ends_at?: string | null
+          id?: string
+          is_student?: boolean
+          notes?: string | null
+          paid_at?: string | null
+          payment_method?: string
+          payment_reference?: string
+          plan_id?: string
+          price_cents?: number
+          session_date?: string | null
+          sessions_remaining?: number | null
+          starts_at?: string | null
+          status?: string
+          user_id?: string | null
+          uts_student_number?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memberships_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "membership_plans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
