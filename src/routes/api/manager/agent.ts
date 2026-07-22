@@ -14,13 +14,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ZodError } from "zod";
 import {
-  deriveLifecycleStatus,
   editInvoiceSchema,
   listAgentInvoicesSchema,
   listAgentUsersSchema,
   managerAgentActions,
 } from "@/lib/validation";
-import type { LifecycleStatus, ManagerAgentAction } from "@/lib/validation";
+import type { ManagerAgentAction } from "@/lib/validation";
 import {
   AGENT_MANIFEST,
   AgentError,
@@ -29,6 +28,8 @@ import {
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
+import { aggregateClubUsers, collectClubUserIds } from "@/lib/club-users";
+import type { ClubUserWaiver } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 
@@ -122,74 +123,62 @@ async function handleListUsers(params: unknown) {
   const [{ data: rows, error }, { data: plans }, { data: waivers }] = await Promise.all([
     db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
     db.from("membership_plans").select("*"),
-    db.from("waivers").select("user_id, full_name, email, signed_at"),
+    db.from("waivers").select("user_id, full_name, email, phone, signed_at"),
   ]);
   if (error) throw new AgentError(500, "db_error", error.message);
 
+  const memberships = (rows ?? []) as MembershipRow[];
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
+  const waiverRows = (waivers ?? []) as ClubUserWaiver[];
 
-  // Latest waiver per user gives the display name/email and marks a signed waiver.
-  const waiverRows = (
-    (waivers ?? []) as {
-      user_id: string | null;
-      full_name: string;
-      email: string;
-      signed_at: string;
-    }[]
-  )
-    .filter((w) => w.user_id)
-    .sort((a, b) => (a.signed_at < b.signed_at ? 1 : -1));
-  const nameByUser = new Map<string, { full_name: string; email: string }>();
-  for (const w of waiverRows) {
-    if (!nameByUser.has(w.user_id!))
-      nameByUser.set(w.user_id!, { full_name: w.full_name, email: w.email });
-  }
-
-  // Group memberships by user; users = union of waiver signers + membership holders.
-  const membershipsByUser = new Map<string, MembershipRow[]>();
-  for (const r of (rows ?? []) as MembershipRow[]) {
-    if (!r.user_id) continue;
-    const list = membershipsByUser.get(r.user_id) ?? [];
-    list.push(r);
-    membershipsByUser.set(r.user_id, list);
-  }
-  const userIds = [...new Set([...nameByUser.keys(), ...membershipsByUser.keys()])];
-
-  const rolesByUser = new Map<string, string[]>();
+  // Roles are scoped to the club's known users (waiver signers + members).
+  const userIds = collectClubUserIds(waiverRows, memberships);
+  let rolesRows: { user_id: string; role: string }[] = [];
   if (userIds.length) {
     const { data: roles } = await db
       .from("user_roles")
       .select("user_id, role")
       .in("user_id", userIds);
-    for (const r of (roles ?? []) as { user_id: string; role: string }[]) {
-      const list = rolesByUser.get(r.user_id) ?? [];
-      list.push(r.role);
-      rolesByUser.set(r.user_id, list);
-    }
+    rolesRows = (roles ?? []) as { user_id: string; role: string }[];
   }
 
-  let users = userIds.map((uid) => {
-    const ms = membershipsByUser.get(uid) ?? [];
-    const who = nameByUser.get(uid);
-    const lifecycle_status: LifecycleStatus = deriveLifecycleStatus({
-      hasWaiver: nameByUser.has(uid),
-      memberships: ms.map((m) => ({
-        status: m.status,
-        kind: planById.get(m.plan_id)?.kind ?? "session",
-        price_cents: m.price_cents,
-      })),
-    });
-    return {
-      user_id: uid,
-      name: who?.full_name ?? null,
-      email: who?.email ?? null,
-      roles: rolesByUser.get(uid) ?? [],
-      lifecycle_status,
-      invoices: ms.map((m) => projectInvoice(m, planById.get(m.plan_id))),
-    };
+  // Shared aggregation: one row per person with name/roles/lifecycle resolved.
+  const aggregated = aggregateClubUsers({
+    waivers: waiverRows,
+    memberships: memberships.map((m) => ({
+      user_id: m.user_id,
+      plan_id: m.plan_id,
+      status: m.status,
+      price_cents: m.price_cents,
+      is_student: m.is_student,
+      uts_student_number: m.uts_student_number,
+      created_at: m.created_at,
+    })),
+    plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
+    roles: rolesRows,
   });
 
-  users.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+  // The agent surface also returns each person's invoices, projected from their
+  // raw membership rows (newest first, matching the memberships query order).
+  const membershipsByUser = new Map<string, MembershipRow[]>();
+  for (const m of memberships) {
+    if (!m.user_id) continue;
+    const list = membershipsByUser.get(m.user_id) ?? [];
+    list.push(m);
+    membershipsByUser.set(m.user_id, list);
+  }
+
+  let users = aggregated.map((u) => ({
+    user_id: u.user_id,
+    name: u.name,
+    email: u.email,
+    roles: u.roles,
+    lifecycle_status: u.lifecycle_status,
+    invoices: (membershipsByUser.get(u.user_id) ?? []).map((m) =>
+      projectInvoice(m, planById.get(m.plan_id)),
+    ),
+  }));
+
   if (status) users = users.filter((u) => u.lifecycle_status === status);
   const capped = users.slice(0, limit ?? 200);
   return { count: capped.length, total: users.length, users: capped };

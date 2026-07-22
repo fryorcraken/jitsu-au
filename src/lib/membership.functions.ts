@@ -489,6 +489,62 @@ export const listMemberships = createServerFn({ method: "GET" })
     });
   });
 
+// ---- Manager: list every person known to the club (one row per user) ----
+export const listClubUsers = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context as { supabase: MembershipClient; userId: string });
+    const admin = await adminClient();
+    const { aggregateClubUsers, collectClubUserIds } = await import("@/lib/club-users");
+
+    const [{ data: rows, error }, { data: plans }, { data: waivers }] = await Promise.all([
+      admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+      admin.from("membership_plans").select("*"),
+      // select("*") so the (generated-types-unaware) `uts_student_number` column
+      // comes back — it marks whether the signer is a UTS student. Capped to match
+      // the memberships read (the existing ~500-2000 row scope).
+      admin.from("waivers").select("*").order("signed_at", { ascending: false }).limit(2000),
+    ]);
+    if (error) throw new Error(error.message);
+
+    const memberships = (rows ?? []) as MembershipRow[];
+    const waiverRows = (waivers ?? []) as unknown as {
+      user_id: string | null;
+      full_name: string;
+      email: string;
+      phone: string | null;
+      signed_at: string;
+      uts_student_number: string | null;
+    }[];
+
+    // Roles are scoped to the club's known users (waiver signers + members).
+    const userIds = collectClubUserIds(waiverRows, memberships);
+    let rolesRows: { user_id: string; role: string }[] = [];
+    if (userIds.length) {
+      const { data: roles } = await admin
+        .from("user_roles")
+        .select("user_id, role")
+        .in("user_id", userIds);
+      rolesRows = (roles ?? []) as { user_id: string; role: string }[];
+    }
+
+    // The one shared aggregation code path (also used by the manager agent API).
+    return aggregateClubUsers({
+      waivers: waiverRows,
+      memberships: memberships.map((m) => ({
+        user_id: m.user_id,
+        plan_id: m.plan_id,
+        status: m.status,
+        price_cents: m.price_cents,
+        is_student: m.is_student,
+        uts_student_number: m.uts_student_number,
+        created_at: m.created_at,
+      })),
+      plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
+      roles: rolesRows,
+    });
+  });
+
 // ---- Manager: activate / cancel a membership ----
 export const setMembershipStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

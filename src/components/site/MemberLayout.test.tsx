@@ -30,6 +30,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 import { MemberLayout } from "./MemberLayout";
 
 const managerOnlyLinks = [
+  /^users$/i,
   /signed waivers/i,
   /waiver template/i,
   /membership plans/i,
@@ -89,6 +90,10 @@ describe("MemberLayout", () => {
       </MemberLayout>,
     );
 
+    expect(screen.getByRole("link", { name: /^users$/i })).toHaveAttribute(
+      "href",
+      "/manager/users",
+    );
     expect(screen.getByRole("link", { name: /signed waivers/i })).toHaveAttribute(
       "href",
       "/manager/waivers",

@@ -79,6 +79,9 @@ function ManagerMembershipsPage() {
           </div>
           <div className="flex gap-2">
             <Button asChild variant="outline">
+              <Link to="/manager/users">Users</Link>
+            </Button>
+            <Button asChild variant="outline">
               <Link to="/manager/reconciliation">Reconcile bank statement</Link>
             </Button>
             <Button asChild variant="outline">
