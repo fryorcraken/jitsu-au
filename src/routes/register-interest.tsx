@@ -84,7 +84,7 @@ function RegisterInterest() {
           <div className="mt-8 rounded-2xl border bg-card p-6 md:p-8">
             <div className="flex items-center gap-2 text-primary">
               <FileSignature className="h-5 w-5" />
-              <p className="text-sm font-semibold">Sign your waiver now, it's prefilled</p>
+              <p className="text-sm font-semibold">Sign your waiver now. It's prefilled</p>
             </div>
             <p className="mt-2 text-muted-foreground">
               Two minutes and you're done before you even arrive. We've filled in your details from
@@ -128,7 +128,7 @@ function RegisterInterest() {
         </p>
         <h1 className="mt-3 text-4xl font-bold">Start your free trial</h1>
         <p className="mt-3 text-muted-foreground">
-          Tell us who you are and we'll get you on the mat. Your first two classes are free, no gear
+          Tell us who you are and we'll get you on the mat. Your first two classes are free. No gear
           needed.
         </p>
 
