@@ -2,7 +2,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCents, parseMoneyToCents, type BankTxnRow } from "@/lib/validation";
@@ -173,7 +172,7 @@ function ReconciliationPage() {
   const unmatched = txns.filter((t) => t.status === "unmatched");
 
   return (
-    <SiteLayout>
+    <>
       <section className="mx-auto max-w-5xl space-y-6 px-4 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -269,6 +268,6 @@ function ReconciliationPage() {
           </Card>
         )}
       </section>
-    </SiteLayout>
+    </>
   );
 }
