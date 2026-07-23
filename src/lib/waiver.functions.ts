@@ -281,35 +281,53 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     if (insErr || !inserted) throw new Error(insErr?.message || "Could not save waiver.");
 
     // Generate PDF (signature images are embedded into it, not stored separately).
-    const pdf = await renderWaiverPdf({
-      full_name,
-      date_of_birth: data.date_of_birth,
-      address: data.address,
-      phone: data.phone,
-      email,
-      emergency_contact_name: data.emergency_contact_name,
-      emergency_contact_phone: data.emergency_contact_phone,
-      medical_notes: data.medical_notes || "",
-      acknowledgements: resolveAcknowledgements(ackDefs, answers),
-      signature_name: data.signature_name || "",
-      signed_at,
-      template_title: tpl.title,
-      template_body: tpl.body_md,
-      template_version: tpl.version,
-      club_name: CLUB_NAME,
-      is_minor: data.is_minor ?? false,
-      guardian_name: data.guardian_name || "",
-      guardian_relationship: data.guardian_relationship || "",
-      guardian_signature: data.guardian_signature || "",
-      signature_image_png: sigPng,
-      guardian_signature_image_png: gSigPng,
-    });
+    // PDF rendering pulls in pdf-lib and can fail for reasons the signer can't
+    // act on (a malformed template, a corrupt signature image, a bundling/interop
+    // fault). The waiver row is already durably saved at this point, so log the
+    // real error server-side for diagnosis and surface a plain, non-technical
+    // message instead of leaking internal library errors to the member.
+    let pdf: Uint8Array;
+    try {
+      pdf = await renderWaiverPdf({
+        full_name,
+        date_of_birth: data.date_of_birth,
+        address: data.address,
+        phone: data.phone,
+        email,
+        emergency_contact_name: data.emergency_contact_name,
+        emergency_contact_phone: data.emergency_contact_phone,
+        medical_notes: data.medical_notes || "",
+        acknowledgements: resolveAcknowledgements(ackDefs, answers),
+        signature_name: data.signature_name || "",
+        signed_at,
+        template_title: tpl.title,
+        template_body: tpl.body_md,
+        template_version: tpl.version,
+        club_name: CLUB_NAME,
+        is_minor: data.is_minor ?? false,
+        guardian_name: data.guardian_name || "",
+        guardian_relationship: data.guardian_relationship || "",
+        guardian_signature: data.guardian_signature || "",
+        signature_image_png: sigPng,
+        guardian_signature_image_png: gSigPng,
+      });
+    } catch (e) {
+      console.error("[submitWaiverWithPdf] PDF generation failed:", e);
+      throw new Error(
+        "Your waiver was saved, but we couldn't generate the PDF copy. Please contact the club so we can send it to you.",
+      );
+    }
 
     const path = `${inserted.id}.pdf`;
     const { error: upErr } = await supabaseAdmin.storage
       .from(BUCKET)
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
-    if (upErr) throw new Error(upErr.message);
+    if (upErr) {
+      console.error("[submitWaiverWithPdf] PDF upload failed:", upErr);
+      throw new Error(
+        "Your waiver was saved, but we couldn't store the PDF copy. Please contact the club so we can send it to you.",
+      );
+    }
 
     await admin.from("waivers").update({ pdf_path: path }).eq("id", inserted.id);
 

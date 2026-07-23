@@ -12,4 +12,24 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  vite: {
+    resolve: {
+      alias: {
+        // tslib 1.x (a transitive dep of pdf-lib) ships a CJS entry (tslib.js)
+        // that sets `__esModule = true`, and an ESM shim (tslib/modules/index.js,
+        // the package's "import" condition) that default-imports that CJS entry
+        // and destructures the helpers off it: `import tslib from "../tslib.js";
+        // const { __extends } = tslib`. Under esbuild's strict interop (Vite
+        // dev/SSR) a CJS module flagged `__esModule` has NO synthesized default,
+        // so `tslib` is undefined and the destructure throws
+        // "Cannot destructure property '__extends' of __toESM(...).default".
+        // pdf-lib's ESM build does `import { __extends } from "tslib"`, so signing
+        // a waiver (which renders the PDF) crashes in the dev/preview server.
+        // Rollup (the production build) synthesizes the default correctly, which
+        // is why only the preview breaks. Point tslib straight at its real ESM
+        // module, which `export`s every helper by name and needs no interop.
+        tslib: "tslib/tslib.es6.js",
+      },
+    },
+  },
 });

@@ -306,7 +306,12 @@ async function handleEditInvoice(params: unknown) {
     .eq("id", updated.plan_id)
     .maybeSingle();
 
-  return { invoice: projectInvoice(updated as MembershipRow, (plan ?? undefined) as MembershipPlanRow | undefined) };
+  return {
+    invoice: projectInvoice(
+      updated as MembershipRow,
+      (plan ?? undefined) as MembershipPlanRow | undefined,
+    ),
+  };
 }
 
 async function dispatch(action: ManagerAgentAction, params: unknown) {
