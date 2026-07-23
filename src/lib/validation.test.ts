@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSignerMeta,
   composeFullName,
   contactSchema,
   decodeDataUrlPng,
@@ -61,6 +62,45 @@ describe("waiverToProfileFields", () => {
       email: "ada@example.com",
     } as never);
     expect(patch).toEqual(fields);
+  });
+});
+
+describe("buildSignerMeta", () => {
+  const headers: Record<string, string> = {
+    "user-agent": "Mozilla/5.0 (test)",
+    "accept-language": "en-AU,en;q=0.9",
+    "sec-ch-ua-platform": '"macOS"',
+  };
+  const getHeader = (name: string) => headers[name];
+
+  it("merges request headers with the browser's self-reported context", () => {
+    const meta = buildSignerMeta(getHeader, {
+      timezone: "Australia/Sydney",
+      screen: "2560x1440",
+      viewport: "1200x800",
+      platform: "MacIntel",
+      languages: ["en-AU", "en"],
+    });
+    expect(meta).toEqual({
+      user_agent: "Mozilla/5.0 (test)",
+      accept_language: "en-AU,en;q=0.9",
+      sec_ch_ua_platform: '"macOS"',
+      timezone: "Australia/Sydney",
+      screen: "2560x1440",
+      viewport: "1200x800",
+      platform: "MacIntel",
+      languages: ["en-AU", "en"],
+    });
+  });
+
+  it("drops empty values so the blob stays compact", () => {
+    const meta = buildSignerMeta(() => undefined, { timezone: "", languages: [] });
+    expect(meta).toEqual({});
+  });
+
+  it("caps header values at 400 characters", () => {
+    const meta = buildSignerMeta((n) => (n === "user-agent" ? "x".repeat(1000) : undefined), {});
+    expect((meta.user_agent as string).length).toBe(400);
   });
 });
 
@@ -284,6 +324,24 @@ describe("waiverSubmitSchema", () => {
 
   it("accepts a valid adult waiver with a typed signature", () => {
     expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+  });
+
+  it("accepts optional client_meta and rejects oversized values", () => {
+    const withMeta = waiverSubmitSchema.safeParse({
+      ...validAdult,
+      client_meta: {
+        timezone: "Australia/Sydney",
+        screen: "2560x1440",
+        languages: ["en-AU", "en"],
+      },
+    });
+    expect(withMeta.success).toBe(true);
+
+    const oversized = waiverSubmitSchema.safeParse({
+      ...validAdult,
+      client_meta: { timezone: "x".repeat(200) },
+    });
+    expect(oversized.success).toBe(false);
   });
 
   it("accepts a drawn signature (image) with no typed name", () => {

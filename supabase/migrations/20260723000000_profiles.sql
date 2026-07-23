@@ -127,6 +127,13 @@ ALTER TABLE public.waivers
 -- a forensic/legal record.
 ALTER TABLE public.waivers RENAME COLUMN ip_hash TO signer_ip;
 
+-- More signing-context evidence for liability: request headers captured
+-- server-side (user agent, language, client hints) plus a small self-reported
+-- block from the browser (timezone, screen, platform). Kept as one JSONB blob
+-- on the frozen submission; never copied to the profile.
+ALTER TABLE public.waivers
+  ADD COLUMN signer_meta JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- The split name parts are what submissions actually provide (full_name is
 -- gone); require the required ones. The table is empty, so this is safe.
 ALTER TABLE public.waivers

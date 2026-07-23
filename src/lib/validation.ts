@@ -75,6 +75,49 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields
   };
 }
 
+// ---- Signing-context evidence (kept on the waiver for liability) ----
+
+/** Self-reported browser context sent with a waiver submission. All optional and
+ * size-bounded; it is evidence, not identity, so nothing here is trusted. */
+export const waiverClientMetaSchema = z.object({
+  timezone: z.string().trim().max(80).optional().or(z.literal("")),
+  screen: z.string().trim().max(40).optional().or(z.literal("")),
+  viewport: z.string().trim().max(40).optional().or(z.literal("")),
+  platform: z.string().trim().max(80).optional().or(z.literal("")),
+  languages: z.array(z.string().trim().max(35)).max(10).optional(),
+});
+export type WaiverClientMeta = z.infer<typeof waiverClientMetaSchema>;
+
+/**
+ * Assemble the signer_meta evidence blob stored on a waiver: request headers
+ * captured server-side (user agent, language, client hints) merged with the
+ * browser's self-reported context. Pure — takes a header getter so it is
+ * unit-testable; empty values are dropped so the blob stays compact.
+ */
+export function buildSignerMeta(
+  getHeader: (name: string) => string | undefined,
+  client: WaiverClientMeta | undefined,
+): Record<string, unknown> {
+  const meta: Record<string, unknown> = {};
+  const header = (key: string, name: string) => {
+    const value = getHeader(name)?.trim();
+    if (value) meta[key] = value.slice(0, 400);
+  };
+  header("user_agent", "user-agent");
+  header("accept_language", "accept-language");
+  header("sec_ch_ua", "sec-ch-ua");
+  header("sec_ch_ua_platform", "sec-ch-ua-platform");
+  header("sec_ch_ua_mobile", "sec-ch-ua-mobile");
+  if (client) {
+    if (client.timezone) meta.timezone = client.timezone;
+    if (client.screen) meta.screen = client.screen;
+    if (client.viewport) meta.viewport = client.viewport;
+    if (client.platform) meta.platform = client.platform;
+    if (client.languages?.length) meta.languages = client.languages;
+  }
+  return meta;
+}
+
 /** The states a waiver submission can be shown in. Stored: pending/approved; the
  * approved set is split into the person's single ACTIVE waiver (latest approved)
  * and SUPERSEDED older ones. */
@@ -194,6 +237,8 @@ export const waiverSubmitSchema = z
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
     guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_signature_image: sigImage,
+    // Self-reported browser context, stored on the waiver as signing evidence.
+    client_meta: waiverClientMetaSchema.optional(),
     hp: z.string().max(0).optional(),
   })
   .refine(

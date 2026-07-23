@@ -96,33 +96,34 @@ read/update all; no public insert path.
 
 ## `waivers` — frozen submissions
 
-| Column                    | Type          | Null | Notes                                                                                                       |
-| ------------------------- | ------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
-| `id`                      | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                |
-| `profile_id`              | `uuid`        | no   | `REFERENCES profiles(id) ON DELETE CASCADE`. Set at submission (visitor profile is created first). Indexed. |
-| `first_name`              | `text`        | no   | As submitted.                                                                                               |
-| `middle_name`             | `text`        | yes  | As submitted.                                                                                               |
-| `last_name`               | `text`        | no   | As submitted.                                                                                               |
-| `date_of_birth`           | `date`        | no   | As submitted.                                                                                               |
-| `address`                 | `text`        | no   | As submitted.                                                                                               |
-| `phone`                   | `text`        | no   | As submitted.                                                                                               |
-| `email`                   | `text`        | no   | As submitted (normalized). Part of the frozen record.                                                       |
-| `uts_student_number`      | `text`        | yes  | As submitted.                                                                                               |
-| `sms_whatsapp_consent`    | `boolean`     | no   | As submitted.                                                                                               |
-| `emergency_contact_name`  | `text`        | no   | As submitted.                                                                                               |
-| `emergency_contact_phone` | `text`        | no   | As submitted.                                                                                               |
-| `medical_notes`           | `text`        | yes  | As submitted.                                                                                               |
-| `is_minor`                | `boolean`     | no   | As submitted.                                                                                               |
-| `guardian_name`           | `text`        | yes  | As submitted (required for minors by validation).                                                           |
-| `guardian_relationship`   | `text`        | yes  | As submitted.                                                                                               |
-| `pdf_path`                | `text`        | yes  | The signed PDF in the `waivers` Storage bucket.                                                             |
-| `template_version`        | `int`         | yes  | Which `waiver_templates.version` was signed.                                                                |
-| `signer_ip`               | `text`        | yes  | The signer's real IP (legal/forensic record).                                                               |
-| `approval_status`         | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                                                     |
-| `approved_at`             | `timestamptz` | yes  | NULL while pending.                                                                                         |
-| `approved_by`             | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager.                                          |
-| `signed_at`               | `timestamptz` | no   | When the waiver was signed.                                                                                 |
-| `created_at`              | `timestamptz` | no   | Default `now()`.                                                                                            |
+| Column                    | Type          | Null | Notes                                                                                                                                                                                                           |
+| ------------------------- | ------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                                                                                                    |
+| `profile_id`              | `uuid`        | no   | `REFERENCES profiles(id) ON DELETE CASCADE`. Set at submission (visitor profile is created first). Indexed.                                                                                                     |
+| `first_name`              | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `middle_name`             | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
+| `last_name`               | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `date_of_birth`           | `date`        | no   | As submitted.                                                                                                                                                                                                   |
+| `address`                 | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `phone`                   | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `email`                   | `text`        | no   | As submitted (normalized). Part of the frozen record.                                                                                                                                                           |
+| `uts_student_number`      | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
+| `sms_whatsapp_consent`    | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
+| `emergency_contact_name`  | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `emergency_contact_phone` | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `medical_notes`           | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
+| `is_minor`                | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
+| `guardian_name`           | `text`        | yes  | As submitted (required for minors by validation).                                                                                                                                                               |
+| `guardian_relationship`   | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
+| `pdf_path`                | `text`        | yes  | The signed PDF in the `waivers` Storage bucket.                                                                                                                                                                 |
+| `template_version`        | `int`         | yes  | Which `waiver_templates.version` was signed.                                                                                                                                                                    |
+| `signer_ip`               | `text`        | yes  | The signer's real IP (legal/forensic record).                                                                                                                                                                   |
+| `signer_meta`             | `jsonb`       | no   | Default `'{}'`. Signing-context evidence: request headers (user agent, language, client hints) + browser-reported timezone/screen/viewport/platform/languages (`buildSignerMeta`). Never copied to the profile. |
+| `approval_status`         | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                                                                                                                                                         |
+| `approved_at`             | `timestamptz` | yes  | NULL while pending.                                                                                                                                                                                             |
+| `approved_by`             | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager.                                                                                                                                              |
+| `signed_at`               | `timestamptz` | no   | When the waiver was signed.                                                                                                                                                                                     |
+| `created_at`              | `timestamptz` | no   | Default `now()`.                                                                                                                                                                                                |
 
 **Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks
 — all captured inside the PDF only. The displayed **pending / active /

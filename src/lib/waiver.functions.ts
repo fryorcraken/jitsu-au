@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
+  buildSignerMeta,
   composeFullName,
   decodeDataUrlPng,
   deriveWaiverListStatuses,
@@ -137,13 +138,19 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // case/whitespace variants map to the one profile.
     const email = normalizeEmail(data.email);
 
-    // Real signer IP for the forensic/legal record.
+    // Signing-context evidence for the forensic/legal record: the signer's real
+    // IP plus request headers (user agent, language, client hints) merged with
+    // the browser's self-reported context (timezone, screen, platform).
     let signer_ip: string | null = null;
+    let signer_meta: Record<string, unknown> = {};
     try {
       const { getRequestHeader } = await import("@tanstack/react-start/server");
-      signer_ip = clientIp((name) => getRequestHeader(name));
+      const getHeader = (name: string) => getRequestHeader(name);
+      signer_ip = clientIp(getHeader);
+      signer_meta = buildSignerMeta(getHeader, data.client_meta);
     } catch {
       /* header access unavailable */
+      signer_meta = buildSignerMeta(() => undefined, data.client_meta);
     }
 
     // Load current template
@@ -170,35 +177,28 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 
     // Every submission attaches to the visitor profile for its email. If the
     // email is new to the club, create a lightweight profile (email, name,
-    // phone). An EXISTING profile is deliberately left untouched: the profile
-    // only changes when a manager approves a waiver (the promotion step).
-    let profileId: string;
-    {
-      const { data: existing, error: findErr } = await admin
-        .from("profiles")
-        .select("id")
-        .eq("email", email)
-        .maybeSingle();
-      if (findErr) throw new Error(findErr.message);
-      if (existing) {
-        profileId = existing.id;
-      } else {
-        const { data: created, error: createErr } = await admin
-          .from("profiles")
-          .insert({
-            email,
-            first_name: data.first_name,
-            middle_name: data.middle_name || null,
-            last_name: data.last_name,
-            phone: data.phone || null,
-          })
-          .select("id")
-          .single();
-        if (createErr || !created)
-          throw new Error(createErr?.message || "Could not save your details.");
-        profileId = created.id;
-      }
-    }
+    // phone). An EXISTING profile is deliberately left untouched (ON CONFLICT
+    // DO NOTHING): the profile only changes when a manager approves a waiver
+    // (the promotion step). The insert-then-select pair is race-safe for
+    // concurrent submissions of the same new email.
+    const { error: createErr } = await admin.from("profiles").upsert(
+      {
+        email,
+        first_name: data.first_name,
+        middle_name: data.middle_name || null,
+        last_name: data.last_name,
+        phone: data.phone || null,
+      },
+      { onConflict: "email", ignoreDuplicates: true },
+    );
+    if (createErr) throw new Error(createErr.message);
+    const { data: profile, error: findErr } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("email", email)
+      .single();
+    if (findErr || !profile) throw new Error(findErr?.message || "Could not save your details.");
+    const profileId = profile.id;
 
     // The waiver row is the frozen submission: exactly what was typed, plus
     // provenance (template version, signer IP) and timestamps. Signatures and
@@ -226,6 +226,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         signed_at,
         template_version: tpl.version,
         signer_ip,
+        signer_meta,
       })
       .select("id")
       .single();

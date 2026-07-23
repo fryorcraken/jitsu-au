@@ -28,8 +28,10 @@ have no login yet, creates their account and emails them an invite. The
    also a name and phone. It may have waivers attached, or none. No login yet.
 3. **A waiver is a frozen submission.** The submitted fields are evidence and
    the source approval copies from, never the live person record. Signatures
-   and acknowledgement ticks exist only inside the PDF. The signer's real IP is
-   stored for legal/forensic needs.
+   and acknowledgement ticks exist only inside the PDF. For legal/forensic
+   needs each submission also stores the signer's real IP and signing context
+   (browser user agent, language, and the browser-reported timezone, screen and
+   platform).
 4. **Waivers are accepted at any time, without limit.** Resubmitting after a
    mistake is never blocked, before or after approval.
 5. **The active waiver is the latest approved one.** Older approved waivers are

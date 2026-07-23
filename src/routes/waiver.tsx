@@ -237,6 +237,14 @@ function Waiver() {
           guardian_relationship: guardianRelationship,
           guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
           guardian_signature_image: guardianSignatureMode === "draw" ? guardianSignatureImage : "",
+          // Browser context stored with the submission as signing evidence.
+          client_meta: {
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "",
+            screen: `${window.screen.width}x${window.screen.height}`,
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
+            platform: navigator.platform ?? "",
+            languages: [...(navigator.languages ?? [])].slice(0, 10),
+          },
           hp: "",
         },
       });

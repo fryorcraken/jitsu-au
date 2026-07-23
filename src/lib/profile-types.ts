@@ -64,6 +64,7 @@ export type WaiverRow = {
   pdf_path: string | null;
   template_version: number | null;
   signer_ip: string | null;
+  signer_meta: Record<string, unknown>;
   approval_status: string;
   approved_at: string | null;
   approved_by: string | null;
