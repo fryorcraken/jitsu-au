@@ -149,16 +149,22 @@ async function activateMembershipRow(
   }
 
   // Confirmation email (best-effort — never fail activation on a send error).
+  // The profile's email is the canonical contact address; the auth email is
+  // only a fallback for accounts that predate any profile (e.g. a bootstrap
+  // manager), where it is the sole copy rather than a duplicate.
   if (membership.user_id) {
     try {
-      const { data: userData } = await admin.auth.admin.getUserById(membership.user_id);
-      const email = userData?.user?.email;
+      const { data: profile } = await profileAdmin(admin)
+        .from("profiles")
+        .select("email, first_name, middle_name, last_name")
+        .eq("user_id", membership.user_id)
+        .maybeSingle();
+      let email = profile?.email ?? null;
+      if (!email) {
+        const { data: userData } = await admin.auth.admin.getUserById(membership.user_id);
+        email = userData?.user?.email ?? null;
+      }
       if (email) {
-        const { data: profile } = await profileAdmin(admin)
-          .from("profiles")
-          .select("first_name, middle_name, last_name")
-          .eq("user_id", membership.user_id)
-          .maybeSingle();
         const memberName = profile ? profileFullName(profile) : "";
         const { sendMembershipActivatedEmail } = await import("./membership-email.server");
         await sendMembershipActivatedEmail({
@@ -289,7 +295,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // the member has not signed a waiver yet.
     const { data: who } = await profileAdmin(admin)
       .from("profiles")
-      .select("first_name, middle_name, last_name")
+      .select("email, first_name, middle_name, last_name")
       .eq("user_id", context.userId)
       .maybeSingle();
     const surname = who?.last_name || who?.first_name || "";
@@ -347,10 +353,15 @@ export const startMembership = createServerFn({ method: "POST" })
       return { ok: true as const, activated: true, reference: null as string | null };
     }
 
-    // Email the member their bank-transfer instructions + notify managers.
+    // Email the member their bank-transfer instructions + notify managers. The
+    // profile's email is canonical; fall back to the auth email only when no
+    // profile exists yet (then it is the sole copy, not a duplicate).
     try {
-      const { data: userData } = await admin.auth.admin.getUserById(context.userId);
-      const email = userData?.user?.email;
+      let email = who?.email ?? null;
+      if (!email) {
+        const { data: userData } = await admin.auth.admin.getUserById(context.userId);
+        email = userData?.user?.email ?? null;
+      }
       if (email) {
         const { sendMembershipPaymentEmail } = await import("./membership-email.server");
         await sendMembershipPaymentEmail({

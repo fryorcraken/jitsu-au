@@ -46,8 +46,12 @@ have no login yet, creates their account and emails them an invite. The
    Approving a newer waiver later refreshes the profile again. Unapprove only
    reverts the waiver's status; profile and account stay as they are.
 7. **Full name is never stored**; it is composed from first/middle/last.
-8. **No duplicate live data.** The profile is the only current record. The
-   login's email is the profile's email.
+8. **No duplicate live data.** The profile is the only current record, and
+   `profiles.email` is the only email the app reads. The login (Supabase auth)
+   necessarily also holds an email as the credential, but it is write-once:
+   copied from the profile at provisioning and never edited on its own. There
+   is no self-serve email change; changing a person's email means updating the
+   profile and the login together, which is a manager/support action.
 9. **No self-serve sign-up.** Accounts exist because a manager approved a
    waiver. The auth page only signs people in (password or magic link, with
    `shouldCreateUser: false`).
@@ -91,5 +95,7 @@ memberships/invoices. Feeds the manager screens and the manager agent API.
 
 - Members self-editing their profile (changes flow through a new approved
   waiver, or a manager).
+- A manager action to change a person's email (updates the profile and the
+  login credential together).
 - Interest-form registrations creating visitor profiles.
 - Waiver expiry / forced re-signing on template changes.

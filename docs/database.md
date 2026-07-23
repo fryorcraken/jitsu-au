@@ -22,9 +22,11 @@ is the only live record; waiver rows are history/evidence.
 - **Signing is public**: no account, no login; only an email is required.
   Submissions are unlimited; the person's **active** waiver is the latest
   approved one (derived, not stored).
-- **One canonical email**: `profiles.email`. `waivers.email` is part of the
-  frozen submission; `auth.users.email` is the login credential and matches the
-  profile email it was provisioned from.
+- **One canonical email**: `profiles.email` — the only email the app reads.
+  `waivers.email` is part of the frozen submission. `auth.users.email` is the
+  login credential, write-once: copied from the profile at provisioning, never
+  edited on its own (no self-serve email change), read only as a fallback for
+  accounts that predate any profile.
 - **No stored full name** anywhere; composed from `first/middle/last` on read
   (`composeFullName` / `profileFullName`).
 

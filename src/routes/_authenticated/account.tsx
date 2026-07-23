@@ -57,7 +57,6 @@ function AccountPage() {
       {isManager && <GoogleDriveCard />}
 
       <ChangePasswordCard />
-      <ChangeEmailCard currentEmail={user.email ?? ""} />
     </section>
   );
 }
@@ -295,57 +294,6 @@ function ChangePasswordCard() {
   );
 }
 
-function ChangeEmailCard({ currentEmail }: { currentEmail: string }) {
-  const [email, setEmail] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState(false);
-
-  useEffect(() => setEmail(currentEmail), [currentEmail]);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (email === currentEmail) return;
-    setBusy(true);
-    const { error } = await supabase.auth.updateUser(
-      { email },
-      { emailRedirectTo: `${window.location.origin}/account` },
-    );
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    setPending(true);
-    toast.success("Confirmation emails sent to both addresses");
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Change email</CardTitle>
-        <CardDescription>
-          You'll receive a confirmation link at both your current and new email address.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={onSubmit} className="space-y-3">
-          <div>
-            <Label htmlFor="ce">Email</Label>
-            <Input
-              id="ce"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <Button type="submit" disabled={busy || email === currentEmail}>
-            {busy ? "Sending..." : "Update email"}
-          </Button>
-          {pending && (
-            <p className="text-sm text-muted-foreground">
-              Change pending. Confirm from both inboxes to complete.
-            </p>
-          )}
-        </form>
-      </CardContent>
-    </Card>
-  );
-}
+// Note: there is deliberately no self-serve "change email" here. The email IS
+// the person's identity (one profile per email), so changing it must update the
+// profile and the login together. That is a manager/support action for now.
