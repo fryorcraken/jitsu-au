@@ -167,6 +167,22 @@ export function splitFullName(full: string): { first: string; middle: string; la
 }
 
 /**
+ * Resolve the waiver form's name prefill from optional search params.
+ * Prefers explicit first/last (the register "free trial" flow); falls back to
+ * splitting a single `name` string for legacy links (older bookmarks / emails).
+ */
+export function resolveNamePrefill(search: {
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+}): { first: string; middle: string; last: string } {
+  const first = (search.first_name ?? "").trim();
+  const last = (search.last_name ?? "").trim();
+  if (first || last) return { first, middle: "", last };
+  return splitFullName(search.name ?? "");
+}
+
+/**
  * Decode a `data:image/png;base64,...` URL into raw PNG bytes.
  * Returns null for empty input or anything that isn't a base64 PNG data URL.
  */
@@ -187,7 +203,9 @@ export function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
 // ---- Interest registration ----
 
 export const interestSchema = z.object({
-  name: z.string().trim().min(1).max(100),
+  // The register form composes this from first + last name fields (each capped
+  // at 60, matching the waiver), so allow up to 60 + " " + 60 = 121 characters.
+  name: z.string().trim().min(1).max(121),
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
   experience: z.string().trim().max(500).optional().or(z.literal("")),
