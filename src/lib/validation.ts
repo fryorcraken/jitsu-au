@@ -265,6 +265,23 @@ export const waiverSubmitSchema = z
 
 export type WaiverSubmitInput = z.infer<typeof waiverSubmitSchema>;
 
+// ---- Waiver prefill (Step 1 -> /waiver, carried on the URL query) ----
+//
+// Optional prefill values passed to the waiver page from Step 1 of the "Start
+// your free trial" flow (e.g. /waiver?name=...&email=...&phone=61313131).
+//
+// TanStack Router parses search params through JSON, so an all-digits value
+// like ?phone=61313131 arrives as a NUMBER, not a string — a plain z.string()
+// would reject it and the field would silently fail to prefill. z.coerce.string()
+// turns such values back into strings; .catch(undefined) keeps a malformed
+// value from breaking the whole route. Length caps mirror the form fields.
+export const waiverPrefillSearchSchema = z.object({
+  name: z.coerce.string().max(120).optional().catch(undefined),
+  email: z.coerce.string().max(255).optional().catch(undefined),
+  phone: z.coerce.string().max(30).optional().catch(undefined),
+});
+export type WaiverPrefillSearch = z.infer<typeof waiverPrefillSearchSchema>;
+
 // ---- Acknowledgements (defined on the template, edited by managers) ----
 
 export const acknowledgementDefSchema = z.object({

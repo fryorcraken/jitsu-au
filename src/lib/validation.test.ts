@@ -12,6 +12,7 @@ import {
   saveTemplateSchema,
   splitFullName,
   waiverApprovalSchema,
+  waiverPrefillSearchSchema,
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "./validation";
@@ -495,6 +496,45 @@ describe("waiverApprovalSchema", () => {
   it("requires both fields", () => {
     expect(waiverApprovalSchema.safeParse({ id }).success).toBe(false);
     expect(waiverApprovalSchema.safeParse({ status: "approved" }).success).toBe(false);
+  });
+});
+
+describe("waiverPrefillSearchSchema", () => {
+  it("keeps string prefill values as-is", () => {
+    const r = waiverPrefillSearchSchema.safeParse({
+      name: "Fntest9 lntest9",
+      email: "sensei+test9@sydneyjitsu.com.au",
+      phone: "+61 400 000 000",
+    });
+    expect(r.success && r.data).toEqual({
+      name: "Fntest9 lntest9",
+      email: "sensei+test9@sydneyjitsu.com.au",
+      phone: "+61 400 000 000",
+    });
+  });
+
+  it("coerces an all-digits phone (parsed as a number by the router) to a string", () => {
+    // TanStack Router runs search params through JSON.parse, so ?phone=61313131
+    // arrives here as the number 61313131. It must still prefill.
+    const r = waiverPrefillSearchSchema.safeParse({ phone: 61313131 });
+    expect(r.success && r.data.phone).toBe("61313131");
+  });
+
+  it("coerces numeric name / email values to strings too", () => {
+    const r = waiverPrefillSearchSchema.safeParse({ name: 12345, email: 678 });
+    expect(r.success && r.data.name).toBe("12345");
+    expect(r.success && r.data.email).toBe("678");
+  });
+
+  it("leaves omitted fields undefined", () => {
+    const r = waiverPrefillSearchSchema.safeParse({});
+    expect(r.success && r.data).toEqual({});
+  });
+
+  it("drops an over-long value to undefined rather than failing the route", () => {
+    const r = waiverPrefillSearchSchema.safeParse({ phone: "0".repeat(31) });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.phone).toBeUndefined();
   });
 });
 

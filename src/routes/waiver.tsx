@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { z } from "zod";
 import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
@@ -22,17 +21,11 @@ import {
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { useAuth } from "@/hooks/useAuth";
-import { splitFullName } from "@/lib/validation";
-
-// Optional prefill carried over from Step 1 of the "Start your free trial" flow.
-const searchSchema = z.object({
-  name: z.string().max(120).optional().catch(undefined),
-  email: z.string().max(255).optional().catch(undefined),
-  phone: z.string().max(30).optional().catch(undefined),
-});
+import { splitFullName, waiverPrefillSearchSchema } from "@/lib/validation";
 
 export const Route = createFileRoute("/waiver")({
-  validateSearch: searchSchema,
+  // Optional prefill carried over from Step 1 of the "Start your free trial" flow.
+  validateSearch: waiverPrefillSearchSchema,
   head: () => ({
     meta: [
       { title: "Sign waiver | UTS Jitsu" },
