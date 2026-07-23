@@ -9,6 +9,7 @@ import {
   isUtsStudent,
   normalizeEmail,
   profileFullName,
+  resolveNamePrefill,
   saveTemplateSchema,
   splitFullName,
   waiverApprovalSchema,
@@ -229,6 +230,61 @@ describe("splitFullName", () => {
   });
 });
 
+describe("resolveNamePrefill", () => {
+  it("uses explicit first/last when provided (register free-trial flow)", () => {
+    expect(resolveNamePrefill({ first_name: "Ada", last_name: "Lovelace" })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "Lovelace",
+    });
+  });
+
+  it("never guesses a middle name from structured params", () => {
+    // "Mary Anne" as a given name stays intact instead of being mis-split.
+    expect(resolveNamePrefill({ first_name: "Mary Anne", last_name: "Smith" })).toEqual({
+      first: "Mary Anne",
+      middle: "",
+      last: "Smith",
+    });
+  });
+
+  it("accepts a first name with no last name", () => {
+    expect(resolveNamePrefill({ first_name: "Ada" })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "",
+    });
+  });
+
+  it("trims surrounding whitespace on structured params", () => {
+    expect(resolveNamePrefill({ first_name: "  Ada  ", last_name: "  Lovelace  " })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "Lovelace",
+    });
+  });
+
+  it("falls back to splitting a single name for legacy links", () => {
+    expect(resolveNamePrefill({ name: "Ada King Lovelace" })).toEqual({
+      first: "Ada",
+      middle: "King",
+      last: "Lovelace",
+    });
+  });
+
+  it("ignores blank structured params and falls back to the legacy name", () => {
+    expect(resolveNamePrefill({ first_name: "  ", last_name: "", name: "Ada Lovelace" })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "Lovelace",
+    });
+  });
+
+  it("returns all-empty parts when nothing is provided", () => {
+    expect(resolveNamePrefill({})).toEqual({ first: "", middle: "", last: "" });
+  });
+});
+
 describe("decodeDataUrlPng", () => {
   it("decodes a valid base64 PNG data URL to bytes", () => {
     // "PNG" -> base64 "UE5H"
@@ -277,8 +333,16 @@ describe("interestSchema", () => {
     expect(interestSchema.safeParse({ ...valid, name: "" }).success).toBe(false);
   });
 
-  it("rejects a name over 100 chars", () => {
-    expect(interestSchema.safeParse({ ...valid, name: "a".repeat(101) }).success).toBe(false);
+  it("accepts a composed first + last name at the 121-char cap", () => {
+    // 60-char first + " " + 60-char last, the longest the register form can
+    // compose (each field is capped at 60 to match the waiver).
+    const name = `${"a".repeat(60)} ${"b".repeat(60)}`;
+    expect(name.length).toBe(121);
+    expect(interestSchema.safeParse({ ...valid, name }).success).toBe(true);
+  });
+
+  it("rejects a name over 121 chars", () => {
+    expect(interestSchema.safeParse({ ...valid, name: "a".repeat(122) }).success).toBe(false);
   });
 
   it("rejects a filled honeypot", () => {

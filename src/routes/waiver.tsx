@@ -21,7 +21,7 @@ import {
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { useAuth } from "@/hooks/useAuth";
-import { splitFullName, waiverPrefillSearchSchema } from "@/lib/validation";
+import { resolveNamePrefill, waiverPrefillSearchSchema } from "@/lib/validation";
 
 export const Route = createFileRoute("/waiver")({
   // Optional prefill carried over from Step 1 of the "Start your free trial" flow.
@@ -65,7 +65,11 @@ function Waiver() {
   const fetchMine = useServerFn(getMyProfile);
   const { user, loading: authLoading } = useAuth();
   const search = Route.useSearch();
-  const prefillName = useMemo(() => splitFullName(search.name ?? ""), [search.name]);
+  const { first_name, last_name, name } = search;
+  const prefillName = useMemo(
+    () => resolveNamePrefill({ first_name, last_name, name }),
+    [first_name, last_name, name],
+  );
 
   const [loading, setLoading] = useState(false);
   // Accepted acknowledgements keyed by the template's acknowledgement id.

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { composeFullName } from "@/lib/validation";
 import { submitInterest } from "@/lib/submissions.functions";
 
 export const Route = createFileRoute("/register-interest")({
@@ -32,7 +33,7 @@ export const Route = createFileRoute("/register-interest")({
   component: RegisterInterest,
 });
 
-type Captured = { name: string; email: string; phone: string };
+type Captured = { firstName: string; lastName: string; email: string; phone: string };
 
 function RegisterInterest() {
   const submit = useServerFn(submitInterest);
@@ -43,14 +44,17 @@ function RegisterInterest() {
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    const name = String(fd.get("name") || "");
+    const firstName = String(fd.get("first_name") || "").trim();
+    const lastName = String(fd.get("last_name") || "").trim();
     const email = String(fd.get("email") || "");
     const phone = String(fd.get("phone") || "");
     setLoading(true);
     try {
       await submit({
         data: {
-          name,
+          // The lead is stored as a single name; the waiver keeps the
+          // structured parts. Compose here so the DB column is unchanged.
+          name: composeFullName(firstName, "", lastName),
           email,
           phone,
           experience: String(fd.get("experience") || ""),
@@ -58,7 +62,7 @@ function RegisterInterest() {
           hp: String(fd.get("hp") || ""),
         },
       });
-      setDone({ name, email, phone });
+      setDone({ firstName, lastName, email, phone });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -89,7 +93,15 @@ function RegisterInterest() {
               the last step to save you time.
             </p>
             <Button asChild size="lg" className="mt-5 w-full sm:w-auto">
-              <Link to="/waiver" search={{ name: done.name, email: done.email, phone: done.phone }}>
+              <Link
+                to="/waiver"
+                search={{
+                  first_name: done.firstName,
+                  last_name: done.lastName,
+                  email: done.email,
+                  phone: done.phone,
+                }}
+              >
                 Sign my waiver
               </Link>
             </Button>
@@ -132,9 +144,15 @@ function RegisterInterest() {
 
         <form onSubmit={onSubmit} className="mt-8 space-y-5 rounded-2xl border bg-card p-6 md:p-8">
           <input type="text" name="hp" tabIndex={-1} autoComplete="off" className="hidden" />
-          <div>
-            <Label htmlFor="name">Full name</Label>
-            <Input id="name" name="name" required maxLength={100} className="mt-1.5" />
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="first_name">First name</Label>
+              <Input id="first_name" name="first_name" required maxLength={60} className="mt-1.5" />
+            </div>
+            <div>
+              <Label htmlFor="last_name">Last name</Label>
+              <Input id="last_name" name="last_name" required maxLength={60} className="mt-1.5" />
+            </div>
           </div>
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
