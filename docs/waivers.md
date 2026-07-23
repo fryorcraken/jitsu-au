@@ -73,8 +73,22 @@ waiver row stores the full submission.
 
 ### Mistake or changed details
 
-Submit again with the same email. Always accepted. Managers decide which
-submission to approve.
+Submit again with the same email. Always accepted, whether that email belongs
+to a visitor or a member: a resubmission attaches to the existing person and
+never modifies them. Managers decide which submission to approve.
+
+### Email edge cases
+
+- **Signed-in people sign for themselves.** The form locks the email field to
+  their login email, and the server rejects a submission whose email does not
+  match it (prevents a typo or someone else's address attaching the waiver to
+  the wrong person, or creating a duplicate person). To sign for someone else,
+  log out first.
+- **An unregistrable email** (rejected by the auth system) fails with a clear
+  "check it for typos" message, never a raw database error.
+- **Signing in with a visitor's email** does nothing special: the auth page
+  responds identically for unknown, locked, and active emails, so nothing is
+  leaked about who exists.
 
 ### Manager reviews and approves
 

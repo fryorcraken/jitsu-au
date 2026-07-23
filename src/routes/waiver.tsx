@@ -162,9 +162,11 @@ function Waiver() {
       });
   }, [authLoading, user, fetchMine]);
 
+  // A signed-in person signs for their own account: the waiver's email is
+  // their login email, and the field is locked (the server enforces the match).
   useEffect(() => {
-    if (user?.email && !email) setEmail(user.email);
-  }, [user, email]);
+    if (user?.email) setEmail(user.email);
+  }, [user]);
 
   // ---- Live preview (HTML rendering of the waiver, mirrors the PDF) ----
   const previewSignatureImage = signatureMode === "draw" ? signatureImage : "";
@@ -388,8 +390,15 @@ function Waiver() {
                   maxLength={255}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  disabled={Boolean(user)}
                   className="mt-1.5"
                 />
+                {user && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    You're signed in, so the waiver uses your account email. To sign for someone
+                    else, log out first.
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="address">Address</Label>

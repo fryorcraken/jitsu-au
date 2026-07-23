@@ -133,17 +133,44 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 
     // Signing-context evidence for the forensic/legal record: the signer's real
     // IP plus request headers (user agent, language, client hints) merged with
-    // the browser's self-reported context (timezone, screen, platform).
+    // the browser's self-reported context (timezone, screen, platform). Also
+    // capture the caller's bearer token to know who is submitting.
     let signer_ip: string | null = null;
     let signer_meta: Record<string, unknown> = {};
+    let bearer: string | null = null;
     try {
       const { getRequestHeader } = await import("@tanstack/react-start/server");
       const getHeader = (name: string) => getRequestHeader(name);
       signer_ip = clientIp(getHeader);
       signer_meta = buildSignerMeta(getHeader, data.client_meta);
+      bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
     } catch {
       /* header access unavailable */
       signer_meta = buildSignerMeta(() => undefined, data.client_meta);
+    }
+
+    // A signed-in caller signs for their own account: require the submitted
+    // email to match their login email (the form locks the field; this is the
+    // server-side backstop). Without this, a typo or someone else's address
+    // would attach the waiver to the wrong person or mint a duplicate one.
+    let callerId: string | null = null;
+    if (bearer) {
+      try {
+        const { data: callerData } = await supabaseAdmin.auth.getUser(bearer);
+        if (callerData.user) {
+          const callerEmail = callerData.user.email ?? "";
+          if (!callerEmail || normalizeEmail(callerEmail) !== email) {
+            throw new Error(
+              `You're signed in as ${callerEmail || "another account"}, so the waiver must use that email. To sign for someone else, log out first.`,
+            );
+          }
+          callerId = callerData.user.id;
+        }
+      } catch (e) {
+        // An invalid/expired token means an anonymous submission; a real
+        // mismatch error must surface.
+        if (e instanceof Error && e.message.includes("signed in as")) throw e;
+      }
     }
 
     // Load current template
@@ -170,14 +197,16 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 
     // Every submission belongs to a person, and a person is an auth user (the
     // email lives on auth.users — the one email store). Resolve the auth user
-    // by email; if the email is new to the club, create a LOCKED auth user
-    // (long ban, no credentials — they cannot log in until a manager approves
-    // a waiver and lifts the ban). The ensure_profile trigger creates the
-    // profile row; seed a new person's name/phone onto it. An EXISTING
-    // profile is never modified by a submission — the profile only changes
-    // when a manager approves (the promotion step).
+    // by email — an EXISTING email (visitor or member) is fine and expected:
+    // resubmission is always allowed and never modifies the existing person.
+    // If the email is new to the club, create a LOCKED auth user (long ban, no
+    // credentials — they cannot log in until a manager approves a waiver and
+    // lifts the ban). The ensure_profile trigger creates the profile row; seed
+    // a new person's name/phone onto it.
     let userId: string;
-    {
+    if (callerId) {
+      userId = callerId;
+    } else {
       const { data: existingId, error: lookupErr } = await admin.rpc("user_id_by_email", {
         _email: email,
       });
@@ -190,9 +219,15 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           ban_duration: "876000h", // ~100 years: a visitor, not a login
         });
         if (createErr || !created.user) {
-          // A concurrent submission may have just created the user; re-resolve.
+          // A concurrent submission may have just created the user; re-resolve
+          // before treating it as a failure.
           const { data: racedId } = await admin.rpc("user_id_by_email", { _email: email });
-          if (!racedId) throw new Error(createErr?.message || "Could not save your details.");
+          if (!racedId) {
+            console.error("[submitWaiverWithPdf] could not register email:", createErr);
+            throw new Error(
+              "We couldn't register that email address. Check it for typos and try again.",
+            );
+          }
           userId = racedId;
         } else {
           userId = created.user.id;
