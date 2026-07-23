@@ -41,8 +41,32 @@ export const submitInterest = createServerFn({ method: "POST" })
     };
     // A registration is a LEAD: just this row, nothing else. The person record
     // (locked login + profile) starts later, when they sign the waiver.
-    const { error } = await supabase.from("interest_registrations").insert(interestRow as never);
+    const { data: inserted, error } = await supabase
+      .from("interest_registrations")
+      .insert(interestRow as never)
+      .select("id")
+      .single();
     if (error) throw new Error(error.message);
+
+    // Best-effort transactional emails: confirm to the applicant (nudging them
+    // to sign their prefilled waiver next) and notify managers of the new lead.
+    // Never let an email hiccup fail the registration the visitor just made.
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { sendInterestEmails } = await import("@/lib/interest-email.server");
+      await sendInterestEmails({
+        registrationId: (inserted as { id: string }).id,
+        name: data.name,
+        email: data.email,
+        phone: data.phone || null,
+        experience: data.experience || null,
+        message: data.message || null,
+        admin: supabaseAdmin,
+      });
+    } catch (e) {
+      console.error("[submitInterest] failed to send interest emails:", e);
+    }
+
     return { ok: true };
   });
 
