@@ -161,10 +161,11 @@ Core tables:
   `auth.users`). **The only email lives on `auth.users`** — no email column in
   `public`; the server resolves emails via the service-role-only
   `user_id_by_email` / `user_emails` RPCs. A person = a (possibly **locked**,
-  i.e. banned/no-credentials) auth user + their profile. Waiver submission
-  creates the locked auth user + seeds name/phone; a **manager approving a
-  waiver** copies the submission's details onto the profile, lifts the ban, and
-  emails a sign-in link. There is no self-serve sign-up.
+  i.e. banned/no-credentials) auth user + their profile. Waiver submission and
+  trial-interest registration create the locked auth user + seed name/phone; a
+  **manager approving a waiver** copies the submission's details onto the
+  profile, lifts the ban, and emails a sign-in link. There is no self-serve
+  sign-up.
 - `waivers` — frozen submissions: the person fields **as submitted** (email
   included, as evidence), plus `user_id` (→ profiles), `pdf_path`,
   `template_version`, `signer_ip` + `signer_meta` (real IP + browser context,

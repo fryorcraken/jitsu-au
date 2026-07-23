@@ -79,9 +79,11 @@ inside the waiver PDF), and no `full_name`.
 
 **Written by (service role only):**
 
-- Waiver submission (`submitWaiverWithPdf`): for a new email, creates a
-  **locked** auth user (`ban_duration` ~100y, no credentials) and seeds the
-  profile with name/phone. An existing person is left untouched.
+- Waiver submission (`submitWaiverWithPdf`) and trial-interest registration
+  (`submitInterest`): for a new email, create a **locked** auth user
+  (`ban_duration` ~100y, no credentials) and seed the profile with name/phone
+  (`interestVisitorSeed` for the trial form). An existing person is left
+  untouched.
 - Manager approval (`setWaiverApproval`): copies the approved submission's
   person fields onto the profile (`waiverToProfileFields`); on first approval
   lifts the ban and sends a sign-in email.
@@ -239,6 +241,9 @@ service role only.
 `id` PK, `name`, `email`, `phone`, `uts_student`, `experience`, `message`,
 `sms_whatsapp_consent`, `created_at`. **RLS:** anon INSERT under a validating
 `WITH CHECK` (name/email/phone/experience/message length + email format).
+Each row is a lead record kept as submitted; the server additionally ensures a
+visitor (locked auth user + profile) exists for the email, best-effort (see
+`profiles`).
 
 ### `contact_messages`
 

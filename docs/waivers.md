@@ -17,10 +17,12 @@ waiver** is the latest approved one; everything else is history.
 
 ## People involved
 
-- **Visitor**: someone who has given the club their email. That is the moment a
-  person starts existing in the system: a **locked** login record (their email,
-  no way to sign in) plus a visitor profile (name, phone). Someone browsing the
-  site who has not provided an email is nothing in the system.
+- **Visitor**: someone who has given the club their email, by registering for
+  the free trial or by signing the waiver. That is the moment a person starts
+  existing in the system: a **locked** login record (their email, no way to
+  sign in) plus a visitor profile (name, phone). Someone browsing the site who
+  has not provided an email is nothing in the system. (The contact form is the
+  deliberate exception: it stores a message, not a person.)
 - **Member**: a person whose waiver was approved; their login is unlocked.
 - **Manager**: club staff with the manager role.
 
@@ -61,6 +63,22 @@ waiver** is the latest approved one; everything else is history.
    magic link, with `shouldCreateUser: false`; a locked login cannot sign in).
 
 ## Flows
+
+### Visitor registers for the free trial
+
+The "Start your free trial" page (`/register-interest`) is step 1: name, email
+(**required**), optional phone and a note. On submit:
+
+- the registration is stored as a lead row (`interest_registrations`, kept
+  as-is for the club's records), and
+- for a new email, the person starts existing: a locked login record plus a
+  visitor profile seeded from the form (name split into parts, phone, and
+  SMS/WhatsApp consent implied by providing a phone number). An existing
+  person is left untouched. Person creation is best-effort: a hiccup there
+  never loses the lead.
+
+They then continue to the waiver (step 2) with name/email/phone carried over.
+Trial registrants appear in the manager directory as prospects.
 
 ### Visitor signs the waiver
 
@@ -116,5 +134,6 @@ memberships/invoices. Feeds the manager screens and the manager agent API.
   waiver, or a manager).
 - A manager action to change a person's email (one update, on the login
   record — the only place it lives).
-- Interest-form registrations creating visitor profiles.
+- Contact-form senders becoming visitors (today a contact message is just a
+  message).
 - Waiver expiry / forced re-signing on template changes.

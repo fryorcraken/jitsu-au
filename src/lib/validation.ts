@@ -33,6 +33,30 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * Seed fields for the visitor profile created by a trial-interest
+ * registration: the single name field split into parts, the phone, and the
+ * SMS/WhatsApp consent implied by providing a phone number (the form's phone
+ * field carries the consent note).
+ */
+export function interestVisitorSeed(input: { name: string; phone?: string | null }): {
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  sms_whatsapp_consent: boolean;
+} {
+  const { first, middle, last } = splitFullName(input.name);
+  const phone = input.phone?.trim() || null;
+  return {
+    first_name: first || null,
+    middle_name: middle || null,
+    last_name: last || null,
+    phone,
+    sms_whatsapp_consent: Boolean(phone),
+  };
+}
+
 /** The person fields a waiver submission carries (as submitted, frozen). */
 export type WaiverPersonFields = {
   first_name: string;
