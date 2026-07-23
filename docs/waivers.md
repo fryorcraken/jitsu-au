@@ -16,14 +16,17 @@ have no login yet, creates their account and emails them an invite. The
 
 ## People involved
 
-- **Visitor**: anyone on the public site. No account.
+- **Visitor**: someone who has given the club their email. That is the moment a
+  person starts existing in the system, as a visitor profile. Someone browsing
+  the site who has not provided an email is nothing in the system.
 - **Member**: a person whose waiver was approved; they have a login.
 - **Manager**: club staff with the manager role.
 
 ## Rules
 
 1. **A person is identified by their email.** One profile per email
-   (lowercased/trimmed).
+   (lowercased/trimmed). No email, no record: nothing is stored about anyone
+   until they provide an email.
 2. **A profile starts as a visitor profile**: possibly just an email, usually
    also a name and phone. It may have waivers attached, or none. No login yet.
 3. **A waiver is a frozen submission.** The submitted fields are evidence and
