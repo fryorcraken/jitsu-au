@@ -11,6 +11,16 @@
 
 <!-- LOVABLE:END -->
 
+## Database
+
+The schema reference lives in **`docs/database.md`**. It documents every table
+(columns, RLS, relationships, storage) and the model we are moving toward. The
+applied schema is defined by the migrations in `supabase/migrations/*.sql` (the
+source of truth); `docs/database.md` is the human-readable spec of intent.
+
+**When you add or change a `supabase/migrations/*.sql` file, update
+`docs/database.md` in the same change** so the doc and the schema do not drift.
+
 ## Manager agent API
 
 A small, token-authenticated HTTP endpoint that lets a manager's AI agent perform

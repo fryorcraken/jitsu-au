@@ -150,7 +150,9 @@ Read `src/routes/README.md` before touching routes. Key points:
 ## Database (Supabase)
 
 Schema lives in `supabase/migrations/*.sql` (timestamped, applied in order). All
-tables use RLS. Core tables:
+tables use RLS. See **`docs/database.md`** for the full per-table spec (columns,
+RLS, relationships, storage) and the target data model; keep it updated alongside
+any migration change. Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
   column-length/format CHECK constraints in the RLS `WITH CHECK`.
