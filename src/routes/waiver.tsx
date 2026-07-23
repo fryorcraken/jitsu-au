@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { z } from "zod";
 import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
@@ -22,21 +21,11 @@ import {
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { useAuth } from "@/hooks/useAuth";
-import { resolveNamePrefill } from "@/lib/validation";
-
-// Optional prefill carried over from Step 1 of the "Start your free trial" flow.
-// The register step now sends first_name/last_name; `name` is kept for legacy
-// links (older bookmarks or emails that carried a single combined name).
-const searchSchema = z.object({
-  first_name: z.string().max(60).optional().catch(undefined),
-  last_name: z.string().max(60).optional().catch(undefined),
-  name: z.string().max(120).optional().catch(undefined),
-  email: z.string().max(255).optional().catch(undefined),
-  phone: z.string().max(30).optional().catch(undefined),
-});
+import { resolveNamePrefill, waiverPrefillSearchSchema } from "@/lib/validation";
 
 export const Route = createFileRoute("/waiver")({
-  validateSearch: searchSchema,
+  // Optional prefill carried over from Step 1 of the "Start your free trial" flow.
+  validateSearch: waiverPrefillSearchSchema,
   head: () => ({
     meta: [
       { title: "Sign waiver | UTS Jitsu" },
