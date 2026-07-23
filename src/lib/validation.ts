@@ -16,6 +16,143 @@ export function composeFullName(first: string, middle: string, last: string): st
     .join(" ");
 }
 
+/** Compose a display name from a profile's (nullable) name parts. */
+export function profileFullName(p: {
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+}): string {
+  return composeFullName(p.first_name || "", p.middle_name || "", p.last_name || "");
+}
+
+/**
+ * Normalize an email for use as the profile identity key: trimmed and lowercased
+ * so case/whitespace variants map to the one profile (mirrors the DB unique key).
+ */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/** The person fields a waiver submission carries (as submitted, frozen). */
+export type WaiverPersonFields = {
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+  date_of_birth: string;
+  address: string;
+  phone: string;
+  uts_student_number: string | null;
+  sms_whatsapp_consent: boolean;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  medical_notes: string | null;
+  is_minor: boolean;
+  guardian_name: string | null;
+  guardian_relationship: string | null;
+};
+
+/**
+ * The profile patch a manager's approval applies: the approved submission's
+ * person fields become the club's current record of that person. Pure so the
+ * promotion mapping is unit-testable; the caller adds `updated_at`.
+ */
+export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields {
+  return {
+    first_name: w.first_name,
+    middle_name: w.middle_name,
+    last_name: w.last_name,
+    date_of_birth: w.date_of_birth,
+    address: w.address,
+    phone: w.phone,
+    uts_student_number: w.uts_student_number,
+    sms_whatsapp_consent: w.sms_whatsapp_consent,
+    emergency_contact_name: w.emergency_contact_name,
+    emergency_contact_phone: w.emergency_contact_phone,
+    medical_notes: w.medical_notes,
+    is_minor: w.is_minor,
+    guardian_name: w.guardian_name,
+    guardian_relationship: w.guardian_relationship,
+  };
+}
+
+// ---- Signing-context evidence (kept on the waiver for liability) ----
+
+/** Self-reported browser context sent with a waiver submission. All optional and
+ * size-bounded; it is evidence, not identity, so nothing here is trusted. */
+export const waiverClientMetaSchema = z.object({
+  timezone: z.string().trim().max(80).optional().or(z.literal("")),
+  screen: z.string().trim().max(40).optional().or(z.literal("")),
+  viewport: z.string().trim().max(40).optional().or(z.literal("")),
+  platform: z.string().trim().max(80).optional().or(z.literal("")),
+  languages: z.array(z.string().trim().max(35)).max(10).optional(),
+});
+export type WaiverClientMeta = z.infer<typeof waiverClientMetaSchema>;
+
+/**
+ * Assemble the signer_meta evidence blob stored on a waiver: request headers
+ * captured server-side (user agent, language, client hints) merged with the
+ * browser's self-reported context. Pure — takes a header getter so it is
+ * unit-testable; empty values are dropped so the blob stays compact.
+ */
+export function buildSignerMeta(
+  getHeader: (name: string) => string | undefined,
+  client: WaiverClientMeta | undefined,
+): Record<string, unknown> {
+  const meta: Record<string, unknown> = {};
+  const header = (key: string, name: string) => {
+    const value = getHeader(name)?.trim();
+    if (value) meta[key] = value.slice(0, 400);
+  };
+  header("user_agent", "user-agent");
+  header("accept_language", "accept-language");
+  header("sec_ch_ua", "sec-ch-ua");
+  header("sec_ch_ua_platform", "sec-ch-ua-platform");
+  header("sec_ch_ua_mobile", "sec-ch-ua-mobile");
+  if (client) {
+    if (client.timezone) meta.timezone = client.timezone;
+    if (client.screen) meta.screen = client.screen;
+    if (client.viewport) meta.viewport = client.viewport;
+    if (client.platform) meta.platform = client.platform;
+    if (client.languages?.length) meta.languages = client.languages;
+  }
+  return meta;
+}
+
+/** The states a waiver submission can be shown in. Stored: pending/approved; the
+ * approved set is split into the person's single ACTIVE waiver (latest approved)
+ * and SUPERSEDED older ones. */
+export const waiverListStatuses = ["pending", "active", "superseded"] as const;
+export type WaiverListStatus = (typeof waiverListStatuses)[number];
+
+/**
+ * Derive each waiver's displayed status. Per person, the approved waiver with
+ * the greatest approved_at (falling back to signed_at) is `active`; other
+ * approved ones are `superseded`; everything else is `pending`.
+ */
+export function deriveWaiverListStatuses(
+  rows: {
+    id: string;
+    user_id: string;
+    approval_status: string;
+    approved_at: string | null;
+    signed_at: string;
+  }[],
+): Map<string, WaiverListStatus> {
+  const activeByUser = new Map<string, { id: string; at: string }>();
+  for (const r of rows) {
+    if (r.approval_status !== "approved") continue;
+    const at = r.approved_at ?? r.signed_at;
+    const current = activeByUser.get(r.user_id);
+    if (!current || current.at < at) activeByUser.set(r.user_id, { id: r.id, at });
+  }
+  const out = new Map<string, WaiverListStatus>();
+  for (const r of rows) {
+    if (r.approval_status !== "approved") out.set(r.id, "pending");
+    else out.set(r.id, activeByUser.get(r.user_id)?.id === r.id ? "active" : "superseded");
+  }
+  return out;
+}
+
 /**
  * Split a single full-name string into first/middle/last parts.
  * One word → first only; two words → first + last; three+ → everything
@@ -100,6 +237,8 @@ export const waiverSubmitSchema = z
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
     guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_signature_image: sigImage,
+    // Self-reported browser context, stored on the waiver as signing evidence.
+    client_meta: waiverClientMetaSchema.optional(),
     hp: z.string().max(0).optional(),
   })
   .refine(
@@ -163,8 +302,12 @@ export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 export const membershipPlanKinds = ["insurance", "trial", "session", "period"] as const;
 export type MembershipPlanKind = (typeof membershipPlanKinds)[number];
 
-/** The lifecycle a person moves through as they join the club. */
-export const lifecycleStatuses = ["prospect", "trial", "member", "expired"] as const;
+/** The lifecycle a person moves through as they join the club:
+ * lead (registered interest only) -> applicant (signed the waiver) ->
+ * visitor (waiver approved, trial assigned) -> member (active paid
+ * membership), plus lapsed (had a trial/membership that ended, nothing
+ * active). Always derived, never stored. */
+export const lifecycleStatuses = ["lead", "applicant", "visitor", "member", "lapsed"] as const;
 export type LifecycleStatus = (typeof lifecycleStatuses)[number];
 
 /** The states an enrollment record can be in. */
@@ -202,26 +345,30 @@ export function formatCents(cents: number): string {
 }
 
 /**
- * Derive a person's lifecycle status from their waiver + membership records.
- * Precedence: an active paid membership makes them a `member`; an active trial
- * (or a signed waiver with nothing paid yet) makes them `trial`; a lapsed paid
- * membership makes them `expired`; otherwise they are a `prospect`.
+ * Derive a person's lifecycle status from their waivers + membership records.
+ * Precedence:
+ *   1. member  — any ACTIVE paid membership (kind != trial, price > 0).
+ *   2. lapsed  — a trial or paid membership ended (expired/cancelled) and
+ *                nothing is active: someone to chase for a renewal.
+ *   3. visitor — an approved waiver (the free trial is assigned at approval).
+ *   4. applicant — waiver submission(s), none approved yet.
+ *   5. lead    — nothing beyond a registration (or a bare profile).
  */
 export function deriveLifecycleStatus(input: {
-  hasWaiver: boolean;
+  hasApprovedWaiver: boolean;
+  hasPendingWaiver: boolean;
   memberships: { status: MembershipStatus; kind: MembershipPlanKind; price_cents: number }[];
 }): LifecycleStatus {
   const isPaid = (m: { kind: MembershipPlanKind; price_cents: number }) =>
     m.kind !== "trial" && m.price_cents > 0;
+  const isEnded = (m: { status: MembershipStatus }) =>
+    m.status === "expired" || m.status === "cancelled";
   const active = input.memberships.filter((m) => m.status === "active");
   if (active.some(isPaid)) return "member";
-  if (active.some((m) => m.kind === "trial")) return "trial";
-  if (
-    input.memberships.some((m) => (m.status === "expired" || m.status === "cancelled") && isPaid(m))
-  )
-    return "expired";
-  if (input.hasWaiver) return "trial";
-  return "prospect";
+  if (active.length === 0 && input.memberships.some(isEnded)) return "lapsed";
+  if (input.hasApprovedWaiver) return "visitor";
+  if (input.hasPendingWaiver) return "applicant";
+  return "lead";
 }
 
 /** Uppercase + strip everything that isn't a letter or digit (for bank matching). */

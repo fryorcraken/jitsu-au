@@ -150,14 +150,32 @@ Read `src/routes/README.md` before touching routes. Key points:
 ## Database (Supabase)
 
 Schema lives in `supabase/migrations/*.sql` (timestamped, applied in order). All
-tables use RLS. Core tables:
+tables use RLS. See **`docs/database.md`** for the full per-table spec (columns,
+RLS, relationships, storage); it is the source of truth for the data model and
+**must stay aligned with the code and migrations** — update it in the same change.
+Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
   column-length/format CHECK constraints in the RLS `WITH CHECK`.
-- `waivers` — signed training waivers (personal + emergency + medical + guardian
-  fields, acknowledgements JSONB, signature name/image paths, `pdf_path`,
-  `template_version`, optional `user_id`). Public insert allowed under strict
-  RLS validation.
+- `profiles` — the person fields for an auth user, keyed by `user_id` (PK →
+  `auth.users`). **The only email lives on `auth.users`** — no email column in
+  `public`; the server resolves emails via the service-role-only
+  `user_id_by_email` / `user_emails` RPCs. A person = a (possibly **locked**,
+  i.e. banned/no-credentials) auth user + their profile, created at waiver
+  submission (interest registrations are leads only — just rows). A **manager
+  approving a waiver** copies the submission's details onto the profile, lifts
+  the ban, emails a sign-in link, and assigns the free trial. The funnel phase
+  (`lead | applicant | visitor | member | lapsed`) is always derived
+  (`deriveLifecycleStatus`). There is no self-serve sign-up.
+- `waivers` — frozen submissions: the person fields **as submitted** (email
+  included, as evidence), plus `user_id` (→ profiles), `pdf_path`,
+  `template_version`, `signer_ip` + `signer_meta` (real IP + browser context,
+  forensic record), approval fields, timestamps. No `full_name` (composed on
+  read), no stored signatures/acknowledgements (they live in the PDF). Signing
+  is public (no login, email required), unlimited, and runs through the
+  service-role client. The displayed pending/active/superseded status is
+  derived (latest approved per person = active). Product flows:
+  `docs/waivers.md`.
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.
@@ -165,8 +183,8 @@ tables use RLS. Core tables:
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.
 
-Signed waiver PDFs and signature PNGs are stored in the Supabase Storage
-**`waivers`** bucket; access is via short-lived signed URLs.
+Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
+is via short-lived signed URLs.
 
 ## Key business flows
 

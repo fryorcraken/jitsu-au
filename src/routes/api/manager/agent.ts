@@ -18,6 +18,7 @@ import {
   listAgentInvoicesSchema,
   listAgentUsersSchema,
   managerAgentActions,
+  profileFullName,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -28,10 +29,29 @@ import {
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
-import { aggregateClubUsers, collectClubUserIds } from "@/lib/club-users";
-import type { ClubUserWaiver } from "@/lib/club-users";
+import { aggregateClubUsers, profileUserIds, LEADS_LIMIT } from "@/lib/club-users";
+import type {
+  ClubUserEmail,
+  ClubUserLead,
+  ClubUserProfile,
+  ClubUserWaiver,
+} from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
+import type { AppClient } from "@/lib/profile-types";
+
+/**
+ * Resolve auth emails (the one email store) for a set of user ids via the
+ * service-role `user_emails` RPC; empty map on failure. Degraded mode: persons
+ * render with a null email and leads aren't deduped against them (a person
+ * could transiently appear twice) — rare and non-destructive.
+ */
+async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<Map<string, string>> {
+  if (!userIds.length) return new Map();
+  const { data, error } = await pdb.rpc("user_emails", { _user_ids: userIds });
+  if (error || !data) return new Map();
+  return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -119,32 +139,60 @@ function errorResponse(e: unknown): Response {
 async function handleListUsers(params: unknown) {
   const { status, limit } = listAgentUsersSchema.parse(params ?? {});
   const db = await adminClient();
+  const pdb = db as unknown as AppClient;
 
-  const [{ data: rows, error }, { data: plans }, { data: waivers }] = await Promise.all([
-    db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
-    db.from("membership_plans").select("*"),
-    db.from("waivers").select("user_id, full_name, email, phone, signed_at"),
-  ]);
+  const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
+    await Promise.all([
+      pdb
+        .from("profiles")
+        .select(
+          "user_id, first_name, middle_name, last_name, phone, uts_student_number, created_at",
+        )
+        .limit(5000),
+      db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+      db.from("membership_plans").select("*"),
+      // ALL waivers: approved => visitor+, pending-only => applicant.
+      pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+      // Interest registrations are the LEAD phase of the funnel; the
+      // aggregation drops any whose email already belongs to a person.
+      db
+        .from("interest_registrations")
+        .select("email, name, phone, created_at")
+        .order("created_at", { ascending: false })
+        .limit(LEADS_LIMIT)
+        .then((r) => (r.data ?? []) as ClubUserLead[]),
+    ]);
   if (error) throw new AgentError(500, "db_error", error.message);
+  if (leads.length >= LEADS_LIMIT) {
+    console.warn(
+      `[agent.list_users] interest_registrations capped at ${LEADS_LIMIT}; leads truncated`,
+    );
+  }
 
   const memberships = (rows ?? []) as MembershipRow[];
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
+  const profileRows = (profiles ?? []) as ClubUserProfile[];
   const waiverRows = (waivers ?? []) as ClubUserWaiver[];
 
-  // Roles are scoped to the club's known users (waiver signers + members).
-  const userIds = collectClubUserIds(waiverRows, memberships);
+  // Roles + emails are scoped to the club's known people.
+  const userIds = profileUserIds(profileRows);
   let rolesRows: { user_id: string; role: string }[] = [];
+  let emails = new Map<string, string>();
   if (userIds.length) {
-    const { data: roles } = await db
-      .from("user_roles")
-      .select("user_id, role")
-      .in("user_id", userIds);
+    const [{ data: roles }, resolved] = await Promise.all([
+      db.from("user_roles").select("user_id, role").in("user_id", userIds),
+      emailsByUserId(pdb, userIds),
+    ]);
     rolesRows = (roles ?? []) as { user_id: string; role: string }[];
+    emails = resolved;
   }
 
   // Shared aggregation: one row per person with name/roles/lifecycle resolved.
   const aggregated = aggregateClubUsers({
+    profiles: profileRows,
+    emails: [...emails].map(([user_id, email]) => ({ user_id, email })),
     waivers: waiverRows,
+    leads,
     memberships: memberships.map((m) => ({
       user_id: m.user_id,
       plan_id: m.plan_id,
@@ -174,7 +222,7 @@ async function handleListUsers(params: unknown) {
     email: u.email,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
-    invoices: (membershipsByUser.get(u.user_id) ?? []).map((m) =>
+    invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) =>
       projectInvoice(m, planById.get(m.plan_id)),
     ),
   }));
@@ -199,31 +247,33 @@ async function handleListInvoices(params: unknown) {
 
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
 
-  // Resolve a display name/email per member from their latest waiver.
+  // Resolve each member's display name from their profile and email from the
+  // auth user (the one email store).
   const userIds = [
     ...new Set(((rows ?? []) as MembershipRow[]).map((r) => r.user_id).filter(Boolean)),
   ] as string[];
-  const nameByUser = new Map<string, { full_name: string; email: string }>();
+  const nameByUser = new Map<string, string>();
+  let emailByUser = new Map<string, string>();
   if (userIds.length) {
-    const { data: waivers } = await db
-      .from("waivers")
-      .select("user_id, full_name, email, signed_at")
-      .in("user_id", userIds)
-      .order("signed_at", { ascending: false });
-    for (const w of (waivers ?? []) as { user_id: string; full_name: string; email: string }[]) {
-      if (!nameByUser.has(w.user_id))
-        nameByUser.set(w.user_id, { full_name: w.full_name, email: w.email });
+    const pdb = db as unknown as AppClient;
+    const [{ data: profiles }, resolved] = await Promise.all([
+      pdb
+        .from("profiles")
+        .select("user_id, first_name, middle_name, last_name")
+        .in("user_id", userIds),
+      emailsByUserId(pdb, userIds),
+    ]);
+    emailByUser = resolved;
+    for (const p of profiles ?? []) {
+      nameByUser.set(p.user_id, profileFullName(p));
     }
   }
 
-  const invoices = ((rows ?? []) as MembershipRow[]).map((r) => {
-    const who = r.user_id ? nameByUser.get(r.user_id) : undefined;
-    return {
-      ...projectInvoice(r, planById.get(r.plan_id)),
-      member_name: who?.full_name ?? null,
-      member_email: who?.email ?? null,
-    };
-  });
+  const invoices = ((rows ?? []) as MembershipRow[]).map((r) => ({
+    ...projectInvoice(r, planById.get(r.plan_id)),
+    member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
+    member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
+  }));
   return { count: invoices.length, invoices };
 }
 

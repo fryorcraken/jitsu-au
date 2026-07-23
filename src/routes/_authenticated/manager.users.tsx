@@ -19,10 +19,11 @@ export const Route = createFileRoute("/_authenticated/manager/users")({
 type Row = Awaited<ReturnType<typeof listClubUsers>>[number];
 
 const LIFECYCLE_CLASS: Record<string, string> = {
-  prospect: "bg-slate-100 text-slate-800",
-  trial: "bg-amber-100 text-amber-800",
+  lead: "bg-slate-100 text-slate-800",
+  applicant: "bg-amber-100 text-amber-800",
+  visitor: "bg-sky-100 text-sky-800",
   member: "bg-green-100 text-green-800",
-  expired: "bg-red-100 text-red-800",
+  lapsed: "bg-red-100 text-red-800",
 };
 
 const MEMBERSHIP_CLASS: Record<string, string> = {
@@ -110,7 +111,7 @@ function ManagerUsersPage() {
       // Newest first-seen at the top; users with no date sort last.
       sorted.sort((a, b) => (b.first_seen_at ?? "").localeCompare(a.first_seen_at ?? ""));
     } else {
-      const order = ["member", "trial", "prospect", "expired"];
+      const order = ["member", "visitor", "applicant", "lead", "lapsed"];
       sorted.sort(
         (a, b) =>
           order.indexOf(a.lifecycle_status) - order.indexOf(b.lifecycle_status) ||
@@ -127,7 +128,8 @@ function ManagerUsersPage() {
           <div>
             <h1 className="text-3xl font-black">Users</h1>
             <p className="text-sm text-muted-foreground">
-              Everyone known to the club: waiver signers and membership holders, one row per person.
+              The whole funnel, one row per person: leads, applicants, visitors, members and lapsed
+              members.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -231,7 +233,7 @@ function ManagerUsersPage() {
                 </thead>
                 <tbody>
                   {visible.map((r) => (
-                    <tr key={r.user_id} className="border-t align-top">
+                    <tr key={r.user_id ?? r.email ?? r.name ?? ""} className="border-t align-top">
                       <td className="px-3 py-2 font-medium">{r.name ?? "—"}</td>
                       <td className="px-3 py-2">{r.email ?? "—"}</td>
                       <td className="px-3 py-2">{r.phone ?? "—"}</td>

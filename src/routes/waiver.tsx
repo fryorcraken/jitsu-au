@@ -17,7 +17,7 @@ import { WaiverDocument } from "@/components/site/WaiverDocument";
 import {
   submitWaiverWithPdf,
   getCurrentWaiverTemplate,
-  getMyLatestWaiver,
+  getMyProfile,
 } from "@/lib/waiver.functions";
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
@@ -50,26 +50,26 @@ export const Route = createFileRoute("/waiver")({
   component: Waiver,
 });
 
+// The profile carries no email — that lives on the auth user, and the form's
+// email field is seeded from the session (user.email) instead.
 type Prefill = {
-  full_name?: string;
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
-  date_of_birth?: string;
-  address?: string;
-  phone?: string;
-  email?: string;
+  date_of_birth?: string | null;
+  address?: string | null;
+  phone?: string | null;
   uts_student_number?: string | null;
   sms_whatsapp_consent?: boolean | null;
-  emergency_contact_name?: string;
-  emergency_contact_phone?: string;
-  medical_notes?: string;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+  medical_notes?: string | null;
 };
 
 function Waiver() {
   const submit = useServerFn(submitWaiverWithPdf);
   const fetchTemplate = useServerFn(getCurrentWaiverTemplate);
-  const fetchMine = useServerFn(getMyLatestWaiver);
+  const fetchMine = useServerFn(getMyProfile);
   const { user, loading: authLoading } = useAuth();
   const search = Route.useSearch();
   const prefillName = useMemo(() => splitFullName(search.name ?? ""), [search.name]);
@@ -145,18 +145,12 @@ function Waiver() {
           setFirstName(r.first_name || "");
           setMiddleName(r.middle_name || "");
           setLastName(r.last_name || "");
-        } else if (r.full_name) {
-          const s = splitFullName(r.full_name);
-          setFirstName(s.first);
-          setMiddleName(s.middle);
-          setLastName(s.last);
         }
         if (r.date_of_birth) setDob(r.date_of_birth);
         if (r.phone) setPhone(r.phone);
         // Prefill the consent checkbox from the member's stored consent (they
         // can still change it).
         if (typeof r.sms_whatsapp_consent === "boolean") setSmsConsent(r.sms_whatsapp_consent);
-        if (r.email) setEmail(r.email);
         if (r.address) setAddress(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);
@@ -164,13 +158,15 @@ function Waiver() {
         if (r.medical_notes) setMedical(r.medical_notes);
       })
       .catch(() => {
-        /* no prior waiver */
+        /* no profile yet */
       });
   }, [authLoading, user, fetchMine]);
 
+  // A signed-in person signs for their own account: the waiver's email is
+  // their login email, and the field is locked (the server enforces the match).
   useEffect(() => {
-    if (user?.email && !email) setEmail(user.email);
-  }, [user, email]);
+    if (user?.email) setEmail(user.email);
+  }, [user]);
 
   // ---- Live preview (HTML rendering of the waiver, mirrors the PDF) ----
   const previewSignatureImage = signatureMode === "draw" ? signatureImage : "";
@@ -243,6 +239,14 @@ function Waiver() {
           guardian_relationship: guardianRelationship,
           guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
           guardian_signature_image: guardianSignatureMode === "draw" ? guardianSignatureImage : "",
+          // Browser context stored with the submission as signing evidence.
+          client_meta: {
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "",
+            screen: `${window.screen.width}x${window.screen.height}`,
+            viewport: `${window.innerWidth}x${window.innerHeight}`,
+            platform: navigator.platform ?? "",
+            languages: [...(navigator.languages ?? [])].slice(0, 10),
+          },
           hp: "",
         },
       });
@@ -299,7 +303,7 @@ function Waiver() {
 
             {user && (
               <p className="rounded-md bg-primary/10 px-3 py-2 text-xs text-primary">
-                Signed in as {user.email}. Your details have been pre-filled from your last waiver.
+                Signed in as {user.email}. Your details have been pre-filled from your profile.
               </p>
             )}
 
@@ -386,8 +390,15 @@ function Waiver() {
                   maxLength={255}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  disabled={Boolean(user)}
                   className="mt-1.5"
                 />
+                {user && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    You're signed in, so the waiver uses your account email. To sign for someone
+                    else, log out first.
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="address">Address</Label>

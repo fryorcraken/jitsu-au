@@ -37,12 +37,12 @@ export const AGENT_MANIFEST: {
       name: "list_users",
       method: "POST",
       summary:
-        "List people known to the club (waiver signed and/or membership started) with their lifecycle status, roles, and invoices.",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, and invoices.",
       params: [
         {
           name: "status",
           required: false,
-          description: "Filter by lifecycle status: prospect | trial | member | expired.",
+          description: "Filter by lifecycle status: lead | applicant | visitor | member | lapsed.",
         },
         {
           name: "limit",

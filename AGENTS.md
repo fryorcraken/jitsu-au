@@ -11,6 +11,17 @@
 
 <!-- LOVABLE:END -->
 
+## Database
+
+The schema reference lives in **`docs/database.md`** (every table: columns,
+RLS, relationships, storage). The product spec for the waiver/profile/account
+flows lives in **`docs/waivers.md`**. The applied schema is defined by the
+migrations in `supabase/migrations/*.sql` (the source of truth).
+
+**When you change a migration, a table, or the code that reads/writes it,
+update `docs/database.md` (and `docs/waivers.md` if the product behavior
+changed) in the same change** so the docs and the code do not drift.
+
 ## Manager agent API
 
 A small, token-authenticated HTTP endpoint that lets a manager's AI agent perform

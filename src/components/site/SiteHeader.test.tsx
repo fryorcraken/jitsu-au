@@ -26,7 +26,7 @@ describe("SiteHeader", () => {
     mockUseAuth.mockReset();
   });
 
-  it('labels the logged-out auth link "Member login" (not "Sign in") for prospects', () => {
+  it('labels the logged-out auth link "Member login" (not "Sign in") for logged-out visitors', () => {
     mockUseAuth.mockReturnValue({ user: null });
     render(<SiteHeader />);
 

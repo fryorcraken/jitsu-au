@@ -10,12 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const searchSchema = z.object({
   redirect: z.string().optional(),
-  mode: z.enum(["signin", "signup"]).optional(),
+  // Kept for old links; there is no self-serve sign-up any more, so any mode
+  // lands on the sign-in form.
+  mode: z.enum(["signin", "signup"]).optional().catch(undefined),
 });
 
 export const Route = createFileRoute("/auth")({
@@ -31,7 +32,7 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
-  const { redirect, mode } = useSearch({ from: "/auth" });
+  const { redirect } = useSearch({ from: "/auth" });
   const navigate = useNavigate();
   const [ready, setReady] = useState(false);
 
@@ -44,26 +45,24 @@ function AuthPage() {
 
   if (!ready) return null;
 
+  // There is no self-serve sign-up: your login is set up by the club when a
+  // manager approves your waiver, via the invite email.
   return (
     <SiteLayout>
       <section className="mx-auto max-w-md px-4 py-16">
         <Card>
           <CardHeader>
-            <CardTitle>Welcome</CardTitle>
+            <CardTitle>Sign in</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Tabs defaultValue={mode === "signup" ? "signup" : "signin"}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="signin">Sign in</TabsTrigger>
-                <TabsTrigger value="signup">Create account</TabsTrigger>
-              </TabsList>
-              <TabsContent value="signin" className="pt-4">
-                <SignInForms redirect={redirect} />
-              </TabsContent>
-              <TabsContent value="signup" className="pt-4">
-                <SignUpForm />
-              </TabsContent>
-            </Tabs>
+          <CardContent className="space-y-4">
+            <SignInForms redirect={redirect} />
+            <p className="text-xs text-muted-foreground">
+              No login yet?{" "}
+              <Link to="/waiver" className="text-primary hover:underline">
+                Sign the training waiver
+              </Link>{" "}
+              and we'll set up your account once the club approves it.
+            </p>
           </CardContent>
         </Card>
       </section>
@@ -216,64 +215,6 @@ function MagicLinkSignIn({
       </div>
       <Button type="submit" className="w-full" disabled={busy}>
         {busy ? "Sending..." : "Sign in"}
-      </Button>
-    </form>
-  );
-}
-
-function SignUpForm() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: `${window.location.origin}/account` },
-    });
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    setSent(true);
-  }
-
-  if (sent) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Almost there. Check <strong>{email}</strong> for a confirmation link to activate your
-        account.
-      </p>
-    );
-  }
-
-  return (
-    <form onSubmit={onSubmit} className="space-y-3">
-      <div>
-        <Label htmlFor="new-email">Email</Label>
-        <Input
-          id="new-email"
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-      </div>
-      <div>
-        <Label htmlFor="new-password">Password</Label>
-        <PasswordInput
-          id="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <p className="mt-1 text-xs text-muted-foreground">At least 8 characters.</p>
-      </div>
-      <Button type="submit" className="w-full" disabled={busy}>
-        {busy ? "Creating account..." : "Create account"}
       </Button>
     </form>
   );
