@@ -98,17 +98,10 @@ export const listMyWaivers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin as unknown as AppClient;
-    const { data: profile, error: pErr } = await admin
-      .from("profiles")
-      .select("id")
-      .eq("user_id", context.userId)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    if (!profile) return [];
     const { data, error } = await admin
       .from("waivers")
-      .select("id, profile_id, signed_at, template_version, pdf_path, approval_status, approved_at")
-      .eq("profile_id", profile.id)
+      .select("id, user_id, signed_at, template_version, pdf_path, approval_status, approved_at")
+      .eq("user_id", context.userId)
       .order("signed_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -175,39 +168,59 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
 
-    // Every submission attaches to the visitor profile for its email. If the
-    // email is new to the club, create a lightweight profile (email, name,
-    // phone). An EXISTING profile is deliberately left untouched (ON CONFLICT
-    // DO NOTHING): the profile only changes when a manager approves a waiver
-    // (the promotion step). The insert-then-select pair is race-safe for
-    // concurrent submissions of the same new email.
-    const { error: createErr } = await admin.from("profiles").upsert(
-      {
-        email,
-        first_name: data.first_name,
-        middle_name: data.middle_name || null,
-        last_name: data.last_name,
-        phone: data.phone || null,
-      },
-      { onConflict: "email", ignoreDuplicates: true },
-    );
-    if (createErr) throw new Error(createErr.message);
-    const { data: profile, error: findErr } = await admin
-      .from("profiles")
-      .select("id")
-      .eq("email", email)
-      .single();
-    if (findErr || !profile) throw new Error(findErr?.message || "Could not save your details.");
-    const profileId = profile.id;
+    // Every submission belongs to a person, and a person is an auth user (the
+    // email lives on auth.users — the one email store). Resolve the auth user
+    // by email; if the email is new to the club, create a LOCKED auth user
+    // (long ban, no credentials — they cannot log in until a manager approves
+    // a waiver and lifts the ban). The ensure_profile trigger creates the
+    // profile row; seed a new person's name/phone onto it. An EXISTING
+    // profile is never modified by a submission — the profile only changes
+    // when a manager approves (the promotion step).
+    let userId: string;
+    {
+      const { data: existingId, error: lookupErr } = await admin.rpc("user_id_by_email", {
+        _email: email,
+      });
+      if (lookupErr) throw new Error(lookupErr.message);
+      if (existingId) {
+        userId = existingId;
+      } else {
+        const { data: created, error: createErr } = await admin.auth.admin.createUser({
+          email,
+          ban_duration: "876000h", // ~100 years: a visitor, not a login
+        });
+        if (createErr || !created.user) {
+          // A concurrent submission may have just created the user; re-resolve.
+          const { data: racedId } = await admin.rpc("user_id_by_email", { _email: email });
+          if (!racedId) throw new Error(createErr?.message || "Could not save your details.");
+          userId = racedId;
+        } else {
+          userId = created.user.id;
+          // Seed the fresh visitor profile (created by the ensure_profile
+          // trigger) with the basics. Best-effort field seed, keyed insert-safe.
+          await admin.from("profiles").upsert(
+            {
+              user_id: userId,
+              first_name: data.first_name,
+              middle_name: data.middle_name || null,
+              last_name: data.last_name,
+              phone: data.phone || null,
+            },
+            { onConflict: "user_id" },
+          );
+        }
+      }
+    }
 
-    // The waiver row is the frozen submission: exactly what was typed, plus
-    // provenance (template version, signer IP) and timestamps. Signatures and
-    // acknowledgements live inside the PDF only. Resubmission is always allowed;
-    // managers pick which submission to approve.
+    // The waiver row is the frozen submission: exactly what was typed
+    // (including the email as submitted), plus provenance (template version,
+    // signer IP, signing context) and timestamps. Signatures and
+    // acknowledgements live inside the PDF only. Resubmission is always
+    // allowed; managers pick which submission to approve.
     const { data: inserted, error: insErr } = await admin
       .from("waivers")
       .insert({
-        profile_id: profileId,
+        user_id: userId,
         first_name: data.first_name,
         middle_name: data.middle_name || null,
         last_name: data.last_name,
@@ -359,7 +372,7 @@ export const listWaivers = createServerFn({ method: "GET" })
     const { data, error } = await admin
       .from("waivers")
       .select(
-        "id, profile_id, first_name, middle_name, last_name, email, signed_at, template_version, pdf_path, approval_status, approved_at",
+        "id, user_id, first_name, middle_name, last_name, email, signed_at, template_version, pdf_path, approval_status, approved_at",
       )
       .order("signed_at", { ascending: false })
       .limit(500);
@@ -378,28 +391,13 @@ export const listWaivers = createServerFn({ method: "GET" })
     }));
   });
 
-/**
- * Look up an existing auth user by (normalized) email via the admin API. Pages
- * through the user list; fine at club scale.
- */
-async function findAuthUserIdByEmail(admin: AppClient, email: string): Promise<string | null> {
-  for (let page = 1; page <= 20; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error || !data?.users?.length) return null;
-    const hit = data.users.find((u) => (u.email ?? "").trim().toLowerCase() === email);
-    if (hit) return hit.id;
-    if (data.users.length < 200) return null;
-  }
-  return null;
-}
-
 // ---- Manager: approve / unapprove a waiver submission ----
 //
 // Approval is the promotion step: the approved submission's details are copied
-// onto the person's profile (the club's current record), and if they have no
-// login yet their account is created and they're emailed an invite to set up
-// access. Unapprove only reverts the waiver's status; the profile and account
-// are left as they are.
+// onto the person's profile (the club's current record), and if they are still
+// a locked visitor (banned auth user, no credentials) the ban is lifted and
+// they're emailed a sign-in link to set up access. Unapprove only reverts the
+// waiver's status; the profile and login are left as they are.
 export const setWaiverApproval = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => waiverApprovalSchema.parse(d))
@@ -430,41 +428,40 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       const { error: pErr } = await admin
         .from("profiles")
         .update({ ...waiverToProfileFields(waiver), updated_at: approvedAt! })
-        .eq("id", waiver.profile_id);
+        .eq("user_id", waiver.user_id);
       if (pErr) throw new Error(pErr.message);
 
-      // Provision the login if they don't have one yet: link an existing auth
-      // user with this email, or create one and send an invite to set up
-      // access. Best-effort — a mail/provisioning hiccup must not undo the
-      // approval; re-approving retries it (user_id is still null).
+      // Provision access on FIRST approval: a visitor's auth user is banned
+      // (no login). Lift the ban and email a sign-in link. Skipped for people
+      // who can already log in, so re-approvals don't spam sign-in emails.
+      // Best-effort — a hiccup must not undo the approval; re-approving
+      // retries it (the user is still banned).
       try {
-        const { data: profile } = await admin
-          .from("profiles")
-          .select("id, email, user_id")
-          .eq("id", waiver.profile_id)
-          .maybeSingle();
-        if (profile && !profile.user_id) {
-          let authUserId = await findAuthUserIdByEmail(admin, profile.email);
-          if (!authUserId) {
+        const { data: got, error: getErr } = await admin.auth.admin.getUserById(waiver.user_id);
+        if (getErr) throw getErr;
+        const bannedUntil = (got.user as { banned_until?: string | null } | null)?.banned_until;
+        const isLocked = Boolean(bannedUntil && new Date(bannedUntil) > new Date());
+        if (isLocked) {
+          const { error: unbanErr } = await admin.auth.admin.updateUserById(waiver.user_id, {
+            ban_duration: "none",
+          });
+          if (unbanErr) throw unbanErr;
+          // The canonical email lives on the auth user.
+          const authEmail = got.user?.email;
+          if (authEmail) {
             const { getRequestHeader } = await import("@tanstack/react-start/server");
             const origin = getRequestHeader("origin") || "https://jitsu.au";
-            const { data: invited, error: invErr } = await admin.auth.admin.inviteUserByEmail(
-              profile.email,
-              { redirectTo: `${origin}/account` },
-            );
-            if (invErr) throw invErr;
-            authUserId = invited.user?.id ?? null;
-          }
-          if (authUserId) {
-            await admin
-              .from("profiles")
-              .update({ user_id: authUserId })
-              .eq("id", profile.id)
-              .is("user_id", null);
+            // Magic-link sign-in email (rendered by the Lovable auth-email
+            // webhook). The user always exists here, so never auto-create.
+            const { error: otpErr } = await serverSupabase().auth.signInWithOtp({
+              email: authEmail,
+              options: { emailRedirectTo: `${origin}/account`, shouldCreateUser: false },
+            });
+            if (otpErr) throw otpErr;
           }
         }
       } catch (e) {
-        console.error("[setWaiverApproval] account provisioning failed:", e);
+        console.error("[setWaiverApproval] access provisioning failed:", e);
       }
     }
 

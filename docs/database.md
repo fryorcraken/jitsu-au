@@ -12,21 +12,21 @@ The schema reference for UTS Jitsu (Supabase Postgres).
 
 ## People and waivers: the shape
 
-A person is stored **once**, in `profiles`, keyed by their **email**. A waiver
-is a **frozen submission**: exactly what was typed (person fields as submitted),
-the signed PDF, the template version, the signer's real IP, and its approval
-state. A manager's **approval** copies the submission's details onto the
-profile and provisions the person's login (see `docs/waivers.md`). The profile
-is the only live record; waiver rows are history/evidence.
+A person = an **auth user** (their email lives on `auth.users`, the ONLY email
+store) + a **`profiles` row keyed by that user id** (the person fields; no
+email column anywhere in `public`). A visitor is a **locked** auth user
+(banned, no credentials) created at first waiver submission; a manager's
+**approval** copies the submission's details onto the profile, lifts the ban,
+and emails a sign-in link (see `docs/waivers.md`). A waiver is a **frozen
+submission**: exactly what was typed, the signed PDF, template version, real
+signer IP and signing context, and its approval state.
 
-- **Signing is public**: no account, no login; only an email is required.
-  Submissions are unlimited; the person's **active** waiver is the latest
-  approved one (derived, not stored).
-- **One canonical email**: `profiles.email` — the only email the app reads.
-  `waivers.email` is part of the frozen submission. `auth.users.email` is the
-  login credential, write-once: copied from the profile at provisioning, never
-  edited on its own (no self-serve email change), read only as a fallback for
-  accounts that predate any profile.
+- **Signing is public**: no login; only an email is required. Submissions are
+  unlimited; the person's **active** waiver is the latest approved one
+  (derived, not stored).
+- **One email, stored once**: `auth.users.email` (unique). `waivers.email` is
+  part of the frozen submission (evidence). The app resolves emails via the
+  service-role-only helpers `user_id_by_email` / `user_emails`.
 - **No stored full name** anywhere; composed from `first/middle/last` on read
   (`composeFullName` / `profileFullName`).
 
@@ -48,51 +48,60 @@ is the only live record; waiver rows are history/evidence.
 
 ---
 
-## `profiles` — one row per person, keyed by email
+## `profiles` — the person fields for an auth user
 
-Starts as a lightweight visitor profile (email, maybe name/phone) created at
-first waiver submission; filled in by manager approval; linked to a login when
-approval provisions one.
+One row per person, keyed by their auth user id. Starts as a lightweight
+visitor profile (name/phone; the email lives on `auth.users`) created at first
+waiver submission; filled in by manager approval.
 
-| Column                    | Type          | Null | Notes                                                                                                          |
-| ------------------------- | ------------- | ---- | -------------------------------------------------------------------------------------------------------------- |
-| `id`                      | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                   |
-| `email`                   | `text`        | no   | `UNIQUE`. Lowercased/trimmed. The person's identity + the one canonical email.                                 |
-| `user_id`                 | `uuid`        | yes  | `UNIQUE`, `REFERENCES auth.users(id) ON DELETE SET NULL`. Set when approval provisions (or links) their login. |
-| `first_name`              | `text`        | yes  |                                                                                                                |
-| `middle_name`             | `text`        | yes  |                                                                                                                |
-| `last_name`               | `text`        | yes  |                                                                                                                |
-| `date_of_birth`           | `date`        | yes  |                                                                                                                |
-| `address`                 | `text`        | yes  |                                                                                                                |
-| `phone`                   | `text`        | yes  |                                                                                                                |
-| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                                                                               |
-| `emergency_contact_name`  | `text`        | yes  |                                                                                                                |
-| `emergency_contact_phone` | `text`        | yes  |                                                                                                                |
-| `medical_notes`           | `text`        | yes  |                                                                                                                |
-| `is_minor`                | `boolean`     | no   | Default `false`.                                                                                               |
-| `guardian_name`           | `text`        | yes  |                                                                                                                |
-| `guardian_relationship`   | `text`        | yes  |                                                                                                                |
-| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                                                                               |
-| `created_at`              | `timestamptz` | no   | Default `now()`.                                                                                               |
-| `updated_at`              | `timestamptz` | no   | Default `now()`.                                                                                               |
+| Column                    | Type          | Null | Notes                                                                       |
+| ------------------------- | ------------- | ---- | --------------------------------------------------------------------------- |
+| `user_id`                 | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user. |
+| `first_name`              | `text`        | yes  |                                                                             |
+| `middle_name`             | `text`        | yes  |                                                                             |
+| `last_name`               | `text`        | yes  |                                                                             |
+| `date_of_birth`           | `date`        | yes  |                                                                             |
+| `address`                 | `text`        | yes  |                                                                             |
+| `phone`                   | `text`        | yes  |                                                                             |
+| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                                            |
+| `emergency_contact_name`  | `text`        | yes  |                                                                             |
+| `emergency_contact_phone` | `text`        | yes  |                                                                             |
+| `medical_notes`           | `text`        | yes  |                                                                             |
+| `is_minor`                | `boolean`     | no   | Default `false`.                                                            |
+| `guardian_name`           | `text`        | yes  |                                                                             |
+| `guardian_relationship`   | `text`        | yes  |                                                                             |
+| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                                            |
+| `created_at`              | `timestamptz` | no   | Default `now()`.                                                            |
+| `updated_at`              | `timestamptz` | no   | Default `now()`.                                                            |
 
-**Not stored here:** signatures (participant or guardian) — they live only
-inside the waiver PDF — and no `full_name`.
+**Not stored here:** any email (lives on `auth.users`), any signature (lives
+inside the waiver PDF), and no `full_name`.
 
 **Written by (service role only):**
 
-- Waiver submission (`submitWaiverWithPdf`): creates the visitor profile for a
-  new email (email, name parts, phone). An existing profile is left untouched.
+- Waiver submission (`submitWaiverWithPdf`): for a new email, creates a
+  **locked** auth user (`ban_duration` ~100y, no credentials) and seeds the
+  profile with name/phone. An existing person is left untouched.
 - Manager approval (`setWaiverApproval`): copies the approved submission's
-  person fields onto the profile (`waiverToProfileFields`) and sets `user_id`
-  when it provisions/links the login.
-- `handle_new_user_profile()` trigger on `auth.users` (SECURITY DEFINER,
-  EXECUTE revoked from PUBLIC/anon/authenticated): a **link-only safety net**
-  that attaches an unlinked profile to a new auth user by email, and only once
-  the email is **confirmed** (`email_confirmed_at`). It never creates profiles.
+  person fields onto the profile (`waiverToProfileFields`); on first approval
+  lifts the ban and sends a sign-in email.
+- `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
+  revoked from PUBLIC/anon/authenticated): inserts the empty profile row for
+  every new auth user, however created. Pure id attachment — no email matching,
+  so nothing can be claimed by typing someone else's address.
 
 **RLS:** owner reads/updates own row (`auth.uid() = user_id`); managers
 read/update all; no public insert path.
+
+### Service-role auth lookups
+
+Two SECURITY DEFINER SQL helpers expose the one email store to the server
+(EXECUTE revoked from PUBLIC/anon/authenticated, granted to `service_role`):
+
+- `user_id_by_email(text) → uuid` — resolve a person by email at submission
+  (indexed lookup on `auth.users`).
+- `user_emails(uuid[]) → (user_id, email)` — batch email resolution for the
+  manager directory, invoices, and transactional emails.
 
 ---
 
@@ -101,7 +110,7 @@ read/update all; no public insert path.
 | Column                    | Type          | Null | Notes                                                                                                                                                                                                           |
 | ------------------------- | ------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`                      | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                                                                                                    |
-| `profile_id`              | `uuid`        | no   | `REFERENCES profiles(id) ON DELETE CASCADE`. Set at submission (visitor profile is created first). Indexed.                                                                                                     |
+| `user_id`                 | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The person (possibly-locked auth user) who submitted. Indexed.                                                                                                |
 | `first_name`              | `text`        | no   | As submitted.                                                                                                                                                                                                   |
 | `middle_name`             | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
 | `last_name`               | `text`        | no   | As submitted.                                                                                                                                                                                                   |
@@ -130,11 +139,10 @@ read/update all; no public insert path.
 **Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks
 — all captured inside the PDF only. The displayed **pending / active /
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
-profile, the latest approved waiver is active.
+person, the latest approved waiver is active.
 
-**RLS:** owner reads their own via their profile
-(`profile_id IN (SELECT id FROM profiles WHERE user_id = auth.uid())`);
-managers read all and UPDATE (approval). Inserts are service-role only.
+**RLS:** owner reads their own (`user_id = auth.uid()`); managers read all and
+UPDATE (approval). Inserts are service-role only.
 
 ---
 
@@ -241,14 +249,15 @@ INSERT under a validating `WITH CHECK`.
 
 ## `auth.users` (Supabase-managed)
 
-The login account, managed by Supabase Auth (not in our migrations). Accounts
-are provisioned by waiver approval (`inviteUserByEmail`), not self-serve
-sign-up. Two triggers fire on insert/confirmation:
+The person's one identity record, managed by Supabase Auth (not in our
+migrations) — **the only place any email lives**. A visitor's auth user is
+created **locked** (banned, no credentials) by waiver submission; approval
+lifts the ban. There is no self-serve sign-up. Two triggers fire:
 
 - `handle_new_user_role` — grants `manager` to a confirmed whitelisted address.
-- `handle_new_user_profile` — link-only safety net: attaches an unlinked
-  profile by **confirmed** email. EXECUTE is revoked from the public RPC
-  surface.
+- `ensure_profile` — inserts the empty `profiles` row for every new auth user.
+  EXECUTE is revoked from the public RPC surface.
 
-`profiles.user_id`, `memberships.user_id`, `user_roles.user_id` and the various
-`*_by` columns reference it.
+`profiles.user_id`, `waivers.user_id`, `memberships.user_id`,
+`user_roles.user_id` and the various `*_by` columns reference it. The server
+reads emails via `user_id_by_email` / `user_emails` (service-role-only).

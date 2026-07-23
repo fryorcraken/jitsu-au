@@ -30,10 +30,21 @@ import {
   safeEqual,
 } from "@/lib/manager-agent";
 import { aggregateClubUsers, profileUserIds } from "@/lib/club-users";
-import type { ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
+import type { ClubUserEmail, ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
+
+/**
+ * Resolve auth emails (the one email store) for a set of user ids via the
+ * service-role `user_emails` RPC; empty map on failure.
+ */
+async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<Map<string, string>> {
+  if (!userIds.length) return new Map();
+  const { data, error } = await pdb.rpc("user_emails", { _user_ids: userIds });
+  if (error || !data) return new Map();
+  return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -128,7 +139,7 @@ async function handleListUsers(params: unknown) {
       pdb
         .from("profiles")
         .select(
-          "id, user_id, email, first_name, middle_name, last_name, phone, uts_student_number, created_at",
+          "user_id, first_name, middle_name, last_name, phone, uts_student_number, created_at",
         )
         .limit(5000),
       db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
@@ -137,7 +148,7 @@ async function handleListUsers(params: unknown) {
       // waiver, not a pending submission.
       pdb
         .from("waivers")
-        .select("profile_id, signed_at")
+        .select("user_id, signed_at")
         .eq("approval_status", "approved")
         .limit(5000),
     ]);
@@ -148,20 +159,23 @@ async function handleListUsers(params: unknown) {
   const profileRows = (profiles ?? []) as ClubUserProfile[];
   const waiverRows = (waivers ?? []) as ClubUserWaiver[];
 
-  // Roles are scoped to the club's known users (profiles with an auth account).
+  // Roles + emails are scoped to the club's known people.
   const userIds = profileUserIds(profileRows);
   let rolesRows: { user_id: string; role: string }[] = [];
+  let emails = new Map<string, string>();
   if (userIds.length) {
-    const { data: roles } = await db
-      .from("user_roles")
-      .select("user_id, role")
-      .in("user_id", userIds);
+    const [{ data: roles }, resolved] = await Promise.all([
+      db.from("user_roles").select("user_id, role").in("user_id", userIds),
+      emailsByUserId(pdb, userIds),
+    ]);
     rolesRows = (roles ?? []) as { user_id: string; role: string }[];
+    emails = resolved;
   }
 
   // Shared aggregation: one row per person with name/roles/lifecycle resolved.
   const aggregated = aggregateClubUsers({
     profiles: profileRows,
+    emails: [...emails].map(([user_id, email]) => ({ user_id, email })),
     waivers: waiverRows,
     memberships: memberships.map((m) => ({
       user_id: m.user_id,
@@ -217,30 +231,33 @@ async function handleListInvoices(params: unknown) {
 
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
 
-  // Resolve a display name/email per member from their profile.
+  // Resolve each member's display name from their profile and email from the
+  // auth user (the one email store).
   const userIds = [
     ...new Set(((rows ?? []) as MembershipRow[]).map((r) => r.user_id).filter(Boolean)),
   ] as string[];
-  const nameByUser = new Map<string, { full_name: string; email: string }>();
+  const nameByUser = new Map<string, string>();
+  let emailByUser = new Map<string, string>();
   if (userIds.length) {
     const pdb = db as unknown as AppClient;
-    const { data: profiles } = await pdb
-      .from("profiles")
-      .select("user_id, first_name, middle_name, last_name, email")
-      .in("user_id", userIds);
+    const [{ data: profiles }, resolved] = await Promise.all([
+      pdb
+        .from("profiles")
+        .select("user_id, first_name, middle_name, last_name")
+        .in("user_id", userIds),
+      emailsByUserId(pdb, userIds),
+    ]);
+    emailByUser = resolved;
     for (const p of profiles ?? []) {
-      if (p.user_id) nameByUser.set(p.user_id, { full_name: profileFullName(p), email: p.email });
+      nameByUser.set(p.user_id, profileFullName(p));
     }
   }
 
-  const invoices = ((rows ?? []) as MembershipRow[]).map((r) => {
-    const who = r.user_id ? nameByUser.get(r.user_id) : undefined;
-    return {
-      ...projectInvoice(r, planById.get(r.plan_id)),
-      member_name: who?.full_name ?? null,
-      member_email: who?.email ?? null,
-    };
-  });
+  const invoices = ((rows ?? []) as MembershipRow[]).map((r) => ({
+    ...projectInvoice(r, planById.get(r.plan_id)),
+    member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
+    member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
+  }));
   return { count: invoices.length, invoices };
 }
 

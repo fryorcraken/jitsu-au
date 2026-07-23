@@ -1,37 +1,30 @@
--- Profiles + waiver submissions.
+-- Profiles + waiver submissions, with auth.users.email as the ONLY email.
 --
--- A person is identified by their email and stored once, in `profiles`. A
--- profile starts as a lightweight "visitor profile" (email, maybe name/phone,
--- no login) created when they first sign a waiver. A waiver row is a frozen
--- submission: exactly what was typed (the form fields), the signed PDF, when it
--- was signed, and the signer's real IP (legal/forensic evidence). Signatures
--- and acknowledgement ticks live only inside the PDF.
+-- A person = an auth user (their email lives there, once) + a `profiles` row
+-- keyed by that user id holding the person fields. There is no email column
+-- anywhere in public: one-profile-per-person is enforced by auth's unique
+-- email. A "visitor" (someone who has provided an email, e.g. by signing the
+-- waiver) is a LOCKED auth user: created server-side with a long ban and no
+-- credentials, so they cannot log in. A manager approving a waiver copies the
+-- submission's details onto the profile, lifts the ban, and sends a sign-in
+-- email — that is the moment a visitor becomes a member with a login.
 --
--- Waivers are accepted at any time, without limit — resubmission is never
--- blocked. A MANAGER'S APPROVAL is the promotion step: the app copies the
--- approved submission's details onto the profile and provisions the person's
--- login (Supabase auth user + invite email) if they don't have one. The
--- "active" waiver is the latest approved one; older approved rows are
--- superseded, unapproved ones stay pending (derived in the app, not stored).
+-- A waiver row is a frozen submission: exactly what was typed (including the
+-- email as submitted — evidence, not a live record), the signed PDF, when it
+-- was signed, the signer's real IP and signing context. Signatures and
+-- acknowledgement ticks live only inside the PDF. Waivers are accepted at any
+-- time, without limit; the "active" waiver is the latest approved one (derived
+-- in the app, not stored).
 --
--- There is no self-serve sign-up: accounts exist because a manager approved a
--- waiver. The trigger below only LINKS an existing profile to a new auth user
--- by confirmed email; it never creates profiles or grants anything.
---
--- No production data exists, so the waiver table is emptied and reshaped in
--- place rather than backfilled.
+-- There is no self-serve sign-up. No production data exists, so the waiver
+-- table is emptied and reshaped in place rather than backfilled.
 
--- ---------- profiles (one row per person, keyed by email) ----------
+-- ---------- profiles (person fields for an auth user) ----------
 CREATE TABLE public.profiles (
-  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  -- The person's identity and the ONE canonical email in the system. Stored
-  -- lowercased/trimmed so the unique key dedupes case variants.
-  email TEXT NOT NULL UNIQUE,
-  -- The person's login, once a manager's approval has provisioned it.
-  user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
-  -- Everything below is nullable: a visitor profile may hold just an email and
-  -- a name/phone. Full details arrive when a manager approves a waiver. Full
-  -- name is never stored — it is composed from the parts on read.
+  user_id UUID NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  -- All person fields are nullable: a visitor profile may hold just a name and
+  -- phone (the email lives on auth.users). Full details arrive when a manager
+  -- approves a waiver. Full name is never stored — composed from the parts.
   first_name TEXT,
   middle_name TEXT,
   last_name TEXT,
@@ -56,7 +49,7 @@ GRANT ALL ON public.profiles TO service_role;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- A person reads/updates their own profile; managers read/update all. Inserts
--- are service-role only (waiver submission and approval both run server-side).
+-- are service-role only (waiver submission and the ensure_profile trigger).
 CREATE POLICY "Users can view their own profile" ON public.profiles
   FOR SELECT TO authenticated USING (auth.uid() = user_id);
 CREATE POLICY "Managers can view all profiles" ON public.profiles
@@ -68,40 +61,64 @@ CREATE POLICY "Managers can update profiles" ON public.profiles
   FOR UPDATE TO authenticated USING (public.has_role(auth.uid(), 'manager'))
   WITH CHECK (public.has_role(auth.uid(), 'manager'));
 
--- Safety-net linkage: if an auth user appears whose CONFIRMED email matches an
--- unlinked profile, attach it. Approval normally does the linking itself; this
--- covers accounts that arrive another way (e.g. a manager-created login).
--- Never trust an unverified email: linking on an unconfirmed address would let
--- anyone claim another person's profile (and their PII) just by typing their
--- email — same rule as the manager-bootstrap fix in 20260721091500.
-CREATE OR REPLACE FUNCTION public.handle_new_user_profile()
+-- Every auth user gets a profile row, no matter how the user was created
+-- (waiver submission, dashboard, invite). Pure id attachment — no email
+-- matching, so nothing can ever be claimed by typing someone else's address.
+CREATE OR REPLACE FUNCTION public.ensure_profile()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF NEW.email IS NOT NULL
-     AND NEW.email_confirmed_at IS NOT NULL
-     AND (TG_OP = 'INSERT' OR OLD.email_confirmed_at IS NULL) THEN
-    UPDATE public.profiles
-      SET user_id = NEW.id, updated_at = now()
-      WHERE email = lower(btrim(NEW.email)) AND user_id IS NULL;
-  END IF;
+  INSERT INTO public.profiles (user_id) VALUES (NEW.id)
+  ON CONFLICT (user_id) DO NOTHING;
   RETURN NEW;
 END;
 $$;
 
--- The function runs only as an auth.users trigger; it must not be callable
--- through the public PostgREST RPC surface.
-REVOKE EXECUTE ON FUNCTION public.handle_new_user_profile() FROM PUBLIC, anon, authenticated;
+-- Trigger-only function: not callable through the public PostgREST RPC surface.
+REVOKE EXECUTE ON FUNCTION public.ensure_profile() FROM PUBLIC, anon, authenticated;
 
 CREATE TRIGGER on_auth_user_created_profile
-  AFTER INSERT OR UPDATE OF email_confirmed_at ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_profile();
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.ensure_profile();
+
+-- ---------- service-role helpers over auth.users (the one email store) ----------
+-- Both are SECURITY DEFINER lookups into auth.users, callable ONLY by the
+-- service role (EXECUTE revoked from everything else): the server resolves a
+-- person by email at waiver submission, and batch-resolves emails for manager
+-- screens and transactional emails.
+
+CREATE OR REPLACE FUNCTION public.user_id_by_email(_email TEXT)
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT id FROM auth.users
+  WHERE lower(email) = lower(btrim(_email))
+  LIMIT 1
+$$;
+
+CREATE OR REPLACE FUNCTION public.user_emails(_user_ids UUID[])
+RETURNS TABLE (user_id UUID, email TEXT)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT id, email::text FROM auth.users WHERE id = ANY(_user_ids)
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.user_id_by_email(TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.user_emails(UUID[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.user_id_by_email(TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.user_emails(UUID[]) TO service_role;
 
 -- ---------- waivers: reshape into a frozen submission ----------
--- Drop the policies that reference user_id before dropping the column.
+-- Drop the policies that reference the old user_id column before dropping it.
 DROP POLICY IF EXISTS "Anyone can sign waiver" ON public.waivers;
 DROP POLICY IF EXISTS "Users can view their own waivers" ON public.waivers;
 
@@ -113,7 +130,7 @@ TRUNCATE public.waivers CASCADE;
 --   * full_name (composed from the parts),
 --   * signature columns (the signatures live inside the PDF),
 --   * acknowledgements (recorded inside the PDF),
---   * user_id (linkage now goes waiver -> profile -> auth user).
+--   * the old nullable auth user_id (re-added below, NOT NULL, via profiles).
 ALTER TABLE public.waivers
   DROP COLUMN IF EXISTS full_name,
   DROP COLUMN IF EXISTS acknowledgements,
@@ -140,17 +157,17 @@ ALTER TABLE public.waivers
   ALTER COLUMN first_name SET NOT NULL,
   ALTER COLUMN last_name SET NOT NULL;
 
--- Every submission attaches to the (possibly just-created) visitor profile of
--- its email. The table is empty, so NOT NULL is safe.
+-- Every submission belongs to a person (the possibly-locked auth user created
+-- at submission time). The table is empty, so NOT NULL is safe.
 ALTER TABLE public.waivers
-  ADD COLUMN profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE;
-CREATE INDEX waivers_profile_id_idx ON public.waivers (profile_id);
+  ADD COLUMN user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE;
+CREATE INDEX waivers_user_id_idx ON public.waivers (user_id);
 
 -- Submissions run through the service role; no public insert path.
 REVOKE INSERT ON public.waivers FROM anon, authenticated;
 
--- The owner sees their own waivers via their profile; managers already have a
--- read-all policy and an update (approval) policy from earlier migrations.
+-- The owner sees their own waivers; managers already have a read-all policy
+-- and an update (approval) policy from earlier migrations.
 CREATE POLICY "Owners can view their own waivers" ON public.waivers
   FOR SELECT TO authenticated
-  USING (profile_id IN (SELECT id FROM public.profiles WHERE user_id = auth.uid()));
+  USING (user_id = auth.uid());

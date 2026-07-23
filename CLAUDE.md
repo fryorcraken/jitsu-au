@@ -157,20 +157,23 @@ Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
   column-length/format CHECK constraints in the RLS `WITH CHECK`.
-- `profiles` — one row per person, keyed by a unique `email` (the canonical
-  email; `auth.users.email` is the login credential). Starts as a lightweight
-  visitor profile (email/name/phone, created at first waiver submission);
-  everything but email is nullable. A **manager approving a waiver** copies the
-  submission's details onto the profile and provisions the login (`user_id`,
-  invite email). Identity is read from here, not from waivers. There is no
-  self-serve sign-up.
-- `waivers` — frozen submissions: the person fields **as submitted**, plus
-  `profile_id`, `pdf_path`, `template_version`, `signer_ip` (real IP, forensic
-  record), approval fields, timestamps. No `full_name` (composed on read), no
-  stored signatures/acknowledgements (they live in the PDF). Signing is public
-  (no login, email required), unlimited, and runs through the service-role
-  client. The displayed pending/active/superseded status is derived (latest
-  approved per person = active). Product flows: `docs/waivers.md`.
+- `profiles` — the person fields for an auth user, keyed by `user_id` (PK →
+  `auth.users`). **The only email lives on `auth.users`** — no email column in
+  `public`; the server resolves emails via the service-role-only
+  `user_id_by_email` / `user_emails` RPCs. A person = a (possibly **locked**,
+  i.e. banned/no-credentials) auth user + their profile. Waiver submission
+  creates the locked auth user + seeds name/phone; a **manager approving a
+  waiver** copies the submission's details onto the profile, lifts the ban, and
+  emails a sign-in link. There is no self-serve sign-up.
+- `waivers` — frozen submissions: the person fields **as submitted** (email
+  included, as evidence), plus `user_id` (→ profiles), `pdf_path`,
+  `template_version`, `signer_ip` + `signer_meta` (real IP + browser context,
+  forensic record), approval fields, timestamps. No `full_name` (composed on
+  read), no stored signatures/acknowledgements (they live in the PDF). Signing
+  is public (no login, email required), unlimited, and runs through the
+  service-role client. The displayed pending/active/superseded status is
+  derived (latest approved per person = active). Product flows:
+  `docs/waivers.md`.
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.

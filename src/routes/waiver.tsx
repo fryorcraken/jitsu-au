@@ -50,6 +50,8 @@ export const Route = createFileRoute("/waiver")({
   component: Waiver,
 });
 
+// The profile carries no email — that lives on the auth user, and the form's
+// email field is seeded from the session (user.email) instead.
 type Prefill = {
   first_name?: string | null;
   middle_name?: string | null;
@@ -57,7 +59,6 @@ type Prefill = {
   date_of_birth?: string | null;
   address?: string | null;
   phone?: string | null;
-  email?: string | null;
   uts_student_number?: string | null;
   sms_whatsapp_consent?: boolean | null;
   emergency_contact_name?: string | null;
@@ -150,7 +151,6 @@ function Waiver() {
         // Prefill the consent checkbox from the member's stored consent (they
         // can still change it).
         if (typeof r.sms_whatsapp_consent === "boolean") setSmsConsent(r.sms_whatsapp_consent);
-        if (r.email) setEmail(r.email);
         if (r.address) setAddress(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);

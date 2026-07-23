@@ -125,30 +125,30 @@ export const waiverListStatuses = ["pending", "active", "superseded"] as const;
 export type WaiverListStatus = (typeof waiverListStatuses)[number];
 
 /**
- * Derive each waiver's displayed status. Per profile, the approved waiver with
+ * Derive each waiver's displayed status. Per person, the approved waiver with
  * the greatest approved_at (falling back to signed_at) is `active`; other
  * approved ones are `superseded`; everything else is `pending`.
  */
 export function deriveWaiverListStatuses(
   rows: {
     id: string;
-    profile_id: string;
+    user_id: string;
     approval_status: string;
     approved_at: string | null;
     signed_at: string;
   }[],
 ): Map<string, WaiverListStatus> {
-  const activeByProfile = new Map<string, { id: string; at: string }>();
+  const activeByUser = new Map<string, { id: string; at: string }>();
   for (const r of rows) {
     if (r.approval_status !== "approved") continue;
     const at = r.approved_at ?? r.signed_at;
-    const current = activeByProfile.get(r.profile_id);
-    if (!current || current.at < at) activeByProfile.set(r.profile_id, { id: r.id, at });
+    const current = activeByUser.get(r.user_id);
+    if (!current || current.at < at) activeByUser.set(r.user_id, { id: r.id, at });
   }
   const out = new Map<string, WaiverListStatus>();
   for (const r of rows) {
     if (r.approval_status !== "approved") out.set(r.id, "pending");
-    else out.set(r.id, activeByProfile.get(r.profile_id)?.id === r.id ? "active" : "superseded");
+    else out.set(r.id, activeByUser.get(r.user_id)?.id === r.id ? "active" : "superseded");
   }
   return out;
 }

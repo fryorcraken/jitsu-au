@@ -107,12 +107,12 @@ describe("buildSignerMeta", () => {
 describe("deriveWaiverListStatuses", () => {
   const row = (over: {
     id: string;
-    profile_id?: string;
+    user_id?: string;
     approval_status?: string;
     approved_at?: string | null;
     signed_at?: string;
   }) => ({
-    profile_id: "p1",
+    user_id: "p1",
     approval_status: "pending",
     approved_at: null,
     signed_at: "2026-01-01T00:00:00Z",
@@ -139,13 +139,13 @@ describe("deriveWaiverListStatuses", () => {
     const statuses = deriveWaiverListStatuses([
       row({
         id: "a1",
-        profile_id: "pa",
+        user_id: "pa",
         approval_status: "approved",
         approved_at: "2026-01-01T00:00:00Z",
       }),
       row({
         id: "b1",
-        profile_id: "pb",
+        user_id: "pb",
         approval_status: "approved",
         approved_at: "2026-02-01T00:00:00Z",
       }),

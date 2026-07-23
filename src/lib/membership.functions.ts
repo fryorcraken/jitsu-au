@@ -25,11 +25,26 @@ import type {
   MembershipRow,
 } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
-import type { ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
+import type { ClubUserEmail, ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
 
 /** The service-role client, viewed with the profiles/waivers-aware types. */
 function profileAdmin(admin: MembershipClient): AppClient {
   return admin as unknown as AppClient;
+}
+
+/**
+ * Resolve auth emails (the one email store) for a set of user ids via the
+ * service-role `user_emails` RPC. Returns an empty map on lookup failure so
+ * callers degrade to missing emails rather than erroring.
+ */
+async function emailsByUserId(
+  admin: MembershipClient,
+  userIds: string[],
+): Promise<Map<string, string>> {
+  if (!userIds.length) return new Map();
+  const { data, error } = await profileAdmin(admin).rpc("user_emails", { _user_ids: userIds });
+  if (error || !data) return new Map();
+  return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
 }
 
 // Public/anon reads. Mirrors the pattern in waiver.functions.ts but typed with
@@ -149,21 +164,19 @@ async function activateMembershipRow(
   }
 
   // Confirmation email (best-effort — never fail activation on a send error).
-  // The profile's email is the canonical contact address; the auth email is
-  // only a fallback for accounts that predate any profile (e.g. a bootstrap
-  // manager), where it is the sole copy rather than a duplicate.
+  // The email lives on the auth user (the one email store); the name on the
+  // profile.
   if (membership.user_id) {
     try {
-      const { data: profile } = await profileAdmin(admin)
-        .from("profiles")
-        .select("email, first_name, middle_name, last_name")
-        .eq("user_id", membership.user_id)
-        .maybeSingle();
-      let email = profile?.email ?? null;
-      if (!email) {
-        const { data: userData } = await admin.auth.admin.getUserById(membership.user_id);
-        email = userData?.user?.email ?? null;
-      }
+      const [{ data: profile }, emails] = await Promise.all([
+        profileAdmin(admin)
+          .from("profiles")
+          .select("first_name, middle_name, last_name")
+          .eq("user_id", membership.user_id)
+          .maybeSingle(),
+        emailsByUserId(admin, [membership.user_id]),
+      ]);
+      const email = emails.get(membership.user_id) ?? null;
       if (email) {
         const memberName = profile ? profileFullName(profile) : "";
         const { sendMembershipActivatedEmail } = await import("./membership-email.server");
@@ -209,34 +222,32 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
 
-    const [{ data: rows, error }, { data: plans }, { data: profile }] = await Promise.all([
-      admin
-        .from("memberships")
-        .select("*")
-        .eq("user_id", context.userId)
-        .order("created_at", { ascending: false }),
-      admin.from("membership_plans").select("*"),
-      // Identity + student number live on the profile; used to prefill the
-      // student rate on the membership page.
-      profileAdmin(admin)
-        .from("profiles")
-        .select("id, uts_student_number")
-        .eq("user_id", context.userId)
-        .maybeSingle(),
-    ]);
+    const [{ data: rows, error }, { data: plans }, { data: profile }, { count: waiverCount }] =
+      await Promise.all([
+        admin
+          .from("memberships")
+          .select("*")
+          .eq("user_id", context.userId)
+          .order("created_at", { ascending: false }),
+        admin.from("membership_plans").select("*"),
+        // The student number lives on the profile; used to prefill the student
+        // rate on the membership page.
+        profileAdmin(admin)
+          .from("profiles")
+          .select("uts_student_number")
+          .eq("user_id", context.userId)
+          .maybeSingle(),
+        // Does this person have an ACTIVE (approved) waiver? Pending
+        // submissions don't count until a manager approves one.
+        profileAdmin(admin)
+          .from("waivers")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", context.userId)
+          .eq("approval_status", "approved"),
+      ]);
     if (error) throw new Error(error.message);
 
-    // Does this person have an ACTIVE (approved) waiver? Pending submissions
-    // don't count until a manager approves one.
-    let hasWaiver = false;
-    if (profile) {
-      const { count } = await profileAdmin(admin)
-        .from("waivers")
-        .select("id", { count: "exact", head: true })
-        .eq("profile_id", profile.id)
-        .eq("approval_status", "approved");
-      hasWaiver = (count ?? 0) > 0;
-    }
+    const hasWaiver = (waiverCount ?? 0) > 0;
     const utsStudentNumber = profile?.uts_student_number ?? null;
 
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
@@ -295,7 +306,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // the member has not signed a waiver yet.
     const { data: who } = await profileAdmin(admin)
       .from("profiles")
-      .select("email, first_name, middle_name, last_name")
+      .select("first_name, middle_name, last_name")
       .eq("user_id", context.userId)
       .maybeSingle();
     const surname = who?.last_name || who?.first_name || "";
@@ -354,14 +365,10 @@ export const startMembership = createServerFn({ method: "POST" })
     }
 
     // Email the member their bank-transfer instructions + notify managers. The
-    // profile's email is canonical; fall back to the auth email only when no
-    // profile exists yet (then it is the sole copy, not a duplicate).
+    // email lives on the auth user (the one email store).
     try {
-      let email = who?.email ?? null;
-      if (!email) {
-        const { data: userData } = await admin.auth.admin.getUserById(context.userId);
-        email = userData?.user?.email ?? null;
-      }
+      const emails = await emailsByUserId(admin, [context.userId]);
+      const email = emails.get(context.userId) ?? null;
       if (email) {
         const { sendMembershipPaymentEmail } = await import("./membership-email.server");
         await sendMembershipPaymentEmail({
@@ -480,29 +487,32 @@ export const listMemberships = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
 
-    // Resolve a display name/email per member from their profile.
+    // Resolve each member's display name from their profile and their email
+    // from the auth user (the one email store).
     const userIds = [...new Set((rows ?? []).map((r) => r.user_id).filter(Boolean))] as string[];
-    const nameByUser = new Map<string, { full_name: string; email: string }>();
+    const nameByUser = new Map<string, string>();
+    let emailByUser = new Map<string, string>();
     if (userIds.length) {
-      const { data: profiles } = await profileAdmin(admin)
-        .from("profiles")
-        .select("user_id, first_name, middle_name, last_name, email")
-        .in("user_id", userIds);
+      const [{ data: profiles }, emails] = await Promise.all([
+        profileAdmin(admin)
+          .from("profiles")
+          .select("user_id, first_name, middle_name, last_name")
+          .in("user_id", userIds),
+        emailsByUserId(admin, userIds),
+      ]);
+      emailByUser = emails;
       for (const p of profiles ?? []) {
-        if (p.user_id) nameByUser.set(p.user_id, { full_name: profileFullName(p), email: p.email });
+        nameByUser.set(p.user_id, profileFullName(p));
       }
     }
 
-    return (rows ?? []).map((r) => {
-      const who = r.user_id ? nameByUser.get(r.user_id) : undefined;
-      return {
-        ...projectMembership(r, planById.get(r.plan_id)),
-        user_id: r.user_id,
-        uts_student_number: r.uts_student_number,
-        member_name: who?.full_name ?? null,
-        member_email: who?.email ?? null,
-      };
-    });
+    return (rows ?? []).map((r) => ({
+      ...projectMembership(r, planById.get(r.plan_id)),
+      user_id: r.user_id,
+      uts_student_number: r.uts_student_number,
+      member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
+      member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
+    }));
   });
 
 // ---- Manager: list every person known to the club (one row per user) ----
@@ -518,7 +528,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
         profileAdmin(admin)
           .from("profiles")
           .select(
-            "id, user_id, email, first_name, middle_name, last_name, phone, uts_student_number, created_at",
+            "user_id, first_name, middle_name, last_name, phone, uts_student_number, created_at",
           )
           .limit(5000),
         admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
@@ -527,7 +537,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
         // manager-approved waiver, not a pending submission.
         profileAdmin(admin)
           .from("waivers")
-          .select("profile_id, signed_at")
+          .select("user_id, signed_at")
           .eq("approval_status", "approved")
           .limit(5000),
       ]);
@@ -537,20 +547,23 @@ export const listClubUsers = createServerFn({ method: "GET" })
     const profileRows = (profiles ?? []) as ClubUserProfile[];
     const waiverRows = (waivers ?? []) as ClubUserWaiver[];
 
-    // Roles are scoped to the club's known users (profiles with an auth account).
+    // Roles + emails are scoped to the club's known people.
     const userIds = profileUserIds(profileRows);
     let rolesRows: { user_id: string; role: string }[] = [];
+    let emails = new Map<string, string>();
     if (userIds.length) {
-      const { data: roles } = await admin
-        .from("user_roles")
-        .select("user_id, role")
-        .in("user_id", userIds);
+      const [{ data: roles }, resolved] = await Promise.all([
+        admin.from("user_roles").select("user_id, role").in("user_id", userIds),
+        emailsByUserId(admin, userIds),
+      ]);
       rolesRows = (roles ?? []) as { user_id: string; role: string }[];
+      emails = resolved;
     }
 
     // The one shared aggregation code path (also used by the manager agent API).
     return aggregateClubUsers({
       profiles: profileRows,
+      emails: [...emails].map(([user_id, email]) => ({ user_id, email })),
       waivers: waiverRows,
       memberships: memberships.map((m) => ({
         user_id: m.user_id,

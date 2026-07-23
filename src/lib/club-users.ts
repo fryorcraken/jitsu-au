@@ -1,25 +1,20 @@
 // Pure, server-import-free aggregation of the club's *people*.
 //
-// A "club user" is a person: one row in `profiles` (keyed by email). This module
-// joins each profile to its waivers (has one been signed, and when), its
-// memberships, its roles, and derives a lifecycle status. Identity (name, email,
-// phone) comes from the profile — the single source of truth — not from waivers.
+// A "club user" is a person: one auth user (their email lives on auth.users,
+// the only email store) plus their `profiles` row (person fields, keyed by the
+// same user id). This module joins each profile to its email (resolved by the
+// caller via the service-role `user_emails` RPC), its approved waivers, its
+// memberships, its roles, and derives a lifecycle status.
 //
-// Memberships, roles and the auth account are keyed by `auth.users` id; a profile
-// links to that via `user_id` (null for someone who never made an account). So a
-// profile's memberships/roles are matched through its `user_id`.
-//
-// It is deliberately free of any DB/server import so it is unit-testable and can
-// be shared by both the manager agent HTTP API (`list_users`) and the manager
-// user-list screen (`/manager/users`) — the single aggregation code path.
+// It is deliberately free of any DB/server import so it is unit-testable and
+// can be shared by both the manager agent HTTP API (`list_users`) and the
+// manager user-list screen (`/manager/users`) — the single aggregation path.
 import { deriveLifecycleStatus, profileFullName } from "./validation";
 import type { LifecycleStatus, MembershipPlanKind, MembershipStatus } from "./validation";
 
 /** The profile fields the aggregation reads (one row per person). */
 export type ClubUserProfile = {
-  id: string;
-  user_id: string | null;
-  email: string;
+  user_id: string;
   first_name: string | null;
   middle_name: string | null;
   last_name: string | null;
@@ -28,9 +23,15 @@ export type ClubUserProfile = {
   created_at: string;
 };
 
-/** The waiver fields the aggregation reads (existence + when, per profile). */
+/** A resolved auth email for a person (from the `user_emails` RPC). */
+export type ClubUserEmail = {
+  user_id: string;
+  email: string;
+};
+
+/** The waiver fields the aggregation reads (approved waivers per person). */
 export type ClubUserWaiver = {
-  profile_id: string;
+  user_id: string;
   signed_at: string;
 };
 
@@ -60,8 +61,7 @@ export type ClubUserRole = {
 
 /** One aggregated person known to the club. */
 export type ClubUser = {
-  profile_id: string;
-  user_id: string | null;
+  user_id: string;
   name: string | null;
   email: string | null;
   phone: string | null;
@@ -82,34 +82,34 @@ function hasStudentNumber(n: string | null | undefined): boolean {
   return Boolean(n && n.trim().length > 0);
 }
 
-/** The non-null auth user ids across a set of profiles (to scope the roles query). */
+/** The distinct user ids across a set of profiles (to scope roles/emails queries). */
 export function profileUserIds(profiles: Pick<ClubUserProfile, "user_id">[]): string[] {
-  const ids = new Set<string>();
-  for (const p of profiles) if (p.user_id) ids.add(p.user_id);
-  return [...ids];
+  return [...new Set(profiles.map((p) => p.user_id))];
 }
 
 /**
- * Aggregate profiles + waivers + memberships + roles into one row per person,
- * sorted by name (A–Z). Pure: callers do their own filtering/capping/re-sorting.
+ * Aggregate profiles + emails + waivers + memberships + roles into one row per
+ * person, sorted by name (A–Z). Pure: callers do their own filtering/capping.
  */
 export function aggregateClubUsers(input: {
   profiles: ClubUserProfile[];
+  emails: ClubUserEmail[];
   waivers: ClubUserWaiver[];
   memberships: ClubUserMembership[];
   plans: ClubUserPlan[];
   roles: ClubUserRole[];
 }): ClubUser[] {
   const planById = new Map(input.plans.map((p) => [p.id, p]));
+  const emailByUser = new Map(input.emails.map((e) => [e.user_id, e.email]));
 
-  // Latest waiver signature per profile (also marks that a waiver exists).
-  const waiverSignedByProfile = new Map<string, string>();
+  // Latest waiver signature per person (also marks that a waiver exists).
+  const waiverSignedByUser = new Map<string, string>();
   for (const w of input.waivers) {
-    const prev = waiverSignedByProfile.get(w.profile_id);
-    if (!prev || prev < w.signed_at) waiverSignedByProfile.set(w.profile_id, w.signed_at);
+    const prev = waiverSignedByUser.get(w.user_id);
+    if (!prev || prev < w.signed_at) waiverSignedByUser.set(w.user_id, w.signed_at);
   }
 
-  // Group memberships by auth user id, newest first (by created_at).
+  // Group memberships by user, newest first (by created_at).
   const membershipsByUser = new Map<string, ClubUserMembership[]>();
   for (const m of input.memberships) {
     if (!m.user_id) continue;
@@ -129,9 +129,9 @@ export function aggregateClubUsers(input: {
   }
 
   const users: ClubUser[] = input.profiles.map((p) => {
-    const ms = p.user_id ? (membershipsByUser.get(p.user_id) ?? []) : [];
+    const ms = membershipsByUser.get(p.user_id) ?? [];
     const latest = ms[0] ?? null;
-    const waiverSignedAt = waiverSignedByProfile.get(p.id) ?? null;
+    const waiverSignedAt = waiverSignedByUser.get(p.user_id) ?? null;
     const hasWaiver = waiverSignedAt != null;
 
     const lifecycle_status = deriveLifecycleStatus({
@@ -143,9 +143,9 @@ export function aggregateClubUsers(input: {
       })),
     });
 
-    // UTS-student status is trust-based on a non-empty student number. Prefer the
-    // number on the profile; fall back to membership data (the student rate +
-    // number captured at membership start).
+    // UTS-student status is trust-based on a non-empty student number. Prefer
+    // the number on the profile; fall back to membership data (the student
+    // rate + number captured at membership start).
     const profileNumber = p.uts_student_number?.trim() || null;
     const studentMembership =
       ms.find((m) => hasStudentNumber(m.uts_student_number)) ??
@@ -164,15 +164,12 @@ export function aggregateClubUsers(input: {
     ].filter(Boolean);
     const first_seen_at = dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : null;
 
-    const name = profileFullName(p) || null;
-
     return {
-      profile_id: p.id,
       user_id: p.user_id,
-      name,
-      email: p.email,
+      name: profileFullName(p) || null,
+      email: emailByUser.get(p.user_id) ?? null,
       phone: p.phone,
-      roles: p.user_id ? (rolesByUser.get(p.user_id) ?? []) : [],
+      roles: rolesByUser.get(p.user_id) ?? [],
       lifecycle_status,
       has_waiver: hasWaiver,
       waiver_signed_at: waiverSignedAt,
