@@ -1,0 +1,1 @@
+ALTER TABLE public.interest_registrations ADD COLUMN IF NOT EXISTS sms_whatsapp_consent boolean NOT NULL DEFAULT false;
