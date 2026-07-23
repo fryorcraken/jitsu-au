@@ -160,6 +160,7 @@ export type Database = {
           message: string | null
           name: string
           phone: string | null
+          sms_whatsapp_consent: boolean
           uts_student: boolean
         }
         Insert: {
@@ -170,6 +171,7 @@ export type Database = {
           message?: string | null
           name: string
           phone?: string | null
+          sms_whatsapp_consent?: boolean
           uts_student?: boolean
         }
         Update: {
@@ -180,6 +182,7 @@ export type Database = {
           message?: string | null
           name?: string
           phone?: string | null
+          sms_whatsapp_consent?: boolean
           uts_student?: boolean
         }
         Relationships: []
