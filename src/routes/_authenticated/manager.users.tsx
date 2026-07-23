@@ -231,7 +231,7 @@ function ManagerUsersPage() {
                 </thead>
                 <tbody>
                   {visible.map((r) => (
-                    <tr key={r.user_id} className="border-t align-top">
+                    <tr key={r.profile_id} className="border-t align-top">
                       <td className="px-3 py-2 font-medium">{r.name ?? "—"}</td>
                       <td className="px-3 py-2">{r.email ?? "—"}</td>
                       <td className="px-3 py-2">{r.phone ?? "—"}</td>

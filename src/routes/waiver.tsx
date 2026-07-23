@@ -17,7 +17,7 @@ import { WaiverDocument } from "@/components/site/WaiverDocument";
 import {
   submitWaiverWithPdf,
   getCurrentWaiverTemplate,
-  getMyLatestWaiver,
+  getMyProfile,
 } from "@/lib/waiver.functions";
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
@@ -51,25 +51,24 @@ export const Route = createFileRoute("/waiver")({
 });
 
 type Prefill = {
-  full_name?: string;
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
-  date_of_birth?: string;
-  address?: string;
-  phone?: string;
-  email?: string;
+  date_of_birth?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
   uts_student_number?: string | null;
   sms_whatsapp_consent?: boolean | null;
-  emergency_contact_name?: string;
-  emergency_contact_phone?: string;
-  medical_notes?: string;
+  emergency_contact_name?: string | null;
+  emergency_contact_phone?: string | null;
+  medical_notes?: string | null;
 };
 
 function Waiver() {
   const submit = useServerFn(submitWaiverWithPdf);
   const fetchTemplate = useServerFn(getCurrentWaiverTemplate);
-  const fetchMine = useServerFn(getMyLatestWaiver);
+  const fetchMine = useServerFn(getMyProfile);
   const { user, loading: authLoading } = useAuth();
   const search = Route.useSearch();
   const prefillName = useMemo(() => splitFullName(search.name ?? ""), [search.name]);
@@ -145,11 +144,6 @@ function Waiver() {
           setFirstName(r.first_name || "");
           setMiddleName(r.middle_name || "");
           setLastName(r.last_name || "");
-        } else if (r.full_name) {
-          const s = splitFullName(r.full_name);
-          setFirstName(s.first);
-          setMiddleName(s.middle);
-          setLastName(s.last);
         }
         if (r.date_of_birth) setDob(r.date_of_birth);
         if (r.phone) setPhone(r.phone);
@@ -164,7 +158,7 @@ function Waiver() {
         if (r.medical_notes) setMedical(r.medical_notes);
       })
       .catch(() => {
-        /* no prior waiver */
+        /* no profile yet */
       });
   }, [authLoading, user, fetchMine]);
 
@@ -299,7 +293,7 @@ function Waiver() {
 
             {user && (
               <p className="rounded-md bg-primary/10 px-3 py-2 text-xs text-primary">
-                Signed in as {user.email}. Your details have been pre-filled from your last waiver.
+                Signed in as {user.email}. Your details have been pre-filled from your profile.
               </p>
             )}
 

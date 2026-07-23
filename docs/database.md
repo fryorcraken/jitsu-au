@@ -1,151 +1,136 @@
-# Database (target model)
+# Database
 
 The schema reference for UTS Jitsu (Supabase Postgres).
 
 > [!IMPORTANT]
-> This document describes the **target** schema we are moving toward, not
-> necessarily what is deployed today. The applied schema is always defined by the
-> timestamped migrations in `supabase/migrations/*.sql` (source of truth). Where
-> the target differs from what is currently applied, a **Changed from today**
-> note calls it out. When you add or change a migration, update this file in the
-> same change so the two do not drift.
+> This document describes the schema and must stay aligned with the code. The
+> applied schema is defined by the timestamped migrations in
+> `supabase/migrations/*.sql` (the source of truth). **Whenever you change a
+> migration, a table, or the code that reads/writes it, update this document in
+> the same change** so the doc, the migrations, and the code never drift apart.
 
-## The core change this doc captures
+## People and waivers: the shape
 
-Today a person's identity/contact details are **not** stored against the user.
-They are captured on each `waivers` row (a full denormalised snapshot per signing)
-and the app _derives_ a person by reading their latest waiver. Email, for example,
-lives only in `waivers.email`.
+A person is stored **once**, in `profiles`, keyed by their **email**. A waiver is
+just the signed document: a PDF plus who signed it (a link to the profile), when,
+from what IP, on which template version, and its approval state. The signer's
+name, contact details, medical notes and guardian details are **not** copied onto
+each waiver. They live on the one profile.
 
-The target inverts that:
+- **Signing a waiver is public. No account, no login.** The only hard requirement
+  is an email. On submit, the server finds-or-creates the profile for that email,
+  updates its details, and inserts a waiver linked to it.
+- **One email field in the whole system:** `profiles.email`. It is the person's
+  identity. `auth.users.email` is only the login credential for the optional
+  member-area account; a profile links to it via `profiles.user_id` if and when
+  the person ever signs in.
+- **No stored full name.** `first/middle/last` are stored; the display name is
+  composed on read (`composeFullName`).
+- **No duplicated identity.** A person who signs several waivers has one profile;
+  each new signing updates that profile and adds a waiver row.
 
-- **Person data lives on the user** in a new `profiles` table (one row per user):
-  identity, emergency contact, medical notes, guardian details, and SMS/WhatsApp
-  consent.
-- **A `waivers` row becomes just the signed artifact**: the generated PDF (path),
-  provenance (`template_version`, `ip_hash`), approval, timestamps, and the link
-  to the user. Individual acknowledgements and signatures are **not** stored as
-  columns; they are captured inside the PDF.
+### How the cases resolve
+
+1. **Walk-in, no account** — name + email + details → new profile (`user_id` null)
+   → waiver. No login.
+2. **Same person signs again** — matched by email → existing profile updated in
+   place → new waiver. Identity stored once.
+3. **Later makes an account** — an auth account created with the same email is
+   linked to the existing profile (`profiles.user_id` set by the signup trigger).
+4. **Makes an account first, then signs** — the signup trigger already created the
+   profile (name/email/phone); the waiver form fills in the rest.
+5. **Minor** — the participant's profile is marked `is_minor` with guardian
+   name/relationship; the guardian's signature is captured inside the PDF only.
+6. **Manager view / agent API** — name, email and phone are read from the profile
+   (one source), with the person's waivers and memberships hanging off it.
 
 ## Conventions
 
-- **RLS on every table.** Access is enforced by Row Level Security, not by the
-  client. Public write paths validate field lengths/formats inside the policy
-  `WITH CHECK`.
-- **Three Supabase clients** decide who may write (see `CLAUDE.md` for the full
-  table): the browser anon client (RLS as the user), the user-scoped server
-  middleware `requireSupabaseAuth` (RLS as that user), and the service-role
-  `supabaseAdmin` (bypasses RLS; server-only, used for trusted writes such as
-  waiver inserts, PDF uploads, and signed URLs).
+- **RLS on every table.** Access is enforced by Row Level Security, not the client.
+- **Three Supabase clients** decide who may write (see `CLAUDE.md`): the browser
+  anon client (RLS as the user), the user-scoped server middleware
+  `requireSupabaseAuth` (RLS as that user), and the service-role `supabaseAdmin`
+  (bypasses RLS; server-only). Public waiver signing runs through `supabaseAdmin`,
+  so it needs no anon insert grant.
 - **Roles** come from `user_roles` + the `app_role` enum, checked server-side via
-  the `has_role(_user_id, _role)` security-definer function.
-- **Money** is stored as integer cents. **Timestamps** are `timestamptz`.
-- **Storage:** the private `waivers` bucket holds signature PNGs and PDFs; access
-  is via short-lived service-role signed URLs. The bucket is provisioned outside
-  SQL migrations.
+  `has_role(_user_id, _role)`.
+- **Money** is integer cents. **Timestamps** are `timestamptz`. **Emails** are
+  stored lowercased/trimmed so the unique key dedupes case variants.
+- **Storage:** the private `waivers` bucket holds the signed PDFs; access is via
+  short-lived service-role signed URLs. The bucket is provisioned outside SQL
+  migrations.
 
 ---
 
-## `auth.users` (Supabase-managed)
+## `profiles` — one row per person, keyed by email
 
-The identity/login record. Managed by Supabase Auth; not defined in our
-migrations. Holds the canonical **login email** and `email_confirmed_at`. A
-trigger (`handle_new_user_role`) grants `manager` to a confirmed whitelisted
-address on signup. Every table below that references a user points at
-`auth.users(id)`.
+The single home for a person's identity and contact details.
 
-> Note the two emails in the system: `auth.users.email` is the **login identity**;
-> `profiles.email` (below) is the person's **contact email** captured on a form.
-> They may differ, and a person can have a contact email with no auth account.
+| Column                    | Type          | Null | Notes                                                          |
+| ------------------------- | ------------- | ---- | -------------------------------------------------------------- |
+| `id`                      | `uuid` PK     | no   | Default `gen_random_uuid()`.                                   |
+| `email`                   | `text`        | no   | `UNIQUE`. Lowercased/trimmed. The person's identity + the one email field. |
+| `user_id`                 | `uuid`        | yes  | `UNIQUE`, `REFERENCES auth.users(id) ON DELETE SET NULL`. Set when the person has a member-area account. |
+| `first_name`              | `text`        | yes  | Present for form/signup-created profiles; nullable for a bare magic-link account with no name yet. |
+| `middle_name`             | `text`        | yes  |                                                                |
+| `last_name`               | `text`        | yes  |                                                                |
+| `date_of_birth`           | `date`        | yes  |                                                                |
+| `address`                 | `text`        | yes  |                                                                |
+| `phone`                   | `text`        | yes  |                                                                |
+| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                               |
+| `emergency_contact_name`  | `text`        | yes  |                                                                |
+| `emergency_contact_phone` | `text`        | yes  |                                                                |
+| `medical_notes`           | `text`        | yes  |                                                                |
+| `is_minor`                | `boolean`     | no   | Default `false`.                                               |
+| `guardian_name`           | `text`        | yes  | Present when `is_minor`.                                       |
+| `guardian_relationship`   | `text`        | yes  | Present when `is_minor`.                                       |
+| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                               |
+| `created_at`              | `timestamptz` | no   | Default `now()`.                                               |
+| `updated_at`              | `timestamptz` | no   | Default `now()`.                                               |
 
----
+**Not stored here:** any signature (participant or guardian). Signatures are part
+of a signed waiver, so they live only inside the generated PDF, never as columns.
 
-## `profiles` 🔜 NEW — one row per person
+**Created/updated by:** the public waiver submit (`submitWaiverWithPdf`, service
+role, upsert by `email`) and the `handle_new_user_profile` trigger on
+`auth.users` insert (links an existing profile by email, or creates one from the
+signup metadata).
 
-The per-user record for identity and contact details. This is the new home for
-everything the waiver row used to snapshot.
-
-| Column                    | Type          | Null | Notes                                                        |
-| ------------------------- | ------------- | ---- | ------------------------------------------------------------ |
-| `user_id`                 | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. One per user. |
-| `first_name`              | `text`        | no   |                                                              |
-| `middle_name`             | `text`        | yes  |                                                              |
-| `last_name`               | `text`        | no   |                                                              |
-| `full_name`               | `text`        | no   | Composed from the parts (maintained or a generated column).  |
-| `date_of_birth`           | `date`        | no   |                                                              |
-| `address`                 | `text`        | no   |                                                              |
-| `phone`                   | `text`        | no   |                                                              |
-| `email`                   | `text`        | no   | Contact email (see the `auth.users` note above).             |
-| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                             |
-| `emergency_contact_name`  | `text`        | no   |                                                              |
-| `emergency_contact_phone` | `text`        | no   |                                                              |
-| `medical_notes`           | `text`        | yes  |                                                              |
-| `is_minor`                | `boolean`     | no   | Default `false`.                                             |
-| `guardian_name`           | `text`        | yes  | Required when `is_minor`.                                    |
-| `guardian_relationship`   | `text`        | yes  | Required when `is_minor`.                                    |
-| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                             |
-| `created_at`              | `timestamptz` | no   | Default `now()`.                                             |
-| `updated_at`              | `timestamptz` | no   | Default `now()`.                                             |
-
-**Not stored here:** the guardian's **signature** (typed name or drawn image) and
-the participant's signature. Those are part of a signed waiver, so they live only
-inside the generated PDF, never as profile columns.
-
-**RLS (target):** a user reads and updates their own row (`auth.uid() = user_id`);
-managers read all. Inserts/updates happen through a service-role server function
-(the same path that writes a waiver), with a defence-in-depth owner policy
-allowing a user to write only their own row. Field-length/format validation lives
-in the `WITH CHECK` (mirroring the current waiver-insert validation).
-
-**Changed from today:** this table does not exist yet. Its columns are moved off
-`waivers`. Every reader that currently derives identity from the latest waiver
-must repoint here (see [Migration notes](#migration-notes--repointing-identity-readers)).
+**RLS:** a person reads/updates their own profile (`auth.uid() = user_id`);
+managers read all. Writes go through the service role; a defence-in-depth owner
+policy lets a signed-in user update only their own row.
 
 ---
 
-## `waivers` 🔜 slimmed — the signed artifact
+## `waivers` — the signed artifact
 
-A signed waiver is now a pointer to the PDF plus provenance/approval/timestamps.
-It carries **no person fields**.
+A waiver is the PDF plus provenance, approval, timestamps, and a link to the
+person. It carries **no** identity columns.
 
-| Column             | Type          | Null | Notes                                                                        |
-| ------------------ | ------------- | ---- | ---------------------------------------------------------------------------- |
-| `id`               | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                 |
-| `user_id`          | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. See the open decision below. |
-| `pdf_path`         | `text`        | yes  | Path to the generated PDF in the `waivers` Storage bucket.                   |
-| `template_version` | `int`         | yes  | Which `waiver_templates.version` was signed.                                 |
-| `ip_hash`          | `text`        | yes  | Provenance. **Declared but not written by any code path today.**             |
-| `approval_status`  | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                      |
-| `approved_at`      | `timestamptz` | yes  | NULL while pending.                                                          |
-| `approved_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The approving manager.       |
-| `signed_at`        | `timestamptz` | no   | When the waiver was signed.                                                  |
-| `created_at`       | `timestamptz` | no   | Default `now()`.                                                             |
+| Column             | Type          | Null | Notes                                                          |
+| ------------------ | ------------- | ---- | -------------------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | Default `gen_random_uuid()`.                                   |
+| `profile_id`       | `uuid`        | no   | `REFERENCES profiles(id) ON DELETE CASCADE`. Who signed it.    |
+| `pdf_path`         | `text`        | yes  | Path to the generated PDF in the `waivers` Storage bucket.     |
+| `template_version` | `int`         | yes  | Which `waiver_templates.version` was signed.                   |
+| `signer_ip`        | `text`        | yes  | The signer's real IP, kept as a forensic/legal record.         |
+| `approval_status`  | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.        |
+| `approved_at`      | `timestamptz` | yes  | NULL while pending.                                            |
+| `approved_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager. |
+| `signed_at`        | `timestamptz` | no   | When the waiver was signed.                                    |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                               |
 
-**Removed from today's table** (moved to `profiles`, or captured inside the PDF):
+**RLS:** the owner reads their own waivers (via their profile:
+`profile_id IN (SELECT id FROM profiles WHERE user_id = auth.uid())`); managers
+read all and UPDATE (approval). Inserts go through the service role (public
+signing); there is no anon insert grant.
 
-- Identity → profile: `full_name`, `first_name`, `middle_name`, `last_name`,
-  `date_of_birth`, `address`, `phone`, `email`, `uts_student_number`
-- Emergency/medical → profile: `emergency_contact_name`, `emergency_contact_phone`,
-  `medical_notes`
-- Guardian → profile: `is_minor`, `guardian_name`, `guardian_relationship`
-- Consent → profile: `sms_whatsapp_consent`
-- Captured in the PDF only (not stored): `acknowledgements` (JSONB),
-  `signature_name`, `signature_image_path`, `guardian_signature`,
-  `guardian_signature_image_path`
-
-**RLS (target):** unchanged in shape from today. Authenticated owners read their
-own rows (`auth.uid() = user_id`); managers read all and may UPDATE (approval).
-The public INSERT path stays but its `WITH CHECK` shrinks to the non-person
-columns, since there are no longer person fields on the row to validate.
-
-**Storage:** the PDF at `${waiver_id}.pdf`. Signature PNGs may still be uploaded
-as inputs to PDF rendering, but their paths are no longer persisted on the row.
+**Storage:** the signed PDF at `${waiver_id}.pdf`. The submitted signature images
+are rendered into the PDF and not otherwise persisted.
 
 ---
 
-## `waiver_templates` ✅ unchanged
-
-Versioned markdown waiver templates.
+## `waiver_templates` — versioned markdown templates
 
 | Column             | Type          | Null | Notes                                                  |
 | ------------------ | ------------- | ---- | ------------------------------------------------------ |
@@ -164,66 +149,64 @@ Versioned markdown waiver templates.
 
 ## Membership ledger
 
-### `membership_plans` ✅ unchanged — manager-editable catalog
+### `membership_plans` — manager-editable catalog
 
 `id` PK, `code` (unique), `name`, `description`, `kind`
 (`insurance|trial|session|period`), `public_price_cents`, `student_price_cents`,
 `duration_days`, `session_credits`, `is_active`, `sort_order`, `created_at`.
 **RLS:** anyone reads active plans; managers read all and write.
 
-### `memberships` ✅ unchanged — enrollment/billing records
+### `memberships` — enrollment/billing records
 
-`id` PK, `user_id → auth.users(id) ON DELETE SET NULL`, `plan_id → membership_plans(id)`,
-`status` (`pending|active|expired|cancelled`), `is_student`, `uts_student_number`,
+`id` PK, `user_id → auth.users(id) ON DELETE SET NULL`,
+`plan_id → membership_plans(id)`, `status`
+(`pending|active|expired|cancelled`), `is_student`, `uts_student_number`,
 `price_cents`, `payment_reference` (indexed; per-member, not unique),
 `payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
-Constraint: student rate requires a `uts_student_number`. The `member` role is
-granted on paid activation. **RLS:** users read own; managers read/update all;
-direct member INSERT is revoked (all inserts go through the service-role
-`startMembership`).
+Constraint: the student rate requires a `uts_student_number`. The `member` role is
+granted on paid activation. Membership belongs to an auth account; the member's
+name/email for display is read from their profile (via `user_id`). **RLS:** users
+read own; managers read/update all; direct member INSERT is revoked (all inserts
+go through the service-role `startMembership`).
 
-> `uts_student_number` is duplicated here for pricing. Once `profiles` exists it
-> could reference the profile instead, but that is a later cleanup, out of scope
-> for the person-data move.
-
-### `bank_transactions` ✅ unchanged — statement import + reconciliation
+### `bank_transactions` — statement import + reconciliation
 
 `id` PK, `import_batch`, `posted_at`, `amount_cents`, `description`, `reference`,
-`raw` (jsonb), `dedupe_hash` (unique, idempotent re-import),
-`matched_membership_id → memberships(id)`, `matched_at`,
-`matched_by → auth.users(id)`, `status` (`unmatched|matched|ignored`),
-`created_at`. **RLS:** managers read; service role writes.
+`raw` (jsonb), `dedupe_hash` (unique), `matched_membership_id → memberships(id)`,
+`matched_at`, `matched_by → auth.users(id)`, `status`
+(`unmatched|matched|ignored`), `created_at`. **RLS:** managers read; service role
+writes.
 
 ---
 
 ## Manager / infrastructure tables
 
-### `user_roles` ✅ unchanged
+### `user_roles`
 
 `id` PK, `user_id → auth.users(id) ON DELETE CASCADE`, `role` (`app_role`:
 `manager|member`), `created_at`, `UNIQUE(user_id, role)`. **RLS:** users read own;
 managers read/insert/delete all. Checked via `has_role()`.
 
-### `club_settings` ✅ unchanged — manager key/value store
+### `club_settings` — manager key/value store
 
 `key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. First use:
 markdown `invoice_payment_instructions`. **RLS:** manager-only.
 
-### `manager_api_tokens` ✅ unchanged — manager agent API credentials
+### `manager_api_tokens` — manager agent API credentials
 
-`id` PK, `label`, `token_prefix` (non-secret label), `token_hash` (SHA-256,
-unique; raw token shown once), `created_by → auth.users(id)`, `created_at`,
-`last_used_at`, `revoked_at`. Partial index on live tokens. **RLS:** manager-only;
-auth/creation go through service-role server functions.
+`id` PK, `label`, `token_prefix`, `token_hash` (SHA-256, unique; raw shown once),
+`created_by → auth.users(id)`, `created_at`, `last_used_at`, `revoked_at`. Partial
+index on live tokens. **RLS:** manager-only; auth/creation via service-role
+functions.
 
-### `app_user_connections` ✅ unchanged — per-user connector credentials
+### `app_user_connections` — per-user connector credentials
 
 `id` PK, `user_id → auth.users(id) ON DELETE CASCADE`, `connector_id`,
 `connection_key_ciphertext`, `connected_email`, `metadata` (jsonb), `created_at`,
 `updated_at`, `UNIQUE(user_id, connector_id)`. **RLS:** enabled; service role only.
 
-### `waiver_drive_uploads` ✅ unchanged — per-manager Drive export tracking
+### `waiver_drive_uploads` — per-manager Drive export tracking
 
 `id` PK, `waiver_id → waivers(id) ON DELETE CASCADE`,
 `manager_user_id → auth.users(id) ON DELETE CASCADE`, `drive_file_id`,
@@ -234,71 +217,24 @@ auth/creation go through service-role server functions.
 
 ## Public intake (anon insert-only)
 
-### `interest_registrations` ✅ unchanged
+### `interest_registrations`
 
 `id` PK, `name`, `email`, `phone`, `uts_student`, `experience`, `message`,
 `sms_whatsapp_consent`, `created_at`. **RLS:** anon INSERT under a validating
 `WITH CHECK` (name/email/phone/experience/message length + email format).
 
-### `contact_messages` ✅ unchanged
+### `contact_messages`
 
 `id` PK, `name`, `email`, `subject`, `message`, `created_at`. **RLS:** anon INSERT
 under a validating `WITH CHECK`.
 
-> Both intake forms already collect a name/email/phone. When `profiles` exists,
-> an interest registration could seed a profile, but that link is out of scope
-> for the initial person-data move.
-
 ---
 
-## Open design decision: anonymous signing
+## `auth.users` (Supabase-managed)
 
-Today `/waiver` is a **public** route, `submitWaiverWithPdf` inserts via the
-service-role client, and a waiver row may have `user_id = NULL` (the RLS INSERT
-policy explicitly allows it). An anonymous visitor can fully sign a waiver and
-receive their PDF via an inline signed URL.
-
-A per-user `profiles` model needs a user to hang person data on, so anonymous
-signing has to be resolved. Options (to decide before implementing):
-
-- **(A) Require an account to sign.** Cleanest for the profile model; a profile
-  row always exists. Drops anonymous signing (the biggest UX/product change).
-- **(B) Keep anonymous signing; PDF-only for anon.** An anon waiver keeps
-  `user_id = NULL` and no `profiles` row; the person's details live only inside
-  the PDF until they create an account and a profile is populated. Least
-  disruptive; managers still get the signed PDF, but anon signers are absent from
-  the profile-derived member directory (which already excludes `user_id = NULL`).
-- **(C) Standalone profile for anon.** Auto-create a profile not FK-locked to
-  `auth.users` (e.g. a separate `profile_id`), later claimable by an account.
-  Most flexible, most schema/plumbing work.
-
----
-
-## Migration notes — repointing identity readers
-
-Because identity is currently derived from the latest waiver per `user_id`, moving
-it to `profiles` requires repointing every reader and both writers:
-
-- **Writers:** `src/lib/waiver.functions.ts` — `submitWaiverWithPdf` (upsert the
-  profile, then insert the slim waiver) and `getMyLatestWaiver` (read the profile
-  for prefill instead of the last waiver). The alternate
-  `src/lib/submissions.functions.ts` `submitWaiver` (no-PDF path) also writes
-  person columns and must change or be retired.
-- **Readers of identity-from-waiver:**
-  - `src/lib/club-users.ts` — the synthetic `ClubUser` aggregation (name/email/
-    phone) reads from `profiles`.
-  - `src/lib/membership.functions.ts` — display name/email/phone, student number,
-    and the surname-derived payment reference read from `profiles`.
-  - `src/routes/api/manager/agent.ts` — `list_users` and `list_invoices` resolve
-    member name/email from `profiles`.
-  - `src/lib/google-drive.functions.ts` — the Drive export filename (`full_name`)
-    reads from `profiles`.
-- **Validation:** `src/lib/validation.ts` — split the waiver schema into a
-  profile schema (person fields) and a slim waiver schema; update
-  `src/lib/validation.test.ts` accordingly.
-- **Backfill:** a migration to create `profiles` and seed one row per `user_id`
-  from that user's latest waiver, before dropping the person columns from
-  `waivers`.
-
-This section is the checklist for the follow-up implementation; it is not
-implemented by this document.
+The optional login account, managed by Supabase Auth (not in our migrations).
+Holds the login email and `email_confirmed_at`. Two triggers fire on insert:
+`handle_new_user_role` (grants `manager` to a confirmed whitelisted address) and
+`handle_new_user_profile` (links or creates the person's `profiles` row by email).
+`profiles.user_id`, `memberships.user_id`, `user_roles.user_id` and the various
+`*_by` columns all reference it.

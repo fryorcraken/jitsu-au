@@ -151,15 +151,22 @@ Read `src/routes/README.md` before touching routes. Key points:
 
 Schema lives in `supabase/migrations/*.sql` (timestamped, applied in order). All
 tables use RLS. See **`docs/database.md`** for the full per-table spec (columns,
-RLS, relationships, storage) and the target data model; keep it updated alongside
-any migration change. Core tables:
+RLS, relationships, storage); it is the source of truth for the data model and
+**must stay aligned with the code and migrations** — update it in the same change.
+Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
   column-length/format CHECK constraints in the RLS `WITH CHECK`.
-- `waivers` — signed training waivers (personal + emergency + medical + guardian
-  fields, acknowledgements JSONB, signature name/image paths, `pdf_path`,
-  `template_version`, optional `user_id`). Public insert allowed under strict
-  RLS validation.
+- `profiles` — one row per person, keyed by a unique `email` (the single email
+  field in the system; `auth.users.email` is only the optional login credential).
+  Holds all identity/contact/emergency/medical/guardian/consent fields; everything
+  but email is nullable. Optional `user_id` links to an auth account (set by the
+  `handle_new_user_profile` trigger). Identity is read from here, not from waivers.
+- `waivers` — the signed artifact only: `profile_id`, `pdf_path`,
+  `template_version`, `signer_ip`, approval fields, timestamps. No identity
+  columns, no `full_name` (composed on read), no stored signatures (they live in
+  the PDF). Signing is public (no login, email required) and runs through the
+  service-role client, so there is no anon insert grant.
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.
@@ -167,8 +174,8 @@ any migration change. Core tables:
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.
 
-Signed waiver PDFs and signature PNGs are stored in the Supabase Storage
-**`waivers`** bucket; access is via short-lived signed URLs.
+Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
+is via short-lived signed URLs.
 
 ## Key business flows
 

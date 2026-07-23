@@ -18,6 +18,7 @@ import {
   listAgentInvoicesSchema,
   listAgentUsersSchema,
   managerAgentActions,
+  profileFullName,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -28,10 +29,11 @@ import {
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
-import { aggregateClubUsers, collectClubUserIds } from "@/lib/club-users";
-import type { ClubUserWaiver } from "@/lib/club-users";
+import { aggregateClubUsers, profileUserIds } from "@/lib/club-users";
+import type { ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
+import type { AppClient } from "@/lib/profile-types";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -119,20 +121,29 @@ function errorResponse(e: unknown): Response {
 async function handleListUsers(params: unknown) {
   const { status, limit } = listAgentUsersSchema.parse(params ?? {});
   const db = await adminClient();
+  const pdb = db as unknown as AppClient;
 
-  const [{ data: rows, error }, { data: plans }, { data: waivers }] = await Promise.all([
-    db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
-    db.from("membership_plans").select("*"),
-    db.from("waivers").select("user_id, full_name, email, phone, signed_at"),
-  ]);
+  const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }] =
+    await Promise.all([
+      pdb
+        .from("profiles")
+        .select(
+          "id, user_id, email, first_name, middle_name, last_name, phone, uts_student_number, created_at",
+        )
+        .limit(5000),
+      db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+      db.from("membership_plans").select("*"),
+      pdb.from("waivers").select("profile_id, signed_at").limit(5000),
+    ]);
   if (error) throw new AgentError(500, "db_error", error.message);
 
   const memberships = (rows ?? []) as MembershipRow[];
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
+  const profileRows = (profiles ?? []) as ClubUserProfile[];
   const waiverRows = (waivers ?? []) as ClubUserWaiver[];
 
-  // Roles are scoped to the club's known users (waiver signers + members).
-  const userIds = collectClubUserIds(waiverRows, memberships);
+  // Roles are scoped to the club's known users (profiles with an auth account).
+  const userIds = profileUserIds(profileRows);
   let rolesRows: { user_id: string; role: string }[] = [];
   if (userIds.length) {
     const { data: roles } = await db
@@ -144,6 +155,7 @@ async function handleListUsers(params: unknown) {
 
   // Shared aggregation: one row per person with name/roles/lifecycle resolved.
   const aggregated = aggregateClubUsers({
+    profiles: profileRows,
     waivers: waiverRows,
     memberships: memberships.map((m) => ({
       user_id: m.user_id,
@@ -174,7 +186,7 @@ async function handleListUsers(params: unknown) {
     email: u.email,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
-    invoices: (membershipsByUser.get(u.user_id) ?? []).map((m) =>
+    invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) =>
       projectInvoice(m, planById.get(m.plan_id)),
     ),
   }));
@@ -199,20 +211,19 @@ async function handleListInvoices(params: unknown) {
 
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
 
-  // Resolve a display name/email per member from their latest waiver.
+  // Resolve a display name/email per member from their profile.
   const userIds = [
     ...new Set(((rows ?? []) as MembershipRow[]).map((r) => r.user_id).filter(Boolean)),
   ] as string[];
   const nameByUser = new Map<string, { full_name: string; email: string }>();
   if (userIds.length) {
-    const { data: waivers } = await db
-      .from("waivers")
-      .select("user_id, full_name, email, signed_at")
-      .in("user_id", userIds)
-      .order("signed_at", { ascending: false });
-    for (const w of (waivers ?? []) as { user_id: string; full_name: string; email: string }[]) {
-      if (!nameByUser.has(w.user_id))
-        nameByUser.set(w.user_id, { full_name: w.full_name, email: w.email });
+    const pdb = db as unknown as AppClient;
+    const { data: profiles } = await pdb
+      .from("profiles")
+      .select("user_id, first_name, middle_name, last_name, email")
+      .in("user_id", userIds);
+    for (const p of profiles ?? []) {
+      if (p.user_id) nameByUser.set(p.user_id, { full_name: profileFullName(p), email: p.email });
     }
   }
 

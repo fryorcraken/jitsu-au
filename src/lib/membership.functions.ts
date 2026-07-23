@@ -10,6 +10,7 @@ import {
   isUtsStudent,
   matchesMembershipReference,
   matchTransactionSchema,
+  profileFullName,
   saveClubSettingsSchema,
   savePlanSchema,
   setMembershipStatusSchema,
@@ -23,6 +24,13 @@ import type {
   MembershipPlanRow,
   MembershipRow,
 } from "@/lib/membership-types";
+import type { AppClient } from "@/lib/profile-types";
+import type { ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
+
+/** The service-role client, viewed with the profiles/waivers-aware types. */
+function profileAdmin(admin: MembershipClient): AppClient {
+  return admin as unknown as AppClient;
+}
 
 // Public/anon reads. Mirrors the pattern in waiver.functions.ts but typed with
 // the memberships-aware Database so `.from("membership_plans")` type-checks.
@@ -146,14 +154,12 @@ async function activateMembershipRow(
       const { data: userData } = await admin.auth.admin.getUserById(membership.user_id);
       const email = userData?.user?.email;
       if (email) {
-        const { data: waiver } = await admin
-          .from("waivers")
-          .select("full_name")
+        const { data: profile } = await profileAdmin(admin)
+          .from("profiles")
+          .select("first_name, middle_name, last_name")
           .eq("user_id", membership.user_id)
-          .order("signed_at", { ascending: false })
-          .limit(1)
           .maybeSingle();
-        const memberName = (waiver as { full_name?: string } | null)?.full_name || "";
+        const memberName = profile ? profileFullName(profile) : "";
         const { sendMembershipActivatedEmail } = await import("./membership-email.server");
         await sendMembershipActivatedEmail({
           membershipId: membership.id,
@@ -197,32 +203,38 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
 
-    const [{ data: rows, error }, { data: plans }, { data: waiver }] = await Promise.all([
+    const [{ data: rows, error }, { data: plans }, { data: profile }] = await Promise.all([
       admin
         .from("memberships")
         .select("*")
         .eq("user_id", context.userId)
         .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("*"),
-      // select("*") so the (generated-types-unaware) `uts_student_number` column
-      // comes back; used to prefill the student rate on the membership page.
-      admin
-        .from("waivers")
-        .select("*")
+      // Identity + student number live on the profile; used to prefill the
+      // student rate on the membership page.
+      profileAdmin(admin)
+        .from("profiles")
+        .select("id, uts_student_number")
         .eq("user_id", context.userId)
-        .order("signed_at", { ascending: false })
-        .limit(1)
         .maybeSingle(),
     ]);
     if (error) throw new Error(error.message);
 
-    const utsStudentNumber =
-      (waiver as { uts_student_number?: string | null } | null)?.uts_student_number ?? null;
+    // Has this person signed a waiver? Their waivers hang off their profile.
+    let hasWaiver = false;
+    if (profile) {
+      const { count } = await profileAdmin(admin)
+        .from("waivers")
+        .select("id", { count: "exact", head: true })
+        .eq("profile_id", profile.id);
+      hasWaiver = (count ?? 0) > 0;
+    }
+    const utsStudentNumber = profile?.uts_student_number ?? null;
 
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
     const memberships = (rows ?? []).map((r) => projectMembership(r, planById.get(r.plan_id)));
     const lifecycle = deriveLifecycleStatus({
-      hasWaiver: Boolean(waiver),
+      hasWaiver,
       // The generated Supabase types widen these enum columns to `string`; the
       // DB constrains them to the narrow unions deriveLifecycleStatus expects.
       memberships: (rows ?? []).map((r) => ({
@@ -273,18 +285,11 @@ export const startMembership = createServerFn({ method: "POST" })
     // Resolve the member's name once: the surname drives the human-friendly
     // reference, and the full name is used in emails. Falls back gracefully when
     // the member has not signed a waiver yet.
-    const { data: waiverName } = await admin
-      .from("waivers")
-      .select("first_name, last_name, full_name")
+    const { data: who } = await profileAdmin(admin)
+      .from("profiles")
+      .select("first_name, middle_name, last_name")
       .eq("user_id", context.userId)
-      .order("signed_at", { ascending: false })
-      .limit(1)
       .maybeSingle();
-    const who = waiverName as {
-      first_name?: string;
-      last_name?: string;
-      full_name?: string;
-    } | null;
     const surname = who?.last_name || who?.first_name || "";
 
     // Per-session plans carry a session date (defaults to today) so each drop-in
@@ -348,7 +353,7 @@ export const startMembership = createServerFn({ method: "POST" })
         const { sendMembershipPaymentEmail } = await import("./membership-email.server");
         await sendMembershipPaymentEmail({
           membershipId: inserted.id,
-          memberName: who?.full_name || "",
+          memberName: who ? profileFullName(who) : "",
           memberEmail: email,
           planName: plan.name,
           amount: formatCents(price),
@@ -462,18 +467,16 @@ export const listMemberships = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
 
-    // Resolve a display name/email per member from their latest waiver.
+    // Resolve a display name/email per member from their profile.
     const userIds = [...new Set((rows ?? []).map((r) => r.user_id).filter(Boolean))] as string[];
     const nameByUser = new Map<string, { full_name: string; email: string }>();
     if (userIds.length) {
-      const { data: waivers } = await admin
-        .from("waivers")
-        .select("user_id, full_name, email, signed_at")
-        .in("user_id", userIds)
-        .order("signed_at", { ascending: false });
-      for (const w of (waivers ?? []) as { user_id: string; full_name: string; email: string }[]) {
-        if (!nameByUser.has(w.user_id))
-          nameByUser.set(w.user_id, { full_name: w.full_name, email: w.email });
+      const { data: profiles } = await profileAdmin(admin)
+        .from("profiles")
+        .select("user_id, first_name, middle_name, last_name, email")
+        .in("user_id", userIds);
+      for (const p of profiles ?? []) {
+        if (p.user_id) nameByUser.set(p.user_id, { full_name: profileFullName(p), email: p.email });
       }
     }
 
@@ -495,30 +498,28 @@ export const listClubUsers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
-    const { aggregateClubUsers, collectClubUserIds } = await import("@/lib/club-users");
+    const { aggregateClubUsers, profileUserIds } = await import("@/lib/club-users");
 
-    const [{ data: rows, error }, { data: plans }, { data: waivers }] = await Promise.all([
-      admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
-      admin.from("membership_plans").select("*"),
-      // select("*") so the (generated-types-unaware) `uts_student_number` column
-      // comes back — it marks whether the signer is a UTS student. Capped to match
-      // the memberships read (the existing ~500-2000 row scope).
-      admin.from("waivers").select("*").order("signed_at", { ascending: false }).limit(2000),
-    ]);
+    const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }] =
+      await Promise.all([
+        profileAdmin(admin)
+          .from("profiles")
+          .select(
+            "id, user_id, email, first_name, middle_name, last_name, phone, uts_student_number, created_at",
+          )
+          .limit(5000),
+        admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+        admin.from("membership_plans").select("*"),
+        profileAdmin(admin).from("waivers").select("profile_id, signed_at").limit(5000),
+      ]);
     if (error) throw new Error(error.message);
 
     const memberships = (rows ?? []) as MembershipRow[];
-    const waiverRows = (waivers ?? []) as unknown as {
-      user_id: string | null;
-      full_name: string;
-      email: string;
-      phone: string | null;
-      signed_at: string;
-      uts_student_number: string | null;
-    }[];
+    const profileRows = (profiles ?? []) as ClubUserProfile[];
+    const waiverRows = (waivers ?? []) as ClubUserWaiver[];
 
-    // Roles are scoped to the club's known users (waiver signers + members).
-    const userIds = collectClubUserIds(waiverRows, memberships);
+    // Roles are scoped to the club's known users (profiles with an auth account).
+    const userIds = profileUserIds(profileRows);
     let rolesRows: { user_id: string; role: string }[] = [];
     if (userIds.length) {
       const { data: roles } = await admin
@@ -530,6 +531,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
 
     // The one shared aggregation code path (also used by the manager agent API).
     return aggregateClubUsers({
+      profiles: profileRows,
       waivers: waiverRows,
       memberships: memberships.map((m) => ({
         user_id: m.user_id,

@@ -16,6 +16,23 @@ export function composeFullName(first: string, middle: string, last: string): st
     .join(" ");
 }
 
+/** Compose a display name from a profile's (nullable) name parts. */
+export function profileFullName(p: {
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+}): string {
+  return composeFullName(p.first_name || "", p.middle_name || "", p.last_name || "");
+}
+
+/**
+ * Normalize an email for use as the profile identity key: trimmed and lowercased
+ * so case/whitespace variants map to the one profile (mirrors the DB unique key).
+ */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /**
  * Split a single full-name string into first/middle/last parts.
  * One word → first only; two words → first + last; three+ → everything

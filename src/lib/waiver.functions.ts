@@ -6,6 +6,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   composeFullName,
   decodeDataUrlPng,
+  normalizeEmail,
+  profileFullName,
   saveTemplateSchema,
   waiverApprovalSchema,
   waiverSubmitSchema,
@@ -15,9 +17,23 @@ import {
   parseTemplateAcks,
   resolveAcknowledgements,
 } from "@/lib/waiver-acknowledgements";
+import type { AppClient } from "@/lib/profile-types";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
+
+/**
+ * Best-effort real client IP from the proxy headers, kept on the waiver as a
+ * forensic/legal record. Falls back through the common forwarding headers.
+ */
+function clientIp(getHeader: (name: string) => string | undefined): string | null {
+  const fwd = getHeader("x-forwarded-for");
+  if (fwd) {
+    const first = fwd.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return getHeader("cf-connecting-ip") || getHeader("x-real-ip") || null;
+}
 
 function serverSupabase() {
   const url = process.env.SUPABASE_URL!;
@@ -56,27 +72,22 @@ export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handle
   };
 });
 
-// ---- Latest waiver for signed-in user (autofill) ----
-export const getMyLatestWaiver = createServerFn({ method: "GET" })
+// ---- The signed-in person's profile (autofill) ----
+export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // Fetch only the columns the prefill needs — keep the row's storage paths
-    // (pdf_path, signature image paths) and acknowledgements off the wire. The
-    // two newest columns (uts_student_number, sms_whatsapp_consent) are absent
-    // from the stale generated types, so the select string is cast to satisfy
-    // the type-checker; the runtime query still fetches just these columns and
-    // the client narrows the result to its Prefill shape.
-    const prefillColumns =
-      "full_name, first_name, middle_name, last_name, date_of_birth, address, phone, email, uts_student_number, sms_whatsapp_consent, emergency_contact_name, emergency_contact_phone, medical_notes";
-    const { data, error } = await context.supabase
-      .from("waivers")
-      .select(prefillColumns as "*")
+    // Identity now lives on the person's profile (one row per email), not on each
+    // waiver. Prefill the waiver form from it. Read via the service role scoped to
+    // the caller's own user id.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = supabaseAdmin as unknown as AppClient;
+    const { data, error } = await admin
+      .from("profiles")
+      .select("*")
       .eq("user_id", context.userId)
-      .order("signed_at", { ascending: false })
-      .limit(1)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return data;
+    return data ?? null;
   });
 
 // ---- Submit waiver + generate PDF ----
@@ -86,22 +97,21 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     if (data.hp) return { ok: true as const, pdf_url: null };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = supabaseAdmin as unknown as AppClient;
     const { renderWaiverPdf } = await import("./waiver-pdf");
 
     const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
+    // Email is the person's identity key (always provided); normalize it so
+    // case/whitespace variants map to the one profile.
+    const email = normalizeEmail(data.email);
 
-    // Try to attach user_id if caller has a bearer token
-    let userId: string | null = null;
+    // Real signer IP for the forensic/legal record.
+    let signer_ip: string | null = null;
     try {
       const { getRequestHeader } = await import("@tanstack/react-start/server");
-      const auth = getRequestHeader("authorization");
-      const token = auth?.replace(/^Bearer\s+/i, "");
-      if (token) {
-        const { data: userData } = await supabaseAdmin.auth.getUser(token);
-        userId = userData.user?.id ?? null;
-      }
+      signer_ip = clientIp((name) => getRequestHeader(name));
     } catch {
-      /* ignore */
+      /* header access unavailable */
     }
 
     // Load current template
@@ -126,65 +136,54 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
 
-    // Insert waiver row. Built as a variable + cast so the `uts_student_number`
-    // key (absent from the stale generated Insert type) doesn't trip the
-    // excess-property check.
-    const waiverRow = {
-      full_name,
+    // Store the person once: find-or-create their profile by email and update its
+    // identity fields. This is the single source of truth for who they are.
+    const profileRow = {
+      email,
       first_name: data.first_name,
       middle_name: data.middle_name || null,
       last_name: data.last_name,
       date_of_birth: data.date_of_birth,
-      address: data.address,
-      phone: data.phone,
-      email: data.email,
+      address: data.address || null,
+      phone: data.phone || null,
       uts_student_number: data.uts_student_number?.trim() || null,
-      sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
-      emergency_contact_name: data.emergency_contact_name,
-      emergency_contact_phone: data.emergency_contact_phone,
+      emergency_contact_name: data.emergency_contact_name || null,
+      emergency_contact_phone: data.emergency_contact_phone || null,
       medical_notes: data.medical_notes || null,
-      acknowledgements: answers,
-      signature_name: data.signature_name || full_name,
-      signed_at,
-      user_id: userId,
-      template_version: tpl.version,
       is_minor: data.is_minor ?? false,
       guardian_name: data.guardian_name || null,
       guardian_relationship: data.guardian_relationship || null,
-      guardian_signature: data.guardian_signature || null,
+      sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+      updated_at: signed_at,
     };
-    const { data: inserted, error: insErr } = await supabaseAdmin
-      .from("waivers")
-      .insert(waiverRow as never)
+    const { data: profile, error: profErr } = await admin
+      .from("profiles")
+      .upsert(profileRow, { onConflict: "email" })
       .select("id")
       .single();
-    if (insErr) throw new Error(insErr.message);
+    if (profErr || !profile) throw new Error(profErr?.message || "Could not save profile.");
 
-    // Upload signature images (if any) so managers can view raw marks
-    let sigPath: string | null = null;
-    let gSigPath: string | null = null;
-    if (sigPng) {
-      sigPath = `${inserted.id}-signature.png`;
-      const { error } = await supabaseAdmin.storage
-        .from(BUCKET)
-        .upload(sigPath, sigPng, { contentType: "image/png", upsert: true });
-      if (error) throw new Error(error.message);
-    }
-    if (gSigPng) {
-      gSigPath = `${inserted.id}-guardian-signature.png`;
-      const { error } = await supabaseAdmin.storage
-        .from(BUCKET)
-        .upload(gSigPath, gSigPng, { contentType: "image/png", upsert: true });
-      if (error) throw new Error(error.message);
-    }
+    // The waiver row is just the signed artifact: it points at the profile and
+    // carries provenance/timestamps. Signatures live inside the PDF only.
+    const { data: inserted, error: insErr } = await admin
+      .from("waivers")
+      .insert({
+        profile_id: profile.id,
+        signed_at,
+        template_version: tpl.version,
+        signer_ip,
+      })
+      .select("id")
+      .single();
+    if (insErr || !inserted) throw new Error(insErr?.message || "Could not save waiver.");
 
-    // Generate PDF
+    // Generate PDF (signature images are embedded into it, not stored separately).
     const pdf = await renderWaiverPdf({
       full_name,
       date_of_birth: data.date_of_birth,
       address: data.address,
       phone: data.phone,
-      email: data.email,
+      email,
       emergency_contact_name: data.emergency_contact_name,
       emergency_contact_phone: data.emergency_contact_phone,
       medical_notes: data.medical_notes || "",
@@ -209,14 +208,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
     if (upErr) throw new Error(upErr.message);
 
-    await supabaseAdmin
-      .from("waivers")
-      .update({
-        pdf_path: path,
-        signature_image_path: sigPath,
-        guardian_signature_image_path: gSigPath,
-      })
-      .eq("id", inserted.id);
+    await admin.from("waivers").update({ pdf_path: path }).eq("id", inserted.id);
 
     const { data: signed, error: signErr } = await supabaseAdmin.storage
       .from(BUCKET)
@@ -236,7 +228,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         await sendWaiverEmails({
           waiverId: inserted.id,
           memberName: full_name,
-          memberEmail: data.email,
+          memberEmail: email,
           pdfUrl: emailSigned.signedUrl,
           admin: supabaseAdmin,
         });
@@ -304,30 +296,41 @@ export const listWaivers = createServerFn({ method: "GET" })
       _role: "manager",
     });
     if (!isMgr) throw new Error("Forbidden");
-    // select("*") so the approval columns (absent from the stale generated
-    // types) come back; we then project to the list shape managers need.
-    const { data, error } = await context.supabase
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = supabaseAdmin as unknown as AppClient;
+    // The signer's name/email live on their profile; embed it via profile_id.
+    const { data, error } = await admin
       .from("waivers")
-      .select("*")
+      .select(
+        "id, signed_at, template_version, pdf_path, approval_status, approved_at, profiles(first_name, middle_name, last_name, email)",
+      )
       .order("signed_at", { ascending: false })
       .limit(500);
     if (error) throw new Error(error.message);
-    return (data ?? []).map((w) => {
-      const row = w as typeof w & {
-        approval_status?: string | null;
-        approved_at?: string | null;
-      };
-      return {
-        id: row.id,
-        full_name: row.full_name,
-        email: row.email,
-        signed_at: row.signed_at,
-        template_version: row.template_version,
-        pdf_path: row.pdf_path,
-        approval_status: (row.approval_status ?? "pending") as "pending" | "approved",
-        approved_at: row.approved_at ?? null,
-      };
-    });
+    type WaiverListRow = {
+      id: string;
+      signed_at: string;
+      template_version: number | null;
+      pdf_path: string | null;
+      approval_status: string | null;
+      approved_at: string | null;
+      profiles: {
+        first_name: string | null;
+        middle_name: string | null;
+        last_name: string | null;
+        email: string | null;
+      } | null;
+    };
+    return ((data ?? []) as unknown as WaiverListRow[]).map((row) => ({
+      id: row.id,
+      full_name: row.profiles ? profileFullName(row.profiles) : "",
+      email: row.profiles?.email ?? null,
+      signed_at: row.signed_at,
+      template_version: row.template_version,
+      pdf_path: row.pdf_path,
+      approval_status: (row.approval_status ?? "pending") as "pending" | "approved",
+      approved_at: row.approved_at ?? null,
+    }));
   });
 
 // ---- Manager: approve / unapprove a signed waiver ----

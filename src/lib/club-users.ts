@@ -1,28 +1,37 @@
 // Pure, server-import-free aggregation of the club's *people*.
 //
-// A "club user" is anyone known to the club: someone who has signed a waiver
-// and/or holds a membership. This module unions those two populations into one
-// row per person, resolving their display name/email/phone from their latest
-// waiver, their roles, their lifecycle status, and a summary of their latest
-// membership.
+// A "club user" is a person: one row in `profiles` (keyed by email). This module
+// joins each profile to its waivers (has one been signed, and when), its
+// memberships, its roles, and derives a lifecycle status. Identity (name, email,
+// phone) comes from the profile — the single source of truth — not from waivers.
+//
+// Memberships, roles and the auth account are keyed by `auth.users` id; a profile
+// links to that via `user_id` (null for someone who never made an account). So a
+// profile's memberships/roles are matched through its `user_id`.
 //
 // It is deliberately free of any DB/server import so it is unit-testable and can
 // be shared by both the manager agent HTTP API (`list_users`) and the manager
 // user-list screen (`/manager/users`) — the single aggregation code path.
-import { deriveLifecycleStatus } from "./validation";
+import { deriveLifecycleStatus, profileFullName } from "./validation";
 import type { LifecycleStatus, MembershipPlanKind, MembershipStatus } from "./validation";
 
-/** The waiver fields the aggregation reads (latest per user wins). */
-export type ClubUserWaiver = {
+/** The profile fields the aggregation reads (one row per person). */
+export type ClubUserProfile = {
+  id: string;
   user_id: string | null;
-  full_name: string;
   email: string;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
   phone: string | null;
+  uts_student_number: string | null;
+  created_at: string;
+};
+
+/** The waiver fields the aggregation reads (existence + when, per profile). */
+export type ClubUserWaiver = {
+  profile_id: string;
   signed_at: string;
-  // Student status is trust-based: a non-empty number means UTS student. The
-  // generated Supabase types don't include this column on waivers yet, so
-  // callers read it via select("*") and it stays optional here.
-  uts_student_number?: string | null;
 };
 
 /** The membership fields the aggregation reads. */
@@ -51,7 +60,8 @@ export type ClubUserRole = {
 
 /** One aggregated person known to the club. */
 export type ClubUser = {
-  user_id: string;
+  profile_id: string;
+  user_id: string | null;
   name: string | null;
   email: string | null;
   phone: string | null;
@@ -72,25 +82,19 @@ function hasStudentNumber(n: string | null | undefined): boolean {
   return Boolean(n && n.trim().length > 0);
 }
 
-/**
- * The distinct set of user ids known to the club: the union of waiver signers
- * and membership holders. Used to scope the roles query before aggregation.
- */
-export function collectClubUserIds(
-  waivers: Pick<ClubUserWaiver, "user_id">[],
-  memberships: Pick<ClubUserMembership, "user_id">[],
-): string[] {
+/** The non-null auth user ids across a set of profiles (to scope the roles query). */
+export function profileUserIds(profiles: Pick<ClubUserProfile, "user_id">[]): string[] {
   const ids = new Set<string>();
-  for (const w of waivers) if (w.user_id) ids.add(w.user_id);
-  for (const m of memberships) if (m.user_id) ids.add(m.user_id);
+  for (const p of profiles) if (p.user_id) ids.add(p.user_id);
   return [...ids];
 }
 
 /**
- * Aggregate waivers + memberships + roles into one row per person, sorted by
- * name (A–Z). Pure: callers do their own filtering/capping/re-sorting.
+ * Aggregate profiles + waivers + memberships + roles into one row per person,
+ * sorted by name (A–Z). Pure: callers do their own filtering/capping/re-sorting.
  */
 export function aggregateClubUsers(input: {
+  profiles: ClubUserProfile[];
   waivers: ClubUserWaiver[];
   memberships: ClubUserMembership[];
   plans: ClubUserPlan[];
@@ -98,17 +102,14 @@ export function aggregateClubUsers(input: {
 }): ClubUser[] {
   const planById = new Map(input.plans.map((p) => [p.id, p]));
 
-  // Latest waiver per user drives the display name/email/phone and marks a
-  // signed waiver. Sort signed_at descending so the first seen per user is latest.
-  const waiverRows = input.waivers
-    .filter((w) => w.user_id)
-    .sort((a, b) => (a.signed_at < b.signed_at ? 1 : -1));
-  const latestWaiverByUser = new Map<string, ClubUserWaiver>();
-  for (const w of waiverRows) {
-    if (!latestWaiverByUser.has(w.user_id!)) latestWaiverByUser.set(w.user_id!, w);
+  // Latest waiver signature per profile (also marks that a waiver exists).
+  const waiverSignedByProfile = new Map<string, string>();
+  for (const w of input.waivers) {
+    const prev = waiverSignedByProfile.get(w.profile_id);
+    if (!prev || prev < w.signed_at) waiverSignedByProfile.set(w.profile_id, w.signed_at);
   }
 
-  // Group memberships by user, newest first (by created_at).
+  // Group memberships by auth user id, newest first (by created_at).
   const membershipsByUser = new Map<string, ClubUserMembership[]>();
   for (const m of input.memberships) {
     if (!m.user_id) continue;
@@ -127,15 +128,14 @@ export function aggregateClubUsers(input: {
     rolesByUser.set(r.user_id, list);
   }
 
-  const userIds = collectClubUserIds(waiverRows, input.memberships);
-
-  const users: ClubUser[] = userIds.map((uid) => {
-    const ms = membershipsByUser.get(uid) ?? [];
-    const waiver = latestWaiverByUser.get(uid) ?? null;
+  const users: ClubUser[] = input.profiles.map((p) => {
+    const ms = p.user_id ? (membershipsByUser.get(p.user_id) ?? []) : [];
     const latest = ms[0] ?? null;
+    const waiverSignedAt = waiverSignedByProfile.get(p.id) ?? null;
+    const hasWaiver = waiverSignedAt != null;
 
     const lifecycle_status = deriveLifecycleStatus({
-      hasWaiver: Boolean(waiver),
+      hasWaiver,
       memberships: ms.map((m) => ({
         status: m.status as MembershipStatus,
         kind: (planById.get(m.plan_id)?.kind ?? "session") as MembershipPlanKind,
@@ -143,33 +143,39 @@ export function aggregateClubUsers(input: {
       })),
     });
 
-    // UTS-student status is trust-based on a non-empty student number. Prefer
-    // the number captured on the waiver (covers trial signers who never joined);
-    // fall back to membership data (the student rate + number at membership start).
-    const waiverNumber = waiver?.uts_student_number?.trim() || null;
+    // UTS-student status is trust-based on a non-empty student number. Prefer the
+    // number on the profile; fall back to membership data (the student rate +
+    // number captured at membership start).
+    const profileNumber = p.uts_student_number?.trim() || null;
     const studentMembership =
       ms.find((m) => hasStudentNumber(m.uts_student_number)) ??
       ms.find((m) => m.is_student) ??
       null;
     const membershipNumber = studentMembership?.uts_student_number?.trim() || null;
-    const uts_student_number = waiverNumber ?? membershipNumber;
-    const is_uts_student = Boolean(waiverNumber) || Boolean(studentMembership);
+    const uts_student_number = profileNumber ?? membershipNumber;
+    const is_uts_student = Boolean(profileNumber) || Boolean(studentMembership);
 
-    // First-seen: earliest of the person's waiver signature and membership dates.
-    const dates = [...ms.map((m) => m.created_at), ...(waiver ? [waiver.signed_at] : [])].filter(
-      Boolean,
-    );
+    // First-seen: earliest of the profile creation, waiver signature and
+    // membership dates.
+    const dates = [
+      p.created_at,
+      ...ms.map((m) => m.created_at),
+      ...(waiverSignedAt ? [waiverSignedAt] : []),
+    ].filter(Boolean);
     const first_seen_at = dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : null;
 
+    const name = profileFullName(p) || null;
+
     return {
-      user_id: uid,
-      name: waiver?.full_name ?? null,
-      email: waiver?.email ?? null,
-      phone: waiver?.phone ?? null,
-      roles: rolesByUser.get(uid) ?? [],
+      profile_id: p.id,
+      user_id: p.user_id,
+      name,
+      email: p.email,
+      phone: p.phone,
+      roles: p.user_id ? (rolesByUser.get(p.user_id) ?? []) : [],
       lifecycle_status,
-      has_waiver: Boolean(waiver),
-      waiver_signed_at: waiver?.signed_at ?? null,
+      has_waiver: hasWaiver,
+      waiver_signed_at: waiverSignedAt,
       is_uts_student,
       uts_student_number,
       latest_plan_name: latest ? (planById.get(latest.plan_id)?.name ?? null) : null,

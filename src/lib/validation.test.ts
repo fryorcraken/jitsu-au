@@ -5,11 +5,33 @@ import {
   decodeDataUrlPng,
   interestSchema,
   isUtsStudent,
+  normalizeEmail,
+  profileFullName,
   saveTemplateSchema,
   splitFullName,
   waiverApprovalSchema,
   waiverSubmitSchema,
 } from "./validation";
+
+describe("profileFullName", () => {
+  it("composes from name parts, tolerating nulls", () => {
+    expect(profileFullName({ first_name: "Ada", middle_name: null, last_name: "Lovelace" })).toBe(
+      "Ada Lovelace",
+    );
+    expect(profileFullName({ first_name: "Ada", middle_name: "M", last_name: "Lovelace" })).toBe(
+      "Ada M Lovelace",
+    );
+    expect(profileFullName({ first_name: "Grace" })).toBe("Grace");
+    expect(profileFullName({})).toBe("");
+  });
+});
+
+describe("normalizeEmail", () => {
+  it("trims and lowercases so case/whitespace variants map to one profile", () => {
+    expect(normalizeEmail("  Ada@Example.COM ")).toBe("ada@example.com");
+    expect(normalizeEmail("already@lower.com")).toBe("already@lower.com");
+  });
+});
 
 describe("composeFullName", () => {
   it("joins first/middle/last with single spaces", () => {
