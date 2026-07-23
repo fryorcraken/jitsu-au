@@ -332,8 +332,16 @@ describe("interestSchema", () => {
     expect(interestSchema.safeParse({ ...valid, name: "" }).success).toBe(false);
   });
 
-  it("rejects a name over 100 chars", () => {
-    expect(interestSchema.safeParse({ ...valid, name: "a".repeat(101) }).success).toBe(false);
+  it("accepts a composed first + last name at the 121-char cap", () => {
+    // 60-char first + " " + 60-char last, the longest the register form can
+    // compose (each field is capped at 60 to match the waiver).
+    const name = `${"a".repeat(60)} ${"b".repeat(60)}`;
+    expect(name.length).toBe(121);
+    expect(interestSchema.safeParse({ ...valid, name }).success).toBe(true);
+  });
+
+  it("rejects a name over 121 chars", () => {
+    expect(interestSchema.safeParse({ ...valid, name: "a".repeat(122) }).success).toBe(false);
   });
 
   it("rejects a filled honeypot", () => {

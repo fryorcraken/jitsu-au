@@ -203,7 +203,9 @@ export function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
 // ---- Interest registration ----
 
 export const interestSchema = z.object({
-  name: z.string().trim().min(1).max(100),
+  // The register form composes this from first + last name fields (each capped
+  // at 60, matching the waiver), so allow up to 60 + " " + 60 = 121 characters.
+  name: z.string().trim().min(1).max(121),
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
   experience: z.string().trim().max(500).optional().or(z.literal("")),
