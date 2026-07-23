@@ -223,6 +223,20 @@ Signed waiver PDFs and signature PNGs are stored in the Supabase Storage
   `public`). Security findings at WARN+ fail the build; performance findings are
   reported only. The vendored query and gating policy live in `supabase/lint/`
   (see its README before changing the threshold or refreshing `splinter.sql`).
+  - The allowlist (`supabase/lint/advisors-allowlist.txt`) only stops CI from
+    **failing** on a reviewed finding; it does not remove it. Supabase's live
+    **dashboard** advisors have no allowlist concept, so an acknowledged finding
+    keeps appearing there (and in Lovable) by design. That is expected, not a CI
+    gap or a regression. The standing example is lint `0029`
+    (`authenticated_security_definer_function_executable`) on `public.has_role`:
+    it is `SECURITY DEFINER` and `authenticated` must keep `EXECUTE` because
+    `has_role` is called both inside RLS policies (evaluated as the querying
+    role) and directly as an RPC by the app to check manager status. Revoking
+    `EXECUTE` / `SECURITY INVOKER` would break every manager check, so this is
+    intentional and permanently allowlisted. If the dashboard ever flags a
+    *different* SECURITY-DEFINER function as authenticated-executable, that is a
+    real live-DB grant drift CI can't see (fresh migrations revoke it) — fix it
+    with a migration re-asserting the `REVOKE EXECUTE`, don't allowlist it.
 
 ## Lock file strategy (Lovable ⇄ Claude/CI)
 
