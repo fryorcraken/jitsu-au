@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { listWaivers, getWaiverPdfUrl } from "@/lib/waiver.functions";
+import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
+import { cn } from "@/lib/utils";
 import {
   getGoogleDriveStatus,
   listMyDriveUploads,
@@ -26,6 +27,16 @@ type Row = {
   signed_at: string;
   template_version: number | null;
   pdf_path: string | null;
+  // Derived server-side: the person's latest approved waiver is "active",
+  // older approved ones are "superseded", the rest are "pending".
+  status: "pending" | "active" | "superseded";
+  approved_at: string | null;
+};
+
+const STATUS_STYLES: Record<Row["status"], string> = {
+  pending: "bg-muted text-muted-foreground",
+  active: "bg-primary/15 text-primary",
+  superseded: "bg-muted text-muted-foreground line-through",
 };
 
 type DriveUpload = {
@@ -41,12 +52,14 @@ function WaiversPage() {
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchList = useServerFn(listWaivers);
   const getUrl = useServerFn(getWaiverPdfUrl);
+  const approve = useServerFn(setWaiverApproval);
   const fetchDriveStatus = useServerFn(getGoogleDriveStatus);
   const fetchDriveUploads = useServerFn(listMyDriveUploads);
   const upload = useServerFn(uploadWaiverToDrive);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
   const [uploads, setUploads] = useState<Record<string, DriveUpload>>({});
   const [uploadingId, setUploadingId] = useState<string | null>(null);
@@ -87,6 +100,26 @@ function WaiversPage() {
     }
   }
 
+  async function setApproval(id: string, status: "approved" | "pending") {
+    setApprovingId(id);
+    try {
+      await approve({ data: { id, status } });
+      // Statuses are derived per person (active vs superseded), so refetch the
+      // list rather than patch one row locally.
+      const data = await fetchList();
+      setRows(data as Row[]);
+      toast.success(
+        status === "approved"
+          ? "Waiver approved. The member's record has been updated."
+          : "Approval removed. The waiver is pending again.",
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update approval");
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
   async function saveToDrive(id: string) {
     setUploadingId(id);
     try {
@@ -113,8 +146,11 @@ function WaiversPage() {
       <section className="mx-auto max-w-5xl space-y-6 px-4 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-black">Signed waivers</h1>
-            <p className="text-sm text-muted-foreground">All waivers signed via the website.</p>
+            <h1 className="text-3xl font-black">Waivers</h1>
+            <p className="text-sm text-muted-foreground">
+              All waiver submissions. Approving one updates the member's record and sets up their
+              login if they don't have one yet.
+            </p>
           </div>
           <Button asChild variant="outline">
             <Link to="/account">Back to account</Link>
@@ -144,6 +180,7 @@ function WaiversPage() {
                   <th className="px-3 py-2">Email</th>
                   <th className="px-3 py-2">Signed</th>
                   <th className="px-3 py-2">Version</th>
+                  <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
@@ -157,7 +194,35 @@ function WaiversPage() {
                       <td className="px-3 py-2">{new Date(r.signed_at).toLocaleString("en-AU")}</td>
                       <td className="px-3 py-2">v{r.template_version ?? "—"}</td>
                       <td className="px-3 py-2">
+                        <span
+                          className={cn(
+                            "inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize",
+                            STATUS_STYLES[r.status],
+                          )}
+                        >
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
+                          {r.status === "pending" ? (
+                            <Button
+                              size="sm"
+                              onClick={() => setApproval(r.id, "approved")}
+                              disabled={approvingId === r.id}
+                            >
+                              {approvingId === r.id ? "Approving..." : "Approve"}
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setApproval(r.id, "pending")}
+                              disabled={approvingId === r.id}
+                            >
+                              {approvingId === r.id ? "Updating..." : "Unapprove"}
+                            </Button>
+                          )}
                           {r.pdf_path ? (
                             <Button size="sm" variant="outline" onClick={() => download(r.id)}>
                               <Download className="mr-1 h-3 w-3" /> PDF

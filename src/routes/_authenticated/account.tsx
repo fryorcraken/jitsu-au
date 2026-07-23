@@ -15,6 +15,7 @@ import {
   saveGoogleDriveConnection,
   startGoogleDriveConnect,
 } from "@/lib/google-drive.functions";
+import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({
@@ -51,11 +52,95 @@ function AccountPage() {
         </CardContent>
       </Card>
 
+      <WaiversCard />
+
       {isManager && <GoogleDriveCard />}
 
       <ChangePasswordCard />
       <ChangeEmailCard currentEmail={user.email ?? ""} />
     </section>
+  );
+}
+
+type MyWaiver = {
+  id: string;
+  signed_at: string;
+  template_version: number | null;
+  has_pdf: boolean;
+  status: "pending" | "active" | "superseded";
+};
+
+function WaiversCard() {
+  const fetchMine = useServerFn(listMyWaivers);
+  const getUrl = useServerFn(getWaiverPdfUrl);
+  const [waivers, setWaivers] = useState<MyWaiver[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMine()
+      .then((rows) => setWaivers(rows as MyWaiver[]))
+      .catch(() => setWaivers([]))
+      .finally(() => setLoading(false));
+  }, [fetchMine]);
+
+  async function download(id: string) {
+    try {
+      const { url } = await getUrl({ data: { id } });
+      window.open(url, "_blank", "noopener");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to get PDF");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Waivers</CardTitle>
+        <CardDescription>
+          Your waiver history. The active waiver is the latest one the club approved.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : waivers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No waivers on file yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {waivers.map((w) => (
+              <li
+                key={w.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+              >
+                <span>
+                  Signed {new Date(w.signed_at).toLocaleDateString("en-AU")}
+                  {w.template_version != null && (
+                    <span className="text-muted-foreground"> (v{w.template_version})</span>
+                  )}
+                  <span
+                    className={
+                      w.status === "active"
+                        ? "ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary"
+                        : "ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                    }
+                  >
+                    {w.status}
+                  </span>
+                </span>
+                {w.has_pdf && (
+                  <Button size="sm" variant="outline" onClick={() => download(w.id)}>
+                    Download PDF
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <Button asChild variant="outline" size="sm">
+          <Link to="/waiver">Sign an updated waiver</Link>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

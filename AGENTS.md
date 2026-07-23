@@ -13,13 +13,14 @@
 
 ## Database
 
-The schema reference lives in **`docs/database.md`**. It documents every table
-(columns, RLS, relationships, storage) and the model we are moving toward. The
-applied schema is defined by the migrations in `supabase/migrations/*.sql` (the
-source of truth); `docs/database.md` is the human-readable spec of intent.
+The schema reference lives in **`docs/database.md`** (every table: columns,
+RLS, relationships, storage). The product spec for the waiver/profile/account
+flows lives in **`docs/waivers.md`**. The applied schema is defined by the
+migrations in `supabase/migrations/*.sql` (the source of truth).
 
-**When you add or change a `supabase/migrations/*.sql` file, update
-`docs/database.md` in the same change** so the doc and the schema do not drift.
+**When you change a migration, a table, or the code that reads/writes it,
+update `docs/database.md` (and `docs/waivers.md` if the product behavior
+changed) in the same change** so the docs and the code do not drift.
 
 ## Manager agent API
 

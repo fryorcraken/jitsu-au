@@ -33,6 +33,83 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/** The person fields a waiver submission carries (as submitted, frozen). */
+export type WaiverPersonFields = {
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+  date_of_birth: string;
+  address: string;
+  phone: string;
+  uts_student_number: string | null;
+  sms_whatsapp_consent: boolean;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  medical_notes: string | null;
+  is_minor: boolean;
+  guardian_name: string | null;
+  guardian_relationship: string | null;
+};
+
+/**
+ * The profile patch a manager's approval applies: the approved submission's
+ * person fields become the club's current record of that person. Pure so the
+ * promotion mapping is unit-testable; the caller adds `updated_at`.
+ */
+export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields {
+  return {
+    first_name: w.first_name,
+    middle_name: w.middle_name,
+    last_name: w.last_name,
+    date_of_birth: w.date_of_birth,
+    address: w.address,
+    phone: w.phone,
+    uts_student_number: w.uts_student_number,
+    sms_whatsapp_consent: w.sms_whatsapp_consent,
+    emergency_contact_name: w.emergency_contact_name,
+    emergency_contact_phone: w.emergency_contact_phone,
+    medical_notes: w.medical_notes,
+    is_minor: w.is_minor,
+    guardian_name: w.guardian_name,
+    guardian_relationship: w.guardian_relationship,
+  };
+}
+
+/** The states a waiver submission can be shown in. Stored: pending/approved; the
+ * approved set is split into the person's single ACTIVE waiver (latest approved)
+ * and SUPERSEDED older ones. */
+export const waiverListStatuses = ["pending", "active", "superseded"] as const;
+export type WaiverListStatus = (typeof waiverListStatuses)[number];
+
+/**
+ * Derive each waiver's displayed status. Per profile, the approved waiver with
+ * the greatest approved_at (falling back to signed_at) is `active`; other
+ * approved ones are `superseded`; everything else is `pending`.
+ */
+export function deriveWaiverListStatuses(
+  rows: {
+    id: string;
+    profile_id: string;
+    approval_status: string;
+    approved_at: string | null;
+    signed_at: string;
+  }[],
+): Map<string, WaiverListStatus> {
+  const activeByProfile = new Map<string, { id: string; at: string }>();
+  for (const r of rows) {
+    if (r.approval_status !== "approved") continue;
+    const at = r.approved_at ?? r.signed_at;
+    const current = activeByProfile.get(r.profile_id);
+    if (!current || current.at < at) activeByProfile.set(r.profile_id, { id: r.id, at });
+  }
+  const out = new Map<string, WaiverListStatus>();
+  for (const r of rows) {
+    if (r.approval_status !== "approved") out.set(r.id, "pending");
+    else out.set(r.id, activeByProfile.get(r.profile_id)?.id === r.id ? "active" : "superseded");
+  }
+  return out;
+}
+
 /**
  * Split a single full-name string into first/middle/last parts.
  * One word → first only; two words → first + last; three+ → everything

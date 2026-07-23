@@ -157,16 +157,20 @@ Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
   column-length/format CHECK constraints in the RLS `WITH CHECK`.
-- `profiles` — one row per person, keyed by a unique `email` (the single email
-  field in the system; `auth.users.email` is only the optional login credential).
-  Holds all identity/contact/emergency/medical/guardian/consent fields; everything
-  but email is nullable. Optional `user_id` links to an auth account (set by the
-  `handle_new_user_profile` trigger). Identity is read from here, not from waivers.
-- `waivers` — the signed artifact only: `profile_id`, `pdf_path`,
-  `template_version`, `signer_ip`, approval fields, timestamps. No identity
-  columns, no `full_name` (composed on read), no stored signatures (they live in
-  the PDF). Signing is public (no login, email required) and runs through the
-  service-role client, so there is no anon insert grant.
+- `profiles` — one row per person, keyed by a unique `email` (the canonical
+  email; `auth.users.email` is the login credential). Starts as a lightweight
+  visitor profile (email/name/phone, created at first waiver submission);
+  everything but email is nullable. A **manager approving a waiver** copies the
+  submission's details onto the profile and provisions the login (`user_id`,
+  invite email). Identity is read from here, not from waivers. There is no
+  self-serve sign-up.
+- `waivers` — frozen submissions: the person fields **as submitted**, plus
+  `profile_id`, `pdf_path`, `template_version`, `signer_ip` (real IP, forensic
+  record), approval fields, timestamps. No `full_name` (composed on read), no
+  stored signatures/acknowledgements (they live in the PDF). Signing is public
+  (no login, email required), unlimited, and runs through the service-role
+  client. The displayed pending/active/superseded status is derived (latest
+  approved per person = active). Product flows: `docs/waivers.md`.
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.

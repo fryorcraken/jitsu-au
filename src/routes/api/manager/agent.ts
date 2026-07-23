@@ -133,7 +133,13 @@ async function handleListUsers(params: unknown) {
         .limit(5000),
       db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
       db.from("membership_plans").select("*"),
-      pdb.from("waivers").select("profile_id, signed_at").limit(5000),
+      // Approved waivers only: "has waiver" means an active, manager-approved
+      // waiver, not a pending submission.
+      pdb
+        .from("waivers")
+        .select("profile_id, signed_at")
+        .eq("approval_status", "approved")
+        .limit(5000),
     ]);
   if (error) throw new AgentError(500, "db_error", error.message);
 

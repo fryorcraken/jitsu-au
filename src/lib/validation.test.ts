@@ -3,6 +3,7 @@ import {
   composeFullName,
   contactSchema,
   decodeDataUrlPng,
+  deriveWaiverListStatuses,
   interestSchema,
   isUtsStudent,
   normalizeEmail,
@@ -11,6 +12,7 @@ import {
   splitFullName,
   waiverApprovalSchema,
   waiverSubmitSchema,
+  waiverToProfileFields,
 } from "./validation";
 
 describe("profileFullName", () => {
@@ -30,6 +32,105 @@ describe("normalizeEmail", () => {
   it("trims and lowercases so case/whitespace variants map to one profile", () => {
     expect(normalizeEmail("  Ada@Example.COM ")).toBe("ada@example.com");
     expect(normalizeEmail("already@lower.com")).toBe("already@lower.com");
+  });
+});
+
+describe("waiverToProfileFields", () => {
+  it("maps exactly the submission's person fields onto the profile patch", () => {
+    const fields = {
+      first_name: "Ada",
+      middle_name: null,
+      last_name: "Lovelace",
+      date_of_birth: "1990-01-01",
+      address: "1 Example St",
+      phone: "0400 000 000",
+      uts_student_number: "12345678",
+      sms_whatsapp_consent: true,
+      emergency_contact_name: "Grace Hopper",
+      emergency_contact_phone: "0400 111 111",
+      medical_notes: "None",
+      is_minor: false,
+      guardian_name: null,
+      guardian_relationship: null,
+    };
+    // Feed it a row with extra waiver-only keys; they must not leak through.
+    const patch = waiverToProfileFields({
+      ...fields,
+      pdf_path: "x.pdf",
+      signer_ip: "203.0.113.7",
+      email: "ada@example.com",
+    } as never);
+    expect(patch).toEqual(fields);
+  });
+});
+
+describe("deriveWaiverListStatuses", () => {
+  const row = (over: {
+    id: string;
+    profile_id?: string;
+    approval_status?: string;
+    approved_at?: string | null;
+    signed_at?: string;
+  }) => ({
+    profile_id: "p1",
+    approval_status: "pending",
+    approved_at: null,
+    signed_at: "2026-01-01T00:00:00Z",
+    ...over,
+  });
+
+  it("marks unapproved waivers pending", () => {
+    const statuses = deriveWaiverListStatuses([row({ id: "w1" })]);
+    expect(statuses.get("w1")).toBe("pending");
+  });
+
+  it("marks the latest approved waiver active and older approved ones superseded", () => {
+    const statuses = deriveWaiverListStatuses([
+      row({ id: "old", approval_status: "approved", approved_at: "2026-01-02T00:00:00Z" }),
+      row({ id: "new", approval_status: "approved", approved_at: "2026-03-02T00:00:00Z" }),
+      row({ id: "pending" }),
+    ]);
+    expect(statuses.get("new")).toBe("active");
+    expect(statuses.get("old")).toBe("superseded");
+    expect(statuses.get("pending")).toBe("pending");
+  });
+
+  it("tracks active per person, not globally", () => {
+    const statuses = deriveWaiverListStatuses([
+      row({
+        id: "a1",
+        profile_id: "pa",
+        approval_status: "approved",
+        approved_at: "2026-01-01T00:00:00Z",
+      }),
+      row({
+        id: "b1",
+        profile_id: "pb",
+        approval_status: "approved",
+        approved_at: "2026-02-01T00:00:00Z",
+      }),
+    ]);
+    expect(statuses.get("a1")).toBe("active");
+    expect(statuses.get("b1")).toBe("active");
+  });
+
+  it("falls back to signed_at when approved_at is missing", () => {
+    const statuses = deriveWaiverListStatuses([
+      row({
+        id: "w1",
+        approval_status: "approved",
+        approved_at: null,
+        signed_at: "2026-01-01T00:00:00Z",
+      }),
+      row({
+        id: "w2",
+        approval_status: "approved",
+        approved_at: null,
+        signed_at: "2026-02-01T00:00:00Z",
+      }),
+    ]);
+    expect(statuses.get("w2")).toBe("active");
+    expect(statuses.get("w1")).toBe("superseded");
   });
 });
 

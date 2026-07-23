@@ -220,13 +220,15 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     ]);
     if (error) throw new Error(error.message);
 
-    // Has this person signed a waiver? Their waivers hang off their profile.
+    // Does this person have an ACTIVE (approved) waiver? Pending submissions
+    // don't count until a manager approves one.
     let hasWaiver = false;
     if (profile) {
       const { count } = await profileAdmin(admin)
         .from("waivers")
         .select("id", { count: "exact", head: true })
-        .eq("profile_id", profile.id);
+        .eq("profile_id", profile.id)
+        .eq("approval_status", "approved");
       hasWaiver = (count ?? 0) > 0;
     }
     const utsStudentNumber = profile?.uts_student_number ?? null;
@@ -510,7 +512,13 @@ export const listClubUsers = createServerFn({ method: "GET" })
           .limit(5000),
         admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
         admin.from("membership_plans").select("*"),
-        profileAdmin(admin).from("waivers").select("profile_id, signed_at").limit(5000),
+        // Approved waivers only: the directory's "has waiver" means an active,
+        // manager-approved waiver, not a pending submission.
+        profileAdmin(admin)
+          .from("waivers")
+          .select("profile_id, signed_at")
+          .eq("approval_status", "approved")
+          .limit(5000),
       ]);
     if (error) throw new Error(error.message);
 

@@ -207,22 +207,14 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
     if (!conn) throw new Error("Connect your Google account first.");
 
     const admin = supabaseAdmin as unknown as AppClient;
-    const { data: waiverRow, error: wErr } = await admin
+    // The Drive filename uses the SUBMITTED name on the waiver row (the frozen
+    // submission the PDF was generated from), not the live profile.
+    const { data: waiver, error: wErr } = await admin
       .from("waivers")
-      .select("id, signed_at, pdf_path, profiles(first_name, middle_name, last_name)")
+      .select("id, signed_at, pdf_path, first_name, middle_name, last_name")
       .eq("id", data.waiverId)
       .maybeSingle();
     if (wErr) throw new Error(wErr.message);
-    const waiver = waiverRow as unknown as {
-      id: string;
-      signed_at: string;
-      pdf_path: string | null;
-      profiles: {
-        first_name: string | null;
-        middle_name: string | null;
-        last_name: string | null;
-      } | null;
-    } | null;
     if (!waiver?.pdf_path) throw new Error("Waiver PDF not found.");
 
     const { data: pdfBlob, error: dlErr } = await supabaseAdmin.storage
@@ -241,7 +233,7 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
     }
 
     const signedDate = new Date(waiver.signed_at).toISOString().slice(0, 10);
-    const fullName = waiver.profiles ? profileFullName(waiver.profiles) : "";
+    const fullName = profileFullName(waiver);
     const safeName = fullName.replace(/[^a-z0-9\-_ ]/gi, "").trim() || "waiver";
     const name = `${signedDate} - ${safeName}.pdf`;
 
