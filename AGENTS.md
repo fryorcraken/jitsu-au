@@ -103,3 +103,21 @@ placeholder glyph for an empty value (e.g. `{value || "—"}`).
 
 When you add or change any user-facing copy (public, authenticated, or email),
 scan the diff for em dashes before committing.
+
+## Recurring build gotchas (for future agents)
+
+Two issues that have burned time recently. Fix these at the source, not by patching call sites over and over.
+
+### 1. Supabase generated types go stale after a migration
+
+Symptom (runtime, on the affected form): `Could not find the '<column>' column of '<table>' in the schema cache`. The migration ran, but `src/integrations/supabase/types.ts` (auto-generated) was not regenerated, so PostgREST rejects the insert against its cached schema view.
+
+Fix: after any `supabase--migration` that adds/renames columns or tables, regenerate `src/integrations/supabase/types.ts` in the same change. Also update `docs/database.md` per the project rule. If a `*.functions.ts` handler already casts the row payload to `never`/`unknown` to work around a stale type, that cast is a temporary bandaid: once types are regenerated, remove it.
+
+### 2. `.maybeSingle()` returns `T | null`, but helpers often take `T | undefined`
+
+Symptom (typecheck, e.g. `src/routes/api/manager/agent.ts`): `Type 'null' is not assignable to type '{...} | undefined'` when passing a `.maybeSingle()` result into a helper whose optional parameter is typed `T | undefined` (default TS optional-parameter shape).
+
+Fix at the call site: `helper(row, (plan ?? undefined) as PlanRow | undefined)`. Do NOT widen the helper signature to accept `null` just to silence one caller — `null` and `undefined` are semantically the same "no row" here and the helper's other callers already pass `undefined`. The `?? undefined` normalization keeps the boundary tidy.
+
+Rule of thumb: Supabase `.maybeSingle()` / `.select().single()` speak `null`; TS optional params speak `undefined`. Normalize at the boundary.
