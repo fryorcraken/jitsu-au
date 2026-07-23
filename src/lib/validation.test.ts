@@ -9,6 +9,7 @@ import {
   isUtsStudent,
   normalizeEmail,
   profileFullName,
+  resolveNamePrefill,
   saveTemplateSchema,
   splitFullName,
   waiverApprovalSchema,
@@ -225,6 +226,61 @@ describe("splitFullName", () => {
   it("round-trips through composeFullName for a simple name", () => {
     const { first, middle, last } = splitFullName("Ada Lovelace");
     expect(composeFullName(first, middle, last)).toBe("Ada Lovelace");
+  });
+});
+
+describe("resolveNamePrefill", () => {
+  it("uses explicit first/last when provided (register free-trial flow)", () => {
+    expect(resolveNamePrefill({ first_name: "Ada", last_name: "Lovelace" })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "Lovelace",
+    });
+  });
+
+  it("never guesses a middle name from structured params", () => {
+    // "Mary Anne" as a given name stays intact instead of being mis-split.
+    expect(resolveNamePrefill({ first_name: "Mary Anne", last_name: "Smith" })).toEqual({
+      first: "Mary Anne",
+      middle: "",
+      last: "Smith",
+    });
+  });
+
+  it("accepts a first name with no last name", () => {
+    expect(resolveNamePrefill({ first_name: "Ada" })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "",
+    });
+  });
+
+  it("trims surrounding whitespace on structured params", () => {
+    expect(resolveNamePrefill({ first_name: "  Ada  ", last_name: "  Lovelace  " })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "Lovelace",
+    });
+  });
+
+  it("falls back to splitting a single name for legacy links", () => {
+    expect(resolveNamePrefill({ name: "Ada King Lovelace" })).toEqual({
+      first: "Ada",
+      middle: "King",
+      last: "Lovelace",
+    });
+  });
+
+  it("ignores blank structured params and falls back to the legacy name", () => {
+    expect(resolveNamePrefill({ first_name: "  ", last_name: "", name: "Ada Lovelace" })).toEqual({
+      first: "Ada",
+      middle: "",
+      last: "Lovelace",
+    });
+  });
+
+  it("returns all-empty parts when nothing is provided", () => {
+    expect(resolveNamePrefill({})).toEqual({ first: "", middle: "", last: "" });
   });
 });
 

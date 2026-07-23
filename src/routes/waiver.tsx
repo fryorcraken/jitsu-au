@@ -22,10 +22,14 @@ import {
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { useAuth } from "@/hooks/useAuth";
-import { splitFullName } from "@/lib/validation";
+import { resolveNamePrefill } from "@/lib/validation";
 
 // Optional prefill carried over from Step 1 of the "Start your free trial" flow.
+// The register step now sends first_name/last_name; `name` is kept for legacy
+// links (older bookmarks or emails that carried a single combined name).
 const searchSchema = z.object({
+  first_name: z.string().max(60).optional().catch(undefined),
+  last_name: z.string().max(60).optional().catch(undefined),
   name: z.string().max(120).optional().catch(undefined),
   email: z.string().max(255).optional().catch(undefined),
   phone: z.string().max(30).optional().catch(undefined),
@@ -72,7 +76,11 @@ function Waiver() {
   const fetchMine = useServerFn(getMyProfile);
   const { user, loading: authLoading } = useAuth();
   const search = Route.useSearch();
-  const prefillName = useMemo(() => splitFullName(search.name ?? ""), [search.name]);
+  const { first_name, last_name, name } = search;
+  const prefillName = useMemo(
+    () => resolveNamePrefill({ first_name, last_name, name }),
+    [first_name, last_name, name],
+  );
 
   const [loading, setLoading] = useState(false);
   // Accepted acknowledgements keyed by the template's acknowledgement id.

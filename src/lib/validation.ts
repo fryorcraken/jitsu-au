@@ -167,6 +167,22 @@ export function splitFullName(full: string): { first: string; middle: string; la
 }
 
 /**
+ * Resolve the waiver form's name prefill from optional search params.
+ * Prefers explicit first/last (the register "free trial" flow); falls back to
+ * splitting a single `name` string for legacy links (older bookmarks / emails).
+ */
+export function resolveNamePrefill(search: {
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+}): { first: string; middle: string; last: string } {
+  const first = (search.first_name ?? "").trim();
+  const last = (search.last_name ?? "").trim();
+  if (first || last) return { first, middle: "", last };
+  return splitFullName(search.name ?? "");
+}
+
+/**
  * Decode a `data:image/png;base64,...` URL into raw PNG bytes.
  * Returns null for empty input or anything that isn't a base64 PNG data URL.
  */
