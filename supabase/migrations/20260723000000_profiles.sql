@@ -3,11 +3,12 @@
 -- A person = an auth user (their email lives there, once) + a `profiles` row
 -- keyed by that user id holding the person fields. There is no email column
 -- anywhere in public: one-profile-per-person is enforced by auth's unique
--- email. A "visitor" (someone who has provided an email, e.g. by signing the
--- waiver) is a LOCKED auth user: created server-side with a long ban and no
--- credentials, so they cannot log in. A manager approving a waiver copies the
--- submission's details onto the profile, lifts the ban, and sends a sign-in
--- email — that is the moment a visitor becomes a member with a login.
+-- email. An APPLICANT (someone who signed the waiver) is a LOCKED auth user:
+-- created server-side with a long ban and no credentials, so they cannot log
+-- in. A manager approving a waiver copies the submission's details onto the
+-- profile, lifts the ban, and sends a sign-in email — that is the moment an
+-- applicant becomes a visitor with a login. (Interest registrations are leads
+-- only: rows in interest_registrations, no person record.)
 --
 -- A waiver row is a frozen submission: exactly what was typed (including the
 -- email as submitted — evidence, not a live record), the signed PDF, when it
@@ -22,7 +23,7 @@
 -- ---------- profiles (person fields for an auth user) ----------
 CREATE TABLE public.profiles (
   user_id UUID NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  -- All person fields are nullable: a visitor profile may hold just a name and
+  -- All person fields are nullable: an applicant profile may hold just a name and
   -- phone (the email lives on auth.users). Full details arrive when a manager
   -- approves a waiver. Full name is never stored — composed from the parts.
   first_name TEXT,

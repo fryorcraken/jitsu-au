@@ -25,7 +25,12 @@ import type {
   MembershipRow,
 } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
-import type { ClubUserEmail, ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
+import type {
+  ClubUserEmail,
+  ClubUserLead,
+  ClubUserProfile,
+  ClubUserWaiver,
+} from "@/lib/club-users";
 
 /** The service-role client, viewed with the profiles/waivers-aware types. */
 function profileAdmin(admin: MembershipClient): AppClient {
@@ -131,7 +136,7 @@ async function activateMembershipRow(
   admin: MembershipClient,
   membership: MembershipRow,
   plan: MembershipPlanRow,
-  opts: { paymentMethod: MembershipRow["payment_method"] },
+  opts: { paymentMethod: MembershipRow["payment_method"]; sendEmail?: boolean },
 ): Promise<void> {
   const now = new Date();
   const nowIso = now.toISOString();
@@ -165,8 +170,9 @@ async function activateMembershipRow(
 
   // Confirmation email (best-effort — never fail activation on a send error).
   // The email lives on the auth user (the one email store); the name on the
-  // profile.
-  if (membership.user_id) {
+  // profile. Suppressed via opts.sendEmail for the auto-assigned trial, whose
+  // approval already emails a sign-in link.
+  if (membership.user_id && opts.sendEmail !== false) {
     try {
       const [{ data: profile }, emails] = await Promise.all([
         profileAdmin(admin)
@@ -192,6 +198,58 @@ async function activateMembershipRow(
       console.error("[activateMembershipRow] failed to send activation email:", e);
     }
   }
+}
+
+/**
+ * Assign the club's free trial to a person, once ever: called when a manager
+ * first approves their waiver (approved = visitor = trial assigned). Skips
+ * silently if they ever had a trial membership or no trial plan exists. The
+ * activation email is suppressed — the approval already sends their sign-in
+ * link. Not a server function: a server-side helper for the approval flow.
+ */
+export async function assignTrialMembership(userId: string): Promise<void> {
+  const admin = await adminClient();
+
+  const { data: trialPlans } = await admin.from("membership_plans").select("*").eq("kind", "trial");
+  const planIds = (trialPlans ?? []).map((p) => p.id);
+  if (!planIds.length) return;
+
+  // One free trial per person, ever (mirrors startMembership's rule).
+  const { data: existing } = await admin
+    .from("memberships")
+    .select("id")
+    .eq("user_id", userId)
+    .in("plan_id", planIds)
+    .limit(1)
+    .maybeSingle();
+  if (existing) return;
+
+  const plan = (trialPlans ?? []).find((p) => p.is_active);
+  if (!plan) return;
+
+  const { data: who } = await profileAdmin(admin)
+    .from("profiles")
+    .select("first_name, last_name")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const surname = who?.last_name || who?.first_name || "";
+
+  const { data: inserted, error } = await admin
+    .from("memberships")
+    .insert({
+      user_id: userId,
+      plan_id: plan.id,
+      status: "pending",
+      is_student: false,
+      uts_student_number: null,
+      price_cents: 0,
+      payment_reference: buildPaymentReference(surname, userId),
+      payment_method: "manual",
+    })
+    .select("*")
+    .single();
+  if (error || !inserted) throw new Error(error?.message || "Could not create trial membership.");
+  await activateMembershipRow(admin, inserted, plan, { paymentMethod: "manual", sendEmail: false });
 }
 
 // ---- Public: list active plans ----
@@ -222,7 +280,7 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
 
-    const [{ data: rows, error }, { data: plans }, { data: profile }, { count: waiverCount }] =
+    const [{ data: rows, error }, { data: plans }, { data: profile }, { data: waiverRows }] =
       await Promise.all([
         admin
           .from("memberships")
@@ -237,23 +295,25 @@ export const getMyMemberships = createServerFn({ method: "GET" })
           .select("uts_student_number")
           .eq("user_id", context.userId)
           .maybeSingle(),
-        // Does this person have an ACTIVE (approved) waiver? Pending
-        // submissions don't count until a manager approves one.
+        // Waiver states feed the lifecycle: approved => visitor+, pending-only
+        // => applicant.
         profileAdmin(admin)
           .from("waivers")
-          .select("id", { count: "exact", head: true })
+          .select("approval_status")
           .eq("user_id", context.userId)
-          .eq("approval_status", "approved"),
+          .limit(100),
       ]);
     if (error) throw new Error(error.message);
 
-    const hasWaiver = (waiverCount ?? 0) > 0;
+    const hasApprovedWaiver = (waiverRows ?? []).some((w) => w.approval_status === "approved");
+    const hasPendingWaiver = (waiverRows ?? []).length > 0 && !hasApprovedWaiver;
     const utsStudentNumber = profile?.uts_student_number ?? null;
 
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
     const memberships = (rows ?? []).map((r) => projectMembership(r, planById.get(r.plan_id)));
     const lifecycle = deriveLifecycleStatus({
-      hasWaiver,
+      hasApprovedWaiver,
+      hasPendingWaiver,
       // The generated Supabase types widen these enum columns to `string`; the
       // DB constrains them to the narrow unions deriveLifecycleStatus expects.
       memberships: (rows ?? []).map((r) => ({
@@ -523,7 +583,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { aggregateClubUsers, profileUserIds } = await import("@/lib/club-users");
 
-    const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }] =
+    const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
       await Promise.all([
         profileAdmin(admin)
           .from("profiles")
@@ -533,13 +593,19 @@ export const listClubUsers = createServerFn({ method: "GET" })
           .limit(5000),
         admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
         admin.from("membership_plans").select("*"),
-        // Approved waivers only: the directory's "has waiver" means an active,
-        // manager-approved waiver, not a pending submission.
+        // ALL waivers: approved => visitor+, pending-only => applicant.
         profileAdmin(admin)
           .from("waivers")
-          .select("user_id, signed_at")
-          .eq("approval_status", "approved")
+          .select("user_id, signed_at, approval_status")
           .limit(5000),
+        // Interest registrations are the LEAD phase of the funnel; the
+        // aggregation drops any whose email already belongs to a person.
+        admin
+          .from("interest_registrations")
+          .select("email, name, phone, created_at")
+          .order("created_at", { ascending: false })
+          .limit(2000)
+          .then((r) => (r.data ?? []) as ClubUserLead[]),
       ]);
     if (error) throw new Error(error.message);
 
@@ -565,6 +631,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
       profiles: profileRows,
       emails: [...emails].map(([user_id, email]) => ({ user_id, email })),
       waivers: waiverRows,
+      leads,
       memberships: memberships.map((m) => ({
         user_id: m.user_id,
         plan_id: m.plan_id,

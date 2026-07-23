@@ -1,4 +1,4 @@
-# Waivers, visitor profiles, and member accounts
+# Waivers, the funnel, and member accounts
 
 The product spec for how a person moves from "stranger on the website" to
 "member with a login". `docs/database.md` documents the schema that backs this;
@@ -12,29 +12,43 @@ their email (the only place any email lives) plus a **profile** carrying their
 person fields. A waiver is a **frozen submission**: exactly what was typed, the
 signed PDF, and the signer's IP and browser context. Nothing becomes official
 until a **manager approves** a submission: approval copies its details onto the
-profile, unlocks the login, and emails the person a sign-in link. The **active
-waiver** is the latest approved one; everything else is history.
+profile, unlocks the login, emails a sign-in link, and assigns the free trial.
+The **active waiver** is the latest approved one; everything else is history.
 
-## People involved
+## The funnel
 
-- **Visitor**: someone who has given the club their email, by registering for
-  the free trial or by signing the waiver. That is the moment a person starts
-  existing in the system: a **locked** login record (their email, no way to
-  sign in) plus a visitor profile (name, phone). Someone browsing the site who
-  has not provided an email is nothing in the system. (The contact form is the
-  deliberate exception: it stores a message, not a person.)
-- **Member**: a person whose waiver was approved; their login is unlocked.
-- **Manager**: club staff with the manager role.
+A person moves through these phases. The phase is always derived from their
+records, never stored.
+
+1. **Lead** — registered for the free trial ("Start your free trial" form).
+   Just a lead row; no person record, no login, nothing else exists.
+2. **Applicant** — signed the waiver. Now a person exists: a **locked** login
+   record (their email, no way to sign in) plus a profile, with the
+   submission(s) pending a manager's review.
+3. **Visitor** — a manager approved their waiver: details promoted onto the
+   profile, login unlocked (sign-in link emailed), and the free trial assigned
+   automatically on the first approval.
+4. **Member** — holds an active paid membership (semester, yearly insurance,
+   or a paid casual session).
+5. **Lapsed** — their trial or membership ended and nothing is active: the
+   people to chase for a renewal.
+
+Derivation precedence: active paid membership → member; something ended with
+nothing active → lapsed; approved waiver → visitor; submission(s) pending →
+applicant; otherwise lead.
+
+**Managers** are club staff with the manager role, orthogonal to the funnel.
+Someone browsing the site who has not provided an email is nothing in the
+system. (The contact form stores a message, not a person.)
 
 ## Rules
 
 1. **A person is identified by their email, stored exactly once** — on their
-   login record (Supabase auth), which enforces uniqueness. No email, no
-   record: nothing is stored about anyone until they provide an email. The
-   profile holds the person fields and no email.
-2. **A person starts as a visitor**: a locked login (banned, no credentials,
-   cannot sign in) plus a profile that may hold just a name and phone. They may
-   have waivers attached, or none.
+   login record (Supabase auth), which enforces uniqueness. The profile holds
+   the person fields and no email.
+2. **The person record starts at the waiver.** A lead is only a lead row;
+   signing the waiver is what creates the locked login + profile (seeded with
+   name and phone).
 3. **A waiver is a frozen submission.** The submitted fields are evidence and
    the source approval copies from, never the live person record. Signatures
    and acknowledgement ticks exist only inside the PDF. For legal/forensic
@@ -46,12 +60,13 @@ waiver** is the latest approved one; everything else is history.
 5. **The active waiver is the latest approved one.** Older approved waivers are
    superseded; unapproved ones stay pending. Screens derive this; it is not
    stored.
-6. **Approval promotes and unlocks.** Approving a waiver copies its details
-   onto the profile and, on the person's first approval, lifts the ban on their
-   login and emails them a sign-in link to set up access. Approving a newer
-   waiver later refreshes the profile again (no repeat sign-in email).
-   Unapprove only reverts the waiver's status; profile and login stay as they
-   are.
+6. **Approval promotes, unlocks, and assigns the trial.** Approving a waiver
+   copies its details onto the profile; on the person's first approval it also
+   lifts the ban on their login, emails them a sign-in link, and assigns the
+   club's free trial (one per person, ever — no activation email, they already
+   got the sign-in one). Approving a newer waiver later refreshes the profile
+   again (no repeat sign-in email, no second trial). Unapprove only reverts
+   the waiver's status; profile, login and trial stay as they are.
 7. **Full name is never stored**; it is composed from first/middle/last.
 8. **No duplicate live data.** The profile is the only record of the person
    fields, and the login record is the only place any email lives. The email
@@ -64,36 +79,29 @@ waiver** is the latest approved one; everything else is history.
 
 ## Flows
 
-### Visitor registers for the free trial
+### Lead registers for the free trial
 
 The "Start your free trial" page (`/register-interest`) is step 1: name, email
-(**required**), optional phone and a note. On submit:
+(**required**), optional phone and a note. The registration is stored as a
+lead row (`interest_registrations`) and nothing else happens — a lead is not a
+person yet. They then continue to the waiver (step 2) with name/email/phone
+carried over. Leads appear in the manager directory (merged in by email) until
+they sign the waiver.
 
-- the registration is stored as a lead row (`interest_registrations`, kept
-  as-is for the club's records), and
-- for a new email, the person starts existing: a locked login record plus a
-  visitor profile seeded from the form (name split into parts, phone, and
-  SMS/WhatsApp consent implied by providing a phone number). An existing
-  person is left untouched. Person creation is best-effort: a hiccup there
-  never loses the lead.
-
-They then continue to the waiver (step 2) with name/email/phone carried over.
-Trial registrants appear in the manager directory as prospects.
-
-### Visitor signs the waiver
+### Applicant signs the waiver
 
 Public page (`/waiver`), optionally prefilled from the free-trial flow. Email
-is required. On submit the visitor immediately gets the signed PDF and a copy
+is required. On submit the signer immediately gets the signed PDF and a copy
 by email; managers are notified. Behind the scenes, for a new email: a locked
 login record is created (their email, no way to sign in) and their profile is
 seeded with name + phone. An existing person is left untouched. Either way the
-waiver row stores the full submission.
+waiver row stores the full submission, and the person is now an applicant.
 
 ### Mistake or changed details
 
-Submit again with the same email. Always accepted, whether that email belongs
-to a visitor or a member: a resubmission attaches to the existing person and
-never modifies them. Managers decide which submission to approve.
+Submit again with the same email. Always accepted, whatever phase that email's
+person is in: a resubmission attaches to the existing person and never
+modifies them. Managers decide which submission to approve.
 
 ### Email edge cases
 
@@ -104,7 +112,7 @@ never modifies them. Managers decide which submission to approve.
   log out first.
 - **An unregistrable email** (rejected by the auth system) fails with a clear
   "check it for typos" message, never a raw database error.
-- **Signing in with a visitor's email** does nothing special: the auth page
+- **Signing in with an applicant's email** does nothing special: the auth page
   responds identically for unknown, locked, and active emails, so nothing is
   leaked about who exists.
 
@@ -112,21 +120,23 @@ never modifies them. Managers decide which submission to approve.
 
 The manager waivers screen lists submissions newest first with the submitted
 name/email, date, template version, status badge (pending / active /
-superseded), the PDF, and Approve / Unapprove. Approve = promote + unlock
-(see rule 6).
+superseded), the PDF, and Approve / Unapprove. Approve = promote + unlock +
+assign the trial (see rule 6). The applicant becomes a visitor.
 
-### Member uses the member area
+### Visitor or member uses the member area
 
 Login exists only via approval (sign-in link email; magic link or password
-thereafter). Members see: the waiver form prefilled from their profile, their
+thereafter). They see: the waiver form prefilled from their profile, their
 waiver history with the active one marked and PDFs downloadable, and
-memberships.
+memberships (buying a paid plan makes a visitor a member).
 
-### Manager looks at people
+### Manager looks at the funnel
 
-One row per person from profiles: composed name, email, phone, roles,
-lifecycle, whether they have an **active** (approved) waiver, student number,
-memberships/invoices. Feeds the manager screens and the manager agent API.
+One row per person: composed name, email, phone, roles, funnel phase, whether
+they have an active (approved) waiver, student number, memberships/invoices.
+Leads are merged in by email and drop out of the lead phase the moment they
+sign the waiver. Feeds the manager screens and the manager agent API
+(`lifecycle_status`: `lead | applicant | visitor | member | lapsed`).
 
 ## Future features (out of scope today)
 
@@ -134,6 +144,5 @@ memberships/invoices. Feeds the manager screens and the manager agent API.
   waiver, or a manager).
 - A manager action to change a person's email (one update, on the login
   record — the only place it lives).
-- Contact-form senders becoming visitors (today a contact message is just a
-  message).
+- Contact-form senders becoming leads.
 - Waiver expiry / forced re-signing on template changes.

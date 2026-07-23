@@ -216,7 +216,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       } else {
         const { data: created, error: createErr } = await admin.auth.admin.createUser({
           email,
-          ban_duration: "876000h", // ~100 years: a visitor, not a login
+          ban_duration: "876000h", // ~100 years: an applicant, not a login yet
         });
         if (createErr || !created.user) {
           // A concurrent submission may have just created the user; re-resolve
@@ -497,6 +497,16 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
         }
       } catch (e) {
         console.error("[setWaiverApproval] access provisioning failed:", e);
+      }
+
+      // Approved = visitor = trial assigned: give them the free trial on
+      // first approval (one per person, ever; skipped for later approvals).
+      // Best-effort like provisioning — re-approving retries it.
+      try {
+        const { assignTrialMembership } = await import("./membership.functions");
+        await assignTrialMembership(waiver.user_id);
+      } catch (e) {
+        console.error("[setWaiverApproval] trial assignment failed:", e);
       }
     }
 

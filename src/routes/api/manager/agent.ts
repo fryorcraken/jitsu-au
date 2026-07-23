@@ -30,7 +30,12 @@ import {
   safeEqual,
 } from "@/lib/manager-agent";
 import { aggregateClubUsers, profileUserIds } from "@/lib/club-users";
-import type { ClubUserEmail, ClubUserProfile, ClubUserWaiver } from "@/lib/club-users";
+import type {
+  ClubUserEmail,
+  ClubUserLead,
+  ClubUserProfile,
+  ClubUserWaiver,
+} from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
@@ -134,7 +139,7 @@ async function handleListUsers(params: unknown) {
   const db = await adminClient();
   const pdb = db as unknown as AppClient;
 
-  const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }] =
+  const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
     await Promise.all([
       pdb
         .from("profiles")
@@ -144,13 +149,16 @@ async function handleListUsers(params: unknown) {
         .limit(5000),
       db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
       db.from("membership_plans").select("*"),
-      // Approved waivers only: "has waiver" means an active, manager-approved
-      // waiver, not a pending submission.
-      pdb
-        .from("waivers")
-        .select("user_id, signed_at")
-        .eq("approval_status", "approved")
-        .limit(5000),
+      // ALL waivers: approved => visitor+, pending-only => applicant.
+      pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+      // Interest registrations are the LEAD phase of the funnel; the
+      // aggregation drops any whose email already belongs to a person.
+      db
+        .from("interest_registrations")
+        .select("email, name, phone, created_at")
+        .order("created_at", { ascending: false })
+        .limit(2000)
+        .then((r) => (r.data ?? []) as ClubUserLead[]),
     ]);
   if (error) throw new AgentError(500, "db_error", error.message);
 
@@ -177,6 +185,7 @@ async function handleListUsers(params: unknown) {
     profiles: profileRows,
     emails: [...emails].map(([user_id, email]) => ({ user_id, email })),
     waivers: waiverRows,
+    leads,
     memberships: memberships.map((m) => ({
       user_id: m.user_id,
       plan_id: m.plan_id,

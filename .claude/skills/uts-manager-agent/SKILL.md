@@ -48,11 +48,12 @@ All actions are `POST` with a body of `{ "action": "<name>", "params": { ... } }
 Responses are `{ "ok": true, "action", "result" }` or
 `{ "ok": false, "error": { "code", "message" } }`.
 
-### `list_users` — list members and their status
+### `list_users` — list everyone in the funnel
 
-Returns people known to the club (waiver signed and/or membership started) with
-their `lifecycle_status` (`prospect | trial | member | expired`), `roles`, and
-their `invoices` (each with an `id` you can pass to `edit_invoice`).
+Returns everyone known to the club, one row per person, with their
+`lifecycle_status` (`lead | applicant | visitor | member | lapsed`), `roles`,
+and their `invoices` (each with an `id` you can pass to `edit_invoice`). A
+`lead` (registered interest only) has `user_id: null` and no invoices.
 
 ```bash
 scripts/agent.sh list_users '{"status":"member","limit":50}'

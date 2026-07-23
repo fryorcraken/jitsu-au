@@ -28,23 +28,28 @@ type Mine = Awaited<ReturnType<typeof getMyMemberships>>;
 
 const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string; className: string }> =
   {
-    prospect: {
-      label: "Prospect",
-      blurb: "Welcome! Start with two free trial sessions, then pick a plan.",
+    lead: {
+      label: "New here",
+      blurb: "Welcome! Sign the waiver and your two free trial sessions are waiting.",
       className: "bg-slate-100 text-slate-800",
     },
-    trial: {
+    applicant: {
+      label: "Waiver pending",
+      blurb: "Your waiver is with the club for review. Hold tight!",
+      className: "bg-amber-100 text-amber-800",
+    },
+    visitor: {
       label: "On trial",
       blurb: "You're on your free trial. Join a plan when you're ready to keep training.",
-      className: "bg-amber-100 text-amber-800",
+      className: "bg-sky-100 text-sky-800",
     },
     member: {
       label: "Member",
       blurb: "You're an active member. See you on the mat!",
       className: "bg-green-100 text-green-800",
     },
-    expired: {
-      label: "Expired",
+    lapsed: {
+      label: "Lapsed",
       blurb: "Your membership has lapsed. Renew below to keep training.",
       className: "bg-red-100 text-red-800",
     },
@@ -120,7 +125,7 @@ function MembershipPage() {
     );
   }
 
-  const lifecycle = mine?.lifecycle ?? "prospect";
+  const lifecycle = mine?.lifecycle ?? "lead";
   const status = LIFECYCLE_COPY[lifecycle];
 
   return (

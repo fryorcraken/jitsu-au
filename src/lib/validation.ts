@@ -33,30 +33,6 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/**
- * Seed fields for the visitor profile created by a trial-interest
- * registration: the single name field split into parts, the phone, and the
- * SMS/WhatsApp consent implied by providing a phone number (the form's phone
- * field carries the consent note).
- */
-export function interestVisitorSeed(input: { name: string; phone?: string | null }): {
-  first_name: string | null;
-  middle_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  sms_whatsapp_consent: boolean;
-} {
-  const { first, middle, last } = splitFullName(input.name);
-  const phone = input.phone?.trim() || null;
-  return {
-    first_name: first || null,
-    middle_name: middle || null,
-    last_name: last || null,
-    phone,
-    sms_whatsapp_consent: Boolean(phone),
-  };
-}
-
 /** The person fields a waiver submission carries (as submitted, frozen). */
 export type WaiverPersonFields = {
   first_name: string;
@@ -326,8 +302,12 @@ export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 export const membershipPlanKinds = ["insurance", "trial", "session", "period"] as const;
 export type MembershipPlanKind = (typeof membershipPlanKinds)[number];
 
-/** The lifecycle a person moves through as they join the club. */
-export const lifecycleStatuses = ["prospect", "trial", "member", "expired"] as const;
+/** The lifecycle a person moves through as they join the club:
+ * lead (registered interest only) -> applicant (signed the waiver) ->
+ * visitor (waiver approved, trial assigned) -> member (active paid
+ * membership), plus lapsed (had a trial/membership that ended, nothing
+ * active). Always derived, never stored. */
+export const lifecycleStatuses = ["lead", "applicant", "visitor", "member", "lapsed"] as const;
 export type LifecycleStatus = (typeof lifecycleStatuses)[number];
 
 /** The states an enrollment record can be in. */
@@ -365,26 +345,30 @@ export function formatCents(cents: number): string {
 }
 
 /**
- * Derive a person's lifecycle status from their waiver + membership records.
- * Precedence: an active paid membership makes them a `member`; an active trial
- * (or a signed waiver with nothing paid yet) makes them `trial`; a lapsed paid
- * membership makes them `expired`; otherwise they are a `prospect`.
+ * Derive a person's lifecycle status from their waivers + membership records.
+ * Precedence:
+ *   1. member  — any ACTIVE paid membership (kind != trial, price > 0).
+ *   2. lapsed  — a trial or paid membership ended (expired/cancelled) and
+ *                nothing is active: someone to chase for a renewal.
+ *   3. visitor — an approved waiver (the free trial is assigned at approval).
+ *   4. applicant — waiver submission(s), none approved yet.
+ *   5. lead    — nothing beyond a registration (or a bare profile).
  */
 export function deriveLifecycleStatus(input: {
-  hasWaiver: boolean;
+  hasApprovedWaiver: boolean;
+  hasPendingWaiver: boolean;
   memberships: { status: MembershipStatus; kind: MembershipPlanKind; price_cents: number }[];
 }): LifecycleStatus {
   const isPaid = (m: { kind: MembershipPlanKind; price_cents: number }) =>
     m.kind !== "trial" && m.price_cents > 0;
+  const isEnded = (m: { status: MembershipStatus }) =>
+    m.status === "expired" || m.status === "cancelled";
   const active = input.memberships.filter((m) => m.status === "active");
   if (active.some(isPaid)) return "member";
-  if (active.some((m) => m.kind === "trial")) return "trial";
-  if (
-    input.memberships.some((m) => (m.status === "expired" || m.status === "cancelled") && isPaid(m))
-  )
-    return "expired";
-  if (input.hasWaiver) return "trial";
-  return "prospect";
+  if (active.length === 0 && input.memberships.some(isEnded)) return "lapsed";
+  if (input.hasApprovedWaiver) return "visitor";
+  if (input.hasPendingWaiver) return "applicant";
+  return "lead";
 }
 
 /** Uppercase + strip everything that isn't a letter or digit (for bank matching). */

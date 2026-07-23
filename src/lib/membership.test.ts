@@ -73,40 +73,46 @@ describe("deriveLifecycleStatus", () => {
     kind: "trial" as const,
     price_cents: 0,
   });
+  const none = { hasApprovedWaiver: false, hasPendingWaiver: false };
+  const pendingOnly = { hasApprovedWaiver: false, hasPendingWaiver: true };
+  const approved = { hasApprovedWaiver: true, hasPendingWaiver: false };
 
-  it("is prospect with no waiver and no memberships", () => {
-    expect(deriveLifecycleStatus({ hasWaiver: false, memberships: [] })).toBe("prospect");
+  it("is lead with no waivers and no memberships", () => {
+    expect(deriveLifecycleStatus({ ...none, memberships: [] })).toBe("lead");
   });
 
-  it("is trial when a waiver is signed but nothing is paid", () => {
-    expect(deriveLifecycleStatus({ hasWaiver: true, memberships: [] })).toBe("trial");
+  it("is applicant when a waiver is submitted but none approved", () => {
+    expect(deriveLifecycleStatus({ ...pendingOnly, memberships: [] })).toBe("applicant");
   });
 
-  it("is trial with an active trial membership", () => {
-    expect(deriveLifecycleStatus({ hasWaiver: false, memberships: [trial("active")] })).toBe(
-      "trial",
-    );
+  it("is visitor once a waiver is approved (trial assigned at approval)", () => {
+    expect(deriveLifecycleStatus({ ...approved, memberships: [] })).toBe("visitor");
+    expect(deriveLifecycleStatus({ ...approved, memberships: [trial("active")] })).toBe("visitor");
   });
 
   it("is member with an active paid membership", () => {
-    expect(deriveLifecycleStatus({ hasWaiver: true, memberships: [paid("active")] })).toBe(
-      "member",
-    );
+    expect(deriveLifecycleStatus({ ...approved, memberships: [paid("active")] })).toBe("member");
   });
 
-  it("prefers member over trial when both are active", () => {
+  it("prefers member over visitor when trial and paid are both active", () => {
     expect(
-      deriveLifecycleStatus({ hasWaiver: true, memberships: [trial("active"), paid("active")] }),
+      deriveLifecycleStatus({ ...approved, memberships: [trial("active"), paid("active")] }),
     ).toBe("member");
   });
 
-  it("is expired when a paid membership has lapsed and nothing is active", () => {
-    expect(deriveLifecycleStatus({ hasWaiver: false, memberships: [paid("expired")] })).toBe(
-      "expired",
-    );
-    expect(deriveLifecycleStatus({ hasWaiver: false, memberships: [paid("cancelled")] })).toBe(
-      "expired",
-    );
+  it("is lapsed when the trial has ended and nothing is active", () => {
+    expect(deriveLifecycleStatus({ ...approved, memberships: [trial("expired")] })).toBe("lapsed");
+  });
+
+  it("is lapsed when a paid membership has ended and nothing is active", () => {
+    expect(deriveLifecycleStatus({ ...approved, memberships: [paid("expired")] })).toBe("lapsed");
+    expect(deriveLifecycleStatus({ ...none, memberships: [paid("cancelled")] })).toBe("lapsed");
+  });
+
+  it("is visitor again when something is active alongside an ended membership", () => {
+    expect(
+      deriveLifecycleStatus({ ...approved, memberships: [trial("active"), paid("expired")] }),
+    ).toBe("visitor");
   });
 });
 

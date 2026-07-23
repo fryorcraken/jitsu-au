@@ -14,7 +14,7 @@ The schema reference for UTS Jitsu (Supabase Postgres).
 
 A person = an **auth user** (their email lives on `auth.users`, the ONLY email
 store) + a **`profiles` row keyed by that user id** (the person fields; no
-email column anywhere in `public`). A visitor is a **locked** auth user
+email column anywhere in `public`). An applicant is a **locked** auth user
 (banned, no credentials) created at first waiver submission; a manager's
 **approval** copies the submission's details onto the profile, lifts the ban,
 and emails a sign-in link (see `docs/waivers.md`). A waiver is a **frozen
@@ -51,8 +51,10 @@ signer IP and signing context, and its approval state.
 ## `profiles` — the person fields for an auth user
 
 One row per person, keyed by their auth user id. Starts as a lightweight
-visitor profile (name/phone; the email lives on `auth.users`) created at first
-waiver submission; filled in by manager approval.
+applicant profile (name/phone; the email lives on `auth.users`) created at
+first waiver submission; filled in by manager approval. The funnel phase (lead
+/ applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
+never stored.
 
 | Column                    | Type          | Null | Notes                                                                       |
 | ------------------------- | ------------- | ---- | --------------------------------------------------------------------------- |
@@ -79,14 +81,15 @@ inside the waiver PDF), and no `full_name`.
 
 **Written by (service role only):**
 
-- Waiver submission (`submitWaiverWithPdf`) and trial-interest registration
-  (`submitInterest`): for a new email, create a **locked** auth user
-  (`ban_duration` ~100y, no credentials) and seed the profile with name/phone
-  (`interestVisitorSeed` for the trial form). An existing person is left
-  untouched.
+- Waiver submission (`submitWaiverWithPdf`): for a new email, creates a
+  **locked** auth user (`ban_duration` ~100y, no credentials) and seeds the
+  profile with name/phone. An existing person is left untouched. (A
+  trial-interest registration creates NO person — leads are only rows in
+  `interest_registrations`.)
 - Manager approval (`setWaiverApproval`): copies the approved submission's
   person fields onto the profile (`waiverToProfileFields`); on first approval
-  lifts the ban and sends a sign-in email.
+  lifts the ban, sends a sign-in email, and assigns the free trial
+  (`assignTrialMembership`, one per person ever, activation email suppressed).
 - `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
   revoked from PUBLIC/anon/authenticated): inserts the empty profile row for
   every new auth user, however created. Pure id attachment — no email matching,
@@ -241,9 +244,9 @@ service role only.
 `id` PK, `name`, `email`, `phone`, `uts_student`, `experience`, `message`,
 `sms_whatsapp_consent`, `created_at`. **RLS:** anon INSERT under a validating
 `WITH CHECK` (name/email/phone/experience/message length + email format).
-Each row is a lead record kept as submitted; the server additionally ensures a
-visitor (locked auth user + profile) exists for the email, best-effort (see
-`profiles`).
+Each row is a **lead**: kept exactly as submitted, creating no person record.
+The manager directory merges leads in by normalized email until the email
+belongs to a person (they signed the waiver).
 
 ### `contact_messages`
 
@@ -255,7 +258,7 @@ INSERT under a validating `WITH CHECK`.
 ## `auth.users` (Supabase-managed)
 
 The person's one identity record, managed by Supabase Auth (not in our
-migrations) — **the only place any email lives**. A visitor's auth user is
+migrations) — **the only place any email lives**. An applicant's auth user is
 created **locked** (banned, no credentials) by waiver submission; approval
 lifts the ban. There is no self-serve sign-up. Two triggers fire:
 

@@ -6,7 +6,6 @@ import {
   decodeDataUrlPng,
   deriveWaiverListStatuses,
   interestSchema,
-  interestVisitorSeed,
   isUtsStudent,
   normalizeEmail,
   profileFullName,
@@ -34,28 +33,6 @@ describe("normalizeEmail", () => {
   it("trims and lowercases so case/whitespace variants map to one profile", () => {
     expect(normalizeEmail("  Ada@Example.COM ")).toBe("ada@example.com");
     expect(normalizeEmail("already@lower.com")).toBe("already@lower.com");
-  });
-});
-
-describe("interestVisitorSeed", () => {
-  it("splits the name, keeps the phone, and implies consent from a phone", () => {
-    expect(interestVisitorSeed({ name: "Ada M Lovelace", phone: "0400 000 000" })).toEqual({
-      first_name: "Ada",
-      middle_name: "M",
-      last_name: "Lovelace",
-      phone: "0400 000 000",
-      sms_whatsapp_consent: true,
-    });
-  });
-
-  it("handles a single-word name and no phone (no consent)", () => {
-    expect(interestVisitorSeed({ name: "Ada", phone: "" })).toEqual({
-      first_name: "Ada",
-      middle_name: null,
-      last_name: null,
-      phone: null,
-      sms_whatsapp_consent: false,
-    });
   });
 });
 

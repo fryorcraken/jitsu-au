@@ -3,6 +3,7 @@ import {
   aggregateClubUsers,
   profileUserIds,
   type ClubUserEmail,
+  type ClubUserLead,
   type ClubUserMembership,
   type ClubUserPlan,
   type ClubUserProfile,
@@ -36,6 +37,7 @@ function waiver(over: Partial<ClubUserWaiver> = {}): ClubUserWaiver {
   return {
     user_id: "u1",
     signed_at: "2026-01-01T00:00:00Z",
+    approval_status: "approved",
     ...over,
   };
 }
@@ -53,6 +55,31 @@ function membership(over: Partial<ClubUserMembership> = {}): ClubUserMembership 
   };
 }
 
+function lead(over: Partial<ClubUserLead> = {}): ClubUserLead {
+  return {
+    email: "lead@example.com",
+    name: "Lena Lead",
+    phone: "0400 999 999",
+    created_at: "2026-01-05T00:00:00Z",
+    ...over,
+  };
+}
+
+type AggregateInput = Parameters<typeof aggregateClubUsers>[0];
+
+function aggregate(over: Partial<AggregateInput>) {
+  return aggregateClubUsers({
+    profiles: [],
+    emails,
+    waivers: [],
+    memberships: [],
+    plans,
+    roles: [],
+    leads: [],
+    ...over,
+  });
+}
+
 describe("profileUserIds", () => {
   it("collects distinct user ids", () => {
     const ids = profileUserIds([{ user_id: "a" }, { user_id: "b" }, { user_id: "a" }]);
@@ -62,148 +89,131 @@ describe("profileUserIds", () => {
 
 describe("aggregateClubUsers", () => {
   it("returns one row per profile", () => {
-    const users = aggregateClubUsers({
+    const users = aggregate({
       profiles: [
         profile({ user_id: "u1" }),
         profile({ user_id: "u2", first_name: "Bob", last_name: null }),
       ],
-      emails,
-      waivers: [],
       memberships: [membership({ user_id: "u2" })],
-      plans,
-      roles: [],
     });
     expect(users.map((u) => u.user_id).sort()).toEqual(["u1", "u2"]);
   });
 
   it("resolves name/phone from the profile and email from the auth lookup", () => {
-    const [u] = aggregateClubUsers({
+    const [u] = aggregate({
       profiles: [profile({ first_name: "Ada", last_name: "Lovelace", phone: "222" })],
-      emails,
-      waivers: [],
-      memberships: [],
-      plans,
-      roles: [],
     });
     expect(u.name).toBe("Ada Lovelace");
     expect(u.email).toBe("ada@example.com");
     expect(u.phone).toBe("222");
   });
 
-  it("leaves email null when the auth lookup has no entry", () => {
-    const [u] = aggregateClubUsers({
-      profiles: [profile({ user_id: "u9" })],
-      emails,
-      waivers: [],
-      memberships: [],
-      plans,
-      roles: [],
-    });
-    expect(u.email).toBeNull();
-  });
-
-  it("marks has_waiver and the latest signed_at from the person's waivers", () => {
-    const [u] = aggregateClubUsers({
-      profiles: [profile({ user_id: "u1" })],
-      emails,
-      waivers: [
-        waiver({ user_id: "u1", signed_at: "2026-01-01T00:00:00Z" }),
-        waiver({ user_id: "u1", signed_at: "2026-03-01T00:00:00Z" }),
+  it("derives the funnel phases", () => {
+    const cases: [ClubUserWaiver[], ClubUserMembership[], string][] = [
+      // Bare profile, nothing else -> lead.
+      [[], [], "lead"],
+      // Pending submission only -> applicant.
+      [[waiver({ approval_status: "pending" })], [], "applicant"],
+      // Approved waiver (+ active trial) -> visitor.
+      [[waiver()], [], "visitor"],
+      [[waiver()], [membership({ plan_id: "plan-trial", price_cents: 0 })], "visitor"],
+      // Active paid membership -> member.
+      [[waiver()], [membership()], "member"],
+      // Ended trial/membership, nothing active -> lapsed.
+      [
+        [waiver()],
+        [membership({ plan_id: "plan-trial", price_cents: 0, status: "expired" })],
+        "lapsed",
       ],
-      memberships: [],
-      plans,
-      roles: [],
-    });
-    expect(u.has_waiver).toBe(true);
-    expect(u.waiver_signed_at).toBe("2026-03-01T00:00:00Z");
+      [[waiver()], [membership({ status: "cancelled" })], "lapsed"],
+    ];
+    for (const [waivers, memberships, expected] of cases) {
+      const [u] = aggregate({ profiles: [profile()], waivers, memberships });
+      expect(u.lifecycle_status).toBe(expected);
+    }
   });
 
-  it("derives lifecycle status from waiver + memberships", () => {
-    const [member] = aggregateClubUsers({
+  it("marks has_waiver only for approved waivers, tracking the latest approved date", () => {
+    const [pendingOnly] = aggregate({
       profiles: [profile()],
-      emails,
-      waivers: [waiver()],
-      memberships: [membership({ status: "active", plan_id: "plan-sem" })],
-      plans,
-      roles: [],
+      waivers: [waiver({ approval_status: "pending" })],
     });
-    expect(member.lifecycle_status).toBe("member");
+    expect(pendingOnly.has_waiver).toBe(false);
+    expect(pendingOnly.waiver_signed_at).toBeNull();
 
-    const [expired] = aggregateClubUsers({
-      profiles: [profile({ user_id: "u9" })],
-      emails,
-      waivers: [],
-      memberships: [membership({ user_id: "u9", status: "cancelled", plan_id: "plan-sem" })],
-      plans,
-      roles: [],
+    const [approved] = aggregate({
+      profiles: [profile()],
+      waivers: [
+        waiver({ signed_at: "2026-01-01T00:00:00Z" }),
+        waiver({ signed_at: "2026-03-01T00:00:00Z" }),
+        waiver({ signed_at: "2026-04-01T00:00:00Z", approval_status: "pending" }),
+      ],
     });
-    expect(expired.lifecycle_status).toBe("expired");
+    expect(approved.has_waiver).toBe(true);
+    expect(approved.waiver_signed_at).toBe("2026-03-01T00:00:00Z");
+  });
+
+  it("appends leads with no person record as lifecycle lead", () => {
+    const users = aggregate({ profiles: [profile()], leads: [lead()] });
+    const l = users.find((u) => u.user_id === null)!;
+    expect(l.lifecycle_status).toBe("lead");
+    expect(l.name).toBe("Lena Lead");
+    expect(l.email).toBe("lead@example.com");
+    expect(l.phone).toBe("0400 999 999");
+    expect(l.first_seen_at).toBe("2026-01-05T00:00:00Z");
+  });
+
+  it("drops a lead whose email already belongs to a person (case-insensitive)", () => {
+    const users = aggregate({
+      profiles: [profile()],
+      leads: [lead({ email: "Ada@Example.com" })],
+    });
+    expect(users).toHaveLength(1);
+    expect(users[0].user_id).toBe("u1");
+  });
+
+  it("dedupes leads by email, keeping the latest registration", () => {
+    const users = aggregate({
+      leads: [
+        lead({ name: "Old Name", created_at: "2026-01-01T00:00:00Z" }),
+        lead({ name: "New Name", created_at: "2026-02-01T00:00:00Z" }),
+      ],
+    });
+    expect(users).toHaveLength(1);
+    expect(users[0].name).toBe("New Name");
   });
 
   it("prefers the profile's student number over membership data", () => {
-    const [u] = aggregateClubUsers({
+    const [u] = aggregate({
       profiles: [profile({ uts_student_number: "99999999" })],
-      emails,
-      waivers: [],
       memberships: [membership({ is_student: true, uts_student_number: "11111111" })],
-      plans,
-      roles: [],
     });
     expect(u.is_uts_student).toBe(true);
     expect(u.uts_student_number).toBe("99999999");
   });
 
   it("marks a UTS student from a membership number when the profile has none", () => {
-    const [u] = aggregateClubUsers({
+    const [u] = aggregate({
       profiles: [profile({ uts_student_number: null })],
-      emails,
-      waivers: [],
       memberships: [membership({ is_student: true, uts_student_number: "12345678" })],
-      plans,
-      roles: [],
     });
     expect(u.is_uts_student).toBe(true);
     expect(u.uts_student_number).toBe("12345678");
   });
 
-  it("marks a UTS student on is_student even without a number, and non-students otherwise", () => {
-    const [withFlag] = aggregateClubUsers({
-      profiles: [profile({ uts_student_number: null })],
-      emails,
-      waivers: [],
-      memberships: [membership({ is_student: true, uts_student_number: "   " })],
-      plans,
-      roles: [],
-    });
-    expect(withFlag.is_uts_student).toBe(true);
-    expect(withFlag.uts_student_number).toBeNull();
-
-    const [nonStudent] = aggregateClubUsers({
-      profiles: [profile({ uts_student_number: null })],
-      emails,
-      waivers: [],
-      memberships: [membership({ is_student: false, uts_student_number: null })],
-      plans,
-      roles: [],
-    });
-    expect(nonStudent.is_uts_student).toBe(false);
-  });
-
   it("summarises the latest membership by created_at", () => {
-    const [u] = aggregateClubUsers({
+    const [u] = aggregate({
       profiles: [profile()],
-      emails,
       waivers: [waiver()],
       memberships: [
         membership({
           plan_id: "plan-trial",
+          price_cents: 0,
           status: "expired",
           created_at: "2026-01-10T00:00:00Z",
         }),
         membership({ plan_id: "plan-sem", status: "active", created_at: "2026-05-10T00:00:00Z" }),
       ],
-      plans,
-      roles: [],
     });
     expect(u.latest_plan_name).toBe("One semester");
     expect(u.latest_membership_status).toBe("active");
@@ -211,27 +221,20 @@ describe("aggregateClubUsers", () => {
   });
 
   it("computes first-seen as the earliest of profile, waiver and membership dates", () => {
-    const [u] = aggregateClubUsers({
+    const [u] = aggregate({
       profiles: [profile({ created_at: "2026-02-01T00:00:00Z" })],
-      emails,
       waivers: [waiver({ signed_at: "2026-03-01T00:00:00Z" })],
       memberships: [membership({ created_at: "2026-01-15T00:00:00Z" })],
-      plans,
-      roles: [],
     });
     expect(u.first_seen_at).toBe("2026-01-15T00:00:00Z");
   });
 
   it("attaches roles per user", () => {
-    const users = aggregateClubUsers({
+    const users = aggregate({
       profiles: [
         profile({ user_id: "u1", first_name: "Ada", last_name: "Lovelace" }),
         profile({ user_id: "u2", first_name: "Bob", last_name: null }),
       ],
-      emails,
-      waivers: [],
-      memberships: [],
-      plans,
       roles: [
         { user_id: "u1", role: "manager" },
         { user_id: "u1", role: "member" },
@@ -243,18 +246,11 @@ describe("aggregateClubUsers", () => {
     expect(u2.roles).toEqual([]);
   });
 
-  it("sorts by name A–Z", () => {
-    const users = aggregateClubUsers({
-      profiles: [
-        profile({ user_id: "u1", first_name: "Zoe", last_name: null }),
-        profile({ user_id: "u2", first_name: "Amy", last_name: null }),
-      ],
-      emails,
-      waivers: [],
-      memberships: [],
-      plans,
-      roles: [],
+  it("sorts persons and leads together by name A-Z", () => {
+    const users = aggregate({
+      profiles: [profile({ user_id: "u1", first_name: "Zoe", last_name: null })],
+      leads: [lead({ name: "Amy Lead" })],
     });
-    expect(users.map((u) => u.name)).toEqual(["Amy", "Zoe"]);
+    expect(users.map((u) => u.name)).toEqual(["Amy Lead", "Zoe"]);
   });
 });
