@@ -70,7 +70,7 @@ async function sendOne(opts: {
 }
 
 export interface InterestEmailParams {
-  /** Stable id (the inserted registration row) used to key idempotent sends. */
+  /** Unique per-submission id used to key idempotent sends. */
   registrationId: string;
   name: string;
   email: string;

@@ -41,11 +41,10 @@ export const submitInterest = createServerFn({ method: "POST" })
     };
     // A registration is a LEAD: just this row, nothing else. The person record
     // (locked login + profile) starts later, when they sign the waiver.
-    const { data: inserted, error } = await supabase
-      .from("interest_registrations")
-      .insert(interestRow as never)
-      .select("id")
-      .single();
+    // NB: this table grants anon INSERT only (no SELECT), so we must NOT ask
+    // PostgREST to return the row (`.select()`) — that needs SELECT privilege
+    // and would error. The idempotency key below is generated instead.
+    const { error } = await supabase.from("interest_registrations").insert(interestRow as never);
     if (error) throw new Error(error.message);
 
     // Best-effort transactional emails: confirm to the applicant (nudging them
@@ -55,7 +54,10 @@ export const submitInterest = createServerFn({ method: "POST" })
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const { sendInterestEmails } = await import("@/lib/interest-email.server");
       await sendInterestEmails({
-        registrationId: (inserted as { id: string }).id,
+        // Unique per submission: keeps the email provider's idempotency keys
+        // distinct across separate registrations (the anon insert can't return
+        // a row id, and this table has no natural key — leads are unlimited).
+        registrationId: crypto.randomUUID(),
         name: data.name,
         email: data.email,
         phone: data.phone || null,
