@@ -40,7 +40,10 @@ function profileAdmin(admin: MembershipClient): AppClient {
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
  * service-role `user_emails` RPC. Returns an empty map on lookup failure so
- * callers degrade to missing emails rather than erroring.
+ * callers degrade to missing emails rather than erroring. Degraded mode in the
+ * directory: persons render with a null email, and leads (matched to persons by
+ * email) are not deduped against them, so a person mid-funnel could transiently
+ * appear twice — acceptable, since the RPC failing is rare and non-destructive.
  */
 async function emailsByUserId(
   admin: MembershipClient,
@@ -581,7 +584,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
-    const { aggregateClubUsers, profileUserIds } = await import("@/lib/club-users");
+    const { aggregateClubUsers, profileUserIds, LEADS_LIMIT } = await import("@/lib/club-users");
 
     const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
       await Promise.all([
@@ -604,10 +607,17 @@ export const listClubUsers = createServerFn({ method: "GET" })
           .from("interest_registrations")
           .select("email, name, phone, created_at")
           .order("created_at", { ascending: false })
-          .limit(2000)
+          .limit(LEADS_LIMIT)
           .then((r) => (r.data ?? []) as ClubUserLead[]),
       ]);
     if (error) throw new Error(error.message);
+
+    // Surface the cap rather than silently truncating the funnel's lead list.
+    if (leads.length >= LEADS_LIMIT) {
+      console.warn(
+        `[listClubUsers] interest_registrations capped at ${LEADS_LIMIT}; leads truncated`,
+      );
+    }
 
     const memberships = (rows ?? []) as MembershipRow[];
     const profileRows = (profiles ?? []) as ClubUserProfile[];

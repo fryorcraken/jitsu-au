@@ -29,7 +29,7 @@ import {
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
-import { aggregateClubUsers, profileUserIds } from "@/lib/club-users";
+import { aggregateClubUsers, profileUserIds, LEADS_LIMIT } from "@/lib/club-users";
 import type {
   ClubUserEmail,
   ClubUserLead,
@@ -42,7 +42,9 @@ import type { AppClient } from "@/lib/profile-types";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
- * service-role `user_emails` RPC; empty map on failure.
+ * service-role `user_emails` RPC; empty map on failure. Degraded mode: persons
+ * render with a null email and leads aren't deduped against them (a person
+ * could transiently appear twice) — rare and non-destructive.
  */
 async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<Map<string, string>> {
   if (!userIds.length) return new Map();
@@ -157,10 +159,15 @@ async function handleListUsers(params: unknown) {
         .from("interest_registrations")
         .select("email, name, phone, created_at")
         .order("created_at", { ascending: false })
-        .limit(2000)
+        .limit(LEADS_LIMIT)
         .then((r) => (r.data ?? []) as ClubUserLead[]),
     ]);
   if (error) throw new AgentError(500, "db_error", error.message);
+  if (leads.length >= LEADS_LIMIT) {
+    console.warn(
+      `[agent.list_users] interest_registrations capped at ${LEADS_LIMIT}; leads truncated`,
+    );
+  }
 
   const memberships = (rows ?? []) as MembershipRow[];
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));

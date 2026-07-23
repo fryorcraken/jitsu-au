@@ -14,6 +14,9 @@
 import { deriveLifecycleStatus, normalizeEmail, profileFullName } from "./validation";
 import type { LifecycleStatus, MembershipPlanKind, MembershipStatus } from "./validation";
 
+/** Max interest-registration (lead) rows the directory pulls in one page. */
+export const LEADS_LIMIT = 2000;
+
 /** The profile fields the aggregation reads (one row per person). */
 export type ClubUserProfile = {
   user_id: string;

@@ -11,9 +11,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MembershipDatabase } from "@/lib/membership-types";
 
 /**
- * The person fields for one auth user. Starts as a lightweight visitor profile
- * (maybe just a name/phone; the email lives on auth.users); full details are
- * copied in when a manager approves a waiver.
+ * The person fields for one auth user. Starts as a lightweight applicant
+ * profile (maybe just a name/phone; the email lives on auth.users); full
+ * details are copied in when a manager approves a waiver.
  */
 export type ProfileRow = {
   user_id: string;

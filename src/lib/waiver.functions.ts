@@ -197,12 +197,12 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 
     // Every submission belongs to a person, and a person is an auth user (the
     // email lives on auth.users — the one email store). Resolve the auth user
-    // by email — an EXISTING email (visitor or member) is fine and expected:
+    // by email — an EXISTING email (any funnel phase) is fine and expected:
     // resubmission is always allowed and never modifies the existing person.
     // If the email is new to the club, create a LOCKED auth user (long ban, no
-    // credentials — they cannot log in until a manager approves a waiver and
-    // lifts the ban). The ensure_profile trigger creates the profile row; seed
-    // a new person's name/phone onto it.
+    // credentials — an applicant, not a login yet: they cannot sign in until a
+    // manager approves a waiver and lifts the ban). The ensure_profile trigger
+    // creates the profile row; seed a new person's name/phone onto it.
     let userId: string;
     if (callerId) {
       userId = callerId;
@@ -231,7 +231,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           userId = racedId;
         } else {
           userId = created.user.id;
-          // Seed the fresh visitor profile (created by the ensure_profile
+          // Seed the fresh applicant profile (created by the ensure_profile
           // trigger) with the basics. Best-effort field seed, keyed insert-safe.
           await admin.from("profiles").upsert(
             {
@@ -430,9 +430,10 @@ export const listWaivers = createServerFn({ method: "GET" })
 //
 // Approval is the promotion step: the approved submission's details are copied
 // onto the person's profile (the club's current record), and if they are still
-// a locked visitor (banned auth user, no credentials) the ban is lifted and
-// they're emailed a sign-in link to set up access. Unapprove only reverts the
-// waiver's status; the profile and login are left as they are.
+// a locked applicant (banned auth user, no credentials) the ban is lifted and
+// they're emailed a sign-in link to set up access (applicant -> visitor).
+// Unapprove only reverts the waiver's status; the profile and login are left
+// as they are.
 export const setWaiverApproval = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => waiverApprovalSchema.parse(d))
@@ -466,7 +467,7 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
         .eq("user_id", waiver.user_id);
       if (pErr) throw new Error(pErr.message);
 
-      // Provision access on FIRST approval: a visitor's auth user is banned
+      // Provision access on FIRST approval: an applicant's auth user is banned
       // (no login). Lift the ban and email a sign-in link. Skipped for people
       // who can already log in, so re-approvals don't spam sign-in emails.
       // Best-effort — a hiccup must not undo the approval; re-approving
