@@ -297,6 +297,66 @@ export type Database = {
           },
         ]
       }
+      profiles: {
+        Row: {
+          address: string | null
+          created_at: string
+          date_of_birth: string | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
+          first_name: string | null
+          guardian_name: string | null
+          guardian_relationship: string | null
+          is_minor: boolean
+          last_name: string | null
+          medical_notes: string | null
+          middle_name: string | null
+          phone: string | null
+          sms_whatsapp_consent: boolean
+          updated_at: string
+          user_id: string
+          uts_student_number: string | null
+        }
+        Insert: {
+          address?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
+          first_name?: string | null
+          guardian_name?: string | null
+          guardian_relationship?: string | null
+          is_minor?: boolean
+          last_name?: string | null
+          medical_notes?: string | null
+          middle_name?: string | null
+          phone?: string | null
+          sms_whatsapp_consent?: boolean
+          updated_at?: string
+          user_id: string
+          uts_student_number?: string | null
+        }
+        Update: {
+          address?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
+          first_name?: string | null
+          guardian_name?: string | null
+          guardian_relationship?: string | null
+          is_minor?: boolean
+          last_name?: string | null
+          medical_notes?: string | null
+          middle_name?: string | null
+          phone?: string | null
+          sms_whatsapp_consent?: boolean
+          updated_at?: string
+          user_id?: string
+          uts_student_number?: string | null
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -385,90 +445,83 @@ export type Database = {
       }
       waivers: {
         Row: {
-          acknowledgements: Json
           address: string
           created_at: string
           date_of_birth: string
           email: string
           emergency_contact_name: string
           emergency_contact_phone: string
-          first_name: string | null
-          full_name: string
+          first_name: string
           guardian_name: string | null
           guardian_relationship: string | null
-          guardian_signature: string | null
-          guardian_signature_image_path: string | null
           id: string
-          ip_hash: string | null
           is_minor: boolean
-          last_name: string | null
+          last_name: string
           medical_notes: string | null
           middle_name: string | null
           pdf_path: string | null
           phone: string
-          signature_image_path: string | null
-          signature_name: string
           signed_at: string
+          signer_ip: string | null
+          signer_meta: Json
           template_version: number | null
-          user_id: string | null
+          user_id: string
         }
         Insert: {
-          acknowledgements?: Json
           address: string
           created_at?: string
           date_of_birth: string
           email: string
           emergency_contact_name: string
           emergency_contact_phone: string
-          first_name?: string | null
-          full_name: string
+          first_name: string
           guardian_name?: string | null
           guardian_relationship?: string | null
-          guardian_signature?: string | null
-          guardian_signature_image_path?: string | null
           id?: string
-          ip_hash?: string | null
           is_minor?: boolean
-          last_name?: string | null
+          last_name: string
           medical_notes?: string | null
           middle_name?: string | null
           pdf_path?: string | null
           phone: string
-          signature_image_path?: string | null
-          signature_name: string
           signed_at?: string
+          signer_ip?: string | null
+          signer_meta?: Json
           template_version?: number | null
-          user_id?: string | null
+          user_id: string
         }
         Update: {
-          acknowledgements?: Json
           address?: string
           created_at?: string
           date_of_birth?: string
           email?: string
           emergency_contact_name?: string
           emergency_contact_phone?: string
-          first_name?: string | null
-          full_name?: string
+          first_name?: string
           guardian_name?: string | null
           guardian_relationship?: string | null
-          guardian_signature?: string | null
-          guardian_signature_image_path?: string | null
           id?: string
-          ip_hash?: string | null
           is_minor?: boolean
-          last_name?: string | null
+          last_name?: string
           medical_notes?: string | null
           middle_name?: string | null
           pdf_path?: string | null
           phone?: string
-          signature_image_path?: string | null
-          signature_name?: string
           signed_at?: string
+          signer_ip?: string | null
+          signer_meta?: Json
           template_version?: number | null
-          user_id?: string | null
+          user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "waivers_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
     }
     Views: {
@@ -482,6 +535,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      user_emails: {
+        Args: { _user_ids: string[] }
+        Returns: {
+          email: string
+          user_id: string
+        }[]
+      }
+      user_id_by_email: { Args: { _email: string }; Returns: string }
     }
     Enums: {
       app_role: "manager" | "member"
