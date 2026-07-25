@@ -186,6 +186,41 @@ Core tables:
 Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
 is via short-lived signed URLs.
 
+### Sequencing schema changes and the code that depends on them
+
+The database and the app deploy through **different paths** — Lovable applies
+`supabase/migrations/**` to Cloud when it syncs the branch, while the app code
+ships with the branch — so the two can drift. Merged code that calls a new RPC
+or reads a new column **before the migration is live** fails at runtime with
+errors like `Could not find the function public.user_id_by_email in the schema
+cache`, or a missing-column error. Sequence the two using **expand/contract**
+(parallel change), and prefer **separate PRs** so a human gate sits between the
+schema and the code:
+
+- **Additive schema the new code needs** (new tables, columns, functions):
+  land the **migration first, in its own PR**. Confirm it is applied to the live
+  DB and the PostgREST schema cache is reloaded (`NOTIFY pgrst, 'reload schema'`),
+  and that the new object actually exists, **then** merge the code PR that uses
+  it. Additive changes are backward compatible, so the currently-deployed old
+  code keeps working in the gap. This is the "DB change first, code second" rule
+  — and it only holds for additive changes.
+- **Destructive schema** (drop/rename a column, `TRUNCATE`, remove a function):
+  the **opposite** order. Ship and deploy the code that stops using the old shape
+  first, then merge a migration that removes it. Never drop or rename something
+  the currently-live code still reads — that breaks it in the window before the
+  new code deploys.
+- A migration that **both adds and drops** (a table reshape — e.g. the profiles
+  migration that created `user_id_by_email` _and_ dropped `waivers` columns and
+  `TRUNCATE`d) is really two phases. Split it: the additive expand phase goes
+  live before the code, the destructive contract phase after.
+- Keep each migration backward compatible within a single deploy step where you
+  can (add-then-backfill-then-switch rather than rename-in-place). Keep
+  `docs/database.md` aligned in the **code** PR that introduces the usage.
+
+Note: neither the unit suite nor CI (`bun run build` is Rollup-only, no live DB)
+catches schema/code drift or preview-only bundler-interop faults — sequencing
+and a browser/DB smoke check are the real guards.
+
 ## Key business flows
 
 - **Waiver signing** (`routes/waiver.tsx` → `lib/waiver.functions.ts`
@@ -252,7 +287,7 @@ is via short-lived signed URLs.
     role) and directly as an RPC by the app to check manager status. Revoking
     `EXECUTE` / `SECURITY INVOKER` would break every manager check, so this is
     intentional and permanently allowlisted. If the dashboard ever flags a
-    *different* SECURITY-DEFINER function as authenticated-executable, that is a
+    _different_ SECURITY-DEFINER function as authenticated-executable, that is a
     real live-DB grant drift CI can't see (fresh migrations revoke it) — fix it
     with a migration re-asserting the `REVOKE EXECUTE`, don't allowlist it.
 
