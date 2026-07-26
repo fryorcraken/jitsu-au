@@ -18,3 +18,14 @@
 # The lint's suggested fix (revoke EXECUTE / SECURITY INVOKER) would break every
 # manager check and RLS policy, so this exposure is intentional and accepted.
 authenticated_security_definer_function_executable_public_has_role
+
+# public.has_active_paid_membership(_user_id) is the calendar's "is this person a
+# paid member" check (active membership, plan kind <> 'trial', price > 0). It is
+# called inside the calendar_events RLS policy that exposes members-only events,
+# so it is evaluated as the querying role and `authenticated` must keep EXECUTE
+# (anon and PUBLIC are revoked in migration 20260726000000). It is SECURITY
+# DEFINER on purpose: the policy must not depend on the caller's own RLS over
+# memberships/membership_plans, or deactivating a plan would silently revoke a
+# member's access. Revoking EXECUTE / SECURITY INVOKER would break members-only
+# visibility, so this exposure is intentional and accepted.
+authenticated_security_definer_function_executable_public_has_active_paid_membership

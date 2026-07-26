@@ -201,6 +201,96 @@ writes.
 
 ---
 
+## Calendar
+
+The club's training schedule and events. A manager defines a **series** (a weekly
+class with a start date and an optional end date); the app materializes it into
+dated **events**. One-off events (grading, seminars) are events with no series.
+Any signed-in person may RSVP; paid members additionally see members-only events
+and get them in their personal calendar feed. See `docs/calendar.md` for the
+product flows.
+
+**`has_active_paid_membership(_user_id uuid) → boolean`** — SECURITY DEFINER SQL
+helper (`SET search_path = public`) used by the events RLS policy: true when the
+person has an `active` membership whose plan `kind <> 'trial'` and whose
+`price_cents > 0`, mirroring `deriveLifecycleStatus`. EXECUTE is revoked from
+PUBLIC/anon and granted to `authenticated` (it is evaluated inside RLS as the
+querying role) + `service_role`. It is acknowledged in
+`supabase/lint/advisors-allowlist.txt` for the same reason as `has_role`.
+
+### `calendar_series` — recurring-session definitions
+
+| Column             | Type          | Null | Notes                                                |
+| ------------------ | ------------- | ---- | ---------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                         |
+| `title`            | `text`        | no   | e.g. "Beginner Gi".                                  |
+| `description`      | `text`        | yes  |                                                      |
+| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.              |
+| `location`         | `text`        | no   | Default `'UTS Ultimo'`.                              |
+| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).            |
+| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                |
+| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                         |
+| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.    |
+| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`. |
+| `is_active`        | `boolean`     | no   | Default `true`.                                      |
+| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.      |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                     |
+| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                       |
+
+**RLS:** anyone reads active series; managers read all and insert/update/delete.
+
+### `calendar_events` — dated occurrences and one-off events
+
+| Column            | Type          | Null | Notes                                                                           |
+| ----------------- | ------------- | ---- | ------------------------------------------------------------------------------- |
+| `id`              | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                    |
+| `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE SET NULL`. NULL = one-off.            |
+| `kind`            | `text`        | no   | `session\|grading\|seminar\|social\|other`. Default `session`.                  |
+| `title`           | `text`        | no   |                                                                                 |
+| `description`     | `text`        | yes  |                                                                                 |
+| `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                     |
+| `location`        | `text`        | no   | Default `'UTS Ultimo'`.                                                         |
+| `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                     |
+| `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
+| `all_day`         | `boolean`     | no   | Default `false`.                                                                |
+| `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |
+| `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only. |
+| `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.          |
+| `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                 |
+| `created_at`      | `timestamptz` | no   | Default `now()`.                                                                |
+| `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                  |
+
+Partial unique index on `(series_id, starts_at) WHERE series_id IS NOT NULL`
+keeps date generation idempotent. **RLS:** everyone (incl. anon) reads
+`visibility = 'public'`; a second policy adds `members` events for callers where
+`has_active_paid_membership(auth.uid())` or `has_role(auth.uid(),'manager')` —
+policies are OR'd, so a paid member sees both sets. Cancelled events stay
+readable so the cancellation shows. Managers insert/update/delete.
+
+### `event_rsvps` — who's coming
+
+`id` PK, `event_id → calendar_events(id) ON DELETE CASCADE`,
+`user_id → auth.users(id) ON DELETE CASCADE`, `response`
+(`going|maybe|declined`), `created_at`, `updated_at`, `UNIQUE(event_id,
+user_id)`. RSVP is open to **any signed-in person**, trial visitors included.
+**RSVP:** a person reads/inserts/updates/deletes their own rows; managers read
+all (the attendance view). The server also refuses an RSVP to a members-only
+event from someone who can't see it, and to a cancelled event.
+
+### `calendar_feed_tokens` — per-person private calendar links
+
+`id` PK, `user_id → auth.users(id) ON DELETE CASCADE`, `token_prefix`,
+`token_hash` (SHA-256, unique; raw shown once), `created_at`, `last_used_at`,
+`revoked_at`. Partial indexes: fast lookup of live tokens by hash, and at most
+one live token per person. The token rides in the URL path
+(`/api/calendar/<token>`) since calendar apps can't send an auth header. There is
+**no public/anon feed** — a personal feed carries members-only events only while
+that person is a paid member, so a subscriber never silently misses one.
+**RLS:** a person reads/creates/revokes their own token; minting and feed lookup
+run through the service role (`token_hash` never reaches the client).
+
+---
+
 ## Manager / infrastructure tables
 
 ### `user_roles`
