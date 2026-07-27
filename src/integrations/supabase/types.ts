@@ -465,8 +465,10 @@ export type Database = {
           signer_ip: string | null
           signer_meta: Json
           sms_whatsapp_consent: boolean
+          sms_whatsapp_consent: boolean
           template_version: number | null
           user_id: string
+          uts_student_number: string | null
           uts_student_number: string | null
         }
         Insert: {
@@ -490,8 +492,10 @@ export type Database = {
           signer_ip?: string | null
           signer_meta?: Json
           sms_whatsapp_consent?: boolean
+          sms_whatsapp_consent?: boolean
           template_version?: number | null
           user_id: string
+          uts_student_number: string | null
           uts_student_number?: string | null
         }
         Update: {
@@ -515,8 +519,10 @@ export type Database = {
           signer_ip?: string | null
           signer_meta?: Json
           sms_whatsapp_consent?: boolean
+          sms_whatsapp_consent?: boolean
           template_version?: number | null
           user_id?: string
+          uts_student_number?: string | null
           uts_student_number?: string | null
         }
         Relationships: [
