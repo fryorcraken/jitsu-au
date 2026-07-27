@@ -237,14 +237,19 @@ querying role) + `service_role`. It is acknowledged in
 | `created_at`       | `timestamptz` | no   | Default `now()`.                                     |
 | `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                       |
 
-**RLS:** anyone reads active series; managers read all and insert/update/delete.
+**RLS:** manager-only (read and write). Deliberately **not** readable by anon: the
+series is only the definition, the public surface is the dated `calendar_events`
+generated from it, and a public grant would leak the title/instructor/day/time of
+a session whose occurrences are members-only. Note `is_active = false` hides the
+definition and stops further generation, but does **not** retract dates already
+on the calendar — cancel those individually.
 
 ### `calendar_events` — dated occurrences and one-off events
 
 | Column            | Type          | Null | Notes                                                                           |
 | ----------------- | ------------- | ---- | ------------------------------------------------------------------------------- |
 | `id`              | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                    |
-| `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE SET NULL`. NULL = one-off.            |
+| `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE CASCADE`. NULL = one-off.             |
 | `kind`            | `text`        | no   | `session\|grading\|seminar\|social\|other`. Default `session`.                  |
 | `title`           | `text`        | no   |                                                                                 |
 | `description`     | `text`        | yes  |                                                                                 |
@@ -273,9 +278,12 @@ readable so the cancellation shows. Managers insert/update/delete.
 `user_id → auth.users(id) ON DELETE CASCADE`, `response`
 (`going|maybe|declined`), `created_at`, `updated_at`, `UNIQUE(event_id,
 user_id)`. RSVP is open to **any signed-in person**, trial visitors included.
-**RSVP:** a person reads/inserts/updates/deletes their own rows; managers read
-all (the attendance view). The server also refuses an RSVP to a members-only
-event from someone who can't see it, and to a cancelled event.
+**RLS:** a person reads their own rows; managers read all (the attendance view).
+Writes are **service-role only** — `authenticated` gets SELECT but no
+INSERT/UPDATE/DELETE grant, because `setRsvp` enforces two rules RLS cannot
+express (no RSVP to a members-only event you can't see, none to a cancelled or
+past event) and a direct client write would bypass exactly those. The
+owner-scoped write policies are kept as defence in depth.
 
 ### `calendar_feed_tokens` — per-person private calendar links
 
@@ -287,7 +295,10 @@ one live token per person. The token rides in the URL path
 **no public/anon feed** — a personal feed carries members-only events only while
 that person is a paid member, so a subscriber never silently misses one.
 **RLS:** a person reads/creates/revokes their own token; minting and feed lookup
-run through the service role (`token_hash` never reaches the client).
+run through the service role; `authenticated` gets SELECT only, so a client
+cannot clear its own `revoked_at` and resurrect a link it just revoked. The
+owner can read their own row including `token_hash`, which is harmless: the hash
+is not reversible and grants no access by itself.
 
 ---
 

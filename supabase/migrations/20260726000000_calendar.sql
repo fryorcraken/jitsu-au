@@ -34,7 +34,7 @@ RETURNS BOOLEAN
 LANGUAGE SQL
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $$
   SELECT EXISTS (
     SELECT 1
@@ -75,14 +75,15 @@ CREATE TABLE public.calendar_series (
   CONSTRAINT calendar_series_dates_ok CHECK (ends_on IS NULL OR ends_on >= starts_on)
 );
 
-GRANT SELECT ON public.calendar_series TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON public.calendar_series TO authenticated;
+-- Manager-only. The series is the DEFINITION; what the public sees is the dated
+-- calendar_events generated from it. Nothing public reads this table, so there
+-- is no anon grant: otherwise a session whose occurrences are members-only would
+-- still leak its title, instructor, day and time to anyone.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.calendar_series TO authenticated;
 GRANT ALL ON public.calendar_series TO service_role;
 
 ALTER TABLE public.calendar_series ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Anyone can read active series" ON public.calendar_series
-  FOR SELECT USING (is_active = true);
 CREATE POLICY "Managers can read all series" ON public.calendar_series
   FOR SELECT TO authenticated USING (public.has_role(auth.uid(), 'manager'));
 CREATE POLICY "Managers can insert series" ON public.calendar_series
@@ -97,7 +98,10 @@ CREATE POLICY "Managers can delete series" ON public.calendar_series
 CREATE TABLE public.calendar_events (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   -- NULL for a standalone event; set for a materialized session occurrence.
-  series_id UUID REFERENCES public.calendar_series(id) ON DELETE SET NULL,
+  -- CASCADE, not SET NULL: orphaned occurrences would be indistinguishable from
+  -- one-off events, stay on the public calendar, and fall out of the partial
+  -- unique index below, so re-creating the same series would duplicate them all.
+  series_id UUID REFERENCES public.calendar_series(id) ON DELETE CASCADE,
   kind TEXT NOT NULL DEFAULT 'session'
     CHECK (kind IN ('session', 'grading', 'seminar', 'social', 'other')),
   title TEXT NOT NULL,
@@ -123,7 +127,10 @@ CREATE TABLE public.calendar_events (
 CREATE INDEX calendar_events_starts_at_idx ON public.calendar_events (starts_at);
 CREATE INDEX calendar_events_series_id_idx ON public.calendar_events (series_id);
 CREATE INDEX calendar_events_status_idx ON public.calendar_events (status);
--- One materialized occurrence per series per start instant (idempotent generation).
+-- Backstop against duplicate occurrences: one per series per start instant. The
+-- app diffs against existing rows before inserting, so this only catches races.
+-- Note the partial predicate means it cannot be inferred by a bare ON CONFLICT
+-- (series_id, starts_at) — that needs the WHERE repeated, or it errors 42P10.
 CREATE UNIQUE INDEX calendar_events_series_occurrence_idx
   ON public.calendar_events (series_id, starts_at)
   WHERE series_id IS NOT NULL;
@@ -165,7 +172,13 @@ CREATE TABLE public.event_rsvps (
 CREATE INDEX event_rsvps_event_id_idx ON public.event_rsvps (event_id);
 CREATE INDEX event_rsvps_user_id_idx ON public.event_rsvps (user_id);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.event_rsvps TO authenticated;
+-- SELECT only for authenticated. RSVPs are written exclusively by the service
+-- role (setRsvp), which additionally enforces rules RLS cannot express: no RSVP
+-- to a members-only event you cannot see, and none to a cancelled event. Direct
+-- client writes would bypass exactly those checks, so the write grants are not
+-- given. The owner-scoped write policies below are kept as defence in depth for
+-- the day a grant is added back.
+GRANT SELECT ON public.event_rsvps TO authenticated;
 GRANT ALL ON public.event_rsvps TO service_role;
 
 ALTER TABLE public.event_rsvps ENABLE ROW LEVEL SECURITY;
@@ -208,13 +221,18 @@ CREATE UNIQUE INDEX calendar_feed_tokens_one_live_idx
   ON public.calendar_feed_tokens (user_id)
   WHERE revoked_at IS NULL;
 
-GRANT SELECT, INSERT, UPDATE ON public.calendar_feed_tokens TO authenticated;
+-- SELECT only. Minting and revoking both run through the service role; a client
+-- UPDATE grant would let someone clear their own revoked_at and resurrect a link
+-- they had just revoked (e.g. after leaking it).
+GRANT SELECT ON public.calendar_feed_tokens TO authenticated;
 GRANT ALL ON public.calendar_feed_tokens TO service_role;
 
 ALTER TABLE public.calendar_feed_tokens ENABLE ROW LEVEL SECURITY;
 
--- A person may see/manage their own token row. The raw token is shown once by the
--- server function that mints it; token_hash never reaches the client.
+-- A person may read their own token row. The raw token is shown once, by the
+-- server function that mints it, and is never recoverable afterwards; the row
+-- itself (including its token_hash) is readable by its owner, which is harmless
+-- since the hash is not reversible and grants no access on its own.
 CREATE POLICY "Users can view their own feed token" ON public.calendar_feed_tokens
   FOR SELECT TO authenticated USING (auth.uid() = user_id);
 CREATE POLICY "Users can create their own feed token" ON public.calendar_feed_tokens
