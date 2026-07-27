@@ -24,7 +24,13 @@ import {
 } from "@/lib/validation";
 import { CLUB_TIME_ZONE, diffOccurrences, generateOccurrences } from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
-import type { CalendarClient, CalendarEventRow, CalendarSeriesRow } from "@/lib/calendar-types";
+import type {
+  CalendarClient,
+  CalendarEventSelection,
+  CalendarEventUpdate,
+  CalendarSeriesRow,
+  CalendarSeriesUpdate,
+} from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
 
 const SITE_URL = "https://jitsu.au";
@@ -102,7 +108,7 @@ async function requestOrigin(): Promise<string> {
   }
 }
 
-function projectEvent(e: CalendarEventRow) {
+function projectEvent(e: CalendarEventSelection) {
   return {
     id: e.id,
     series_id: e.series_id,
@@ -448,7 +454,7 @@ export const updateSeries = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
     const { id, ...fields } = data;
-    const patch: Record<string, unknown> = { ...fields, updated_at: new Date().toISOString() };
+    const patch: CalendarSeriesUpdate = { ...fields, updated_at: new Date().toISOString() };
     const { error } = await admin.from("calendar_series").update(patch).eq("id", id);
     if (error) throw new Error(error.message);
     return { ok: true as const, id };
@@ -515,7 +521,7 @@ export const updateEvent = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
     const { id, ...fields } = data;
-    const patch: Record<string, unknown> = { ...fields, updated_at: new Date().toISOString() };
+    const patch: CalendarEventUpdate = { ...fields, updated_at: new Date().toISOString() };
     const { error } = await admin.from("calendar_events").update(patch).eq("id", id);
     if (error) throw new Error(error.message);
     return { ok: true as const, id };

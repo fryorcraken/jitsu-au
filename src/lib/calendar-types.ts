@@ -1,86 +1,54 @@
 // Row/client type aliases for the calendar tables.
 //
-// The calendar migration (20260726000000_calendar.sql) is newer than the last
-// Lovable types regen, so this module hand-writes the current rows and layers
-// them onto the app Database (which already adds profiles/waivers). Once Lovable
-// regenerates the generated types, these aliases can collapse into them.
+// These were hand-written while the calendar migration was newer than the last
+// Lovable types regen. The types have since been regenerated and now carry
+// calendar_series, calendar_events, event_rsvps, calendar_feed_tokens, the
+// has_active_paid_membership RPC and user_emails — everything the calendar
+// touches — so the aliases point straight at the generated definitions. Keeping
+// a second hand-written copy would silently go stale the next time a column
+// changes, and intersecting one with the generated table produced conflicting
+// row types.
+//
+// Note this deliberately builds on the plain generated `Database`, not on
+// `AppDatabase`: that one overrides `waivers` with columns the generated types
+// still lack, which makes it incompatible with the client the auth middleware
+// hands to a server function.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AppDatabase } from "@/lib/profile-types";
+import type { Database } from "@/integrations/supabase/types";
 
-export type CalendarSeriesRow = {
-  id: string;
-  title: string;
-  description: string | null;
-  instructor_name: string | null;
-  location: string;
-  weekday: number;
-  start_time: string;
-  duration_minutes: number;
-  starts_on: string;
-  /** NULL = open-ended (recurs indefinitely). */
-  ends_on: string | null;
-  is_active: boolean;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-};
+type Tables = Database["public"]["Tables"];
 
-export type CalendarEventRow = {
-  id: string;
-  series_id: string | null;
-  kind: string;
-  title: string;
-  description: string | null;
-  instructor_name: string | null;
-  location: string;
-  starts_at: string;
-  ends_at: string;
-  all_day: boolean;
-  status: string;
-  /** ACCESS: 'public' | 'members' (members = paid members only). */
-  visibility: string;
-  /** DISPLAY ONLY: badges the event "invite only"; enforces nothing. */
-  invite_only: boolean;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-};
+export type CalendarSeriesRow = Tables["calendar_series"]["Row"];
+export type CalendarEventRow = Tables["calendar_events"]["Row"];
+export type EventRsvpRow = Tables["event_rsvps"]["Row"];
+export type CalendarFeedTokenRow = Tables["calendar_feed_tokens"]["Row"];
 
-export type EventRsvpRow = {
-  id: string;
-  event_id: string;
-  user_id: string;
-  response: string;
-  created_at: string;
-  updated_at: string;
-};
+/**
+ * The columns the calendar reads for display. Selecting a subset narrows the
+ * row type, so projections take this rather than the full row.
+ */
+export type CalendarEventSelection = Pick<
+  CalendarEventRow,
+  | "id"
+  | "series_id"
+  | "kind"
+  | "title"
+  | "description"
+  | "instructor_name"
+  | "location"
+  | "starts_at"
+  | "ends_at"
+  | "all_day"
+  | "status"
+  | "visibility"
+  | "invite_only"
+>;
 
-export type CalendarFeedTokenRow = {
-  id: string;
-  user_id: string;
-  token_prefix: string;
-  token_hash: string;
-  created_at: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
-};
+/** The feed additionally needs updated_at, which drives the ICS SEQUENCE. */
+export type CalendarFeedSelection = CalendarEventSelection & Pick<CalendarEventRow, "updated_at">;
 
-// Loose Insert/Update: handlers build explicit literal objects, so a permissive
-// partial shape is enough for the Supabase client generics.
-type TableDef<Row> = { Row: Row; Insert: Partial<Row>; Update: Partial<Row>; Relationships: [] };
+/** Generated Update shapes, so patches are checked rather than cast to a bag. */
+export type CalendarSeriesUpdate = Tables["calendar_series"]["Update"];
+export type CalendarEventUpdate = Tables["calendar_events"]["Update"];
 
-export type CalendarDatabase = Omit<AppDatabase, "public"> & {
-  public: Omit<AppDatabase["public"], "Tables" | "Functions"> & {
-    Tables: AppDatabase["public"]["Tables"] & {
-      calendar_series: TableDef<CalendarSeriesRow>;
-      calendar_events: TableDef<CalendarEventRow>;
-      event_rsvps: TableDef<EventRsvpRow>;
-      calendar_feed_tokens: TableDef<CalendarFeedTokenRow>;
-    };
-    Functions: AppDatabase["public"]["Functions"] & {
-      has_active_paid_membership: { Args: { _user_id: string }; Returns: boolean };
-    };
-  };
-};
-
-export type CalendarClient = SupabaseClient<CalendarDatabase>;
+export type CalendarClient = SupabaseClient<Database>;

@@ -12,7 +12,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { hashToken } from "@/lib/manager-api-tokens";
 import { buildCalendar, type IcsEvent } from "@/lib/ics";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
-import type { CalendarClient, CalendarEventRow } from "@/lib/calendar-types";
+import type { CalendarClient, CalendarFeedSelection } from "@/lib/calendar-types";
 
 const FEED_WINDOW_PAST_DAYS = 30;
 const FEED_WINDOW_FUTURE_DAYS = 180;
@@ -21,7 +21,7 @@ function dateFromNow(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString();
 }
 
-function toIcsEvent(e: CalendarEventRow): IcsEvent {
+function toIcsEvent(e: CalendarFeedSelection): IcsEvent {
   const detail = [
     e.description ?? "",
     e.instructor_name ? `Instructor: ${e.instructor_name}` : "",
