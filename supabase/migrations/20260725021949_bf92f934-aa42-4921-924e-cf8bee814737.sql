@@ -15,7 +15,7 @@
 -- CREATE TABLE with `relation "profiles" already exists` (SQLSTATE 42P07), so
 -- `supabase db start` never finished and the Advisors / plpgsql_check job in
 -- .github/workflows/supabase-lint.yml could not run at all. Making just the
--- CREATE TABLE idempotent is not enough -- every following statement collides
+-- CREATE TABLE idempotent is not enough: every following statement collides
 -- the same way (the policies, the trigger, the duplicate signer_meta and
 -- user_id columns), and the rename has no old column left to rename.
 --
@@ -28,5 +28,6 @@
 -- See issue #53.
 
 -- Retained from the original file: harmless, idempotent, and the reason the
--- edit existed at all -- it tells PostgREST to pick up the reshaped schema.
+-- edit existed at all. It tells PostgREST to pick up the reshaped schema, and
+-- it keeps this file from being empty.
 NOTIFY pgrst, 'reload schema';
