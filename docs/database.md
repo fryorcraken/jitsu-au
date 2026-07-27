@@ -43,8 +43,10 @@ signer IP and signing context, and its approval state.
 - **Money** is integer cents. **Timestamps** are `timestamptz`. **Emails** are
   stored lowercased/trimmed so the unique key dedupes case variants.
 - **Storage:** the private `waivers` bucket holds the signed PDFs; access is via
-  short-lived service-role signed URLs. The bucket is provisioned outside SQL
-  migrations.
+  short-lived service-role signed URLs. Migration
+  `20260727120000_waiver_storage_policies.sql` owns the bucket's access model:
+  it asserts `public = false`, clears any dashboard-created policy scoped to the
+  bucket, and adds the `storage.objects` policies below.
 
 ---
 
@@ -148,6 +150,21 @@ person, the latest approved waiver is active.
 
 **RLS:** owner reads their own (`user_id = auth.uid()`); managers read all and
 UPDATE (approval). Inserts are service-role only.
+
+**PDF storage RLS** (`storage.objects`, `bucket_id = 'waivers'`): objects are
+named `<waiver id>.pdf`, which is exactly what `pdf_path` stores, so ownership
+is resolved by looking up the waiver row rather than by parsing the path.
+
+| Operation                  | Who                                                                                           |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| `SELECT`                   | the waiver's owner (`waivers.pdf_path = objects.name AND user_id = auth.uid()`), or a manager |
+| `INSERT`/`UPDATE`/`DELETE` | managers only                                                                                 |
+
+Owners deliberately get **no** write access: the PDF is frozen evidence (the
+signatures and acknowledgement ticks exist only inside it), so a signer must not
+be able to overwrite or delete what they signed. `anon` gets nothing. None of
+this is on the app's hot path today, since uploads and downloads both run
+through the service-role client, which bypasses RLS.
 
 ---
 
