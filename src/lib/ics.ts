@@ -33,19 +33,37 @@ export function escapeIcsText(value: string): string {
     .replace(/\r\n|\n|\r/g, "\\n");
 }
 
-/** Fold a content line to <=75 octets with CRLF + single-space continuation. */
+/**
+ * Fold a content line to <=75 OCTETS with CRLF + single-space continuation.
+ *
+ * RFC 5545 counts octets, not characters, so this measures UTF-8 length: a
+ * Japanese class title or an accented instructor name is multi-byte and would
+ * otherwise overflow the limit. Chunking also stops on whole code points, so a
+ * split never lands inside a surrogate pair and mangles an emoji.
+ */
 export function foldIcsLine(line: string): string {
-  if (line.length <= 75) return line;
+  const encoder = new TextEncoder();
+  if (encoder.encode(line).length <= 75) return line;
+
   const parts: string[] = [];
-  let rest = line;
-  // First chunk 75 chars, continuations 74 (a leading space is added on unfold).
-  parts.push(rest.slice(0, 75));
-  rest = rest.slice(75);
-  while (rest.length > 0) {
-    parts.push(" " + rest.slice(0, 74));
-    rest = rest.slice(74);
+  // First line may use 75 octets; continuations lose one to the leading space.
+  let limit = 75;
+  let current = "";
+  let used = 0;
+  // Iterate code points (not UTF-16 units) so surrogate pairs stay intact.
+  for (const char of line) {
+    const size = encoder.encode(char).length;
+    if (used + size > limit) {
+      parts.push(current);
+      current = "";
+      used = 0;
+      limit = 74;
+    }
+    current += char;
+    used += size;
   }
-  return parts.join("\r\n");
+  if (current) parts.push(current);
+  return parts.map((part, i) => (i === 0 ? part : " " + part)).join("\r\n");
 }
 
 function pad(n: number, width = 2): string {
@@ -65,12 +83,40 @@ export function formatUtcDate(d: Date): string {
   return `${pad(d.getUTCFullYear(), 4)}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
 }
 
+/** The {y,m,d} an instant falls on in `timeZone` (UTC when omitted). */
+function datePartsInZone(d: Date, timeZone?: string): { y: number; m: number; d: number } {
+  if (!timeZone) return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
+  return { y: get("year"), m: get("month"), d: get("day") };
+}
+
+/**
+ * DATE value (all-day events) for the calendar day an instant falls on in
+ * `timeZone`. A Sydney all-day event on 2026-08-01 is stored as
+ * 2026-07-31T14:00:00Z, so reading the UTC date would land it a day early.
+ * `addDays` shifts the result, which DTEND needs (see below).
+ */
+export function formatDateInZone(d: Date, timeZone?: string, addDays = 0): string {
+  const { y, m, d: day } = datePartsInZone(d, timeZone);
+  const shifted = new Date(Date.UTC(y, m - 1, day + addDays));
+  return `${pad(shifted.getUTCFullYear(), 4)}${pad(shifted.getUTCMonth() + 1)}${pad(shifted.getUTCDate())}`;
+}
+
 /** The VEVENT lines for one event (unfolded content lines). */
-export function veventLines(ev: IcsEvent, dtstamp: Date): string[] {
+export function veventLines(ev: IcsEvent, dtstamp: Date, timeZone?: string): string[] {
   const lines: string[] = ["BEGIN:VEVENT", `UID:${ev.uid}`, `DTSTAMP:${formatUtcStamp(dtstamp)}`];
   if (ev.allDay) {
-    lines.push(`DTSTART;VALUE=DATE:${formatUtcDate(ev.start)}`);
-    lines.push(`DTEND;VALUE=DATE:${formatUtcDate(ev.end)}`);
+    // A DATE-valued DTEND is EXCLUSIVE (RFC 5545 3.6.1), so a single-day event
+    // ends on the FOLLOWING date. Emitting the same date gives DTEND <= DTSTART,
+    // which clients drop or render as zero-length.
+    lines.push(`DTSTART;VALUE=DATE:${formatDateInZone(ev.start, timeZone)}`);
+    lines.push(`DTEND;VALUE=DATE:${formatDateInZone(ev.end, timeZone, 1)}`);
   } else {
     lines.push(`DTSTART:${formatUtcStamp(ev.start)}`);
     lines.push(`DTEND:${formatUtcStamp(ev.end)}`);
@@ -93,6 +139,12 @@ export type BuildCalendarOptions = {
   prodId?: string;
   /** DTSTAMP for every event; defaults to now. Injectable for deterministic tests. */
   now?: Date;
+  /**
+   * Timezone whose calendar days define all-day events (e.g. "Australia/Sydney").
+   * Timed events are always emitted as absolute UTC and ignore this. Defaults to
+   * UTC, which is only right if the club also runs on UTC.
+   */
+  timeZone?: string;
 };
 
 /** Assemble a full VCALENDAR document (CRLF-terminated, folded). */
@@ -110,7 +162,7 @@ export function buildCalendar(opts: BuildCalendarOptions): string {
     lines.push(`NAME:${escapeIcsText(opts.calName)}`);
     lines.push(`X-WR-CALNAME:${escapeIcsText(opts.calName)}`);
   }
-  for (const ev of opts.events) lines.push(...veventLines(ev, dtstamp));
+  for (const ev of opts.events) lines.push(...veventLines(ev, dtstamp, opts.timeZone));
   lines.push("END:VCALENDAR");
   // Fold each content line, then join with CRLF as required by the spec.
   return lines.map(foldIcsLine).join("\r\n") + "\r\n";

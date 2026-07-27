@@ -11,6 +11,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { hashToken } from "@/lib/manager-api-tokens";
 import { buildCalendar, type IcsEvent } from "@/lib/ics";
+import { CLUB_TIME_ZONE } from "@/lib/calendar";
 import type { CalendarClient, CalendarEventRow } from "@/lib/calendar-types";
 
 const FEED_WINDOW_PAST_DAYS = 30;
@@ -38,6 +39,10 @@ function toIcsEvent(e: CalendarEventRow): IcsEvent {
     description: detail || undefined,
     location: e.location,
     cancelled: e.status === "cancelled",
+    // Clients ignore a re-sent event whose SEQUENCE hasn't advanced, so derive
+    // it from updated_at: any manager edit (time change, cancellation) bumps it
+    // and subscribers pick the change up instead of keeping the stale copy.
+    sequence: Math.floor(new Date(e.updated_at).getTime() / 1000),
   };
 }
 
@@ -67,11 +72,17 @@ export const Route = createFileRoute("/api/calendar/$token")({
           .maybeSingle();
         if (!tokenRow) return textResponse("Calendar not found.", 404);
 
-        // Best-effort usage stamp — never blocks the feed.
-        void admin
+        // Best-effort usage stamp — never blocks the feed. A PostgrestBuilder is
+        // a lazy thenable: `void builder` would never issue the request, so the
+        // .then() is what actually sends it (and swallows any failure).
+        admin
           .from("calendar_feed_tokens")
           .update({ last_used_at: new Date().toISOString() })
-          .eq("id", tokenRow.id);
+          .eq("id", tokenRow.id)
+          .then(
+            () => {},
+            () => {},
+          );
 
         // Members-only events ride along only for a paid member (or a manager).
         const [{ data: paid }, { data: isMgr }] = await Promise.all([
@@ -83,7 +94,7 @@ export const Route = createFileRoute("/api/calendar/$token")({
         let query = admin
           .from("calendar_events")
           .select(
-            "id, series_id, kind, title, description, instructor_name, location, starts_at, ends_at, all_day, status, visibility, invite_only",
+            "id, series_id, kind, title, description, instructor_name, location, starts_at, ends_at, all_day, status, visibility, invite_only, updated_at",
           )
           .gte("starts_at", dateFromNow(-FEED_WINDOW_PAST_DAYS))
           .lte("starts_at", dateFromNow(FEED_WINDOW_FUTURE_DAYS))
@@ -97,6 +108,8 @@ export const Route = createFileRoute("/api/calendar/$token")({
         const ics = buildCalendar({
           events: (events ?? []).map(toIcsEvent),
           calName: "UTS Jitsu",
+          // All-day events are the club's calendar days, not UTC's.
+          timeZone: CLUB_TIME_ZONE,
         });
         return new Response(ics, {
           status: 200,

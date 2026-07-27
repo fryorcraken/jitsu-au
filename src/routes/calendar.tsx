@@ -91,7 +91,7 @@ function CalendarPage() {
   const [seesMembersOnly, setSeesMembersOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rsvps, setRsvps] = useState<Record<string, RsvpResponse | undefined>>({});
-  const [savingRsvp, setSavingRsvp] = useState<string | null>(null);
+  const [savingRsvp, setSavingRsvp] = useState<Set<string>>(new Set());
   const [hasFeed, setHasFeed] = useState(false);
   const [feedUrl, setFeedUrl] = useState<string | null>(null);
   const [feedBusy, setFeedBusy] = useState(false);
@@ -127,7 +127,8 @@ function CalendarPage() {
   }, [loadCalendar, loadFeed, refreshRsvps]);
 
   async function respond(eventId: string, response: RsvpResponse) {
-    setSavingRsvp(eventId);
+    // Per-event, so replying to one event doesn't re-enable another's buttons.
+    setSavingRsvp((s) => new Set(s).add(eventId));
     // Optimistic update; revert on error.
     const prev = rsvps[eventId];
     setRsvps((m) => ({ ...m, [eventId]: response }));
@@ -137,11 +138,25 @@ function CalendarPage() {
       setRsvps((m) => ({ ...m, [eventId]: prev }));
       toast.error(e instanceof Error ? e.message : "Could not save your RSVP");
     } finally {
-      setSavingRsvp(null);
+      setSavingRsvp((s) => {
+        const next = new Set(s);
+        next.delete(eventId);
+        return next;
+      });
     }
   }
 
   async function createFeed() {
+    // Minting revokes the current token, so any calendar already subscribed to
+    // the old URL silently stops updating. Make that explicit.
+    if (
+      hasFeed &&
+      !window.confirm(
+        "This replaces your current calendar link. Any calendar already using the old link will stop updating. Continue?",
+      )
+    ) {
+      return;
+    }
     setFeedBusy(true);
     try {
       const { url } = await makeFeed();
@@ -214,7 +229,7 @@ function CalendarPage() {
               ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={createFeed} disabled={feedBusy}>
-                  {hasFeed ? "Show a fresh link" : "Get my calendar link"}
+                  {hasFeed ? "Replace my link" : "Get my calendar link"}
                 </Button>
                 {hasFeed ? (
                   <Button size="sm" variant="outline" onClick={removeFeed} disabled={feedBusy}>
@@ -225,7 +240,11 @@ function CalendarPage() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              <Link to="/auth" className="font-semibold text-primary underline">
+              <Link
+                to="/auth"
+                search={{ redirect: "/calendar" }}
+                className="font-semibold text-primary underline"
+              >
                 Sign in
               </Link>{" "}
               to tell us you're coming and to add this calendar to your phone. New here?{" "}
@@ -252,10 +271,13 @@ function CalendarPage() {
                 <div className="space-y-3">
                   {group.items.map((ev) => {
                     const cancelled = ev.status === "cancelled";
+                    // Recently-finished events stay listed for context, but you
+                    // can't say you're coming to something that already ran.
+                    const past = new Date(ev.ends_at) < new Date();
                     return (
                       <div
                         key={ev.id}
-                        className={cn("rounded-lg border p-4", cancelled && "opacity-60")}
+                        className={cn("rounded-lg border p-4", (cancelled || past) && "opacity-60")}
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className={cn("text-lg font-semibold", cancelled && "line-through")}>
@@ -299,7 +321,7 @@ function CalendarPage() {
                           <p className="mt-2 text-sm text-muted-foreground">{ev.description}</p>
                         )}
 
-                        {!cancelled && (
+                        {!cancelled && !past && (
                           <div className="mt-3 border-t pt-3">
                             {signedIn ? (
                               <div className="flex flex-wrap items-center gap-2">
@@ -312,7 +334,7 @@ function CalendarPage() {
                                     size="sm"
                                     variant={rsvps[ev.id] === opt.value ? "default" : "outline"}
                                     onClick={() => respond(ev.id, opt.value)}
-                                    disabled={savingRsvp === ev.id}
+                                    disabled={savingRsvp.has(ev.id)}
                                   >
                                     {opt.label}
                                   </Button>
@@ -321,6 +343,7 @@ function CalendarPage() {
                             ) : (
                               <Link
                                 to="/auth"
+                                search={{ redirect: "/calendar" }}
                                 className="text-sm font-medium text-primary underline"
                               >
                                 Sign in to RSVP

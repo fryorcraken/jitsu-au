@@ -22,7 +22,7 @@ import {
   updateEventSchema,
   updateSeriesSchema,
 } from "@/lib/validation";
-import { CLUB_TIME_ZONE, generateOccurrences } from "@/lib/calendar";
+import { CLUB_TIME_ZONE, diffOccurrences, generateOccurrences } from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
 import type { CalendarClient, CalendarEventRow, CalendarSeriesRow } from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
@@ -30,6 +30,12 @@ import type { AppClient } from "@/lib/profile-types";
 const SITE_URL = "https://jitsu.au";
 /** Default horizon (days) materialized when a series is created. */
 const DEFAULT_HORIZON_DAYS = 84;
+/**
+ * Hard ceiling on how far ahead dates can be generated in one go. Without it a
+ * far-future `through_date` against an open-ended series would enumerate tens of
+ * thousands of dates and attempt them in a single insert.
+ */
+const MAX_HORIZON_DAYS = 400;
 
 const EVENT_COLUMNS =
   "id, series_id, kind, title, description, instructor_name, location, starts_at, ends_at, all_day, status, visibility, invite_only";
@@ -123,7 +129,10 @@ export const getCalendar = createServerFn({ method: "GET" }).handler(async () =>
   let query = admin
     .from("calendar_events")
     .select(EVENT_COLUMNS)
-    .gte("starts_at", `${dateFromNow(-7)}T00:00:00.000Z`)
+    // Yesterday, not a week back: this is a "what's on" page, so it should open
+    // on what's next. The one-day margin keeps today's earlier club-time
+    // sessions visible despite the UTC date boundary falling mid-morning in Sydney.
+    .gte("starts_at", `${dateFromNow(-1)}T00:00:00.000Z`)
     .lte("starts_at", `${dateFromNow(120)}T23:59:59.999Z`)
     .order("starts_at", { ascending: true })
     .limit(500);
@@ -161,15 +170,18 @@ export const setRsvp = createServerFn({ method: "POST" })
     const admin = await adminClient();
     const { data: event, error: evErr } = await admin
       .from("calendar_events")
-      .select("id, visibility, status")
+      .select("id, visibility, status, ends_at")
       .eq("id", data.event_id)
       .maybeSingle();
     if (evErr) throw new Error(evErr.message);
     if (!event) throw new Error("Event not found.");
     if (event.visibility === "members" && !(await canSeeMembersOnly(context.userId))) {
+      // Same message as a genuinely missing event, so this can't be used to
+      // probe whether a members-only event exists.
       throw new Error("Event not found.");
     }
     if (event.status === "cancelled") throw new Error("That event has been cancelled.");
+    if (new Date(event.ends_at) < new Date()) throw new Error("That event has already finished.");
 
     const { error } = await admin.from("event_rsvps").upsert(
       {
@@ -269,13 +281,18 @@ export const listManagerEvents = createServerFn({ method: "GET" })
     const events = (data ?? []).map(projectEvent);
 
     // Attach a per-event RSVP tally so the manager sees interest at a glance.
+    // Chunked: `.in()` becomes a query-string filter, and a few hundred UUIDs
+    // blow past the proxy's request-line limit. A failure here must surface —
+    // silently rendering "0 going" everywhere would be read as "nobody came".
     const ids = events.map((e) => e.id);
     const counts = new Map<string, { going: number; maybe: number; declined: number }>();
-    if (ids.length) {
-      const { data: rsvps } = await admin
+    const CHUNK = 100;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const { data: rsvps, error: rErr } = await admin
         .from("event_rsvps")
         .select("event_id, response")
-        .in("event_id", ids);
+        .in("event_id", ids.slice(i, i + CHUNK));
+      if (rErr) throw new Error(rErr.message);
       for (const r of rsvps ?? []) {
         const tally = counts.get(r.event_id) ?? { going: 0, maybe: 0, declined: 0 };
         if (r.response === "going") tally.going += 1;
@@ -312,13 +329,17 @@ export const listEventRsvps = createServerFn({ method: "POST" })
       // Names live on profiles; the one email store is auth.users, read via the
       // service-role-only user_emails RPC.
       const pdb = admin as unknown as AppClient;
-      const [{ data: profiles }, { data: emails }] = await Promise.all([
+      const [{ data: profiles, error: pErr }, { data: emails, error: eErr }] = await Promise.all([
         pdb
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name")
           .in("user_id", userIds),
         pdb.rpc("user_emails", { _user_ids: userIds }),
       ]);
+      // Surface these: silently falling back to "Someone" with no email would
+      // look like missing data rather than a broken lookup.
+      if (pErr) throw new Error(pErr.message);
+      if (eErr) throw new Error(eErr.message);
       for (const p of profiles ?? []) nameByUser.set(p.user_id, profileFullName(p));
       for (const e of (emails ?? []) as { user_id: string; email: string }[]) {
         emailByUser.set(e.user_id, e.email);
@@ -366,21 +387,18 @@ async function materializeSeries(
     .gte("starts_at", occ[0].starts_at)
     .lte("starts_at", occ[occ.length - 1].starts_at);
   if (exErr) throw new Error(exErr.message);
-  const present = new Set((existing ?? []).map((r) => new Date(r.starts_at).toISOString()));
 
-  const rows = occ
-    .filter((o) => !present.has(new Date(o.starts_at).toISOString()))
-    .map((o) => ({
-      series_id: series.id,
-      kind: "session",
-      title: series.title,
-      description: series.description,
-      instructor_name: series.instructor_name,
-      location: series.location,
-      starts_at: o.starts_at,
-      ends_at: o.ends_at,
-      visibility: "public",
-    }));
+  const rows = diffOccurrences(existing ?? [], occ).map((o) => ({
+    series_id: series.id,
+    kind: "session",
+    title: series.title,
+    description: series.description,
+    instructor_name: series.instructor_name,
+    location: series.location,
+    starts_at: o.starts_at,
+    ends_at: o.ends_at,
+    visibility: "public",
+  }));
   if (rows.length === 0) return 0;
   const { error: insErr } = await admin.from("calendar_events").insert(rows);
   if (insErr) throw new Error(insErr.message);
@@ -450,11 +468,15 @@ export const generateSessions = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!series) throw new Error("Series not found.");
     const row = series as CalendarSeriesRow;
+    if (!row.is_active) throw new Error("That session is inactive. Reactivate it to add dates.");
+    // Clamp the requested horizon so one call can't enumerate years of dates.
+    const ceiling = dateFromNow(MAX_HORIZON_DAYS);
+    const through = data.through_date > ceiling ? ceiling : data.through_date;
     const generated = await materializeSeries(
       admin,
       row,
       row.starts_on > dateFromNow(0) ? row.starts_on : dateFromNow(0),
-      data.through_date,
+      through,
     );
     return { ok: true as const, generated };
   });

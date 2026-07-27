@@ -107,6 +107,21 @@ export type SeriesSpec = {
 export type GeneratedOccurrence = { starts_at: string; ends_at: string };
 
 /**
+ * The occurrences that don't already exist, comparing by absolute instant rather
+ * than by string so differing ISO spellings of the same moment
+ * ("2026-07-06T08:00:00+00:00" vs "...Z") don't produce a duplicate date.
+ * Pure so the de-duplication that protects the calendar from double entries is
+ * unit-testable without a database.
+ */
+export function diffOccurrences(
+  existing: { starts_at: string }[],
+  occurrences: GeneratedOccurrence[],
+): GeneratedOccurrence[] {
+  const present = new Set(existing.map((r) => new Date(r.starts_at).getTime()));
+  return occurrences.filter((o) => !present.has(new Date(o.starts_at).getTime()));
+}
+
+/**
  * Materialize a series into absolute UTC instants for every occurrence in
  * [fromISO, toISO], clamped to the series' own start/end dates. Returns ISO
  * strings ready to insert as `calendar_events.starts_at/ends_at`.

@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as ClassesRouteImport } from './routes/classes'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as FaqRouteImport } from './routes/faq'
@@ -27,6 +28,7 @@ import { Route as WaiverRouteImport } from './routes/waiver'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
+import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
@@ -34,6 +36,7 @@ import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_auth
 import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
+import { Route as ApiCalendarTokenRouteImport } from './routes/api/calendar/$token'
 import { Route as ApiManagerAgentRouteImport } from './routes/api/manager/agent'
 import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
 import { Route as LovableEmailAuthWebhookRouteImport } from './routes/lovable/email/auth/webhook'
@@ -55,6 +58,11 @@ const AboutRoute = AboutRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalendarRoute = CalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ClassesRoute = ClassesRouteImport.update({
@@ -128,6 +136,12 @@ const AuthenticatedManagerApiTokensRoute =
     path: '/manager/api-tokens',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerCalendarRoute =
+  AuthenticatedManagerCalendarRouteImport.update({
+    id: '/manager/calendar',
+    path: '/manager/calendar',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerMembershipPlansRoute =
   AuthenticatedManagerMembershipPlansRouteImport.update({
     id: '/manager/membership-plans',
@@ -170,6 +184,11 @@ const AuthenticatedManagerWaiversRoute =
     path: '/manager/waivers',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiCalendarTokenRoute = ApiCalendarTokenRouteImport.update({
+  id: '/api/calendar/$token',
+  path: '/api/calendar/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiManagerAgentRoute = ApiManagerAgentRouteImport.update({
   id: '/api/manager/agent',
   path: '/api/manager/agent',
@@ -190,6 +209,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
+  '/calendar': typeof CalendarRoute
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
@@ -204,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
+  '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -211,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
+  '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
@@ -219,6 +241,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
+  '/calendar': typeof CalendarRoute
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
@@ -233,6 +256,7 @@ export interface FileRoutesByTo {
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
+  '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -240,6 +264,7 @@ export interface FileRoutesByTo {
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
+  '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
@@ -250,6 +275,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/about': typeof AboutRoute
   '/auth': typeof AuthRoute
+  '/calendar': typeof CalendarRoute
   '/classes': typeof ClassesRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
@@ -264,6 +290,7 @@ export interface FileRoutesById {
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
+  '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -271,6 +298,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/users': typeof AuthenticatedManagerUsersRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
+  '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
@@ -281,6 +309,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/auth'
+    | '/calendar'
     | '/classes'
     | '/contact'
     | '/faq'
@@ -295,6 +324,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/membership'
     | '/manager/api-tokens'
+    | '/manager/calendar'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -302,6 +332,7 @@ export interface FileRouteTypes {
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
+    | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
@@ -310,6 +341,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/auth'
+    | '/calendar'
     | '/classes'
     | '/contact'
     | '/faq'
@@ -324,6 +356,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/membership'
     | '/manager/api-tokens'
+    | '/manager/calendar'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -331,6 +364,7 @@ export interface FileRouteTypes {
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
+    | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
@@ -340,6 +374,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/about'
     | '/auth'
+    | '/calendar'
     | '/classes'
     | '/contact'
     | '/faq'
@@ -354,6 +389,7 @@ export interface FileRouteTypes {
     | '/_authenticated/account'
     | '/_authenticated/membership'
     | '/_authenticated/manager/api-tokens'
+    | '/_authenticated/manager/calendar'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
@@ -361,6 +397,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/users'
     | '/_authenticated/manager/waiver-template'
     | '/_authenticated/manager/waivers'
+    | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
@@ -371,6 +408,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AboutRoute: typeof AboutRoute
   AuthRoute: typeof AuthRoute
+  CalendarRoute: typeof CalendarRoute
   ClassesRoute: typeof ClassesRoute
   ContactRoute: typeof ContactRoute
   FaqRoute: typeof FaqRoute
@@ -382,6 +420,7 @@ export interface RootRouteChildren {
   ThankYouRoute: typeof ThankYouRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
+  ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
   LovableEmailAuthPreviewRoute: typeof LovableEmailAuthPreviewRoute
   LovableEmailAuthWebhookRoute: typeof LovableEmailAuthWebhookRoute
@@ -415,6 +454,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/classes': {
@@ -515,6 +561,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerApiTokensRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/calendar': {
+      id: '/_authenticated/manager/calendar'
+      path: '/manager/calendar'
+      fullPath: '/manager/calendar'
+      preLoaderRoute: typeof AuthenticatedManagerCalendarRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/membership-plans': {
       id: '/_authenticated/manager/membership-plans'
       path: '/manager/membership-plans'
@@ -564,6 +617,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerWaiversRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/calendar/$token': {
+      id: '/api/calendar/$token'
+      path: '/api/calendar/$token'
+      fullPath: '/api/calendar/$token'
+      preLoaderRoute: typeof ApiCalendarTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/manager/agent': {
       id: '/api/manager/agent'
       path: '/api/manager/agent'
@@ -592,6 +652,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
   AuthenticatedMembershipRoute: typeof AuthenticatedMembershipRoute
   AuthenticatedManagerApiTokensRoute: typeof AuthenticatedManagerApiTokensRoute
+  AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
@@ -605,6 +666,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAccountRoute: AuthenticatedAccountRoute,
   AuthenticatedMembershipRoute: AuthenticatedMembershipRoute,
   AuthenticatedManagerApiTokensRoute: AuthenticatedManagerApiTokensRoute,
+  AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,
@@ -625,6 +687,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AboutRoute: AboutRoute,
   AuthRoute: AuthRoute,
+  CalendarRoute: CalendarRoute,
   ClassesRoute: ClassesRoute,
   ContactRoute: ContactRoute,
   FaqRoute: FaqRoute,
@@ -636,6 +699,7 @@ const rootRouteChildren: RootRouteChildren = {
   ThankYouRoute: ThankYouRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
+  ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,
   LovableEmailAuthPreviewRoute: LovableEmailAuthPreviewRoute,
   LovableEmailAuthWebhookRoute: LovableEmailAuthWebhookRoute,

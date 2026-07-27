@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addMinutes,
+  diffOccurrences,
   generateOccurrences,
   tzOffsetMinutes,
   weeklyOccurrenceDates,
@@ -92,5 +93,71 @@ describe("generateOccurrences", () => {
       "2026-07-13T08:00:00.000Z",
       "2026-07-20T08:00:00.000Z",
     ]);
+  });
+});
+
+describe("zonedWallTimeToUtc across a DST transition", () => {
+  // Sydney springs forward 2026-10-04 (AEST +10 -> AEDT +11). These exercise the
+  // second pass in zonedWallTimeToUtc, which the in-season cases never reach.
+  it("resolves times either side of the spring-forward boundary", () => {
+    // Clocks jump at 02:00, so 01:30 that morning is still AEST (+10).
+    expect(zonedWallTimeToUtc("2026-10-04", "01:30", SYDNEY).toISOString()).toBe(
+      "2026-10-03T15:30:00.000Z",
+    );
+    // The evening of the same day is firmly AEDT.
+    expect(zonedWallTimeToUtc("2026-10-04", "18:00", SYDNEY).toISOString()).toBe(
+      "2026-10-04T07:00:00.000Z",
+    );
+    // The day before is still AEST (+10).
+    expect(zonedWallTimeToUtc("2026-10-03", "18:00", SYDNEY).toISOString()).toBe(
+      "2026-10-03T08:00:00.000Z",
+    );
+  });
+
+  it("keeps a weekly series at the same club wall-clock time across the change", () => {
+    // A Monday 18:00 class must stay 18:00 locally, which means its UTC instant
+    // shifts by an hour when Sydney moves to daylight time.
+    const occ = generateOccurrences(
+      {
+        weekday: 1,
+        start_time: "18:00",
+        duration_minutes: 60,
+        starts_on: "2026-09-28",
+        ends_on: "2026-10-12",
+      },
+      "2026-09-01",
+      "2026-10-31",
+      SYDNEY,
+    );
+    expect(occ.map((o) => o.starts_at)).toEqual([
+      "2026-09-28T08:00:00.000Z", // AEST (+10)
+      "2026-10-05T07:00:00.000Z", // AEDT (+11)
+      "2026-10-12T07:00:00.000Z",
+    ]);
+  });
+});
+
+describe("diffOccurrences", () => {
+  const occ = [
+    { starts_at: "2026-07-06T08:00:00.000Z", ends_at: "2026-07-06T09:00:00.000Z" },
+    { starts_at: "2026-07-13T08:00:00.000Z", ends_at: "2026-07-13T09:00:00.000Z" },
+  ];
+
+  it("returns everything when nothing exists yet", () => {
+    expect(diffOccurrences([], occ)).toEqual(occ);
+  });
+
+  it("skips occurrences that already exist", () => {
+    expect(diffOccurrences([{ starts_at: "2026-07-06T08:00:00.000Z" }], occ)).toEqual([occ[1]]);
+  });
+
+  it("matches on the instant, not the string spelling", () => {
+    // Postgres commonly returns +00:00 rather than Z; the same moment must not
+    // be re-inserted as a duplicate calendar entry.
+    expect(diffOccurrences([{ starts_at: "2026-07-06T08:00:00+00:00" }], occ)).toEqual([occ[1]]);
+  });
+
+  it("is a no-op when every occurrence is already present (repeat generation)", () => {
+    expect(diffOccurrences(occ, occ)).toEqual([]);
   });
 });

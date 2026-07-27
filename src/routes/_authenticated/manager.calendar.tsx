@@ -1,12 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
-import { WEEKDAY_LABELS } from "@/lib/calendar";
+import { CLUB_TIME_ZONE, WEEKDAY_LABELS, zonedWallTimeToUtc } from "@/lib/calendar";
 import { calendarEventKinds } from "@/lib/validation";
 import {
   cancelEvent,
@@ -52,7 +52,18 @@ type RsvpRow = {
   updated_at: string;
 };
 
-const TZ = "Australia/Sydney";
+const TZ = CLUB_TIME_ZONE;
+
+/**
+ * Read a `datetime-local` value ("YYYY-MM-DDTHH:MM") as CLUB wall-clock time.
+ * `new Date(value)` would parse it in the browser's zone, so a manager working
+ * from a laptop set to UTC would save 18:00 and see it listed back as 5:00 am —
+ * the list and the public page both render in club time.
+ */
+function clubLocalToIso(value: string): string {
+  const [date, time] = value.split("T");
+  return zonedWallTimeToUtc(date, time.slice(0, 5), TZ).toISOString();
+}
 
 function fmt(iso: string): string {
   return new Date(iso).toLocaleString("en-AU", {
@@ -173,8 +184,8 @@ function ManagerCalendarPage() {
           kind: eventForm.kind,
           instructor_name: eventForm.instructor_name || undefined,
           location: eventForm.location || undefined,
-          starts_at: new Date(eventForm.starts_at).toISOString(),
-          ends_at: new Date(eventForm.ends_at).toISOString(),
+          starts_at: clubLocalToIso(eventForm.starts_at),
+          ends_at: clubLocalToIso(eventForm.ends_at),
           visibility: eventForm.visibility,
           invite_only: eventForm.invite_only,
           description: eventForm.description || undefined,
@@ -254,10 +265,16 @@ function ManagerCalendarPage() {
       return;
     }
     setOpenRsvpEvent(eventId);
+    setRsvpRows([]);
     setRsvpLoading(true);
     try {
       const rows = await fetchRsvps({ data: { event_id: eventId } });
-      setRsvpRows(rows as RsvpRow[]);
+      // Expanding another event before this resolves would otherwise render one
+      // event's attendees under another's row.
+      setOpenRsvpEvent((current) => {
+        if (current === eventId) setRsvpRows(rows as RsvpRow[]);
+        return current;
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not load who's coming");
       setRsvpRows([]);
@@ -559,8 +576,10 @@ function ManagerCalendarPage() {
                   const cancelled = ev.status === "cancelled";
                   const expanded = openRsvpEvent === ev.id;
                   return (
-                    <>
-                      <tr key={ev.id} className={cn("border-t", cancelled && "opacity-60")}>
+                    // Key belongs on the array element (the Fragment), not its
+                    // children — otherwise the list reconciles by index.
+                    <Fragment key={ev.id}>
+                      <tr className={cn("border-t", cancelled && "opacity-60")}>
                         <td className="px-3 py-2 font-medium">
                           <span className={cn(cancelled && "line-through")}>{ev.title}</span>
                           {ev.kind !== "session" && (
@@ -619,7 +638,7 @@ function ManagerCalendarPage() {
                         </td>
                       </tr>
                       {expanded && (
-                        <tr key={`${ev.id}-rsvps`} className="border-t bg-muted/30">
+                        <tr className="border-t bg-muted/30">
                           <td colSpan={6} className="px-3 py-3">
                             {rsvpLoading ? (
                               <p className="text-xs text-muted-foreground">Loading...</p>
@@ -647,7 +666,7 @@ function ManagerCalendarPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>
