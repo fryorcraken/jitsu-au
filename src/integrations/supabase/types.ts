@@ -464,6 +464,7 @@ export type Database = {
           signed_at: string
           signer_ip: string | null
           signer_meta: Json
+          sms_whatsapp_consent: boolean
           template_version: number | null
           user_id: string
         }
@@ -487,6 +488,7 @@ export type Database = {
           signed_at?: string
           signer_ip?: string | null
           signer_meta?: Json
+          sms_whatsapp_consent?: boolean
           template_version?: number | null
           user_id: string
         }
@@ -510,6 +512,7 @@ export type Database = {
           signed_at?: string
           signer_ip?: string | null
           signer_meta?: Json
+          sms_whatsapp_consent?: boolean
           template_version?: number | null
           user_id?: string
         }
