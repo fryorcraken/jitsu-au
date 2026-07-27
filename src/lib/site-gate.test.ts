@@ -80,6 +80,12 @@ describe("safeRedirectPath", () => {
     expect(safeRedirectPath("/classes?a=1")).toBe("/classes?a=1");
   });
 
+  it("keeps the fragment auth links carry their token in", () => {
+    expect(safeRedirectPath("/auth#access_token=abc&type=magiclink")).toBe(
+      "/auth#access_token=abc&type=magiclink",
+    );
+  });
+
   it("rejects anything that could leave the site", () => {
     expect(safeRedirectPath("//evil.example")).toBe("/");
     expect(safeRedirectPath("/\\evil.example")).toBe("/");
@@ -97,6 +103,12 @@ describe("renderGatePage", () => {
     expect(html).toContain('name="password"');
     expect(html).toContain('value="/classes"');
     expect(html).toContain('content="noindex, nofollow"');
+  });
+
+  it("carries the URL fragment into the redirect, so auth links survive", () => {
+    const html = renderGatePage({ redirectTo: "/auth" });
+    expect(html).toContain("location.hash");
+    expect(html).toContain(`document.querySelector('input[name="redirect"]')`);
   });
 
   it("shows an error only after a wrong password", () => {

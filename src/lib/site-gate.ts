@@ -118,6 +118,16 @@ export function renderGatePage(options: { redirectTo: string; failed?: boolean }
         <button type="submit">Let me in</button>
       </form>
     </div>
+    <script>
+      // Supabase auth links (magic link, password reset) carry their token in
+      // the URL fragment, which never reaches the server. Fold it into the
+      // redirect so the link still works for someone who has not unlocked yet.
+      (function () {
+        if (!location.hash) return;
+        var field = document.querySelector('input[name="redirect"]');
+        if (field && field.value.indexOf("#") === -1) field.value += location.hash;
+      })();
+    </script>
   </body>
 </html>`;
 }
