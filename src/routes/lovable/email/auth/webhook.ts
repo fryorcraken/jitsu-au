@@ -17,8 +17,14 @@ const SITE_URL = "https://jitsu.au";
 
 // The SDK handler owns verification, dispatch, and retry semantics; this file
 // owns only the email decisions: subjects, templates, and per-type props.
-const handler = createAuthEmailHandler({
-  apiKey: process.env.LOVABLE_API_KEY!,
+// Built lazily: process.env is only populated at request time, so creating the
+// handler at module scope throws "Missing Lovable API key" during route load.
+let cachedHandler: ReturnType<typeof createAuthEmailHandler> | undefined;
+
+function getHandler() {
+  if (cachedHandler) return cachedHandler;
+  cachedHandler = createAuthEmailHandler({
+    apiKey: process.env.LOVABLE_API_KEY!,
   from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
   senderDomain: SENDER_DOMAIN,
   sendUrl: process.env.LOVABLE_SEND_URL,
