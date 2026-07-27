@@ -103,6 +103,152 @@ export type Database = {
           },
         ]
       }
+      calendar_events: {
+        Row: {
+          all_day: boolean
+          created_at: string
+          created_by: string | null
+          description: string | null
+          ends_at: string
+          id: string
+          instructor_name: string | null
+          invite_only: boolean
+          kind: string
+          location: string
+          series_id: string | null
+          starts_at: string
+          status: string
+          title: string
+          updated_at: string
+          visibility: string
+        }
+        Insert: {
+          all_day?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          ends_at: string
+          id?: string
+          instructor_name?: string | null
+          invite_only?: boolean
+          kind?: string
+          location?: string
+          series_id?: string | null
+          starts_at: string
+          status?: string
+          title: string
+          updated_at?: string
+          visibility?: string
+        }
+        Update: {
+          all_day?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          ends_at?: string
+          id?: string
+          instructor_name?: string | null
+          invite_only?: boolean
+          kind?: string
+          location?: string
+          series_id?: string | null
+          starts_at?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_events_series_id_fkey"
+            columns: ["series_id"]
+            isOneToOne: false
+            referencedRelation: "calendar_series"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      calendar_feed_tokens: {
+        Row: {
+          created_at: string
+          id: string
+          last_used_at: string | null
+          revoked_at: string | null
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token_hash?: string
+          token_prefix?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      calendar_series: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          duration_minutes: number
+          ends_on: string | null
+          id: string
+          instructor_name: string | null
+          is_active: boolean
+          location: string
+          start_time: string
+          starts_on: string
+          title: string
+          updated_at: string
+          weekday: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          duration_minutes: number
+          ends_on?: string | null
+          id?: string
+          instructor_name?: string | null
+          is_active?: boolean
+          location?: string
+          start_time: string
+          starts_on: string
+          title: string
+          updated_at?: string
+          weekday: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          duration_minutes?: number
+          ends_on?: string | null
+          id?: string
+          instructor_name?: string | null
+          is_active?: boolean
+          location?: string
+          start_time?: string
+          starts_on?: string
+          title?: string
+          updated_at?: string
+          weekday?: number
+        }
+        Relationships: []
+      }
       club_settings: {
         Row: {
           key: string
@@ -151,6 +297,41 @@ export type Database = {
         }
         Relationships: []
       }
+      event_rsvps: {
+        Row: {
+          created_at: string
+          event_id: string
+          id: string
+          response: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          id?: string
+          response: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          id?: string
+          response?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_rsvps_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "calendar_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       interest_registrations: {
         Row: {
           created_at: string
@@ -184,6 +365,39 @@ export type Database = {
           phone?: string | null
           sms_whatsapp_consent?: boolean
           uts_student?: boolean
+        }
+        Relationships: []
+      }
+      manager_api_tokens: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string
+          last_used_at: string | null
+          revoked_at: string | null
+          token_hash: string
+          token_prefix: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token_hash: string
+          token_prefix: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token_hash?: string
+          token_prefix?: string
         }
         Relationships: []
       }
@@ -534,6 +748,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      has_active_paid_membership: {
+        Args: { _user_id: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
