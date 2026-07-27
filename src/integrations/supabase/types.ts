@@ -467,6 +467,7 @@ export type Database = {
           sms_whatsapp_consent: boolean
           template_version: number | null
           user_id: string
+          uts_student_number: string | null
         }
         Insert: {
           address: string
@@ -491,6 +492,7 @@ export type Database = {
           sms_whatsapp_consent?: boolean
           template_version?: number | null
           user_id: string
+          uts_student_number?: string | null
         }
         Update: {
           address?: string
@@ -515,6 +517,7 @@ export type Database = {
           sms_whatsapp_consent?: boolean
           template_version?: number | null
           user_id?: string
+          uts_student_number?: string | null
         }
         Relationships: [
           {
