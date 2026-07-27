@@ -221,6 +221,31 @@ Note: neither the unit suite nor CI (`bun run build` is Rollup-only, no live DB)
 catches schema/code drift or preview-only bundler-interop faults — sequencing
 and a browser/DB smoke check are the real guards.
 
+### Lovable can re-emit a hand-written migration as a duplicate
+
+Lovable generates migrations from the **live database's schema**, not from this
+directory's history, so it does not know that a hand-written migration already
+creates an object. A "Rebuilt schema cache" edit can therefore drop a second
+migration here that re-creates what an earlier one already made. That is what
+happened in issue #53: `20260725021949_…` was a verbatim copy of
+`20260723000000_profiles.sql`, and the duplicate `CREATE TABLE public.profiles`
+broke the from-scratch replay (`relation "profiles" already exists`, 42P07), so
+the Supabase lint workflow could not run on any PR.
+
+- The symptom is the **Advisors + plpgsql_check** job failing on every
+  `supabase/**` PR, including ones whose own SQL is fine. A red ❌ there says
+  nothing about that PR until the replay itself is green again.
+- After Lovable syncs a schema change, it is worth checking that the new
+  migration is not a re-derivation of one already in this directory.
+- When it is a pure duplicate, empty the later file to a no-op with a comment
+  explaining why (see `20260725021949_…`). **Keep the file** so the applied
+  migration ledger stays intact, and do not delete it. Making only the first
+  statement idempotent is not a fix: every later statement collides too, and an
+  in-place `RENAME COLUMN` has nothing left to rename on replay.
+- Prefer `DROP … IF EXISTS` before a deliberate re-create (see
+  `on_auth_user_created_assign_role` in `20260721091500_…`), which is what makes
+  a genuine re-point replay cleanly.
+
 ## Key business flows
 
 - **Waiver signing** (`routes/waiver.tsx` → `lib/waiver.functions.ts`

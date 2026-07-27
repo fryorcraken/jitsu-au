@@ -1,119 +1,33 @@
--- ---------- profiles ----------
-CREATE TABLE public.profiles (
-  user_id UUID NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  first_name TEXT,
-  middle_name TEXT,
-  last_name TEXT,
-  date_of_birth DATE,
-  address TEXT,
-  phone TEXT,
-  uts_student_number TEXT,
-  emergency_contact_name TEXT,
-  emergency_contact_phone TEXT,
-  medical_notes TEXT,
-  is_minor BOOLEAN NOT NULL DEFAULT false,
-  guardian_name TEXT,
-  guardian_relationship TEXT,
-  sms_whatsapp_consent BOOLEAN NOT NULL DEFAULT false,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- Intentionally a no-op. Kept as a file so the applied-migration ledger stays
+-- intact; do not delete it and do not re-add the statements below.
+--
+-- This migration arrived with a Lovable "Rebuilt schema cache" edit
+-- (commit 6b2d32a, 2026-07-25) and was a verbatim duplicate of
+-- 20260723000000_profiles.sql, which was already on main at the time: the same
+-- CREATE TABLE public.profiles, the same policies, ensure_profile trigger,
+-- user_id_by_email / user_emails helpers, and the same waivers reshape
+-- (TRUNCATE, column drops, the ip_hash -> signer_ip rename). Only the comments
+-- differed. Lovable generates migrations from the live database's schema rather
+-- than from this directory's history, so a hand-written migration it later
+-- re-derives can reappear here as a second copy.
+--
+-- Replaying the history onto an empty database therefore aborted on the second
+-- CREATE TABLE with `relation "profiles" already exists` (SQLSTATE 42P07), so
+-- `supabase db start` never finished and the Advisors / plpgsql_check job in
+-- .github/workflows/supabase-lint.yml could not run at all. Making just the
+-- CREATE TABLE idempotent is not enough: every following statement collides
+-- the same way (the policies, the trigger, the duplicate signer_meta and
+-- user_id columns), and the rename has no old column left to rename.
+--
+-- Emptying the file is safe in both directions:
+--   * Live: this migration is already recorded as applied, so its contents are
+--     never re-run there. The schema is unchanged.
+--   * From scratch: 20260723000000_profiles.sql alone builds exactly the same
+--     objects, so the replayed schema is unchanged too.
+--
+-- See issue #53.
 
-GRANT SELECT, UPDATE ON public.profiles TO authenticated;
-GRANT ALL ON public.profiles TO service_role;
-
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view their own profile" ON public.profiles
-  FOR SELECT TO authenticated USING (auth.uid() = user_id);
-CREATE POLICY "Managers can view all profiles" ON public.profiles
-  FOR SELECT TO authenticated USING (public.has_role(auth.uid(), 'manager'));
-CREATE POLICY "Users can update their own profile" ON public.profiles
-  FOR UPDATE TO authenticated USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Managers can update profiles" ON public.profiles
-  FOR UPDATE TO authenticated USING (public.has_role(auth.uid(), 'manager'))
-  WITH CHECK (public.has_role(auth.uid(), 'manager'));
-
-CREATE OR REPLACE FUNCTION public.ensure_profile()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  INSERT INTO public.profiles (user_id) VALUES (NEW.id)
-  ON CONFLICT (user_id) DO NOTHING;
-  RETURN NEW;
-END;
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.ensure_profile() FROM PUBLIC, anon, authenticated;
-
-CREATE TRIGGER on_auth_user_created_profile
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.ensure_profile();
-
--- ---------- service-role helpers ----------
-CREATE OR REPLACE FUNCTION public.user_id_by_email(_email TEXT)
-RETURNS UUID
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT id FROM auth.users
-  WHERE lower(email) = lower(btrim(_email))
-  LIMIT 1
-$$;
-
-CREATE OR REPLACE FUNCTION public.user_emails(_user_ids UUID[])
-RETURNS TABLE (user_id UUID, email TEXT)
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT id, email::text FROM auth.users WHERE id = ANY(_user_ids)
-$$;
-
-REVOKE EXECUTE ON FUNCTION public.user_id_by_email(TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.user_emails(UUID[]) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.user_id_by_email(TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION public.user_emails(UUID[]) TO service_role;
-
--- ---------- waivers reshape ----------
-DROP POLICY IF EXISTS "Anyone can sign waiver" ON public.waivers;
-DROP POLICY IF EXISTS "Users can view their own waivers" ON public.waivers;
-
-TRUNCATE public.waivers CASCADE;
-
-ALTER TABLE public.waivers
-  DROP COLUMN IF EXISTS full_name,
-  DROP COLUMN IF EXISTS acknowledgements,
-  DROP COLUMN IF EXISTS signature_name,
-  DROP COLUMN IF EXISTS signature_image_path,
-  DROP COLUMN IF EXISTS guardian_signature,
-  DROP COLUMN IF EXISTS guardian_signature_image_path,
-  DROP COLUMN IF EXISTS user_id;
-
-ALTER TABLE public.waivers RENAME COLUMN ip_hash TO signer_ip;
-
-ALTER TABLE public.waivers
-  ADD COLUMN signer_meta JSONB NOT NULL DEFAULT '{}'::jsonb;
-
-ALTER TABLE public.waivers
-  ALTER COLUMN first_name SET NOT NULL,
-  ALTER COLUMN last_name SET NOT NULL;
-
-ALTER TABLE public.waivers
-  ADD COLUMN user_id UUID NOT NULL REFERENCES public.profiles(user_id) ON DELETE CASCADE;
-CREATE INDEX waivers_user_id_idx ON public.waivers (user_id);
-
-REVOKE INSERT ON public.waivers FROM anon, authenticated;
-
-CREATE POLICY "Owners can view their own waivers" ON public.waivers
-  FOR SELECT TO authenticated
-  USING (user_id = auth.uid());
-
+-- Retained from the original file: harmless, idempotent, and the reason the
+-- edit existed at all. It tells PostgREST to pick up the reshaped schema, and
+-- it keeps this file from being empty.
 NOTIFY pgrst, 'reload schema';
