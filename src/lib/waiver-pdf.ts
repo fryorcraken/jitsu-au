@@ -299,7 +299,9 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   const signature = await embedSignature(data.signature_image_png);
   drawSignatureBlock(
     signature,
-    signature ? data.signature_name || data.full_name || "" : data.signature_name || "",
+    // A drawn signature may carry no typed name (validation accepts either), so
+    // an unreadable PNG must still fall back to a name, never a blank line.
+    data.signature_name || data.full_name || "",
     data.draft
       ? null
       : `Electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`,
@@ -324,9 +326,7 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     const guardianSignature = await embedSignature(data.guardian_signature_image_png);
     drawSignatureBlock(
       guardianSignature,
-      guardianSignature
-        ? data.guardian_signature || data.guardian_name || ""
-        : data.guardian_signature || "",
+      data.guardian_signature || data.guardian_name || "",
       data.draft
         ? null
         : `Guardian electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`,

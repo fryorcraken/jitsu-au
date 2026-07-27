@@ -268,6 +268,21 @@ describe("renderWaiverPdf", () => {
     expect(guardianSignature.y + guardianSignature.height).toBeLessThan(relationship!.y);
   });
 
+  it("still names the signer when a drawn signature fails to embed", async () => {
+    // Validation accepts a drawn signature with no typed name, so a corrupt PNG
+    // must not leave the waiver with a blank signer line.
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        signature_name: "",
+        signature_image_png: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+      }),
+    );
+    const { texts, images } = readPlacements(doc, doc.getPage(0));
+    expect(images).toHaveLength(0);
+    expect(texts.some((t) => t.text === "Jane Sample")).toBe(true);
+  });
+
   it("prints the signer name and timestamp below the drawn signature", async () => {
     const doc = await expectValidPdf(
       await renderWaiverPdf({ ...base, signature_image_png: tallPng() }),
