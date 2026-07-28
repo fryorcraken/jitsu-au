@@ -15,3 +15,7 @@ ALTER TABLE public.waivers
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS preferred_name TEXT;
+
+-- The app writes this column as soon as it deploys, so make sure PostgREST
+-- picks it up rather than serving a stale schema cache (PGRST204).
+NOTIFY pgrst, 'reload schema';

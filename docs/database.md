@@ -56,26 +56,26 @@ first waiver submission; filled in by manager approval. The funnel phase (lead
 / applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
 never stored.
 
-| Column                    | Type          | Null | Notes                                                                        |
-| ------------------------- | ------------- | ---- | ---------------------------------------------------------------------------- |
-| `user_id`                 | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.  |
-| `first_name`              | `text`        | yes  |                                                                              |
-| `middle_name`             | `text`        | yes  |                                                                              |
-| `last_name`               | `text`        | yes  |                                                                              |
-| `preferred_name`          | `text`        | yes  | What they go by, when it differs from the first name. NULL = use first name. |
-| `date_of_birth`           | `date`        | yes  |                                                                              |
-| `address`                 | `text`        | yes  |                                                                              |
-| `phone`                   | `text`        | yes  |                                                                              |
-| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                                             |
-| `emergency_contact_name`  | `text`        | yes  |                                                                              |
-| `emergency_contact_phone` | `text`        | yes  |                                                                              |
-| `medical_notes`           | `text`        | yes  |                                                                              |
-| `is_minor`                | `boolean`     | no   | Default `false`.                                                             |
-| `guardian_name`           | `text`        | yes  |                                                                              |
-| `guardian_relationship`   | `text`        | yes  |                                                                              |
-| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                                             |
-| `created_at`              | `timestamptz` | no   | Default `now()`.                                                             |
-| `updated_at`              | `timestamptz` | no   | Default `now()`.                                                             |
+| Column                    | Type          | Null | Notes                                                                                                                                             |
+| ------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_id`                 | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                                       |
+| `first_name`              | `text`        | yes  |                                                                                                                                                   |
+| `middle_name`             | `text`        | yes  |                                                                                                                                                   |
+| `last_name`               | `text`        | yes  |                                                                                                                                                   |
+| `preferred_name`          | `text`        | yes  | What they go by, when it differs from the first name. NULL = none given, and the `{{preferred_name}}` token falls back to the composed full name. |
+| `date_of_birth`           | `date`        | yes  |                                                                                                                                                   |
+| `address`                 | `text`        | yes  |                                                                                                                                                   |
+| `phone`                   | `text`        | yes  |                                                                                                                                                   |
+| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                                                                                                                  |
+| `emergency_contact_name`  | `text`        | yes  |                                                                                                                                                   |
+| `emergency_contact_phone` | `text`        | yes  |                                                                                                                                                   |
+| `medical_notes`           | `text`        | yes  |                                                                                                                                                   |
+| `is_minor`                | `boolean`     | no   | Default `false`.                                                                                                                                  |
+| `guardian_name`           | `text`        | yes  |                                                                                                                                                   |
+| `guardian_relationship`   | `text`        | yes  |                                                                                                                                                   |
+| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                                                                                                                  |
+| `created_at`              | `timestamptz` | no   | Default `now()`.                                                                                                                                  |
+| `updated_at`              | `timestamptz` | no   | Default `now()`.                                                                                                                                  |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.

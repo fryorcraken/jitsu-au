@@ -60,8 +60,10 @@ export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<strin
   return {
     full_name: v.fullName,
     // Not everyone gives a preferred name, and a template that greets the signer
-    // must never render a blank, so fall back to their full name.
-    preferred_name: v.preferredName || v.fullName,
+    // must never render a blank, so fall back to their full name. Trimmed
+    // because this runs on raw form state in the live preview but on
+    // Zod-trimmed input server-side, and the two must render identically.
+    preferred_name: v.preferredName.trim() || v.fullName,
     date_of_birth: v.dateOfBirth,
     address: v.address,
     phone: v.phone,

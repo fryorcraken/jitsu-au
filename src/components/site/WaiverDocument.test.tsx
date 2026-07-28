@@ -79,6 +79,14 @@ describe("waiver placeholders", () => {
     expect(withPreferred.preferred_name).toBe("Janey");
   });
 
+  // The live preview feeds raw form state while the PDF feeds Zod-trimmed
+  // input, so a whitespace-only entry must fall back in both, not render blank
+  // on screen and the full name on paper.
+  it("preferred_name falls back when the entry is only whitespace", () => {
+    const blank = buildWaiverPlaceholders({ ...input, preferredName: "   " });
+    expect(blank.preferred_name).toBe("Jane Sample");
+  });
+
   it("fills known tokens and leaves unknown tokens intact", () => {
     const body = "Hi {{full_name}} ({{club_name}}) on {{signed_date}}. {{mystery}}";
     expect(applyWaiverPlaceholders(body, values)).toBe(
