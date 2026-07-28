@@ -159,24 +159,6 @@ Read `src/routes/README.md` before touching routes. Key points:
   client. Manager pages both guard in the server fn **and** redirect non-managers
   client-side (see `manager.waivers.tsx`).
 
-## Pre-launch password gate
-
-The site can sit behind one shared password so a random visitor who finds the
-URL doesn't take the unfinished site for the live club site. It is **not** a
-security control (one password, an obfuscated cookie, no accounts); real
-protection is still Supabase auth + RLS.
-
-- Helpers: `src/lib/site-gate.ts`. Wiring: a `requestMiddleware` in
-  `src/start.ts`, so it covers every SSR page and server-function call.
-- **Off unless `SITE_PASSWORD` is set** on the server, so local dev, tests and
-  CI run ungated. Set it in Lovable Cloud to turn the gate on.
-- A locked visitor gets a 401 password form; posting the right password to
-  `/__site-access` sets the `uts_site_access` cookie (30 days) and redirects
-  back to the page they asked for.
-- Exempt (they carry their own auth and can't be shown a form): `/api/*` (the
-  manager agent API, bearer token) and `/lovable/email/*` (the Supabase auth
-  email webhook). Add any new machine endpoint to `EXEMPT_PREFIXES`.
-
 ## Database (Supabase)
 
 Schema lives in `supabase/migrations/*.sql` (timestamped, applied in order). All
@@ -517,8 +499,6 @@ meaningfully). The app reads:
   manager agent API (`/api/manager/agent`). Normally managers mint revocable
   tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
   env var is just an optional fallback (see AGENTS.md).
-- Server, optional: `SITE_PASSWORD` — set it to put the whole site behind a
-  shared password (see Pre-launch password gate). Unset means the site is open.
 
 Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 
