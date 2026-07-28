@@ -526,6 +526,7 @@ export type Database = {
           medical_notes: string | null
           middle_name: string | null
           phone: string | null
+          preferred_name: string | null
           sms_whatsapp_consent: boolean
           updated_at: string
           user_id: string
@@ -545,6 +546,7 @@ export type Database = {
           medical_notes?: string | null
           middle_name?: string | null
           phone?: string | null
+          preferred_name?: string | null
           sms_whatsapp_consent?: boolean
           updated_at?: string
           user_id: string
@@ -564,6 +566,7 @@ export type Database = {
           medical_notes?: string | null
           middle_name?: string | null
           phone?: string | null
+          preferred_name?: string | null
           sms_whatsapp_consent?: boolean
           updated_at?: string
           user_id?: string
@@ -675,6 +678,7 @@ export type Database = {
           middle_name: string | null
           pdf_path: string | null
           phone: string
+          preferred_name: string | null
           signed_at: string
           signer_ip: string | null
           signer_meta: Json
@@ -700,6 +704,7 @@ export type Database = {
           middle_name?: string | null
           pdf_path?: string | null
           phone: string
+          preferred_name?: string | null
           signed_at?: string
           signer_ip?: string | null
           signer_meta?: Json
@@ -725,6 +730,7 @@ export type Database = {
           middle_name?: string | null
           pdf_path?: string | null
           phone?: string
+          preferred_name?: string | null
           signed_at?: string
           signer_ip?: string | null
           signer_meta?: Json
