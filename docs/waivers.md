@@ -67,7 +67,15 @@ system. (The contact form stores a message, not a person.)
    got the sign-in one). Approving a newer waiver later refreshes the profile
    again (no repeat sign-in email, no second trial). Unapprove only reverts
    the waiver's status; profile, login and trial stay as they are.
-7. **Full name is never stored**; it is composed from first/middle/last.
+7. **Full name is never stored**; it is composed from first/middle/last. The
+   optional **preferred name** is stored separately (on the submission and, once
+   approved, on the profile). One rule governs it everywhere: **address a person
+   by their preferred name, else their first name** (`greetingName`). That is
+   what the waiver and membership emails greet them with, and what the
+   `{{preferred_name}}` template token renders. It never replaces the legal name
+   on the signed document, and manager-facing lists show the legal name with the
+   preferred name quoted in, e.g. `Ada "Addy" Lovelace` (`nameWithPreferred`),
+   so staff can see both.
 8. **No duplicate live data.** The profile is the only record of the person
    fields, and the login record is the only place any email lives. The email
    captured on a waiver is part of that frozen submission (evidence), not a

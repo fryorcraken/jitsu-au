@@ -20,6 +20,8 @@ export type ProfileRow = {
   first_name: string | null;
   middle_name: string | null;
   last_name: string | null;
+  /** What the person goes by, when it differs from their first name. */
+  preferred_name: string | null;
   date_of_birth: string | null;
   address: string | null;
   phone: string | null;
@@ -47,6 +49,7 @@ export type WaiverRow = {
   first_name: string;
   middle_name: string | null;
   last_name: string;
+  preferred_name: string | null;
   date_of_birth: string;
   address: string;
   phone: string;

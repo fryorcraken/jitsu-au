@@ -92,6 +92,7 @@ describe("sendWaiverEmails", () => {
     const result = await sendWaiverEmails({
       waiverId: "w1",
       memberName: "Ada Lovelace",
+      memberGreetingName: "Addy",
       memberEmail: "ada@example.com",
       pdfUrl: "https://example.com/waiver.pdf",
       admin,

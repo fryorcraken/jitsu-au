@@ -3,6 +3,10 @@ import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "./waiver-docum
 
 export type WaiverPdfData = {
   full_name: string;
+  /** First name, the fallback for `{{preferred_name}}`. */
+  first_name: string;
+  /** Optional preferred name, as submitted ("" when not given). */
+  preferred_name: string;
   date_of_birth: string;
   address: string;
   phone: string;
@@ -227,6 +231,8 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   // data appears only where the body/labels use a {{placeholder}}.
   const placeholders = buildWaiverPlaceholders({
     fullName: data.full_name,
+    firstName: data.first_name,
+    preferredName: data.preferred_name,
     dateOfBirth: data.date_of_birth,
     address: data.address,
     phone: data.phone,

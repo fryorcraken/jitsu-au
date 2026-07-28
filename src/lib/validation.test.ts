@@ -14,6 +14,8 @@ import {
   splitFullName,
   waiverApprovalSchema,
   waiverPrefillSearchSchema,
+  greetingName,
+  nameWithPreferred,
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "./validation";
@@ -31,6 +33,66 @@ describe("profileFullName", () => {
   });
 });
 
+describe("greetingName", () => {
+  it("prefers the preferred name", () => {
+    expect(greetingName({ preferred_name: "Addy", first_name: "Ada", last_name: "Lovelace" })).toBe(
+      "Addy",
+    );
+  });
+
+  it("falls back to the first name when no preferred name was given", () => {
+    expect(greetingName({ preferred_name: null, first_name: "Ada", last_name: "Lovelace" })).toBe(
+      "Ada",
+    );
+    expect(greetingName({ preferred_name: "   ", first_name: "Ada", last_name: "Lovelace" })).toBe(
+      "Ada",
+    );
+  });
+
+  it("falls back to the full name when there is no first name", () => {
+    expect(greetingName({ first_name: null, middle_name: "Byron", last_name: "Lovelace" })).toBe(
+      "Byron Lovelace",
+    );
+  });
+
+  it("is empty when the profile carries no name at all", () => {
+    expect(greetingName({})).toBe("");
+  });
+});
+
+describe("nameWithPreferred", () => {
+  it("quotes the preferred name into the conventional nickname position", () => {
+    expect(
+      nameWithPreferred({
+        first_name: "Ada",
+        middle_name: "Byron",
+        last_name: "Lovelace",
+        preferred_name: "Addy",
+      }),
+    ).toBe('Ada "Addy" Byron Lovelace');
+  });
+
+  it("returns the plain full name when no preferred name was given", () => {
+    expect(
+      nameWithPreferred({ first_name: "Ada", last_name: "Lovelace", preferred_name: null }),
+    ).toBe("Ada Lovelace");
+  });
+
+  // Repeating the first name adds nothing, so it is left off rather than
+  // rendering the noisy `Ada "Ada" Lovelace`.
+  it("omits a preferred name that just repeats the first name, ignoring case", () => {
+    expect(
+      nameWithPreferred({ first_name: "Ada", last_name: "Lovelace", preferred_name: "ada" }),
+    ).toBe("Ada Lovelace");
+  });
+
+  it("still shows the preferred name when there is no first name", () => {
+    expect(
+      nameWithPreferred({ first_name: null, last_name: "Lovelace", preferred_name: "Addy" }),
+    ).toBe('"Addy" Lovelace');
+  });
+});
+
 describe("normalizeEmail", () => {
   it("trims and lowercases so case/whitespace variants map to one profile", () => {
     expect(normalizeEmail("  Ada@Example.COM ")).toBe("ada@example.com");
@@ -44,6 +106,7 @@ describe("waiverToProfileFields", () => {
       first_name: "Ada",
       middle_name: null,
       last_name: "Lovelace",
+      preferred_name: "Addy",
       date_of_birth: "1990-01-01",
       address: "1 Example St",
       phone: "0400 000 000",
@@ -459,6 +522,22 @@ describe("waiverSubmitSchema", () => {
   it("rejects a UTS student number over 20 chars", () => {
     expect(
       waiverSubmitSchema.safeParse({ ...validAdult, uts_student_number: "1".repeat(21) }).success,
+    ).toBe(false);
+  });
+
+  it("accepts an optional preferred name and trims it", () => {
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, preferred_name: "  Addy  " });
+    expect(result.success && result.data.preferred_name).toBe("Addy");
+  });
+
+  it("allows the preferred name to be omitted or blank", () => {
+    expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, preferred_name: "" }).success).toBe(true);
+  });
+
+  it("rejects a preferred name over 60 chars", () => {
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, preferred_name: "a".repeat(61) }).success,
     ).toBe(false);
   });
 

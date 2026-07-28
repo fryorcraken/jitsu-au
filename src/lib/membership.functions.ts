@@ -10,6 +10,8 @@ import {
   isUtsStudent,
   matchesMembershipReference,
   matchTransactionSchema,
+  greetingName,
+  nameWithPreferred,
   profileFullName,
   saveClubSettingsSchema,
   savePlanSchema,
@@ -180,18 +182,18 @@ async function activateMembershipRow(
       const [{ data: profile }, emails] = await Promise.all([
         profileAdmin(admin)
           .from("profiles")
-          .select("first_name, middle_name, last_name")
+          .select("first_name, middle_name, last_name, preferred_name")
           .eq("user_id", membership.user_id)
           .maybeSingle(),
         emailsByUserId(admin, [membership.user_id]),
       ]);
       const email = emails.get(membership.user_id) ?? null;
       if (email) {
-        const memberName = profile ? profileFullName(profile) : "";
+        const memberGreetingName = profile ? greetingName(profile) : "";
         const { sendMembershipActivatedEmail } = await import("./membership-email.server");
         await sendMembershipActivatedEmail({
           membershipId: membership.id,
-          memberName,
+          memberGreetingName,
           memberEmail: email,
           planName: plan.name,
           validity: validityLabel(plan),
@@ -369,7 +371,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // the member has not signed a waiver yet.
     const { data: who } = await profileAdmin(admin)
       .from("profiles")
-      .select("first_name, middle_name, last_name")
+      .select("first_name, middle_name, last_name, preferred_name")
       .eq("user_id", context.userId)
       .maybeSingle();
     const surname = who?.last_name || who?.first_name || "";
@@ -437,6 +439,7 @@ export const startMembership = createServerFn({ method: "POST" })
         await sendMembershipPaymentEmail({
           membershipId: inserted.id,
           memberName: who ? profileFullName(who) : "",
+          memberGreetingName: who ? greetingName(who) : "",
           memberEmail: email,
           planName: plan.name,
           amount: formatCents(price),
@@ -559,13 +562,13 @@ export const listMemberships = createServerFn({ method: "GET" })
       const [{ data: profiles }, emails] = await Promise.all([
         profileAdmin(admin)
           .from("profiles")
-          .select("user_id, first_name, middle_name, last_name")
+          .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
         emailsByUserId(admin, userIds),
       ]);
       emailByUser = emails;
       for (const p of profiles ?? []) {
-        nameByUser.set(p.user_id, profileFullName(p));
+        nameByUser.set(p.user_id, nameWithPreferred(p));
       }
     }
 
@@ -591,7 +594,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
         profileAdmin(admin)
           .from("profiles")
           .select(
-            "user_id, first_name, middle_name, last_name, phone, uts_student_number, created_at",
+            "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
           )
           .limit(5000),
         admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),

@@ -49,6 +49,7 @@ type Prefill = {
   first_name?: string | null;
   middle_name?: string | null;
   last_name?: string | null;
+  preferred_name?: string | null;
   date_of_birth?: string | null;
   address?: string | null;
   phone?: string | null;
@@ -81,6 +82,7 @@ function Waiver() {
   const [firstName, setFirstName] = useState(prefillName.first);
   const [middleName, setMiddleName] = useState(prefillName.middle);
   const [lastName, setLastName] = useState(prefillName.last);
+  const [preferredName, setPreferredName] = useState("");
   const [dob, setDob] = useState("");
   const [phone, setPhone] = useState(search.phone ?? "");
   const [email, setEmail] = useState(search.email ?? "");
@@ -143,6 +145,7 @@ function Waiver() {
           setMiddleName(r.middle_name || "");
           setLastName(r.last_name || "");
         }
+        if (r.preferred_name) setPreferredName(r.preferred_name);
         if (r.date_of_birth) setDob(r.date_of_birth);
         if (r.phone) setPhone(r.phone);
         // Prefill the consent checkbox from the member's stored consent (they
@@ -178,6 +181,8 @@ function Waiver() {
   const ackDefs = templateQ.data?.acknowledgements ?? [];
   const ackPlaceholders = buildWaiverPlaceholders({
     fullName,
+    firstName,
+    preferredName,
     dateOfBirth: dob,
     address,
     phone,
@@ -219,6 +224,7 @@ function Waiver() {
           first_name: firstName,
           middle_name: middleName,
           last_name: lastName,
+          preferred_name: preferredName,
           date_of_birth: dob,
           address,
           phone,
@@ -341,6 +347,23 @@ function Waiver() {
                     className="mt-1.5"
                   />
                 </div>
+              </div>
+              <div>
+                <Label htmlFor="preferred_name">
+                  Preferred name <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="preferred_name"
+                  maxLength={60}
+                  value={preferredName}
+                  onChange={(e) => setPreferredName(e.target.value)}
+                  placeholder="What you'd like us to call you"
+                  className="mt-1.5"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Only if it's different from your first name. It's what we'll call you in class and
+                  in any email we send you. Your legal name still signs the waiver.
+                </p>
               </div>
               <div className="grid gap-5 sm:grid-cols-2">
                 <div>
@@ -606,6 +629,8 @@ function Waiver() {
                 templateVersion={null}
                 signedAt={previewSignedAt}
                 fullName={fullName}
+                firstName={firstName}
+                preferredName={preferredName}
                 dateOfBirth={dob}
                 address={address}
                 phone={phone}

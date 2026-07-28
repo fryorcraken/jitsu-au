@@ -11,7 +11,12 @@
 // It is deliberately free of any DB/server import so it is unit-testable and
 // can be shared by both the manager agent HTTP API (`list_users`) and the
 // manager user-list screen (`/manager/users`) — the single aggregation path.
-import { deriveLifecycleStatus, normalizeEmail, profileFullName } from "./validation";
+import {
+  deriveLifecycleStatus,
+  greetingName,
+  nameWithPreferred,
+  normalizeEmail,
+} from "./validation";
 import type { LifecycleStatus, MembershipPlanKind, MembershipStatus } from "./validation";
 
 /** Max interest-registration (lead) rows the directory pulls in one page. */
@@ -23,6 +28,7 @@ export type ClubUserProfile = {
   first_name: string | null;
   middle_name: string | null;
   last_name: string | null;
+  preferred_name: string | null;
   phone: string | null;
   uts_student_number: string | null;
   created_at: string;
@@ -77,7 +83,10 @@ export type ClubUserRole = {
 export type ClubUser = {
   /** Null for a lead — they have no person record yet. */
   user_id: string | null;
+  /** Legal full name, with the preferred name quoted in: `Ada "Addy" Lovelace`. */
   name: string | null;
+  /** What to call them: preferred name, else first name. Null for a bare lead. */
+  greeting_name: string | null;
   email: string | null;
   phone: string | null;
   roles: string[];
@@ -190,7 +199,8 @@ export function aggregateClubUsers(input: {
 
     return {
       user_id: p.user_id,
-      name: profileFullName(p) || null,
+      name: nameWithPreferred(p) || null,
+      greeting_name: greetingName(p) || null,
       email: emailByUser.get(p.user_id) ?? null,
       phone: p.phone,
       roles: rolesByUser.get(p.user_id) ?? [],
@@ -220,6 +230,7 @@ export function aggregateClubUsers(input: {
     users.push({
       user_id: null,
       name: lead.name.trim() || null,
+      greeting_name: null,
       email,
       phone: lead.phone,
       roles: [],

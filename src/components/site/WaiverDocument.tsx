@@ -13,6 +13,10 @@ import {
  */
 export type WaiverDocumentProps = {
   fullName: string;
+  /** First name, the fallback for `{{preferred_name}}`. */
+  firstName: string;
+  /** Optional preferred name ("" when not given); fills `{{preferred_name}}`. */
+  preferredName: string;
   dateOfBirth: string;
   address: string;
   phone: string;
@@ -120,6 +124,8 @@ function SignatureBlock({
 export function WaiverDocument(props: WaiverDocumentProps) {
   const {
     fullName,
+    firstName,
+    preferredName,
     dateOfBirth,
     address,
     phone,
@@ -147,6 +153,8 @@ export function WaiverDocument(props: WaiverDocumentProps) {
   // Participant data appears only where the body/labels use a {{placeholder}}.
   const placeholders = buildWaiverPlaceholders({
     fullName,
+    firstName,
+    preferredName,
     dateOfBirth,
     address,
     phone,

@@ -25,6 +25,43 @@ export function profileFullName(p: {
   return composeFullName(p.first_name || "", p.middle_name || "", p.last_name || "");
 }
 
+/** The name parts every person-name helper below reads. All optional/nullable
+ * because a profile may hold only some of them. */
+export type PersonNameParts = {
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  preferred_name?: string | null;
+};
+
+/**
+ * The name to address someone BY: the preferred name they gave, else their
+ * first name, else whatever full name we have. Use this wherever the club
+ * speaks TO a person (email greetings, "Hi ..."), never where it identifies
+ * them to a manager or on a document — those keep the legal name.
+ */
+export function greetingName(p: PersonNameParts): string {
+  const preferred = (p.preferred_name || "").trim();
+  if (preferred) return preferred;
+  const first = (p.first_name || "").trim();
+  if (first) return first;
+  return profileFullName(p);
+}
+
+/**
+ * A person's name for manager-facing lists: the legal full name with the
+ * preferred name quoted in the conventional nickname position, e.g.
+ * `Ada "Addy" Lovelace`. A preferred name that just repeats the first name
+ * adds nothing, so it is left off.
+ */
+export function nameWithPreferred(p: PersonNameParts): string {
+  const preferred = (p.preferred_name || "").trim();
+  const first = (p.first_name || "").trim();
+  if (!preferred || preferred.toLowerCase() === first.toLowerCase()) return profileFullName(p);
+  const lead = first ? `${first} "${preferred}"` : `"${preferred}"`;
+  return composeFullName(lead, p.middle_name || "", p.last_name || "");
+}
+
 /**
  * Normalize an email for use as the profile identity key: trimmed and lowercased
  * so case/whitespace variants map to the one profile (mirrors the DB unique key).
@@ -38,6 +75,8 @@ export type WaiverPersonFields = {
   first_name: string;
   middle_name: string | null;
   last_name: string;
+  /** What the person wants to be called, when it differs from their legal name. */
+  preferred_name: string | null;
   date_of_birth: string;
   address: string;
   phone: string;
@@ -61,6 +100,7 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields
     first_name: w.first_name,
     middle_name: w.middle_name,
     last_name: w.last_name,
+    preferred_name: w.preferred_name,
     date_of_birth: w.date_of_birth,
     address: w.address,
     phone: w.phone,
@@ -232,6 +272,9 @@ export const waiverSubmitSchema = z
     first_name: z.string().trim().min(1).max(60),
     middle_name: z.string().trim().max(60).optional().or(z.literal("")),
     last_name: z.string().trim().min(1).max(60),
+    // Optional: what the person goes by, when that isn't their first name.
+    // Purely for how the club addresses them; the legal name still signs.
+    preferred_name: z.string().trim().max(60).optional().or(z.literal("")),
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     address: z.string().trim().min(1).max(300),
     phone: z.string().trim().min(1).max(30),
