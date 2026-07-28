@@ -230,20 +230,35 @@ its agent author and apply equivalent SQL for the same feature, then emit that
 as a migration of its own — which is also where the duplicate migrations below
 come from.
 
-**The rule: a migration is not done until it is live.** In the same session
-that writes the file:
+**The rule: a migration is not done until it is live — but a human sees the SQL
+before it touches production.** There is one database and no staging tier, so
+applying a migration _is_ a production change and gets a review gate like any
+other. Sequence, in order:
 
-1. Apply the SQL against the live database (the Lovable project's SQL access).
-2. Record it in the ledger so it is not later re-derived as a duplicate:
+1. Write the migration file, push the branch, and **open the PR. Stop there.**
+   Do **not** run any of it against the live database yet. Say plainly in the PR
+   body what SQL is waiting to be applied and what it changes, so the reviewer is
+   approving the schema change and not just the diff.
+2. **Wait for the user to approve the PR.** This is a blocking gate: no live SQL
+   without it, additive or not. If CI needs the schema to be live to pass, say so
+   in the PR and wait — do not apply it to get a green tick.
+3. Once approved, apply the SQL against the live database (the Lovable project's
+   SQL access).
+4. Record it in the ledger so it is not later re-derived as a duplicate:
    `INSERT INTO supabase_migrations.schema_migrations (version, name, statements)`
    with `version` = the file's timestamp prefix, `name` = the rest of the stem.
-3. Verify the object actually exists (`information_schema.columns`, `pg_proc`,
-   `pg_policies`) and reload PostgREST: `NOTIFY pgrst, 'reload schema'`.
-4. Only then merge code that depends on it (see sequencing, below).
+5. Verify the object actually exists (`information_schema.columns`, `pg_proc`,
+   `pg_policies`, `information_schema.role_table_grants`) and reload PostgREST:
+   `NOTIFY pgrst, 'reload schema'`.
+6. Merge — and only then merge code that depends on it (see sequencing, below).
 
-Additive migrations are safe to apply directly. For **destructive** ones
-(drop/rename a column, `TRUNCATE`, remove a function) confirm with the user
-first — there is no staging database to absorb a mistake.
+The gate is the approval, not the merge: applying between steps 2 and 6 is what
+keeps a migration from sitting merged-but-inert, which is the failure this whole
+section exists to prevent. Never merge a migration you have not applied.
+
+Approval of the PR covers the SQL described in it, and nothing else. Widening the
+change after approval (another table, another column, a `DROP` you noticed on the
+way) means updating the PR and asking again.
 
 **How drift gets caught now** (both are backstops, not substitutes for the rule):
 
@@ -260,9 +275,9 @@ first — there is no staging database to absorb a mistake.
     `--selftest` runs on PRs, from `ci.yml`.
   - Without the `SUPABASE_DB_URL` secret it warns and passes, so a green tick
     only means "no drift" once the secret is set — the job summary says which.
-  - It proves a **ledger row exists**, not that the SQL ran. Since step 2 below
+  - It proves a **ledger row exists**, not that the SQL ran. Since step 4 above
     writes that row by hand, a recorded-but-unapplied migration still passes.
-    Step 3 (verify the object exists) is the part only a human/agent can do.
+    Step 5 (verify the object exists) is the part only a human/agent can do.
 - `bun run typecheck`. `src/integrations/supabase/types.ts` is generated **from
   the live schema**, so it is the closest thing the repo has to a mirror of the
   real database. Every row type now derives from it, and
@@ -298,12 +313,11 @@ cache`, or a missing-column error. Sequence the two using **expand/contract**
 (parallel change), and prefer **separate PRs** so a human gate sits between the
 schema change **merging** and the code that depends on it merging.
 
-Note what that gate now does and does not cover: under the rule above, the SQL
-is applied to production in the session that writes the migration, so the human
-gate no longer precedes the live schema change — only the file's merge. That is
-deliberate (an unapplied migration is the more dangerous state), and it is why
-destructive SQL needs explicit confirmation before it is applied, not just
-before it is merged.
+Under the rule above, that gate now sits **before** the live schema change, not
+just before the file's merge: the reviewer approves the migration PR, and only
+then does the SQL run against production. So the schema PR's approval is the
+point at which to catch a bad `DROP`, a mis-scoped `REVOKE`, or a column the code
+does not actually need — after it there is no staging tier to absorb the mistake.
 
 - **Additive schema the new code needs** (new tables, columns, functions):
   land the **migration first, in its own PR**. Confirm it is applied to the live
@@ -523,9 +537,10 @@ Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
    touches tested logic without touching its tests is incomplete.
 6. Verify with `bun run lint`, `bun run typecheck`, `bun run test`, and
    `bun run build`. The build alone does not type-check.
-7. If you touched `supabase/migrations/**`, **apply the migration to the live
-   database and record it in the ledger** in the same session — committing it
-   applies nothing (see Schema drift).
+7. If you touched `supabase/migrations/**`, open the PR and **wait for the user
+   to approve it before applying any SQL to the live database**; once approved,
+   apply it and record it in the ledger before merging — committing it applies
+   nothing (see Schema drift).
 
 ## After pushing — always do this
 
