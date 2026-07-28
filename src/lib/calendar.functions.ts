@@ -17,7 +17,7 @@ import {
   deleteEventSchema,
   eventRsvpsSchema,
   generateSessionsSchema,
-  profileFullName,
+  nameWithPreferred,
   rsvpSchema,
   updateEventSchema,
   updateSeriesSchema,
@@ -338,7 +338,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
       const [{ data: profiles, error: pErr }, { data: emails, error: eErr }] = await Promise.all([
         pdb
           .from("profiles")
-          .select("user_id, first_name, middle_name, last_name")
+          .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
         pdb.rpc("user_emails", { _user_ids: userIds }),
       ]);
@@ -346,7 +346,9 @@ export const listEventRsvps = createServerFn({ method: "POST" })
       // look like missing data rather than a broken lookup.
       if (pErr) throw new Error(pErr.message);
       if (eErr) throw new Error(eErr.message);
-      for (const p of profiles ?? []) nameByUser.set(p.user_id, profileFullName(p));
+      // Manager-facing list, so it shows the preferred name in the nickname
+      // position (`Ada "Addy" Lovelace`), matching the other manager views.
+      for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
       for (const e of (emails ?? []) as { user_id: string; email: string }[]) {
         emailByUser.set(e.user_id, e.email);
       }
