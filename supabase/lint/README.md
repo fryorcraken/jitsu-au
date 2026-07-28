@@ -5,12 +5,38 @@
 **both** Supabase linters against it. It is path-filtered to `supabase/**`, so
 frontend-only PRs don't pay for a Docker database.
 
+This directory also holds the **migration drift** check, which is *not* part of
+that workflow: it runs from the `migration-drift` job in `../../.github/workflows/ci.yml`
+on every PR, and it talks to the **live** database rather than a local one.
+
 ## What runs
 
 | Check | Tool | Catches |
 | ----- | ---- | ------- |
 | **Advisors** | `splinter.sql` via `psql` → `check-advisors.py` | The Security/Performance lints from the dashboard's **Database > Advisors**, e.g. `function_search_path_mutable` (a `SECURITY DEFINER` function without a fixed `search_path`). |
 | **plpgsql_check** | `supabase db lint --schema public --fail-on warning` | Errors in `public` PL/pgSQL function bodies (unused variables, bad SQL, etc.). |
+| **Migration drift** | `check-migration-drift.py` against the live ledger | A migration file that has never been applied to the live database. Committing a migration does not apply it — see "Schema drift" in `CLAUDE.md`. |
+
+## Migration drift
+
+The local replay above proves a migration *can* apply; it says nothing about
+whether it *has*. Nothing in this pipeline runs `../migrations/*.sql` against
+the real database, so `check-migration-drift.py` reads
+`supabase_migrations.schema_migrations` from the live project and compares it to
+the files on disk.
+
+It needs the read-only `SUPABASE_DB_URL` repository secret. Without it the job
+prints a warning and passes, so an unset secret never looks like a clean
+result — check the job log, not just the ✅, when you rely on it.
+
+A migration legitimately waiting to be applied (the contract phase of an
+expand/contract change, which must land *after* the code deploys) goes in
+`migration-drift-allowlist.txt` with a note. Everything else failing there is
+real drift: apply the migration and record it in the ledger.
+
+`python3 check-migration-drift.py --selftest` exercises the matching logic
+(both ledger key forms, the allowlist) with inline fixtures and needs no
+database.
 
 `supabase db lint` is scoped to `public` on purpose: Supabase-managed schemas
 (`storage`, `auth`, …) ship functions that emit warnings we don't control.

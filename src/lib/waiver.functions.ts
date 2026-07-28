@@ -16,12 +16,12 @@ import {
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "@/lib/validation";
+import type { SignerMeta } from "@/lib/validation";
 import {
   missingRequiredAcks,
   parseTemplateAcks,
   resolveAcknowledgements,
 } from "@/lib/waiver-acknowledgements";
-import type { AppClient } from "@/lib/profile-types";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -59,10 +59,9 @@ function serverSupabase() {
 // ---- Current template (public) ----
 export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handler(async () => {
   const supabase = serverSupabase();
-  // select("*") so the (generated-types-unaware) `acknowledgements` column comes back.
   const { data, error } = await supabase
     .from("waiver_templates")
-    .select("*")
+    .select("id, version, title, body_md, acknowledgements")
     .eq("is_current", true)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -72,7 +71,7 @@ export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handle
     version: data.version,
     title: data.title,
     body_md: data.body_md,
-    acknowledgements: parseTemplateAcks((data as { acknowledgements?: unknown }).acknowledgements),
+    acknowledgements: parseTemplateAcks(data.acknowledgements),
   };
 });
 
@@ -84,7 +83,7 @@ export const getMyProfile = createServerFn({ method: "GET" })
     // waiver. Prefill the waiver form from it. Read via the service role scoped to
     // the caller's own user id.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as AppClient;
+    const admin = supabaseAdmin;
     const { data, error } = await admin
       .from("profiles")
       .select("*")
@@ -99,7 +98,7 @@ export const listMyWaivers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as AppClient;
+    const admin = supabaseAdmin;
     const { data, error } = await admin
       .from("waivers")
       .select("id, user_id, signed_at, template_version, pdf_path, approval_status, approved_at")
@@ -125,7 +124,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     if (data.hp) return { ok: true as const, pdf_url: null };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as AppClient;
+    const admin = supabaseAdmin;
     const { renderWaiverPdf } = await import("./waiver-pdf");
 
     const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
@@ -138,7 +137,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // the browser's self-reported context (timezone, screen, platform). Also
     // capture the caller's bearer token to know who is submitting.
     let signer_ip: string | null = null;
-    let signer_meta: Record<string, unknown> = {};
+    let signer_meta: SignerMeta = {};
     let bearer: string | null = null;
     try {
       const { getRequestHeader } = await import("@tanstack/react-start/server");
@@ -185,7 +184,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     if (!tpl) throw new Error("No active waiver template.");
 
     // Acknowledgements are defined on the template; enforce the required ones.
-    const ackDefs = parseTemplateAcks((tpl as { acknowledgements?: unknown }).acknowledgements);
+    const ackDefs = parseTemplateAcks(tpl.acknowledgements);
     const answers = data.acknowledgements ?? {};
     const missing = missingRequiredAcks(ackDefs, answers);
     if (missing.length > 0) {
@@ -401,19 +400,16 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
       .update({ is_current: false })
       .eq("is_current", true);
 
-    // Built as a variable so the `acknowledgements` key (absent from the stale
-    // generated Insert type) doesn't trip the excess-property check.
-    const templateRow = {
-      version: nextVersion,
-      title: data.title,
-      body_md: data.body_md,
-      acknowledgements: data.acknowledgements,
-      is_current: true,
-      created_by: context.userId,
-    };
     const { data: created, error } = await supabaseAdmin
       .from("waiver_templates")
-      .insert(templateRow as never)
+      .insert({
+        version: nextVersion,
+        title: data.title,
+        body_md: data.body_md,
+        acknowledgements: data.acknowledgements,
+        is_current: true,
+        created_by: context.userId,
+      })
       .select("id, version")
       .single();
     if (error) throw new Error(error.message);
@@ -430,7 +426,7 @@ export const listWaivers = createServerFn({ method: "GET" })
     });
     if (!isMgr) throw new Error("Forbidden");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as AppClient;
+    const admin = supabaseAdmin;
     // Each row shows the SUBMITTED name/email (the frozen submission), plus a
     // derived status: the person's latest approved waiver is their active one,
     // older approved ones are superseded, the rest are pending.
@@ -478,7 +474,7 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
     if (!isMgr) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as AppClient;
+    const admin = supabaseAdmin;
 
     const approved = data.status === "approved";
     const approvedAt = approved ? new Date().toISOString() : null;
@@ -543,14 +539,14 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       }
     }
 
-    // Built as a variable so the approval keys (absent from the stale generated
-    // Update type) don't trip the excess-property check.
-    const patch = {
-      approval_status: data.status,
-      approved_at: approvedAt,
-      approved_by: approved ? context.userId : null,
-    };
-    const { error } = await admin.from("waivers").update(patch).eq("id", data.id);
+    const { error } = await admin
+      .from("waivers")
+      .update({
+        approval_status: data.status,
+        approved_at: approvedAt,
+        approved_by: approved ? context.userId : null,
+      })
+      .eq("id", data.id);
     if (error) throw new Error(error.message);
 
     // Return the authoritative timestamp so the client doesn't have to guess it

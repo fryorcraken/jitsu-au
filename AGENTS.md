@@ -15,12 +15,23 @@
 
 The schema reference lives in **`docs/database.md`** (every table: columns,
 RLS, relationships, storage). The product spec for the waiver/profile/account
-flows lives in **`docs/waivers.md`**. The applied schema is defined by the
-migrations in `supabase/migrations/*.sql` (the source of truth).
+flows lives in **`docs/waivers.md`**. The intended schema is defined by the
+migrations in `supabase/migrations/*.sql`.
 
 **When you change a migration, a table, or the code that reads/writes it,
 update `docs/database.md` (and `docs/waivers.md` if the product behavior
 changed) in the same change** so the docs and the code do not drift.
+
+⚠️ **Committing a migration does not apply it.** Nothing in this pipeline runs
+`supabase/migrations/*.sql` — Lovable applies only the SQL its own agent
+writes. A migration file pushed through GitHub is inert until somebody applies
+it against the live database (there is only one; no staging tier), which is how
+`column waivers.approval_status does not exist` reached production with the
+migration sitting merged in the repo. **Apply the SQL and record it in
+`supabase_migrations.schema_migrations` in the same session that writes the
+file** — additive changes directly, destructive ones only after checking with
+the user. See "Schema drift" in `CLAUDE.md` for the full procedure and the CI
+check that catches it.
 
 ## Manager agent API
 

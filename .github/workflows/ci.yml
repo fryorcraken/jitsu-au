@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   verify:
-    name: Lint, test, build
+    name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +44,53 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # `vite build` is a Rollup bundle: it strips types without checking them,
+      # so a type error alone will NOT fail the build step below. This is the
+      # step that catches them — including a query against a column the live
+      # database no longer has, now that the row types come from the generated
+      # (live-schema-derived) types. See CLAUDE.md > Schema drift.
+      - name: Typecheck
+        run: bun run typecheck
+
       - name: Test
         run: bun run test
 
       - name: Build
         run: bun run build
+
+  # Nothing in this project's pipeline runs supabase/migrations/*.sql: Lovable
+  # applies only the SQL its own agent writes. A migration that arrives through
+  # a GitHub push is inert until somebody applies it by hand, which is how
+  # `column waivers.approval_status does not exist` reached production with the
+  # migration adding it sitting merged in the repo. Only the database knows, so
+  # this job asks it. Deliberately NOT path-filtered to supabase/**: an
+  # unapplied migration stays unapplied across every later PR, so every PR
+  # should see it. See CLAUDE.md > Schema drift.
+  migration-drift:
+    name: Migrations applied to the live database
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Guards the matching logic itself (both ledger key forms, the allowlist)
+      # with inline fixtures — no database needed, so it runs even on forks.
+      - name: Self-test the drift checker
+        run: python3 supabase/lint/check-migration-drift.py --selftest
+
+      # Read-only: a single SELECT against the migration ledger. Forks and
+      # repos that have not configured the secret skip rather than fail, so a
+      # missing secret never looks like drift.
+      - name: Compare supabase/migrations against the live ledger
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::warning::SUPABASE_DB_URL is not set — skipping the migration drift check."
+            echo "Set a READ-ONLY Supabase connection string as the SUPABASE_DB_URL repository secret to enable it."
+            exit 0
+          fi
+          psql "$SUPABASE_DB_URL" \
+            -v ON_ERROR_STOP=1 --csv --tuples-only --quiet --pset pager=off \
+            -c "SELECT version, coalesce(name, '') FROM supabase_migrations.schema_migrations ORDER BY version" \
+            -o "$RUNNER_TEMP/applied.csv"
+          python3 supabase/lint/check-migration-drift.py "$RUNNER_TEMP/applied.csv"

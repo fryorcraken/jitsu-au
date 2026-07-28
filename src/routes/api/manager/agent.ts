@@ -60,10 +60,10 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** The service-role client, typed with the memberships-aware Database. */
+/** Load the service-role client. */
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin as unknown as MembershipClient;
+  return supabaseAdmin;
 }
 
 /**
@@ -139,7 +139,7 @@ function errorResponse(e: unknown): Response {
 async function handleListUsers(params: unknown) {
   const { status, limit } = listAgentUsersSchema.parse(params ?? {});
   const db = await adminClient();
-  const pdb = db as unknown as AppClient;
+  const pdb = db;
 
   const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
     await Promise.all([
@@ -255,7 +255,7 @@ async function handleListInvoices(params: unknown) {
   const nameByUser = new Map<string, string>();
   let emailByUser = new Map<string, string>();
   if (userIds.length) {
-    const pdb = db as unknown as AppClient;
+    const pdb = db;
     const [{ data: profiles }, resolved] = await Promise.all([
       pdb
         .from("profiles")

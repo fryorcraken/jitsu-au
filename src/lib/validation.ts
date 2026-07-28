@@ -129,6 +129,13 @@ export const waiverClientMetaSchema = z.object({
 export type WaiverClientMeta = z.infer<typeof waiverClientMetaSchema>;
 
 /**
+ * The signer_meta evidence blob. Every value is a string or a list of strings,
+ * which keeps it assignable to the `jsonb` column's generated `Json` type
+ * without a cast.
+ */
+export type SignerMeta = Record<string, string | string[]>;
+
+/**
  * Assemble the signer_meta evidence blob stored on a waiver: request headers
  * captured server-side (user agent, language, client hints) merged with the
  * browser's self-reported context. Pure — takes a header getter so it is
@@ -137,8 +144,8 @@ export type WaiverClientMeta = z.infer<typeof waiverClientMetaSchema>;
 export function buildSignerMeta(
   getHeader: (name: string) => string | undefined,
   client: WaiverClientMeta | undefined,
-): Record<string, unknown> {
-  const meta: Record<string, unknown> = {};
+): SignerMeta {
+  const meta: SignerMeta = {};
   const header = (key: string, name: string) => {
     const value = getHeader(name)?.trim();
     if (value) meta[key] = value.slice(0, 400);

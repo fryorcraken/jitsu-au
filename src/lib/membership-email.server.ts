@@ -12,7 +12,6 @@ import { render } from "@react-email/render";
 import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import type { MembershipClient } from "@/lib/membership-types";
 import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment";
 import { MembershipActivatedEmail } from "@/lib/email-templates/membership-activated";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
@@ -40,16 +39,12 @@ type AdminClient = SupabaseClient<Database>;
  */
 export async function getInvoiceInstructions(admin: AdminClient): Promise<string> {
   try {
-    // `club_settings` isn't in the generated Database types yet; the memberships
-    // client type knows it (see membership-types.ts).
-    const client = admin as unknown as MembershipClient;
-    const { data } = await client
+    const { data } = await admin
       .from("club_settings")
       .select("value")
       .eq("key", "invoice_payment_instructions")
       .maybeSingle();
-    const value = (data as { value?: string } | null)?.value?.trim();
-    return value || DEFAULT_INVOICE_INSTRUCTIONS;
+    return data?.value?.trim() || DEFAULT_INVOICE_INSTRUCTIONS;
   } catch {
     return DEFAULT_INVOICE_INSTRUCTIONS;
   }
