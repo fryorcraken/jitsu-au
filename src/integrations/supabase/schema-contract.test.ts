@@ -4,76 +4,107 @@ import type { Database } from "./types";
 /**
  * A contract between the app and the *live* database.
  *
- * `types.ts` is generated from the live Supabase schema, so it is the only
- * artifact in this repo that reflects what the database actually has. A
+ * `types.ts` is generated from the live Supabase schema, so it is the closest
+ * thing the repo has to a mirror of what the database actually holds. A
  * migration file sitting in `supabase/migrations/` proves nothing: Lovable does
  * not apply hand-written migrations, and `waivers.approval_status` was missing
  * from production for a week while the migration adding it sat in the repo.
  *
- * Each object below is `satisfies`-checked against a generated Row type, so a
- * column that disappears from the live schema fails `bun run typecheck` at the
- * exact call site instead of failing at runtime with
- * `column waivers.approval_status does not exist`. The runtime assertions keep
- * the check visible in the test report.
+ * ⚠️ **The protection here is entirely `tsc`'s** — the assertions below are
+ * type-level, so they are checked by `bun run typecheck`, NOT by `bun run test`.
+ * A `vitest` run cannot see a schema change at all (types are erased), so a
+ * green test report says nothing on its own. This lives in a `.test.ts` file
+ * only to sit beside the code it constrains.
+ *
+ * Note the lag: `types.ts` changes when Lovable regenerates it or when someone
+ * hand-adds a verified column, so a live `DROP COLUMN` produces no error here
+ * until then. This is a backstop, not a live check — that is what
+ * `supabase/lint/check-migration-drift.py` is for.
  *
  * When you add a column the app reads or writes, add it here.
  */
 
 type Tables = Database["public"]["Tables"];
 
+/**
+ * Fails to compile unless every key in `K` exists on row type `T`.
+ *
+ * Deliberately not `satisfies Partial<Row>` with a sample object: that catches a
+ * removed column but silently accepts a *widened* one (a column going
+ * `string` -> `string | null` still accepts `"pending"`), and it needs fixture
+ * values that invite tautological runtime assertions.
+ */
+type RequireColumns<T, K extends keyof T> = K;
+
+/**
+ * Exact type equality. The doubled conditional is the standard trick for
+ * comparing types *invariantly*: a plain `T[K] extends Expected` would accept a
+ * narrowing, and would also silently pass when `T[K]` is `never`.
+ */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/**
+ * Fails to compile unless its argument is exactly `true`.
+ *
+ * The constraint is what makes this bite. An unconstrained `type X = ... : never`
+ * compiles happily — `never` is assignable to everything — so a naive
+ * conditional-type assertion silently passes. This one errors on `false`.
+ */
+type Expect<T extends true> = T;
+
+// ---- waivers: the approval workflow (the columns the outage was about) ----
+export type _WaiverApprovalColumns = RequireColumns<
+  Tables["waivers"]["Row"],
+  "approval_status" | "approved_at" | "approved_by"
+>;
+// Exactly `string`, not `string | null`: `deriveWaiverListStatuses` and
+// `deriveLifecycleStatus` compare it directly, and the column is
+// NOT NULL DEFAULT 'pending'. A nullable widening here would mean the NOT NULL
+// was dropped live, and every status comparison would quietly start missing.
+export type _WaiverApprovalStatusIsString = Expect<
+  Equals<Tables["waivers"]["Row"]["approval_status"], string>
+>;
+
+// ---- waivers: the frozen-submission person fields ----
+export type _WaiverSubmissionColumns = RequireColumns<
+  Tables["waivers"]["Row"],
+  | "first_name"
+  | "middle_name"
+  | "last_name"
+  | "preferred_name"
+  | "email"
+  | "uts_student_number"
+  | "sms_whatsapp_consent"
+  | "signer_ip"
+  | "signer_meta"
+  | "user_id"
+>;
+
+// ---- waiver_templates: the manager-editable acknowledgements ----
+export type _TemplateColumns = RequireColumns<
+  Tables["waiver_templates"]["Row"],
+  "acknowledgements" | "body_md" | "is_current" | "version"
+>;
+
+// ---- profiles: the fields waiver approval copies across ----
+export type _ProfileColumns = RequireColumns<
+  Tables["profiles"]["Row"],
+  "user_id" | "first_name" | "preferred_name" | "uts_student_number" | "sms_whatsapp_consent"
+>;
+
+// ---- interest_registrations: the consent flag the public form writes ----
+export type _InterestColumns = RequireColumns<
+  Tables["interest_registrations"]["Row"],
+  "sms_whatsapp_consent"
+>;
+
 describe("live schema contract", () => {
-  it("waivers carries the approval workflow columns", () => {
-    const row = {
-      approval_status: "pending",
-      approved_at: null,
-      approved_by: null,
-    } satisfies Partial<Tables["waivers"]["Row"]>;
-
-    expect(Object.keys(row).sort()).toEqual(["approval_status", "approved_at", "approved_by"]);
-  });
-
-  it("waivers carries the frozen-submission person fields", () => {
-    const row = {
-      first_name: "Ada",
-      middle_name: null,
-      last_name: "Lovelace",
-      preferred_name: null,
-      email: "ada@example.com",
-      uts_student_number: null,
-      sms_whatsapp_consent: false,
-      signer_ip: null,
-      signer_meta: {},
-      user_id: "00000000-0000-0000-0000-000000000000",
-    } satisfies Partial<Tables["waivers"]["Row"]>;
-
-    expect(row.first_name).toBe("Ada");
-  });
-
-  it("waiver_templates carries the manager-editable acknowledgements", () => {
-    const row = {
-      acknowledgements: [{ id: "risk", label: "I accept the risks.", required: true }],
-    } satisfies Partial<Tables["waiver_templates"]["Row"]>;
-
-    expect(row.acknowledgements).toHaveLength(1);
-  });
-
-  it("profiles carries the fields waiver approval copies across", () => {
-    const row = {
-      user_id: "00000000-0000-0000-0000-000000000000",
-      first_name: null,
-      preferred_name: null,
-      uts_student_number: null,
-      sms_whatsapp_consent: false,
-    } satisfies Partial<Tables["profiles"]["Row"]>;
-
-    expect(row.sms_whatsapp_consent).toBe(false);
-  });
-
-  it("interest_registrations carries the consent flag the form writes", () => {
-    const row = { sms_whatsapp_consent: true } satisfies Partial<
-      Tables["interest_registrations"]["Row"]
-    >;
-
-    expect(row.sms_whatsapp_consent).toBe(true);
+  it("is enforced by the typechecker, not by this test", () => {
+    // Nothing to assert at runtime: the contract is the type declarations above,
+    // and `bun run typecheck` is what enforces them. This case exists so the
+    // file is a valid suite and so a reader of the test report is told where
+    // the real check lives.
+    expect(true).toBe(true);
   });
 });

@@ -1,0 +1,81 @@
+name: Migration drift
+
+# Does the live database actually have every migration in supabase/migrations?
+#
+# Nothing in this project's pipeline runs supabase/migrations/*.sql against the
+# live database: Lovable applies only the SQL its own agent writes. A migration
+# that arrives through a GitHub push is inert until somebody applies it by hand,
+# which is how `column waivers.approval_status does not exist` reached
+# production with the migration adding it sitting merged in the repo. Only the
+# database knows, so this workflow asks it. See CLAUDE.md > Schema drift.
+#
+# ⚠️ This workflow deliberately does NOT run on `pull_request`.
+#
+# It holds a production database credential, and this repo takes same-repo
+# feature branches from Lovable and from coding agents. A `pull_request` run on
+# a same-repo branch DOES receive secrets, so pairing the secret with a script
+# the PR itself can rewrite would let any PR (or any agent that gets prompt-
+# injected while editing supabase/lint/**) exfiltrate the connection string in
+# one line. Running only on trusted refs keeps the credential away from
+# unreviewed code.
+#
+# The cost is that drift is caught a merge later rather than in the PR. That is
+# acceptable: an unapplied migration is a persistent state, not a property of
+# one PR, so the daily schedule and the post-merge run both find it — and the
+# real guard is the rule that a migration is applied in the session that writes
+# it. The checker's self-test still runs on every PR from ci.yml.
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Daily. Drift can also appear without a push (someone edits the live schema
+    # in the Supabase dashboard), so this must not be push-only.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: migration-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Migrations applied to the live database
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the drift checker
+        run: python3 supabase/lint/check-migration-drift.py --selftest
+
+      # A single read-only SELECT against the migration ledger. psql ships on
+      # the ubuntu-latest image, so there is nothing to install.
+      #
+      # A missing secret warns and passes rather than failing, so that setting
+      # the workflow up does not wedge main. That means a green check here does
+      # NOT prove there is no drift unless the secret is set — read the summary,
+      # which says which of the two happened.
+      - name: Compare supabase/migrations against the live ledger
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::warning::SUPABASE_DB_URL is not set — the migration drift check did NOT run."
+            {
+              echo "### ⚠️ Migration drift check not armed"
+              echo
+              echo "\`SUPABASE_DB_URL\` is not set, so this run checked nothing."
+              echo "A green tick here does **not** mean the migrations are applied."
+              echo
+              echo "See \`supabase/lint/README.md\` for the least-privilege role to create."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          psql "$SUPABASE_DB_URL" \
+            -v ON_ERROR_STOP=1 --csv --tuples-only --quiet --pset pager=off \
+            -c "SELECT version, coalesce(name, '') FROM supabase_migrations.schema_migrations ORDER BY version" \
+            -o "$RUNNER_TEMP/applied.csv"
+          python3 supabase/lint/check-migration-drift.py "$RUNNER_TEMP/applied.csv" \
+            | tee -a "$GITHUB_STEP_SUMMARY"

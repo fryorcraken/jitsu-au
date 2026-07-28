@@ -174,10 +174,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       }
     }
 
-    // Load current template
+    // Load current template. Explicit columns, matching getCurrentWaiverTemplate:
+    // with `select("*")` a missing `acknowledgements` column would come back
+    // undefined and silently enforce ZERO required acknowledgements on a signed
+    // legal document. Naming it means PostgREST rejects the read instead.
     const { data: tpl, error: tplErr } = await supabaseAdmin
       .from("waiver_templates")
-      .select("*")
+      .select("id, version, title, body_md, acknowledgements")
       .eq("is_current", true)
       .maybeSingle();
     if (tplErr) throw new Error(tplErr.message);

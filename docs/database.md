@@ -11,13 +11,14 @@ The schema reference for UTS Jitsu (Supabase Postgres).
 > behind the person/waiver tables live in `docs/waivers.md`.
 
 > [!WARNING]
-> A migration file describes what the database *should* have, not what it
-> *does*. Committing a migration does not apply it — nothing in this pipeline
-> runs `supabase/migrations/*.sql`, and this document described
-> `waivers.approval_status` correctly for a week while the live column did not
-> exist. To see the real schema, query the live database
-> (`information_schema.columns`) or read
-> `src/integrations/supabase/types.ts`, which is generated from it. See
+> A migration file describes what the database _should_ have, not what it
+> _does_. Committing a migration does not apply it — nothing in this pipeline
+> runs `supabase/migrations/*.sql` against the live database (CI replays them
+> onto a throwaway local Postgres, which proves only that they _can_ apply).
+> This document described `waivers.approval_status` correctly for a week while
+> the live column did not exist. To see the real schema, query the live database
+> (`information_schema.columns`) — or read `src/integrations/supabase/types.ts`,
+> which is generated from it, but may lag or carry hand-added columns. See
 > "Schema drift" in `CLAUDE.md`.
 
 ## People and waivers: the shape
