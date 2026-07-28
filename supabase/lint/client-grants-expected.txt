@@ -41,38 +41,3 @@ calendar_events:authenticated:SELECT
 # exclusively through server functions, which enforce rules RLS cannot express.
 event_rsvps:authenticated:SELECT
 calendar_feed_tokens:authenticated:SELECT
-
-# ---------------------------------------------------------------------------
-# ACKNOWLEDGED, NOT ACCEPTED — `session_checkins`
-# ---------------------------------------------------------------------------
-# This table exists in the live database with Supabase's full default grants,
-# but appears in NO migration, no generated type, no doc and no code in this
-# repo. It was created live, outside the migration flow — which is the failure
-# the review gate in CLAUDE.md > Schema drift now exists to stop.
-#
-# It is listed here only so this check reports the state it is meant to report
-# instead of sitting red on `main` forever; the entries are NOT an endorsement,
-# and the table is deliberately left out of
-# 20260728150000_revoke_remaining_client_grants.sql because a REVOKE naming a
-# table with no CREATE in this directory fails the from-scratch replay in
-# supabase-lint.yml.
-#
-# Resolve by either adding the migration that should have created it (then
-# revoking these grants like every other table) or dropping it, and delete this
-# block. Until then RLS is the only thing gating it.
-session_checkins:anon:SELECT
-session_checkins:anon:INSERT
-session_checkins:anon:UPDATE
-session_checkins:anon:DELETE
-session_checkins:anon:TRUNCATE
-session_checkins:anon:REFERENCES
-session_checkins:anon:TRIGGER
-session_checkins:anon:MAINTAIN
-session_checkins:authenticated:SELECT
-session_checkins:authenticated:INSERT
-session_checkins:authenticated:UPDATE
-session_checkins:authenticated:DELETE
-session_checkins:authenticated:TRUNCATE
-session_checkins:authenticated:REFERENCES
-session_checkins:authenticated:TRIGGER
-session_checkins:authenticated:MAINTAIN

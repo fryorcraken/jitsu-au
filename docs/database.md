@@ -79,10 +79,12 @@ table waivers` unless `authenticated` holds `SELECT` there. That is the only
   happened, and how a manager could assign roles directly through
   `user_roles`.
 
-Not covered: **`session_checkins`** exists in the live database with the full
-default grants but has no migration, type, doc or code in this repo. It is
-acknowledged in `client-grants-expected.txt` so CI reports rather than blocks;
-RLS is the only thing gating it.
+This audit also turned up a table that was in the live database and nowhere
+else: **`session_checkins`**, a per-event attendance model with membership
+credit consumption, created directly against production with no migration, type,
+doc or code in this repo. It was empty and nothing referenced it, so
+`20260728160000_drop_session_checkins.sql` drops it; that migration records the
+full design should the feature be rebuilt deliberately.
 
 ## People and waivers: the shape
 
