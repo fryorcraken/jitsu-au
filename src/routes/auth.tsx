@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { rememberSession } from "@/lib/auth-persistence";
+import { AuthPending } from "@/components/site/AuthPending";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { PasswordInput } from "@/components/site/PasswordInput";
 import { Button } from "@/components/ui/button";
@@ -37,13 +38,21 @@ function AuthPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
       if (data.session) navigate({ to: redirect ?? "/account" });
       else setReady(true);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [navigate, redirect]);
 
-  if (!ready) return null;
+  // Never render nothing here. Someone already signed in is on their way to
+  // their account, and if that hand-off stalls a spinner is a far better thing
+  // to be looking at than a blank page.
+  if (!ready) return <AuthPending label="Checking your sign-in" />;
 
   // There is no self-serve sign-up: your login is set up by the club when a
   // manager approves your waiver, via the invite email.
