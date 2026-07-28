@@ -130,11 +130,20 @@ Read `src/routes/README.md` before touching routes. Key points:
 
 ## Supabase clients — pick the right one
 
-| Module                                                             | Runs where                  | Auth level                                                        | Use for                                                                                        |
-| ------------------------------------------------------------------ | --------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `integrations/supabase/client.ts` (`supabase`)                     | Browser (also SSR fallback) | Publishable/anon key, RLS-enforced, user session                  | Client components, `useAuth`, auth-gate `beforeLoad`                                           |
-| `integrations/supabase/auth-middleware.ts` (`requireSupabaseAuth`) | Server fn                   | Verifies the caller's bearer token, RLS-enforced **as that user** | Authenticated server functions; exposes `context.supabase`, `context.userId`, `context.claims` |
-| `integrations/supabase/client.server.ts` (`supabaseAdmin`)         | Server only                 | **Service role — bypasses RLS**                                   | Trusted admin writes (waiver insert, PDF upload, signed URLs). Never ship to client.           |
+| Module                                                                                                                                 | Runs where                  | Auth level                                                                                 | Use for                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `integrations/supabase/client.ts` (`supabase`)                                                                                         | Browser (also SSR fallback) | Publishable/anon key, RLS-enforced, user session                                           | Client components, `useAuth`, auth-gate `beforeLoad`                                           |
+| `integrations/supabase/auth-middleware.ts` (`requireSupabaseAuth`)                                                                     | Server fn                   | Verifies the caller's bearer token, RLS-enforced **as that user**                          | Authenticated server functions; exposes `context.supabase`, `context.userId`, `context.claims` |
+| `integrations/supabase/client.server.ts` (`supabaseAdmin`)                                                                             | Server only                 | **Service role — bypasses RLS**                                                            | Trusted admin writes (waiver insert, PDF upload, signed URLs). Never ship to client.           |
+| a local `serverSupabase()` built with `createClient` — in `submissions.functions.ts`, `waiver.functions.ts`, `membership.functions.ts` | Server fn                   | **`anon`** — publishable key, no user session, so RLS **and table grants** apply as `anon` | The public funnel: interest/contact submit, current waiver template, plan catalogue            |
+
+> [!WARNING]
+> That fourth row is the one people miss. **Running on the server does not make a
+> query privileged.** Those modules do not import `client.ts`, so grepping for
+> `@/integrations/supabase/client` will not find them — grep `createClient` too.
+> Because PostgREST resolves them to `anon`, they need real table grants, and a
+> migration that revokes those takes down the interest form, the contact form,
+> the waiver signing page and the pricing page. See "Table grants" under Database.
 
 - `attachSupabaseAuth` (registered as a `functionMiddleware` in `start.ts`)
   attaches the browser's bearer token to every server-function RPC — without it,
@@ -196,7 +205,53 @@ Core tables:
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.
 
 Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
-is via short-lived signed URLs.
+is via short-lived signed URLs, and `storage.objects` carries explicit
+owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
+
+### Table grants: only REVOKE narrows, and RLS is the second lock
+
+Supabase's bootstrap runs `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL
+ON TABLES TO anon, authenticated, service_role`, so **every new table arrives
+with all eight privileges** (SELECT, INSERT, UPDATE, DELETE, TRUNCATE,
+REFERENCES, TRIGGER, MAINTAIN) granted to both client roles.
+
+> [!IMPORTANT]
+> **`GRANT` only ever adds — it cannot narrow.** `GRANT SELECT ON t TO
+authenticated` meaning "reads only" grants a privilege the role already holds:
+> it reads like a restriction in review and does nothing. A new table needs an
+> explicit `REVOKE ALL ON public.<t> FROM anon, authenticated;` **before** any
+> intended grant. Every table in this schema was fully open to both client roles
+> until `20260728120000` and `20260728150000` revoked them.
+
+The full picture, including the complete list of privileges the client roles are
+allowed to hold, is the "Client grants" section of **`docs/database.md`**. Read
+it before writing a migration that touches grants. Three things bite repeatedly:
+
+- **"Server function" does not mean "service role".** Several `*.functions.ts`
+  handlers build their own client from `SUPABASE_PUBLISHABLE_KEY` with no user
+  session, so PostgREST resolves them to `anon` and their queries need real
+  grants — that is the whole public funnel (interest form, contact form, waiver
+  signing page, pricing page). Grepping imports of
+  `@/integrations/supabase/client` will not find them: **grep `createClient`
+  too**, and check which key each one passes.
+- **An RLS policy that references another table needs a grant on that table.**
+  Policy expressions run with the _caller's_ privileges, so the `storage.objects`
+  policy that sub-selects `public.waivers` fails with `permission denied` unless
+  `authenticated` holds `SELECT` there. Route it through a `SECURITY DEFINER`
+  helper (as the manager branch does with `has_role()`) if you do not want the
+  grant.
+- **A write grant makes "defence in depth" policies real.** Owner-scoped write
+  policies written on the assumption that no client grant exists become live,
+  reachable paths the moment one does, bypassing rules that only live in the
+  server functions.
+
+`supabase/lint/client-grants-expected.txt` pins the allowed set and
+`.github/workflows/migration-drift.yml` checks it against the live ACL. When you
+add a table or a grant, update that file in the same change or the check fails.
+Read the live ACL from **`pg_class.relacl`**, never
+`information_schema.role_table_grants`: the information_schema views only show
+grants the connecting role is party to (a least-privilege reader sees an empty
+set) and they omit `MAINTAIN` entirely.
 
 ### Schema drift: committing a migration does NOT apply it
 
@@ -574,7 +629,12 @@ asks for the technical detail, give them all of it.
    touches tested logic without touching its tests is incomplete.
 6. Verify with `bun run lint`, `bun run typecheck`, `bun run test`, and
    `bun run build`. The build alone does not type-check.
-7. If you touched `supabase/migrations/**`, open the PR and **wait for the user
+7. **Creating a table?** It arrives with all eight privileges granted to `anon`
+   and `authenticated`. Add `REVOKE ALL ON public.<t> FROM anon, authenticated;`
+   before any intended grant, and add whatever survives to
+   `supabase/lint/client-grants-expected.txt` (see Table grants). Adding or
+   removing a client grant means updating that file in the same change.
+8. If you touched `supabase/migrations/**`, open the PR and **wait for the user
    to approve it before applying any SQL to the live database**; once approved,
    apply it and record it in the ledger before merging — committing it applies
    nothing (see Schema drift).
