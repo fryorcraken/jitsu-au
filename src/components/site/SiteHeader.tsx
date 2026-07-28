@@ -11,6 +11,7 @@ const nav = [
   { to: "/about", label: "About" },
   { to: "/instructors", label: "Instructors" },
   { to: "/classes", label: "Classes" },
+  { to: "/calendar", label: "Calendar" },
   { to: "/first-class", label: "First class" },
   { to: "/pricing", label: "Pricing" },
   { to: "/faq", label: "FAQ" },

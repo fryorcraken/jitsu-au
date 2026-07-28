@@ -708,6 +708,148 @@ export const saveClubSettingsSchema = z.object({
 });
 export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
 
+// ---- Calendar (see docs/calendar.md) ----
+
+/** Event kinds. `session` occurrences come from a series; the rest are one-offs. */
+export const calendarEventKinds = ["session", "grading", "seminar", "social", "other"] as const;
+export type CalendarEventKind = (typeof calendarEventKinds)[number];
+
+/**
+ * ACCESS setting. `public` shows to everyone including the marketing site;
+ * `members` is visible only to PAID members (and managers).
+ */
+export const calendarVisibilities = ["public", "members"] as const;
+export type CalendarVisibility = (typeof calendarVisibilities)[number];
+
+/** Cancelling keeps the row (so the feed emits STATUS:CANCELLED). */
+export const eventStatuses = ["scheduled", "cancelled"] as const;
+export type EventStatus = (typeof eventStatuses)[number];
+
+/** An RSVP response. Open to any signed-in user, trial visitors included. */
+export const rsvpResponses = ["going", "maybe", "declined"] as const;
+export type RsvpResponse = (typeof rsvpResponses)[number];
+
+const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a 24-hour HH:MM time.");
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date.");
+const isoDateTime = z.string().datetime({ offset: true });
+
+/**
+ * Manager: define a recurring weekly session. `starts_on` is required (the first
+ * date it runs); `ends_on` is optional — omit/null for an OPEN-ENDED series that
+ * recurs indefinitely, or set it for a fixed end (e.g. end of semester).
+ */
+export const createSeriesSchema = z
+  .object({
+    title: z.string().trim().min(1, "Give the session a title.").max(80),
+    description: z.string().trim().max(2000).optional(),
+    instructor_name: z.string().trim().max(80).optional(),
+    location: z.string().trim().max(120).optional(),
+    weekday: z.number().int().min(0).max(6),
+    start_time: timeOfDay,
+    duration_minutes: z.number().int().positive().max(600),
+    starts_on: dateOnly,
+    ends_on: dateOnly.nullish(),
+  })
+  .refine((v) => !v.ends_on || v.ends_on >= v.starts_on, {
+    message: "The end date must be on or after the start date.",
+    path: ["ends_on"],
+  });
+export type CreateSeriesInput = z.infer<typeof createSeriesSchema>;
+
+/** Manager: edit a series (any subset of fields, plus activate/deactivate). */
+export const updateSeriesSchema = z
+  .object({
+    id: z.string().uuid(),
+    title: z.string().trim().min(1).max(80).optional(),
+    description: z.string().trim().max(2000).nullish(),
+    instructor_name: z.string().trim().max(80).nullish(),
+    location: z.string().trim().max(120).optional(),
+    weekday: z.number().int().min(0).max(6).optional(),
+    start_time: timeOfDay.optional(),
+    duration_minutes: z.number().int().positive().max(600).optional(),
+    starts_on: dateOnly.optional(),
+    ends_on: dateOnly.nullish(),
+    is_active: z.boolean().optional(),
+  })
+  .strict();
+export type UpdateSeriesInput = z.infer<typeof updateSeriesSchema>;
+
+/** Manager: materialize a series' occurrences through a date (idempotent). */
+export const generateSessionsSchema = z.object({
+  series_id: z.string().uuid(),
+  through_date: dateOnly,
+});
+export type GenerateSessionsInput = z.infer<typeof generateSessionsSchema>;
+
+/** Manager: create a one-off event (grading, seminar, ...) or an extra session. */
+export const createEventSchema = z
+  .object({
+    kind: z.enum(calendarEventKinds).default("other"),
+    title: z.string().trim().min(1, "Give the event a title.").max(120),
+    description: z.string().trim().max(4000).optional(),
+    instructor_name: z.string().trim().max(80).optional(),
+    location: z.string().trim().max(120).optional(),
+    starts_at: isoDateTime,
+    ends_at: isoDateTime,
+    all_day: z.boolean().default(false),
+    visibility: z.enum(calendarVisibilities).default("public"),
+    invite_only: z.boolean().default(false),
+  })
+  .refine((v) => new Date(v.ends_at) >= new Date(v.starts_at), {
+    message: "The event must end at or after it starts.",
+    path: ["ends_at"],
+  });
+export type CreateEventInput = z.infer<typeof createEventSchema>;
+
+/** Manager: edit a single event (any subset of fields). */
+export const updateEventSchema = z
+  .object({
+    id: z.string().uuid(),
+    kind: z.enum(calendarEventKinds).optional(),
+    title: z.string().trim().min(1).max(120).optional(),
+    description: z.string().trim().max(4000).nullish(),
+    instructor_name: z.string().trim().max(80).nullish(),
+    location: z.string().trim().max(120).optional(),
+    starts_at: isoDateTime.optional(),
+    ends_at: isoDateTime.optional(),
+    all_day: z.boolean().optional(),
+    visibility: z.enum(calendarVisibilities).optional(),
+    invite_only: z.boolean().optional(),
+  })
+  .strict();
+export type UpdateEventInput = z.infer<typeof updateEventSchema>;
+
+/** Manager: cancel or un-cancel a single event (the row is kept either way). */
+export const cancelEventSchema = z.object({
+  id: z.string().uuid(),
+  cancelled: z.boolean(),
+});
+export type CancelEventInput = z.infer<typeof cancelEventSchema>;
+
+/** Manager: change the instructor on one event, or on a series + its future events. */
+export const changeInstructorSchema = z.object({
+  scope: z.enum(["event", "series"]),
+  id: z.string().uuid(),
+  // Empty string clears the instructor (handled server-side as null).
+  instructor_name: z.string().trim().max(80),
+});
+export type ChangeInstructorInput = z.infer<typeof changeInstructorSchema>;
+
+/** Manager: delete an event outright (use cancel to keep the record). */
+export const deleteEventSchema = z.object({ id: z.string().uuid() });
+export type DeleteEventInput = z.infer<typeof deleteEventSchema>;
+
+/** Manager: list who responded to one event. */
+export const eventRsvpsSchema = z.object({ event_id: z.string().uuid() });
+export type EventRsvpsInput = z.infer<typeof eventRsvpsSchema>;
+
+/** Member: set (upsert) an RSVP to an event. */
+export const rsvpSchema = z.object({
+  event_id: z.string().uuid(),
+  response: z.enum(rsvpResponses),
+});
+export type RsvpInput = z.infer<typeof rsvpSchema>;
+
 /**
  * Parse a "$245", "245", "20.50" or "2,450.00" money string into integer cents.
  * Returns null for blanks / unparseable input. Used by the CSV importer.

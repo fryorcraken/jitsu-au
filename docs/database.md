@@ -267,7 +267,9 @@ querying role) + `service_role`. It is acknowledged in
 | `created_at`       | `timestamptz` | no   | Default `now()`.                                     |
 | `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                       |
 
-**RLS:** manager-only (read and write). Deliberately **not** readable by anon: the
+**Grants:** none for `anon`/`authenticated` — this table is reached only through
+the service role. **RLS:** manager-only (read and write). Deliberately **not**
+readable by anon: the
 series is only the definition, the public surface is the dated `calendar_events`
 generated from it, and a public grant would leak the title/instructor/day/time of
 a session whose occurrences are members-only. Note `is_active = false` hides the
@@ -309,11 +311,14 @@ readable so the cancellation shows. Managers insert/update/delete.
 (`going|maybe|declined`), `created_at`, `updated_at`, `UNIQUE(event_id,
 user_id)`. RSVP is open to **any signed-in person**, trial visitors included.
 **RLS:** a person reads their own rows; managers read all (the attendance view).
-Writes are **service-role only** — `authenticated` gets SELECT but no
-INSERT/UPDATE/DELETE grant, because `setRsvp` enforces two rules RLS cannot
-express (no RSVP to a members-only event you can't see, none to a cancelled or
-past event) and a direct client write would bypass exactly those. The
-owner-scoped write policies are kept as defence in depth.
+Writes are **service-role only** — `authenticated` holds SELECT and nothing
+else, because `setRsvp` enforces three rules RLS cannot express (no RSVP to a
+members-only event you can't see, none to a cancelled event, none to one that
+has already finished) and a direct client write would bypass exactly those. The
+owner-scoped write policies are kept as defence in depth. Note the narrower
+GRANT in the original migration did not achieve this on its own: Supabase grants
+ALL on `public` to both roles by default and GRANT cannot take a privilege away,
+so `20260728120000_calendar_revoke_client_grants.sql` REVOKEs them explicitly.
 
 ### `calendar_feed_tokens` — per-person private calendar links
 
