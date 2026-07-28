@@ -46,21 +46,33 @@ roles.
 > grant.
 
 The list below is the complete set of table privileges the client roles hold.
-It is short because almost nothing talks to the database from the browser:
-everything else runs through a server function on the service-role client, which
-bypasses both grants and RLS. `supabase/lint/client-grants-expected.txt` pins
-this list and `.github/workflows/migration-drift.yml` checks it against the live
-database.
+Most of the app needs none of it: it reaches the database through a server
+function on the service-role client, which bypasses both grants and RLS.
+`supabase/lint/client-grants-expected.txt` pins this list and
+`.github/workflows/migration-drift.yml` checks it against the live database.
 
-| Table                  | Role            | Privilege | Why                                                                             |
-| ---------------------- | --------------- | --------- | ------------------------------------------------------------------------------- |
-| `user_roles`           | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
-| `waivers`              | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
-| `calendar_events`      | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
-| `event_rsvps`          | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                  |
-| `calendar_feed_tokens` | `authenticated` | `SELECT`  | a person reads their own feed-token row                                         |
+| Table                    | Role            | Privilege | Why                                                                             |
+| ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------- |
+| `interest_registrations` | `anon`+`auth`   | `INSERT`  | `submitInterest` — the public interest form                                     |
+| `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                       |
+| `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                     |
+| `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                 |
+| `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
+| `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
+| `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
+| `event_rsvps`            | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                  |
+| `calendar_feed_tokens`   | `authenticated` | `SELECT`  | a person reads their own feed-token row                                         |
 
 Every other table grants the client roles **nothing**.
+
+> [!IMPORTANT]
+> The first four rows are **server** functions, not browser code. They run in
+> `*.functions.ts` handlers but build their own client from
+> `SUPABASE_PUBLISHABLE_KEY` with no user session, so PostgREST resolves them to
+> `anon` and they need real grants. Grepping for imports of the shared browser
+> client (`@/integrations/supabase/client`) will not find them — search for
+> `createClient` as well. Revoking these without re-granting takes down the
+> whole public funnel: interest form, contact form, signing page, pricing page.
 
 Two traps worth knowing before you touch a policy or a grant:
 

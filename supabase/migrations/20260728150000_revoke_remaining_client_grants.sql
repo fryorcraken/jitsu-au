@@ -47,12 +47,29 @@
 -- ---------------------------------------------------------------------------
 -- Why revoking everything is safe
 -- ---------------------------------------------------------------------------
--- Exactly one table is queried directly by the browser client, read-only:
--- `user_roles`, in useRoles (src/hooks/useAuth.ts:41). Every file importing
--- @/integrations/supabase/client was checked for .from(), .rpc() and .storage()
--- and there is no other client-side data access. Everything else runs through
--- server functions on the service-role client, which bypasses both grants and
--- RLS, so removing the client grants takes away nothing the app uses.
+-- Two things reach these tables without the service role, and both are easy to
+-- miss:
+--
+--   1. The browser client, which queries exactly one table, read-only:
+--      `user_roles`, in useRoles (src/hooks/useAuth.ts).
+--   2. Three *server* modules that do NOT import the shared browser client and
+--      so do not show up when grepping for it — submissions.functions.ts,
+--      waiver.functions.ts and membership.functions.ts each build their own
+--      client from SUPABASE_PUBLISHABLE_KEY with no user session. PostgREST
+--      resolves those to `anon`, not to a privileged role, so their queries need
+--      real grants:
+--        submitInterest        -> INSERT interest_registrations
+--        submitContact         -> INSERT contact_messages
+--        getCurrentWaiverTemplate -> SELECT waiver_templates
+--        listMembershipPlans   -> SELECT membership_plans
+--      Those four are the public funnel: the interest form, the contact form,
+--      the waiver signing page and the pricing page. Revoking without re-granting
+--      them 500s all four.
+--
+-- Everything else runs on the service-role client, which bypasses both grants
+-- and RLS, so it needs nothing. No server function reads a table through
+-- `context.supabase` (the caller-scoped middleware client) — that is used only
+-- for the has_role RPC, whose EXECUTE grant is untouched here.
 --
 -- The RLS policies are deliberately left in place. They cost nothing and stay
 -- correct if a grant is ever added back.
@@ -64,8 +81,17 @@
 -- first; see the PR for this migration.
 
 -- ---------- Public intake: insert-only, read via the service role ----------
+-- submitInterest / submitContact (submissions.functions.ts) run server-side but
+-- build their own client from SUPABASE_PUBLISHABLE_KEY with no user session, so
+-- PostgREST resolves them to `anon` — these two INSERTs are genuinely exercised
+-- as anon and the forms 500 without the grant. Deliberately no SELECT: the
+-- handlers avoid `.select()` on the insert for exactly that reason (see the
+-- comment in submitInterest), so a lead cannot be read back from the client.
 REVOKE ALL ON public.interest_registrations FROM anon, authenticated;
+GRANT INSERT ON public.interest_registrations TO anon, authenticated;
+
 REVOKE ALL ON public.contact_messages FROM anon, authenticated;
+GRANT INSERT ON public.contact_messages TO anon, authenticated;
 
 -- ---------- Waivers: signed through submitWaiverWithPdf on the service role ----------
 REVOKE ALL ON public.waivers FROM anon, authenticated;
@@ -82,14 +108,24 @@ REVOKE ALL ON public.waivers FROM anon, authenticated;
 -- to the caller's own, so the grant hands over nothing the policy would not.
 GRANT SELECT ON public.waivers TO authenticated;
 
+-- getCurrentWaiverTemplate (waiver.functions.ts) reads the current template on
+-- the anon-key client so the public signing page can render it. The role-less
+-- "Anyone can read current template" policy narrows it to is_current = true.
 REVOKE ALL ON public.waiver_templates FROM anon, authenticated;
+GRANT SELECT ON public.waiver_templates TO anon, authenticated;
+
 REVOKE ALL ON public.waiver_drive_uploads FROM anon, authenticated;
 
 -- ---------- People ----------
 REVOKE ALL ON public.profiles FROM anon, authenticated;
 
 -- ---------- Membership and money ----------
+-- listMembershipPlans (membership.functions.ts) reads the catalogue on the
+-- anon-key client for the public pricing page. The role-less "Anyone can read
+-- active plans" policy narrows it to is_active = true.
 REVOKE ALL ON public.membership_plans FROM anon, authenticated;
+GRANT SELECT ON public.membership_plans TO anon, authenticated;
+
 REVOKE ALL ON public.memberships FROM anon, authenticated;
 REVOKE ALL ON public.bank_transactions FROM anon, authenticated;
 
