@@ -21,6 +21,69 @@ The schema reference for UTS Jitsu (Supabase Postgres).
 > which is generated from it, but may lag or carry hand-added columns. See
 > "Schema drift" in `CLAUDE.md`.
 
+## Client grants: the schema is closed by default
+
+Every table in `public` has RLS enabled, but RLS is only the **second** of two
+locks. The first is the table grant, and Supabase's bootstrap opens it for you:
+
+```sql
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON TABLES TO anon, authenticated, service_role;
+```
+
+So a new table arrives with all eight privileges (SELECT, INSERT, UPDATE,
+DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN) already granted to both client
+roles.
+
+> [!WARNING]
+> **`GRANT` cannot narrow anything — only `REVOKE` can.** A migration writing
+> `GRANT SELECT ON t TO authenticated` to mean "reads only" grants a privilege
+> the role already holds; it reads like a restriction in review and does
+> nothing. Every table in this schema sat fully open to both client roles for
+> that reason until `20260728120000` (calendar) and `20260728150000` (the rest)
+> revoked them. A new table needs an explicit
+> `REVOKE ALL ON public.<t> FROM anon, authenticated;` **before** any intended
+> grant.
+
+The list below is the complete set of table privileges the client roles hold.
+It is short because almost nothing talks to the database from the browser:
+everything else runs through a server function on the service-role client, which
+bypasses both grants and RLS. `supabase/lint/client-grants-expected.txt` pins
+this list and `.github/workflows/migration-drift.yml` checks it against the live
+database.
+
+| Table                  | Role            | Privilege | Why                                                                             |
+| ---------------------- | --------------- | --------- | ------------------------------------------------------------------------------- |
+| `user_roles`           | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
+| `waivers`              | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
+| `calendar_events`      | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
+| `event_rsvps`          | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                  |
+| `calendar_feed_tokens` | `authenticated` | `SELECT`  | a person reads their own feed-token row                                         |
+
+Every other table grants the client roles **nothing**.
+
+Two traps worth knowing before you touch a policy or a grant:
+
+- **An RLS policy that references another table needs a grant on that table.**
+  Policy expressions are evaluated with the _caller's_ privileges, so the
+  `storage.objects` policy "Owners can read their own waiver PDF" — which tests
+  `EXISTS (SELECT 1 FROM public.waivers …)` — fails with `permission denied for
+table waivers` unless `authenticated` holds `SELECT` there. That is the only
+  reason `waivers` appears above. The sibling manager policy needs no grant
+  because it goes through `has_role()`, which is `SECURITY DEFINER` — the
+  standard way out.
+- **A write grant makes "defence in depth" policies real.** Owner-scoped write
+  policies written on the assumption that no client grant exists become live,
+  reachable code paths the moment one does, bypassing rules that live in the
+  server functions. That is how the calendar RSVP and feed-token bypasses
+  happened, and how a manager could assign roles directly through
+  `user_roles`.
+
+Not covered: **`session_checkins`** exists in the live database with the full
+default grants but has no migration, type, doc or code in this repo. It is
+acknowledged in `client-grants-expected.txt` so CI reports rather than blocks;
+RLS is the only thing gating it.
+
 ## People and waivers: the shape
 
 A person = an **auth user** (their email lives on `auth.users`, the ONLY email
@@ -161,8 +224,11 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
 person, the latest approved waiver is active.
 
-**RLS:** owner reads their own (`user_id = auth.uid()`); managers read all and
-UPDATE (approval). Inserts are service-role only.
+**Grants:** `SELECT` for `authenticated`, and nothing else for either client
+role. The grant is not there for anything in `src/` — it exists because the PDF
+storage policy below sub-selects this table as the caller. **RLS:** owner reads
+their own (`user_id = auth.uid()`); managers read all and UPDATE (approval).
+Inserts are service-role only.
 
 **PDF storage RLS** (`storage.objects`, `bucket_id = 'waivers'`): objects are
 named `<waiver id>.pdf`, which is exactly what `pdf_path` stores, so ownership
@@ -177,7 +243,11 @@ Owners deliberately get **no** write access: the PDF is frozen evidence (the
 signatures and acknowledgement ticks exist only inside it), so a signer must not
 be able to overwrite or delete what they signed. `anon` gets nothing. None of
 this is on the app's hot path today, since uploads and downloads both run
-through the service-role client, which bypasses RLS.
+through the service-role client, which bypasses RLS. The owner `SELECT` branch
+does depend on `authenticated` holding `SELECT` on `public.waivers`, though: a
+policy's subquery runs with the caller's privileges, so revoking that grant
+would break it (`permission denied for table waivers`) while the manager branch,
+which goes through the `SECURITY DEFINER` `has_role()`, kept working.
 
 ---
 
@@ -254,24 +324,24 @@ A calendar entry that repeats weekly. It is a template, not a thing members see:
 the public surface is the dated `calendar_events` generated from it, which copy
 its details including `visibility` and `invite_only`.
 
-| Column             | Type          | Null | Notes                                                |
-| ------------------ | ------------- | ---- | ---------------------------------------------------- |
-| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                         |
-| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".        |
-| `description`      | `text`        | yes  |                                                      |
-| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.              |
-| `location`         | `text`        | yes  | No default — the club picks it, or leaves it blank.  |
+| Column             | Type          | Null | Notes                                                                  |
+| ------------------ | ------------- | ---- | ---------------------------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                           |
+| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".                          |
+| `description`      | `text`        | yes  |                                                                        |
+| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                |
+| `location`         | `text`        | yes  | No default — the club picks it, or leaves it blank.                    |
 | `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date. |
 | `invite_only`      | `boolean`     | no   | Default `false`. Display badge only. Copied onto every generated date. |
-| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).            |
-| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                |
-| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                         |
-| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.    |
-| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`. |
-| `is_active`        | `boolean`     | no   | Default `true`.                                      |
-| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.      |
-| `created_at`       | `timestamptz` | no   | Default `now()`.                                     |
-| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                       |
+| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                              |
+| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                  |
+| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                           |
+| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.                      |
+| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`.                   |
+| `is_active`        | `boolean`     | no   | Default `true`.                                                        |
+| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                        |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                                       |
+| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                                         |
 
 **Grants:** none for `anon`/`authenticated` — this table is reached only through
 the service role. **RLS:** manager-only (read and write). Deliberately **not**
@@ -284,24 +354,24 @@ on the calendar — cancel those individually.
 
 ### `calendar_events` — dated occurrences and one-off events
 
-| Column            | Type          | Null | Notes                                                                           |
-| ----------------- | ------------- | ---- | ------------------------------------------------------------------------------- |
-| `id`              | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                    |
-| `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE CASCADE`. NULL = one-off.             |
+| Column            | Type          | Null | Notes                                                                                    |
+| ----------------- | ------------- | ---- | ---------------------------------------------------------------------------------------- |
+| `id`              | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                             |
+| `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE CASCADE`. NULL = one-off.                      |
 | `kind`            | `text`        | no   | **Being removed** — a free-text title says it better. Dropped by the contract migration. |
-| `title`           | `text`        | no   |                                                                                 |
-| `description`     | `text`        | yes  |                                                                                 |
-| `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                     |
-| `location`        | `text`        | yes  | No default — the club picks it, or leaves it blank.                             |
-| `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                     |
-| `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
-| `all_day`         | `boolean`     | no   | **Being removed** — never exposed in any form; a full-day event is just a long one. |
-| `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |
-| `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only. |
-| `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.          |
-| `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                 |
-| `created_at`      | `timestamptz` | no   | Default `now()`.                                                                |
-| `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                  |
+| `title`           | `text`        | no   |                                                                                          |
+| `description`     | `text`        | yes  |                                                                                          |
+| `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                              |
+| `location`        | `text`        | yes  | No default — the club picks it, or leaves it blank.                                      |
+| `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                              |
+| `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                            |
+| `all_day`         | `boolean`     | no   | **Being removed** — never exposed in any form; a full-day event is just a long one.      |
+| `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).                      |
+| `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only.          |
+| `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.                   |
+| `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                          |
+| `created_at`      | `timestamptz` | no   | Default `now()`.                                                                         |
+| `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                           |
 
 Partial unique index on `(series_id, starts_at) WHERE series_id IS NOT NULL`
 keeps date generation idempotent. **RLS:** everyone (incl. anon) reads
@@ -348,8 +418,17 @@ is not reversible and grants no access by itself.
 ### `user_roles`
 
 `id` PK, `user_id → auth.users(id) ON DELETE CASCADE`, `role` (`app_role`:
-`manager|member`), `created_at`, `UNIQUE(user_id, role)`. **RLS:** users read
+`manager|member`), `created_at`, `UNIQUE(user_id, role)`. **Grants:** `SELECT`
+for `authenticated` (`useRoles` reads the caller's own roles in the browser);
+no client write grant, so role changes are service-role only. **RLS:** users read
 own; managers read/insert/delete all. Checked via `has_role()`.
+
+The manager insert/delete policies are defence in depth, not a supported path.
+They were reachable directly from a manager's browser session until
+`20260728150000` revoked the write grants that Supabase's defaults had left in
+place — a manager could `POST /rest/v1/user_roles` and assign `manager` to
+anyone, bypassing `assignTrialMembership`'s service-role path. Keep the write
+grants off.
 
 ### `club_settings` — manager key/value store
 

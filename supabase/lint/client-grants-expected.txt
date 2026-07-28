@@ -1,0 +1,78 @@
+# Table privileges `anon` and `authenticated` are allowed to hold in `public`.
+#
+# One `table:grantee:privilege` per line. Checked against the live database by
+# check-client-grants.py, which FAILS on anything held live and not listed here.
+# `service_role` is out of scope — it bypasses RLS by design and every server
+# function needs it.
+#
+# The list is short because it should be: almost nothing in this app talks to
+# the database from the browser. Every read and write outside the entries below
+# goes through a server function on the service-role client, which bypasses both
+# grants and RLS. Before adding a line, check that browser code genuinely needs
+# it — RLS still gates the rows, but a grant makes any policy written as
+# "defence in depth" into a live, reachable code path, which is exactly how the
+# calendar RSVP and feed-token bypasses happened.
+#
+# Supabase grants ALL on every new table to both roles by default, and GRANT
+# cannot narrow that — only REVOKE can. So a new table needs an explicit
+# `REVOKE ALL ON public.<table> FROM anon, authenticated;` in its migration
+# before any intended GRANT, or it will show up here as seven unexpected
+# privileges per role.
+
+# Not for any browser code: the storage policy "Owners can read their own waiver
+# PDF" sub-selects public.waivers, and an RLS policy expression runs with the
+# caller's privileges, so without this grant that policy raises `permission
+# denied for table waivers`. See 20260728150000_revoke_remaining_client_grants.sql.
+waivers:authenticated:SELECT
+
+# useRoles (src/hooks/useAuth.ts) reads the caller's own roles in the browser to
+# decide whether to show the manager navigation. The "Users can view their own
+# roles" policy narrows it to their own rows. Role writes are service-role only.
+user_roles:authenticated:SELECT
+
+# The public class schedule. The "Anyone can read public events" policy narrows
+# anon to visibility = 'public'; authenticated additionally matches the
+# members-only policy when they hold a paid membership.
+calendar_events:anon:SELECT
+calendar_events:authenticated:SELECT
+
+# A signed-in person may read their own RSVPs and their own feed-token row (the
+# hash is not reversible and grants no access on its own). Both are written
+# exclusively through server functions, which enforce rules RLS cannot express.
+event_rsvps:authenticated:SELECT
+calendar_feed_tokens:authenticated:SELECT
+
+# ---------------------------------------------------------------------------
+# ACKNOWLEDGED, NOT ACCEPTED — `session_checkins`
+# ---------------------------------------------------------------------------
+# This table exists in the live database with Supabase's full default grants,
+# but appears in NO migration, no generated type, no doc and no code in this
+# repo. It was created live, outside the migration flow — which is the failure
+# the review gate in CLAUDE.md > Schema drift now exists to stop.
+#
+# It is listed here only so this check reports the state it is meant to report
+# instead of sitting red on `main` forever; the entries are NOT an endorsement,
+# and the table is deliberately left out of
+# 20260728150000_revoke_remaining_client_grants.sql because a REVOKE naming a
+# table with no CREATE in this directory fails the from-scratch replay in
+# supabase-lint.yml.
+#
+# Resolve by either adding the migration that should have created it (then
+# revoking these grants like every other table) or dropping it, and delete this
+# block. Until then RLS is the only thing gating it.
+session_checkins:anon:SELECT
+session_checkins:anon:INSERT
+session_checkins:anon:UPDATE
+session_checkins:anon:DELETE
+session_checkins:anon:TRUNCATE
+session_checkins:anon:REFERENCES
+session_checkins:anon:TRIGGER
+session_checkins:anon:MAINTAIN
+session_checkins:authenticated:SELECT
+session_checkins:authenticated:INSERT
+session_checkins:authenticated:UPDATE
+session_checkins:authenticated:DELETE
+session_checkins:authenticated:TRUNCATE
+session_checkins:authenticated:REFERENCES
+session_checkins:authenticated:TRIGGER
+session_checkins:authenticated:MAINTAIN
