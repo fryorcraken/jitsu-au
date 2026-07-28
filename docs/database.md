@@ -21,6 +21,83 @@ The schema reference for UTS Jitsu (Supabase Postgres).
 > which is generated from it, but may lag or carry hand-added columns. See
 > "Schema drift" in `CLAUDE.md`.
 
+## Client grants: the schema is closed by default
+
+Every table in `public` has RLS enabled, but RLS is only the **second** of two
+locks. The first is the table grant, and Supabase's bootstrap opens it for you:
+
+```sql
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON TABLES TO anon, authenticated, service_role;
+```
+
+So a new table arrives with all eight privileges (SELECT, INSERT, UPDATE,
+DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN) already granted to both client
+roles.
+
+> [!WARNING]
+> **`GRANT` cannot narrow anything — only `REVOKE` can.** A migration writing
+> `GRANT SELECT ON t TO authenticated` to mean "reads only" grants a privilege
+> the role already holds; it reads like a restriction in review and does
+> nothing. Every table in this schema sat fully open to both client roles for
+> that reason until `20260728120000` (calendar) and `20260728150000` (the rest)
+> revoked them. A new table needs an explicit
+> `REVOKE ALL ON public.<t> FROM anon, authenticated;` **before** any intended
+> grant.
+
+The list below is the complete set of table privileges the client roles hold.
+Most of the app needs none of it: it reaches the database through a server
+function on the service-role client, which bypasses both grants and RLS.
+`supabase/lint/client-grants-expected.txt` pins this list and
+`.github/workflows/migration-drift.yml` checks it against the live database.
+
+| Table                    | Role            | Privilege | Why                                                                             |
+| ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------- |
+| `interest_registrations` | `anon`+`auth`   | `INSERT`  | `submitInterest` — the public interest form                                     |
+| `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                       |
+| `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                     |
+| `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                 |
+| `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
+| `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
+| `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
+| `event_rsvps`            | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                  |
+| `calendar_feed_tokens`   | `authenticated` | `SELECT`  | a person reads their own feed-token row                                         |
+
+Every other table grants the client roles **nothing**.
+
+> [!IMPORTANT]
+> The first four rows are **server** functions, not browser code. They run in
+> `*.functions.ts` handlers but build their own client from
+> `SUPABASE_PUBLISHABLE_KEY` with no user session, so PostgREST resolves them to
+> `anon` and they need real grants. Grepping for imports of the shared browser
+> client (`@/integrations/supabase/client`) will not find them — search for
+> `createClient` as well. Revoking these without re-granting takes down the
+> whole public funnel: interest form, contact form, signing page, pricing page.
+
+Two traps worth knowing before you touch a policy or a grant:
+
+- **An RLS policy that references another table needs a grant on that table.**
+  Policy expressions are evaluated with the _caller's_ privileges, so the
+  `storage.objects` policy "Owners can read their own waiver PDF" — which tests
+  `EXISTS (SELECT 1 FROM public.waivers …)` — fails with `permission denied for
+table waivers` unless `authenticated` holds `SELECT` there. That is the only
+  reason `waivers` appears above. The sibling manager policy needs no grant
+  because it goes through `has_role()`, which is `SECURITY DEFINER` — the
+  standard way out.
+- **A write grant makes "defence in depth" policies real.** Owner-scoped write
+  policies written on the assumption that no client grant exists become live,
+  reachable code paths the moment one does, bypassing rules that live in the
+  server functions. That is how the calendar RSVP and feed-token bypasses
+  happened, and how a manager could assign roles directly through
+  `user_roles`.
+
+This audit also turned up a table that was in the live database and nowhere
+else: **`session_checkins`**, a per-event attendance model with membership
+credit consumption, created directly against production with no migration, type,
+doc or code in this repo. It was empty and nothing referenced it, so
+`20260728170000_drop_session_checkins.sql` drops it; that migration records the
+full design should the feature be rebuilt deliberately.
+
 ## People and waivers: the shape
 
 A person = an **auth user** (their email lives on `auth.users`, the ONLY email
@@ -161,8 +238,11 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
 person, the latest approved waiver is active.
 
-**RLS:** owner reads their own (`user_id = auth.uid()`); managers read all and
-UPDATE (approval). Inserts are service-role only.
+**Grants:** `SELECT` for `authenticated`, and nothing else for either client
+role. The grant is not there for anything in `src/` — it exists because the PDF
+storage policy below sub-selects this table as the caller. **RLS:** owner reads
+their own (`user_id = auth.uid()`); managers read all and UPDATE (approval).
+Inserts are service-role only.
 
 **PDF storage RLS** (`storage.objects`, `bucket_id = 'waivers'`): objects are
 named `<waiver id>.pdf`, which is exactly what `pdf_path` stores, so ownership
@@ -177,7 +257,11 @@ Owners deliberately get **no** write access: the PDF is frozen evidence (the
 signatures and acknowledgement ticks exist only inside it), so a signer must not
 be able to overwrite or delete what they signed. `anon` gets nothing. None of
 this is on the app's hot path today, since uploads and downloads both run
-through the service-role client, which bypasses RLS.
+through the service-role client, which bypasses RLS. The owner `SELECT` branch
+does depend on `authenticated` holding `SELECT` on `public.waivers`, though: a
+policy's subquery runs with the caller's privileges, so revoking that grant
+would break it (`permission denied for table waivers`) while the manager branch,
+which goes through the `SECURITY DEFINER` `has_role()`, kept working.
 
 ---
 
@@ -348,8 +432,17 @@ is not reversible and grants no access by itself.
 ### `user_roles`
 
 `id` PK, `user_id → auth.users(id) ON DELETE CASCADE`, `role` (`app_role`:
-`manager|member`), `created_at`, `UNIQUE(user_id, role)`. **RLS:** users read
+`manager|member`), `created_at`, `UNIQUE(user_id, role)`. **Grants:** `SELECT`
+for `authenticated` (`useRoles` reads the caller's own roles in the browser);
+no client write grant, so role changes are service-role only. **RLS:** users read
 own; managers read/insert/delete all. Checked via `has_role()`.
+
+The manager insert/delete policies are defence in depth, not a supported path.
+They were reachable directly from a manager's browser session until
+`20260728150000` revoked the write grants that Supabase's defaults had left in
+place — a manager could `POST /rest/v1/user_roles` and assign `manager` to
+anyone, bypassing `assignTrialMembership`'s service-role path. Keep the write
+grants off.
 
 ### `club_settings` — manager key/value store
 

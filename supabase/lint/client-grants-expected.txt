@@ -1,0 +1,67 @@
+# Table privileges `anon` and `authenticated` are allowed to hold in `public`.
+#
+# One `table:grantee:privilege` per line. Checked against the live database by
+# check-client-grants.py, which FAILS on anything held live and not listed here.
+# `service_role` is out of scope — it bypasses RLS by design and every server
+# function needs it.
+#
+# Almost everything in this app reaches the database through a server function
+# on the service-role client, which bypasses both grants and RLS and so needs no
+# entry here. Two kinds of caller do not, and both are easy to miss when
+# deciding whether a grant is still needed:
+#
+#   * the browser client (one table, read-only: user_roles);
+#   * server modules that build their OWN client from SUPABASE_PUBLISHABLE_KEY
+#     with no user session. Those run server-side but PostgREST resolves them to
+#     `anon`, so they need real grants. Grepping for imports of the shared
+#     browser client will not find them — check for `createClient` too.
+#
+# Before adding a line, confirm which of those needs it. RLS still gates the
+# rows, but a grant makes any policy written as "defence in depth" into a live,
+# reachable code path, which is exactly how the calendar RSVP and feed-token
+# bypasses happened.
+#
+# Supabase grants ALL on every new table to both roles by default, and GRANT
+# cannot narrow that — only REVOKE can. So a new table needs an explicit
+# `REVOKE ALL ON public.<table> FROM anon, authenticated;` in its migration
+# before any intended GRANT, or it will show up here as seven unexpected
+# privileges per role.
+
+# The public funnel. These four run in *server* functions that build their own
+# client from SUPABASE_PUBLISHABLE_KEY with no user session, so PostgREST
+# resolves them to `anon` and they need real grants — they are not service-role
+# calls, despite running on the server. Grepping for the shared browser client
+# does not find them. RLS narrows each: the intake tables are insert-only (and
+# the handlers deliberately skip `.select()` so nothing can be read back), the
+# template read is `is_current = true`, the plans read is `is_active = true`.
+interest_registrations:anon:INSERT
+interest_registrations:authenticated:INSERT
+contact_messages:anon:INSERT
+contact_messages:authenticated:INSERT
+waiver_templates:anon:SELECT
+waiver_templates:authenticated:SELECT
+membership_plans:anon:SELECT
+membership_plans:authenticated:SELECT
+
+# Not for any browser code: the storage policy "Owners can read their own waiver
+# PDF" sub-selects public.waivers, and an RLS policy expression runs with the
+# caller's privileges, so without this grant that policy raises `permission
+# denied for table waivers`. See 20260728150000_revoke_remaining_client_grants.sql.
+waivers:authenticated:SELECT
+
+# useRoles (src/hooks/useAuth.ts) reads the caller's own roles in the browser to
+# decide whether to show the manager navigation. The "Users can view their own
+# roles" policy narrows it to their own rows. Role writes are service-role only.
+user_roles:authenticated:SELECT
+
+# The public class schedule. The "Anyone can read public events" policy narrows
+# anon to visibility = 'public'; authenticated additionally matches the
+# members-only policy when they hold a paid membership.
+calendar_events:anon:SELECT
+calendar_events:authenticated:SELECT
+
+# A signed-in person may read their own RSVPs and their own feed-token row (the
+# hash is not reversible and grants no access on its own). Both are written
+# exclusively through server functions, which enforce rules RLS cannot express.
+event_rsvps:authenticated:SELECT
+calendar_feed_tokens:authenticated:SELECT

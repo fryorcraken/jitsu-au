@@ -29,11 +29,17 @@ but onto a throwaway local Postgres: that proves a migration _can_ apply, not
 that it _has_.) A migration file pushed through GitHub is inert until somebody
 applies it to the live database (there is only one; no staging tier), which is
 how `column waivers.approval_status does not exist` reached production with the
-migration sitting merged in the repo. **Apply the SQL and record it in
-`supabase_migrations.schema_migrations` in the same session that writes the
-file** — additive changes directly, destructive ones only after checking with
-the user. See "Schema drift" in `CLAUDE.md` for the full procedure and the CI
-check that catches it.
+migration sitting merged in the repo.
+
+**But do not apply it before the user has reviewed it.** Write the migration,
+open the PR, and stop — spell out in the PR body what SQL is waiting to run.
+Once the user approves, **apply the SQL, record it in
+`supabase_migrations.schema_migrations`, verify the object exists, and reload
+PostgREST — all before merging.** This holds for additive and destructive changes
+alike: there is one database and no staging tier, so applying a migration is a
+production change. Never merge a migration you have not applied, and never apply
+one the user has not approved. See "Schema drift" in `CLAUDE.md` for the full
+procedure and the CI checks that catch both halves.
 
 ## Manager agent API
 

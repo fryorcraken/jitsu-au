@@ -1,0 +1,56 @@
+-- Drop `session_checkins`: a live table that never existed in this repo.
+--
+-- Found during the schema-wide client-grant audit (20260728150000). The table
+-- was present in the live database with Supabase's full default grants but had
+-- no migration, no generated type, no doc and no code anywhere in this repo. It
+-- was created directly against production, outside the migration flow — the
+-- exact failure the review gate in CLAUDE.md > Schema drift now exists to stop.
+--
+-- Safe to drop, checked before writing this:
+--   * 0 rows, so no data is lost.
+--   * No foreign key in any other table references it (nothing depends on it),
+--     so a plain DROP suffices and CASCADE is deliberately NOT used — if that
+--     ever stops being true, this should fail loudly rather than take
+--     dependents with it.
+--   * Nothing in `src/` mentions it, so no code path breaks.
+--
+-- It is dropped rather than adopted because a half-built feature sitting in
+-- production is worse than no feature: it carried the full default grants, and
+-- RLS was the only thing gating it. Recreating it deliberately, with a
+-- migration and the REVOKE that every other table now has, is cheap — the
+-- design is recorded below so nothing is lost but the orphaned object.
+--
+-- ---------------------------------------------------------------------------
+-- The dropped design, for whoever rebuilds it. Per-event attendance with
+-- membership credit consumption:
+--
+--   id             uuid PRIMARY KEY
+--   event_id       uuid NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE
+--   user_id        uuid NOT NULL REFERENCES profiles(user_id)   ON DELETE CASCADE
+--   checked_in_at  timestamptz
+--   checked_in_by  uuid REFERENCES auth.users(id) ON DELETE SET NULL
+--   coverage       text CHECK (coverage IN ('member','trial','pass','pending','none'))
+--   membership_id  uuid REFERENCES memberships(id) ON DELETE SET NULL
+--   consumed_credit boolean
+--   warnings       text[]
+--   note           text
+--   UNIQUE (event_id, user_id)
+--
+--   Indexes on (event_id), (user_id), (checked_in_at).
+--
+--   RLS: managers select/insert/update/delete all via has_role(); a person
+--   reads their own rows (auth.uid() = user_id).
+--
+--   Note the grants: were this rebuilt, it would need
+--     REVOKE ALL ON public.session_checkins FROM anon, authenticated;
+--   before any GRANT, like every other table in this schema — check-ins would
+--   be written by a manager-only server function on the service role, so the
+--   client needs no privilege at all.
+-- ---------------------------------------------------------------------------
+--
+-- IF EXISTS because this migration also has to replay onto a from-scratch
+-- database (supabase-lint.yml), where the table was never created.
+
+DROP TABLE IF EXISTS public.session_checkins;
+
+NOTIFY pgrst, 'reload schema';
