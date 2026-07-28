@@ -131,6 +131,19 @@ name/email, date, template version, status badge (pending / active /
 superseded), the PDF, and Approve / Unapprove. Approve = promote + unlock +
 assign the trial (see rule 6). The applicant becomes a visitor.
 
+For one person there is a user page (`/manager/users/:userId`, reached from the
+directory), which is where a review normally happens: the profile (the club's
+current record), their memberships, and every submission they ever made, newest
+first. Each submission is a collapsible panel holding the frozen submission in
+full, the signing record (IP + browser context), Approve / Unapprove, and the
+signed PDF embedded inline. The submissions themselves load with the page; the
+PDFs do not, since each needs a short-lived signed URL, so one is signed when a
+panel is opened or its PDF button is used, and re-signed once it goes stale.
+Exactly one panel opens by itself: the newest
+submission, and only while it is still pending, because that is the one waiting
+on a decision. Older submissions and approved ones (active or superseded) start
+collapsed; a manager can open any of them by hand.
+
 ### Visitor or member uses the member area
 
 Login exists only via approval (sign-in link email; magic link or password
@@ -144,7 +157,9 @@ One row per person: composed name, email, phone, roles, funnel phase, whether
 they have an active (approved) waiver, student number, memberships/invoices.
 Leads are merged in by email and drop out of the lead phase the moment they
 sign the waiver. Feeds the manager screens and the manager agent API
-(`lifecycle_status`: `lead | applicant | visitor | member | lapsed`).
+(`lifecycle_status`: `lead | applicant | visitor | member | lapsed`). Each
+person links through to their user page; a lead has no person record yet, so
+there is nothing to open.
 
 ## Future features (out of scope today)
 

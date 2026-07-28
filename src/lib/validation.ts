@@ -201,6 +201,25 @@ export function deriveWaiverListStatuses(
 }
 
 /**
+ * Which waiver panels start expanded on a person's manager page.
+ *
+ * A manager opens that page to deal with what is waiting on them, so only the
+ * newest submission expands, and only while it is still pending. Everything
+ * else stays collapsed: older submissions are history, and an approved waiver
+ * (active or superseded) has already been dealt with. Managers can still open
+ * any panel by hand.
+ */
+export function deriveExpandedWaivers(
+  rows: { id: string; signed_at: string; status: WaiverListStatus }[],
+): Set<string> {
+  let newest: { id: string; signed_at: string; status: WaiverListStatus } | null = null;
+  for (const row of rows) {
+    if (!newest || newest.signed_at < row.signed_at) newest = row;
+  }
+  return new Set(newest && newest.status === "pending" ? [newest.id] : []);
+}
+
+/**
  * Split a single full-name string into first/middle/last parts.
  * One word → first only; two words → first + last; three+ → everything
  * between the first and last word becomes the middle name.

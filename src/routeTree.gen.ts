@@ -38,6 +38,7 @@ import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
 import { Route as ApiCalendarTokenRouteImport } from './routes/api/calendar/$token'
 import { Route as ApiManagerAgentRouteImport } from './routes/api/manager/agent'
+import { Route as AuthenticatedManagerUsersUserIdRouteImport } from './routes/_authenticated/manager.users_.$userId'
 import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
 import { Route as LovableEmailAuthWebhookRouteImport } from './routes/lovable/email/auth/webhook'
 
@@ -194,6 +195,12 @@ const ApiManagerAgentRoute = ApiManagerAgentRouteImport.update({
   path: '/api/manager/agent',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedManagerUsersUserIdRoute =
+  AuthenticatedManagerUsersUserIdRouteImport.update({
+    id: '/manager/users_/$userId',
+    path: '/manager/users/$userId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const LovableEmailAuthPreviewRoute = LovableEmailAuthPreviewRouteImport.update({
   id: '/lovable/email/auth/preview',
   path: '/lovable/email/auth/preview',
@@ -234,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
+  '/manager/users/$userId': typeof AuthenticatedManagerUsersUserIdRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -266,6 +274,7 @@ export interface FileRoutesByTo {
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
+  '/manager/users/$userId': typeof AuthenticatedManagerUsersUserIdRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -300,6 +309,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
+  '/_authenticated/manager/users_/$userId': typeof AuthenticatedManagerUsersUserIdRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
   '/lovable/email/auth/webhook': typeof LovableEmailAuthWebhookRoute
 }
@@ -334,6 +344,7 @@ export interface FileRouteTypes {
     | '/manager/waivers'
     | '/api/calendar/$token'
     | '/api/manager/agent'
+    | '/manager/users/$userId'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   fileRoutesByTo: FileRoutesByTo
@@ -366,6 +377,7 @@ export interface FileRouteTypes {
     | '/manager/waivers'
     | '/api/calendar/$token'
     | '/api/manager/agent'
+    | '/manager/users/$userId'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   id:
@@ -399,6 +411,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/waivers'
     | '/api/calendar/$token'
     | '/api/manager/agent'
+    | '/_authenticated/manager/users_/$userId'
     | '/lovable/email/auth/preview'
     | '/lovable/email/auth/webhook'
   fileRoutesById: FileRoutesById
@@ -631,6 +644,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiManagerAgentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/manager/users_/$userId': {
+      id: '/_authenticated/manager/users_/$userId'
+      path: '/manager/users/$userId'
+      fullPath: '/manager/users/$userId'
+      preLoaderRoute: typeof AuthenticatedManagerUsersUserIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/lovable/email/auth/preview': {
       id: '/lovable/email/auth/preview'
       path: '/lovable/email/auth/preview'
@@ -660,6 +680,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerUsersRoute: typeof AuthenticatedManagerUsersRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
   AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
+  AuthenticatedManagerUsersUserIdRoute: typeof AuthenticatedManagerUsersUserIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -677,6 +698,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerWaiverTemplateRoute:
     AuthenticatedManagerWaiverTemplateRoute,
   AuthenticatedManagerWaiversRoute: AuthenticatedManagerWaiversRoute,
+  AuthenticatedManagerUsersUserIdRoute: AuthenticatedManagerUsersUserIdRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

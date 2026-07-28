@@ -234,7 +234,20 @@ function ManagerUsersPage() {
                 <tbody>
                   {visible.map((r) => (
                     <tr key={r.user_id ?? r.email ?? r.name ?? ""} className="border-t align-top">
-                      <td className="px-3 py-2 font-medium">{r.name ?? "—"}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {r.user_id ? (
+                          <Link
+                            to="/manager/users/$userId"
+                            params={{ userId: r.user_id }}
+                            className="underline underline-offset-2 hover:no-underline"
+                          >
+                            {r.name ?? r.email ?? "View"}
+                          </Link>
+                        ) : (
+                          // A lead has no person record yet, so nothing to open.
+                          (r.name ?? "—")
+                        )}
+                      </td>
                       <td className="px-3 py-2">{r.email ?? "—"}</td>
                       <td className="px-3 py-2">{r.phone ?? "—"}</td>
                       <td className="px-3 py-2">
