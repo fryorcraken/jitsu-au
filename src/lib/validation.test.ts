@@ -119,6 +119,7 @@ describe("waiverToProfileFields", () => {
       uts_student_number: "12345678",
       sms_whatsapp_consent: true,
       emergency_contact_name: "Grace Hopper",
+      emergency_contact_relationship: "Colleague",
       emergency_contact_phone: "0400 111 111",
       medical_notes: "None",
       is_minor: false,
@@ -494,6 +495,15 @@ describe("contactSchema", () => {
 });
 
 describe("waiverSubmitSchema", () => {
+  /** Every health question answered no: the "nothing to declare" baseline. */
+  const noConcerns = {
+    drugs: false,
+    blackouts: false,
+    device: false,
+    impairments: false,
+    other: false,
+  };
+
   const validAdult = {
     first_name: "Ada",
     last_name: "Lovelace",
@@ -502,7 +512,10 @@ describe("waiverSubmitSchema", () => {
     phone: "0400000000",
     email: "ada@example.com",
     emergency_contact_name: "Charles Babbage",
+    emergency_contact_relationship: "Colleague",
     emergency_contact_phone: "0400000001",
+    health_answers: noConcerns,
+    initials: "AL",
     signature_name: "Ada Lovelace",
   };
 
@@ -612,23 +625,75 @@ describe("waiverSubmitSchema", () => {
     expect(result.success && result.data.is_minor).toBe(false);
   });
 
-  it("requires guardian details for a minor", () => {
+  it("requires a guardian signature for a minor", () => {
     const result = waiverSubmitSchema.safeParse({ ...validAdult, is_minor: true });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes("guardian_name"))).toBe(true);
+      expect(result.error.issues.some((i) => i.path.includes("guardian_signature"))).toBe(true);
     }
   });
 
-  it("accepts a minor with full guardian details and signature", () => {
+  // The guardian's name and relationship are the emergency contact fields (the
+  // form asks for that person once, and the server copies them across), so a
+  // minor's payload carries no separate guardian identity.
+  it("accepts a minor with only the emergency contact and a guardian signature", () => {
     const result = waiverSubmitSchema.safeParse({
       ...validAdult,
       is_minor: true,
-      guardian_name: "Charles Babbage",
-      guardian_relationship: "Father",
       guardian_signature: "Charles Babbage",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("requires the emergency contact's relationship", () => {
+    const { emergency_contact_relationship: _omitted, ...withoutRelationship } = validAdult;
+    expect(waiverSubmitSchema.safeParse(withoutRelationship).success).toBe(false);
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, emergency_contact_relationship: "  " }).success,
+    ).toBe(false);
+  });
+
+  it("requires initials against the acknowledgements", () => {
+    const { initials: _omitted, ...withoutInitials } = validAdult;
+    expect(waiverSubmitSchema.safeParse(withoutInitials).success).toBe(false);
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, initials: "ABCDEFGHIJK" }).success).toBe(
+      false,
+    );
+  });
+
+  it("requires every health question to be answered", () => {
+    const { drugs: _unanswered, ...missingOne } = noConcerns;
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, health_answers: missingOne });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("drugs"))).toBe(true);
+    }
+  });
+
+  // A "yes" nobody explained tells an instructor nothing, so the details box
+  // the form has always had stops being optional.
+  it("requires medical details once any health question is answered yes", () => {
+    const concern = { ...noConcerns, impairments: true };
+    const withoutDetails = waiverSubmitSchema.safeParse({
+      ...validAdult,
+      health_answers: concern,
+    });
+    expect(withoutDetails.success).toBe(false);
+    if (!withoutDetails.success) {
+      expect(withoutDetails.error.issues.some((i) => i.path.includes("medical_notes"))).toBe(true);
+    }
+
+    const withDetails = waiverSubmitSchema.safeParse({
+      ...validAdult,
+      health_answers: concern,
+      medical_notes: "Weak left ankle, taped for training.",
+    });
+    expect(withDetails.success).toBe(true);
+  });
+
+  it("leaves medical details optional when nothing is declared", () => {
+    expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, medical_notes: "" }).success).toBe(true);
   });
 
   it("rejects a filled honeypot", () => {

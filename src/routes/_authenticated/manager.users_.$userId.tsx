@@ -352,6 +352,7 @@ function ManagerUserPage() {
           <Field label="Address" value={profile.address} />
           <Field label="UTS student number" value={profile.uts_student_number} />
           <Field label="Emergency contact" value={profile.emergency_contact_name} />
+          <Field label="Emergency relationship" value={profile.emergency_contact_relationship} />
           <Field label="Emergency phone" value={profile.emergency_contact_phone} />
           <Field label="Medical notes" value={profile.medical_notes} />
           <Field label="Minor" value={profile.is_minor ? "Yes" : "No"} />
@@ -480,6 +481,10 @@ function ManagerUserPage() {
                       <Field label="Address" value={w.address} />
                       <Field label="UTS student number" value={w.uts_student_number} />
                       <Field label="Emergency contact" value={w.emergency_contact_name} />
+                      <Field
+                        label="Emergency relationship"
+                        value={w.emergency_contact_relationship}
+                      />
                       <Field label="Emergency phone" value={w.emergency_contact_phone} />
                       <Field label="Medical notes" value={w.medical_notes} />
                       <Field label="Minor" value={w.is_minor ? "Yes" : "No"} />

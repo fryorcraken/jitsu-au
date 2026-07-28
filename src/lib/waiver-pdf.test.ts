@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { inflateSync } from "node:zlib";
 import { PDFArray, PDFDocument, PDFRawStream, type PDFPage } from "pdf-lib";
-import { layoutSignatureBlock, renderWaiverPdf, type WaiverPdfData } from "./waiver-pdf";
+import {
+  layoutSignatureBlock,
+  renderWaiverPdf,
+  winAnsiSafe,
+  type WaiverPdfData,
+} from "./waiver-pdf";
 
 // A real, minimal 1x1 PNG. pdf-lib's embedPng parses the IHDR/IDAT chunks, so
 // the signature-image tests need actual PNG bytes, not an arbitrary buffer.
@@ -91,9 +96,18 @@ const base: WaiverPdfData = {
   phone: "0400 000 000",
   email: "jane@example.com",
   emergency_contact_name: "John Sample",
+  emergency_contact_relationship: "Partner",
   emergency_contact_phone: "0400 111 222",
   medical_notes: "",
+  health_answers: {
+    drugs: false,
+    blackouts: false,
+    device: false,
+    impairments: false,
+    other: false,
+  },
   acknowledgements: [{ label: "I accept the risks.", checked: true }],
+  initials: "JS",
   signature_name: "Jane Sample",
   signed_at: "2026-07-21T10:00:00.000Z",
   template_title: "Training Waiver",
@@ -159,7 +173,28 @@ describe("layoutSignatureBlock", () => {
   });
 });
 
+describe("winAnsiSafe", () => {
+  it("keeps ASCII, Latin-1 and the typographic characters the font can encode", () => {
+    expect(winAnsiSafe('Café — "quoted" 50% · ok')).toBe('Café — "quoted" 50% · ok');
+    expect(winAnsiSafe("line one\nline two")).toBe("line one\nline two");
+  });
+
+  it("drops what the standard font cannot encode", () => {
+    // A ⚠ pasted into a template heading used to throw out of drawText and fail
+    // the whole render, telling the signer their PDF could not be generated.
+    expect(winAnsiSafe("⚠️ WARNING ⚠️")).toBe(" WARNING ");
+    expect(winAnsiSafe("危険")).toBe("");
+  });
+});
+
 describe("renderWaiverPdf", () => {
+  it("renders a template body containing characters the font cannot encode", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({ ...base, template_body: "# ⚠ Warning ⚠\n\nTrain safely 🥋." }),
+    );
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
+  });
+
   it("renders a valid single-page PDF for a signed adult with a typed signature", async () => {
     const doc = await expectValidPdf(await renderWaiverPdf(base));
     expect(doc.getPageCount()).toBe(1);

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CheckCircle2, Download } from "lucide-react";
 import { SignaturePad, type SignaturePadHandle } from "@/components/site/SignaturePad";
@@ -20,8 +21,14 @@ import {
 } from "@/lib/waiver.functions";
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
+import { anyHealthConcern, healthQuestions, missingHealthAnswers } from "@/lib/waiver-health";
 import { useAuth } from "@/hooks/useAuth";
-import { resolveNamePrefill, waiverPrefillSearchSchema } from "@/lib/validation";
+import {
+  resolveNamePrefill,
+  waiverPrefillSearchSchema,
+  type HealthAnswers,
+  type HealthQuestionId,
+} from "@/lib/validation";
 
 export const Route = createFileRoute("/waiver")({
   // Optional prefill carried over from Step 1 of the "Start your free trial" flow.
@@ -56,9 +63,16 @@ type Prefill = {
   uts_student_number?: string | null;
   sms_whatsapp_consent?: boolean | null;
   emergency_contact_name?: string | null;
+  emergency_contact_relationship?: string | null;
   emergency_contact_phone?: string | null;
   medical_notes?: string | null;
 };
+
+/** Health answers while the form is being filled in: `null` = not answered yet. */
+type HealthDraft = Record<HealthQuestionId, boolean | null>;
+
+const emptyHealthDraft = (): HealthDraft =>
+  Object.fromEntries(healthQuestions.map((q) => [q.id, null])) as HealthDraft;
 
 function Waiver() {
   const submit = useServerFn(submitWaiverWithPdf);
@@ -94,13 +108,14 @@ function Waiver() {
   // during the "Start your free trial" step. Otherwise they must opt in.
   const [smsConsent, setSmsConsent] = useState(Boolean(search.phone && search.phone.trim()));
   const [ecName, setEcName] = useState("");
+  const [ecRelationship, setEcRelationship] = useState("");
   const [ecPhone, setEcPhone] = useState("");
+  const [health, setHealth] = useState<HealthDraft>(emptyHealthDraft);
   const [medical, setMedical] = useState("");
+  const [initials, setInitials] = useState("");
   const [signatureName, setSignatureName] = useState("");
   const [signatureImage, setSignatureImage] = useState("");
   const [signatureMode, setSignatureMode] = useState<"draw" | "type">("draw");
-  const [guardianName, setGuardianName] = useState("");
-  const [guardianRelationship, setGuardianRelationship] = useState("");
   const [guardianSignature, setGuardianSignature] = useState("");
   const [guardianSignatureImage, setGuardianSignatureImage] = useState("");
   const [guardianSignatureMode, setGuardianSignatureMode] = useState<"draw" | "type">("draw");
@@ -154,8 +169,12 @@ function Waiver() {
         if (r.address) setAddress(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);
+        if (r.emergency_contact_relationship) setEcRelationship(r.emergency_contact_relationship);
         if (r.emergency_contact_phone) setEcPhone(r.emergency_contact_phone);
         if (r.medical_notes) setMedical(r.medical_notes);
+        // The health questions are deliberately NOT prefilled: they are a
+        // declaration about today, and a stale "no" carried over from an older
+        // waiver is exactly what an instructor must not read as current.
       })
       .catch(() => {
         /* no profile yet */
@@ -178,6 +197,9 @@ function Waiver() {
 
   // Acknowledgements come from the current template; their labels may use
   // {{placeholders}} (e.g. {{club_name}}), substituted the same way as the body.
+  // A "yes" to any health question is what makes the details box required.
+  const healthConcern = anyHealthConcern(health);
+
   const ackDefs = templateQ.data?.acknowledgements ?? [];
   const ackPlaceholders = buildWaiverPlaceholders({
     fullName,
@@ -188,17 +210,33 @@ function Waiver() {
     phone,
     email,
     emergencyContactName: ecName,
+    emergencyContactRelationship: ecRelationship,
     emergencyContactPhone: ecPhone,
     medicalNotes: medical,
+    healthAnswers: health,
+    initials,
     signatureName: signatureMode === "type" ? signatureName : "",
     clubName: "UTS Jitsu",
+    isMinor,
     signedDate: new Date(previewSignedAt).toLocaleDateString("en-AU"),
   });
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (missingHealthAnswers(health).length > 0) {
+      toast.error("Please answer yes or no to every health question.");
+      return;
+    }
+    if (anyHealthConcern(health) && !medical.trim()) {
+      toast.error("Please give details of anything you answered yes to.");
+      return;
+    }
     if (missingRequiredAcks(ackDefs, acks).length > 0) {
       toast.error("Please read and accept the required acknowledgements.");
+      return;
+    }
+    if (!initials.trim()) {
+      toast.error("Please add your initials against the acknowledgements.");
       return;
     }
     const sigImg = signatureMode === "draw" ? signatureImage : "";
@@ -210,10 +248,8 @@ function Waiver() {
     if (isMinor) {
       const gImg = guardianSignatureMode === "draw" ? guardianSignatureImage : "";
       const gName = guardianSignatureMode === "type" ? guardianSignature : "";
-      if (!guardianName.trim() || !guardianRelationship.trim() || (!gImg && !gName.trim())) {
-        toast.error(
-          "Parent/guardian name, relationship and signature are required for participants under 18.",
-        );
+      if (!gImg && !gName.trim()) {
+        toast.error("A parent or guardian must sign for participants under 18.");
         return;
       }
     }
@@ -232,14 +268,17 @@ function Waiver() {
           uts_student_number: utsStudentNumber,
           sms_whatsapp_consent: smsConsent,
           emergency_contact_name: ecName,
+          emergency_contact_relationship: ecRelationship,
           emergency_contact_phone: ecPhone,
+          // Every question is answered by this point (guarded above), so the
+          // draft narrows to the five booleans the server requires.
+          health_answers: health as HealthAnswers,
           medical_notes: medical,
           acknowledgements: acks,
+          initials,
           signature_name: sigName,
           signature_image: sigImg,
           is_minor: isMinor,
-          guardian_name: guardianName,
-          guardian_relationship: guardianRelationship,
           guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
           guardian_signature_image: guardianSignatureMode === "draw" ? guardianSignatureImage : "",
           // Browser context stored with the submission as signing evidence.
@@ -376,6 +415,16 @@ function Waiver() {
                     onChange={(e) => setDob(e.target.value)}
                     className="mt-1.5"
                   />
+                  {/* The paper form's "participant type" tick box. It follows
+                      from the date of birth, so we show which one applies
+                      rather than asking the same thing twice. */}
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    {!dob
+                      ? "This decides whether you sign as an adult or a guardian signs for you."
+                      : isMinor
+                        ? "Under 18, so a parent or guardian consents and signs at the end."
+                        : "18 or over, so you sign as the applicant."}
+                  </p>
                 </div>
                 <div>
                   <Label htmlFor="phone">Phone</Label>
@@ -451,8 +500,14 @@ function Waiver() {
             </fieldset>
 
             <fieldset className="space-y-5 border-t pt-6">
-              <legend className="text-sm font-semibold">Emergency contact</legend>
-              <div className="grid gap-5 sm:grid-cols-2">
+              <legend className="text-sm font-semibold">Emergency contact / guardian</legend>
+              {isMinor && (
+                <p className="text-xs text-muted-foreground">
+                  The participant is under 18, so this is the parent or legal guardian who signs at
+                  the end of the form.
+                </p>
+              )}
+              <div className="grid gap-5 sm:grid-cols-3">
                 <div>
                   <Label htmlFor="emergency_contact_name">Contact name</Label>
                   <Input
@@ -465,7 +520,19 @@ function Waiver() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="emergency_contact_phone">Contact phone</Label>
+                  <Label htmlFor="emergency_contact_relationship">Relationship</Label>
+                  <Input
+                    id="emergency_contact_relationship"
+                    required
+                    maxLength={80}
+                    value={ecRelationship}
+                    onChange={(e) => setEcRelationship(e.target.value)}
+                    placeholder="Parent, partner, friend"
+                    className="mt-1.5"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="emergency_contact_phone">Contact mobile</Label>
                   <Input
                     id="emergency_contact_phone"
                     type="tel"
@@ -479,18 +546,55 @@ function Waiver() {
               </div>
             </fieldset>
 
-            <fieldset className="space-y-3 border-t pt-6">
-              <legend className="text-sm font-semibold">Medical</legend>
-              <Label htmlFor="medical_notes">
-                Any injuries, conditions or medications we should know about? (optional)
-              </Label>
-              <Textarea
-                id="medical_notes"
-                maxLength={2000}
-                rows={4}
-                value={medical}
-                onChange={(e) => setMedical(e.target.value)}
-              />
+            <fieldset className="space-y-5 border-t pt-6">
+              <legend className="text-sm font-semibold">Health declaration</legend>
+              <p className="text-xs text-muted-foreground">
+                Please answer all five. Your instructors read these before you train.
+              </p>
+              {healthQuestions.map((q) => (
+                <div key={q.id} className="space-y-2">
+                  <p className="text-sm">{q.question}</p>
+                  <RadioGroup
+                    className="flex gap-6"
+                    aria-label={q.question}
+                    value={health[q.id] === null ? "" : health[q.id] ? "yes" : "no"}
+                    onValueChange={(v) => setHealth((prev) => ({ ...prev, [q.id]: v === "yes" }))}
+                  >
+                    <label className="flex items-center gap-2 text-sm" htmlFor={`${q.id}_yes`}>
+                      <RadioGroupItem value="yes" id={`${q.id}_yes`} />
+                      Yes
+                    </label>
+                    <label className="flex items-center gap-2 text-sm" htmlFor={`${q.id}_no`}>
+                      <RadioGroupItem value="no" id={`${q.id}_no`} />
+                      No
+                    </label>
+                  </RadioGroup>
+                </div>
+              ))}
+              <div>
+                <Label htmlFor="medical_notes">
+                  Details of anything you answered yes to
+                  {healthConcern ? (
+                    <span className="text-primary"> (required)</span>
+                  ) : (
+                    <span className="text-muted-foreground"> (optional)</span>
+                  )}
+                </Label>
+                <Textarea
+                  id="medical_notes"
+                  required={healthConcern}
+                  maxLength={2000}
+                  rows={4}
+                  value={medical}
+                  onChange={(e) => setMedical(e.target.value)}
+                  placeholder="Medication, injuries, conditions, anything else our instructors should know"
+                  className="mt-1.5"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Privacy note: we collect this health information only to keep you (or the minor)
+                safe while training.
+              </p>
             </fieldset>
 
             {ackDefs.length > 0 && (
@@ -511,6 +615,21 @@ function Waiver() {
                     </span>
                   </label>
                 ))}
+                <div>
+                  <Label htmlFor="initials">Your initials</Label>
+                  <Input
+                    id="initials"
+                    required
+                    maxLength={10}
+                    value={initials}
+                    onChange={(e) => setInitials(e.target.value)}
+                    placeholder="e.g. JS"
+                    className="mt-1.5 max-w-[120px]"
+                  />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Initial here to confirm the statements above, as you would on paper.
+                  </p>
+                </div>
               </fieldset>
             )}
 
@@ -551,33 +670,13 @@ function Waiver() {
               {isMinor && (
                 <div className="mt-4 space-y-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
                   <p className="text-sm font-medium text-primary">
-                    Participant is under 18. A parent or legal guardian must also sign.
+                    Participant is under 18, so a parent or legal guardian signs as well.
                   </p>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <Label htmlFor="guardian_name">Parent/guardian full name</Label>
-                      <Input
-                        id="guardian_name"
-                        required
-                        maxLength={120}
-                        value={guardianName}
-                        onChange={(e) => setGuardianName(e.target.value)}
-                        className="mt-1.5"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="guardian_relationship">Relationship</Label>
-                      <Input
-                        id="guardian_relationship"
-                        required
-                        maxLength={80}
-                        value={guardianRelationship}
-                        onChange={(e) => setGuardianRelationship(e.target.value)}
-                        placeholder="Parent, guardian, etc."
-                        className="mt-1.5"
-                      />
-                    </div>
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Signing for {ecName || "the minor"}
+                    {ecRelationship ? ` (${ecRelationship})` : ""}, from the emergency contact
+                    section above. Change it there if someone else is signing.
+                  </p>
                   <div>
                     <Label>Parent/guardian signature</Label>
                     <Tabs
@@ -636,14 +735,17 @@ function Waiver() {
                 phone={phone}
                 email={email}
                 emergencyContactName={ecName}
+                emergencyContactRelationship={ecRelationship}
                 emergencyContactPhone={ecPhone}
                 medicalNotes={medical}
+                healthAnswers={health}
                 acknowledgements={resolveAcknowledgements(ackDefs, acks)}
+                initials={initials}
                 signatureName={signatureMode === "type" ? signatureName : ""}
                 signatureImage={previewSignatureImage}
                 isMinor={isMinor}
-                guardianName={guardianName}
-                guardianRelationship={guardianRelationship}
+                guardianName={ecName}
+                guardianRelationship={ecRelationship}
                 guardianSignature={guardianSignatureMode === "type" ? guardianSignature : ""}
                 guardianSignatureImage={previewGuardianSignatureImage}
               />

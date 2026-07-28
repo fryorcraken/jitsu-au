@@ -5,6 +5,7 @@ import {
   buildWaiverPlaceholders,
   parseWaiverBlocks,
 } from "@/lib/waiver-document";
+import type { HealthAnswerDraft } from "@/lib/waiver-health";
 
 /**
  * Props for {@link WaiverDocument}. These mirror the fields that
@@ -22,10 +23,16 @@ export type WaiverDocumentProps = {
   phone: string;
   email: string;
   emergencyContactName: string;
+  /** How the emergency contact is related; the "relationship to minor" too. */
+  emergencyContactRelationship: string;
   emergencyContactPhone: string;
   medicalNotes: string;
+  /** The five health answers; unanswered ones render as "Not answered". */
+  healthAnswers: HealthAnswerDraft;
   /** Template-defined acknowledgements + whether each was accepted. */
   acknowledgements: { label: string; checked: boolean }[];
+  /** Initials typed against the acknowledgement block. */
+  initials: string;
   /** Typed signature name (used when the participant did not draw). */
   signatureName: string;
   /** Data URL (image/png) of the drawn participant signature, if any. */
@@ -131,9 +138,12 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     phone,
     email,
     emergencyContactName,
+    emergencyContactRelationship,
     emergencyContactPhone,
     medicalNotes,
+    healthAnswers,
     acknowledgements,
+    initials,
     signatureName,
     signatureImage,
     templateTitle,
@@ -160,10 +170,14 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     phone,
     email,
     emergencyContactName,
+    emergencyContactRelationship,
     emergencyContactPhone,
     medicalNotes,
+    healthAnswers,
+    initials,
     signatureName,
     clubName,
+    isMinor,
     signedDate: signedAt ? new Date(signedAt).toLocaleDateString("en-AU") : "",
   });
   const blocks = parseWaiverBlocks(applyWaiverPlaceholders(templateBody, placeholders));
@@ -215,7 +229,9 @@ export function WaiverDocument(props: WaiverDocumentProps) {
                 </h4>
               );
             return (
-              <p key={i} className="text-sm leading-relaxed text-slate-700">
+              // pre-line: single newlines in the template are line breaks, so
+              // the form's field lines render one per line, as in the PDF.
+              <p key={i} className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
                 {renderInline(b.text)}
               </p>
             );

@@ -70,6 +70,32 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+// ---- Health declaration (the application form's five safety questions) ----
+
+/**
+ * The five health questions, each answered yes or no. Every one is required:
+ * an unanswered question is not a "no", and instructors read these before
+ * anybody trains. The question prose lives in `waiver-health.ts` (shared by the
+ * form and the signed document); only the shape is pinned here.
+ *
+ * The answers are not stored in a column. They are printed into the signed PDF,
+ * which is the record, exactly like the acknowledgement ticks. Anything the
+ * signer needs to explain goes in `medical_notes`, which the refine below makes
+ * required as soon as any answer is yes.
+ */
+export const healthAnswersSchema = z.object({
+  drugs: z.boolean(),
+  blackouts: z.boolean(),
+  device: z.boolean(),
+  impairments: z.boolean(),
+  other: z.boolean(),
+});
+export type HealthAnswers = z.infer<typeof healthAnswersSchema>;
+export type HealthQuestionId = keyof HealthAnswers;
+
+/** The question ids, in the order they appear on the form. */
+export const healthQuestionIds = Object.keys(healthAnswersSchema.shape) as HealthQuestionId[];
+
 /** The person fields a waiver submission carries (as submitted, frozen). */
 export type WaiverPersonFields = {
   first_name: string;
@@ -83,6 +109,8 @@ export type WaiverPersonFields = {
   uts_student_number: string | null;
   sms_whatsapp_consent: boolean;
   emergency_contact_name: string;
+  /** How the emergency contact is related. For a minor this IS the guardian. */
+  emergency_contact_relationship: string | null;
   emergency_contact_phone: string;
   medical_notes: string | null;
   is_minor: boolean;
@@ -107,6 +135,7 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields
     uts_student_number: w.uts_student_number,
     sms_whatsapp_consent: w.sms_whatsapp_consent,
     emergency_contact_name: w.emergency_contact_name,
+    emergency_contact_relationship: w.emergency_contact_relationship,
     emergency_contact_phone: w.emergency_contact_phone,
     medical_notes: w.medical_notes,
     is_minor: w.is_minor,
@@ -311,17 +340,29 @@ export const waiverSubmitSchema = z
     // Consent to be contacted by SMS/WhatsApp and added to club WhatsApp groups.
     // Optional (not required to submit); defaults to no consent.
     sms_whatsapp_consent: z.boolean().optional().default(false),
+    // The emergency contact. For a participant under 18 this person IS the
+    // parent/guardian who signs, which is why the relationship is required for
+    // everyone and reused as the "relationship to minor" on the document.
     emergency_contact_name: z.string().trim().min(1).max(120),
+    emergency_contact_relationship: z.string().trim().min(1).max(80),
     emergency_contact_phone: z.string().trim().min(1).max(30),
+    // All five health questions, each answered yes or no.
+    health_answers: healthAnswersSchema,
+    // The one details box the form has always had. Required once any health
+    // answer is yes (see the refine below); otherwise optional.
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
     // Map of acknowledgement id -> accepted. Which ids are *required* is defined
     // on the template, so that check lives in `missingRequiredAcks`, not here.
     acknowledgements: z.record(z.string(), z.boolean()).default({}),
+    // Initials typed against the acknowledgement block, as on the paper form.
+    // Evidence of assent, so it lives in the PDF only, never in a column.
+    initials: z.string().trim().min(1).max(10),
     signature_name: z.string().trim().max(120).optional().or(z.literal("")),
     signature_image: sigImage,
     is_minor: z.boolean().optional().default(false),
-    guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
-    guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+    // No guardian name/relationship here: for a minor they are the emergency
+    // contact fields above, so the server derives them rather than accepting a
+    // second copy that could disagree with the first.
     guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_signature_image: sigImage,
     // Self-reported browser context, stored on the waiver as signing evidence.
@@ -339,14 +380,24 @@ export const waiverSubmitSchema = z
   .refine(
     (d) =>
       !d.is_minor ||
-      (d.guardian_name &&
-        d.guardian_relationship &&
-        ((d.guardian_signature && d.guardian_signature.trim()) ||
-          (d.guardian_signature_image && d.guardian_signature_image.trim()))),
+      Boolean(
+        (d.guardian_signature && d.guardian_signature.trim()) ||
+        (d.guardian_signature_image && d.guardian_signature_image.trim()),
+      ),
     {
-      message:
-        "Parent/guardian name, relationship and signature are required for participants under 18.",
-      path: ["guardian_name"],
+      message: "A parent or guardian must sign for participants under 18.",
+      path: ["guardian_signature"],
+    },
+  )
+  // A "yes" nobody explained tells an instructor nothing, so the details box
+  // stops being optional the moment any health question is answered yes.
+  .refine(
+    (d) =>
+      !Object.values(d.health_answers).some(Boolean) ||
+      Boolean(d.medical_notes && d.medical_notes.trim()),
+    {
+      message: "Please give details of anything you answered yes to.",
+      path: ["medical_notes"],
     },
   );
 

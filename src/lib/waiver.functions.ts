@@ -195,6 +195,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     }
 
     const signed_at = new Date().toISOString();
+    const isMinor = data.is_minor ?? false;
 
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
@@ -272,11 +273,15 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         uts_student_number: data.uts_student_number?.trim() || null,
         sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
         emergency_contact_name: data.emergency_contact_name,
+        emergency_contact_relationship: data.emergency_contact_relationship,
         emergency_contact_phone: data.emergency_contact_phone,
         medical_notes: data.medical_notes || null,
-        is_minor: data.is_minor ?? false,
-        guardian_name: data.guardian_name || null,
-        guardian_relationship: data.guardian_relationship || null,
+        is_minor: isMinor,
+        // For a minor the emergency contact IS the guardian who signs, so the
+        // guardian columns are filled from that one block rather than from a
+        // second set of inputs that could disagree with it.
+        guardian_name: isMinor ? data.emergency_contact_name : null,
+        guardian_relationship: isMinor ? data.emergency_contact_relationship : null,
         signed_at,
         template_version: tpl.version,
         signer_ip,
@@ -303,18 +308,21 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         phone: data.phone,
         email,
         emergency_contact_name: data.emergency_contact_name,
+        emergency_contact_relationship: data.emergency_contact_relationship,
         emergency_contact_phone: data.emergency_contact_phone,
         medical_notes: data.medical_notes || "",
+        health_answers: data.health_answers,
         acknowledgements: resolveAcknowledgements(ackDefs, answers),
+        initials: data.initials,
         signature_name: data.signature_name || "",
         signed_at,
         template_title: tpl.title,
         template_body: tpl.body_md,
         template_version: tpl.version,
         club_name: CLUB_NAME,
-        is_minor: data.is_minor ?? false,
-        guardian_name: data.guardian_name || "",
-        guardian_relationship: data.guardian_relationship || "",
+        is_minor: isMinor,
+        guardian_name: isMinor ? data.emergency_contact_name : "",
+        guardian_relationship: isMinor ? data.emergency_contact_relationship : "",
         guardian_signature: data.guardian_signature || "",
         signature_image_png: sigPng,
         guardian_signature_image_png: gSigPng,

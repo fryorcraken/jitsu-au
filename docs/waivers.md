@@ -50,8 +50,10 @@ system. (The contact form stores a message, not a person.)
    signing the waiver is what creates the locked login + profile (seeded with
    name and phone).
 3. **A waiver is a frozen submission.** The submitted fields are evidence and
-   the source approval copies from, never the live person record. Signatures
-   and acknowledgement ticks exist only inside the PDF. For legal/forensic
+   the source approval copies from, never the live person record. Signatures,
+   acknowledgement ticks, the signer's initials and the five yes/no health
+   answers exist only inside the PDF. What the signer wrote to explain a "yes"
+   is a stored field (`medical_notes`), because instructors need it to hand. For legal/forensic
    needs each submission also stores the signer's real IP and signing context
    (browser user agent, language, and the browser-reported timezone, screen and
    platform).
@@ -99,7 +101,13 @@ they sign the waiver.
 ### Applicant signs the waiver
 
 Public page (`/waiver`), optionally prefilled from the free-trial flow. Email
-is required. On submit the signer immediately gets the signed PDF and a copy
+is required. The form is the club's **application form**: participant type
+(taken from the date of birth, not asked twice), applicant details, one
+emergency contact with their **relationship**, the five health questions
+answered yes or no, initials against the acknowledgements, and the signature.
+Anything answered yes has to be explained in the medical details box. For a
+participant under 18 the emergency contact IS the parent or guardian: they are
+asked for once, and the guardian signs at the end. On submit the signer immediately gets the signed PDF and a copy
 by email; managers are notified. Behind the scenes, for a new email: a locked
 login record is created (their email, no way to sign in) and their profile is
 seeded with name + phone. An existing person is left untouched. Either way the
