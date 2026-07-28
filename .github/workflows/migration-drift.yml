@@ -7,7 +7,7 @@ name: Migration drift
 # that arrives through a GitHub push is inert until somebody applies it by hand,
 # which is how `column waivers.approval_status does not exist` reached
 # production with the migration adding it sitting merged in the repo. Only the
-# database knows, so this workflow asks it. See CLAUDE.md > Schema drift.
+# database knows, so this workflow asks it. See docs/database-changes.md.
 #
 # ⚠️ This workflow deliberately does NOT run on `pull_request`.
 #
@@ -88,7 +88,7 @@ jobs:
       # authenticated by default and GRANT cannot narrow that, so a new table
       # arrives fully open and CI cannot see it: the vendored Splinter lints
       # 0026/0027 only test SELECT. Only the database knows, so ask it.
-      # See CLAUDE.md > Schema drift.
+      # See docs/database-changes.md.
       #
       # Read from pg_class.relacl, NOT information_schema.role_table_grants.
       # The information_schema views only show grants where the current user is

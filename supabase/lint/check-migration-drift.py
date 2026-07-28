@@ -26,8 +26,8 @@ A file `<version>_<slug>.sql` counts as applied when the ledger holds either:
 Ordering
 --------
 Additive migrations must be applied BEFORE the code that uses them merges (see
-"Sequencing schema changes" in CLAUDE.md), so a PR that adds a migration is
-expected to have applied it already, and failing here is the point.
+"Sequencing schema changes" in docs/database-changes.md), so a PR that adds a
+migration is expected to have applied it already, and failing here is the point.
 
 The exception is the contract phase of an expand/contract change: a migration
 that drops something must land AFTER the code that stopped using it deploys.

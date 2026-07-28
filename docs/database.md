@@ -19,7 +19,7 @@ The schema reference for UTS Jitsu (Supabase Postgres).
 > the live column did not exist. To see the real schema, query the live database
 > (`information_schema.columns`) — or read `src/integrations/supabase/types.ts`,
 > which is generated from it, but may lag or carry hand-added columns. See
-> "Schema drift" in `CLAUDE.md`.
+> `docs/database-changes.md`.
 
 ## Client grants: the schema is closed by default
 

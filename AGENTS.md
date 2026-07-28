@@ -38,7 +38,7 @@ Once the user approves, **apply the SQL, record it in
 PostgREST — all before merging.** This holds for additive and destructive changes
 alike: there is one database and no staging tier, so applying a migration is a
 production change. Never merge a migration you have not applied, and never apply
-one the user has not approved. See "Schema drift" in `CLAUDE.md` for the full
+one the user has not approved. See `docs/database-changes.md` for the full
 procedure and the CI checks that catch both halves.
 
 ## Manager agent API
@@ -142,7 +142,7 @@ Two issues that have burned time recently. Fix these at the source, not by patch
 
 Symptom (runtime, on the affected form): `Could not find the '<column>' column of '<table>' in the schema cache`. The migration ran, but `src/integrations/supabase/types.ts` (auto-generated) was not regenerated, so PostgREST rejects the insert against its cached schema view.
 
-First rule out the more serious cause: a `column <table>.<column> does not exist` error is a different problem — the migration never reached the live database at all. See "Schema drift" in `CLAUDE.md` before touching the types.
+First rule out the more serious cause: a `column <table>.<column> does not exist` error is a different problem — the migration never reached the live database at all. See `docs/database-changes.md` before touching the types.
 
 Fix: after any migration that adds/renames columns or tables, bring `src/integrations/supabase/types.ts` back in step in the same change, and run `NOTIFY pgrst, 'reload schema'` so PostgREST re-reads the schema. Only Lovable can truly regenerate the file; when it cannot (out of credits, say), hand-add **only** columns you have verified exist live, in the generator's own style. Also update `docs/database.md` per the project rule.
 
