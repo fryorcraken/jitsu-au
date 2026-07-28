@@ -86,10 +86,11 @@ is no "Add dates" button; that was an implementation detail leaking into the UI.
 2. **See what's on** — a single list of upcoming dates. A repeating one is marked
    _Weekly_ and shows who can see it.
 3. **Edit** — for a repeating entry, editing asks the question Google Calendar
-   asks: **this date only**, or **this and all future dates**? Past dates are never
-   rewritten; they record what actually happened. The day and time of a repeat are
-   deliberately not editable, because dates already on the calendar would become
-   wrong: stop it repeating and add it again.
+   asks: **this date only**, or **this and all future dates**? "All future" is
+   measured from the date you clicked, not from today, and dates before it are
+   never rewritten; they record what actually happened. The day and time of a
+   repeat are deliberately not editable, because dates already on the calendar
+   would become wrong: stop it repeating and add it again.
 4. **Cancel** — the same scope question. A cancelled date stays on the calendar,
    struck through and marked _Cancelled_ (never deleted), so people see the change,
    it clears from subscribed calendars, and RSVPs are kept. Reversible with
@@ -99,7 +100,9 @@ is no "Add dates" button; that was an implementation detail leaking into the UI.
 6. **See who's coming** — a going/maybe tally per date, expandable to the list of
    names and emails.
 
-Deleting an entry outright exists for mistakes only. Cancel keeps the record.
+Deleting an entry outright exists for mistakes only, and only for one-off
+entries: deleting a single date of a repeat would just be regenerated at the next
+top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
 
 ## Member and visitor actions
 

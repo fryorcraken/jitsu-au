@@ -882,7 +882,9 @@ describe("createCalendarEntrySchema", () => {
 describe("updateCalendarEntrySchema", () => {
   const id = crypto.randomUUID();
 
-  it("accepts both scopes — this date, or this and all future", () => {
+  // `id` is the clicked DATE in both scopes, so "all future" is measured from
+  // there. The server resolves the series; the client never sends a series id.
+  it("accepts both scopes, keyed by the clicked date", () => {
     expect(updateCalendarEntrySchema.safeParse({ scope: "event", id, title: "New" }).success).toBe(
       true,
     );

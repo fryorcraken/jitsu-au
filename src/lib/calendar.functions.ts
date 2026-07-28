@@ -506,9 +506,12 @@ export const createCalendarEntry = createServerFn({ method: "POST" })
   });
 
 /**
- * Manager: edit an entry's details. `scope: "event"` touches one date;
- * `scope: "series"` updates the repeat rule AND its future dates, leaving past
- * ones as they actually happened.
+ * Manager: edit an entry's details. `id` is always the DATE that was clicked, as
+ * it is for cancelEvent. `scope: "event"` touches only that date; `scope:
+ * "series"` updates the repeat rule and every date from the clicked one onward,
+ * leaving earlier ones as they actually happened. Keying off the clicked date
+ * (rather than the series) is what makes "this and all future dates" mean what
+ * it says: dates between now and the clicked one are not rewritten.
  */
 export const updateCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -545,16 +548,27 @@ export const updateCalendarEntry = createServerFn({ method: "POST" })
       return { ok: true as const, id, updated: 1 };
     }
 
+    // Series scope: resolve the clicked date's series, then rewrite from that
+    // date forward. Never earlier: a past date records what actually happened.
+    const { data: ev, error: evErr } = await admin
+      .from("calendar_events")
+      .select("series_id, starts_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (evErr) throw new Error(evErr.message);
+    if (!ev?.series_id) throw new Error("That entry does not repeat.");
+    const from = ev.starts_at > now ? ev.starts_at : now;
+
     const { error: sErr } = await admin
       .from("calendar_series")
       .update({ ...patch, updated_at: now })
-      .eq("id", id);
+      .eq("id", ev.series_id);
     if (sErr) throw new Error(sErr.message);
     const { error: eErr } = await admin
       .from("calendar_events")
       .update({ ...patch, updated_at: now })
-      .eq("series_id", id)
-      .gte("starts_at", now);
+      .eq("series_id", ev.series_id)
+      .gte("starts_at", from);
     if (eErr) throw new Error(eErr.message);
     return { ok: true as const, id, updated: 1 };
   });
@@ -570,15 +584,31 @@ export const stopRepeating = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
     const now = new Date().toISOString();
+    const { data: series, error: sReadErr } = await admin
+      .from("calendar_series")
+      .select("starts_on")
+      .eq("id", data.series_id)
+      .maybeSingle();
+    if (sReadErr) throw new Error(sReadErr.message);
+    if (!series) throw new Error("That repeating entry no longer exists.");
+
     const { error: dErr } = await admin
       .from("calendar_events")
       .delete()
       .eq("series_id", data.series_id)
       .gte("starts_at", now);
     if (dErr) throw new Error(dErr.message);
+    // `ends_on` has a CHECK against `starts_on`, so an entry stopped before its
+    // first date ends on that date rather than today. is_active = false is what
+    // actually stops it; the date is only for the record.
+    const today = dateFromNow(0);
     const { error: sErr } = await admin
       .from("calendar_series")
-      .update({ is_active: false, ends_on: dateFromNow(0), updated_at: now })
+      .update({
+        is_active: false,
+        ends_on: series.starts_on > today ? series.starts_on : today,
+        updated_at: now,
+      })
       .eq("id", data.series_id);
     if (sErr) throw new Error(sErr.message);
     return { ok: true as const };

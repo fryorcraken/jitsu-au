@@ -830,9 +830,11 @@ export type CreateCalendarEntryInput = z.infer<typeof createCalendarEntrySchema>
 
 /**
  * Manager: edit an entry's details. `scope` answers the question the UI asks
- * when the entry repeats: just this date, or this and every future one? Schedule
- * shape (weekday, time, duration) is deliberately not editable here — changing
- * it invalidates dates already on the calendar.
+ * when the entry repeats: just this date, or this and every future one? `id` is
+ * the DATE that was clicked in both scopes (the server resolves its series), so
+ * "every future one" is measured from there. Schedule shape (weekday, time,
+ * duration) is deliberately not editable here — changing it invalidates dates
+ * already on the calendar.
  */
 export const updateCalendarEntrySchema = z
   .object({

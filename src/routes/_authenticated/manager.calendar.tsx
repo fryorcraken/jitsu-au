@@ -237,9 +237,9 @@ function ManagerCalendarPage() {
       await saveEntry({
         data: {
           scope,
-          // Series scope patches the repeat rule itself, so it is keyed by the
-          // series, not by the date that was clicked.
-          id: scope === "series" ? ev.series_id! : ev.id,
+          // Always the date that was clicked, in both scopes: the server resolves
+          // the series from it, so "all future dates" means from HERE forward.
+          id: ev.id,
           title: editForm.title,
           instructor_name: editForm.instructor_name,
           location: editForm.location,
@@ -604,7 +604,10 @@ function ManagerCalendarPage() {
                             >
                               {cancelled ? "Restore" : "Cancel"}
                             </Button>
-                            {repeats && (
+                            {/* Deleting one date of a repeat would just be
+                                regenerated at the next top-up, so a repeat gets
+                                "Stop repeating" instead. */}
+                            {repeats ? (
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -613,15 +616,16 @@ function ManagerCalendarPage() {
                               >
                                 Stop repeating
                               </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => remove(ev)}
+                                disabled={busy}
+                              >
+                                Delete
+                              </Button>
                             )}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => remove(ev)}
-                              disabled={busy}
-                            >
-                              Delete
-                            </Button>
                           </div>
                         </td>
                       </tr>
