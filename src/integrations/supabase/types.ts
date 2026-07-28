@@ -105,7 +105,6 @@ export type Database = {
       }
       calendar_events: {
         Row: {
-          all_day: boolean
           created_at: string
           created_by: string | null
           description: string | null
@@ -113,7 +112,6 @@ export type Database = {
           id: string
           instructor_name: string | null
           invite_only: boolean
-          kind: string
           location: string | null
           series_id: string | null
           starts_at: string
@@ -123,7 +121,6 @@ export type Database = {
           visibility: string
         }
         Insert: {
-          all_day?: boolean
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -131,7 +128,6 @@ export type Database = {
           id?: string
           instructor_name?: string | null
           invite_only?: boolean
-          kind?: string
           location?: string | null
           series_id?: string | null
           starts_at: string
@@ -141,7 +137,6 @@ export type Database = {
           visibility?: string
         }
         Update: {
-          all_day?: boolean
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -149,7 +144,6 @@ export type Database = {
           id?: string
           instructor_name?: string | null
           invite_only?: boolean
-          kind?: string
           location?: string | null
           series_id?: string | null
           starts_at?: string

@@ -138,9 +138,8 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
 
 ## Not built, on purpose
 
-- **All-day entries.** The column exists but no form has ever exposed it, and a
-  full-day grading reads fine as "9am, 8 hours". It is dropped rather than wired
-  up.
+- **All-day entries.** No form ever exposed the column, and a full-day grading
+  reads fine as "9am, 8 hours", so it was dropped rather than wired up.
 - **Moving a repeat's day or time.** Dates already on the calendar would become
   wrong, and people may have already replied to them. Stop the repeat and add a
   new one.
