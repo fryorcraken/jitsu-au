@@ -248,15 +248,21 @@ PUBLIC/anon and granted to `authenticated` (it is evaluated inside RLS as the
 querying role) + `service_role`. It is acknowledged in
 `supabase/lint/advisors-allowlist.txt` for the same reason as `has_role`.
 
-### `calendar_series` — recurring-session definitions
+### `calendar_series` — the repeat rule for an event
+
+A calendar entry that repeats weekly. It is a template, not a thing members see:
+the public surface is the dated `calendar_events` generated from it, which copy
+its details including `visibility` and `invite_only`.
 
 | Column             | Type          | Null | Notes                                                |
 | ------------------ | ------------- | ---- | ---------------------------------------------------- |
 | `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                         |
-| `title`            | `text`        | no   | e.g. "Beginner Gi".                                  |
+| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".        |
 | `description`      | `text`        | yes  |                                                      |
 | `instructor_name`  | `text`        | yes  | Default instructor for generated dates.              |
-| `location`         | `text`        | no   | Default `'UTS Ultimo'`.                              |
+| `location`         | `text`        | yes  | No default — the club picks it, or leaves it blank.  |
+| `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date. |
+| `invite_only`      | `boolean`     | no   | Default `false`. Display badge only. Copied onto every generated date. |
 | `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).            |
 | `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                |
 | `duration_minutes` | `int`         | no   | `CHECK > 0`.                                         |
@@ -282,14 +288,14 @@ on the calendar — cancel those individually.
 | ----------------- | ------------- | ---- | ------------------------------------------------------------------------------- |
 | `id`              | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                    |
 | `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE CASCADE`. NULL = one-off.             |
-| `kind`            | `text`        | no   | `session\|grading\|seminar\|social\|other`. Default `session`.                  |
+| `kind`            | `text`        | no   | **Being removed** — a free-text title says it better. Dropped by the contract migration. |
 | `title`           | `text`        | no   |                                                                                 |
 | `description`     | `text`        | yes  |                                                                                 |
 | `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                     |
-| `location`        | `text`        | no   | Default `'UTS Ultimo'`.                                                         |
+| `location`        | `text`        | yes  | No default — the club picks it, or leaves it blank.                             |
 | `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                     |
 | `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
-| `all_day`         | `boolean`     | no   | Default `false`.                                                                |
+| `all_day`         | `boolean`     | no   | **Being removed** — never exposed in any form; a full-day event is just a long one. |
 | `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |
 | `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only. |
 | `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.          |
