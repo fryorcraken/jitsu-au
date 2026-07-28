@@ -40,7 +40,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: memberships, error: mErr },
       { data: plans, error: plErr },
       { data: roles, error: rErr },
-      { data: emailRows },
+      { data: emailRows, error: emailErr },
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("user_id", data.userId).maybeSingle(),
       admin
@@ -63,7 +63,8 @@ export const getClubUser = createServerFn({ method: "POST" })
     // manager decides an approval from, so "the query failed" must never render
     // as "there is nothing there": an errored memberships read would otherwise
     // feed an empty list to the aggregation below and show a paid-up member as a
-    // visitor with no memberships. Matches listClubUsers/listMemberships.
+    // visitor with no memberships. Stricter than listClubUsers, which throws on
+    // its memberships read but still swallows the other four.
     if (pErr) throw new Error(pErr.message);
     if (wErr) throw new Error(wErr.message);
     if (mErr) throw new Error(mErr.message);
@@ -76,15 +77,24 @@ export const getClubUser = createServerFn({ method: "POST" })
     const planRows = plans ?? [];
     const planById = new Map(planRows.map((p) => [p.id, p]));
 
-    // Surface the cap rather than silently showing a partial history. Newest
-    // first, so a truncated page still holds the active waiver and the derived
-    // statuses stay correct; only ancient submissions fall off.
+    // Surface the caps rather than silently showing a partial history. Both
+    // read newest first, so what falls off is ancient; note the waiver cap can
+    // in principle drop an old submission that was approved most recently
+    // (status is derived by approved_at, the query truncates by signed_at).
     if (waiverRows.length >= WAIVERS_LIMIT) {
       console.warn(`[getClubUser] waivers capped at ${WAIVERS_LIMIT}; older submissions truncated`);
     }
+    if (membershipRows.length >= MEMBERSHIPS_LIMIT) {
+      console.warn(
+        `[getClubUser] memberships capped at ${MEMBERSHIPS_LIMIT}; older ones truncated`,
+      );
+    }
 
     // The RPC is service-role only and can fail; degrade to a missing email
-    // rather than failing the whole page (same posture as the list screen).
+    // rather than failing the whole page (same posture as the list screen). A
+    // person always HAS an email — it lives on their login record — so log it:
+    // the screen can only say the lookup failed, and nothing else would.
+    if (emailErr) console.error("[getClubUser] email lookup failed:", emailErr);
     const emails = ((emailRows ?? []) as ClubUserEmail[]).map((e) => ({
       user_id: e.user_id,
       email: e.email,
@@ -117,7 +127,18 @@ export const getClubUser = createServerFn({ method: "POST" })
     const statuses = deriveWaiverListStatuses(waiverRows);
 
     return {
-      user: summary,
+      // Only the derived headline fields, not the whole aggregate. Its
+      // `uts_student_number` in particular falls back to a number captured on a
+      // membership, which is exactly what the Profile card must not show — so
+      // don't ship it under a name that invites someone to render it.
+      user: {
+        name: summary.name,
+        email: summary.email,
+        phone: summary.phone,
+        roles: summary.roles,
+        lifecycle_status: summary.lifecycle_status,
+        first_seen_at: summary.first_seen_at,
+      },
       // Straight off the `profiles` row, so the screen can show the club's live
       // record as it actually is. Deliberately NOT taken from the aggregated
       // summary above, which fills gaps from other tables (its student number

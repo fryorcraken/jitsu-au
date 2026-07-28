@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { deriveExpandedWaivers, formatCents } from "@/lib/validation";
+import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
+import type { SignedUrlEntry } from "@/lib/signed-url-cache";
 import { getClubUser } from "@/lib/club-user.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -15,6 +17,11 @@ export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
   head: () => ({
     meta: [{ title: "User | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
+  // Remount on a different person. Without this the router reuses one component
+  // instance across /manager/users/A -> /manager/users/B, so an approval's
+  // refetch issued for A (its closure holds A's id) could land after B's load
+  // and paint A's record, Approve buttons and all, under B's URL.
+  remountDeps: ({ params }) => params.userId,
   component: ManagerUserPage,
 });
 
@@ -45,10 +52,12 @@ const WAIVER_CLASS: Record<Waiver["status"], string> = {
   superseded: "bg-muted text-muted-foreground line-through",
 };
 
-/** Re-sign a bit before the server's 1-hour signed URL actually expires. */
-const PDF_URL_TTL_MS = 50 * 60 * 1000;
-
-type PdfState = { url?: string; at: number; error?: string };
+/** A copy of `record` without `key`. */
+function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
 
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-AU") : "—";
@@ -126,11 +135,11 @@ function ManagerUserPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const [pdfs, setPdfs] = useState<Record<string, PdfState>>({});
+  const [pdfs, setPdfs] = useState<Record<string, SignedUrlEntry>>({});
   const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set());
-  // Only the newest load's result may land: this component instance is reused
-  // when the :userId param changes (no remount), and two approvals in a row
-  // each trigger their own refetch.
+  // Only the newest load's result may land: back-to-back approvals each trigger
+  // their own refetch. (A different person is a different component instance —
+  // see remountDeps above.)
   const loadSeq = useRef(0);
   const pdfInFlight = useRef<Set<string>>(new Set());
 
@@ -154,15 +163,9 @@ function ManagerUserPage() {
 
   useEffect(() => {
     if (!isManager) return;
-    // `load` changes identity with the :userId param, and the component is not
-    // remounted, so clear the previous person off the screen first. Without
-    // this a failed load would strand its error message over the next person.
     let active = true;
     setLoading(true);
     setError(null);
-    setDetail(null);
-    setOpen(new Set());
-    setPdfs({});
     load(true)
       .catch((e) => {
         if (active) setError(e instanceof Error ? e.message : "Failed to load user");
@@ -175,18 +178,20 @@ function ManagerUserPage() {
     };
   }, [isManager, load]);
 
-  // A signed PDF URL lasts an hour, so fetch one only for panels actually open,
-  // and re-sign a stale one: Radix unmounts collapsed content, so re-expanding
-  // an old panel remounts the iframe and would otherwise reuse a dead URL.
+  // Sign a PDF URL only for panels actually open, and re-sign a stale one:
+  // Radix unmounts collapsed content, so re-expanding an old panel remounts the
+  // iframe and would otherwise reuse a dead URL. See `signed-url-cache` for the
+  // freshness rule.
   const ensurePdfUrl = useCallback(
     async (waiver: Waiver) => {
       if (!waiver.has_pdf) return;
       const cached = pdfs[waiver.id];
-      if (cached?.url && Date.now() - cached.at < PDF_URL_TTL_MS) return;
-      // A failed fetch stays failed until the manager retries, so the effect
-      // below can't spin on it.
-      if (cached?.error || pdfInFlight.current.has(waiver.id)) return;
+      if (!shouldFetchSignedUrl(cached, Date.now())) return;
+      if (pdfInFlight.current.has(waiver.id)) return;
       pdfInFlight.current.add(waiver.id);
+      // Drop the stale URL before re-signing, so the iframe remounts on the
+      // loading line rather than flashing the storage error for an expired one.
+      if (cached?.url) setPdfs((prev) => omitKey(prev, waiver.id));
       try {
         const { url } = await getUrl({ data: { id: waiver.id } });
         setPdfs((prev) => ({ ...prev, [waiver.id]: { url, at: Date.now() } }));
@@ -211,11 +216,7 @@ function ManagerUserPage() {
   }, [detail, open, ensurePdfUrl]);
 
   function retryPdf(id: string) {
-    setPdfs((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    setPdfs((prev) => omitKey(prev, id));
   }
 
   function toggle(id: string, next: boolean) {
@@ -240,15 +241,28 @@ function ManagerUserPage() {
     markApproving(id, true);
     try {
       await approve({ data: { id, status } });
-      // Statuses are derived per person (active vs superseded), so refetch.
-      await load(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update approval");
+      markApproving(id, false);
+      return;
+    }
+    // The approval is committed from here on, so a refetch failure must not be
+    // reported as a failed approval. Statuses are derived per person (active vs
+    // superseded), so the whole person is refetched rather than patched.
+    try {
+      const refreshed = await load(false);
+      if (!refreshed) return; // a newer load owns the screen; it will say so
       toast.success(
         status === "approved"
           ? "Waiver approved. The member's record has been updated."
           : "Approval removed. The waiver is pending again.",
       );
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update approval");
+      toast.error(
+        e instanceof Error
+          ? `Saved, but the page could not be refreshed: ${e.message}`
+          : "Saved, but the page could not be refreshed.",
+      );
     } finally {
       markApproving(id, false);
     }
@@ -257,8 +271,14 @@ function ManagerUserPage() {
   async function download(id: string) {
     try {
       const cached = pdfs[id];
-      const fresh = cached?.url && Date.now() - cached.at < PDF_URL_TTL_MS;
-      const url = fresh ? cached.url! : (await getUrl({ data: { id } })).url;
+      if (isSignedUrlFresh(cached, Date.now())) {
+        window.open(cached.url, "_blank", "noopener");
+        return;
+      }
+      const { url } = await getUrl({ data: { id } });
+      // Keep the panel in step: this URL is as good as the one it holds, and
+      // writing it back clears a stale entry or a recorded error.
+      setPdfs((prev) => ({ ...prev, [id]: { url, at: Date.now() } }));
       window.open(url, "_blank", "noopener");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to get PDF");
@@ -301,7 +321,9 @@ function ManagerUserPage() {
             ))}
           </div>
           <p className="text-sm text-muted-foreground">
-            {summary.email ?? "No email on file"}
+            {/* Every person has an email (it lives on their login record), so a
+                missing one here means the lookup failed, not that we hold none. */}
+            {summary.email ?? "Email lookup failed"}
             {summary.phone ? ` · ${summary.phone}` : ""}
           </p>
           <p className="text-sm text-muted-foreground">
