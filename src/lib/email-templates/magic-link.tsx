@@ -11,6 +11,8 @@ import {
   Text,
 } from "@react-email/components";
 
+import { formatAuthLinkValidity } from "./link-validity";
+
 interface MagicLinkEmailProps {
   siteName: string;
   confirmationUrl: string;
@@ -24,7 +26,8 @@ export const MagicLinkEmail = ({ siteName, confirmationUrl }: MagicLinkEmailProp
       <Container style={container}>
         <Heading style={h1}>Your login link</Heading>
         <Text style={text}>
-          Click the button below to log in to {siteName}. This link will expire shortly.
+          Click the button below to log in to {siteName}. The link is valid for{" "}
+          {formatAuthLinkValidity()}. After that, request a new one.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Log In

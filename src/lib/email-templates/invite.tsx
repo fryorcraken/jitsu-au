@@ -12,6 +12,8 @@ import {
   Text,
 } from "@react-email/components";
 
+import { formatAuthLinkValidity } from "./link-validity";
+
 interface InviteEmailProps {
   siteName: string;
   siteUrl: string;
@@ -35,6 +37,9 @@ export const InviteEmail = ({ siteName, siteUrl, confirmationUrl }: InviteEmailP
         <Button style={button} href={confirmationUrl}>
           Accept Invitation
         </Button>
+        <Text style={note}>
+          The link is valid for {formatAuthLinkValidity()}. After that, ask us for a new one.
+        </Text>
         <Text style={footer}>
           If you weren't expecting this invitation, you can safely ignore this email.
         </Text>
@@ -59,6 +64,7 @@ const text = {
   lineHeight: "1.5",
   margin: "0 0 25px",
 };
+const note = { ...text, margin: "25px 0 0" };
 const link = { color: "inherit", textDecoration: "underline" };
 const button = {
   backgroundColor: "#008eaa",

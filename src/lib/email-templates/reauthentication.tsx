@@ -2,6 +2,8 @@ import * as React from "react";
 
 import { Body, Container, Head, Heading, Html, Preview, Text } from "@react-email/components";
 
+import { formatAuthLinkValidity } from "./link-validity";
+
 interface ReauthenticationEmailProps {
   token: string;
 }
@@ -16,8 +18,8 @@ export const ReauthenticationEmail = ({ token }: ReauthenticationEmailProps) => 
         <Text style={text}>Use the code below to confirm your identity:</Text>
         <Text style={codeStyle}>{token}</Text>
         <Text style={footer}>
-          This code will expire shortly. If you didn't request this, you can safely ignore this
-          email.
+          This code is valid for {formatAuthLinkValidity()}. If you didn't request this, you can
+          safely ignore this email.
         </Text>
       </Container>
     </Body>
