@@ -88,6 +88,17 @@ so a forgotten manifest update fails CI. The `GET` manifest is authoritative at
 runtime: the skill instructs agents to read it before acting, so an MCP/skill
 wrapper never needs hand-syncing beyond the human-readable docs above.
 
+## Plans you show the user are product-level
+
+Plans presented to the user (plan mode, an approach proposal, a check-in before
+starting) describe **what changes for the people using the site**: who is
+affected, which page or flow, what is different afterwards, what decisions are
+theirs, and what is out of scope. Not file paths, table names, or migration
+ordering. Work the implementation out separately and keep it as working notes,
+the way `.lovable/plan.md` puts user-facing behavior first and the technical
+section after. Full detail on request. See "Plans you show the user are
+product-level" in `CLAUDE.md`.
+
 ## Writing style for website copy
 
 This applies to all user-facing copy, not just the public marketing pages:
