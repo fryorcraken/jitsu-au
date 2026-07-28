@@ -31,14 +31,12 @@ export type CalendarEventSelection = Pick<
   CalendarEventRow,
   | "id"
   | "series_id"
-  | "kind"
   | "title"
   | "description"
   | "instructor_name"
   | "location"
   | "starts_at"
   | "ends_at"
-  | "all_day"
   | "status"
   | "visibility"
   | "invite_only"
@@ -47,8 +45,14 @@ export type CalendarEventSelection = Pick<
 /** The feed additionally needs updated_at, which drives the ICS SEQUENCE. */
 export type CalendarFeedSelection = CalendarEventSelection & Pick<CalendarEventRow, "updated_at">;
 
-/** Generated Update shapes, so patches are checked rather than cast to a bag. */
-export type CalendarSeriesUpdate = Tables["calendar_series"]["Update"];
-export type CalendarEventUpdate = Tables["calendar_events"]["Update"];
+/**
+ * The detail columns a series and its generated dates BOTH carry, so one patch
+ * can update either. Derived from the generated Update shapes rather than
+ * hand-written, so a column change is a type error here first.
+ */
+export type EntryDetailsPatch = Pick<
+  Tables["calendar_series"]["Update"] & Tables["calendar_events"]["Update"],
+  "title" | "description" | "instructor_name" | "location" | "visibility" | "invite_only"
+>;
 
 export type CalendarClient = SupabaseClient<Database>;
