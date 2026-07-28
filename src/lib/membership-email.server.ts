@@ -12,7 +12,6 @@ import { render } from "@react-email/render";
 import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import type { MembershipClient } from "@/lib/membership-types";
 import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment";
 import { MembershipActivatedEmail } from "@/lib/email-templates/membership-activated";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
@@ -40,16 +39,12 @@ type AdminClient = SupabaseClient<Database>;
  */
 export async function getInvoiceInstructions(admin: AdminClient): Promise<string> {
   try {
-    // `club_settings` isn't in the generated Database types yet; the memberships
-    // client type knows it (see membership-types.ts).
-    const client = admin as unknown as MembershipClient;
-    const { data } = await client
+    const { data } = await admin
       .from("club_settings")
       .select("value")
       .eq("key", "invoice_payment_instructions")
       .maybeSingle();
-    const value = (data as { value?: string } | null)?.value?.trim();
-    return value || DEFAULT_INVOICE_INSTRUCTIONS;
+    return data?.value?.trim() || DEFAULT_INVOICE_INSTRUCTIONS;
   } catch {
     return DEFAULT_INVOICE_INSTRUCTIONS;
   }
@@ -81,7 +76,10 @@ async function sendOne(opts: {
 
 export interface MembershipPaymentEmailParams {
   membershipId: string;
+  /** The member's legal full name — how managers identify them. */
   memberName: string;
+  /** What to call the member to their face: preferred name, else first name. */
+  memberGreetingName: string;
   memberEmail: string;
   planName: string;
   /** Human-readable amount, e.g. "$245". */
@@ -99,6 +97,7 @@ export interface MembershipPaymentEmailParams {
 export async function sendMembershipPaymentEmail({
   membershipId,
   memberName,
+  memberGreetingName,
   memberEmail,
   planName,
   amount,
@@ -116,7 +115,8 @@ export async function sendMembershipPaymentEmail({
   const memberEl = React.createElement(MembershipPaymentEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_URL,
-    memberName,
+    // The member-facing greeting: call them what they asked to be called.
+    memberName: memberGreetingName,
     planName,
     amount,
     reference,
@@ -180,7 +180,9 @@ export async function sendMembershipPaymentEmail({
 
 export interface MembershipActivatedEmailParams {
   membershipId: string;
-  memberName: string;
+  /** What to call the member to their face: preferred name, else first name.
+   * This email has no manager copy, so the legal name is never needed. */
+  memberGreetingName: string;
   memberEmail: string;
   planName: string;
   /** Human-readable validity/credit summary. */
@@ -190,7 +192,7 @@ export interface MembershipActivatedEmailParams {
 /** Confirm to the member that their membership is active. Best-effort. */
 export async function sendMembershipActivatedEmail({
   membershipId,
-  memberName,
+  memberGreetingName,
   memberEmail,
   planName,
   validity,
@@ -205,7 +207,7 @@ export async function sendMembershipActivatedEmail({
   const el = React.createElement(MembershipActivatedEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_URL,
-    memberName,
+    memberName: memberGreetingName,
     planName,
     validity,
     accountUrl: ACCOUNT_URL,

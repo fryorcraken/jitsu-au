@@ -4,11 +4,22 @@ The schema reference for UTS Jitsu (Supabase Postgres).
 
 > [!IMPORTANT]
 > This document describes the schema and must stay aligned with the code. The
-> applied schema is defined by the timestamped migrations in
-> `supabase/migrations/*.sql` (the source of truth). **Whenever you change a
-> migration, a table, or the code that reads/writes it, update this document in
-> the same change** so the doc, the migrations, and the code never drift apart.
-> The product flows behind the person/waiver tables live in `docs/waivers.md`.
+> intended schema is defined by the timestamped migrations in
+> `supabase/migrations/*.sql`. **Whenever you change a migration, a table, or
+> the code that reads/writes it, update this document in the same change** so
+> the doc, the migrations, and the code never drift apart. The product flows
+> behind the person/waiver tables live in `docs/waivers.md`.
+
+> [!WARNING]
+> A migration file describes what the database _should_ have, not what it
+> _does_. Committing a migration does not apply it — nothing in this pipeline
+> runs `supabase/migrations/*.sql` against the live database (CI replays them
+> onto a throwaway local Postgres, which proves only that they _can_ apply).
+> This document described `waivers.approval_status` correctly for a week while
+> the live column did not exist. To see the real schema, query the live database
+> (`information_schema.columns`) — or read `src/integrations/supabase/types.ts`,
+> which is generated from it, but may lag or carry hand-added columns. See
+> "Schema drift" in `CLAUDE.md`.
 
 ## People and waivers: the shape
 
@@ -58,25 +69,26 @@ first waiver submission; filled in by manager approval. The funnel phase (lead
 / applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
 never stored.
 
-| Column                    | Type          | Null | Notes                                                                       |
-| ------------------------- | ------------- | ---- | --------------------------------------------------------------------------- |
-| `user_id`                 | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user. |
-| `first_name`              | `text`        | yes  |                                                                             |
-| `middle_name`             | `text`        | yes  |                                                                             |
-| `last_name`               | `text`        | yes  |                                                                             |
-| `date_of_birth`           | `date`        | yes  |                                                                             |
-| `address`                 | `text`        | yes  |                                                                             |
-| `phone`                   | `text`        | yes  |                                                                             |
-| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                                            |
-| `emergency_contact_name`  | `text`        | yes  |                                                                             |
-| `emergency_contact_phone` | `text`        | yes  |                                                                             |
-| `medical_notes`           | `text`        | yes  |                                                                             |
-| `is_minor`                | `boolean`     | no   | Default `false`.                                                            |
-| `guardian_name`           | `text`        | yes  |                                                                             |
-| `guardian_relationship`   | `text`        | yes  |                                                                             |
-| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                                            |
-| `created_at`              | `timestamptz` | no   | Default `now()`.                                                            |
-| `updated_at`              | `timestamptz` | no   | Default `now()`.                                                            |
+| Column                    | Type          | Null | Notes                                                                                                             |
+| ------------------------- | ------------- | ---- | ----------------------------------------------------------------------------------------------------------------- |
+| `user_id`                 | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                       |
+| `first_name`              | `text`        | yes  |                                                                                                                   |
+| `middle_name`             | `text`        | yes  |                                                                                                                   |
+| `last_name`               | `text`        | yes  |                                                                                                                   |
+| `preferred_name`          | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`). |
+| `date_of_birth`           | `date`        | yes  |                                                                                                                   |
+| `address`                 | `text`        | yes  |                                                                                                                   |
+| `phone`                   | `text`        | yes  |                                                                                                                   |
+| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                                                                                  |
+| `emergency_contact_name`  | `text`        | yes  |                                                                                                                   |
+| `emergency_contact_phone` | `text`        | yes  |                                                                                                                   |
+| `medical_notes`           | `text`        | yes  |                                                                                                                   |
+| `is_minor`                | `boolean`     | no   | Default `false`.                                                                                                  |
+| `guardian_name`           | `text`        | yes  |                                                                                                                   |
+| `guardian_relationship`   | `text`        | yes  |                                                                                                                   |
+| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                                                                                  |
+| `created_at`              | `timestamptz` | no   | Default `now()`.                                                                                                  |
+| `updated_at`              | `timestamptz` | no   | Default `now()`.                                                                                                  |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
@@ -121,6 +133,7 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 | `first_name`              | `text`        | no   | As submitted.                                                                                                                                                                                                   |
 | `middle_name`             | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
 | `last_name`               | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `preferred_name`          | `text`        | yes  | As submitted. Optional; fills the `{{preferred_name}}` template token (falling back to the first name).                                                                                                         |
 | `date_of_birth`           | `date`        | no   | As submitted.                                                                                                                                                                                                   |
 | `address`                 | `text`        | no   | As submitted.                                                                                                                                                                                                   |
 | `phone`                   | `text`        | no   | As submitted.                                                                                                                                                                                                   |

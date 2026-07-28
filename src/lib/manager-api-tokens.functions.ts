@@ -4,10 +4,10 @@ import { createApiTokenSchema, revokeApiTokenSchema } from "@/lib/validation";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
 import type { ManagerApiTokenRow, MembershipClient } from "@/lib/membership-types";
 
-/** Load the service-role client, cast to the memberships-aware Database. */
+/** Load the service-role client. */
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin as unknown as MembershipClient;
+  return supabaseAdmin;
 }
 
 /** Throw unless the caller holds the `manager` role (checked via the RLS RPC). */

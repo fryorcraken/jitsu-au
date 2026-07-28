@@ -20,6 +20,7 @@ function applyPlaceholders(body: string, values: Record<string, string>): string
 
 const PLACEHOLDERS = [
   "full_name",
+  "preferred_name",
   "date_of_birth",
   "address",
   "phone",
@@ -34,6 +35,7 @@ const PLACEHOLDERS = [
 
 const SAMPLE: Record<string, string> = {
   full_name: "Jane Sample",
+  preferred_name: "Janey",
   date_of_birth: "1995-06-12",
   address: "123 Broadway, Ultimo NSW 2007",
   phone: "0400 000 000",

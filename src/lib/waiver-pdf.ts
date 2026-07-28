@@ -3,6 +3,10 @@ import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "./waiver-docum
 
 export type WaiverPdfData = {
   full_name: string;
+  /** First name, the fallback for `{{preferred_name}}`. */
+  first_name: string;
+  /** Optional preferred name, as submitted ("" when not given). */
+  preferred_name: string;
   date_of_birth: string;
   address: string;
   phone: string;
@@ -29,6 +33,69 @@ export type WaiverPdfData = {
   /** If true, overlay a DRAFT watermark and skip signed-at footer */
   draft?: boolean;
 };
+
+/** Largest box a drawn signature is scaled into, in PDF points. */
+const SIGNATURE_MAX_WIDTH = 220;
+const SIGNATURE_MAX_HEIGHT = 60;
+/** Gap between the baseline rule and the glyph resting on it. */
+const SIGNATURE_SIT = 4;
+/** Gap between the text above the block and the top of the drawn glyph. */
+const SIGNATURE_CLEARANCE = 6;
+
+export type SignatureBlockLayout = {
+  /** y of the horizontal rule the signature sits on. */
+  lineY: number;
+  /** y of the bottom-left corner of the drawn signature image. */
+  imageY: number;
+  /** y of the top edge of the drawn signature image. */
+  imageTop: number;
+  /** Cursor for the printed signer name below the rule. */
+  nameY: number;
+  /** Font size for the printed signer name. */
+  nameSize: number;
+  /** y for the "electronically signed on ..." line, when there is one. */
+  timestampY: number;
+  /** Cursor position after the whole block. */
+  next: number;
+  /** Total vertical space the block consumes, for ensureSpace(). */
+  height: number;
+};
+
+/**
+ * Vertical layout for a signature block.
+ *
+ * A drawn signature is rendered *above* its rule, so its height has to be
+ * reserved before the rule is positioned. Without that reservation the glyph
+ * runs back up the page and overlaps the text already drawn there (the
+ * template's "Signed by ... on ..." line).
+ *
+ * `top` is the cursor before the block; every returned coordinate is at or
+ * below it.
+ */
+export function layoutSignatureBlock(opts: {
+  top: number;
+  /** Scaled height of the drawn signature, or 0 when the name is typed. */
+  signatureHeight: number;
+  hasTimestamp: boolean;
+}): SignatureBlockLayout {
+  const { top, signatureHeight, hasTimestamp } = opts;
+  const reserved = signatureHeight > 0 ? signatureHeight + SIGNATURE_SIT + SIGNATURE_CLEARANCE : 0;
+  const lineY = top - reserved;
+  const nameY = lineY - 14;
+  const nameSize = signatureHeight > 0 ? 10 : 14;
+  const timestampY = nameY - (nameSize + 8);
+  const next = hasTimestamp ? timestampY - 13 : timestampY;
+  return {
+    lineY,
+    imageY: lineY + SIGNATURE_SIT,
+    imageTop: lineY + SIGNATURE_SIT + signatureHeight,
+    nameY,
+    nameSize,
+    timestampY,
+    next,
+    height: top - next,
+  };
+}
 
 export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -96,6 +163,58 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     }
   };
 
+  type EmbeddedSignature = { img: Awaited<ReturnType<typeof doc.embedPng>>; w: number; h: number };
+
+  /** Embed a drawn signature, scaled into the signature box. Null if absent or unreadable. */
+  const embedSignature = async (png?: Uint8Array | null): Promise<EmbeddedSignature | null> => {
+    if (!png || png.byteLength === 0) return null;
+    try {
+      const img = await doc.embedPng(png);
+      const scale = Math.min(SIGNATURE_MAX_WIDTH / img.width, SIGNATURE_MAX_HEIGHT / img.height, 1);
+      return { img, w: img.width * scale, h: img.height * scale };
+    } catch {
+      // A corrupt PNG must never fail the whole render; fall back to typed text.
+      return null;
+    }
+  };
+
+  /** Rule + drawn-or-typed signature + printed name + optional timestamp. */
+  const drawSignatureBlock = (
+    sig: EmbeddedSignature | null,
+    typedName: string,
+    timestamp: string | null,
+  ) => {
+    const measure = () =>
+      layoutSignatureBlock({
+        top: y,
+        signatureHeight: sig?.h ?? 0,
+        hasTimestamp: timestamp !== null,
+      });
+    ensureSpace(measure().height);
+    // Re-measure: ensureSpace may have moved the cursor to a fresh page.
+    const layout = measure();
+    page.drawLine({
+      start: { x: margin, y: layout.lineY },
+      end: { x: margin + 260, y: layout.lineY },
+      thickness: 0.5,
+      color: muted,
+    });
+    if (sig) {
+      page.drawImage(sig.img, { x: margin, y: layout.imageY, width: sig.w, height: sig.h });
+    }
+    page.drawText(typedName, {
+      x: margin,
+      y: layout.nameY - 4,
+      size: layout.nameSize,
+      font: sig ? font : bold,
+      color: sig ? muted : ink,
+    });
+    if (timestamp !== null) {
+      page.drawText(timestamp, { x: margin, y: layout.timestampY, size: 9, font, color: muted });
+    }
+    y = layout.next;
+  };
+
   // Header
   page.drawRectangle({ x: 0, y: pageHeight - 8, width: pageWidth, height: 8, color: primary });
   drawText(data.club_name, { size: 10, color: muted });
@@ -112,6 +231,8 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   // data appears only where the body/labels use a {{placeholder}}.
   const placeholders = buildWaiverPlaceholders({
     fullName: data.full_name,
+    firstName: data.first_name,
+    preferredName: data.preferred_name,
     dateOfBirth: data.date_of_birth,
     address: data.address,
     phone: data.phone,
@@ -181,64 +302,16 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
 
   // Signature
   y -= 10;
-  ensureSpace(90);
-  const sigLineY = y;
-  page.drawLine({
-    start: { x: margin, y: sigLineY },
-    end: { x: margin + 260, y: sigLineY },
-    thickness: 0.5,
-    color: muted,
-  });
-
-  if (data.signature_image_png && data.signature_image_png.byteLength > 0) {
-    try {
-      const img = await doc.embedPng(data.signature_image_png);
-      const maxW = 220;
-      const maxH = 60;
-      const scale = Math.min(maxW / img.width, maxH / img.height, 1);
-      const w = img.width * scale;
-      const h = img.height * scale;
-      page.drawImage(img, { x: margin, y: sigLineY + 4, width: w, height: h });
-      y = sigLineY - 14;
-      page.drawText(data.signature_name || data.full_name || "", {
-        x: margin,
-        y: y - 4,
-        size: 10,
-        font,
-        color: muted,
-      });
-      y -= 18;
-    } catch {
-      y -= 14;
-      page.drawText(data.signature_name || "", {
-        x: margin,
-        y: y - 4,
-        size: 14,
-        font: bold,
-        color: ink,
-      });
-      y -= 22;
-    }
-  } else {
-    y -= 14;
-    page.drawText(data.signature_name || "", {
-      x: margin,
-      y: y - 4,
-      size: 14,
-      font: bold,
-      color: ink,
-    });
-    y -= 22;
-  }
-  if (!data.draft) {
-    page.drawText(`Electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`, {
-      x: margin,
-      y,
-      size: 9,
-      font,
-      color: muted,
-    });
-  }
+  const signature = await embedSignature(data.signature_image_png);
+  drawSignatureBlock(
+    signature,
+    // A drawn signature may carry no typed name (validation accepts either), so
+    // an unreadable PNG must still fall back to a name, never a blank line.
+    data.signature_name || data.full_name || "",
+    data.draft
+      ? null
+      : `Electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`,
+  );
 
   if (data.is_minor) {
     y -= 24;
@@ -256,60 +329,14 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       y -= 16;
     }
     y -= 4;
-    ensureSpace(80);
-    const gLineY = y;
-    page.drawLine({
-      start: { x: margin, y: gLineY },
-      end: { x: margin + 260, y: gLineY },
-      thickness: 0.5,
-      color: muted,
-    });
-    if (data.guardian_signature_image_png && data.guardian_signature_image_png.byteLength > 0) {
-      try {
-        const img = await doc.embedPng(data.guardian_signature_image_png);
-        const maxW = 220;
-        const maxH = 60;
-        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
-        const w = img.width * scale;
-        const h = img.height * scale;
-        page.drawImage(img, { x: margin, y: gLineY + 4, width: w, height: h });
-        y = gLineY - 14;
-        page.drawText(data.guardian_signature || data.guardian_name || "", {
-          x: margin,
-          y: y - 4,
-          size: 10,
-          font,
-          color: muted,
-        });
-        y -= 18;
-      } catch {
-        y -= 14;
-        page.drawText(data.guardian_signature || "", {
-          x: margin,
-          y: y - 4,
-          size: 14,
-          font: bold,
-          color: ink,
-        });
-        y -= 20;
-      }
-    } else {
-      y -= 14;
-      page.drawText(data.guardian_signature || "", {
-        x: margin,
-        y: y - 4,
-        size: 14,
-        font: bold,
-        color: ink,
-      });
-      y -= 20;
-    }
-    if (!data.draft) {
-      page.drawText(
-        `Guardian electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`,
-        { x: margin, y, size: 9, font, color: muted },
-      );
-    }
+    const guardianSignature = await embedSignature(data.guardian_signature_image_png);
+    drawSignatureBlock(
+      guardianSignature,
+      data.guardian_signature || data.guardian_name || "",
+      data.draft
+        ? null
+        : `Guardian electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`,
+    );
   }
 
   // DRAFT watermark on every page

@@ -1,37 +1,34 @@
 -- Intentionally a no-op. Kept as a file so the applied-migration ledger stays
 -- intact; do not delete it and do not re-add the statements below.
 --
--- This is the same Lovable re-derivation described in
--- 20260725021949_bf92f934-aa42-4921-924e-cf8bee814737.sql (issue #53), a second
--- time. The file arrived with a Lovable "Changes" commit (dc2e8d0, 2026-07-27)
--- and re-created objects that two hand-written migrations already on main had
--- built:
---   * 20260722130000_manager_api_tokens.sql — manager_api_tokens, its partial
---     index, grants, RLS and the three manager policies;
---   * 20260726000000_calendar.sql — has_active_paid_membership, calendar_series,
---     calendar_events, event_rsvps, calendar_feed_tokens, their indexes, grants
---     and all their policies.
--- All 19 objects it creates already exist in those two files, and it carried no
--- DROP/INSERT/UPDATE/TRUNCATE of its own. Only the comments differed. Lovable
--- generates migrations from the live database's schema rather than from this
--- directory's history, so a hand-written migration it later re-derives can
--- reappear here as a second copy.
+-- This migration arrived with a Lovable "Changes" commit (dc2e8d0) and was a
+-- re-derivation of two migrations already on main at the time: the whole
+-- `manager_api_tokens` block from 20260722130000_manager_api_tokens.sql, and
+-- the whole calendar block (has_active_paid_membership, calendar_series,
+-- calendar_events, event_rsvps, calendar_feed_tokens, their indexes, grants
+-- and policies) from 20260726000000_calendar.sql. All 54 statements appear
+-- verbatim in those two files; only the comments differed. Lovable generates
+-- migrations from the live database's schema rather than from this directory's
+-- history, so a hand-written migration it later re-derives can reappear here
+-- as a second copy. Same failure mode as issue #53, different objects.
 --
 -- Replaying the history onto an empty database therefore aborted on
 -- `CREATE TABLE public.manager_api_tokens` with `relation "manager_api_tokens"
 -- already exists` (SQLSTATE 42P07), so `supabase db start` never finished and
--- the Advisors / plpgsql_check job in .github/workflows/supabase-lint.yml could
--- not run at all — on this PR or on any other touching supabase/**. Making just
--- the first CREATE TABLE idempotent is not enough: every following statement
--- collides the same way.
+-- the Advisors / plpgsql_check job in .github/workflows/supabase-lint.yml
+-- could not run at all — on this PR or any other touching supabase/**. Making
+-- just the first CREATE TABLE idempotent is not enough: every following
+-- statement collides the same way (the indexes, the grants, the policies, and
+-- then the entire calendar schema).
 --
 -- Emptying the file is safe in both directions:
 --   * Live: this migration is already recorded as applied, so its contents are
 --     never re-run there. The schema is unchanged.
---   * From scratch: the two migrations named above build exactly the same
---     objects, so the replayed schema is unchanged too.
+--   * From scratch: 20260722130000_manager_api_tokens.sql and
+--     20260726000000_calendar.sql alone build exactly the same objects, so the
+--     replayed schema is unchanged too.
 
 -- Retained from the original file: harmless, idempotent, and the reason the
--- edit existed at all. It tells PostgREST to pick up the schema, and it keeps
--- this file from being empty.
+-- edit existed at all. It tells PostgREST to pick up the current schema, and
+-- it keeps this file from being empty.
 NOTIFY pgrst, 'reload schema';

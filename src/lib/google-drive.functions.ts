@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { profileFullName } from "@/lib/validation";
-import type { AppClient } from "@/lib/profile-types";
 
 const GATEWAY_BASE_URL = "https://connector-gateway.lovable.dev";
 const CONNECTOR_ID = "google_drive";
@@ -206,7 +205,7 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
     const conn = await getConnectionForUser(context.userId, CONNECTOR_ID);
     if (!conn) throw new Error("Connect your Google account first.");
 
-    const admin = supabaseAdmin as unknown as AppClient;
+    const admin = supabaseAdmin;
     // The Drive filename uses the SUBMITTED name on the waiver row (the frozen
     // submission the PDF was generated from), not the live profile.
     const { data: waiver, error: wErr } = await admin
@@ -269,7 +268,7 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
         drive_file_id: uploaded.id,
         drive_web_view_link: uploaded.webViewLink,
         uploaded_at: uploadedAt,
-      } as never,
+      },
       { onConflict: "waiver_id,manager_user_id" },
     );
 

@@ -18,7 +18,7 @@ import {
   listAgentInvoicesSchema,
   listAgentUsersSchema,
   managerAgentActions,
-  profileFullName,
+  nameWithPreferred,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -60,10 +60,10 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** The service-role client, typed with the memberships-aware Database. */
+/** Load the service-role client. */
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin as unknown as MembershipClient;
+  return supabaseAdmin;
 }
 
 /**
@@ -139,14 +139,14 @@ function errorResponse(e: unknown): Response {
 async function handleListUsers(params: unknown) {
   const { status, limit } = listAgentUsersSchema.parse(params ?? {});
   const db = await adminClient();
-  const pdb = db as unknown as AppClient;
+  const pdb = db;
 
   const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
     await Promise.all([
       pdb
         .from("profiles")
         .select(
-          "user_id, first_name, middle_name, last_name, phone, uts_student_number, created_at",
+          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
         )
         .limit(5000),
       db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
@@ -255,17 +255,17 @@ async function handleListInvoices(params: unknown) {
   const nameByUser = new Map<string, string>();
   let emailByUser = new Map<string, string>();
   if (userIds.length) {
-    const pdb = db as unknown as AppClient;
+    const pdb = db;
     const [{ data: profiles }, resolved] = await Promise.all([
       pdb
         .from("profiles")
-        .select("user_id, first_name, middle_name, last_name")
+        .select("user_id, first_name, middle_name, last_name, preferred_name")
         .in("user_id", userIds),
       emailsByUserId(pdb, userIds),
     ]);
     emailByUser = resolved;
     for (const p of profiles ?? []) {
-      nameByUser.set(p.user_id, profileFullName(p));
+      nameByUser.set(p.user_id, nameWithPreferred(p));
     }
   }
 

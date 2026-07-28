@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { PDFDocument } from "pdf-lib";
-import { renderWaiverPdf, type WaiverPdfData } from "./waiver-pdf";
+import { inflateSync } from "node:zlib";
+import { PDFArray, PDFDocument, PDFRawStream, type PDFPage } from "pdf-lib";
+import { layoutSignatureBlock, renderWaiverPdf, type WaiverPdfData } from "./waiver-pdf";
 
 // A real, minimal 1x1 PNG. pdf-lib's embedPng parses the IHDR/IDAT chunks, so
 // the signature-image tests need actual PNG bytes, not an arbitrary buffer.
 const PNG_1x1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+// A 400x120 greyscale PNG. Real drawn signatures are wide and tall; this one
+// scales into the full 220x60 signature box, which is what makes the overlap
+// regression visible (a 1x1 pixel is too small to collide with anything).
+const PNG_400x120_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAZAAAAB4CAAAAAD5tPtLAAAARUlEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgb7v4AAH1tVnmAAAAAElFTkSuQmCC";
 
 function decodeBase64(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -13,9 +20,72 @@ function decodeBase64(b64: string): Uint8Array {
 }
 
 const validPng = () => decodeBase64(PNG_1x1_BASE64);
+const tallPng = () => decodeBase64(PNG_400x120_BASE64);
+
+type PlacedText = { x: number; y: number; text: string };
+type PlacedImage = { x: number; y: number; width: number; height: number };
+
+/**
+ * Read back where text and images actually landed on a rendered page.
+ *
+ * This parses only the operator shapes pdf-lib emits for `drawText`/`drawImage`
+ * (`1 0 0 1 x y Tm` + `<hex> Tj`, and a `q`-scoped chain of `cm` matrices before
+ * `/Image… Do`), which is enough to assert geometry without a full PDF parser.
+ */
+function readPlacements(doc: PDFDocument, page: PDFPage) {
+  const contents = page.node.Contents();
+  const refs = contents instanceof PDFArray ? contents.asArray() : [contents];
+  const src = refs
+    .map((ref) => {
+      const stream = doc.context.lookup(ref) as PDFRawStream;
+      return inflateSync(Buffer.from(stream.contents)).toString("latin1");
+    })
+    .join("\n");
+
+  const texts: PlacedText[] = [];
+  const images: PlacedImage[] = [];
+  let cursor: { x: number; y: number } | null = null;
+  let matrices: number[][] = [];
+
+  for (const line of src.split("\n").map((l) => l.trim())) {
+    const tm = line.match(/^1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm$/);
+    if (tm) {
+      cursor = { x: Number(tm[1]), y: Number(tm[2]) };
+      continue;
+    }
+    const tj = line.match(/^<([0-9A-Fa-f]*)> Tj$/);
+    if (tj && cursor) {
+      const text = (tj[1].match(/../g) ?? [])
+        .map((pair) => String.fromCharCode(parseInt(pair, 16)))
+        .join("");
+      texts.push({ ...cursor, text });
+      continue;
+    }
+    const cm = line.match(/^(-?[\d.]+) 0 0 (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) cm$/);
+    if (cm) {
+      matrices.push(cm.slice(1).map(Number));
+      continue;
+    }
+    if (/^\/Image\S* Do$/.test(line)) {
+      // pdf-lib emits translate-then-scale, so summing offsets and multiplying
+      // scales reconstructs the placement.
+      images.push({
+        x: matrices.reduce((acc, [, , tx]) => acc + tx, 0),
+        y: matrices.reduce((acc, [, , , ty]) => acc + ty, 0),
+        width: matrices.reduce((acc, [sx]) => acc * sx, 1),
+        height: matrices.reduce((acc, [, sy]) => acc * sy, 1),
+      });
+      continue;
+    }
+    if (line === "q" || line === "Q") matrices = [];
+  }
+  return { texts, images };
+}
 
 const base: WaiverPdfData = {
   full_name: "Jane Sample",
+  first_name: "Jane",
+  preferred_name: "",
   date_of_birth: "1990-01-01",
   address: "123 Broadway, Ultimo NSW 2007",
   phone: "0400 000 000",
@@ -45,6 +115,49 @@ async function expectValidPdf(bytes: Uint8Array): Promise<PDFDocument> {
   // that it starts with the magic bytes.
   return await PDFDocument.load(bytes);
 }
+
+describe("layoutSignatureBlock", () => {
+  const TOP = 700;
+
+  it("never lets a drawn signature reach above the cursor it starts from", () => {
+    // The invariant the overlap fix rests on: whatever the signature's height,
+    // the glyph stays below whatever was already drawn on the page.
+    for (const signatureHeight of [1, 12, 30, 59.5, 60]) {
+      const layout = layoutSignatureBlock({ top: TOP, signatureHeight, hasTimestamp: true });
+      expect(layout.imageTop).toBeLessThanOrEqual(TOP);
+      expect(layout.imageY).toBe(layout.lineY + 4);
+    }
+  });
+
+  it("pushes the rule down by the full height of a drawn signature", () => {
+    const short = layoutSignatureBlock({ top: TOP, signatureHeight: 10, hasTimestamp: true });
+    const tall = layoutSignatureBlock({ top: TOP, signatureHeight: 60, hasTimestamp: true });
+    expect(tall.lineY).toBe(short.lineY - 50);
+    expect(tall.height).toBe(short.height + 50);
+  });
+
+  it("leaves the rule at the cursor when the signature is typed", () => {
+    const layout = layoutSignatureBlock({ top: TOP, signatureHeight: 0, hasTimestamp: true });
+    expect(layout.lineY).toBe(TOP);
+    expect(layout.nameSize).toBe(14);
+  });
+
+  it("orders the rule, printed name and timestamp top to bottom", () => {
+    const layout = layoutSignatureBlock({ top: TOP, signatureHeight: 60, hasTimestamp: true });
+    expect(layout.lineY).toBeLessThan(layout.imageY);
+    expect(layout.nameY).toBeLessThan(layout.lineY);
+    expect(layout.timestampY).toBeLessThan(layout.nameY);
+    expect(layout.next).toBeLessThan(layout.timestampY);
+  });
+
+  it("reports a height that spans the whole block", () => {
+    for (const hasTimestamp of [true, false]) {
+      const layout = layoutSignatureBlock({ top: TOP, signatureHeight: 60, hasTimestamp });
+      expect(layout.height).toBe(TOP - layout.next);
+      expect(layout.next).toBeLessThanOrEqual(layout.timestampY);
+    }
+  });
+});
 
 describe("renderWaiverPdf", () => {
   it("renders a valid single-page PDF for a signed adult with a typed signature", async () => {
@@ -111,6 +224,79 @@ describe("renderWaiverPdf", () => {
       }),
     );
     expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps a drawn signature clear of the body text above it", async () => {
+    // Regression: the drawn signature is rendered *above* its rule, and no
+    // vertical space was reserved for it, so a full-height signature ran back
+    // up the page and struck through the template's closing "Signed by …" line.
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        template_body: "## Media consent\n\nI may consent.\n\n---\n\nSigned by {{full_name}}.",
+        signature_image_png: tallPng(),
+      }),
+    );
+    const { texts, images } = readPlacements(doc, doc.getPage(0));
+
+    expect(images).toHaveLength(1);
+    const [signature] = images;
+    // The fixture must actually fill the signature box, or the test proves nothing.
+    expect(signature.height).toBeCloseTo(60, 5);
+
+    const signedBy = texts.find((t) => t.text.startsWith("Signed by"));
+    expect(signedBy).toBeDefined();
+    expect(signature.y + signature.height).toBeLessThan(signedBy!.y);
+  });
+
+  it("keeps a drawn guardian signature clear of the consent details above it", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        is_minor: true,
+        guardian_name: "Pat Sample",
+        guardian_relationship: "Parent",
+        guardian_signature: "Pat Sample",
+        signature_image_png: tallPng(),
+        guardian_signature_image_png: tallPng(),
+      }),
+    );
+    const { texts, images } = readPlacements(doc, doc.getPage(0));
+
+    expect(images).toHaveLength(2);
+    const guardianSignature = images[1];
+    const relationship = texts.find((t) => t.text === "Parent");
+    expect(relationship).toBeDefined();
+    expect(guardianSignature.y + guardianSignature.height).toBeLessThan(relationship!.y);
+  });
+
+  it("still names the signer when a drawn signature fails to embed", async () => {
+    // Validation accepts a drawn signature with no typed name, so a corrupt PNG
+    // must not leave the waiver with a blank signer line.
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        signature_name: "",
+        signature_image_png: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+      }),
+    );
+    const { texts, images } = readPlacements(doc, doc.getPage(0));
+    expect(images).toHaveLength(0);
+    expect(texts.some((t) => t.text === "Jane Sample")).toBe(true);
+  });
+
+  it("prints the signer name and timestamp below the drawn signature", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({ ...base, signature_image_png: tallPng() }),
+    );
+    const { texts, images } = readPlacements(doc, doc.getPage(0));
+    const [signature] = images;
+    const printedName = texts.find((t) => t.text === "Jane Sample" && t.y < signature.y);
+    const timestamp = texts.find((t) => t.text.startsWith("Electronically signed on"));
+
+    expect(printedName).toBeDefined();
+    expect(timestamp).toBeDefined();
+    expect(timestamp!.y).toBeLessThan(printedName!.y);
   });
 
   it("fills {{placeholder}} tokens in acknowledgement labels without throwing", async () => {

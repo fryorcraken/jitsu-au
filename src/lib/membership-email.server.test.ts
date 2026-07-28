@@ -68,6 +68,7 @@ describe("membership emails without an API key", () => {
     const result = await sendMembershipPaymentEmail({
       membershipId: "m1",
       memberName: "Ada Lovelace",
+      memberGreetingName: "Addy",
       memberEmail: "ada@example.com",
       planName: "One semester",
       amount: "$245",
@@ -83,7 +84,7 @@ describe("membership emails without an API key", () => {
     delete process.env.LOVABLE_API_KEY;
     const result = await sendMembershipActivatedEmail({
       membershipId: "m1",
-      memberName: "Ada",
+      memberGreetingName: "Addy",
       memberEmail: "ada@example.com",
       planName: "One semester",
       validity: "Valid for 182 days.",

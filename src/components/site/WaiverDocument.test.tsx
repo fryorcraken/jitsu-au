@@ -9,6 +9,8 @@ import {
 
 const base: WaiverDocumentProps = {
   fullName: "Jane Sample",
+  firstName: "Jane",
+  preferredName: "",
   dateOfBirth: "1995-06-12",
   address: "123 Broadway, Ultimo NSW 2007",
   phone: "0400 000 000",
@@ -45,8 +47,10 @@ describe("parseWaiverBlocks", () => {
 });
 
 describe("waiver placeholders", () => {
-  const values = buildWaiverPlaceholders({
+  const input = {
     fullName: "Jane Sample",
+    firstName: "Jane",
+    preferredName: "",
     dateOfBirth: "1995-06-12",
     address: "1 Broadway",
     phone: "0400",
@@ -57,7 +61,8 @@ describe("waiver placeholders", () => {
     signatureName: "",
     clubName: "UTS Jitsu",
     signedDate: "21/07/2026",
-  });
+  };
+  const values = buildWaiverPlaceholders(input);
 
   it("empty medical notes become 'None provided'", () => {
     expect(values.medical_notes).toBe("None provided");
@@ -65,6 +70,30 @@ describe("waiver placeholders", () => {
 
   it("signature_name falls back to the full name when not typed", () => {
     expect(values.signature_name).toBe("Jane Sample");
+  });
+
+  it("preferred_name falls back to the first name when not given", () => {
+    expect(values.preferred_name).toBe("Jane");
+  });
+
+  it("preferred_name uses the submitted preferred name when given", () => {
+    const withPreferred = buildWaiverPlaceholders({ ...input, preferredName: "Janey" });
+    expect(withPreferred.preferred_name).toBe("Janey");
+  });
+
+  // The live preview feeds raw form state while the PDF feeds Zod-trimmed
+  // input, so a whitespace-only entry must fall back in both, not render blank
+  // on screen and the first name on paper.
+  it("preferred_name falls back when the entry is only whitespace", () => {
+    const blank = buildWaiverPlaceholders({ ...input, preferredName: "   " });
+    expect(blank.preferred_name).toBe("Jane");
+  });
+
+  // Only reachable in the half-filled live preview: never render an empty
+  // greeting, even before the signer has typed a first name.
+  it("preferred_name falls back to the full name when there is no first name", () => {
+    const noFirst = buildWaiverPlaceholders({ ...input, preferredName: "", firstName: "" });
+    expect(noFirst.preferred_name).toBe("Jane Sample");
   });
 
   it("fills known tokens and leaves unknown tokens intact", () => {

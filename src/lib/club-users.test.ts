@@ -21,6 +21,7 @@ function profile(over: Partial<ClubUserProfile> = {}): ClubUserProfile {
     first_name: "Ada",
     middle_name: null,
     last_name: "Lovelace",
+    preferred_name: null,
     phone: "0400 000 000",
     uts_student_number: null,
     created_at: "2026-01-01T00:00:00Z",
@@ -106,6 +107,29 @@ describe("aggregateClubUsers", () => {
     expect(u.name).toBe("Ada Lovelace");
     expect(u.email).toBe("ada@example.com");
     expect(u.phone).toBe("222");
+  });
+
+  it("surfaces the preferred name in both the list name and the greeting name", () => {
+    const [u] = aggregate({
+      profiles: [profile({ first_name: "Ada", last_name: "Lovelace", preferred_name: "Addy" })],
+    });
+    // Managers see who they are AND what to call them; the greeting name is
+    // what transactional emails address them by.
+    expect(u.name).toBe('Ada "Addy" Lovelace');
+    expect(u.greeting_name).toBe("Addy");
+  });
+
+  it("falls back to the plain full name and first name with no preferred name", () => {
+    const [u] = aggregate({
+      profiles: [profile({ first_name: "Ada", last_name: "Lovelace", preferred_name: null })],
+    });
+    expect(u.name).toBe("Ada Lovelace");
+    expect(u.greeting_name).toBe("Ada");
+  });
+
+  it("leaves a lead without a greeting name (no person record yet)", () => {
+    const users = aggregate({ profiles: [], emails: [], leads: [lead()] });
+    expect(users[0].greeting_name).toBeNull();
   });
 
   it("derives the funnel phases", () => {

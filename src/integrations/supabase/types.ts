@@ -526,6 +526,7 @@ export type Database = {
           medical_notes: string | null
           middle_name: string | null
           phone: string | null
+          preferred_name: string | null
           sms_whatsapp_consent: boolean
           updated_at: string
           user_id: string
@@ -545,6 +546,7 @@ export type Database = {
           medical_notes?: string | null
           middle_name?: string | null
           phone?: string | null
+          preferred_name?: string | null
           sms_whatsapp_consent?: boolean
           updated_at?: string
           user_id: string
@@ -564,6 +566,7 @@ export type Database = {
           medical_notes?: string | null
           middle_name?: string | null
           phone?: string | null
+          preferred_name?: string | null
           sms_whatsapp_consent?: boolean
           updated_at?: string
           user_id?: string
@@ -629,6 +632,7 @@ export type Database = {
       }
       waiver_templates: {
         Row: {
+          acknowledgements: Json
           body_md: string
           created_at: string
           created_by: string | null
@@ -638,6 +642,7 @@ export type Database = {
           version: number
         }
         Insert: {
+          acknowledgements?: Json
           body_md: string
           created_at?: string
           created_by?: string | null
@@ -647,6 +652,7 @@ export type Database = {
           version: number
         }
         Update: {
+          acknowledgements?: Json
           body_md?: string
           created_at?: string
           created_by?: string | null
@@ -660,6 +666,9 @@ export type Database = {
       waivers: {
         Row: {
           address: string
+          approval_status: string
+          approved_at: string | null
+          approved_by: string | null
           created_at: string
           date_of_birth: string
           email: string
@@ -675,6 +684,7 @@ export type Database = {
           middle_name: string | null
           pdf_path: string | null
           phone: string
+          preferred_name: string | null
           signed_at: string
           signer_ip: string | null
           signer_meta: Json
@@ -685,6 +695,9 @@ export type Database = {
         }
         Insert: {
           address: string
+          approval_status?: string
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           date_of_birth: string
           email: string
@@ -700,6 +713,7 @@ export type Database = {
           middle_name?: string | null
           pdf_path?: string | null
           phone: string
+          preferred_name?: string | null
           signed_at?: string
           signer_ip?: string | null
           signer_meta?: Json
@@ -710,6 +724,9 @@ export type Database = {
         }
         Update: {
           address?: string
+          approval_status?: string
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           date_of_birth?: string
           email?: string
@@ -725,6 +742,7 @@ export type Database = {
           middle_name?: string | null
           pdf_path?: string | null
           phone?: string
+          preferred_name?: string | null
           signed_at?: string
           signer_ip?: string | null
           signer_meta?: Json

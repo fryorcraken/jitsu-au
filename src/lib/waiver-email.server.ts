@@ -79,7 +79,10 @@ async function sendOne(opts: {
 
 export interface WaiverEmailParams {
   waiverId: string;
+  /** The signer's legal full name — how managers identify them. */
   memberName: string;
+  /** What to call the signer to their face: preferred name, else first name. */
+  memberGreetingName: string;
   memberEmail: string;
   /** Short-lived signed URL to the generated waiver PDF. */
   pdfUrl: string;
@@ -96,6 +99,7 @@ export interface WaiverEmailParams {
 export async function sendWaiverEmails({
   waiverId,
   memberName,
+  memberGreetingName,
   memberEmail,
   pdfUrl,
   admin,
@@ -112,7 +116,8 @@ export async function sendWaiverEmails({
       React.createElement(WaiverConfirmationEmail, {
         siteName: SITE_NAME,
         siteUrl: SITE_URL,
-        memberName,
+        // The member-facing greeting: call them what they asked to be called.
+        memberName: memberGreetingName,
         pdfUrl,
       }),
     ),
@@ -122,7 +127,7 @@ export async function sendWaiverEmails({
     React.createElement(WaiverConfirmationEmail, {
       siteName: SITE_NAME,
       siteUrl: SITE_URL,
-      memberName,
+      memberName: memberGreetingName,
       pdfUrl,
     }),
     { plainText: true },
