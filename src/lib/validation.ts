@@ -38,6 +38,8 @@ export type WaiverPersonFields = {
   first_name: string;
   middle_name: string | null;
   last_name: string;
+  /** What the person wants to be called, when it differs from their legal name. */
+  preferred_name: string | null;
   date_of_birth: string;
   address: string;
   phone: string;
@@ -61,6 +63,7 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields
     first_name: w.first_name,
     middle_name: w.middle_name,
     last_name: w.last_name,
+    preferred_name: w.preferred_name,
     date_of_birth: w.date_of_birth,
     address: w.address,
     phone: w.phone,
@@ -232,6 +235,9 @@ export const waiverSubmitSchema = z
     first_name: z.string().trim().min(1).max(60),
     middle_name: z.string().trim().max(60).optional().or(z.literal("")),
     last_name: z.string().trim().min(1).max(60),
+    // Optional: what the person goes by, when that isn't their first name.
+    // Purely for how the club addresses them; the legal name still signs.
+    preferred_name: z.string().trim().max(60).optional().or(z.literal("")),
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     address: z.string().trim().min(1).max(300),
     phone: z.string().trim().min(1).max(30),

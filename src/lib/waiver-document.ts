@@ -37,6 +37,8 @@ export function parseWaiverBlocks(body: string): WaiverBlock[] {
 /** Waiver field values used to fill `{{placeholder}}` tokens in the body. */
 export type WaiverPlaceholderInput = {
   fullName: string;
+  /** Optional preferred name; `{{preferred_name}}` falls back to the full name. */
+  preferredName: string;
   dateOfBirth: string;
   address: string;
   phone: string;
@@ -57,6 +59,9 @@ export type WaiverPlaceholderInput = {
 export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<string, string> {
   return {
     full_name: v.fullName,
+    // Not everyone gives a preferred name, and a template that greets the signer
+    // must never render a blank, so fall back to their full name.
+    preferred_name: v.preferredName || v.fullName,
     date_of_birth: v.dateOfBirth,
     address: v.address,
     phone: v.phone,

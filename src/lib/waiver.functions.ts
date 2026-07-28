@@ -239,6 +239,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
               first_name: data.first_name,
               middle_name: data.middle_name || null,
               last_name: data.last_name,
+              preferred_name: data.preferred_name || null,
               phone: data.phone || null,
             },
             { onConflict: "user_id" },
@@ -259,6 +260,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         first_name: data.first_name,
         middle_name: data.middle_name || null,
         last_name: data.last_name,
+        preferred_name: data.preferred_name || null,
         date_of_birth: data.date_of_birth,
         address: data.address,
         phone: data.phone,
@@ -290,6 +292,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     try {
       pdf = await renderWaiverPdf({
         full_name,
+        preferred_name: data.preferred_name || "",
         date_of_birth: data.date_of_birth,
         address: data.address,
         phone: data.phone,

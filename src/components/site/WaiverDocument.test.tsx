@@ -9,6 +9,7 @@ import {
 
 const base: WaiverDocumentProps = {
   fullName: "Jane Sample",
+  preferredName: "",
   dateOfBirth: "1995-06-12",
   address: "123 Broadway, Ultimo NSW 2007",
   phone: "0400 000 000",
@@ -45,8 +46,9 @@ describe("parseWaiverBlocks", () => {
 });
 
 describe("waiver placeholders", () => {
-  const values = buildWaiverPlaceholders({
+  const input = {
     fullName: "Jane Sample",
+    preferredName: "",
     dateOfBirth: "1995-06-12",
     address: "1 Broadway",
     phone: "0400",
@@ -57,7 +59,8 @@ describe("waiver placeholders", () => {
     signatureName: "",
     clubName: "UTS Jitsu",
     signedDate: "21/07/2026",
-  });
+  };
+  const values = buildWaiverPlaceholders(input);
 
   it("empty medical notes become 'None provided'", () => {
     expect(values.medical_notes).toBe("None provided");
@@ -65,6 +68,15 @@ describe("waiver placeholders", () => {
 
   it("signature_name falls back to the full name when not typed", () => {
     expect(values.signature_name).toBe("Jane Sample");
+  });
+
+  it("preferred_name falls back to the full name when not given", () => {
+    expect(values.preferred_name).toBe("Jane Sample");
+  });
+
+  it("preferred_name uses the submitted preferred name when given", () => {
+    const withPreferred = buildWaiverPlaceholders({ ...input, preferredName: "Janey" });
+    expect(withPreferred.preferred_name).toBe("Janey");
   });
 
   it("fills known tokens and leaves unknown tokens intact", () => {

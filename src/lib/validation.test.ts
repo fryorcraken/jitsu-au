@@ -44,6 +44,7 @@ describe("waiverToProfileFields", () => {
       first_name: "Ada",
       middle_name: null,
       last_name: "Lovelace",
+      preferred_name: "Addy",
       date_of_birth: "1990-01-01",
       address: "1 Example St",
       phone: "0400 000 000",
@@ -459,6 +460,22 @@ describe("waiverSubmitSchema", () => {
   it("rejects a UTS student number over 20 chars", () => {
     expect(
       waiverSubmitSchema.safeParse({ ...validAdult, uts_student_number: "1".repeat(21) }).success,
+    ).toBe(false);
+  });
+
+  it("accepts an optional preferred name and trims it", () => {
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, preferred_name: "  Addy  " });
+    expect(result.success && result.data.preferred_name).toBe("Addy");
+  });
+
+  it("allows the preferred name to be omitted or blank", () => {
+    expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, preferred_name: "" }).success).toBe(true);
+  });
+
+  it("rejects a preferred name over 60 chars", () => {
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, preferred_name: "a".repeat(61) }).success,
     ).toBe(false);
   });
 
