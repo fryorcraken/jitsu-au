@@ -8,6 +8,8 @@ import {
   composeFullName,
   decodeDataUrlPng,
   deriveWaiverListStatuses,
+  greetingName,
+  nameWithPreferred,
   normalizeEmail,
   saveTemplateSchema,
   waiverApprovalSchema,
@@ -292,6 +294,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     try {
       pdf = await renderWaiverPdf({
         full_name,
+        first_name: data.first_name,
         preferred_name: data.preferred_name || "",
         date_of_birth: data.date_of_birth,
         address: data.address,
@@ -352,6 +355,12 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         await sendWaiverEmails({
           waiverId: inserted.id,
           memberName: full_name,
+          memberGreetingName: greetingName({
+            preferred_name: data.preferred_name,
+            first_name: data.first_name,
+            middle_name: data.middle_name,
+            last_name: data.last_name,
+          }),
           memberEmail: email,
           pdfUrl: emailSigned.signedUrl,
           admin: supabaseAdmin,
@@ -428,7 +437,7 @@ export const listWaivers = createServerFn({ method: "GET" })
     const { data, error } = await admin
       .from("waivers")
       .select(
-        "id, user_id, first_name, middle_name, last_name, email, signed_at, template_version, pdf_path, approval_status, approved_at",
+        "id, user_id, first_name, middle_name, last_name, preferred_name, email, signed_at, template_version, pdf_path, approval_status, approved_at",
       )
       .order("signed_at", { ascending: false })
       .limit(500);
@@ -437,7 +446,9 @@ export const listWaivers = createServerFn({ method: "GET" })
     const statuses = deriveWaiverListStatuses(rows);
     return rows.map((row) => ({
       id: row.id,
-      full_name: composeFullName(row.first_name, row.middle_name || "", row.last_name),
+      // The legal name as submitted, with the preferred name quoted in when
+      // they gave one: managers see who signed AND what to call them.
+      full_name: nameWithPreferred(row),
       email: row.email,
       signed_at: row.signed_at,
       template_version: row.template_version,

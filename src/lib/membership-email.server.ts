@@ -81,7 +81,10 @@ async function sendOne(opts: {
 
 export interface MembershipPaymentEmailParams {
   membershipId: string;
+  /** The member's legal full name — how managers identify them. */
   memberName: string;
+  /** What to call the member to their face: preferred name, else first name. */
+  memberGreetingName: string;
   memberEmail: string;
   planName: string;
   /** Human-readable amount, e.g. "$245". */
@@ -99,6 +102,7 @@ export interface MembershipPaymentEmailParams {
 export async function sendMembershipPaymentEmail({
   membershipId,
   memberName,
+  memberGreetingName,
   memberEmail,
   planName,
   amount,
@@ -116,7 +120,8 @@ export async function sendMembershipPaymentEmail({
   const memberEl = React.createElement(MembershipPaymentEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_URL,
-    memberName,
+    // The member-facing greeting: call them what they asked to be called.
+    memberName: memberGreetingName,
     planName,
     amount,
     reference,
@@ -180,7 +185,9 @@ export async function sendMembershipPaymentEmail({
 
 export interface MembershipActivatedEmailParams {
   membershipId: string;
-  memberName: string;
+  /** What to call the member to their face: preferred name, else first name.
+   * This email has no manager copy, so the legal name is never needed. */
+  memberGreetingName: string;
   memberEmail: string;
   planName: string;
   /** Human-readable validity/credit summary. */
@@ -190,7 +197,7 @@ export interface MembershipActivatedEmailParams {
 /** Confirm to the member that their membership is active. Best-effort. */
 export async function sendMembershipActivatedEmail({
   membershipId,
-  memberName,
+  memberGreetingName,
   memberEmail,
   planName,
   validity,
@@ -205,7 +212,7 @@ export async function sendMembershipActivatedEmail({
   const el = React.createElement(MembershipActivatedEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_URL,
-    memberName,
+    memberName: memberGreetingName,
     planName,
     validity,
     accountUrl: ACCOUNT_URL,

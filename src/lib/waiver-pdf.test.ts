@@ -84,6 +84,7 @@ function readPlacements(doc: PDFDocument, page: PDFPage) {
 
 const base: WaiverPdfData = {
   full_name: "Jane Sample",
+  first_name: "Jane",
   preferred_name: "",
   date_of_birth: "1990-01-01",
   address: "123 Broadway, Ultimo NSW 2007",

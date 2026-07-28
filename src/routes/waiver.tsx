@@ -181,6 +181,7 @@ function Waiver() {
   const ackDefs = templateQ.data?.acknowledgements ?? [];
   const ackPlaceholders = buildWaiverPlaceholders({
     fullName,
+    firstName,
     preferredName,
     dateOfBirth: dob,
     address,
@@ -360,8 +361,8 @@ function Waiver() {
                   className="mt-1.5"
                 />
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  Only if it's different from your first name. We'll use it in class and when we get
-                  in touch. Your legal name still signs the waiver.
+                  Only if it's different from your first name. It's what we'll call you in class and
+                  in any email we send you. Your legal name still signs the waiver.
                 </p>
               </div>
               <div className="grid gap-5 sm:grid-cols-2">
@@ -628,6 +629,7 @@ function Waiver() {
                 templateVersion={null}
                 signedAt={previewSignedAt}
                 fullName={fullName}
+                firstName={firstName}
                 preferredName={preferredName}
                 dateOfBirth={dob}
                 address={address}

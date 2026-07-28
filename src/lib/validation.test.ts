@@ -14,6 +14,8 @@ import {
   splitFullName,
   waiverApprovalSchema,
   waiverPrefillSearchSchema,
+  greetingName,
+  nameWithPreferred,
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "./validation";
@@ -28,6 +30,66 @@ describe("profileFullName", () => {
     );
     expect(profileFullName({ first_name: "Grace" })).toBe("Grace");
     expect(profileFullName({})).toBe("");
+  });
+});
+
+describe("greetingName", () => {
+  it("prefers the preferred name", () => {
+    expect(greetingName({ preferred_name: "Addy", first_name: "Ada", last_name: "Lovelace" })).toBe(
+      "Addy",
+    );
+  });
+
+  it("falls back to the first name when no preferred name was given", () => {
+    expect(greetingName({ preferred_name: null, first_name: "Ada", last_name: "Lovelace" })).toBe(
+      "Ada",
+    );
+    expect(greetingName({ preferred_name: "   ", first_name: "Ada", last_name: "Lovelace" })).toBe(
+      "Ada",
+    );
+  });
+
+  it("falls back to the full name when there is no first name", () => {
+    expect(greetingName({ first_name: null, middle_name: "Byron", last_name: "Lovelace" })).toBe(
+      "Byron Lovelace",
+    );
+  });
+
+  it("is empty when the profile carries no name at all", () => {
+    expect(greetingName({})).toBe("");
+  });
+});
+
+describe("nameWithPreferred", () => {
+  it("quotes the preferred name into the conventional nickname position", () => {
+    expect(
+      nameWithPreferred({
+        first_name: "Ada",
+        middle_name: "Byron",
+        last_name: "Lovelace",
+        preferred_name: "Addy",
+      }),
+    ).toBe('Ada "Addy" Byron Lovelace');
+  });
+
+  it("returns the plain full name when no preferred name was given", () => {
+    expect(
+      nameWithPreferred({ first_name: "Ada", last_name: "Lovelace", preferred_name: null }),
+    ).toBe("Ada Lovelace");
+  });
+
+  // Repeating the first name adds nothing, so it is left off rather than
+  // rendering the noisy `Ada "Ada" Lovelace`.
+  it("omits a preferred name that just repeats the first name, ignoring case", () => {
+    expect(
+      nameWithPreferred({ first_name: "Ada", last_name: "Lovelace", preferred_name: "ada" }),
+    ).toBe("Ada Lovelace");
+  });
+
+  it("still shows the preferred name when there is no first name", () => {
+    expect(
+      nameWithPreferred({ first_name: null, last_name: "Lovelace", preferred_name: "Addy" }),
+    ).toBe('"Addy" Lovelace');
   });
 });
 

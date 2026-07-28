@@ -9,6 +9,7 @@ import {
 
 const base: WaiverDocumentProps = {
   fullName: "Jane Sample",
+  firstName: "Jane",
   preferredName: "",
   dateOfBirth: "1995-06-12",
   address: "123 Broadway, Ultimo NSW 2007",
@@ -48,6 +49,7 @@ describe("parseWaiverBlocks", () => {
 describe("waiver placeholders", () => {
   const input = {
     fullName: "Jane Sample",
+    firstName: "Jane",
     preferredName: "",
     dateOfBirth: "1995-06-12",
     address: "1 Broadway",
@@ -70,8 +72,8 @@ describe("waiver placeholders", () => {
     expect(values.signature_name).toBe("Jane Sample");
   });
 
-  it("preferred_name falls back to the full name when not given", () => {
-    expect(values.preferred_name).toBe("Jane Sample");
+  it("preferred_name falls back to the first name when not given", () => {
+    expect(values.preferred_name).toBe("Jane");
   });
 
   it("preferred_name uses the submitted preferred name when given", () => {
@@ -81,10 +83,17 @@ describe("waiver placeholders", () => {
 
   // The live preview feeds raw form state while the PDF feeds Zod-trimmed
   // input, so a whitespace-only entry must fall back in both, not render blank
-  // on screen and the full name on paper.
+  // on screen and the first name on paper.
   it("preferred_name falls back when the entry is only whitespace", () => {
     const blank = buildWaiverPlaceholders({ ...input, preferredName: "   " });
-    expect(blank.preferred_name).toBe("Jane Sample");
+    expect(blank.preferred_name).toBe("Jane");
+  });
+
+  // Only reachable in the half-filled live preview: never render an empty
+  // greeting, even before the signer has typed a first name.
+  it("preferred_name falls back to the full name when there is no first name", () => {
+    const noFirst = buildWaiverPlaceholders({ ...input, preferredName: "", firstName: "" });
+    expect(noFirst.preferred_name).toBe("Jane Sample");
   });
 
   it("fills known tokens and leaves unknown tokens intact", () => {

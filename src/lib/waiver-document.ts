@@ -37,7 +37,9 @@ export function parseWaiverBlocks(body: string): WaiverBlock[] {
 /** Waiver field values used to fill `{{placeholder}}` tokens in the body. */
 export type WaiverPlaceholderInput = {
   fullName: string;
-  /** Optional preferred name; `{{preferred_name}}` falls back to the full name. */
+  /** First name, the fallback for `{{preferred_name}}`. */
+  firstName: string;
+  /** Optional preferred name; `{{preferred_name}}` falls back to the first name. */
   preferredName: string;
   dateOfBirth: string;
   address: string;
@@ -59,11 +61,13 @@ export type WaiverPlaceholderInput = {
 export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<string, string> {
   return {
     full_name: v.fullName,
-    // Not everyone gives a preferred name, and a template that greets the signer
-    // must never render a blank, so fall back to their full name. Trimmed
-    // because this runs on raw form state in the live preview but on
-    // Zod-trimmed input server-side, and the two must render identically.
-    preferred_name: v.preferredName.trim() || v.fullName,
+    // The one rule the whole app uses for "what do we call this person":
+    // the preferred name if they gave one, else their first name (see
+    // `greetingName`). A template that greets the signer must never render a
+    // blank, so the full name is a last resort for the half-filled live
+    // preview. Trimmed because this runs on raw form state in the preview but
+    // on Zod-trimmed input server-side, and the two must render identically.
+    preferred_name: v.preferredName.trim() || v.firstName.trim() || v.fullName,
     date_of_birth: v.dateOfBirth,
     address: v.address,
     phone: v.phone,
