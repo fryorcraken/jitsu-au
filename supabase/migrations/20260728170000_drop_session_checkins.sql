@@ -4,7 +4,7 @@
 -- was present in the live database with Supabase's full default grants but had
 -- no migration, no generated type, no doc and no code anywhere in this repo. It
 -- was created directly against production, outside the migration flow — the
--- exact failure the review gate in CLAUDE.md > Schema drift now exists to stop.
+-- exact failure the review gate in docs/database-changes.md now exists to stop.
 --
 -- Safe to drop, checked before writing this:
 --   * 0 rows, so no data is lost.

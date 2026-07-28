@@ -16,7 +16,7 @@ pushes to `main`, on a daily schedule, and on demand — and it talks to the
 | ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Advisors**        | `splinter.sql` via `psql` → `check-advisors.py`      | The Security/Performance lints from the dashboard's **Database > Advisors**, e.g. `function_search_path_mutable` (a `SECURITY DEFINER` function without a fixed `search_path`). |
 | **plpgsql_check**   | `supabase db lint --schema public --fail-on warning` | Errors in `public` PL/pgSQL function bodies (unused variables, bad SQL, etc.).                                                                                                  |
-| **Migration drift** | `check-migration-drift.py` against the live ledger   | A migration file that has never been applied to the live database. Committing a migration does not apply it — see "Schema drift" in `CLAUDE.md`.                                |
+| **Migration drift** | `check-migration-drift.py` against the live ledger   | A migration file that has never been applied to the live database. Committing a migration does not apply it — see `docs/database-changes.md`.                                   |
 
 `supabase db lint` is scoped to `public` on purpose: Supabase-managed schemas
 (`storage`, `auth`, …) ship functions that emit warnings we don't control.

@@ -252,7 +252,7 @@ def main():
         "followed by only the privileges the browser client genuinely uses. If a grant\n"
         "listed above is deliberate, add it to\n"
         f"{expected_display(expected_path)} with a note saying which client code needs it.\n"
-        "See CLAUDE.md > Schema drift.",
+        "See docs/database-changes.md.",
         file=sys.stderr,
     )
     return 1

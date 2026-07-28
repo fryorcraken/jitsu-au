@@ -48,7 +48,7 @@ jobs:
       # so a type error alone will NOT fail the build step below. This is the
       # step that catches them — including a query against a column the live
       # database no longer has, now that the row types come from the generated
-      # (live-schema-derived) types. See CLAUDE.md > Schema drift.
+      # (live-schema-derived) types. See docs/database-changes.md.
       - name: Typecheck
         run: bun run typecheck
 
