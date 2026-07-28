@@ -11,6 +11,10 @@ import { deriveWaiverListStatuses, nameWithPreferred } from "@/lib/validation";
 import type { MembershipClient } from "@/lib/membership-types";
 import type { ClubUserEmail } from "@/lib/club-users";
 
+/** Max waiver / membership rows one person's page pulls. */
+const WAIVERS_LIMIT = 100;
+const MEMBERSHIPS_LIMIT = 100;
+
 /** Throw unless the caller holds the `manager` role (checked via the RLS RPC). */
 async function requireManager(context: { supabase: MembershipClient; userId: string }) {
   const { data: isMgr, error } = await context.supabase.rpc("has_role", {
@@ -33,9 +37,9 @@ export const getClubUser = createServerFn({ method: "POST" })
     const [
       { data: profile, error: pErr },
       { data: waivers, error: wErr },
-      { data: memberships },
-      { data: plans },
-      { data: roles },
+      { data: memberships, error: mErr },
+      { data: plans, error: plErr },
+      { data: roles, error: rErr },
       { data: emailRows },
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("user_id", data.userId).maybeSingle(),
@@ -44,25 +48,41 @@ export const getClubUser = createServerFn({ method: "POST" })
         .select("*")
         .eq("user_id", data.userId)
         .order("signed_at", { ascending: false })
-        .limit(100),
+        .limit(WAIVERS_LIMIT),
       admin
         .from("memberships")
         .select("*")
         .eq("user_id", data.userId)
         .order("created_at", { ascending: false })
-        .limit(100),
+        .limit(MEMBERSHIPS_LIMIT),
       admin.from("membership_plans").select("id, name, kind"),
       admin.from("user_roles").select("user_id, role").eq("user_id", data.userId),
       admin.rpc("user_emails", { _user_ids: [data.userId] }),
     ]);
+    // Every read except the email RPC fails the whole page. This is the screen a
+    // manager decides an approval from, so "the query failed" must never render
+    // as "there is nothing there": an errored memberships read would otherwise
+    // feed an empty list to the aggregation below and show a paid-up member as a
+    // visitor with no memberships. Matches listClubUsers/listMemberships.
     if (pErr) throw new Error(pErr.message);
     if (wErr) throw new Error(wErr.message);
+    if (mErr) throw new Error(mErr.message);
+    if (plErr) throw new Error(plErr.message);
+    if (rErr) throw new Error(rErr.message);
     if (!profile) throw new Error("User not found.");
 
     const waiverRows = waivers ?? [];
     const membershipRows = memberships ?? [];
     const planRows = plans ?? [];
     const planById = new Map(planRows.map((p) => [p.id, p]));
+
+    // Surface the cap rather than silently showing a partial history. Newest
+    // first, so a truncated page still holds the active waiver and the derived
+    // statuses stay correct; only ancient submissions fall off.
+    if (waiverRows.length >= WAIVERS_LIMIT) {
+      console.warn(`[getClubUser] waivers capped at ${WAIVERS_LIMIT}; older submissions truncated`);
+    }
+
     // The RPC is service-role only and can fail; degrade to a missing email
     // rather than failing the whole page (same posture as the list screen).
     const emails = ((emailRows ?? []) as ClubUserEmail[]).map((e) => ({
@@ -98,13 +118,17 @@ export const getClubUser = createServerFn({ method: "POST" })
 
     return {
       user: summary,
+      // Straight off the `profiles` row, so the screen can show the club's live
+      // record as it actually is. Deliberately NOT taken from the aggregated
+      // summary above, which fills gaps from other tables (its student number
+      // falls back to one captured on a membership) — that would show the
+      // record as complete while the column driving student pricing is null.
       profile: {
-        first_name: profile.first_name,
-        middle_name: profile.middle_name,
-        last_name: profile.last_name,
         preferred_name: profile.preferred_name,
+        phone: profile.phone,
         date_of_birth: profile.date_of_birth,
         address: profile.address,
+        uts_student_number: profile.uts_student_number,
         emergency_contact_name: profile.emergency_contact_name,
         emergency_contact_phone: profile.emergency_contact_phone,
         medical_notes: profile.medical_notes,
@@ -112,20 +136,17 @@ export const getClubUser = createServerFn({ method: "POST" })
         guardian_name: profile.guardian_name,
         guardian_relationship: profile.guardian_relationship,
         sms_whatsapp_consent: profile.sms_whatsapp_consent,
-        created_at: profile.created_at,
         updated_at: profile.updated_at,
       },
       memberships: membershipRows.map((m) => ({
         id: m.id,
         plan_name: planById.get(m.plan_id)?.name ?? null,
-        kind: planById.get(m.plan_id)?.kind ?? null,
         status: m.status,
         price_cents: m.price_cents,
         payment_reference: m.payment_reference,
         starts_at: m.starts_at,
         ends_at: m.ends_at,
         sessions_remaining: m.sessions_remaining,
-        created_at: m.created_at,
       })),
       // The frozen submission, in full: what a manager reads to decide whether
       // to approve. The PDF is fetched separately, as a short-lived signed URL.

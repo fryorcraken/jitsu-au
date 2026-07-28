@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { ChevronDown, Download } from "lucide-react";
@@ -36,14 +36,33 @@ const MEMBERSHIP_CLASS: Record<string, string> = {
   cancelled: "bg-slate-100 text-slate-800",
 };
 
+// The same three derived statuses the signed-waivers screen shows, in the same
+// colours: a manager moves between both screens, so "pending" must not be grey
+// on one and amber on the other. Keep in step with manager.waivers.tsx.
 const WAIVER_CLASS: Record<Waiver["status"], string> = {
-  pending: "bg-amber-100 text-amber-800",
-  active: "bg-green-100 text-green-800",
-  superseded: "bg-slate-100 text-slate-800",
+  pending: "bg-muted text-muted-foreground",
+  active: "bg-primary/15 text-primary",
+  superseded: "bg-muted text-muted-foreground line-through",
 };
+
+/** Re-sign a bit before the server's 1-hour signed URL actually expires. */
+const PDF_URL_TTL_MS = 50 * 60 * 1000;
+
+type PdfState = { url?: string; at: number; error?: string };
 
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-AU") : "—";
+}
+
+/**
+ * A `DATE` column arrives as `YYYY-MM-DD`. `new Date` would read that as UTC
+ * midnight and shift it a day back for a manager in a negative-offset timezone,
+ * so format the parts directly: a birth date has no timezone.
+ */
+function fmtDateOnly(value: string | null): string {
+  if (!value) return "—";
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : value;
 }
 
 function fmtDateTime(iso: string | null): string {
@@ -72,15 +91,17 @@ function Field({ label, value }: { label: string; value: string | null | undefin
   );
 }
 
-/** The signing context blob, rendered as plain rows so nothing is hidden. */
+/**
+ * The signing context blob, rendered as plain rows so nothing is hidden.
+ * Emits bare <Field>s: the caller owns the surrounding <dl>.
+ */
 function SignerMeta({ meta }: { meta: unknown }) {
   const entries =
     meta && typeof meta === "object" && !Array.isArray(meta)
       ? Object.entries(meta as Record<string, unknown>)
       : [];
-  if (!entries.length) return null;
   return (
-    <dl className="grid gap-2 sm:grid-cols-2">
+    <>
       {entries.map(([key, value]) => (
         <Field
           key={key}
@@ -88,7 +109,7 @@ function SignerMeta({ meta }: { meta: unknown }) {
           value={Array.isArray(value) ? value.join(", ") : String(value)}
         />
       ))}
-    </dl>
+    </>
   );
 }
 
@@ -105,8 +126,13 @@ function ManagerUserPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const [pdfUrls, setPdfUrls] = useState<Record<string, string>>({});
-  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [pdfs, setPdfs] = useState<Record<string, PdfState>>({});
+  const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set());
+  // Only the newest load's result may land: this component instance is reused
+  // when the :userId param changes (no remount), and two approvals in a row
+  // each trigger their own refetch.
+  const loadSeq = useRef(0);
+  const pdfInFlight = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -114,7 +140,9 @@ function ManagerUserPage() {
 
   const load = useCallback(
     async (resetOpen: boolean) => {
-      const data = (await fetchDetail({ data: { userId } })) as Detail;
+      const seq = ++loadSeq.current;
+      const data = await fetchDetail({ data: { userId } });
+      if (seq !== loadSeq.current) return null; // a newer load won
       setDetail(data);
       // Only the newest still-pending submission opens by itself; a manager's
       // own expand/collapse choices survive a refetch after an approval.
@@ -126,30 +154,69 @@ function ManagerUserPage() {
 
   useEffect(() => {
     if (!isManager) return;
+    // `load` changes identity with the :userId param, and the component is not
+    // remounted, so clear the previous person off the screen first. Without
+    // this a failed load would strand its error message over the next person.
+    let active = true;
+    setLoading(true);
+    setError(null);
+    setDetail(null);
+    setOpen(new Set());
+    setPdfs({});
     load(true)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load user"))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : "Failed to load user");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [isManager, load]);
 
-  // A signed PDF URL is short-lived, so fetch it only for panels actually
-  // opened, and only once per panel.
+  // A signed PDF URL lasts an hour, so fetch one only for panels actually open,
+  // and re-sign a stale one: Radix unmounts collapsed content, so re-expanding
+  // an old panel remounts the iframe and would otherwise reuse a dead URL.
   const ensurePdfUrl = useCallback(
     async (waiver: Waiver) => {
-      if (!waiver.has_pdf || pdfUrls[waiver.id]) return;
+      if (!waiver.has_pdf) return;
+      const cached = pdfs[waiver.id];
+      if (cached?.url && Date.now() - cached.at < PDF_URL_TTL_MS) return;
+      // A failed fetch stays failed until the manager retries, so the effect
+      // below can't spin on it.
+      if (cached?.error || pdfInFlight.current.has(waiver.id)) return;
+      pdfInFlight.current.add(waiver.id);
       try {
         const { url } = await getUrl({ data: { id: waiver.id } });
-        setPdfUrls((prev) => ({ ...prev, [waiver.id]: url }));
+        setPdfs((prev) => ({ ...prev, [waiver.id]: { url, at: Date.now() } }));
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to load the PDF");
+        setPdfs((prev) => ({
+          ...prev,
+          [waiver.id]: {
+            at: Date.now(),
+            error: e instanceof Error ? e.message : "Failed to load the PDF",
+          },
+        }));
+      } finally {
+        pdfInFlight.current.delete(waiver.id);
       }
     },
-    [getUrl, pdfUrls],
+    [getUrl, pdfs],
   );
 
   useEffect(() => {
     if (!detail) return;
     for (const w of detail.waivers) if (open.has(w.id)) void ensurePdfUrl(w);
   }, [detail, open, ensurePdfUrl]);
+
+  function retryPdf(id: string) {
+    setPdfs((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
 
   function toggle(id: string, next: boolean) {
     setOpen((prev) => {
@@ -160,8 +227,17 @@ function ManagerUserPage() {
     });
   }
 
+  function markApproving(id: string, busy: boolean) {
+    setApprovingIds((prev) => {
+      const set = new Set(prev);
+      if (busy) set.add(id);
+      else set.delete(id);
+      return set;
+    });
+  }
+
   async function setApproval(id: string, status: "approved" | "pending") {
-    setApprovingId(id);
+    markApproving(id, true);
     try {
       await approve({ data: { id, status } });
       // Statuses are derived per person (active vs superseded), so refetch.
@@ -174,13 +250,15 @@ function ManagerUserPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update approval");
     } finally {
-      setApprovingId(null);
+      markApproving(id, false);
     }
   }
 
   async function download(id: string) {
     try {
-      const { url } = await getUrl({ data: { id } });
+      const cached = pdfs[id];
+      const fresh = cached?.url && Date.now() - cached.at < PDF_URL_TTL_MS;
+      const url = fresh ? cached.url! : (await getUrl({ data: { id } })).url;
       window.open(url, "_blank", "noopener");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to get PDF");
@@ -226,6 +304,9 @@ function ManagerUserPage() {
             {summary.email ?? "No email on file"}
             {summary.phone ? ` · ${summary.phone}` : ""}
           </p>
+          <p className="text-sm text-muted-foreground">
+            First seen {fmtDate(summary.first_seen_at)}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
@@ -244,13 +325,10 @@ function ManagerUserPage() {
         </p>
         <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Preferred name" value={profile.preferred_name} />
-          <Field label="Date of birth" value={fmtDate(profile.date_of_birth)} />
-          <Field label="Phone" value={summary.phone} />
+          <Field label="Date of birth" value={fmtDateOnly(profile.date_of_birth)} />
+          <Field label="Phone" value={profile.phone} />
           <Field label="Address" value={profile.address} />
-          <Field
-            label="UTS student number"
-            value={summary.uts_student_number ?? (summary.is_uts_student ? "Yes" : "No")}
-          />
+          <Field label="UTS student number" value={profile.uts_student_number} />
           <Field label="Emergency contact" value={profile.emergency_contact_name} />
           <Field label="Emergency phone" value={profile.emergency_contact_phone} />
           <Field label="Medical notes" value={profile.medical_notes} />
@@ -265,7 +343,6 @@ function ManagerUserPage() {
             label="SMS / WhatsApp consent"
             value={profile.sms_whatsapp_consent ? "Yes" : "No"}
           />
-          <Field label="First seen" value={fmtDate(summary.first_seen_at)} />
           <Field label="Record updated" value={fmtDateTime(profile.updated_at)} />
         </dl>
       </div>
@@ -322,6 +399,8 @@ function ManagerUserPage() {
         ) : (
           waivers.map((w) => {
             const isOpen = open.has(w.id);
+            const busy = approvingIds.has(w.id);
+            const pdf = pdfs[w.id];
             return (
               <Collapsible
                 key={w.id}
@@ -347,18 +426,18 @@ function ManagerUserPage() {
                       <Button
                         size="sm"
                         onClick={() => setApproval(w.id, "approved")}
-                        disabled={approvingId === w.id}
+                        disabled={busy}
                       >
-                        {approvingId === w.id ? "Approving..." : "Approve"}
+                        {busy ? "Approving..." : "Approve"}
                       </Button>
                     ) : (
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => setApproval(w.id, "pending")}
-                        disabled={approvingId === w.id}
+                        disabled={busy}
                       >
-                        {approvingId === w.id ? "Updating..." : "Unapprove"}
+                        {busy ? "Updating..." : "Unapprove"}
                       </Button>
                     )}
                     {w.has_pdf ? (
@@ -375,7 +454,7 @@ function ManagerUserPage() {
                       <Field label="Name as signed" value={w.full_name} />
                       <Field label="Email" value={w.email} />
                       <Field label="Phone" value={w.phone} />
-                      <Field label="Date of birth" value={fmtDate(w.date_of_birth)} />
+                      <Field label="Date of birth" value={fmtDateOnly(w.date_of_birth)} />
                       <Field label="Address" value={w.address} />
                       <Field label="UTS student number" value={w.uts_student_number} />
                       <Field label="Emergency contact" value={w.emergency_contact_name} />
@@ -395,30 +474,36 @@ function ManagerUserPage() {
                       <Field label="Approved" value={fmtDateTime(w.approved_at)} />
                     </dl>
 
-                    {w.has_pdf ? (
-                      pdfUrls[w.id] ? (
-                        <iframe
-                          src={pdfUrls[w.id]}
-                          title={`Signed waiver ${fmtDateTime(w.signed_at)}`}
-                          className="h-[70vh] w-full rounded-md border bg-muted"
-                        />
-                      ) : (
-                        <p className="text-sm text-muted-foreground">Loading the signed PDF...</p>
-                      )
-                    ) : (
+                    {!w.has_pdf ? (
                       <p className="text-sm text-muted-foreground">
                         No PDF was stored for this submission.
                       </p>
+                    ) : pdf?.error ? (
+                      <div className="flex flex-wrap items-center gap-3 text-sm">
+                        <span className="text-muted-foreground">{pdf.error}</span>
+                        <Button size="sm" variant="outline" onClick={() => retryPdf(w.id)}>
+                          Try again
+                        </Button>
+                      </div>
+                    ) : pdf?.url ? (
+                      <iframe
+                        src={pdf.url}
+                        title={`Signed waiver ${fmtDateTime(w.signed_at)}`}
+                        referrerPolicy="no-referrer"
+                        className="h-[70vh] w-full rounded-md border bg-muted"
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Loading the signed PDF...</p>
                     )}
 
                     <details className="text-sm">
                       <summary className="cursor-pointer text-muted-foreground">
                         Signing record
                       </summary>
-                      <div className="mt-2 space-y-2">
+                      <dl className="mt-2 grid gap-2 sm:grid-cols-2">
                         <Field label="Signer IP" value={w.signer_ip} />
                         <SignerMeta meta={w.signer_meta} />
-                      </div>
+                      </dl>
                     </details>
                   </div>
                 </CollapsibleContent>

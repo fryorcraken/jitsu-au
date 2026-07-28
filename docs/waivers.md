@@ -136,8 +136,10 @@ directory), which is where a review normally happens: the profile (the club's
 current record), their memberships, and every submission they ever made, newest
 first. Each submission is a collapsible panel holding the frozen submission in
 full, the signing record (IP + browser context), Approve / Unapprove, and the
-signed PDF embedded inline via a short-lived signed URL, fetched only for
-panels that are actually open. Exactly one panel opens by itself: the newest
+signed PDF embedded inline. The submissions themselves load with the page; the
+PDFs do not, since each needs a short-lived signed URL, so one is signed only
+for a panel that is actually open (and re-signed if it goes stale before the
+panel is reopened). Exactly one panel opens by itself: the newest
 submission, and only while it is still pending, because that is the one waiting
 on a decision. Older submissions and approved ones (active or superseded) start
 collapsed; a manager can open any of them by hand.

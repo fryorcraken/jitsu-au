@@ -279,6 +279,15 @@ describe("deriveExpandedWaivers", () => {
   it("expands nothing when there are no waivers", () => {
     expect(deriveExpandedWaivers([]).size).toBe(0);
   });
+
+  it("keeps the first row on an exact signed_at tie", () => {
+    // Rows arrive newest first, so first-seen wins is the sane tie-break.
+    const open = deriveExpandedWaivers([
+      w("first", "2026-03-01T00:00:00Z", "pending"),
+      w("second", "2026-03-01T00:00:00Z", "pending"),
+    ]);
+    expect([...open]).toEqual(["first"]);
+  });
 });
 
 describe("composeFullName", () => {
