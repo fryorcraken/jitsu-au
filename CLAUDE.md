@@ -502,6 +502,43 @@ meaningfully). The app reads:
 
 Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 
+## Plans you show the user are product-level
+
+The person you are working for owns the **product**, not the codebase. When you
+present a plan — plan mode / `ExitPlanMode`, a "here's what I'd do" proposal
+before starting, or a check-in on approach — write it as **what changes for the
+people using the site**, not as an implementation walkthrough.
+
+A plan for the user says:
+
+- **Who it is for and what they see**: member, prospective member, manager;
+  which page or flow (`/waiver`, `/account`, `/manager/waivers`, the emails).
+- **What is different afterwards**, in their words: "a manager can correct an
+  invoice's price without asking anyone", "signing a waiver no longer needs an
+  account".
+- **The decisions only they can make**: defaults, wording, who gets access,
+  what happens to people mid-flow, what is deliberately left out of this change.
+- **Anything they'd feel**: a step that adds friction, an email that goes out,
+  data that is deleted or moved, something that briefly breaks during rollout.
+
+Keep out of it: file paths, function and table names, Zod/RLS/server-function
+mechanics, migration ordering, library choices, test plans. Surface a technical
+fact only when it has a product consequence, and then state the consequence
+("approving a waiver has to email the member, so it can't be undone silently"),
+not the mechanism.
+
+- ✅ "Managers get a Google Drive card on their account page. Once connected,
+  every new signed waiver lands in their own Drive folder. Signing stays as fast
+  as it is now, and members see nothing new."
+- ❌ "Add `google-drive.functions.ts` with `startGoogleDriveConnect`, store an
+  encrypted connection key in `app_user_connections`, then fire-and-forget the
+  upload from `submitWaiverWithPdf`."
+
+Do still work out the implementation — just keep it as your own working notes
+and get to it once the product shape is agreed. `.lovable/plan.md` is the shape
+to copy: user-facing behavior first, a technical section after it. If the user
+asks for the technical detail, give them all of it.
+
 ## When making changes
 
 1. Develop on the assigned feature branch; commit in a working state (Lovable
