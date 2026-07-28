@@ -12,6 +12,8 @@ import {
   Text,
 } from "@react-email/components";
 
+import { formatAuthLinkValidity } from "./link-validity";
+
 interface SignupEmailProps {
   siteName: string;
   siteUrl: string;
@@ -48,6 +50,9 @@ export const SignupEmail = ({
         <Button style={button} href={confirmationUrl}>
           Verify Email
         </Button>
+        <Text style={note}>
+          The link is valid for {formatAuthLinkValidity()}. After that, request a new one.
+        </Text>
         <Text style={footer}>
           If you didn't create an account, you can safely ignore this email.
         </Text>
@@ -72,6 +77,7 @@ const text = {
   lineHeight: "1.5",
   margin: "0 0 25px",
 };
+const note = { ...text, margin: "25px 0 0" };
 const link = { color: "inherit", textDecoration: "underline" };
 const button = {
   backgroundColor: "#008eaa",

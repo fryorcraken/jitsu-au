@@ -146,11 +146,16 @@ collapsed; a manager can open any of them by hand.
 
 ### Visitor or member uses the member area
 
-Login exists only via approval (sign-in link email, valid for 10 minutes and
-stated as such in the email; magic link or password thereafter). They see: the
-waiver form prefilled from their profile, their waiver history with the active
-one marked and PDFs downloadable, and memberships (buying a paid plan makes a
-visitor a member).
+Login exists only via approval (sign-in link email; magic link or password
+thereafter). They see: the waiver form prefilled from their profile, their
+waiver history with the active one marked and PDFs downloadable, and
+memberships (buying a paid plan makes a visitor a member).
+
+Every emailed auth link and code lasts as long as Supabase Auth's "Email OTP
+Expiration" setting, currently its 3600 second default. The emails say so, from
+the single `AUTH_LINK_VALIDITY_MINUTES` constant in
+`src/lib/email-templates/link-validity.ts`. That setting lives in the dashboard,
+not in this repo, so changing it means changing the constant in the same breath.
 
 ### Manager looks at the funnel
 

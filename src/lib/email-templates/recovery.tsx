@@ -11,6 +11,8 @@ import {
   Text,
 } from "@react-email/components";
 
+import { formatAuthLinkValidity } from "./link-validity";
+
 interface RecoveryEmailProps {
   siteName: string;
   confirmationUrl: string;
@@ -25,7 +27,7 @@ export const RecoveryEmail = ({ siteName, confirmationUrl }: RecoveryEmailProps)
         <Heading style={h1}>Reset your password</Heading>
         <Text style={text}>
           We received a request to reset your password for {siteName}. Click the button below to
-          choose a new password.
+          choose a new password. The link is valid for {formatAuthLinkValidity()}.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Reset Password
