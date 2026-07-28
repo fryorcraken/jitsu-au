@@ -40,14 +40,12 @@ export const Route = createFileRoute("/calendar")({
 type CalendarEvent = {
   id: string;
   series_id: string | null;
-  kind: string;
   title: string;
   description: string | null;
   instructor_name: string | null;
-  location: string;
+  location: string | null;
   starts_at: string;
   ends_at: string;
-  all_day: boolean;
   status: string;
   visibility: string;
   invite_only: boolean;
@@ -65,7 +63,6 @@ function dayHeading(iso: string): string {
 }
 
 function timeRange(ev: CalendarEvent): string {
-  if (ev.all_day) return "All day";
   const opts: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit", timeZone: TZ };
   const start = new Date(ev.starts_at).toLocaleTimeString("en-AU", opts);
   const end = new Date(ev.ends_at).toLocaleTimeString("en-AU", opts);
@@ -283,11 +280,6 @@ function CalendarPage() {
                           <h3 className={cn("text-lg font-semibold", cancelled && "line-through")}>
                             {ev.title}
                           </h3>
-                          {ev.kind !== "session" && (
-                            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium capitalize text-primary">
-                              {ev.kind}
-                            </span>
-                          )}
                           {ev.visibility === "members" && (
                             <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                               Members only
@@ -308,9 +300,14 @@ function CalendarPage() {
                           <span className="flex items-center gap-1">
                             <Clock className="h-3.5 w-3.5" /> {timeRange(ev)}
                           </span>
-                          <span className="flex items-center gap-1">
-                            <MapPin className="h-3.5 w-3.5" /> {ev.location}
-                          </span>
+                          {/* Location is optional now: a social or a grading at a
+                              venue not yet booked should show nothing rather than
+                              a default the club never chose. */}
+                          {ev.location && (
+                            <span className="flex items-center gap-1">
+                              <MapPin className="h-3.5 w-3.5" /> {ev.location}
+                            </span>
+                          )}
                           {ev.instructor_name && (
                             <span className="flex items-center gap-1">
                               <User className="h-3.5 w-3.5" /> {ev.instructor_name}

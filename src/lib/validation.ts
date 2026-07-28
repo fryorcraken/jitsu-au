@@ -710,13 +710,9 @@ export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
 
 // ---- Calendar (see docs/calendar.md) ----
 
-/** Event kinds. `session` occurrences come from a series; the rest are one-offs. */
-export const calendarEventKinds = ["session", "grading", "seminar", "social", "other"] as const;
-export type CalendarEventKind = (typeof calendarEventKinds)[number];
-
 /**
  * ACCESS setting. `public` shows to everyone including the marketing site;
- * `members` is visible only to PAID members (and managers).
+ * `members` is visible only to PAID members (and managers). Enforced.
  */
 export const calendarVisibilities = ["public", "members"] as const;
 export type CalendarVisibility = (typeof calendarVisibilities)[number];
@@ -734,106 +730,120 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date.
 const isoDateTime = z.string().datetime({ offset: true });
 
 /**
- * Manager: define a recurring weekly session. `starts_on` is required (the first
- * date it runs); `ends_on` is optional — omit/null for an OPEN-ENDED series that
- * recurs indefinitely, or set it for a fixed end (e.g. end of semester).
+ * The details every calendar entry carries, whether it happens once or weekly.
+ * Only the title is required — an entry with no instructor, no description and
+ * no fixed location is perfectly normal (a social, a grading at a venue not yet
+ * booked). Blank optional text is normalised to undefined so the column ends up
+ * NULL rather than an empty string.
  */
-export const createSeriesSchema = z
-  .object({
-    title: z.string().trim().min(1, "Give the session a title.").max(80),
-    description: z.string().trim().max(2000).optional(),
-    instructor_name: z.string().trim().max(80).optional(),
-    location: z.string().trim().max(120).optional(),
-    weekday: z.number().int().min(0).max(6),
-    start_time: timeOfDay,
-    duration_minutes: z.number().int().positive().max(600),
-    starts_on: dateOnly,
-    ends_on: dateOnly.nullish(),
-  })
-  .refine((v) => !v.ends_on || v.ends_on >= v.starts_on, {
-    message: "The end date must be on or after the start date.",
-    path: ["ends_on"],
-  });
-export type CreateSeriesInput = z.infer<typeof createSeriesSchema>;
+const blankToUndefined = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .transform((v) => (v ? v : undefined));
 
-/** Manager: edit a series (any subset of fields, plus activate/deactivate). */
-export const updateSeriesSchema = z
-  .object({
-    id: z.string().uuid(),
-    title: z.string().trim().min(1).max(80).optional(),
-    description: z.string().trim().max(2000).nullish(),
-    instructor_name: z.string().trim().max(80).nullish(),
-    location: z.string().trim().max(120).optional(),
-    weekday: z.number().int().min(0).max(6).optional(),
-    start_time: timeOfDay.optional(),
-    duration_minutes: z.number().int().positive().max(600).optional(),
-    starts_on: dateOnly.optional(),
-    ends_on: dateOnly.nullish(),
-    is_active: z.boolean().optional(),
-  })
-  .strict();
-export type UpdateSeriesInput = z.infer<typeof updateSeriesSchema>;
+const calendarEntryDetails = {
+  title: z.string().trim().min(1, "Give it a title.").max(120),
+  description: blankToUndefined(4000),
+  instructor_name: blankToUndefined(80),
+  location: blankToUndefined(120),
+  visibility: z.enum(calendarVisibilities).default("public"),
+  /** DISPLAY ONLY: badges the entry "invite only". Restricts nothing. */
+  invite_only: z.boolean().default(false),
+};
 
-/** Manager: materialize a series' occurrences through a date (idempotent). */
-export const generateSessionsSchema = z.object({
-  series_id: z.string().uuid(),
-  through_date: dateOnly,
+/** A one-off entry: an absolute start and end. */
+export const calendarRepeatNeverSchema = z.object({
+  type: z.literal("never"),
+  starts_at: isoDateTime,
+  ends_at: isoDateTime,
 });
-export type GenerateSessionsInput = z.infer<typeof generateSessionsSchema>;
 
-/** Manager: create a one-off event (grading, seminar, ...) or an extra session. */
-export const createEventSchema = z
+/**
+ * A weekly entry: a club-local time of day on a weekday, from a first date,
+ * either open-ended (`ends_on` omitted/null) or until a set date.
+ */
+export const calendarRepeatWeeklySchema = z.object({
+  type: z.literal("weekly"),
+  weekday: z.number().int().min(0).max(6),
+  start_time: timeOfDay,
+  duration_minutes: z.number().int().positive().max(600),
+  starts_on: dateOnly,
+  ends_on: dateOnly.nullish(),
+});
+
+/**
+ * Manager: put something on the calendar. There is ONE kind of thing — an entry
+ * — and repeating is a property of it, not a different type. The discriminated
+ * union is what makes "these fields only when it repeats" checkable, which two
+ * separate schemas could not express.
+ *
+ * The date ordering rules live in a superRefine rather than on each member,
+ * because a discriminated union's options must be plain objects.
+ */
+export const createCalendarEntrySchema = z
   .object({
-    kind: z.enum(calendarEventKinds).default("other"),
-    title: z.string().trim().min(1, "Give the event a title.").max(120),
-    description: z.string().trim().max(4000).optional(),
-    instructor_name: z.string().trim().max(80).optional(),
-    location: z.string().trim().max(120).optional(),
-    starts_at: isoDateTime,
-    ends_at: isoDateTime,
-    all_day: z.boolean().default(false),
-    visibility: z.enum(calendarVisibilities).default("public"),
-    invite_only: z.boolean().default(false),
+    ...calendarEntryDetails,
+    repeat: z.discriminatedUnion("type", [calendarRepeatNeverSchema, calendarRepeatWeeklySchema]),
   })
-  .refine((v) => new Date(v.ends_at) >= new Date(v.starts_at), {
-    message: "The event must end at or after it starts.",
-    path: ["ends_at"],
+  .superRefine((v, ctx) => {
+    if (v.repeat.type === "never") {
+      if (new Date(v.repeat.ends_at) < new Date(v.repeat.starts_at)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "It must end at or after it starts.",
+          path: ["repeat", "ends_at"],
+        });
+      }
+      return;
+    }
+    if (v.repeat.ends_on && v.repeat.ends_on < v.repeat.starts_on) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "The end date must be on or after the first date.",
+        path: ["repeat", "ends_on"],
+      });
+    }
   });
-export type CreateEventInput = z.infer<typeof createEventSchema>;
+export type CreateCalendarEntryInput = z.infer<typeof createCalendarEntrySchema>;
 
-/** Manager: edit a single event (any subset of fields). */
-export const updateEventSchema = z
+/**
+ * Manager: edit an entry's details. `scope` answers the question the UI asks
+ * when the entry repeats: just this date, or this and every future one? Schedule
+ * shape (weekday, time, duration) is deliberately not editable here — changing
+ * it invalidates dates already on the calendar.
+ */
+export const updateCalendarEntrySchema = z
   .object({
+    scope: z.enum(["event", "series"]),
     id: z.string().uuid(),
-    kind: z.enum(calendarEventKinds).optional(),
     title: z.string().trim().min(1).max(120).optional(),
     description: z.string().trim().max(4000).nullish(),
     instructor_name: z.string().trim().max(80).nullish(),
-    location: z.string().trim().max(120).optional(),
-    starts_at: isoDateTime.optional(),
-    ends_at: isoDateTime.optional(),
-    all_day: z.boolean().optional(),
+    location: z.string().trim().max(120).nullish(),
     visibility: z.enum(calendarVisibilities).optional(),
     invite_only: z.boolean().optional(),
   })
   .strict();
-export type UpdateEventInput = z.infer<typeof updateEventSchema>;
+export type UpdateCalendarEntryInput = z.infer<typeof updateCalendarEntrySchema>;
 
-/** Manager: cancel or un-cancel a single event (the row is kept either way). */
+/** Manager: stop a repeating entry. Future dates go; history is untouched. */
+export const stopRepeatingSchema = z.object({ series_id: z.string().uuid() });
+export type StopRepeatingInput = z.infer<typeof stopRepeatingSchema>;
+
+/**
+ * Manager: cancel or un-cancel. The row is always kept, so subscribers see the
+ * cancellation rather than the entry silently disappearing. `scope` asks the
+ * same question as editing: just this date, or this and every future one?
+ */
 export const cancelEventSchema = z.object({
+  scope: z.enum(["event", "series"]).default("event"),
   id: z.string().uuid(),
   cancelled: z.boolean(),
 });
 export type CancelEventInput = z.infer<typeof cancelEventSchema>;
-
-/** Manager: change the instructor on one event, or on a series + its future events. */
-export const changeInstructorSchema = z.object({
-  scope: z.enum(["event", "series"]),
-  id: z.string().uuid(),
-  // Empty string clears the instructor (handled server-side as null).
-  instructor_name: z.string().trim().max(80),
-});
-export type ChangeInstructorInput = z.infer<typeof changeInstructorSchema>;
 
 /** Manager: delete an event outright (use cancel to keep the record). */
 export const deleteEventSchema = z.object({ id: z.string().uuid() });

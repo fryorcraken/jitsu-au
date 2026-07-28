@@ -34,10 +34,9 @@ function toIcsEvent(e: CalendarFeedSelection): IcsEvent {
     uid: `${e.id}@jitsu.au`,
     start: new Date(e.starts_at),
     end: new Date(e.ends_at),
-    allDay: e.all_day,
     summary: e.invite_only ? `${e.title} (invite only)` : e.title,
     description: detail || undefined,
-    location: e.location,
+    location: e.location ?? undefined,
     cancelled: e.status === "cancelled",
     // Clients ignore a re-sent event whose SEQUENCE hasn't advanced, so derive
     // it from updated_at: any manager edit (time change, cancellation) bumps it
@@ -94,7 +93,7 @@ export const Route = createFileRoute("/api/calendar/$token")({
         let query = admin
           .from("calendar_events")
           .select(
-            "id, series_id, kind, title, description, instructor_name, location, starts_at, ends_at, all_day, status, visibility, invite_only, updated_at",
+            "id, series_id, title, description, instructor_name, location, starts_at, ends_at, status, visibility, invite_only, updated_at",
           )
           .gte("starts_at", dateFromNow(-FEED_WINDOW_PAST_DAYS))
           .lte("starts_at", dateFromNow(FEED_WINDOW_FUTURE_DAYS))

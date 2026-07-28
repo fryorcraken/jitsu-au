@@ -114,7 +114,7 @@ export type Database = {
           instructor_name: string | null
           invite_only: boolean
           kind: string
-          location: string
+          location: string | null
           series_id: string | null
           starts_at: string
           status: string
@@ -132,7 +132,7 @@ export type Database = {
           instructor_name?: string | null
           invite_only?: boolean
           kind?: string
-          location?: string
+          location?: string | null
           series_id?: string | null
           starts_at: string
           status?: string
@@ -150,7 +150,7 @@ export type Database = {
           instructor_name?: string | null
           invite_only?: boolean
           kind?: string
-          location?: string
+          location?: string | null
           series_id?: string | null
           starts_at?: string
           status?: string
@@ -207,12 +207,14 @@ export type Database = {
           ends_on: string | null
           id: string
           instructor_name: string | null
+          invite_only: boolean
           is_active: boolean
-          location: string
+          location: string | null
           start_time: string
           starts_on: string
           title: string
           updated_at: string
+          visibility: string
           weekday: number
         }
         Insert: {
@@ -223,12 +225,14 @@ export type Database = {
           ends_on?: string | null
           id?: string
           instructor_name?: string | null
+          invite_only?: boolean
           is_active?: boolean
-          location?: string
+          location?: string | null
           start_time: string
           starts_on: string
           title: string
           updated_at?: string
+          visibility?: string
           weekday: number
         }
         Update: {
@@ -239,12 +243,14 @@ export type Database = {
           ends_on?: string | null
           id?: string
           instructor_name?: string | null
+          invite_only?: boolean
           is_active?: boolean
-          location?: string
+          location?: string | null
           start_time?: string
           starts_on?: string
           title?: string
           updated_at?: string
+          visibility?: string
           weekday?: number
         }
         Relationships: []

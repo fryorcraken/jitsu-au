@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildSignerMeta,
   cancelEventSchema,
-  changeInstructorSchema,
   composeFullName,
   contactSchema,
-  createEventSchema,
-  createSeriesSchema,
+  createCalendarEntrySchema,
   rsvpSchema,
+  updateCalendarEntrySchema,
   decodeDataUrlPng,
   deriveWaiverListStatuses,
   interestSchema,
@@ -17,6 +16,7 @@ import {
   resolveNamePrefill,
   saveTemplateSchema,
   splitFullName,
+  stopRepeatingSchema,
   waiverApprovalSchema,
   waiverPrefillSearchSchema,
   greetingName,
@@ -705,84 +705,154 @@ describe("isUtsStudent", () => {
   });
 });
 
-describe("createSeriesSchema", () => {
-  const valid = {
-    title: "Beginner Gi",
+describe("createCalendarEntrySchema", () => {
+  const details = { title: "Beginner Gi" };
+  const once = {
+    type: "never" as const,
+    starts_at: "2026-08-01T09:00:00.000Z",
+    ends_at: "2026-08-01T10:30:00.000Z",
+  };
+  const weekly = {
+    type: "weekly" as const,
     weekday: 1,
     start_time: "18:00",
     duration_minutes: 90,
     starts_on: "2026-07-06",
   };
 
-  it("accepts an open-ended series (no end date)", () => {
-    const result = createSeriesSchema.safeParse(valid);
+  it("needs nothing but a title and when it happens", () => {
+    const result = createCalendarEntrySchema.safeParse({ ...details, repeat: once });
     expect(result.success).toBe(true);
-    expect(result.success && result.data.ends_on).toBeUndefined();
-  });
-
-  it("accepts an explicit null end date as open-ended", () => {
-    expect(createSeriesSchema.safeParse({ ...valid, ends_on: null }).success).toBe(true);
-  });
-
-  it("accepts a fixed end date on or after the start", () => {
-    expect(createSeriesSchema.safeParse({ ...valid, ends_on: "2026-11-30" }).success).toBe(true);
-    expect(createSeriesSchema.safeParse({ ...valid, ends_on: valid.starts_on }).success).toBe(true);
-  });
-
-  it("rejects an end date before the start date", () => {
-    const result = createSeriesSchema.safeParse({ ...valid, ends_on: "2026-07-05" });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes("ends_on"))).toBe(true);
+    if (result.success) {
+      // Everything else is optional, and blank stays blank rather than "".
+      expect(result.data.instructor_name).toBeUndefined();
+      expect(result.data.location).toBeUndefined();
+      expect(result.data.description).toBeUndefined();
+      expect(result.data.visibility).toBe("public");
+      expect(result.data.invite_only).toBe(false);
     }
   });
 
-  it("requires a start date", () => {
-    const { starts_on: _omitted, ...noStart } = valid;
-    expect(createSeriesSchema.safeParse(noStart).success).toBe(false);
+  it("rejects a missing or empty title", () => {
+    expect(createCalendarEntrySchema.safeParse({ repeat: once }).success).toBe(false);
+    expect(createCalendarEntrySchema.safeParse({ title: "   ", repeat: once }).success).toBe(false);
   });
 
-  it("rejects a weekday outside 0..6 and a non 24-hour time", () => {
-    expect(createSeriesSchema.safeParse({ ...valid, weekday: 7 }).success).toBe(false);
-    expect(createSeriesSchema.safeParse({ ...valid, start_time: "6pm" }).success).toBe(false);
-  });
-});
-
-describe("createEventSchema", () => {
-  const valid = {
-    title: "Grading",
-    kind: "grading" as const,
-    starts_at: "2026-08-01T09:00:00.000Z",
-    ends_at: "2026-08-01T12:00:00.000Z",
-  };
-
-  it("defaults to a public, non-invite-only event", () => {
-    const result = createEventSchema.safeParse(valid);
-    expect(result.success && result.data.visibility).toBe("public");
-    expect(result.success && result.data.invite_only).toBe(false);
+  it("normalises blank optional text to undefined, so the column ends up NULL", () => {
+    const result = createCalendarEntrySchema.safeParse({
+      ...details,
+      instructor_name: "   ",
+      location: "",
+      description: "  ",
+      repeat: once,
+    });
+    expect(result.success && result.data.instructor_name).toBeUndefined();
+    expect(result.success && result.data.location).toBeUndefined();
+    expect(result.success && result.data.description).toBeUndefined();
   });
 
-  it("accepts members-only access and the invite-only display flag independently", () => {
-    const membersOnly = createEventSchema.safeParse({ ...valid, visibility: "members" });
-    expect(membersOnly.success && membersOnly.data.visibility).toBe("members");
-    expect(membersOnly.success && membersOnly.data.invite_only).toBe(false);
-
-    // Invite-only is display only, so it can sit on a PUBLIC event too.
-    const publicInvite = createEventSchema.safeParse({ ...valid, invite_only: true });
-    expect(publicInvite.success && publicInvite.data.visibility).toBe("public");
-    expect(publicInvite.success && publicInvite.data.invite_only).toBe(true);
+  // The whole point of the redesign: this combination was unexpressible before,
+  // because visibility and invite_only lived only on one-off events.
+  it("allows a WEEKLY entry to be members-only and invite-only", () => {
+    const result = createCalendarEntrySchema.safeParse({
+      ...details,
+      visibility: "members",
+      invite_only: true,
+      repeat: weekly,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.visibility).toBe("members");
+    expect(result.success && result.data.invite_only).toBe(true);
+    expect(result.success && result.data.repeat.type).toBe("weekly");
   });
 
-  it("rejects an event that ends before it starts", () => {
-    const result = createEventSchema.safeParse({ ...valid, ends_at: "2026-08-01T08:00:00.000Z" });
+  it("treats a weekly entry with no end date as open-ended", () => {
+    const result = createCalendarEntrySchema.safeParse({ ...details, repeat: weekly });
+    expect(result.success).toBe(true);
+    const parsed = result.success && result.data.repeat;
+    expect(parsed && parsed.type === "weekly" && parsed.ends_on).toBeUndefined();
+    expect(
+      createCalendarEntrySchema.safeParse({
+        ...details,
+        repeat: { ...weekly, ends_on: null },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a one-off that ends before it starts", () => {
+    const result = createCalendarEntrySchema.safeParse({
+      ...details,
+      repeat: { ...once, ends_at: "2026-08-01T08:00:00.000Z" },
+    });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.some((i) => i.path.includes("ends_at"))).toBe(true);
     }
   });
 
-  it("rejects an unknown visibility", () => {
-    expect(createEventSchema.safeParse({ ...valid, visibility: "secret" }).success).toBe(false);
+  it("rejects a weekly entry ending before its first date", () => {
+    const result = createCalendarEntrySchema.safeParse({
+      ...details,
+      repeat: { ...weekly, ends_on: "2026-07-05" },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("ends_on"))).toBe(true);
+    }
+  });
+
+  it("will not accept weekly fields on a one-off, or the reverse", () => {
+    // The discriminated union is what makes these mistakes unrepresentable.
+    expect(
+      createCalendarEntrySchema.safeParse({
+        ...details,
+        repeat: { type: "never", weekday: 1, start_time: "18:00" },
+      }).success,
+    ).toBe(false);
+    expect(
+      createCalendarEntrySchema.safeParse({
+        ...details,
+        repeat: { type: "weekly", starts_at: once.starts_at, ends_at: once.ends_at },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects an unknown repeat type and an unknown visibility", () => {
+    expect(
+      createCalendarEntrySchema.safeParse({ ...details, repeat: { type: "monthly" } }).success,
+    ).toBe(false);
+    expect(
+      createCalendarEntrySchema.safeParse({ ...details, visibility: "secret", repeat: once })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("updateCalendarEntrySchema", () => {
+  const id = crypto.randomUUID();
+
+  it("accepts both scopes — this date, or this and all future", () => {
+    expect(updateCalendarEntrySchema.safeParse({ scope: "event", id, title: "New" }).success).toBe(
+      true,
+    );
+    expect(
+      updateCalendarEntrySchema.safeParse({ scope: "series", id, visibility: "members" }).success,
+    ).toBe(true);
+  });
+
+  it("allows clearing an optional field with null", () => {
+    expect(
+      updateCalendarEntrySchema.safeParse({ scope: "event", id, instructor_name: null }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an unknown scope, and schedule fields it must not change", () => {
+    expect(updateCalendarEntrySchema.safeParse({ scope: "all", id }).success).toBe(false);
+    // Changing the day or time would invalidate dates already on the calendar,
+    // so it is deliberately not editable here.
+    expect(updateCalendarEntrySchema.safeParse({ scope: "series", id, weekday: 2 }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -800,34 +870,30 @@ describe("rsvpSchema", () => {
   });
 });
 
-describe("changeInstructorSchema", () => {
-  it("accepts event and series scopes, and a blank name to clear", () => {
-    const id = crypto.randomUUID();
-    expect(
-      changeInstructorSchema.safeParse({ scope: "series", id, instructor_name: "Sensei Aoki" })
-        .success,
-    ).toBe(true);
-    expect(
-      changeInstructorSchema.safeParse({ scope: "event", id, instructor_name: "" }).success,
-    ).toBe(true);
-  });
-
-  it("rejects an unknown scope", () => {
-    expect(
-      changeInstructorSchema.safeParse({
-        scope: "all",
-        id: crypto.randomUUID(),
-        instructor_name: "x",
-      }).success,
-    ).toBe(false);
-  });
-});
-
 describe("cancelEventSchema", () => {
   it("requires an explicit boolean so cancel and restore are both intentional", () => {
     const id = crypto.randomUUID();
     expect(cancelEventSchema.safeParse({ id, cancelled: true }).success).toBe(true);
     expect(cancelEventSchema.safeParse({ id, cancelled: false }).success).toBe(true);
     expect(cancelEventSchema.safeParse({ id }).success).toBe(false);
+  });
+
+  it("defaults to this date only, and accepts the all-future scope", () => {
+    const id = crypto.randomUUID();
+    const one = cancelEventSchema.safeParse({ id, cancelled: true });
+    // The safe default: a caller that forgets the scope cancels one date, not
+    // every remaining one.
+    expect(one.success && one.data.scope).toBe("event");
+    expect(cancelEventSchema.safeParse({ scope: "series", id, cancelled: true }).success).toBe(
+      true,
+    );
+    expect(cancelEventSchema.safeParse({ scope: "all", id, cancelled: true }).success).toBe(false);
+  });
+});
+
+describe("stopRepeatingSchema", () => {
+  it("takes the series, not one of its dates", () => {
+    expect(stopRepeatingSchema.safeParse({ series_id: crypto.randomUUID() }).success).toBe(true);
+    expect(stopRepeatingSchema.safeParse({ series_id: "not-a-uuid" }).success).toBe(false);
   });
 });

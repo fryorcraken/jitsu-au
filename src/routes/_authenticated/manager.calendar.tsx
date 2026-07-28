@@ -7,19 +7,15 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { CLUB_TIME_ZONE, WEEKDAY_LABELS, zonedWallTimeToUtc } from "@/lib/calendar";
-import { calendarEventKinds } from "@/lib/validation";
 import {
   cancelEvent,
-  changeInstructor,
-  createEvent,
-  createSeries,
+  createCalendarEntry,
   deleteEvent,
-  generateSessions,
   listEventRsvps,
   listManagerEvents,
-  listSeries,
+  stopRepeating,
+  updateCalendarEntry,
 } from "@/lib/calendar.functions";
-import type { CalendarSeriesRow } from "@/lib/calendar-types";
 
 export const Route = createFileRoute("/_authenticated/manager/calendar")({
   head: () => ({
@@ -28,16 +24,16 @@ export const Route = createFileRoute("/_authenticated/manager/calendar")({
   component: ManagerCalendarPage,
 });
 
+/** One date on the calendar. A repeating entry contributes one of these per week. */
 type EventRow = {
   id: string;
   series_id: string | null;
-  kind: string;
   title: string;
+  description: string | null;
   instructor_name: string | null;
-  location: string;
+  location: string | null;
   starts_at: string;
   ends_at: string;
-  all_day: boolean;
   status: string;
   visibility: string;
   invite_only: boolean;
@@ -52,13 +48,16 @@ type RsvpRow = {
   updated_at: string;
 };
 
+/** "This date only" or "this date and every future one" (repeating entries only). */
+type Scope = "event" | "series";
+
 const TZ = CLUB_TIME_ZONE;
 
 /**
  * Read a `datetime-local` value ("YYYY-MM-DDTHH:MM") as CLUB wall-clock time.
  * `new Date(value)` would parse it in the browser's zone, so a manager working
- * from a laptop set to UTC would save 18:00 and see it listed back as 5:00 am —
- * the list and the public page both render in club time.
+ * from a laptop set to UTC would save 18:00 and see it listed back as 5:00 am.
+ * The list and the public page both render in club time.
  */
 function clubLocalToIso(value: string): string {
   const [date, time] = value.split("T");
@@ -76,51 +75,68 @@ function fmt(iso: string): string {
   });
 }
 
-const emptySeries = {
+/**
+ * One form for everything on the calendar. Repeating is a property of the entry,
+ * not a separate kind of thing, so the schedule fields swap in place rather than
+ * living in a second form.
+ */
+const emptyEntry = {
   title: "",
-  instructor_name: "",
-  location: "UTS Ultimo",
+  repeats: "never" as "never" | "weekly",
+  // Only when it does not repeat.
+  starts_at: "",
+  ends_at: "",
+  // Only when it repeats weekly.
   weekday: 1,
   start_time: "18:00",
   duration_minutes: 90,
   starts_on: "",
   ends_on: "",
-};
-
-const emptyEvent = {
-  title: "",
-  kind: "grading" as (typeof calendarEventKinds)[number],
+  openEnded: true,
+  // Shared, all optional except the title.
   instructor_name: "",
-  location: "UTS Ultimo",
-  starts_at: "",
-  ends_at: "",
+  location: "",
+  description: "",
   visibility: "public" as "public" | "members",
   invite_only: false,
-  description: "",
 };
+
+const inputCls =
+  "h-9 rounded-md border border-input bg-background px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 function ManagerCalendarPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
 
-  const fetchSeries = useServerFn(listSeries);
   const fetchEvents = useServerFn(listManagerEvents);
   const fetchRsvps = useServerFn(listEventRsvps);
-  const addSeries = useServerFn(createSeries);
-  const genSessions = useServerFn(generateSessions);
-  const addEvent = useServerFn(createEvent);
+  const addEntry = useServerFn(createCalendarEntry);
+  const saveEntry = useServerFn(updateCalendarEntry);
+  const endRepeat = useServerFn(stopRepeating);
   const setCancelled = useServerFn(cancelEvent);
-  const setInstructor = useServerFn(changeInstructor);
   const removeEvent = useServerFn(deleteEvent);
 
-  const [series, setSeries] = useState<CalendarSeriesRow[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [seriesForm, setSeriesForm] = useState({ ...emptySeries });
-  const [openEnded, setOpenEnded] = useState(true);
-  const [eventForm, setEventForm] = useState({ ...emptyEvent });
+  const [form, setForm] = useState({ ...emptyEntry });
+
+  // Which event is open for editing, and the draft for it.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editScope, setEditScope] = useState<Scope>("event");
+  const [editForm, setEditForm] = useState({
+    title: "",
+    instructor_name: "",
+    location: "",
+    description: "",
+    visibility: "public" as "public" | "members",
+    invite_only: false,
+  });
+
+  // Cancelling a repeating date asks the same this-date/all-future question.
+  const [scopeAsk, setScopeAsk] = useState<{ id: string; cancelled: boolean } | null>(null);
+
   // Which event's attendee list is expanded, and the rows for it.
   const [openRsvpEvent, setOpenRsvpEvent] = useState<string | null>(null);
   const [rsvpRows, setRsvpRows] = useState<RsvpRow[]>([]);
@@ -131,9 +147,8 @@ function ManagerCalendarPage() {
   }, [rolesLoading, isManager, user, navigate]);
 
   const reload = useCallback(() => {
-    return Promise.all([fetchSeries(), fetchEvents()])
-      .then(([s, e]) => {
-        setSeries(s as CalendarSeriesRow[]);
+    return fetchEvents()
+      .then((e) => {
         setEvents(e as EventRow[]);
         setLoading(false);
       })
@@ -141,106 +156,149 @@ function ManagerCalendarPage() {
         toast.error(err instanceof Error ? err.message : "Could not load the calendar");
         setLoading(false);
       });
-  }, [fetchSeries, fetchEvents]);
+  }, [fetchEvents]);
 
   useEffect(() => {
     if (!isManager) return;
     reload();
   }, [isManager, reload]);
 
-  async function submitSeries() {
+  const canSubmit =
+    Boolean(form.title.trim()) &&
+    (form.repeats === "never"
+      ? Boolean(form.starts_at && form.ends_at)
+      : Boolean(form.starts_on) && (form.openEnded || Boolean(form.ends_on)));
+
+  async function submit() {
     setBusy(true);
     try {
-      const res = await addSeries({
+      const res = await addEntry({
         data: {
-          title: seriesForm.title,
-          instructor_name: seriesForm.instructor_name || undefined,
-          location: seriesForm.location || undefined,
-          weekday: Number(seriesForm.weekday),
-          start_time: seriesForm.start_time,
-          duration_minutes: Number(seriesForm.duration_minutes),
-          starts_on: seriesForm.starts_on,
-          // Open-ended series carry no end date at all.
-          ends_on: openEnded ? null : seriesForm.ends_on || null,
+          title: form.title,
+          instructor_name: form.instructor_name || undefined,
+          location: form.location || undefined,
+          description: form.description || undefined,
+          visibility: form.visibility,
+          invite_only: form.invite_only,
+          repeat:
+            form.repeats === "never"
+              ? {
+                  type: "never" as const,
+                  starts_at: clubLocalToIso(form.starts_at),
+                  ends_at: clubLocalToIso(form.ends_at),
+                }
+              : {
+                  type: "weekly" as const,
+                  weekday: Number(form.weekday),
+                  start_time: form.start_time,
+                  duration_minutes: Number(form.duration_minutes),
+                  starts_on: form.starts_on,
+                  // An open-ended entry carries no end date at all.
+                  ends_on: form.openEnded ? null : form.ends_on || null,
+                },
         },
       });
-      toast.success(`Session added. ${res.generated} date(s) put on the calendar.`);
-      setSeriesForm({ ...emptySeries });
-      setOpenEnded(true);
-      await reload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not add the session");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function submitEvent() {
-    setBusy(true);
-    try {
-      await addEvent({
-        data: {
-          title: eventForm.title,
-          kind: eventForm.kind,
-          instructor_name: eventForm.instructor_name || undefined,
-          location: eventForm.location || undefined,
-          starts_at: clubLocalToIso(eventForm.starts_at),
-          ends_at: clubLocalToIso(eventForm.ends_at),
-          visibility: eventForm.visibility,
-          invite_only: eventForm.invite_only,
-          description: eventForm.description || undefined,
-        },
-      });
-      toast.success("Event added.");
-      setEventForm({ ...emptyEvent });
-      await reload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not add the event");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function generateFor(seriesId: string) {
-    setBusy(true);
-    try {
-      const through = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10);
-      const res = await genSessions({ data: { series_id: seriesId, through_date: through } });
-      toast.success(`${res.generated} date(s) added.`);
-      await reload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not add more dates");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleCancel(ev: EventRow) {
-    setBusy(true);
-    try {
-      await setCancelled({ data: { id: ev.id, cancelled: ev.status !== "cancelled" } });
-      await reload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not update the event");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function editInstructor(scope: "event" | "series", id: string, current: string | null) {
-    const name = window.prompt("Instructor name (leave blank to clear):", current ?? "");
-    if (name === null) return;
-    setBusy(true);
-    try {
-      await setInstructor({ data: { scope, id, instructor_name: name } });
       toast.success(
-        scope === "series"
-          ? "Instructor changed for this session and its upcoming dates."
-          : "Instructor changed for this date.",
+        res.repeats
+          ? `Added. ${res.generated} date(s) are on the calendar, and more appear as they get close.`
+          : "Added to the calendar.",
       );
+      setForm({ ...emptyEntry });
       await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not change the instructor");
+      toast.error(e instanceof Error ? e.message : "Could not add it to the calendar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startEditing(ev: EventRow) {
+    if (editingId === ev.id) {
+      setEditingId(null);
+      return;
+    }
+    setEditingId(ev.id);
+    // A one-off entry has no other dates to choose between.
+    setEditScope("event");
+    setEditForm({
+      title: ev.title,
+      instructor_name: ev.instructor_name ?? "",
+      location: ev.location ?? "",
+      description: ev.description ?? "",
+      visibility: ev.visibility === "members" ? "members" : "public",
+      invite_only: ev.invite_only,
+    });
+  }
+
+  async function saveEdit(ev: EventRow) {
+    const scope: Scope = ev.series_id ? editScope : "event";
+    setBusy(true);
+    try {
+      await saveEntry({
+        data: {
+          scope,
+          // Series scope patches the repeat rule itself, so it is keyed by the
+          // series, not by the date that was clicked.
+          id: scope === "series" ? ev.series_id! : ev.id,
+          title: editForm.title,
+          instructor_name: editForm.instructor_name,
+          location: editForm.location,
+          description: editForm.description,
+          visibility: editForm.visibility,
+          invite_only: editForm.invite_only,
+        },
+      });
+      toast.success(
+        scope === "series" ? "Saved for this date and all future ones." : "Saved for this date.",
+      );
+      setEditingId(null);
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the changes");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function askCancel(ev: EventRow) {
+    const cancelled = ev.status !== "cancelled";
+    // Nothing to choose between when it happens once.
+    if (!ev.series_id) {
+      applyCancel(ev.id, cancelled, "event");
+      return;
+    }
+    setScopeAsk({ id: ev.id, cancelled });
+  }
+
+  async function applyCancel(id: string, cancelled: boolean, scope: Scope) {
+    setScopeAsk(null);
+    setBusy(true);
+    try {
+      await setCancelled({ data: { scope, id, cancelled } });
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update the entry");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopRepeats(ev: EventRow) {
+    if (!ev.series_id) return;
+    if (
+      !window.confirm(
+        `Stop "${ev.title}" repeating? Future dates are removed. Past ones stay on the record.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await endRepeat({ data: { series_id: ev.series_id } });
+      toast.success("It stops repeating. Past dates are untouched.");
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not stop it repeating");
     } finally {
       setBusy(false);
     }
@@ -253,7 +311,7 @@ function ManagerCalendarPage() {
       await removeEvent({ data: { id: ev.id } });
       await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not delete the event");
+      toast.error(e instanceof Error ? e.message : "Could not delete the entry");
     } finally {
       setBusy(false);
     }
@@ -283,17 +341,13 @@ function ManagerCalendarPage() {
     }
   }
 
-  const inputCls =
-    "h-9 rounded-md border border-input bg-background px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
-
   return (
     <section className="mx-auto max-w-5xl space-y-8 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-black">Calendar</h1>
           <p className="text-sm text-muted-foreground">
-            Set up regular sessions, add events, cancel or change the instructor, and see who's
-            coming.
+            Add anything to the calendar, one-off or weekly, then edit, cancel and see who's coming.
           </p>
         </div>
         <Button asChild variant="outline">
@@ -301,257 +355,173 @@ function ManagerCalendarPage() {
         </Button>
       </div>
 
-      {/* ---- Regular sessions ---- */}
+      {/* ---- Add anything ---- */}
       <div className="space-y-4">
-        <h2 className="text-xl font-bold">Regular sessions</h2>
+        <h2 className="text-xl font-bold">Add to the calendar</h2>
         <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="flex flex-col gap-1 text-xs font-medium">
             Title
             <Input
-              value={seriesForm.title}
-              onChange={(e) => setSeriesForm({ ...seriesForm, title: e.target.value })}
-              placeholder="Beginner Gi"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              placeholder="Beginner Gi, Grading, End of semester social"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Instructor
-            <Input
-              value={seriesForm.instructor_name}
-              onChange={(e) => setSeriesForm({ ...seriesForm, instructor_name: e.target.value })}
-              placeholder="Sensei"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Location
-            <Input
-              value={seriesForm.location}
-              onChange={(e) => setSeriesForm({ ...seriesForm, location: e.target.value })}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Day
-            <select
-              className={inputCls}
-              value={seriesForm.weekday}
-              onChange={(e) => setSeriesForm({ ...seriesForm, weekday: Number(e.target.value) })}
-            >
-              {WEEKDAY_LABELS.map((label, i) => (
-                <option key={label} value={i}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Start time
-            <Input
-              type="time"
-              value={seriesForm.start_time}
-              onChange={(e) => setSeriesForm({ ...seriesForm, start_time: e.target.value })}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Length (minutes)
-            <Input
-              type="number"
-              value={seriesForm.duration_minutes}
-              onChange={(e) =>
-                setSeriesForm({ ...seriesForm, duration_minutes: Number(e.target.value) })
-              }
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            First date
-            <Input
-              type="date"
-              value={seriesForm.starts_on}
-              onChange={(e) => setSeriesForm({ ...seriesForm, starts_on: e.target.value })}
-            />
-          </label>
-          <div className="flex flex-col gap-1 text-xs font-medium">
-            Runs until
-            <select
-              className={inputCls}
-              value={openEnded ? "open" : "fixed"}
-              onChange={(e) => setOpenEnded(e.target.value === "open")}
-            >
-              <option value="open">No end date, keeps running</option>
-              <option value="fixed">Ends on a set date</option>
-            </select>
-            {!openEnded && (
-              <Input
-                type="date"
-                className="mt-1"
-                value={seriesForm.ends_on}
-                onChange={(e) => setSeriesForm({ ...seriesForm, ends_on: e.target.value })}
-              />
-            )}
-          </div>
-          <div className="flex items-end">
-            <Button
-              onClick={submitSeries}
-              disabled={
-                busy ||
-                !seriesForm.title ||
-                !seriesForm.starts_on ||
-                (!openEnded && !seriesForm.ends_on)
-              }
-            >
-              Add session
-            </Button>
-          </div>
-        </div>
 
-        {series.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-left">
-                <tr>
-                  <th className="px-3 py-2">Session</th>
-                  <th className="px-3 py-2">When</th>
-                  <th className="px-3 py-2">Runs</th>
-                  <th className="px-3 py-2">Instructor</th>
-                  <th className="px-3 py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {series.map((s) => (
-                  <tr key={s.id} className="border-t">
-                    <td className="px-3 py-2 font-medium">{s.title}</td>
-                    <td className="px-3 py-2">
-                      {WEEKDAY_LABELS[s.weekday]} {s.start_time} · {s.duration_minutes}m
-                    </td>
-                    <td className="px-3 py-2">
-                      {s.starts_on} {s.ends_on ? `to ${s.ends_on}` : "onwards"}
-                    </td>
-                    <td className="px-3 py-2">{s.instructor_name ?? "Not set"}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => generateFor(s.id)}
-                          disabled={busy}
-                        >
-                          Add dates
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => editInstructor("series", s.id, s.instructor_name)}
-                          disabled={busy}
-                        >
-                          Instructor
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* ---- One-off event ---- */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-bold">Add an event</h2>
-        <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="flex flex-col gap-1 text-xs font-medium">
-            Title
-            <Input
-              value={eventForm.title}
-              onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-              placeholder="Grading"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Kind
+            Repeats
             <select
               className={inputCls}
-              value={eventForm.kind}
-              onChange={(e) =>
-                setEventForm({ ...eventForm, kind: e.target.value as typeof eventForm.kind })
-              }
+              value={form.repeats}
+              onChange={(e) => setForm({ ...form, repeats: e.target.value as "never" | "weekly" })}
             >
-              {calendarEventKinds.map((k) => (
-                <option key={k} value={k} className="capitalize">
-                  {k}
-                </option>
-              ))}
+              <option value="never">Doesn't repeat</option>
+              <option value="weekly">Weekly</option>
             </select>
           </label>
+
           <label className="flex flex-col gap-1 text-xs font-medium">
             Who can see it
             <select
               className={inputCls}
-              value={eventForm.visibility}
+              value={form.visibility}
               onChange={(e) =>
-                setEventForm({
-                  ...eventForm,
-                  visibility: e.target.value as typeof eventForm.visibility,
-                })
+                setForm({ ...form, visibility: e.target.value as "public" | "members" })
               }
             >
               <option value="public">Everyone</option>
               <option value="members">Paid members only</option>
             </select>
           </label>
+
+          {form.repeats === "never" ? (
+            <>
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                Starts
+                <Input
+                  type="datetime-local"
+                  value={form.starts_at}
+                  onChange={(e) => setForm({ ...form, starts_at: e.target.value })}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                Ends
+                <Input
+                  type="datetime-local"
+                  value={form.ends_at}
+                  onChange={(e) => setForm({ ...form, ends_at: e.target.value })}
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                Day
+                <select
+                  className={inputCls}
+                  value={form.weekday}
+                  onChange={(e) => setForm({ ...form, weekday: Number(e.target.value) })}
+                >
+                  {WEEKDAY_LABELS.map((label, i) => (
+                    <option key={label} value={i}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                Start time
+                <Input
+                  type="time"
+                  value={form.start_time}
+                  onChange={(e) => setForm({ ...form, start_time: e.target.value })}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                Length (minutes)
+                <Input
+                  type="number"
+                  value={form.duration_minutes}
+                  onChange={(e) => setForm({ ...form, duration_minutes: Number(e.target.value) })}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium">
+                First date
+                <Input
+                  type="date"
+                  value={form.starts_on}
+                  onChange={(e) => setForm({ ...form, starts_on: e.target.value })}
+                />
+              </label>
+              <div className="flex flex-col gap-1 text-xs font-medium">
+                Runs until
+                <select
+                  className={inputCls}
+                  value={form.openEnded ? "open" : "fixed"}
+                  onChange={(e) => setForm({ ...form, openEnded: e.target.value === "open" })}
+                >
+                  <option value="open">No end date, keeps running</option>
+                  <option value="fixed">Ends on a set date</option>
+                </select>
+                {!form.openEnded && (
+                  <Input
+                    type="date"
+                    className="mt-1"
+                    value={form.ends_on}
+                    onChange={(e) => setForm({ ...form, ends_on: e.target.value })}
+                  />
+                )}
+              </div>
+            </>
+          )}
+
           <label className="flex flex-col gap-1 text-xs font-medium">
-            Starts
+            Instructor (optional)
             <Input
-              type="datetime-local"
-              value={eventForm.starts_at}
-              onChange={(e) => setEventForm({ ...eventForm, starts_at: e.target.value })}
+              value={form.instructor_name}
+              onChange={(e) => setForm({ ...form, instructor_name: e.target.value })}
+              placeholder="Sensei"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium">
-            Ends
+            Location (optional)
             <Input
-              type="datetime-local"
-              value={eventForm.ends_at}
-              onChange={(e) => setEventForm({ ...eventForm, ends_at: e.target.value })}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Instructor
-            <Input
-              value={eventForm.instructor_name}
-              onChange={(e) => setEventForm({ ...eventForm, instructor_name: e.target.value })}
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              placeholder="UTS Ultimo"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium sm:col-span-2">
-            Description
+            Description (optional)
             <Input
-              value={eventForm.description}
-              onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
           </label>
+
           <label className="flex items-center gap-2 self-end text-xs font-medium">
             <input
               type="checkbox"
               className="h-4 w-4 rounded border-input"
-              checked={eventForm.invite_only}
-              onChange={(e) => setEventForm({ ...eventForm, invite_only: e.target.checked })}
+              checked={form.invite_only}
+              onChange={(e) => setForm({ ...form, invite_only: e.target.checked })}
             />
             Show an &quot;invite only&quot; badge
           </label>
           <div className="flex items-end">
-            <Button
-              onClick={submitEvent}
-              disabled={busy || !eventForm.title || !eventForm.starts_at || !eventForm.ends_at}
-            >
-              Add event
+            <Button onClick={submit} disabled={busy || !canSubmit}>
+              Add to calendar
             </Button>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          &quot;Invite only&quot; is only a label. It does not hide the event or stop anyone
-          replying. Use &quot;Paid members only&quot; to actually restrict who can see it.
+          &quot;Invite only&quot; is only a label. It does not hide the entry or stop anyone
+          replying. Use &quot;Paid members only&quot; to actually restrict who can see it. A weekly
+          entry keeps future dates appearing on its own, so there is nothing to press.
         </p>
       </div>
 
-      {/* ---- Upcoming events ---- */}
+      {/* ---- Everything coming up ---- */}
       <div className="space-y-4">
         <h2 className="text-xl font-bold">What's coming up</h2>
         {loading ? (
@@ -563,7 +533,7 @@ function ManagerCalendarPage() {
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-left">
                 <tr>
-                  <th className="px-3 py-2">Event</th>
+                  <th className="px-3 py-2">Entry</th>
                   <th className="px-3 py-2">When</th>
                   <th className="px-3 py-2">Instructor</th>
                   <th className="px-3 py-2">Seen by</th>
@@ -574,22 +544,30 @@ function ManagerCalendarPage() {
               <tbody>
                 {events.map((ev) => {
                   const cancelled = ev.status === "cancelled";
+                  const repeats = Boolean(ev.series_id);
                   const expanded = openRsvpEvent === ev.id;
+                  const editing = editingId === ev.id;
+                  const asking = scopeAsk?.id === ev.id;
                   return (
                     // Key belongs on the array element (the Fragment), not its
-                    // children — otherwise the list reconciles by index.
+                    // children, otherwise the list reconciles by index.
                     <Fragment key={ev.id}>
                       <tr className={cn("border-t", cancelled && "opacity-60")}>
                         <td className="px-3 py-2 font-medium">
                           <span className={cn(cancelled && "line-through")}>{ev.title}</span>
-                          {ev.kind !== "session" && (
-                            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs capitalize text-primary">
-                              {ev.kind}
+                          {repeats && (
+                            <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                              Weekly
                             </span>
                           )}
                           {ev.invite_only && (
                             <span className="ml-2 rounded-full border border-primary/40 px-2 py-0.5 text-xs text-primary">
                               Invite only
+                            </span>
+                          )}
+                          {cancelled && (
+                            <span className="ml-2 rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
+                              Cancelled
                             </span>
                           )}
                         </td>
@@ -613,19 +591,29 @@ function ManagerCalendarPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => editInstructor("event", ev.id, ev.instructor_name)}
+                              onClick={() => startEditing(ev)}
                               disabled={busy}
                             >
-                              Instructor
+                              {editing ? "Close" : "Edit"}
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => toggleCancel(ev)}
+                              onClick={() => askCancel(ev)}
                               disabled={busy}
                             >
                               {cancelled ? "Restore" : "Cancel"}
                             </Button>
+                            {repeats && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => stopRepeats(ev)}
+                                disabled={busy}
+                              >
+                                Stop repeating
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
@@ -637,6 +625,146 @@ function ManagerCalendarPage() {
                           </div>
                         </td>
                       </tr>
+
+                      {asking && (
+                        <tr className="border-t bg-muted/30">
+                          <td colSpan={6} className="px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="font-medium">
+                                {scopeAsk.cancelled ? "Cancel" : "Restore"} which dates?
+                              </span>
+                              <Button
+                                size="sm"
+                                onClick={() => applyCancel(ev.id, scopeAsk.cancelled, "event")}
+                                disabled={busy}
+                              >
+                                This date only
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => applyCancel(ev.id, scopeAsk.cancelled, "series")}
+                                disabled={busy}
+                              >
+                                This and all future dates
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setScopeAsk(null)}>
+                                Never mind
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+
+                      {editing && (
+                        <tr className="border-t bg-muted/30">
+                          <td colSpan={6} className="px-3 py-3">
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              {repeats && (
+                                <label className="flex flex-col gap-1 text-xs font-medium lg:col-span-3">
+                                  Apply the changes to
+                                  <select
+                                    className={inputCls}
+                                    value={editScope}
+                                    onChange={(e) => setEditScope(e.target.value as Scope)}
+                                  >
+                                    <option value="event">This date only</option>
+                                    <option value="series">This and all future dates</option>
+                                  </select>
+                                </label>
+                              )}
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Title
+                                <Input
+                                  value={editForm.title}
+                                  onChange={(e) =>
+                                    setEditForm({ ...editForm, title: e.target.value })
+                                  }
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Instructor
+                                <Input
+                                  value={editForm.instructor_name}
+                                  onChange={(e) =>
+                                    setEditForm({ ...editForm, instructor_name: e.target.value })
+                                  }
+                                  placeholder="Leave blank to clear"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Location
+                                <Input
+                                  value={editForm.location}
+                                  onChange={(e) =>
+                                    setEditForm({ ...editForm, location: e.target.value })
+                                  }
+                                  placeholder="Leave blank to clear"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium">
+                                Who can see it
+                                <select
+                                  className={inputCls}
+                                  value={editForm.visibility}
+                                  onChange={(e) =>
+                                    setEditForm({
+                                      ...editForm,
+                                      visibility: e.target.value as "public" | "members",
+                                    })
+                                  }
+                                >
+                                  <option value="public">Everyone</option>
+                                  <option value="members">Paid members only</option>
+                                </select>
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium sm:col-span-2">
+                                Description
+                                <Input
+                                  value={editForm.description}
+                                  onChange={(e) =>
+                                    setEditForm({ ...editForm, description: e.target.value })
+                                  }
+                                />
+                              </label>
+                              <label className="flex items-center gap-2 self-end text-xs font-medium">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded border-input"
+                                  checked={editForm.invite_only}
+                                  onChange={(e) =>
+                                    setEditForm({ ...editForm, invite_only: e.target.checked })
+                                  }
+                                />
+                                Show an &quot;invite only&quot; badge
+                              </label>
+                              <div className="flex items-end gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={() => saveEdit(ev)}
+                                  disabled={busy || !editForm.title.trim()}
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setEditingId(null)}
+                                  disabled={busy}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              The day and time of a weekly entry are not editable here. Dates
+                              already on the calendar would become wrong. Stop it repeating and add
+                              it again at the new time.
+                            </p>
+                          </td>
+                        </tr>
+                      )}
+
                       {expanded && (
                         <tr className="border-t bg-muted/30">
                           <td colSpan={6} className="px-3 py-3">

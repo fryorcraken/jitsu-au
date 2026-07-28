@@ -11,40 +11,39 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   cancelEventSchema,
-  changeInstructorSchema,
-  createEventSchema,
-  createSeriesSchema,
+  createCalendarEntrySchema,
   deleteEventSchema,
   eventRsvpsSchema,
-  generateSessionsSchema,
   nameWithPreferred,
   rsvpSchema,
-  updateEventSchema,
-  updateSeriesSchema,
+  stopRepeatingSchema,
+  updateCalendarEntrySchema,
 } from "@/lib/validation";
 import { CLUB_TIME_ZONE, diffOccurrences, generateOccurrences } from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
 import type {
   CalendarClient,
   CalendarEventSelection,
-  CalendarEventUpdate,
   CalendarSeriesRow,
-  CalendarSeriesUpdate,
+  EntryDetailsPatch,
 } from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
 
 const SITE_URL = "https://jitsu.au";
-/** Default horizon (days) materialized when a series is created. */
-const DEFAULT_HORIZON_DAYS = 84;
 /**
- * Hard ceiling on how far ahead dates can be generated in one go. Without it a
- * far-future `through_date` against an open-ended series would enumerate tens of
- * thousands of dates and attempt them in a single insert.
+ * How far ahead a repeating entry's dates are kept on the calendar. The manager
+ * never asks for this: any calendar read tops the horizon back up, so a weekly
+ * entry simply keeps appearing (see topUpHorizon).
  */
-const MAX_HORIZON_DAYS = 400;
+const HORIZON_DAYS = 84;
+/**
+ * Top up once the furthest generated date falls inside this window. Keeps the
+ * common read a single cheap query instead of a write on every page load.
+ */
+const TOPUP_WHEN_WITHIN_DAYS = 42;
 
 const EVENT_COLUMNS =
-  "id, series_id, kind, title, description, instructor_name, location, starts_at, ends_at, all_day, status, visibility, invite_only";
+  "id, series_id, title, description, instructor_name, location, starts_at, ends_at, status, visibility, invite_only";
 
 /** The service-role client, typed with the calendar-aware Database. */
 async function adminClient(): Promise<CalendarClient> {
@@ -112,14 +111,12 @@ function projectEvent(e: CalendarEventSelection) {
   return {
     id: e.id,
     series_id: e.series_id,
-    kind: e.kind,
     title: e.title,
     description: e.description,
     instructor_name: e.instructor_name,
     location: e.location,
     starts_at: e.starts_at,
     ends_at: e.ends_at,
-    all_day: e.all_day,
     status: e.status,
     visibility: e.visibility,
     invite_only: e.invite_only,
@@ -131,6 +128,8 @@ function projectEvent(e: CalendarEventSelection) {
 // (and managers). Cancelled events are included so the cancellation shows.
 export const getCalendar = createServerFn({ method: "GET" }).handler(async () => {
   const admin = await adminClient();
+  // Keeps repeating entries appearing without anyone pressing anything.
+  await topUpHorizon(admin);
   const { userId, canSeeMembersOnly: seesMembers } = await resolveViewer();
   let query = admin
     .from("calendar_events")
@@ -257,25 +256,15 @@ export const revokeMyFeedToken = createServerFn({ method: "POST" })
 
 // ================= Manager =================
 
-export const listSeries = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const { data, error } = await admin
-      .from("calendar_series")
-      .select("*")
-      .order("weekday", { ascending: true })
-      .order("start_time", { ascending: true });
-    if (error) throw new Error(error.message);
-    return (data ?? []) as CalendarSeriesRow[];
-  });
-
+// The manager view is a single list of upcoming DATES. A repeating entry shows
+// as its dates (marked "Weekly"), so there is no second list of repeat rules to
+// keep in your head.
 export const listManagerEvents = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
+    await topUpHorizon(admin);
     const { data, error } = await admin
       .from("calendar_events")
       .select(EVENT_COLUMNS)
@@ -396,16 +385,19 @@ async function materializeSeries(
     .lte("starts_at", occ[occ.length - 1].starts_at);
   if (exErr) throw new Error(exErr.message);
 
+  // Every generated date is a copy of the entry, INCLUDING who can see it and
+  // the invite-only badge. Hardcoding those (as this used to) is what made a
+  // recurring members-only or invite-only entry impossible to express.
   const rows = diffOccurrences(existing ?? [], occ).map((o) => ({
     series_id: series.id,
-    kind: "session",
     title: series.title,
     description: series.description,
     instructor_name: series.instructor_name,
     location: series.location,
     starts_at: o.starts_at,
     ends_at: o.ends_at,
-    visibility: "public",
+    visibility: series.visibility,
+    invite_only: series.invite_only,
   }));
   if (rows.length === 0) return 0;
   const { error: insErr } = await admin.from("calendar_events").insert(rows);
@@ -413,120 +405,183 @@ async function materializeSeries(
   return rows.length;
 }
 
-export const createSeries = createServerFn({ method: "POST" })
+/**
+ * Keep every active repeating entry's dates topped up to the horizon, so a
+ * manager never has to press anything to make next month appear. Cheap: one
+ * query for the furthest generated date per entry, and it only materialises the
+ * ones running low. Best-effort — a failure here must never break a calendar
+ * read, so it is caught and logged.
+ */
+async function topUpHorizon(admin: CalendarClient): Promise<void> {
+  try {
+    const { data: series } = await admin.from("calendar_series").select("*").eq("is_active", true);
+    if (!series?.length) return;
+
+    const { data: furthest } = await admin
+      .from("calendar_events")
+      .select("series_id, starts_at")
+      .not("series_id", "is", null)
+      .order("starts_at", { ascending: false });
+
+    const lastBySeries = new Map<string, string>();
+    for (const row of furthest ?? []) {
+      if (row.series_id && !lastBySeries.has(row.series_id)) {
+        lastBySeries.set(row.series_id, row.starts_at);
+      }
+    }
+
+    const threshold = `${dateFromNow(TOPUP_WHEN_WITHIN_DAYS)}T00:00:00.000Z`;
+    const through = dateFromNow(HORIZON_DAYS);
+    for (const row of series as CalendarSeriesRow[]) {
+      const last = lastBySeries.get(row.id);
+      // No dates yet, or the last one is close enough to be worth extending.
+      if (last && last >= threshold) continue;
+      // A finished entry has nothing left to generate.
+      if (row.ends_on && row.ends_on < dateFromNow(0)) continue;
+      await materializeSeries(
+        admin,
+        row,
+        row.starts_on > dateFromNow(0) ? row.starts_on : dateFromNow(0),
+        through,
+      );
+    }
+  } catch (e) {
+    console.error("[calendar] horizon top-up failed:", e);
+  }
+}
+
+/**
+ * Manager: put something on the calendar. One entry point for both a one-off and
+ * a weekly entry — repeating is a property of the thing, not a different thing.
+ */
+export const createCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => createSeriesSchema.parse(d))
+  .inputValidator((d: unknown) => createCalendarEntrySchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
+
+    const details = {
+      title: data.title,
+      description: data.description ?? null,
+      instructor_name: data.instructor_name ?? null,
+      location: data.location ?? null,
+      visibility: data.visibility,
+      invite_only: data.invite_only,
+      created_by: context.userId,
+    };
+
+    if (data.repeat.type === "never") {
+      const { data: created, error } = await admin
+        .from("calendar_events")
+        .insert({ ...details, starts_at: data.repeat.starts_at, ends_at: data.repeat.ends_at })
+        .select("id")
+        .single();
+      if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
+      return { ok: true as const, id: created.id, repeats: false as const, generated: 1 };
+    }
+
+    const { weekday, start_time, duration_minutes, starts_on, ends_on } = data.repeat;
     const { data: created, error } = await admin
       .from("calendar_series")
       .insert({
-        title: data.title,
-        description: data.description ?? null,
-        instructor_name: data.instructor_name ?? null,
-        location: data.location || "UTS Ultimo",
-        weekday: data.weekday,
-        start_time: data.start_time,
-        duration_minutes: data.duration_minutes,
-        starts_on: data.starts_on,
-        ends_on: data.ends_on ?? null,
-        created_by: context.userId,
+        ...details,
+        weekday,
+        start_time,
+        duration_minutes,
+        starts_on,
+        ends_on: ends_on ?? null,
       })
       .select("*")
       .single();
-    if (error || !created) throw new Error(error?.message || "Could not create series.");
+    if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
 
-    // Materialize an initial horizon so the schedule is immediately populated.
-    // An open-ended series gets the default horizon; a fixed-end one stops at
-    // its own end date (generateOccurrences clamps to it).
     const generated = await materializeSeries(
       admin,
       created as CalendarSeriesRow,
-      data.starts_on > dateFromNow(0) ? data.starts_on : dateFromNow(0),
-      dateFromNow(DEFAULT_HORIZON_DAYS),
+      starts_on > dateFromNow(0) ? starts_on : dateFromNow(0),
+      dateFromNow(HORIZON_DAYS),
     );
-    return { ok: true as const, id: created.id, generated };
+    return { ok: true as const, id: created.id, repeats: true as const, generated };
   });
 
-export const updateSeries = createServerFn({ method: "POST" })
+/**
+ * Manager: edit an entry's details. `scope: "event"` touches one date;
+ * `scope: "series"` updates the repeat rule AND its future dates, leaving past
+ * ones as they actually happened.
+ */
+export const updateCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => updateSeriesSchema.parse(d))
+  .inputValidator((d: unknown) => updateCalendarEntrySchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
-    const { id, ...fields } = data;
-    const patch: CalendarSeriesUpdate = { ...fields, updated_at: new Date().toISOString() };
-    const { error } = await admin.from("calendar_series").update(patch).eq("id", id);
-    if (error) throw new Error(error.message);
-    return { ok: true as const, id };
-  });
+    const { scope, id, ...fields } = data;
+    const now = new Date().toISOString();
+    // Blank text clears the field rather than storing an empty string.
+    const blankToNull = (v: string | null | undefined) =>
+      v === undefined ? undefined : v && v.trim() ? v : null;
+    // Only the detail columns, which calendar_series and calendar_events share.
+    // Built explicitly rather than spread from `fields`, so a column that exists
+    // on one table and not the other can never leak into the other's update.
+    const patch: EntryDetailsPatch = {
+      ...(fields.title !== undefined && { title: fields.title }),
+      ...(fields.description !== undefined && { description: blankToNull(fields.description) }),
+      ...(fields.instructor_name !== undefined && {
+        instructor_name: blankToNull(fields.instructor_name),
+      }),
+      ...(fields.location !== undefined && { location: blankToNull(fields.location) }),
+      ...(fields.visibility !== undefined && { visibility: fields.visibility }),
+      ...(fields.invite_only !== undefined && { invite_only: fields.invite_only }),
+    };
+    if (Object.keys(patch).length === 0) return { ok: true as const, id, updated: 0 };
 
-export const generateSessions = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => generateSessionsSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const { data: series, error } = await admin
+    if (scope === "event") {
+      const { error } = await admin
+        .from("calendar_events")
+        .update({ ...patch, updated_at: now })
+        .eq("id", id);
+      if (error) throw new Error(error.message);
+      return { ok: true as const, id, updated: 1 };
+    }
+
+    const { error: sErr } = await admin
       .from("calendar_series")
-      .select("*")
-      .eq("id", data.series_id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!series) throw new Error("Series not found.");
-    const row = series as CalendarSeriesRow;
-    if (!row.is_active) throw new Error("That session is inactive. Reactivate it to add dates.");
-    // Clamp the requested horizon so one call can't enumerate years of dates.
-    const ceiling = dateFromNow(MAX_HORIZON_DAYS);
-    const through = data.through_date > ceiling ? ceiling : data.through_date;
-    const generated = await materializeSeries(
-      admin,
-      row,
-      row.starts_on > dateFromNow(0) ? row.starts_on : dateFromNow(0),
-      through,
-    );
-    return { ok: true as const, generated };
-  });
-
-export const createEvent = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => createEventSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const { data: created, error } = await admin
+      .update({ ...patch, updated_at: now })
+      .eq("id", id);
+    if (sErr) throw new Error(sErr.message);
+    const { error: eErr } = await admin
       .from("calendar_events")
-      .insert({
-        kind: data.kind,
-        title: data.title,
-        description: data.description ?? null,
-        instructor_name: data.instructor_name ?? null,
-        location: data.location || "UTS Ultimo",
-        starts_at: data.starts_at,
-        ends_at: data.ends_at,
-        all_day: data.all_day,
-        visibility: data.visibility,
-        invite_only: data.invite_only,
-        created_by: context.userId,
-      })
-      .select("id")
-      .single();
-    if (error || !created) throw new Error(error?.message || "Could not create event.");
-    return { ok: true as const, id: created.id };
+      .update({ ...patch, updated_at: now })
+      .eq("series_id", id)
+      .gte("starts_at", now);
+    if (eErr) throw new Error(eErr.message);
+    return { ok: true as const, id, updated: 1 };
   });
 
-export const updateEvent = createServerFn({ method: "POST" })
+/**
+ * Manager: stop a repeating entry. Future dates are removed and the rule is
+ * deactivated; past dates stay, because they happened.
+ */
+export const stopRepeating = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => updateEventSchema.parse(d))
+  .inputValidator((d: unknown) => stopRepeatingSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
-    const { id, ...fields } = data;
-    const patch: CalendarEventUpdate = { ...fields, updated_at: new Date().toISOString() };
-    const { error } = await admin.from("calendar_events").update(patch).eq("id", id);
-    if (error) throw new Error(error.message);
-    return { ok: true as const, id };
+    const now = new Date().toISOString();
+    const { error: dErr } = await admin
+      .from("calendar_events")
+      .delete()
+      .eq("series_id", data.series_id)
+      .gte("starts_at", now);
+    if (dErr) throw new Error(dErr.message);
+    const { error: sErr } = await admin
+      .from("calendar_series")
+      .update({ is_active: false, ends_on: dateFromNow(0), updated_at: now })
+      .eq("id", data.series_id);
+    if (sErr) throw new Error(sErr.message);
+    return { ok: true as const };
   });
 
 export const cancelEvent = createServerFn({ method: "POST" })
@@ -535,47 +590,34 @@ export const cancelEvent = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
-    const { error } = await admin
-      .from("calendar_events")
-      .update({
-        status: data.cancelled ? "cancelled" : "scheduled",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", data.id);
-    if (error) throw new Error(error.message);
-    return { ok: true as const, id: data.id, cancelled: data.cancelled };
-  });
-
-export const changeInstructor = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => changeInstructorSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const name = data.instructor_name.trim() ? data.instructor_name.trim() : null;
     const now = new Date().toISOString();
+    const status = data.cancelled ? "cancelled" : "scheduled";
+
     if (data.scope === "event") {
       const { error } = await admin
         .from("calendar_events")
-        .update({ instructor_name: name, updated_at: now })
+        .update({ status, updated_at: now })
         .eq("id", data.id);
       if (error) throw new Error(error.message);
-    } else {
-      // Series: update the series (so future generation uses it) and its
-      // upcoming events. Past occurrences keep whoever actually taught them.
-      const { error: sErr } = await admin
-        .from("calendar_series")
-        .update({ instructor_name: name, updated_at: now })
-        .eq("id", data.id);
-      if (sErr) throw new Error(sErr.message);
-      const { error: eErr } = await admin
-        .from("calendar_events")
-        .update({ instructor_name: name, updated_at: now })
-        .eq("series_id", data.id)
-        .gte("starts_at", now);
-      if (eErr) throw new Error(eErr.message);
+      return { ok: true as const, id: data.id, cancelled: data.cancelled };
     }
-    return { ok: true as const };
+
+    // Series scope: this date and every future one. `id` is the event that was
+    // clicked, so resolve its series first.
+    const { data: ev, error: evErr } = await admin
+      .from("calendar_events")
+      .select("series_id, starts_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (evErr) throw new Error(evErr.message);
+    if (!ev?.series_id) throw new Error("That entry does not repeat.");
+    const { error } = await admin
+      .from("calendar_events")
+      .update({ status, updated_at: now })
+      .eq("series_id", ev.series_id)
+      .gte("starts_at", ev.starts_at);
+    if (error) throw new Error(error.message);
+    return { ok: true as const, id: data.id, cancelled: data.cancelled };
   });
 
 export const deleteEvent = createServerFn({ method: "POST" })
