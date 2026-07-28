@@ -362,7 +362,7 @@ function Waiver() {
                 />
                 <p className="mt-1.5 text-xs text-muted-foreground">
                   Only if it's different from your first name. It's what we'll call you in class and
-                  in any email we send you. Your legal name still signs the waiver.
+                  in any email we send you.
                 </p>
               </div>
               <div className="grid gap-5 sm:grid-cols-2">
