@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSignerMeta,
+  cancelEventSchema,
+  changeInstructorSchema,
   composeFullName,
   contactSchema,
+  createEventSchema,
+  createSeriesSchema,
+  rsvpSchema,
   decodeDataUrlPng,
   deriveWaiverListStatuses,
   interestSchema,
@@ -697,5 +702,132 @@ describe("isUtsStudent", () => {
     expect(isUtsStudent("")).toBe(false);
     expect(isUtsStudent(null)).toBe(false);
     expect(isUtsStudent(undefined)).toBe(false);
+  });
+});
+
+describe("createSeriesSchema", () => {
+  const valid = {
+    title: "Beginner Gi",
+    weekday: 1,
+    start_time: "18:00",
+    duration_minutes: 90,
+    starts_on: "2026-07-06",
+  };
+
+  it("accepts an open-ended series (no end date)", () => {
+    const result = createSeriesSchema.safeParse(valid);
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.ends_on).toBeUndefined();
+  });
+
+  it("accepts an explicit null end date as open-ended", () => {
+    expect(createSeriesSchema.safeParse({ ...valid, ends_on: null }).success).toBe(true);
+  });
+
+  it("accepts a fixed end date on or after the start", () => {
+    expect(createSeriesSchema.safeParse({ ...valid, ends_on: "2026-11-30" }).success).toBe(true);
+    expect(createSeriesSchema.safeParse({ ...valid, ends_on: valid.starts_on }).success).toBe(true);
+  });
+
+  it("rejects an end date before the start date", () => {
+    const result = createSeriesSchema.safeParse({ ...valid, ends_on: "2026-07-05" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("ends_on"))).toBe(true);
+    }
+  });
+
+  it("requires a start date", () => {
+    const { starts_on: _omitted, ...noStart } = valid;
+    expect(createSeriesSchema.safeParse(noStart).success).toBe(false);
+  });
+
+  it("rejects a weekday outside 0..6 and a non 24-hour time", () => {
+    expect(createSeriesSchema.safeParse({ ...valid, weekday: 7 }).success).toBe(false);
+    expect(createSeriesSchema.safeParse({ ...valid, start_time: "6pm" }).success).toBe(false);
+  });
+});
+
+describe("createEventSchema", () => {
+  const valid = {
+    title: "Grading",
+    kind: "grading" as const,
+    starts_at: "2026-08-01T09:00:00.000Z",
+    ends_at: "2026-08-01T12:00:00.000Z",
+  };
+
+  it("defaults to a public, non-invite-only event", () => {
+    const result = createEventSchema.safeParse(valid);
+    expect(result.success && result.data.visibility).toBe("public");
+    expect(result.success && result.data.invite_only).toBe(false);
+  });
+
+  it("accepts members-only access and the invite-only display flag independently", () => {
+    const membersOnly = createEventSchema.safeParse({ ...valid, visibility: "members" });
+    expect(membersOnly.success && membersOnly.data.visibility).toBe("members");
+    expect(membersOnly.success && membersOnly.data.invite_only).toBe(false);
+
+    // Invite-only is display only, so it can sit on a PUBLIC event too.
+    const publicInvite = createEventSchema.safeParse({ ...valid, invite_only: true });
+    expect(publicInvite.success && publicInvite.data.visibility).toBe("public");
+    expect(publicInvite.success && publicInvite.data.invite_only).toBe(true);
+  });
+
+  it("rejects an event that ends before it starts", () => {
+    const result = createEventSchema.safeParse({ ...valid, ends_at: "2026-08-01T08:00:00.000Z" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("ends_at"))).toBe(true);
+    }
+  });
+
+  it("rejects an unknown visibility", () => {
+    expect(createEventSchema.safeParse({ ...valid, visibility: "secret" }).success).toBe(false);
+  });
+});
+
+describe("rsvpSchema", () => {
+  it("accepts the three valid responses", () => {
+    for (const response of ["going", "maybe", "declined"]) {
+      expect(rsvpSchema.safeParse({ event_id: crypto.randomUUID(), response }).success).toBe(true);
+    }
+  });
+
+  it("rejects anything else", () => {
+    expect(rsvpSchema.safeParse({ event_id: crypto.randomUUID(), response: "yes" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("changeInstructorSchema", () => {
+  it("accepts event and series scopes, and a blank name to clear", () => {
+    const id = crypto.randomUUID();
+    expect(
+      changeInstructorSchema.safeParse({ scope: "series", id, instructor_name: "Sensei Aoki" })
+        .success,
+    ).toBe(true);
+    expect(
+      changeInstructorSchema.safeParse({ scope: "event", id, instructor_name: "" }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an unknown scope", () => {
+    expect(
+      changeInstructorSchema.safeParse({
+        scope: "all",
+        id: crypto.randomUUID(),
+        instructor_name: "x",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("cancelEventSchema", () => {
+  it("requires an explicit boolean so cancel and restore are both intentional", () => {
+    const id = crypto.randomUUID();
+    expect(cancelEventSchema.safeParse({ id, cancelled: true }).success).toBe(true);
+    expect(cancelEventSchema.safeParse({ id, cancelled: false }).success).toBe(true);
+    expect(cancelEventSchema.safeParse({ id }).success).toBe(false);
   });
 });

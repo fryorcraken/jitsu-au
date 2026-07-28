@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  CalendarDays,
   ChevronLeft,
   CreditCard,
   FileText,
@@ -46,6 +47,7 @@ const managerNav: NavItem[] = [
   { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
   { to: "/manager/waivers", label: "Signed waivers", icon: FileText },
   { to: "/manager/waiver-template", label: "Waiver template", icon: FileText },
+  { to: "/manager/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/manager/reconciliation", label: "Bank reconciliation", icon: Wallet },
   { to: "/manager/settings", label: "Club settings", icon: Settings },
   { to: "/manager/api-tokens", label: "Agent access", icon: KeyRound },
