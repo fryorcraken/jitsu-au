@@ -196,9 +196,6 @@ function CalendarPage() {
                     : "Loading your link..."}
                 </p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Keep it to yourself. Anyone with the link can see the club calendar you see.
-              </p>
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
