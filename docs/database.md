@@ -286,24 +286,22 @@ on the calendar — cancel those individually.
 
 ### `calendar_events` — dated occurrences and one-off events
 
-| Column            | Type          | Null | Notes                                                                                    |
-| ----------------- | ------------- | ---- | ---------------------------------------------------------------------------------------- |
-| `id`              | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                             |
-| `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE CASCADE`. NULL = one-off.                      |
-| `kind`            | `text`        | no   | **Being removed** — a free-text title says it better. Dropped by the contract migration. |
-| `title`           | `text`        | no   |                                                                                          |
-| `description`     | `text`        | yes  |                                                                                          |
-| `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                              |
-| `location`        | `text`        | yes  | No default — the club picks it, or leaves it blank.                                      |
-| `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                              |
-| `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                            |
-| `all_day`         | `boolean`     | no   | **Being removed** — never exposed in any form; a full-day event is just a long one.      |
-| `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).                      |
-| `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only.          |
-| `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.                   |
-| `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                          |
-| `created_at`      | `timestamptz` | no   | Default `now()`.                                                                         |
-| `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                           |
+| Column            | Type          | Null | Notes                                                                           |
+| ----------------- | ------------- | ---- | ------------------------------------------------------------------------------- |
+| `id`              | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                    |
+| `series_id`       | `uuid`        | yes  | `REFERENCES calendar_series(id) ON DELETE CASCADE`. NULL = one-off.             |
+| `title`           | `text`        | no   |                                                                                 |
+| `description`     | `text`        | yes  |                                                                                 |
+| `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                     |
+| `location`        | `text`        | yes  | No default — the club picks it, or leaves it blank.                             |
+| `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                     |
+| `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
+| `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |
+| `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only. |
+| `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.          |
+| `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                 |
+| `created_at`      | `timestamptz` | no   | Default `now()`.                                                                |
+| `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                  |
 
 Partial unique index on `(series_id, starts_at) WHERE series_id IS NOT NULL`
 keeps date generation idempotent. **RLS:** everyone (incl. anon) reads
