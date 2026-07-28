@@ -8,6 +8,7 @@ import {
   rsvpSchema,
   updateCalendarEntrySchema,
   decodeDataUrlPng,
+  deriveExpandedWaivers,
   deriveWaiverListStatuses,
   interestSchema,
   isUtsStudent,
@@ -241,6 +242,56 @@ describe("deriveWaiverListStatuses", () => {
     ]);
     expect(statuses.get("w2")).toBe("active");
     expect(statuses.get("w1")).toBe("superseded");
+  });
+});
+
+describe("deriveExpandedWaivers", () => {
+  const w = (id: string, signed_at: string, status: "pending" | "active" | "superseded") => ({
+    id,
+    signed_at,
+    status,
+  });
+
+  it("expands the newest submission while it is still pending", () => {
+    const open = deriveExpandedWaivers([
+      w("older", "2026-01-01T00:00:00Z", "pending"),
+      w("newest", "2026-03-01T00:00:00Z", "pending"),
+    ]);
+    expect([...open]).toEqual(["newest"]);
+  });
+
+  it("does not depend on the order rows arrive in", () => {
+    const open = deriveExpandedWaivers([
+      w("newest", "2026-03-01T00:00:00Z", "pending"),
+      w("older", "2026-01-01T00:00:00Z", "pending"),
+    ]);
+    expect([...open]).toEqual(["newest"]);
+  });
+
+  it("expands nothing when the newest waiver is approved", () => {
+    expect(deriveExpandedWaivers([w("w1", "2026-03-01T00:00:00Z", "active")]).size).toBe(0);
+    expect(deriveExpandedWaivers([w("w1", "2026-03-01T00:00:00Z", "superseded")]).size).toBe(0);
+  });
+
+  it("leaves an older pending waiver collapsed when a newer one is approved", () => {
+    const open = deriveExpandedWaivers([
+      w("older", "2026-01-01T00:00:00Z", "pending"),
+      w("newest", "2026-03-01T00:00:00Z", "active"),
+    ]);
+    expect(open.size).toBe(0);
+  });
+
+  it("expands nothing when there are no waivers", () => {
+    expect(deriveExpandedWaivers([]).size).toBe(0);
+  });
+
+  it("keeps the first row on an exact signed_at tie", () => {
+    // Rows arrive newest first, so first-seen wins is the sane tie-break.
+    const open = deriveExpandedWaivers([
+      w("first", "2026-03-01T00:00:00Z", "pending"),
+      w("second", "2026-03-01T00:00:00Z", "pending"),
+    ]);
+    expect([...open]).toEqual(["first"]);
   });
 });
 
