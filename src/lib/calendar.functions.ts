@@ -201,57 +201,61 @@ export const setRsvp = createServerFn({ method: "POST" })
     return { ok: true as const, event_id: data.event_id, response: data.response };
   });
 
-// ---- Member: personal ICS feed token ----
-// Only the hash is stored, so the usable URL is shown once at creation.
-export const getMyFeedToken = createServerFn({ method: "GET" })
+// ---- Member: personal ICS feed link ----
+// One link per person, minted on first ask and shown every time afterwards, so
+// the raw token is stored (see 20260728180000). There is no rotate or turn-off:
+// the link is a permanent, private subscription address like any other calendar
+// app's. The hash is still written and is what the feed route looks up.
+//
+// POST rather than GET because the first call for a person writes their row.
+export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const admin = await adminClient();
-    const { data, error } = await admin
+    const origin = await requestOrigin();
+    const feedUrl = (token: string) => ({ url: `${origin}/api/calendar/${token}` });
+
+    const { data: existing, error } = await admin
       .from("calendar_feed_tokens")
-      .select("token_prefix, created_at")
+      .select("id, token")
       .eq("user_id", context.userId)
       .is("revoked_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return data ? { token_prefix: data.token_prefix, created_at: data.created_at } : null;
-  });
-
-export const createMyFeedToken = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const admin = await adminClient();
-    // At most one live token per person: revoke any existing one first.
-    await admin
-      .from("calendar_feed_tokens")
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("user_id", context.userId)
-      .is("revoked_at", null);
+    if (existing?.token) return feedUrl(existing.token);
 
     const raw = generateRawToken();
     const token_hash = await hashToken(raw);
     const token_prefix = tokenPreview(raw);
-    const { error } = await admin
-      .from("calendar_feed_tokens")
-      .insert({ user_id: context.userId, token_hash, token_prefix });
-    if (error) throw new Error(error.message);
 
-    const origin = await requestOrigin();
-    // The raw token is returned here and never again.
-    return { url: `${origin}/api/calendar/${raw}`, token_prefix };
-  });
+    if (existing) {
+      // A link minted while only the hash was stored: the original is not
+      // recoverable, so it is re-minted in place. Anything still subscribed to
+      // that old URL stops updating.
+      const { error: updateError } = await admin
+        .from("calendar_feed_tokens")
+        .update({ token: raw, token_hash, token_prefix })
+        .eq("id", existing.id);
+      if (updateError) throw new Error(updateError.message);
+      return feedUrl(raw);
+    }
 
-export const revokeMyFeedToken = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const admin = await adminClient();
-    const { error } = await admin
+    const { error: insertError } = await admin
       .from("calendar_feed_tokens")
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("user_id", context.userId)
-      .is("revoked_at", null);
-    if (error) throw new Error(error.message);
-    return { ok: true as const };
+      .insert({ user_id: context.userId, token: raw, token_hash, token_prefix });
+    if (insertError) {
+      // Two first-ever loads racing (two tabs): the one-live-token-per-person
+      // index rejects the loser, so use the row the winner just wrote.
+      const { data: raced } = await admin
+        .from("calendar_feed_tokens")
+        .select("token")
+        .eq("user_id", context.userId)
+        .is("revoked_at", null)
+        .maybeSingle();
+      if (raced?.token) return feedUrl(raced.token);
+      throw new Error(insertError.message);
+    }
+    return feedUrl(raw);
   });
 
 // ================= Manager =================
