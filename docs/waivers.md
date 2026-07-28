@@ -146,10 +146,11 @@ collapsed; a manager can open any of them by hand.
 
 ### Visitor or member uses the member area
 
-Login exists only via approval (sign-in link email; magic link or password
-thereafter). They see: the waiver form prefilled from their profile, their
-waiver history with the active one marked and PDFs downloadable, and
-memberships (buying a paid plan makes a visitor a member).
+Login exists only via approval (sign-in link email, valid for 10 minutes and
+stated as such in the email; magic link or password thereafter). They see: the
+waiver form prefilled from their profile, their waiver history with the active
+one marked and PDFs downloadable, and memberships (buying a paid plan makes a
+visitor a member).
 
 ### Manager looks at the funnel
 

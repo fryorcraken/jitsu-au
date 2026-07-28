@@ -16,6 +16,13 @@ interface MagicLinkEmailProps {
   confirmationUrl: string;
 }
 
+/**
+ * How long a login link stays usable, in minutes. Must match the Supabase Auth
+ * "Email OTP Expiration" setting (600 seconds), which is dashboard config and
+ * not part of this repo. Change one and change the other.
+ */
+export const LOGIN_LINK_VALIDITY_MINUTES = 10;
+
 export const MagicLinkEmail = ({ siteName, confirmationUrl }: MagicLinkEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -24,7 +31,8 @@ export const MagicLinkEmail = ({ siteName, confirmationUrl }: MagicLinkEmailProp
       <Container style={container}>
         <Heading style={h1}>Your login link</Heading>
         <Text style={text}>
-          Click the button below to log in to {siteName}. This link will expire shortly.
+          Click the button below to log in to {siteName}. The link is valid for{" "}
+          {LOGIN_LINK_VALIDITY_MINUTES} minutes. After that, request a new one.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Log In
