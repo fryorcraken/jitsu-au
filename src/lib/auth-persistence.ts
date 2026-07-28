@@ -88,6 +88,10 @@ export function applyRememberPreference(initialHref: string): void {
   const remember = localStorage.getItem(REMEMBER_STORAGE_KEY);
   const sessionActive = sessionStorage.getItem(SESSION_ACTIVE_KEY);
 
+  // Note that the stored preference itself is left alone on a callback landing.
+  // "Don't remember me" is a durable privacy choice, so a session started from
+  // an email link is still discarded on the next browser restart. It just is
+  // not discarded by the link that created it.
   if (!isAuthCallbackUrl(initialHref) && shouldForgetSession(remember, sessionActive)) {
     // `scope: "local"` clears the stored session without a network round-trip.
     void supabase.auth.signOut({ scope: "local" });

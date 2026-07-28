@@ -7,10 +7,19 @@ export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   // The gate always waits on the Supabase client finishing its initialisation,
   // and on an email-link landing that includes a round trip to turn the tokens
-  // in the URL fragment into a session. Show the spinner straight away
-  // (pendingMs: 0) so that wait reads as "loading" instead of a blank page.
-  pendingMs: 0,
-  pendingComponent: () => <AuthPending label="Signing you in" />,
+  // in the URL fragment into a session. Without a pending component that wait
+  // is a blank white page.
+  //
+  // The timings matter as much as having the component at all. A warm load
+  // resolves from local storage in a few dozen ms and should go straight to
+  // content, so hold off for 100ms before showing anything (the router's own
+  // default is 1000ms, which is long enough to be the blank page we are fixing).
+  // pendingMinMs then keeps the spinner up long enough to not read as a flicker
+  // once it has appeared; the router's 500ms default would put that floor under
+  // every member page load.
+  pendingMs: 100,
+  pendingMinMs: 300,
+  pendingComponent: () => <AuthPending label="Loading your account" />,
   beforeLoad: async ({ location }) => {
     // getSession() resolves from local storage once the client has initialised,
     // which is also what consumes an email link's `#access_token=...` fragment.
