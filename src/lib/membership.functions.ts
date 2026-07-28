@@ -26,18 +26,12 @@ import type {
   MembershipPlanRow,
   MembershipRow,
 } from "@/lib/membership-types";
-import type { AppClient } from "@/lib/profile-types";
 import type {
   ClubUserEmail,
   ClubUserLead,
   ClubUserProfile,
   ClubUserWaiver,
 } from "@/lib/club-users";
-
-/** The service-role client, viewed with the profiles/waivers-aware types. */
-function profileAdmin(admin: MembershipClient): AppClient {
-  return admin as unknown as AppClient;
-}
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -52,7 +46,7 @@ async function emailsByUserId(
   userIds: string[],
 ): Promise<Map<string, string>> {
   if (!userIds.length) return new Map();
-  const { data, error } = await profileAdmin(admin).rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await admin.rpc("user_emails", { _user_ids: userIds });
   if (error || !data) return new Map();
   return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
 }
@@ -76,10 +70,10 @@ function serverSupabase(): MembershipClient {
   });
 }
 
-/** Load the service-role client, cast to the memberships-aware Database. */
+/** Load the service-role client. */
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin as unknown as MembershipClient;
+  return supabaseAdmin;
 }
 
 /** Throw unless the caller holds the `manager` role (checked via the RLS RPC). */
@@ -180,7 +174,7 @@ async function activateMembershipRow(
   if (membership.user_id && opts.sendEmail !== false) {
     try {
       const [{ data: profile }, emails] = await Promise.all([
-        profileAdmin(admin)
+        admin
           .from("profiles")
           .select("first_name, middle_name, last_name, preferred_name")
           .eq("user_id", membership.user_id)
@@ -232,7 +226,7 @@ export async function assignTrialMembership(userId: string): Promise<void> {
   const plan = (trialPlans ?? []).find((p) => p.is_active);
   if (!plan) return;
 
-  const { data: who } = await profileAdmin(admin)
+  const { data: who } = await admin
     .from("profiles")
     .select("first_name, last_name")
     .eq("user_id", userId)
@@ -295,18 +289,14 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         admin.from("membership_plans").select("*"),
         // The student number lives on the profile; used to prefill the student
         // rate on the membership page.
-        profileAdmin(admin)
+        admin
           .from("profiles")
           .select("uts_student_number")
           .eq("user_id", context.userId)
           .maybeSingle(),
         // Waiver states feed the lifecycle: approved => visitor+, pending-only
         // => applicant.
-        profileAdmin(admin)
-          .from("waivers")
-          .select("approval_status")
-          .eq("user_id", context.userId)
-          .limit(100),
+        admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
       ]);
     if (error) throw new Error(error.message);
 
@@ -369,7 +359,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // Resolve the member's name once: the surname drives the human-friendly
     // reference, and the full name is used in emails. Falls back gracefully when
     // the member has not signed a waiver yet.
-    const { data: who } = await profileAdmin(admin)
+    const { data: who } = await admin
       .from("profiles")
       .select("first_name, middle_name, last_name, preferred_name")
       .eq("user_id", context.userId)
@@ -560,7 +550,7 @@ export const listMemberships = createServerFn({ method: "GET" })
     let emailByUser = new Map<string, string>();
     if (userIds.length) {
       const [{ data: profiles }, emails] = await Promise.all([
-        profileAdmin(admin)
+        admin
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
@@ -591,7 +581,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
 
     const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
       await Promise.all([
-        profileAdmin(admin)
+        admin
           .from("profiles")
           .select(
             "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
@@ -600,10 +590,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
         admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
         admin.from("membership_plans").select("*"),
         // ALL waivers: approved => visitor+, pending-only => applicant.
-        profileAdmin(admin)
-          .from("waivers")
-          .select("user_id, signed_at, approval_status")
-          .limit(5000),
+        admin.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
         // Interest registrations are the LEAD phase of the funnel; the
         // aggregation drops any whose email already belongs to a person.
         admin

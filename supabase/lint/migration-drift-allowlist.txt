@@ -1,0 +1,16 @@
+# Migrations that are intentionally NOT applied to the live database yet.
+#
+# check-migration-drift.py fails CI when a file in supabase/migrations/ has
+# never run against the live database, because committing a migration does not
+# apply it (see the script's header, and "Schema drift" in CLAUDE.md).
+#
+# The one legitimate reason to be unapplied is the CONTRACT phase of an
+# expand/contract change: a migration that drops a column, table or function
+# must land AFTER the code that stopped using it has deployed. Park it here
+# while it waits, then apply it and delete the entry.
+#
+# One entry per line, either the full file stem
+# (20260101000000_drop_old_column) or just the version prefix
+# (20260101000000). Blank lines and everything after '#' are ignored.
+# Say WHY each entry is here and what unblocks it. An empty list is the
+# healthy state.

@@ -15,12 +15,25 @@
 
 The schema reference lives in **`docs/database.md`** (every table: columns,
 RLS, relationships, storage). The product spec for the waiver/profile/account
-flows lives in **`docs/waivers.md`**. The applied schema is defined by the
-migrations in `supabase/migrations/*.sql` (the source of truth).
+flows lives in **`docs/waivers.md`**. The intended schema is defined by the
+migrations in `supabase/migrations/*.sql`.
 
 **When you change a migration, a table, or the code that reads/writes it,
 update `docs/database.md` (and `docs/waivers.md` if the product behavior
 changed) in the same change** so the docs and the code do not drift.
+
+⚠️ **Committing a migration does not apply it.** Nothing in this pipeline runs
+`supabase/migrations/*.sql` **against the live database** — Lovable applies only
+the SQL its own agent writes. (`supabase-lint.yml` does replay every migration,
+but onto a throwaway local Postgres: that proves a migration _can_ apply, not
+that it _has_.) A migration file pushed through GitHub is inert until somebody
+applies it to the live database (there is only one; no staging tier), which is
+how `column waivers.approval_status does not exist` reached production with the
+migration sitting merged in the repo. **Apply the SQL and record it in
+`supabase_migrations.schema_migrations` in the same session that writes the
+file** — additive changes directly, destructive ones only after checking with
+the user. See "Schema drift" in `CLAUDE.md` for the full procedure and the CI
+check that catches it.
 
 ## Manager agent API
 
@@ -112,7 +125,11 @@ Two issues that have burned time recently. Fix these at the source, not by patch
 
 Symptom (runtime, on the affected form): `Could not find the '<column>' column of '<table>' in the schema cache`. The migration ran, but `src/integrations/supabase/types.ts` (auto-generated) was not regenerated, so PostgREST rejects the insert against its cached schema view.
 
-Fix: after any `supabase--migration` that adds/renames columns or tables, regenerate `src/integrations/supabase/types.ts` in the same change. Also update `docs/database.md` per the project rule. If a `*.functions.ts` handler already casts the row payload to `never`/`unknown` to work around a stale type, that cast is a temporary bandaid: once types are regenerated, remove it.
+First rule out the more serious cause: a `column <table>.<column> does not exist` error is a different problem — the migration never reached the live database at all. See "Schema drift" in `CLAUDE.md` before touching the types.
+
+Fix: after any migration that adds/renames columns or tables, bring `src/integrations/supabase/types.ts` back in step in the same change, and run `NOTIFY pgrst, 'reload schema'` so PostgREST re-reads the schema. Only Lovable can truly regenerate the file; when it cannot (out of credits, say), hand-add **only** columns you have verified exist live, in the generator's own style. Also update `docs/database.md` per the project rule.
+
+Do **not** reach for a `never`/`unknown` cast to silence a stale type. Those casts are what let `waivers.approval_status` be missing from production for a week with a green build — the cast disables the only check that would have caught it. Fix the types instead.
 
 ### 2. `.maybeSingle()` returns `T | null`, but helpers often take `T | undefined`
 

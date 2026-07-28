@@ -55,13 +55,19 @@ Use **Bun** (this is a Bun project — `bun install`, not npm/pnpm).
 | `bun run build:dev`     | Build in development mode           |
 | `bun run preview`       | Preview the production build        |
 | `bun run lint`          | ESLint over the repo                |
+| `bun run typecheck`     | `tsc --noEmit` over the repo        |
 | `bun run format`        | Prettier `--write` over the repo    |
 | `bun run test`          | Run the Vitest suite once (CI mode) |
 | `bun run test:watch`    | Vitest in watch mode                |
 | `bun run test:coverage` | Vitest with a V8 coverage report    |
 
-Verify changes with `bun run test`, `bun run lint`, and `bun run build` (the
-build also type-checks). These three run in CI on every PR (see Testing & CI).
+Verify changes with `bun run lint`, `bun run typecheck`, `bun run test`, and
+`bun run build`. All four run in CI on every PR (see Testing & CI).
+
+⚠️ **`bun run build` does NOT type-check.** `vite build` is a Rollup bundle: it
+strips types without checking them, so a build can go green over code that
+`tsc` rejects. `bun run typecheck` is the only thing that catches type errors —
+run it, and never treat a passing build as proof the types are sound.
 
 `bunfig.toml` enforces a **24-hour supply-chain guard** (`minimumReleaseAge`):
 packages published less than a day ago are skipped. Only `@lovable.dev/*`
@@ -135,6 +141,12 @@ Read `src/routes/README.md` before touching routes. Key points:
   `requireSupabaseAuth` gets no token.
 - `client.ts`, `client.server.ts`, `auth-middleware.ts`, and `types.ts` are
   **auto-generated** ("Do not edit it directly"). Prefer regenerating over hand-edits.
+  `types.ts` is generated **from the live schema**, which makes it the repo's
+  closest mirror of what the database actually has — see Schema drift. If you
+  must hand-add a column to it (Lovable out of credits, say), add only what you
+  have verified exists live, in the generator's own style. It is listed in
+  `.prettierignore` so `bun run format` cannot reformat it: Prettier would
+  rewrite all ~1400 lines and the next regen would revert them.
 
 ## Auth & roles
 
@@ -204,16 +216,112 @@ Core tables:
 Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
 is via short-lived signed URLs.
 
+### Schema drift: committing a migration does NOT apply it
+
+> [!IMPORTANT]
+> **Nothing in this pipeline runs `supabase/migrations/*.sql` against the live
+> database.** Writing a migration file and pushing it changes nothing about
+> production. Lovable applies only the SQL **its own agent** writes, and records
+> it in the live `supabase_migrations.schema_migrations` ledger. A migration
+> that arrives via a GitHub push is inert until somebody applies it by hand.
+>
+> The "against the live database" qualifier matters:
+> `.github/workflows/supabase-lint.yml` _does_ replay every migration, but onto
+> a throwaway local Postgres. That proves a migration **can** apply; it says
+> nothing about whether it **has**.
+
+There is **one database** — no staging or preview tier. The Lovable editor
+preview, the published `.lovable.app` site and the deployed site all read the
+same Supabase project (`supabase/config.toml` → `project_id`). So an unapplied
+migration is a production outage waiting for the first request that needs it,
+and applying one is a production change.
+
+This is not hypothetical. On 2026-07-28 the live `waivers` table had no
+`approval_status` column — every manager approval failed with
+`column waivers.approval_status does not exist` — while
+`20260721120000_waiver_approval.sql` sat merged in this repo. Of the 28
+migration files, **13 had no ledger row at all, and 3 of those had never
+reached the live schema by any route** (the waiver approval columns, the
+template acknowledgements column, and the role-security hardening). The other
+10 were live despite the missing ledger row, because a later Lovable prompt had
+its agent author and apply equivalent SQL for the same feature, then emit that
+as a migration of its own — which is also where the duplicate migrations below
+come from.
+
+**The rule: a migration is not done until it is live.** In the same session
+that writes the file:
+
+1. Apply the SQL against the live database (the Lovable project's SQL access).
+2. Record it in the ledger so it is not later re-derived as a duplicate:
+   `INSERT INTO supabase_migrations.schema_migrations (version, name, statements)`
+   with `version` = the file's timestamp prefix, `name` = the rest of the stem.
+3. Verify the object actually exists (`information_schema.columns`, `pg_proc`,
+   `pg_policies`) and reload PostgREST: `NOTIFY pgrst, 'reload schema'`.
+4. Only then merge code that depends on it (see sequencing, below).
+
+Additive migrations are safe to apply directly. For **destructive** ones
+(drop/rename a column, `TRUNCATE`, remove a function) confirm with the user
+first — there is no staging database to absorb a mistake.
+
+**How drift gets caught now** (both are backstops, not substitutes for the rule):
+
+- `supabase/lint/check-migration-drift.py`, run by
+  `.github/workflows/migration-drift.yml` on pushes to `main`, on a daily
+  schedule, and on demand. It compares `supabase/migrations/*.sql` against the
+  live ledger and fails when a file has no matching row. Contract-phase
+  migrations that must land _after_ a deploy go in
+  `supabase/lint/migration-drift-allowlist.txt` with a note.
+  - It **does not run on pull requests, by design** — it holds a production
+    credential, and a same-repo PR branch (how Lovable and every agent push
+    here) would receive that secret while running a script the PR itself can
+    edit. So drift surfaces a merge later, not in the PR. Only the checker's
+    `--selftest` runs on PRs, from `ci.yml`.
+  - Without the `SUPABASE_DB_URL` secret it warns and passes, so a green tick
+    only means "no drift" once the secret is set — the job summary says which.
+  - It proves a **ledger row exists**, not that the SQL ran. Since step 2 below
+    writes that row by hand, a recorded-but-unapplied migration still passes.
+    Step 3 (verify the object exists) is the part only a human/agent can do.
+- `bun run typecheck`. `src/integrations/supabase/types.ts` is generated **from
+  the live schema**, so it is the closest thing the repo has to a mirror of the
+  real database. Every row type now derives from it, and
+  `src/integrations/supabase/schema-contract.test.ts` pins the columns the app
+  depends on. This lags — the types only change when Lovable regenerates them,
+  or when someone hand-adds a verified column (see the Supabase clients section)
+  — so treat it as a second net, not the first.
+
+⚠️ **Never hand-write a row type that asserts a column into existence.**
+`profile-types.ts` declared its own `WaiverRow`/`ProfileRow` (and
+`membership-types.ts` its own `ManagerApiTokenRow`) and layered them over the
+generated `Database`. That is one of the two reasons `approval_status` could be
+missing from production for a week with a green build — the hand-written type
+told the compiler the column was there; the other is that nothing ran `tsc` in
+CI at all. Alias the generated types (`Database["public"]["Tables"][…]["Row"]`)
+and let a real mismatch fail the typecheck. Same for `as never` /
+`as unknown as` casts on a query — they silence the one check that would have
+caught this.
+
+The one sanctioned exception is hand-adding a column to `types.ts` itself,
+after verifying it exists live — see the Supabase clients section. That is the
+same assertion in a different file, so it is only safe because the SQL was
+applied and checked first.
+
 ### Sequencing schema changes and the code that depends on them
 
-The database and the app deploy through **different paths** — Lovable applies
-`supabase/migrations/**` to Cloud when it syncs the branch, while the app code
-ships with the branch — so the two can drift. Merged code that calls a new RPC
+The database and the app deploy through **different paths** — a migration only
+reaches Cloud when it is applied (see above), while the app code ships with the
+branch — so the two can drift. Merged code that calls a new RPC
 or reads a new column **before the migration is live** fails at runtime with
 errors like `Could not find the function public.user_id_by_email in the schema
 cache`, or a missing-column error. Sequence the two using **expand/contract**
 (parallel change), and prefer **separate PRs** so a human gate sits between the
-schema and the code:
+schema change **merging** and the code that depends on it merging.
+
+Note what that gate now does and does not cover: under the rule above, the SQL
+is applied to production in the session that writes the migration, so the human
+gate no longer precedes the live schema change — only the file's merge. That is
+deliberate (an unapplied migration is the more dangerous state), and it is why
+destructive SQL needs explicit confirmation before it is applied, not just
+before it is merged.
 
 - **Additive schema the new code needs** (new tables, columns, functions):
   land the **migration first, in its own PR**. Confirm it is applied to the live
@@ -235,9 +343,13 @@ schema and the code:
   can (add-then-backfill-then-switch rather than rename-in-place). Keep
   `docs/database.md` aligned in the **code** PR that introduces the usage.
 
-Note: neither the unit suite nor CI (`bun run build` is Rollup-only, no live DB)
-catches schema/code drift or preview-only bundler-interop faults — sequencing
-and a browser/DB smoke check are the real guards.
+Note: the unit suite never sees a live DB, and `bun run build` is Rollup-only
+(no type-check). The migration-drift workflow catches an _unapplied_ migration
+(but only after merge, and only once its secret is set), and `bun run typecheck`
+catches code that reads a column the generated types don't have — but neither
+sees a preview-only bundler-interop fault, and neither can prove the ordering
+above was respected. Sequencing and a browser/DB smoke check are still the real
+guards.
 
 ### Lovable can re-emit a hand-written migration as a duplicate
 
@@ -309,11 +421,16 @@ the Supabase lint workflow could not run on any PR.
   have failed before your change. Never delete or `.skip` a test to get CI
   green — fix the code or fix the test on purpose, and say which in the commit.
   `bun run test` must pass before you push.
-- **CI:** `.github/workflows/ci.yml` runs lint → test → build on Linux with Bun
-  for every PR and pushes to `main`. It installs via `bash scripts/bun-install.sh`
-  (see Lock file strategy below), not a plain `bun install`.
+- **CI:** `.github/workflows/ci.yml` runs lint → typecheck → test → build on
+  Linux with Bun for every PR and pushes to `main`. It installs via
+  `bash scripts/bun-install.sh` (see Lock file strategy below), not a plain
+  `bun install`.
+- **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
+  migration file against the **live** ledger. Not on PRs — it holds a
+  production credential (see Schema drift).
 - **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
-  `supabase/**`) starts a local Postgres, applies every migration, and runs the
+  `supabase/**`) starts a local Postgres, applies every migration to it (which
+  is not the live database — see Schema drift), and runs the
   **Advisors** (Splinter — the dashboard's Security/Performance lints, e.g.
   `function_search_path_mutable`) plus `supabase db lint` (plpgsql_check on
   `public`). Security findings at WARN+ fail the build; performance findings are
@@ -424,7 +541,11 @@ Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 5. **Keep the tests in step with the code** — update or add `*.test.ts(x)`
    coverage for any behavior you change or add (see Testing & CI). A change that
    touches tested logic without touching its tests is incomplete.
-6. Verify with `bun run test`, `bun run lint`, and `bun run build`.
+6. Verify with `bun run lint`, `bun run typecheck`, `bun run test`, and
+   `bun run build`. The build alone does not type-check.
+7. If you touched `supabase/migrations/**`, **apply the migration to the live
+   database and record it in the ledger** in the same session — committing it
+   applies nothing (see Schema drift).
 
 ## After pushing — always do this
 

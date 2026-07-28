@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   verify:
-    name: Lint, test, build
+    name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +44,24 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # `vite build` is a Rollup bundle: it strips types without checking them,
+      # so a type error alone will NOT fail the build step below. This is the
+      # step that catches them — including a query against a column the live
+      # database no longer has, now that the row types come from the generated
+      # (live-schema-derived) types. See CLAUDE.md > Schema drift.
+      - name: Typecheck
+        run: bun run typecheck
+
       - name: Test
         run: bun run test
 
       - name: Build
         run: bun run build
+
+      # The drift checker's own matching logic, guarded by inline fixtures. No
+      # database and no secret, so it is safe to run on PR-authored code — which
+      # is the point: the live check lives in migration-drift.yml, which never
+      # runs on `pull_request`, so this is the only place a change to the
+      # checker gets exercised before it merges. See CLAUDE.md > Schema drift.
+      - name: Self-test the migration drift checker
+        run: python3 supabase/lint/check-migration-drift.py --selftest

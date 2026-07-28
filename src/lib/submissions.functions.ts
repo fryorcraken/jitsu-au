@@ -28,23 +28,21 @@ export const submitInterest = createServerFn({ method: "POST" })
     const supabase = serverSupabase();
     // Providing a phone number here is implicit consent to SMS/WhatsApp contact
     // (the phone field carries a consent note). Record it so later forms can
-    // prefill their consent checkbox. Built as a variable + cast so the
-    // `sms_whatsapp_consent` key (absent from the stale generated Insert type)
-    // doesn't trip the excess-property check.
-    const interestRow = {
+    // prefill their consent checkbox.
+    //
+    // A registration is a LEAD: just this row, nothing else. The person record
+    // (locked login + profile) starts later, when they sign the waiver.
+    // NB: this table grants anon INSERT only (no SELECT), so we must NOT ask
+    // PostgREST to return the row (`.select()`) — that needs SELECT privilege
+    // and would error. The idempotency key below is generated instead.
+    const { error } = await supabase.from("interest_registrations").insert({
       name: data.name,
       email: data.email,
       phone: data.phone || null,
       sms_whatsapp_consent: Boolean(data.phone && data.phone.trim()),
       experience: data.experience || null,
       message: data.message || null,
-    };
-    // A registration is a LEAD: just this row, nothing else. The person record
-    // (locked login + profile) starts later, when they sign the waiver.
-    // NB: this table grants anon INSERT only (no SELECT), so we must NOT ask
-    // PostgREST to return the row (`.select()`) — that needs SELECT privilege
-    // and would error. The idempotency key below is generated instead.
-    const { error } = await supabase.from("interest_registrations").insert(interestRow as never);
+    });
     if (error) throw new Error(error.message);
 
     // Best-effort transactional emails: confirm to the applicant (nudging them
