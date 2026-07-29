@@ -54,17 +54,27 @@ export const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 20_000] as const;
 /**
  * A uuid identifying one form fill, reused across every attempt of it.
  *
- * `crypto.randomUUID` needs a secure context, which the live site has but a
- * plain-HTTP LAN dev server does not. The fallback keeps the dedupe key working
- * there rather than throwing mid-submit; it only has to be unique, not
- * unguessable, since it is scoped to rows the submitter is creating anyway.
+ * ⚠️ **This is a secret, not just a dedupe key.** `checkWaiverSubmission` answers
+ * "did this submission land?" to anyone holding the id, and hands back a signed
+ * link to the waiver PDF, which carries the signer's health declaration. The id
+ * is the only thing guarding that, so it must come from a CSPRNG: 122 random
+ * bits are unguessable, `Math.random()` is not.
+ *
+ * `crypto.randomUUID` is preferred but needs a secure context, which the live
+ * site has and a plain-HTTP LAN dev server does not. `crypto.getRandomValues`
+ * has no such requirement and is in every browser this app supports, so the
+ * fallback is a real path rather than a weaker one. If neither exists we throw:
+ * a caller that cannot mint a safe id must fail loudly, not quietly mint a
+ * guessable one.
  */
 export function newSubmissionId(): string {
   const c: Crypto | undefined = typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
   if (c?.randomUUID) return c.randomUUID();
+  if (!c?.getRandomValues) {
+    throw new Error("A secure random source is required to submit this form.");
+  }
   const bytes = new Uint8Array(16);
-  if (c?.getRandomValues) c.getRandomValues(bytes);
-  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  c.getRandomValues(bytes);
   // RFC 4122 version 4 / variant 10xx.
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;

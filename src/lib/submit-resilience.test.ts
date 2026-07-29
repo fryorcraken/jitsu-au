@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   RETRY_DELAYS_MS,
   classifySubmitFailure,
@@ -27,6 +27,10 @@ function timeoutError() {
   err.name = "TimeoutError";
   return err;
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("classifySubmitFailure", () => {
   it("reports offline before anything else", () => {
@@ -99,11 +103,36 @@ describe("retryDelayMs", () => {
 });
 
 describe("newSubmissionId", () => {
+  const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
   it("mints distinct v4 uuids", () => {
     const a = newSubmissionId();
     const b = newSubmissionId();
-    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(a).toMatch(uuidV4);
     expect(a).not.toBe(b);
+  });
+
+  it("falls back to getRandomValues when randomUUID needs a secure context", () => {
+    // randomUUID is unavailable over plain HTTP (a LAN dev server); getRandomValues
+    // is not, so this branch is a real path and must still produce a valid v4.
+    vi.spyOn(globalThis, "crypto", "get").mockReturnValue({
+      getRandomValues: (a: Uint8Array) => {
+        for (let i = 0; i < a.length; i++) a[i] = i * 7;
+        return a;
+      },
+    } as unknown as Crypto);
+
+    expect(newSubmissionId()).toMatch(uuidV4);
+  });
+
+  it("throws rather than minting a guessable id with no CSPRNG", () => {
+    // This id is a secret: checkWaiverSubmission hands anyone holding it a signed
+    // link to a waiver PDF, health declaration included. A Math.random() fallback
+    // would silently downgrade that to something predictable, so failing loudly
+    // is the only safe option left.
+    vi.spyOn(globalThis, "crypto", "get").mockReturnValue(undefined as unknown as Crypto);
+
+    expect(() => newSubmissionId()).toThrow(/secure random source/i);
   });
 });
 
