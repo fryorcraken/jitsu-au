@@ -8,8 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { deriveExpandedWaivers, formatCents } from "@/lib/validation";
-import type { WaiverApprovalStatus } from "@/lib/validation";
+import { deriveExpandedWaivers, formatCents, type WaiverApprovalStatus } from "@/lib/validation";
 import { emailVerificationLabel, isEmailVerified } from "@/lib/email-verification";
 import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
@@ -19,11 +18,7 @@ import {
   setClubUserEmail,
 } from "@/lib/club-user.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
-import {
-  approvalFailureMessage,
-  approvalRefreshFailureMessage,
-  approvalSuccessMessage,
-} from "@/lib/waiver-approval";
+import { runApproval } from "@/lib/waiver-approval";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
@@ -385,25 +380,16 @@ function ManagerUserPage() {
 
   async function setApproval(id: string, status: WaiverApprovalStatus) {
     markApproving(id, true);
-    try {
-      await approve({ data: { id, status } });
-    } catch (e) {
-      toast.error(approvalFailureMessage(e));
-      markApproving(id, false);
-      return;
-    }
-    // The approval is committed from here on, so a refetch failure must not be
-    // reported as a failed approval. Statuses are derived per person (active vs
-    // superseded), so the whole person is refetched rather than patched.
-    try {
-      const refreshed = await load(false);
-      if (!refreshed) return; // a newer load owns the screen; it will say so
-      toast.success(approvalSuccessMessage(status));
-    } catch (e) {
-      toast.error(approvalRefreshFailureMessage(e));
-    } finally {
-      markApproving(id, false);
-    }
+    // Statuses are derived per person (active vs superseded), so refresh by
+    // refetching the whole person rather than patching one waiver. `load`
+    // answers null when a newer load owns the screen, which stays quiet.
+    const outcome = await runApproval({
+      status,
+      approve: () => approve({ data: { id, status } }),
+      refresh: async () => (await load(false)) !== null,
+    });
+    markApproving(id, false);
+    if (outcome.kind !== "stale") toast[outcome.severity](outcome.message);
   }
 
   async function download(id: string) {
