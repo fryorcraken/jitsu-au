@@ -77,6 +77,7 @@ describe("SignInForms", () => {
 
     await user.click(screen.getByRole("button", { name: /login with password/i }));
     expect(screen.getByText(/signing in as/i)).toBeInTheDocument();
+    expect(screen.getByText("member@example.com")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /back to email sign-in/i }));
     expect(screen.getByLabelText(/email/i)).toHaveValue("member@example.com");
