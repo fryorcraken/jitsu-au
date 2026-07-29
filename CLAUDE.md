@@ -21,9 +21,13 @@ This project is connected to [Lovable](https://lovable.dev) (see `AGENTS.md`).
   apply to every agent working in this repo, including the writing-style rules
   for public website copy (e.g. no em dashes in prose). Follow it alongside this
   file.
-- **Never rewrite published git history** — no force-push, and no
-  rebasing/amending/squashing commits that are already pushed. Doing so
-  rewrites history on Lovable's side and the user can lose project history.
+- **Never rewrite published history on `main`** (the branch connected to
+  Lovable) — no force-push, and no rebasing/amending/squashing commits already
+  pushed there. Doing so rewrites history on Lovable's side and the user can
+  lose project history. This restriction is about `main` specifically; it does
+  not extend to feature/working branches, where force-pushing your own
+  in-progress commits (e.g. after a rebase, or restarting a branch whose PR
+  already merged) is fine.
 - Commits pushed to the connected branch **sync back to Lovable** and appear in
   the editor, so keep the branch in a working (buildable) state.
 - `.lovable/` holds Lovable metadata (`project.json`) and the current work

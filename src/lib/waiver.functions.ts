@@ -17,6 +17,7 @@ import {
   normalizeEmail,
   paperWaiverUploadSchema,
   saveTemplateSchema,
+  setCurrentTemplateSchema,
   waiverApprovalSchema,
   waiverSubmitSchema,
   waiverToProfileFields,
@@ -169,6 +170,23 @@ function serverSupabase() {
   });
 }
 
+/**
+ * Manager gate for a server function. Fails closed either way, but a broken
+ * role RPC surfaces its own message: "Forbidden" would tell a manager they lost
+ * access when what actually broke was the check.
+ */
+async function requireManager(context: {
+  supabase: SupabaseClient<Database>;
+  userId: string;
+}): Promise<void> {
+  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
+    _user_id: context.userId,
+    _role: "manager",
+  });
+  if (error) throw new Error(error.message);
+  if (!isMgr) throw new Error("Forbidden");
+}
+
 // ---- Current template (public) ----
 export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handler(async () => {
   const supabase = serverSupabase();
@@ -298,6 +316,20 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .maybeSingle();
     if (tplErr) throw new Error(tplErr.message);
     if (!tpl) throw new Error("No active waiver template.");
+
+    // Refuse to file a signature against text the signer never read.
+    //
+    // The form holds its template for the life of the tab, so a manager
+    // promoting a new version mid-fill would otherwise have this submission
+    // recorded against the NEW version: `template_version` would name it and the
+    // PDF would embed its body. In the direction where the new template asks for
+    // fewer acknowledgements, that succeeds silently and produces a signed legal
+    // document whose terms the signer was never shown.
+    if (data.template_version !== undefined && data.template_version !== tpl.version) {
+      throw new Error(
+        "The waiver was updated while you were filling this in. Please reload the page and read the current version before signing.",
+      );
+    }
 
     // Acknowledgements are defined on the template; enforce the required ones.
     const ackDefs = parseTemplateAcks(tpl.acknowledgements);
@@ -480,6 +512,130 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     return { ok: true as const, pdf_url: signed.signedUrl, waiver_id: inserted.id };
   });
 
+// ---- Manager: list every template version ----
+//
+// The editor used to see only `is_current`, so a version that arrived by any
+// other route (a migration seeding a draft, an older version someone wants to
+// read back) was invisible in the UI even though the table had always held the
+// full history. Managers can read every row by RLS; this goes through the
+// service role like the rest of the manager reads.
+export const listWaiverTemplates = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("waiver_templates")
+      .select("id, version, title, body_md, acknowledgements, is_current, created_at")
+      .order("version", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((t) => ({
+      id: t.id,
+      version: t.version,
+      title: t.title,
+      body_md: t.body_md,
+      acknowledgements: parseTemplateAcks(t.acknowledgements),
+      is_current: t.is_current,
+      created_at: t.created_at,
+    }));
+  });
+
+// ---- Manager: promote an existing version to the live one ----
+
+/**
+ * Make one template row the live one, and report honestly when it cannot.
+ *
+ * Exported and taking its client as a parameter so the failure paths are
+ * unit-testable, following `applyCoverage` / `undoCheckInRow` in
+ * `checkin.functions.ts` — a `createServerFn` handler cannot run in the test
+ * runner, and the sequence below is the part worth pinning.
+ *
+ * The partial unique index allows exactly one `is_current = true`, so this is
+ * necessarily two writes with a gap: clear, then set. Nothing can close that gap
+ * from here — PostgREST gives each statement its own transaction — so the job is
+ * to make the gap as short as possible, never widen it needlessly, and be loud
+ * when the club is left in it. An unnoticed gap means `/waiver` throws
+ * "No active waiver template" for every prospective member who submits.
+ */
+export async function promoteWaiverTemplate(
+  admin: SupabaseClient<Database>,
+  id: string,
+): Promise<{ version: number }> {
+  const { data: target, error: tErr } = await admin
+    .from("waiver_templates")
+    .select("id, version, is_current")
+    .eq("id", id)
+    .maybeSingle();
+  if (tErr) throw new Error(tErr.message);
+  // Both checks happen BEFORE anything is cleared: a bad id or an already-live
+  // target must never cost the club its live waiver.
+  if (!target) throw new Error("That waiver version no longer exists.");
+  if (target.is_current) return { version: target.version };
+
+  const { data: previous, error: pErr } = await admin
+    .from("waiver_templates")
+    .select("id")
+    .eq("is_current", true)
+    .maybeSingle();
+  if (pErr) throw new Error(pErr.message);
+
+  const { error: clearErr } = await admin
+    .from("waiver_templates")
+    .update({ is_current: false })
+    .eq("is_current", true);
+  if (clearErr) throw new Error(clearErr.message);
+
+  const { error: setErr } = await admin
+    .from("waiver_templates")
+    .update({ is_current: true })
+    .eq("id", target.id);
+  if (!setErr) return { version: target.version };
+
+  // From here the club has no live waiver until something sets one.
+  //
+  // The likeliest cause is another manager promoting concurrently: they cleared
+  // and set while we were between our own two writes, so our set hit the unique
+  // index. That is not a broken database, it is a race with a winner — say so
+  // in words a manager can act on rather than surfacing a constraint name.
+  const { data: nowCurrent } = await admin
+    .from("waiver_templates")
+    .select("id")
+    .eq("is_current", true)
+    .maybeSingle();
+  if (nowCurrent) {
+    throw new Error(
+      "Someone else changed the live waiver a moment ago, so this change was not applied. Reload the page to see the current version.",
+    );
+  }
+
+  if (previous) {
+    const { error: restoreErr } = await admin
+      .from("waiver_templates")
+      .update({ is_current: true })
+      .eq("id", previous.id);
+    if (restoreErr) {
+      // Both writes failed and nothing is live. This is the outage case, so it
+      // gets a server-side log AND a message that tells the manager the signing
+      // page is down rather than a generic failure they would shrug at.
+      console.error("[promoteWaiverTemplate] could not restore the live template:", restoreErr);
+      throw new Error(
+        "The waiver version could not be changed, and the club is now left with no live waiver, so nobody can sign. Try again now to fix it.",
+      );
+    }
+  }
+  throw new Error(setErr.message);
+}
+
+export const setCurrentWaiverTemplate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => setCurrentTemplateSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { version } = await promoteWaiverTemplate(supabaseAdmin, data.id);
+    return { ok: true as const, version };
+  });
+
 // ---- Manager: save new template version ----
 export const saveWaiverTemplate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -501,13 +657,14 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
     if (maxErr) throw new Error(maxErr.message);
     const nextVersion = (maxRow?.version ?? 0) + 1;
 
-    // Clear current flag on all rows
-    const { error: clearErr } = await supabaseAdmin
-      .from("waiver_templates")
-      .update({ is_current: false })
-      .eq("is_current", true);
-    if (clearErr) throw new Error(clearErr.message);
-
+    // Write the new version as a draft, THEN promote it.
+    //
+    // The obvious order (clear `is_current`, then insert the row with
+    // `is_current = true`) leaves the club with no live waiver if the insert
+    // fails, and there is nothing to roll back to by then. This way a failed
+    // insert changes nothing at all, and a failed promotion leaves the previous
+    // version live with an unused draft behind it — a manager can retry, and
+    // nobody's signing page went down in the meantime.
     const { data: created, error } = await supabaseAdmin
       .from("waiver_templates")
       .insert({
@@ -515,12 +672,14 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
         title: data.title,
         body_md: data.body_md,
         acknowledgements: data.acknowledgements,
-        is_current: true,
+        is_current: false,
         created_by: context.userId,
       })
       .select("id, version")
       .single();
     if (error) throw new Error(error.message);
+
+    await promoteWaiverTemplate(supabaseAdmin, created.id);
     return { ok: true as const, version: created.version };
   });
 
