@@ -305,6 +305,33 @@ which goes through the `SECURITY DEFINER` `has_role()`, kept working.
 
 **RLS:** anyone reads the current template; managers read all and insert/update.
 
+This is a version **history**, not a set of selectable documents: the partial
+unique index means exactly one row is live, and that row is the whole of what
+`/waiver` serves. **The text is never edited in place** — changing the wording
+means a new row with a new version number, so a signed waiver's
+`template_version` keeps meaning what it meant. `is_current` is the one field
+that does move between rows, which is what promoting a version is.
+
+**These rows are not the evidence.** The signed PDF embeds the full template
+text at signing time, so a member's own document says what they agreed to
+without this table. The one gap is a waiver whose PDF never generated
+(`pdf_path IS NULL`, a handled failure path in `submitWaiverWithPdf`): for that
+one, `template_version` is the only pointer. So deleting an old version is
+cheap-but-not-free once the club is live, and free before then.
+
+That is why the history here is short. **On 2026-07-29, before the club took any
+real signature, version 1 (`UTS Jitsu Training Waiver`, the short two-tick
+waiver) was deleted outright** and version 2 (`UTS Jitsu Application Form`) was
+promoted, leaving one row —
+`20260729140000_waiver_template_single_version.sql`. A `waivers` row pointing at
+a version that is not in this table dates from before then. Deleting a version
+is not the normal course; see `docs/waivers.md`.
+
+`/manager/waiver-template` lists every version and can promote any of them
+(`setCurrentWaiverTemplate`); saving in the editor appends a new version as a
+draft and then promotes it, so a failed save never leaves the club with no live
+waiver.
+
 ---
 
 ## Membership ledger

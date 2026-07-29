@@ -385,6 +385,15 @@ export const waiverSubmitSchema = z
     guardian_signature_image: sigImage,
     // Self-reported browser context, stored on the waiver as signing evidence.
     client_meta: waiverClientMetaSchema.optional(),
+    // Which template version the signer actually READ, sent back so the server
+    // can refuse to file a signature against different text.
+    //
+    // A manager can promote a new version while someone has the form open; the
+    // page holds its template for the life of the tab. Without this the server
+    // would file the submission against whatever is live at that moment, and the
+    // signed PDF would carry a document the signer never saw. Optional so a
+    // client that predates this still submits.
+    template_version: z.number().int().positive().optional(),
     // Proof-of-click token from the interest confirmation email, carried through
     // from the prefill link. When it matches the address being submitted, the
     // person record is created already verified. Never required, and never
@@ -468,6 +477,17 @@ export const saveTemplateSchema = z.object({
   body_md: z.string().trim().min(1).max(30000),
   acknowledgements: templateAcknowledgementsSchema.default([]),
 });
+
+// ---- Manager: promote an existing template version to the live one ----
+//
+// Saving from the editor always writes a NEW version. Promoting is the other
+// half: it makes an existing row the one `/waiver` serves, which is how a
+// template that arrived any other way (a migration seeding a draft, say) goes
+// live without being retyped into the editor first.
+export const setCurrentTemplateSchema = z.object({
+  id: z.string().uuid(),
+});
+export type SetCurrentTemplateInput = z.infer<typeof setCurrentTemplateSchema>;
 
 // ---- Manager: approve / unapprove a signed waiver ----
 

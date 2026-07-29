@@ -78,9 +78,11 @@ export function isEmailVerified(emailConfirmedAt: string | null | undefined): bo
 }
 
 /** The badge text shown to managers and members. Lowercase, like lifecycle pills. */
+export type VerificationLabel = "verified" | "unverified";
+
 export function emailVerificationLabel(
   emailConfirmedAt: string | null | undefined,
-): "verified" | "unverified" {
+): VerificationLabel {
   return isEmailVerified(emailConfirmedAt) ? "verified" : "unverified";
 }
 

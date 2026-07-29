@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { formatDateTime } from "@/lib/dates";
 import { createApiToken, listApiTokens, revokeApiToken } from "@/lib/manager-api-tokens.functions";
 import { buildAgentPrompt } from "@/lib/manager-api-tokens";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -52,11 +53,6 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       {label}
     </Button>
   );
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString();
 }
 
 function ApiTokensPage() {
@@ -230,7 +226,7 @@ function ApiTokensPage() {
                       </div>
                       <p className="text-xs text-muted-foreground">
                         <code className="font-mono">{t.token_prefix}…</code> · created{" "}
-                        {formatDate(t.created_at)} · last used {formatDate(t.last_used_at)}
+                        {formatDateTime(t.created_at)} · last used {formatDateTime(t.last_used_at)}
                       </p>
                     </div>
                     {t.active && (

@@ -444,6 +444,9 @@ function Waiver() {
             guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
             guardian_signature_image:
               guardianSignatureMode === "draw" ? guardianSignatureImage : "",
+            // The version on screen, so the server refuses to file this against a
+            // template that was promoted while the form was being filled in.
+            template_version: templateQ.data?.version,
             // Browser context stored with the submission as signing evidence.
             client_meta: {
               timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "",

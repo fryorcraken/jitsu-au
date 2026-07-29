@@ -21,9 +21,13 @@ This project is connected to [Lovable](https://lovable.dev) (see `AGENTS.md`).
   apply to every agent working in this repo, including the writing-style rules
   for public website copy (e.g. no em dashes in prose). Follow it alongside this
   file.
-- **Never rewrite published git history** — no force-push, and no
-  rebasing/amending/squashing commits that are already pushed. Doing so
-  rewrites history on Lovable's side and the user can lose project history.
+- **Never rewrite published history on `main`** (the branch connected to
+  Lovable) — no force-push, and no rebasing/amending/squashing commits already
+  pushed there. Doing so rewrites history on Lovable's side and the user can
+  lose project history. This restriction is about `main` specifically; it does
+  not extend to feature/working branches, where force-pushing your own
+  in-progress commits (e.g. after a rebase, or restarting a branch whose PR
+  already merged) is fine.
 - Commits pushed to the connected branch **sync back to Lovable** and appear in
   the editor, so keep the branch in a working (buildable) state.
 - `.lovable/` holds Lovable metadata (`project.json`) and the current work
@@ -85,6 +89,7 @@ src/
       manager.waivers.tsx        Manager: list signed waivers
       manager.waiver-template.tsx Manager: edit waiver template
     lovable/email/auth/   Lovable auth-email webhook + preview routes
+    app.tsx               Installed-app launch screen (PWA start_url; see docs/pwa.md)
     index.tsx, about.tsx, classes.tsx, pricing.tsx, instructors.tsx,
     faq.tsx, contact.tsx, register-interest.tsx, waiver.tsx, auth.tsx, ...
     robots[.]txt.ts         /robots.txt (escaped dot; see the SEO section)
@@ -100,6 +105,11 @@ src/
   server.ts               SSR entry — wraps errors into a rendered error page
   start.ts                createStart(): global function + request middleware
   styles.css              Tailwind v4 entry + design tokens
+public/                   Served at the site root
+  manifest.webmanifest    PWA manifest (start_url /app, icons, shortcuts)
+  sw.js                   Service worker (pages network-only, assets cached)
+  offline.html            Shown when a page is opened with no connection
+  icons/                  Generated PWA icons (scripts/generate-pwa-icons.mjs)
 supabase/
   config.toml             Supabase project ref
   migrations/*.sql        Schema + RLS (timestamped, applied in order)
@@ -270,6 +280,10 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   returning users.
 - **Interest / contact** (`lib/submissions.functions.ts`): validate → insert to
   the respective public table.
+- **Installed app** (`routes/app.tsx` → `lib/pwa.ts`): the site is installable, and
+  the manifest's `start_url` is `/app`, a route that forwards you to the screen you
+  actually wanted (member area when signed in, home page otherwise). Full spec:
+  `docs/pwa.md`.
 - **Auth emails** (`routes/lovable/email/auth/webhook.ts`): a Lovable
   `createAuthEmailHandler` dispatches React-email templates from
   `src/lib/email-templates/` for signup, invite, magic-link, recovery, etc.

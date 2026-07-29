@@ -238,6 +238,49 @@ submission, and only while it is still pending, because that is the one waiting
 on a decision. Older submissions and approved ones (active or superseded) start
 collapsed; a manager can open any of them by hand.
 
+### Manager changes the waiver text
+
+`/manager/waiver-template` is the club's waiver document, versioned. The screen
+lists every version newest first, marks the one that is **live** (the single
+`waiver_templates.is_current = true` row, the only thing `/waiver` serves), and
+opens on it. Each other version is marked **Previous** (older than the live one,
+so possibly signed against) or **Draft** (never been live). Selecting one loads
+it into the editor to read or work from; an unsaved edit is confirmed before it
+is discarded.
+
+There are two ways a version becomes live:
+
+- **Save as new version** — writes the edited text as version N+1 and makes it
+  live. This is the everyday path.
+- **Make version N live** — promotes a version that already exists. This is the
+  path for a template that arrived any other way: a migration that seeded a
+  draft, or an older version the club wants back. Without it a seeded draft is
+  unreachable, which is exactly what happened to the application form. It
+  publishes the **stored** text, so unsaved edits in the editor are not part of
+  what goes live and the screen says so before it proceeds.
+
+Promoting never touches waivers already signed. Each one records the
+`template_version` it was signed against and its PDF carries that version's full
+text, so the evidence is fixed at signing time and does not depend on this table.
+
+**Someone mid-signature is protected too.** The signing page keeps the version it
+loaded for the life of the tab, so a promotion during that time would otherwise
+file their signature against text they never saw — and where the new version
+asks for fewer acknowledgements, silently. The form submits the version it
+showed, and the server refuses a mismatch, asking them to reload and read the
+current version before signing.
+
+Old versions are normally kept, but they are not sacred: the signed PDF is the
+record (rule 3). The narrow exception is a waiver whose PDF failed to generate,
+which has only its `template_version` to go on. The short pre-application-form
+waiver (version 1) was deleted outright on 2026-07-29, before launch, when no
+signature yet mattered; the migration that did it refuses to run if any waiver
+without a PDF still points at the version being removed.
+
+One consequence worth knowing: after that deletion there is a single version, so
+"an older version the club wants back" has nothing to act on until a second one
+exists. The button stays because the next seeded draft needs it.
+
 ### Visitor or member uses the member area
 
 Login exists only via approval (sign-in link email; magic link or password

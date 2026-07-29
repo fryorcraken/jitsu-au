@@ -1,0 +1,58 @@
+{
+  "id": "/",
+  "name": "UTS Jitsu",
+  "short_name": "UTS Jitsu",
+  "description": "Class times, your membership and your waivers for UTS Jitsu, the Japanese Jiu-Jitsu club at UTS Ultimo.",
+  "lang": "en-AU",
+  "dir": "ltr",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "theme_color": "#008eaa",
+  "background_color": "#ffffff",
+  "categories": ["sports", "education", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Your account",
+      "short_name": "Account",
+      "url": "/account"
+    },
+    {
+      "name": "Class calendar",
+      "short_name": "Calendar",
+      "url": "/calendar"
+    },
+    {
+      "name": "Class times",
+      "short_name": "Classes",
+      "url": "/classes"
+    }
+  ]
+}

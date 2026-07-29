@@ -13,6 +13,7 @@ import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SOCIAL_IMAGE } from "../lib/seo";
+import { setUpServiceWorker } from "../lib/service-worker";
 
 function NotFoundComponent() {
   return (
@@ -87,6 +88,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { property: "og:site_name", content: "UTS Jitsu" },
       { property: "og:type", content: "website" },
+      // Installed-app chrome: the address bar / status bar tint, and the name
+      // and title style iOS uses for a home-screen launch.
+      { name: "theme-color", content: "#008eaa" },
+      { name: "application-name", content: "UTS Jitsu" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: "UTS Jitsu" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
       { property: "og:url", content: "https://jitsu.au/" },
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
@@ -119,6 +128,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       // concerned. Each public page sets its own; noindex pages need none.
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.png", type: "image/png" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png", sizes: "180x180" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
@@ -155,6 +166,8 @@ const initialHref = typeof window === "undefined" ? "" : window.location.href;
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
+
+  useEffect(() => setUpServiceWorker(), []);
 
   useEffect(() => {
     let mounted = true;

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { lifecycleClass } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import {
   computeMembershipPrice,
@@ -26,34 +27,31 @@ export const Route = createFileRoute("/_authenticated/membership")({
 type Plan = Awaited<ReturnType<typeof listMembershipPlans>>[number];
 type Mine = Awaited<ReturnType<typeof getMyMemberships>>;
 
-const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string; className: string }> =
-  {
-    lead: {
-      label: "New here",
-      blurb: "Welcome! Sign the waiver and your two free trial sessions are waiting.",
-      className: "bg-slate-100 text-slate-800",
-    },
-    applicant: {
-      label: "Waiver pending",
-      blurb: "Your waiver is with the club for review. Hold tight!",
-      className: "bg-amber-100 text-amber-800",
-    },
-    visitor: {
-      label: "On trial",
-      blurb: "You're on your free trial. Join a plan when you're ready to keep training.",
-      className: "bg-sky-100 text-sky-800",
-    },
-    member: {
-      label: "Member",
-      blurb: "You're an active member. See you on the mat!",
-      className: "bg-green-100 text-green-800",
-    },
-    lapsed: {
-      label: "Lapsed",
-      blurb: "Your membership has lapsed. Renew below to keep training.",
-      className: "bg-red-100 text-red-800",
-    },
-  };
+// The words are this page's own: a member reads "On trial", a manager reads
+// "visitor". The colours are not, and come from the shared map so the badge a
+// member sees matches the one a manager sees for the same phase.
+const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string }> = {
+  lead: {
+    label: "New here",
+    blurb: "Welcome! Sign the waiver and your two free trial sessions are waiting.",
+  },
+  applicant: {
+    label: "Waiver pending",
+    blurb: "Your waiver is with the club for review. Hold tight!",
+  },
+  visitor: {
+    label: "On trial",
+    blurb: "You're on your free trial. Join a plan when you're ready to keep training.",
+  },
+  member: {
+    label: "Member",
+    blurb: "You're an active member. See you on the mat!",
+  },
+  lapsed: {
+    label: "Lapsed",
+    blurb: "Your membership has lapsed. Renew below to keep training.",
+  },
+};
 
 function MembershipPage() {
   const navigate = useNavigate();
@@ -147,10 +145,13 @@ function MembershipPage() {
           <CardHeader>
             <div className="flex items-center gap-3">
               <CardTitle>Your status</CardTitle>
+              {/* Not the shared <Pill>: this badge is a heading companion, so it
+                  sits slightly larger and bolder, and its label is a sentence
+                  ("On trial") that must not be title-cased. */}
               <span
                 className={cn(
                   "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                  status.className,
+                  lifecycleClass(lifecycle),
                 )}
               >
                 {status.label}

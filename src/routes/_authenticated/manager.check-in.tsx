@@ -4,6 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Pill } from "@/components/site/StatusPill";
+import { coverageClass } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
@@ -33,13 +35,6 @@ const TZ = CLUB_TIME_ZONE;
 
 /** How many roster matches to show before asking the manager to keep typing. */
 const MATCH_LIMIT = 25;
-
-const COVERAGE_CLASS: Record<string, string> = {
-  trial: "bg-sky-100 text-sky-800",
-  session: "bg-indigo-100 text-indigo-800",
-  period: "bg-green-100 text-green-800",
-  none: "bg-red-100 text-red-800",
-};
 
 // Warnings are stored as stable codes so the wording can change without a
 // migration. This is that wording.
@@ -72,19 +67,6 @@ function fmtTime(iso: string): string {
     minute: "2-digit",
     timeZone: TZ,
   });
-}
-
-function Pill({ label, className }: { label: string; className: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        className,
-      )}
-    >
-      {label}
-    </span>
-  );
 }
 
 function Warnings({ codes }: { codes: string[] }) {
@@ -354,7 +336,8 @@ function CheckInPage() {
                   <td className="px-3 py-2">
                     <Pill
                       label={c.coverage === "none" ? "No cover" : (c.plan_name ?? "Membership")}
-                      className={COVERAGE_CLASS[c.coverage] ?? COVERAGE_CLASS.none}
+                      className={coverageClass(c.coverage)}
+                      preserveCase
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -418,7 +401,8 @@ function CheckInPage() {
                   <td className="px-3 py-2">
                     <Pill
                       label={coveragePreviewLabel(r)}
-                      className={COVERAGE_CLASS[r.coverage] ?? COVERAGE_CLASS.none}
+                      className={coverageClass(r.coverage)}
+                      preserveCase
                     />
                   </td>
                   <td className="px-3 py-2 text-right">
