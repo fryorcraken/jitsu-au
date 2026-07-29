@@ -225,6 +225,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     }
 
     const signed_at = new Date().toISOString();
+    const isMinor = data.is_minor ?? false;
 
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
@@ -323,11 +324,15 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         uts_student_number: data.uts_student_number?.trim() || null,
         sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
         emergency_contact_name: data.emergency_contact_name,
+        emergency_contact_relationship: data.emergency_contact_relationship,
         emergency_contact_phone: data.emergency_contact_phone,
         medical_notes: data.medical_notes || null,
-        is_minor: data.is_minor ?? false,
-        guardian_name: data.guardian_name || null,
-        guardian_relationship: data.guardian_relationship || null,
+        is_minor: isMinor,
+        // For a minor the emergency contact IS the guardian who signs, so the
+        // guardian columns are filled from that one block rather than from a
+        // second set of inputs that could disagree with it.
+        guardian_name: isMinor ? data.emergency_contact_name : null,
+        guardian_relationship: isMinor ? data.emergency_contact_relationship : null,
         signed_at,
         template_version: tpl.version,
         signer_ip,
@@ -354,8 +359,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         phone: data.phone,
         email,
         emergency_contact_name: data.emergency_contact_name,
+        emergency_contact_relationship: data.emergency_contact_relationship,
         emergency_contact_phone: data.emergency_contact_phone,
         medical_notes: data.medical_notes || "",
+        health_answers: data.health_answers,
         acknowledgements: resolveAcknowledgements(ackDefs, answers),
         signature_name: data.signature_name || "",
         signed_at,
@@ -363,9 +370,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         template_body: tpl.body_md,
         template_version: tpl.version,
         club_name: CLUB_NAME,
-        is_minor: data.is_minor ?? false,
-        guardian_name: data.guardian_name || "",
-        guardian_relationship: data.guardian_relationship || "",
+        is_minor: isMinor,
+        guardian_name: isMinor ? data.emergency_contact_name : "",
+        guardian_relationship: isMinor ? data.emergency_contact_relationship : "",
         guardian_signature: data.guardian_signature || "",
         signature_image_png: sigPng,
         guardian_signature_image_png: gSigPng,
@@ -443,19 +450,24 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: maxRow } = await supabaseAdmin
+    // A failed read here would number the new template 1 and collide with the
+    // existing version 1, so the manager's save would fail on a duplicate-key
+    // message that says nothing about what actually went wrong.
+    const { data: maxRow, error: maxErr } = await supabaseAdmin
       .from("waiver_templates")
       .select("version")
       .order("version", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (maxErr) throw new Error(maxErr.message);
     const nextVersion = (maxRow?.version ?? 0) + 1;
 
     // Clear current flag on all rows
-    await supabaseAdmin
+    const { error: clearErr } = await supabaseAdmin
       .from("waiver_templates")
       .update({ is_current: false })
       .eq("is_current", true);
+    if (clearErr) throw new Error(clearErr.message);
 
     const { data: created, error } = await supabaseAdmin
       .from("waiver_templates")
@@ -477,10 +489,13 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
 export const listWaivers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: isMgr } = await context.supabase.rpc("has_role", {
+    // Fail-closed either way, but "Forbidden" for a failed role check tells a
+    // manager they lost their access when the RPC is what broke.
+    const { data: isMgr, error: rErr } = await context.supabase.rpc("has_role", {
       _user_id: context.userId,
       _role: "manager",
     });
+    if (rErr) throw new Error(rErr.message);
     if (!isMgr) throw new Error("Forbidden");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;

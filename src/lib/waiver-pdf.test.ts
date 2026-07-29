@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { inflateSync } from "node:zlib";
 import { PDFArray, PDFDocument, PDFRawStream, type PDFPage } from "pdf-lib";
-import { layoutSignatureBlock, renderWaiverPdf, type WaiverPdfData } from "./waiver-pdf";
+import {
+  layoutSignatureBlock,
+  renderWaiverPdf,
+  winAnsiSafe,
+  type WaiverPdfData,
+} from "./waiver-pdf";
 
 // A real, minimal 1x1 PNG. pdf-lib's embedPng parses the IHDR/IDAT chunks, so
 // the signature-image tests need actual PNG bytes, not an arbitrary buffer.
@@ -91,8 +96,16 @@ const base: WaiverPdfData = {
   phone: "0400 000 000",
   email: "jane@example.com",
   emergency_contact_name: "John Sample",
+  emergency_contact_relationship: "Partner",
   emergency_contact_phone: "0400 111 222",
   medical_notes: "",
+  health_answers: {
+    drugs: false,
+    blackouts: false,
+    device: false,
+    impairments: false,
+    other: false,
+  },
   acknowledgements: [{ label: "I accept the risks.", checked: true }],
   signature_name: "Jane Sample",
   signed_at: "2026-07-21T10:00:00.000Z",
@@ -159,7 +172,60 @@ describe("layoutSignatureBlock", () => {
   });
 });
 
+describe("winAnsiSafe", () => {
+  it("keeps ASCII, Latin-1 and the typographic characters the font can encode", () => {
+    expect(winAnsiSafe('Café — "quoted" 50% · ok')).toBe('Café — "quoted" 50% · ok');
+    expect(winAnsiSafe("line one\nline two")).toBe("line one\nline two");
+  });
+
+  it("drops what the standard font cannot encode", () => {
+    // A ⚠ pasted into a template heading used to throw out of drawText and fail
+    // the whole render, telling the signer their PDF could not be generated.
+    expect(winAnsiSafe("⚠️ WARNING ⚠️")).toBe(" WARNING ");
+    expect(winAnsiSafe("危険")).toBe("");
+  });
+});
+
 describe("renderWaiverPdf", () => {
+  // The health answers have no column behind them: the signed document is
+  // their only record. A template that never references them (the version live
+  // before this form shipped does not) would otherwise collect five safety
+  // answers and print them nowhere.
+  it("prints the health declaration when the body does not reference it", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        template_body: "# Terms\n\nTrain safely.",
+        health_answers: { ...base.health_answers, blackouts: true },
+        medical_notes: "Fainted once in 2024.",
+      }),
+    );
+    const { texts } = readPlacements(doc, doc.getPage(0));
+    const printed = texts.map((t) => t.text).join(" ");
+    expect(printed).toContain("Health declaration");
+    expect(printed).toContain("Yes");
+  });
+
+  it("leaves the declaration to the body when the body does reference it", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        template_body: "Blackouts: {{health_blackouts}}",
+      }),
+    );
+    const { texts } = readPlacements(doc, doc.getPage(0));
+    const printed = texts.map((t) => t.text).join(" ");
+    expect(printed).not.toContain("Health declaration");
+    expect(printed).toContain("Blackouts:");
+  });
+
+  it("renders a template body containing characters the font cannot encode", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({ ...base, template_body: "# ⚠ Warning ⚠\n\nTrain safely 🥋." }),
+    );
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
+  });
+
   it("renders a valid single-page PDF for a signed adult with a typed signature", async () => {
     const doc = await expectValidPdf(await renderWaiverPdf(base));
     expect(doc.getPageCount()).toBe(1);

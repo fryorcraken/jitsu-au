@@ -150,26 +150,27 @@ first waiver submission; filled in by manager approval. The funnel phase (lead
 / applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
 never stored.
 
-| Column                    | Type          | Null | Notes                                                                                                             |
-| ------------------------- | ------------- | ---- | ----------------------------------------------------------------------------------------------------------------- |
-| `user_id`                 | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                       |
-| `first_name`              | `text`        | yes  |                                                                                                                   |
-| `middle_name`             | `text`        | yes  |                                                                                                                   |
-| `last_name`               | `text`        | yes  |                                                                                                                   |
-| `preferred_name`          | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`). |
-| `date_of_birth`           | `date`        | yes  |                                                                                                                   |
-| `address`                 | `text`        | yes  |                                                                                                                   |
-| `phone`                   | `text`        | yes  |                                                                                                                   |
-| `uts_student_number`      | `text`        | yes  | Drives the student pricing rate.                                                                                  |
-| `emergency_contact_name`  | `text`        | yes  |                                                                                                                   |
-| `emergency_contact_phone` | `text`        | yes  |                                                                                                                   |
-| `medical_notes`           | `text`        | yes  |                                                                                                                   |
-| `is_minor`                | `boolean`     | no   | Default `false`.                                                                                                  |
-| `guardian_name`           | `text`        | yes  |                                                                                                                   |
-| `guardian_relationship`   | `text`        | yes  |                                                                                                                   |
-| `sms_whatsapp_consent`    | `boolean`     | no   | Default `false`.                                                                                                  |
-| `created_at`              | `timestamptz` | no   | Default `now()`.                                                                                                  |
-| `updated_at`              | `timestamptz` | no   | Default `now()`.                                                                                                  |
+| Column                           | Type          | Null | Notes                                                                                                             |
+| -------------------------------- | ------------- | ---- | ----------------------------------------------------------------------------------------------------------------- |
+| `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                       |
+| `first_name`                     | `text`        | yes  |                                                                                                                   |
+| `middle_name`                    | `text`        | yes  |                                                                                                                   |
+| `last_name`                      | `text`        | yes  |                                                                                                                   |
+| `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`). |
+| `date_of_birth`                  | `date`        | yes  |                                                                                                                   |
+| `address`                        | `text`        | yes  |                                                                                                                   |
+| `phone`                          | `text`        | yes  |                                                                                                                   |
+| `uts_student_number`             | `text`        | yes  | Drives the student pricing rate.                                                                                  |
+| `emergency_contact_name`         | `text`        | yes  |                                                                                                                   |
+| `emergency_contact_relationship` | `text`        | yes  | How that contact is related. For a minor this person IS the guardian who signs.                                   |
+| `emergency_contact_phone`        | `text`        | yes  |                                                                                                                   |
+| `medical_notes`                  | `text`        | yes  | Details of anything declared on the health questions.                                                             |
+| `is_minor`                       | `boolean`     | no   | Default `false`.                                                                                                  |
+| `guardian_name`                  | `text`        | yes  |                                                                                                                   |
+| `guardian_relationship`          | `text`        | yes  |                                                                                                                   |
+| `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                  |
+| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                  |
+| `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                  |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
@@ -215,38 +216,40 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 
 ## `waivers` — frozen submissions
 
-| Column                    | Type          | Null | Notes                                                                                                                                                                                                           |
-| ------------------------- | ------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                      | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                                                                                                    |
-| `user_id`                 | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The person (possibly-locked auth user) who submitted. Indexed.                                                                                                |
-| `first_name`              | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `middle_name`             | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
-| `last_name`               | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `preferred_name`          | `text`        | yes  | As submitted. Optional; fills the `{{preferred_name}}` template token (falling back to the first name).                                                                                                         |
-| `date_of_birth`           | `date`        | no   | As submitted.                                                                                                                                                                                                   |
-| `address`                 | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `phone`                   | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `email`                   | `text`        | no   | As submitted (normalized). Part of the frozen record.                                                                                                                                                           |
-| `uts_student_number`      | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
-| `sms_whatsapp_consent`    | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
-| `emergency_contact_name`  | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `emergency_contact_phone` | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `medical_notes`           | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
-| `is_minor`                | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
-| `guardian_name`           | `text`        | yes  | As submitted (required for minors by validation).                                                                                                                                                               |
-| `guardian_relationship`   | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
-| `pdf_path`                | `text`        | yes  | The signed PDF in the `waivers` Storage bucket.                                                                                                                                                                 |
-| `template_version`        | `int`         | yes  | Which `waiver_templates.version` was signed.                                                                                                                                                                    |
-| `signer_ip`               | `text`        | yes  | The signer's real IP (legal/forensic record).                                                                                                                                                                   |
-| `signer_meta`             | `jsonb`       | no   | Default `'{}'`. Signing-context evidence: request headers (user agent, language, client hints) + browser-reported timezone/screen/viewport/platform/languages (`buildSignerMeta`). Never copied to the profile. |
-| `approval_status`         | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                                                                                                                                                         |
-| `approved_at`             | `timestamptz` | yes  | NULL while pending.                                                                                                                                                                                             |
-| `approved_by`             | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager.                                                                                                                                              |
-| `signed_at`               | `timestamptz` | no   | When the waiver was signed.                                                                                                                                                                                     |
-| `created_at`              | `timestamptz` | no   | Default `now()`.                                                                                                                                                                                                |
+| Column                           | Type          | Null | Notes                                                                                                                                                                                                           |
+| -------------------------------- | ------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                             | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                                                                                                    |
+| `user_id`                        | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The person (possibly-locked auth user) who submitted. Indexed.                                                                                                |
+| `first_name`                     | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `middle_name`                    | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
+| `last_name`                      | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `preferred_name`                 | `text`        | yes  | As submitted. Optional; fills the `{{preferred_name}}` template token (falling back to the first name).                                                                                                         |
+| `date_of_birth`                  | `date`        | no   | As submitted.                                                                                                                                                                                                   |
+| `address`                        | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `phone`                          | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `email`                          | `text`        | no   | As submitted (normalized). Part of the frozen record.                                                                                                                                                           |
+| `uts_student_number`             | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
+| `sms_whatsapp_consent`           | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
+| `emergency_contact_name`         | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `emergency_contact_relationship` | `text`        | yes  | As submitted. How the contact is related; for a minor, the "relationship to minor" on the signed document.                                                                                                      |
+| `emergency_contact_phone`        | `text`        | no   | As submitted.                                                                                                                                                                                                   |
+| `medical_notes`                  | `text`        | yes  | As submitted. Details of anything answered yes on the health declaration; required by validation once any answer is yes.                                                                                        |
+| `is_minor`                       | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
+| `guardian_name`                  | `text`        | yes  | As submitted (required for minors by validation).                                                                                                                                                               |
+| `guardian_relationship`          | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
+| `pdf_path`                       | `text`        | yes  | The signed PDF in the `waivers` Storage bucket.                                                                                                                                                                 |
+| `template_version`               | `int`         | yes  | Which `waiver_templates.version` was signed.                                                                                                                                                                    |
+| `signer_ip`                      | `text`        | yes  | The signer's real IP (legal/forensic record).                                                                                                                                                                   |
+| `signer_meta`                    | `jsonb`       | no   | Default `'{}'`. Signing-context evidence: request headers (user agent, language, client hints) + browser-reported timezone/screen/viewport/platform/languages (`buildSignerMeta`). Never copied to the profile. |
+| `approval_status`                | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                                                                                                                                                         |
+| `approved_at`                    | `timestamptz` | yes  | NULL while pending.                                                                                                                                                                                             |
+| `approved_by`                    | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager.                                                                                                                                              |
+| `signed_at`                      | `timestamptz` | no   | When the waiver was signed.                                                                                                                                                                                     |
+| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                                                |
 
-**Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks
-— all captured inside the PDF only. The displayed **pending / active /
+**Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks,
+and the five yes/no **health declaration** answers — all
+captured inside the PDF only. The displayed **pending / active /
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
 person, the latest approved waiver is active.
 

@@ -79,6 +79,9 @@ export type _WaiverSubmissionColumns = RequireColumns<
   | "signer_ip"
   | "signer_meta"
   | "user_id"
+  // How the emergency contact is related; for a minor, that contact IS the
+  // guardian who signs, so this doubles as the relationship to the minor.
+  | "emergency_contact_relationship"
 >;
 
 // ---- waiver_templates: the manager-editable acknowledgements ----
@@ -90,7 +93,12 @@ export type _TemplateColumns = RequireColumns<
 // ---- profiles: the fields waiver approval copies across ----
 export type _ProfileColumns = RequireColumns<
   Tables["profiles"]["Row"],
-  "user_id" | "first_name" | "preferred_name" | "uts_student_number" | "sms_whatsapp_consent"
+  | "user_id"
+  | "first_name"
+  | "preferred_name"
+  | "uts_student_number"
+  | "sms_whatsapp_consent"
+  | "emergency_contact_relationship"
 >;
 
 // ---- interest_registrations: the consent flag the public form writes ----

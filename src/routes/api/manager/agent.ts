@@ -29,7 +29,7 @@ import {
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
-import { aggregateClubUsers, profileUserIds, LEADS_LIMIT } from "@/lib/club-users";
+import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
 import type {
   ClubUserEmail,
   ClubUserLead,
@@ -102,10 +102,14 @@ async function authenticate(request: Request): Promise<void> {
   if (!row.created_by) {
     throw new AgentError(403, "forbidden", "Token has no owner.");
   }
-  const { data: isMgr } = await db.rpc("has_role", {
+  // Still fail-closed if the check errors, but say which it was: a failed RPC
+  // reported as "no longer a manager" sends whoever is debugging it to revoke
+  // and re-mint a token that was never the problem.
+  const { data: isMgr, error: roleErr } = await db.rpc("has_role", {
     _user_id: row.created_by,
     _role: "manager",
   });
+  if (roleErr) throw new AgentError(500, "db_error", roleErr.message);
   if (!isMgr) throw new AgentError(403, "forbidden", "Token owner is no longer a manager.");
 
   // Best-effort usage stamp — never fail the request on this.
@@ -149,12 +153,12 @@ async function handleListUsers(params: unknown) {
   const pdb = db;
 
   const [
-    { data: profiles },
+    { data: profiles, error: pErr },
     { data: rows, error },
-    { data: plans },
-    { data: waivers },
-    { data: checkins },
-    leads,
+    { data: plans, error: plErr },
+    { data: waivers, error: wErr },
+    { data: checkins, error: cErr },
+    { data: leadRows, error: lErr },
   ] = await Promise.all([
     pdb
       .from("profiles")
@@ -168,17 +172,32 @@ async function handleListUsers(params: unknown) {
     pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
     // Attendance, counted per person: "who has been coming" is squarely this
     // API's use case, and it costs one read on the shared aggregation path.
-    db.from("session_checkins").select("user_id").limit(50000),
+    db.from("session_checkins").select("user_id").limit(CHECKINS_LIMIT),
     // Interest registrations are the LEAD phase of the funnel; the
     // aggregation drops any whose email already belongs to a person.
     db
       .from("interest_registrations")
       .select("email, name, phone, created_at")
       .order("created_at", { ascending: false })
-      .limit(LEADS_LIMIT)
-      .then((r) => (r.data ?? []) as ClubUserLead[]),
+      .limit(LEADS_LIMIT),
   ]);
+  // A db_error is the only honest answer to a failed read. An agent cannot see
+  // that a query fell over, so degrading to `[]` would hand it a confident
+  // answer — every applicant reported as a lead, nobody needing approval — and
+  // it would act on that.
+  if (pErr) throw new AgentError(500, "db_error", pErr.message);
   if (error) throw new AgentError(500, "db_error", error.message);
+  if (plErr) throw new AgentError(500, "db_error", plErr.message);
+  if (wErr) throw new AgentError(500, "db_error", wErr.message);
+  if (cErr) throw new AgentError(500, "db_error", cErr.message);
+  if (lErr) throw new AgentError(500, "db_error", lErr.message);
+
+  const leads = (leadRows ?? []) as ClubUserLead[];
+  if ((checkins ?? []).length >= CHECKINS_LIMIT) {
+    console.warn(
+      `[agent.list_users] session_checkins capped at ${CHECKINS_LIMIT}; counts truncated`,
+    );
+  }
   if (leads.length >= LEADS_LIMIT) {
     console.warn(
       `[agent.list_users] interest_registrations capped at ${LEADS_LIMIT}; leads truncated`,
@@ -195,10 +214,12 @@ async function handleListUsers(params: unknown) {
   let rolesRows: { user_id: string; role: string }[] = [];
   let emails: ClubUserEmail[] = [];
   if (userIds.length) {
-    const [{ data: roles }, resolved] = await Promise.all([
+    // The email RPC is the one deliberate degradation (see emailsByUserId).
+    const [{ data: roles, error: rErr }, resolved] = await Promise.all([
       db.from("user_roles").select("user_id, role").in("user_id", userIds),
       emailsByUserId(pdb, userIds),
     ]);
+    if (rErr) throw new AgentError(500, "db_error", rErr.message);
     rolesRows = (roles ?? []) as { user_id: string; role: string }[];
     emails = resolved;
   }
@@ -257,11 +278,15 @@ async function handleListInvoices(params: unknown) {
 
   let query = db.from("memberships").select("*").order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
-  const [{ data: rows, error }, { data: plans }] = await Promise.all([
+  const [{ data: rows, error }, { data: plans, error: plErr }] = await Promise.all([
     query.limit(limit ?? 200),
     db.from("membership_plans").select("*"),
   ]);
   if (error) throw new AgentError(500, "db_error", error.message);
+  // Without this, a failed plans read returns invoices whose plan name, kind and
+  // price basis are all null — an agent asked to correct one has no way to tell
+  // that from an invoice genuinely missing its plan.
+  if (plErr) throw new AgentError(500, "db_error", plErr.message);
 
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
 
@@ -274,13 +299,14 @@ async function handleListInvoices(params: unknown) {
   let emailByUser = new Map<string, string>();
   if (userIds.length) {
     const pdb = db;
-    const [{ data: profiles }, resolved] = await Promise.all([
+    const [{ data: profiles, error: prErr }, resolved] = await Promise.all([
       pdb
         .from("profiles")
         .select("user_id, first_name, middle_name, last_name, preferred_name")
         .in("user_id", userIds),
       emailsByUserId(pdb, userIds),
     ]);
+    if (prErr) throw new AgentError(500, "db_error", prErr.message);
     // The invoice listing only needs the address, not its verified state.
     emailByUser = new Map(resolved.map((e) => [e.user_id, e.email]));
     for (const p of profiles ?? []) {
@@ -319,11 +345,16 @@ async function handleEditInvoice(params: unknown) {
   if (updErr || !updated)
     throw new AgentError(500, "db_error", updErr?.message ?? "Update failed.");
 
-  const { data: plan } = await db
+  // The one read here that must NOT throw: the update above has already
+  // committed, so failing now would report a successful edit as an error and
+  // invite the agent to retry it. The plan only decorates the echoed invoice, so
+  // log and return what did happen.
+  const { data: plan, error: planErr } = await db
     .from("membership_plans")
     .select("*")
     .eq("id", updated.plan_id)
     .maybeSingle();
+  if (planErr) console.error("[agent.edit_invoice] plan lookup failed after update:", planErr);
 
   return {
     invoice: projectInvoice(

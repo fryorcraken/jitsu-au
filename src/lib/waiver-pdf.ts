@@ -1,5 +1,10 @@
 import { PDFDocument, StandardFonts, rgb, degrees, type PDFFont, type PDFPage } from "pdf-lib";
-import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "./waiver-document";
+import {
+  applyWaiverPlaceholders,
+  bodyReferences,
+  buildWaiverPlaceholders,
+} from "./waiver-document";
+import { healthDeclarationLines, healthTokens, type HealthAnswerDraft } from "./waiver-health";
 
 export type WaiverPdfData = {
   full_name: string;
@@ -12,8 +17,11 @@ export type WaiverPdfData = {
   phone: string;
   email: string;
   emergency_contact_name: string;
+  emergency_contact_relationship: string;
   emergency_contact_phone: string;
   medical_notes: string;
+  /** The five health answers, as submitted. */
+  health_answers: HealthAnswerDraft;
   /** Template-defined acknowledgements + whether each was accepted. */
   acknowledgements: { label: string; checked: boolean }[];
   signature_name: string;
@@ -33,6 +41,40 @@ export type WaiverPdfData = {
   /** If true, overlay a DRAFT watermark and skip signed-at footer */
   draft?: boolean;
 };
+
+/**
+ * The characters outside plain ASCII that WinAnsi (the encoding pdf-lib's
+ * standard fonts use) can represent: the Latin-1 range plus the typographic
+ * extras in the 0x80-0x9F slots.
+ */
+const WIN_ANSI_EXTRAS = new Set(
+  [
+    0x20ac, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152,
+    0x017d, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a,
+    0x0153, 0x017e, 0x0178,
+  ].map((code) => String.fromCharCode(code)),
+);
+
+/**
+ * Drop what the PDF's standard font cannot encode.
+ *
+ * `drawText` THROWS on an unencodable character, and the template body is
+ * manager-authored free text: one pasted emoji (a ⚠ in a warning heading, say)
+ * would fail the whole render, and the signer would be told their PDF could not
+ * be generated. Losing a decorative glyph is the better failure.
+ */
+export function winAnsiSafe(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!;
+    if (code === 0x0a || (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff)) {
+      out += ch;
+    } else if (WIN_ANSI_EXTRAS.has(ch)) {
+      out += ch;
+    }
+  }
+  return out;
+}
 
 /** Largest box a drawn signature is scaled into, in PDF points. */
 const SIGNATURE_MAX_WIDTH = 220;
@@ -125,7 +167,8 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     if (y - needed < margin) newPage();
   };
 
-  const wrap = (text: string, size: number, f: PDFFont): string[] => {
+  const wrap = (raw: string, size: number, f: PDFFont): string[] => {
+    const text = winAnsiSafe(raw);
     const lines: string[] = [];
     for (const paragraph of text.split("\n")) {
       if (paragraph === "") {
@@ -202,7 +245,7 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     if (sig) {
       page.drawImage(sig.img, { x: margin, y: layout.imageY, width: sig.w, height: sig.h });
     }
-    page.drawText(typedName, {
+    page.drawText(winAnsiSafe(typedName), {
       x: margin,
       y: layout.nameY - 4,
       size: layout.nameSize,
@@ -210,7 +253,15 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       color: sig ? muted : ink,
     });
     if (timestamp !== null) {
-      page.drawText(timestamp, { x: margin, y: layout.timestampY, size: 9, font, color: muted });
+      // Locale-formatted, so it can carry a narrow no-break space the standard
+      // font cannot encode. Every other drawn string is filtered; so is this.
+      page.drawText(winAnsiSafe(timestamp), {
+        x: margin,
+        y: layout.timestampY,
+        size: 9,
+        font,
+        color: muted,
+      });
     }
     y = layout.next;
   };
@@ -238,10 +289,13 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     phone: data.phone,
     email: data.email,
     emergencyContactName: data.emergency_contact_name,
+    emergencyContactRelationship: data.emergency_contact_relationship,
     emergencyContactPhone: data.emergency_contact_phone,
     medicalNotes: data.medical_notes,
+    healthAnswers: data.health_answers,
     signatureName: data.signature_name,
     clubName: data.club_name,
+    isMinor: data.is_minor,
     signedDate: data.draft ? "" : new Date(data.signed_at).toLocaleDateString("en-AU"),
   });
   const paragraphs = applyWaiverPlaceholders(data.template_body, placeholders).split(/\n{2,}/);
@@ -269,9 +323,26 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       drawText(block.slice(3), { size: 13, font: bold });
       continue;
     }
-    const clean = block.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\n/g, " ");
+    // Single newlines are kept: the document is a form, and its "Full name: …"
+    // style lines must stay on separate lines (wrap() splits on "\n").
+    const clean = block.replace(/\*\*(.+?)\*\*/g, "$1");
     drawText(clean, { size: 11 });
     y -= 4;
+  }
+
+  // Health declaration, but only when the template body did not print it
+  // itself. The answers have no column behind them: if the current template
+  // carries no {{health_*}} token, this section is the only record there will
+  // ever be that the signer was asked at all.
+  if (!bodyReferences(data.template_body, healthTokens)) {
+    y -= 6;
+    ensureSpace(20);
+    drawText("Health declaration", { size: 13, font: bold, color: primary });
+    for (const row of healthDeclarationLines(data.health_answers)) {
+      drawText(`${row.question} ${row.answer}`, { size: 10 });
+      y -= 2;
+    }
+    if (data.medical_notes) drawText(`Details: ${data.medical_notes}`, { size: 10 });
   }
 
   // Acknowledgements (defined on the template)
@@ -325,7 +396,13 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       ensureSpace(16);
       page.drawText(label, { x: margin, y: y - 10, size: 9, font: bold, color: muted });
       y -= 12;
-      page.drawText(value || "—", { x: margin, y: y - 11, size: 11, font, color: ink });
+      page.drawText(winAnsiSafe(value) || "—", {
+        x: margin,
+        y: y - 11,
+        size: 11,
+        font,
+        color: ink,
+      });
       y -= 16;
     }
     y -= 4;

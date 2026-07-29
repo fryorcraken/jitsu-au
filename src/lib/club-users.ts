@@ -22,6 +22,13 @@ import type { LifecycleStatus, MembershipPlanKind, MembershipStatus } from "./va
 /** Max interest-registration (lead) rows the directory pulls in one page. */
 export const LEADS_LIMIT = 2000;
 
+/**
+ * Max check-in rows read to count attendance. One row per person per class, so
+ * this is years of training for a club this size; the cap exists so a runaway
+ * read cannot take the directory down with it.
+ */
+export const CHECKINS_LIMIT = 50000;
+
 /** The profile fields the aggregation reads (one row per person). */
 export type ClubUserProfile = {
   user_id: string;

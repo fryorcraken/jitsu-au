@@ -144,8 +144,13 @@ function ReconciliationPage() {
       }
       const res = await runImport({ data: { rows } });
       await reload();
+      // A null count means the import and its matching worked but the tally
+      // afterwards did not. The list below has just reloaded, so say the count
+      // is unavailable rather than quoting a number nobody counted.
+      const unmatchedPart =
+        res.unmatched === null ? "unmatched count unavailable" : `${res.unmatched} unmatched`;
       toast.success(
-        `Imported ${res.imported} rows · ${res.matched} auto-matched · ${res.unmatched} unmatched`,
+        `Imported ${res.imported} rows · ${res.matched} auto-matched · ${unmatchedPart}`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed");

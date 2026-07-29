@@ -80,8 +80,8 @@ export const getClubUser = createServerFn({ method: "POST" })
     // manager decides an approval from, so "the query failed" must never render
     // as "there is nothing there": an errored memberships read would otherwise
     // feed an empty list to the aggregation below and show a paid-up member as a
-    // visitor with no memberships. Stricter than listClubUsers, which throws on
-    // its memberships read but still swallows the other four.
+    // visitor with no memberships. `listClubUsers` holds the same line for the
+    // directory it lists this person in.
     if (pErr) throw new Error(pErr.message);
     if (wErr) throw new Error(wErr.message);
     if (mErr) throw new Error(mErr.message);
@@ -189,6 +189,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         address: profile.address,
         uts_student_number: profile.uts_student_number,
         emergency_contact_name: profile.emergency_contact_name,
+        emergency_contact_relationship: profile.emergency_contact_relationship,
         emergency_contact_phone: profile.emergency_contact_phone,
         medical_notes: profile.medical_notes,
         is_minor: profile.is_minor,
@@ -232,6 +233,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         uts_student_number: w.uts_student_number,
         sms_whatsapp_consent: w.sms_whatsapp_consent,
         emergency_contact_name: w.emergency_contact_name,
+        emergency_contact_relationship: w.emergency_contact_relationship,
         emergency_contact_phone: w.emergency_contact_phone,
         medical_notes: w.medical_notes,
         is_minor: w.is_minor,
