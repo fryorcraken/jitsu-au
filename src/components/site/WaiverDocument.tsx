@@ -2,10 +2,11 @@ import { Fragment, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
   applyWaiverPlaceholders,
+  bodyReferences,
   buildWaiverPlaceholders,
   parseWaiverBlocks,
 } from "@/lib/waiver-document";
-import type { HealthAnswerDraft } from "@/lib/waiver-health";
+import { healthDeclarationLines, healthTokens, type HealthAnswerDraft } from "@/lib/waiver-health";
 
 /**
  * Props for {@link WaiverDocument}. These mirror the fields that
@@ -238,6 +239,30 @@ export function WaiverDocument(props: WaiverDocumentProps) {
           })}
         </div>
 
+        {/* Health declaration, when the body did not print it itself. Mirrors
+            the same fallback in the PDF (src/lib/waiver-pdf.ts) so the preview
+            shows exactly what the signed document will hold. */}
+        {!bodyReferences(templateBody, healthTokens) ? (
+          <section className="mt-7">
+            <h3 className="text-base font-bold" style={{ color: PRIMARY }}>
+              Health declaration
+            </h3>
+            <dl className="mt-2 space-y-1.5">
+              {healthDeclarationLines(healthAnswers).map((row) => (
+                <div key={row.question}>
+                  <dt className="text-sm leading-snug text-slate-700">{row.question}</dt>
+                  <dd className="text-sm font-semibold text-slate-900">{row.answer}</dd>
+                </div>
+              ))}
+            </dl>
+            {medicalNotes ? (
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">
+                Details: {medicalNotes}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
         {/* Acknowledgements (defined on the template) */}
         {acknowledgements.length > 0 ? (
           <section className="mt-7">
@@ -252,6 +277,12 @@ export function WaiverDocument(props: WaiverDocumentProps) {
               ))}
             </ul>
           </section>
+        ) : null}
+
+        {/* Initials, when the body did not print them. Same reasoning as the
+            health declaration above: no column stands behind them. */}
+        {initials && !bodyReferences(templateBody, ["initials"]) ? (
+          <p className="mt-4 text-sm font-semibold text-slate-900">Initials: {initials}</p>
         ) : null}
 
         {/* Participant signature */}

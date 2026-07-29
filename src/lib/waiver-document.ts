@@ -110,6 +110,19 @@ export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<strin
 }
 
 /**
+ * Does the body actually print any of these `{{tokens}}`?
+ *
+ * The health answers and the initials are evidence with no column behind them:
+ * the signed document is their only record. If the current template does not
+ * reference them — the version live before this form shipped does not, and a
+ * manager can always delete a token — they would be collected and then vanish.
+ * Both renderers use this to fall back to a section of their own.
+ */
+export function bodyReferences(body: string, tokens: string[]): boolean {
+  return tokens.some((token) => new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`).test(body));
+}
+
+/**
  * Replace `{{placeholder}}` tokens in a template body with the given values.
  * Unknown tokens are left intact so authoring mistakes stay visible.
  */

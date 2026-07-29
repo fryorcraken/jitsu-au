@@ -615,23 +615,29 @@ function Waiver() {
                     </span>
                   </label>
                 ))}
-                <div>
-                  <Label htmlFor="initials">Your initials</Label>
-                  <Input
-                    id="initials"
-                    required
-                    maxLength={10}
-                    value={initials}
-                    onChange={(e) => setInitials(e.target.value)}
-                    placeholder="e.g. JS"
-                    className="mt-1.5 max-w-[120px]"
-                  />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    Initial here to confirm the statements above, as you would on paper.
-                  </p>
-                </div>
               </fieldset>
             )}
+
+            {/* Outside the acknowledgements block on purpose: initials are
+                required whatever the template says, so a template with no
+                acknowledgements must not hide the only field standing between
+                the signer and a submit button that refuses them. */}
+            <fieldset className="space-y-3 border-t pt-6">
+              <legend className="text-sm font-semibold">Your initials</legend>
+              <Input
+                id="initials"
+                required
+                maxLength={10}
+                value={initials}
+                onChange={(e) => setInitials(e.target.value)}
+                placeholder="e.g. JS"
+                className="max-w-[120px]"
+                aria-label="Your initials"
+              />
+              <p className="text-xs text-muted-foreground">
+                Initial here to confirm the statements above, as you would on paper.
+              </p>
+            </fieldset>
 
             <fieldset className="space-y-3 border-t pt-6">
               <legend className="text-sm font-semibold">Signature</legend>
@@ -673,9 +679,9 @@ function Waiver() {
                     Participant is under 18, so a parent or legal guardian signs as well.
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Signing for {ecName || "the minor"}
-                    {ecRelationship ? ` (${ecRelationship})` : ""}, from the emergency contact
-                    section above. Change it there if someone else is signing.
+                    {ecName || "The contact"}
+                    {ecRelationship ? ` (${ecRelationship})` : ""} signs below, taken from the
+                    emergency contact section above. Change it there if someone else is signing.
                   </p>
                   <div>
                     <Label>Parent/guardian signature</Label>

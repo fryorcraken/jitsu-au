@@ -69,6 +69,20 @@ export function anyHealthConcern(answers: HealthAnswerDraft): boolean {
   return healthQuestions.some((q) => answers[q.id] === true);
 }
 
+/** The token names a template body uses to print the answers. */
+export const healthTokens = healthQuestionIds.map((id) => `health_${id}`);
+
+/** Every question with its answer spelled out, for a renderer that has to print
+ * the declaration itself because the template body never referenced it. */
+export function healthDeclarationLines(
+  answers: HealthAnswerDraft,
+): { question: string; answer: string }[] {
+  return healthQuestions.map((q) => ({
+    question: q.question,
+    answer: typeof answers[q.id] === "boolean" ? (answers[q.id] ? "Yes" : "No") : NOT_ANSWERED,
+  }));
+}
+
 /**
  * The `{{health_*}}` tokens a template body can use, one per question, e.g.
  * `{{health_drugs}}` -> "Yes" / "No" / "Not answered" (the last only reachable

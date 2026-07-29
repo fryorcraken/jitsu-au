@@ -1,6 +1,10 @@
 import { PDFDocument, StandardFonts, rgb, degrees, type PDFFont, type PDFPage } from "pdf-lib";
-import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "./waiver-document";
-import type { HealthAnswerDraft } from "./waiver-health";
+import {
+  applyWaiverPlaceholders,
+  bodyReferences,
+  buildWaiverPlaceholders,
+} from "./waiver-document";
+import { healthDeclarationLines, healthTokens, type HealthAnswerDraft } from "./waiver-health";
 
 export type WaiverPdfData = {
   full_name: string;
@@ -251,7 +255,15 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       color: sig ? muted : ink,
     });
     if (timestamp !== null) {
-      page.drawText(timestamp, { x: margin, y: layout.timestampY, size: 9, font, color: muted });
+      // Locale-formatted, so it can carry a narrow no-break space the standard
+      // font cannot encode. Every other drawn string is filtered; so is this.
+      page.drawText(winAnsiSafe(timestamp), {
+        x: margin,
+        y: layout.timestampY,
+        size: 9,
+        font,
+        color: muted,
+      });
     }
     y = layout.next;
   };
@@ -321,6 +333,21 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     y -= 4;
   }
 
+  // Health declaration, but only when the template body did not print it
+  // itself. The answers have no column behind them: if the current template
+  // carries no {{health_*}} token, this section is the only record there will
+  // ever be that the signer was asked at all.
+  if (!bodyReferences(data.template_body, healthTokens)) {
+    y -= 6;
+    ensureSpace(20);
+    drawText("Health declaration", { size: 13, font: bold, color: primary });
+    for (const row of healthDeclarationLines(data.health_answers)) {
+      drawText(`${row.question} ${row.answer}`, { size: 10 });
+      y -= 2;
+    }
+    if (data.medical_notes) drawText(`Details: ${data.medical_notes}`, { size: 10 });
+  }
+
   // Acknowledgements (defined on the template)
   if (data.acknowledgements.length > 0) {
     y -= 6;
@@ -345,6 +372,13 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       }
       y -= Math.max(16, lines.length * 12 + 4);
     }
+  }
+
+  // Same reasoning as the health declaration: the initials are evidence with
+  // no column behind them, so print them when the body did not.
+  if (data.initials && !bodyReferences(data.template_body, ["initials"])) {
+    y -= 4;
+    drawText(`Initials: ${data.initials}`, { size: 10, font: bold });
   }
 
   // Signature
