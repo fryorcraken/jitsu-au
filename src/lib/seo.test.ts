@@ -31,6 +31,27 @@ describe("isProductionHost", () => {
     expect(isProductionHost("www.jitsu.au")).toBe(true);
   });
 
+  // These serve the same site. Missing one here would tell crawlers to drop it
+  // from the index entirely, so each is pinned by name.
+  it("accepts the club's other domains, apex and www alike", () => {
+    for (const host of [
+      "utsjitsu.com.au",
+      "www.utsjitsu.com.au",
+      "sydneyjitsu.com.au",
+      "www.sydneyjitsu.com.au",
+    ]) {
+      expect(isProductionHost(host), `${host} would be told to stay out`).toBe(true);
+    }
+  });
+
+  it("serves the real rules, not a blanket disallow, on the other domains", () => {
+    const robots = buildRobotsTxt("utsjitsu.com.au");
+    expect(robots).toContain("Allow: /");
+    // The sitemap pointer stays absolute so every domain funnels crawlers to
+    // the canonical one.
+    expect(robots).toContain(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`);
+  });
+
   it("ignores case and a port", () => {
     expect(isProductionHost("JITSU.AU:443")).toBe(true);
   });
@@ -201,28 +222,89 @@ describe("club details match the site", () => {
 // The sitemap is only useful if it keeps matching the site. These read the
 // route files directly so adding a public page without listing it (or leaving a
 // noindex page listed) fails here rather than silently costing search traffic.
+/** URL a route file serves, from its directory prefix and basename-without-extension. */
+function routePath(prefix: string, base: string): string {
+  // "index" resolves to whatever its directory is, and a dot inside a route
+  // filename is a path separator ("manager.waivers" -> "/manager/waivers").
+  if (base === "index") return prefix || "/";
+  return `${prefix}/${base.replace(/\./g, "/")}`;
+}
+
+/**
+ * Every `.tsx` route file under `dir`, walked recursively.
+ *
+ * The walk has to descend: a page filed under a subdirectory later (a blog,
+ * say) would otherwise slip past the sitemap check silently, which is the one
+ * thing this suite exists to prevent.
+ */
+function collectRouteFiles(dir: string, prefix = ""): { path: string; source: string }[] {
+  const found: { path: string; source: string }[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // `__root.tsx` is the app shell and `_`-prefixed names are layout or
+    // pathless routes (`_authenticated`). Neither is an indexable page.
+    if (entry.name.startsWith("_")) continue;
+    if (entry.isDirectory()) {
+      found.push(...collectRouteFiles(join(dir, entry.name), `${prefix}/${entry.name}`));
+      continue;
+    }
+    if (!entry.name.endsWith(".tsx")) continue;
+    found.push({
+      path: routePath(prefix, entry.name.replace(/\.tsx$/, "")),
+      source: readFileSync(join(dir, entry.name), "utf8"),
+    });
+  }
+  return found;
+}
+
+describe("routePath", () => {
+  it("maps a top-level file to its own path", () => {
+    expect(routePath("", "first-class")).toBe("/first-class");
+  });
+
+  it("maps index files to their directory", () => {
+    expect(routePath("", "index")).toBe("/");
+    expect(routePath("/blog", "index")).toBe("/blog");
+  });
+
+  it("nests a file under its directory", () => {
+    expect(routePath("/blog", "my-first-class")).toBe("/blog/my-first-class");
+  });
+
+  it("reads a dot in the filename as a path separator", () => {
+    expect(routePath("", "manager.waivers")).toBe("/manager/waivers");
+  });
+});
+
 describe("sitemap coverage of the route files", () => {
   const routesDir = join(import.meta.dirname, "..", "routes");
+  const routeFiles = collectRouteFiles(routesDir);
 
-  /** Route files that render an indexable public page, as `{ path, source }`. */
-  const publicRouteFiles = readdirSync(routesDir)
-    // `__root.tsx` is the app shell and `_`-prefixed files are layout/pathless
-    // routes, not pages.
-    .filter((name) => name.endsWith(".tsx") && !name.startsWith("_"))
-    .map((name) => ({ name, source: readFileSync(join(routesDir, name), "utf8") }))
+  /** Route files that render a page with its own canonical. */
+  const canonicalRoutes = routeFiles
     .filter(({ source }) => source.includes('rel: "canonical"'))
-    .map(({ name, source }) => ({
-      // "index.tsx" -> "/", "first-class.tsx" -> "/first-class".
-      path: name === "index.tsx" ? "/" : `/${name.replace(/\.tsx$/, "")}`,
+    .map(({ path, source }) => ({
+      path,
       noindex: /name: "robots", content: "noindex"/.test(source),
     }));
 
   it("finds the route files (guards against the scan itself breaking)", () => {
-    expect(publicRouteFiles.length).toBeGreaterThan(5);
+    expect(canonicalRoutes.length).toBeGreaterThan(5);
+  });
+
+  it("descends into subdirectories rather than only reading the top level", () => {
+    // Nothing public lives in a subdirectory today, so prove the walk reaches
+    // one: the auth-gated pages are the deepest .tsx files in the tree.
+    const nested = collectRouteFiles(routesDir, "").length;
+    const topLevelOnly = readdirSync(routesDir).filter((n) => n.endsWith(".tsx")).length;
+    const authenticated = collectRouteFiles(join(routesDir, "_authenticated"), "/x");
+    expect(authenticated.length).toBeGreaterThan(5);
+    // The top level is all there is right now, minus `__root.tsx`, which the
+    // walk skips. If that stops being true the walk must have found more.
+    expect(nested).toBeGreaterThanOrEqual(topLevelOnly - 1);
   });
 
   it("lists every indexable route and no noindex one", () => {
-    const expected = publicRouteFiles
+    const expected = canonicalRoutes
       .filter((r) => !r.noindex)
       .map((r) => r.path)
       .sort();
@@ -231,9 +313,9 @@ describe("sitemap coverage of the route files", () => {
 
   it("matches each page's own canonical link", () => {
     for (const page of PUBLIC_PAGES) {
-      const name = page.path === "/" ? "index.tsx" : `${page.path.slice(1)}.tsx`;
-      const source = readFileSync(join(routesDir, name), "utf8");
-      expect(source).toContain(`rel: "canonical", href: "${canonicalUrl(page.path)}"`);
+      const file = routeFiles.find((r) => r.path === page.path);
+      expect(file, `no route file serves ${page.path}`).toBeDefined();
+      expect(file!.source).toContain(`rel: "canonical", href: "${canonicalUrl(page.path)}"`);
     }
   });
 

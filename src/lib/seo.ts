@@ -20,8 +20,26 @@ export const SITE_ORIGIN = "https://jitsu.au";
  * Cloudflare *.workers.dev URL, a branch deploy) is the same content on a
  * different hostname, which is exactly the duplicate-content case search
  * engines penalise. Those hosts get a "stay out" robots.txt instead.
+ *
+ * The club's other domains are listed here on purpose, and are NOT blocked.
+ * They serve the same site, and every page canonicals to jitsu.au, so letting
+ * crawlers in is what consolidates the ranking signal onto jitsu.au. Blocking
+ * them would stop a crawler ever reading that canonical and leave bare,
+ * contentless URLs eligible for the index instead.
+ *
+ * This list is the site's off switch: a host that is missing here is told to
+ * stay out entirely. `www.` variants are included whether or not they are
+ * wired up today, because listing a host that never receives a request costs
+ * nothing, while omitting one that does costs the site its search traffic.
  */
-export const PRODUCTION_HOSTS = ["jitsu.au", "www.jitsu.au"];
+export const PRODUCTION_HOSTS = [
+  "jitsu.au",
+  "www.jitsu.au",
+  "utsjitsu.com.au",
+  "www.utsjitsu.com.au",
+  "sydneyjitsu.com.au",
+  "www.sydneyjitsu.com.au",
+];
 
 /**
  * The image social platforms show when someone shares a link to the site.
