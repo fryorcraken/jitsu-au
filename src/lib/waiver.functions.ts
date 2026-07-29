@@ -170,23 +170,6 @@ function serverSupabase() {
   });
 }
 
-/**
- * Manager gate for a server function. Fails closed either way, but a broken
- * role RPC surfaces its own message: "Forbidden" would tell a manager they lost
- * access when what actually broke was the check.
- */
-async function requireManager(context: {
-  supabase: SupabaseClient<Database>;
-  userId: string;
-}): Promise<void> {
-  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
-    _user_id: context.userId,
-    _role: "manager",
-  });
-  if (error) throw new Error(error.message);
-  if (!isMgr) throw new Error("Forbidden");
-}
-
 // ---- Current template (public) ----
 export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handler(async () => {
   const supabase = serverSupabase();
