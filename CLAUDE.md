@@ -87,6 +87,8 @@ src/
     lovable/email/auth/   Lovable auth-email webhook + preview routes
     index.tsx, about.tsx, classes.tsx, pricing.tsx, instructors.tsx,
     faq.tsx, contact.tsx, register-interest.tsx, waiver.tsx, auth.tsx, ...
+    robots[.]txt.ts         /robots.txt (escaped dot; see the SEO section)
+    sitemap[.]xml.ts        /sitemap.xml
     routeTree.gen.ts      AUTO-GENERATED route tree — never edit by hand
   components/
     ui/                   shadcn/ui primitives (generated; avoid hand-editing)
@@ -347,13 +349,44 @@ hand-produce a public-npm lock.
   `@/lib/utils`. Reuse `components/ui` primitives and the `SiteLayout`
   (`SiteHeader`/`SiteFooter`) shell for pages. Theme tokens (`bg-background`,
   `text-muted-foreground`, etc.) come from `styles.css`.
-- Every public page sets SEO `head()` meta (title/description/og/canonical);
-  manager pages set `robots: noindex`. Match the existing pattern when adding pages.
+- **SEO:** every public page sets its own `head()` meta (title/description/og)
+  **and its own `rel="canonical"`**; manager and other private pages set
+  `robots: noindex`. Match the existing pattern when adding pages, and see the
+  SEO section below for the two things that are easy to get wrong.
 - **Copy voice:** user-facing website copy must read like a person wrote it, not
   an AI. **No em dashes (`—`) in prose** — rewrite with a full stop, comma,
   colon, or "and"/"but". See the "Writing style for website copy" section in
   `AGENTS.md` for the full rules and allowed exceptions (numeric en-dash ranges,
   empty-value placeholder glyphs).
+
+## SEO
+
+`src/lib/seo.ts` holds everything crawlers are told: the canonical origin, the
+list of indexable pages, the robots rules, and the club's structured data. It is
+served by two routes whose filenames escape the dot so the router does not read
+it as a path separator (`robots[.]txt.ts` → `/robots.txt`,
+`sitemap[.]xml.ts` → `/sitemap.xml`).
+
+**Adding a public page? Add it to `PUBLIC_PAGES` in `src/lib/seo.ts`.**
+`src/lib/seo.test.ts` reads the route files and fails if an indexable page is
+missing from the sitemap (or a `noindex` one is listed), so this is enforced,
+not just documented.
+
+Two non-obvious rules:
+
+- **Never put a `rel="canonical"` in `__root.tsx`.** TanStack Router _replaces_
+  a parent's meta tag when a child declares the same name/property, but it
+  _appends_ `<link>`s. A site-wide canonical therefore shipped a second,
+  competing canonical on every subpage, which is the same as having none.
+- **`robots.txt` blocks only what a crawler can never usefully read** (`/api/`,
+  `/lovable/`, and the client-rendered auth-gated areas). Public pages that must
+  stay out of the index (`/waiver`, `/thank-you`, the auth screens) are
+  server-rendered with `robots: noindex` instead: a crawler has to be allowed to
+  fetch a page in order to see that tag, so blocking it in robots.txt would
+  leave the URL eligible for a bare, contentless listing.
+
+Non-production hosts (Lovable previews, branch deploys) are served a blanket
+`Disallow: /`, so a preview never competes with `jitsu.au` in search results.
 
 ## Environment variables
 
