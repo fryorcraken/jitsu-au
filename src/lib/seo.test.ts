@@ -1,0 +1,239 @@
+import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  SITE_ORIGIN,
+  PUBLIC_PAGES,
+  CRAWLER_DISALLOW,
+  CLUB_PHONE_E164,
+  CLUB_SOCIAL_URLS,
+  SOCIAL_IMAGE,
+  buildClubJsonLd,
+  buildRobotsTxt,
+  buildSitemapXml,
+  canonicalUrl,
+  isProductionHost,
+} from "./seo";
+
+describe("canonicalUrl", () => {
+  it("keeps the trailing slash on the home page", () => {
+    expect(canonicalUrl("/")).toBe("https://jitsu.au/");
+  });
+
+  it("appends other paths to the origin without a trailing slash", () => {
+    expect(canonicalUrl("/about")).toBe("https://jitsu.au/about");
+  });
+});
+
+describe("isProductionHost", () => {
+  it("accepts the apex and www hosts", () => {
+    expect(isProductionHost("jitsu.au")).toBe(true);
+    expect(isProductionHost("www.jitsu.au")).toBe(true);
+  });
+
+  it("ignores case and a port", () => {
+    expect(isProductionHost("JITSU.AU:443")).toBe(true);
+  });
+
+  it("rejects preview hosts, look-alikes and a missing host", () => {
+    expect(isProductionHost("preview--utsjitsu.lovable.app")).toBe(false);
+    expect(isProductionHost("localhost:5173")).toBe(false);
+    // A suffix match would wrongly accept this one.
+    expect(isProductionHost("jitsu.au.example.com")).toBe(false);
+    expect(isProductionHost(null)).toBe(false);
+    expect(isProductionHost("")).toBe(false);
+  });
+});
+
+describe("buildRobotsTxt", () => {
+  const robots = buildRobotsTxt("jitsu.au");
+
+  it("allows crawling and points at the sitemap", () => {
+    expect(robots).toContain("User-agent: *");
+    expect(robots).toContain("Allow: /");
+    expect(robots).toContain(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`);
+  });
+
+  it("disallows every private area", () => {
+    for (const path of CRAWLER_DISALLOW) {
+      expect(robots).toContain(`Disallow: ${path}`);
+    }
+  });
+
+  it("never blocks a page that is in the sitemap", () => {
+    for (const page of PUBLIC_PAGES) {
+      for (const blocked of CRAWLER_DISALLOW) {
+        expect(page.path.startsWith(blocked)).toBe(false);
+      }
+    }
+  });
+
+  it("never blocks the noindex pages, which must be crawled to be seen as noindex", () => {
+    for (const path of ["/waiver", "/thank-you", "/auth", "/reset-password", "/update-password"]) {
+      expect(robots).not.toContain(`Disallow: ${path}`);
+    }
+  });
+
+  it("keeps preview deploys out of search results entirely", () => {
+    const preview = buildRobotsTxt("preview--utsjitsu.lovable.app");
+    expect(preview).toContain("Disallow: /");
+    expect(preview).not.toContain("Allow: /");
+    // A preview must not advertise the production sitemap either.
+    expect(preview).not.toContain("Sitemap:");
+  });
+
+  it("ends with a newline", () => {
+    expect(robots.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("buildSitemapXml", () => {
+  const xml = buildSitemapXml();
+
+  it("declares the sitemap namespace", () => {
+    expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+    expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
+    expect(xml.trimEnd().endsWith("</urlset>")).toBe(true);
+  });
+
+  it("emits one absolute <loc> per public page", () => {
+    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+    expect(locs).toEqual(PUBLIC_PAGES.map((p) => canonicalUrl(p.path)));
+    for (const loc of locs) expect(loc.startsWith(`${SITE_ORIGIN}/`)).toBe(true);
+  });
+
+  it("lists no page twice", () => {
+    const paths = PUBLIC_PAGES.map((p) => p.path);
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("writes priorities in the 0.0 - 1.0 range", () => {
+    const priorities = [...xml.matchAll(/<priority>([^<]+)<\/priority>/g)].map((m) => Number(m[1]));
+    expect(priorities).toHaveLength(PUBLIC_PAGES.length);
+    for (const p of priorities) {
+      expect(p).toBeGreaterThan(0);
+      expect(p).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("escapes XML-significant characters in a path", () => {
+    const xmlWithEntities = buildSitemapXml([
+      { path: "/search?q=gi&size=a2", changefreq: "monthly", priority: 0.5 },
+    ]);
+    expect(xmlWithEntities).toContain("<loc>https://jitsu.au/search?q=gi&amp;size=a2</loc>");
+    expect(xmlWithEntities).not.toContain("&size");
+  });
+});
+
+describe("SOCIAL_IMAGE", () => {
+  it("is an absolute URL, which is the only form the social crawlers accept", () => {
+    expect(SOCIAL_IMAGE.url).toBe(`${SITE_ORIGIN}/logo.png`);
+  });
+
+  it("is big enough for a large summary card", () => {
+    // Twitter's floor for summary_large_image is 300x157.
+    expect(SOCIAL_IMAGE.width).toBeGreaterThanOrEqual(300);
+    expect(SOCIAL_IMAGE.height).toBeGreaterThanOrEqual(157);
+  });
+
+  it("is served from the public directory, so the file actually exists", () => {
+    const file = join(import.meta.dirname, "..", "..", "public", "logo.png");
+    expect(() => readFileSync(file)).not.toThrow();
+  });
+});
+
+describe("buildClubJsonLd", () => {
+  const club = buildClubJsonLd() as Record<string, unknown>;
+
+  it("declares a sports club at the canonical URL", () => {
+    expect(club["@context"]).toBe("https://schema.org");
+    expect(club["@type"]).toBe("SportsClub");
+    expect(club.url).toBe(`${SITE_ORIGIN}/`);
+    expect(club.name).toBe("UTS Jitsu");
+  });
+
+  it("carries a postal address a search engine can place on a map", () => {
+    const address = club.address as Record<string, string>;
+    expect(address.addressLocality).toBe("Ultimo");
+    expect(address.addressRegion).toBe("NSW");
+    expect(address.postalCode).toBe("2007");
+    expect(address.addressCountry).toBe("AU");
+  });
+
+  it("serialises to valid JSON for the ld+json script tag", () => {
+    expect(() => JSON.parse(JSON.stringify(club))).not.toThrow();
+  });
+
+  it("uses absolute URLs for the logo and image", () => {
+    expect(String(club.logo).startsWith(SITE_ORIGIN)).toBe(true);
+    expect(String(club.image).startsWith(SITE_ORIGIN)).toBe(true);
+  });
+});
+
+// Structured data that contradicts the visible page is worse than none, so the
+// contact details are checked against what the site actually renders.
+describe("club details match the site", () => {
+  const srcDir = join(import.meta.dirname, "..");
+  const footer = readFileSync(join(srcDir, "components", "site", "SiteFooter.tsx"), "utf8");
+  const contact = readFileSync(join(srcDir, "routes", "contact.tsx"), "utf8");
+
+  it("uses the phone number the footer and contact page dial", () => {
+    // "+61493631759" -> the local "0493631759" both pages link with tel:.
+    const local = CLUB_PHONE_E164.replace(/^\+61/, "0");
+    expect(footer).toContain(`tel:${local}`);
+    expect(contact).toContain(`tel:${local}`);
+  });
+
+  it("lists the social profiles the footer links to", () => {
+    for (const url of CLUB_SOCIAL_URLS) {
+      expect(footer).toContain(url);
+    }
+  });
+});
+
+// The sitemap is only useful if it keeps matching the site. These read the
+// route files directly so adding a public page without listing it (or leaving a
+// noindex page listed) fails here rather than silently costing search traffic.
+describe("sitemap coverage of the route files", () => {
+  const routesDir = join(import.meta.dirname, "..", "routes");
+
+  /** Route files that render an indexable public page, as `{ path, source }`. */
+  const publicRouteFiles = readdirSync(routesDir)
+    // `__root.tsx` is the app shell and `_`-prefixed files are layout/pathless
+    // routes, not pages.
+    .filter((name) => name.endsWith(".tsx") && !name.startsWith("_"))
+    .map((name) => ({ name, source: readFileSync(join(routesDir, name), "utf8") }))
+    .filter(({ source }) => source.includes('rel: "canonical"'))
+    .map(({ name, source }) => ({
+      // "index.tsx" -> "/", "first-class.tsx" -> "/first-class".
+      path: name === "index.tsx" ? "/" : `/${name.replace(/\.tsx$/, "")}`,
+      noindex: /name: "robots", content: "noindex"/.test(source),
+    }));
+
+  it("finds the route files (guards against the scan itself breaking)", () => {
+    expect(publicRouteFiles.length).toBeGreaterThan(5);
+  });
+
+  it("lists every indexable route and no noindex one", () => {
+    const expected = publicRouteFiles
+      .filter((r) => !r.noindex)
+      .map((r) => r.path)
+      .sort();
+    expect(PUBLIC_PAGES.map((p) => p.path).sort()).toEqual(expected);
+  });
+
+  it("matches each page's own canonical link", () => {
+    for (const page of PUBLIC_PAGES) {
+      const name = page.path === "/" ? "index.tsx" : `${page.path.slice(1)}.tsx`;
+      const source = readFileSync(join(routesDir, name), "utf8");
+      expect(source).toContain(`rel: "canonical", href: "${canonicalUrl(page.path)}"`);
+    }
+  });
+
+  // The root route's <link>s are appended to every page's, not replaced by
+  // them, so a canonical there put a second, competing one on every subpage.
+  it("keeps the canonical off the root route, so no page ships two", () => {
+    const root = readFileSync(join(routesDir, "__root.tsx"), "utf8");
+    expect(root).not.toContain('rel: "canonical"');
+  });
+});

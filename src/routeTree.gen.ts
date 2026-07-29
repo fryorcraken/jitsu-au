@@ -22,6 +22,8 @@ import { Route as InstructorsRouteImport } from './routes/instructors'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as RegisterInterestRouteImport } from './routes/register-interest'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ThankYouRouteImport } from './routes/thank-you'
 import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as WaiverRouteImport } from './routes/waiver'
@@ -105,6 +107,16 @@ const RegisterInterestRoute = RegisterInterestRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ThankYouRoute = ThankYouRouteImport.update({
@@ -231,6 +243,8 @@ export interface FileRoutesByFullPath {
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
@@ -265,6 +279,8 @@ export interface FileRoutesByTo {
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
@@ -301,6 +317,8 @@ export interface FileRoutesById {
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
@@ -337,6 +355,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sitemap.xml'
     | '/thank-you'
     | '/update-password'
     | '/waiver'
@@ -371,6 +391,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sitemap.xml'
     | '/thank-you'
     | '/update-password'
     | '/waiver'
@@ -406,6 +428,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sitemap.xml'
     | '/thank-you'
     | '/update-password'
     | '/waiver'
@@ -442,6 +466,8 @@ export interface RootRouteChildren {
   PricingRoute: typeof PricingRoute
   RegisterInterestRoute: typeof RegisterInterestRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  RobotsDottxtRoute: typeof RobotsDottxtRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ThankYouRoute: typeof ThankYouRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
@@ -543,6 +569,20 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/thank-you': {
@@ -738,6 +778,8 @@ const rootRouteChildren: RootRouteChildren = {
   PricingRoute: PricingRoute,
   RegisterInterestRoute: RegisterInterestRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  RobotsDottxtRoute: RobotsDottxtRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ThankYouRoute: ThankYouRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
