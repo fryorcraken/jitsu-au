@@ -29,13 +29,16 @@ export function SignInForms({ redirect }: { redirect?: string }) {
         >
           Login with password
         </Button>
-        {/* The address stays in state, so someone who mistyped it lands back on
-            the form with it prefilled and fixes the typo in one edit. */}
+        {/* Clear the address on the way back: this is for signing in as someone
+            else, so an empty field is a fresh start rather than an edit. */}
         <p className="text-center text-sm">
           <button
             type="button"
             className="text-primary hover:underline"
-            onClick={() => setSent(false)}
+            onClick={() => {
+              setEmail("");
+              setSent(false);
+            }}
           >
             Use a different email
           </button>

@@ -53,18 +53,17 @@ describe("SignInForms", () => {
     expect(screen.getByText("member@example.com")).toBeInTheDocument();
   });
 
-  it("goes back to the email form, prefilled, from the sent screen", async () => {
+  it("goes back to an empty email form from the sent screen", async () => {
     render(<SignInForms />);
-    const user = await requestLink("typo@example.con");
+    const user = await requestLink("someone.else@example.com");
 
     await user.click(screen.getByRole("button", { name: /use a different email/i }));
 
     const field = screen.getByLabelText(/email/i);
-    expect(field).toHaveValue("typo@example.con");
+    expect(field).toHaveValue("");
     expect(screen.queryByText(/we've sent a sign-in link/i)).not.toBeInTheDocument();
 
-    // The corrected address is the one the second link goes to.
-    await user.clear(field);
+    // The newly typed address is the one the second link goes to.
     await user.type(field, "member@example.com");
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
     expect(signInWithOtp).toHaveBeenLastCalledWith(
