@@ -91,8 +91,85 @@ export const AGENT_MANIFEST: {
         { name: "status", required: false, description: "pending | cancelled | expired." },
       ],
     },
+    {
+      name: "file_waiver",
+      method: "POST",
+      summary:
+        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active.",
+      params: [
+        { name: "first_name", required: true, description: "As written on the form." },
+        { name: "middle_name", required: false, description: "As written on the form." },
+        { name: "last_name", required: true, description: "As written on the form." },
+        {
+          name: "preferred_name",
+          required: false,
+          description: "What they go by, if different from first_name.",
+        },
+        { name: "date_of_birth", required: true, description: "YYYY-MM-DD." },
+        { name: "address", required: true, description: "As written on the form." },
+        { name: "phone", required: true, description: "As written on the form." },
+        {
+          name: "email",
+          required: true,
+          description:
+            "Identifies the person: an address the club already knows attaches to that person, a new one creates one. A typo makes a second person.",
+        },
+        {
+          name: "uts_student_number",
+          required: false,
+          description: "Non-empty unlocks the student rate.",
+        },
+        {
+          name: "sms_whatsapp_consent",
+          required: false,
+          description: "Whether they ticked SMS/WhatsApp consent on the form. Default false.",
+        },
+        { name: "emergency_contact_name", required: true, description: "As written on the form." },
+        {
+          name: "emergency_contact_relationship",
+          required: false,
+          description:
+            "Optional for an adult; REQUIRED if the participant was under 18 on signed_on, since that contact is the guardian who signed.",
+        },
+        {
+          name: "emergency_contact_phone",
+          required: true,
+          description: "As written on the form.",
+        },
+        {
+          name: "medical_notes",
+          required: false,
+          description: "Details of anything answered yes on the health declaration, if noted.",
+        },
+        {
+          name: "signed_on",
+          required: true,
+          description:
+            "YYYY-MM-DD, the date on the paper (not today). Determines minority and list ordering, not which waiver is active.",
+        },
+        {
+          name: "template_version",
+          required: false,
+          description: "Which form version this is, if known. Null/omit for an unplaceable form.",
+        },
+        {
+          name: "scan",
+          required: true,
+          description:
+            "Array of { name, type, data }, 1-20 files, type is application/pdf | image/png | image/jpeg, data is raw base64 (no data: prefix). Joined into one PDF in array order. 10 MB decoded total across all files in this call.",
+        },
+      ],
+    },
   ],
 };
+
+/**
+ * The `uploaded_by` recorded on a waiver filed through the break-glass
+ * `MANAGER_AGENT_API_KEY` fallback, which authenticates without resolving to
+ * any real auth user. Not a UUID on purpose: `filePaperWaiver` only attempts
+ * to look up an owner's email for values that look like one.
+ */
+export const AGENT_ENV_KEY_UPLOADER = "manager-agent-env-key";
 
 /** A dispatch/auth failure carrying the HTTP status + a stable machine code. */
 export class AgentError extends Error {

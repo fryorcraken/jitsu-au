@@ -21,7 +21,7 @@ import {
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "@/lib/validation";
-import type { SignerMeta } from "@/lib/validation";
+import type { PaperWaiverUploadInput, SignerMeta } from "@/lib/validation";
 import {
   missingRequiredAcks,
   parseTemplateAcks,
@@ -577,144 +577,166 @@ export const listWaivers = createServerFn({ method: "GET" })
 //   - email anybody. Nobody just pressed submit: the signer is not sitting at a
 //     screen waiting for their copy, and the managers are the ones filing it.
 //     The confirmation emails would be answering a question no one asked.
+//
+// The actual work is `filePaperWaiver`, a plain function rather than part of
+// this createServerFn: the manager agent HTTP API (src/routes/api/manager/agent.ts,
+// action `file_waiver`) authenticates by API token, not a Supabase session, so
+// it cannot go through requireSupabaseAuth. Both entry points call the same
+// function after their own auth check, so a scripted migration and a manager's
+// own upload produce identical waivers.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function filePaperWaiver(
+  admin: SupabaseClient<Database>,
+  data: PaperWaiverUploadInput,
+  uploadedByUserId: string,
+): Promise<{ id: string; user_id: string }> {
+  if (isFutureSigningDate(data.signed_on, new Date().toISOString())) {
+    throw new Error("The signing date is in the future. Check the date on the form.");
+  }
+
+  const { buildScanPdf, decodeBase64 } = await import("./waiver-scan");
+
+  const email = normalizeEmail(data.email);
+
+  // Build the PDF BEFORE creating anything: an unreadable scan is the likely
+  // failure here, and it must not leave behind a waiver row with no document
+  // or a person record for an email nobody has actually filed a form for.
+  let pdf: Uint8Array;
+  try {
+    pdf = await buildScanPdf(
+      data.scan.map((file) => ({
+        name: file.name,
+        type: file.type,
+        bytes: decodeBase64(file.data),
+      })),
+    );
+  } catch (e) {
+    console.error("[filePaperWaiver] could not build the scan PDF:", e);
+    throw new Error(
+      e instanceof Error
+        ? e.message
+        : "We couldn't read that scan. Try a PDF, or photograph each page again.",
+    );
+  }
+
+  // Same person resolution as an online submission: an existing email attaches
+  // to that person untouched, a new one becomes a locked applicant. Never
+  // verified by this route — a manager holding a piece of paper is not proof
+  // that anyone can read the mailbox written on it.
+  const userId = await resolvePersonId(admin, {
+    email,
+    emailProven: false,
+    seed: {
+      first_name: data.first_name,
+      middle_name: data.middle_name || null,
+      last_name: data.last_name,
+      preferred_name: data.preferred_name || null,
+      phone: data.phone || null,
+    },
+  });
+
+  const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
+  // The date written on the form, not the moment it was filed: this is what
+  // the club's records show as the signing date, and what the lists order by.
+  // Midnight UTC keeps the club's own timezone (UTC+10/+11) reading back the
+  // same calendar date.
+  const signed_at = `${data.signed_on}T00:00:00.000Z`;
+
+  // Who filed it, when, and from what. This is the paper equivalent of the IP
+  // and browser context an online submission carries: the provenance of the
+  // record, which for a scan is the manager who vouched for it.
+  const signer_meta: SignerMeta = {
+    source: PAPER_WAIVER_SOURCE,
+    uploaded_at: new Date().toISOString(),
+    uploaded_by: uploadedByUserId,
+    scan_files: data.scan.map((f) => f.name),
+  };
+  // Not every caller resolves to a real auth user: the manager agent API's
+  // break-glass env-key fallback (docs: AGENTS.md) has no owner to look up, so
+  // skip the lookup rather than log a spurious not-found error every call.
+  if (UUID_RE.test(uploadedByUserId)) {
+    try {
+      const { data: manager } = await admin.auth.admin.getUserById(uploadedByUserId);
+      if (manager.user?.email) signer_meta.uploaded_by_email = manager.user.email;
+    } catch (e) {
+      console.error("[filePaperWaiver] could not resolve the uploading manager:", e);
+    }
+  }
+
+  const { data: inserted, error: insErr } = await admin
+    .from("waivers")
+    .insert({
+      user_id: userId,
+      first_name: data.first_name,
+      middle_name: data.middle_name || null,
+      last_name: data.last_name,
+      preferred_name: data.preferred_name || null,
+      date_of_birth: data.date_of_birth,
+      address: data.address,
+      phone: data.phone,
+      email,
+      uts_student_number: data.uts_student_number?.trim() || null,
+      sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+      emergency_contact_name: data.emergency_contact_name,
+      emergency_contact_relationship: data.emergency_contact_relationship || null,
+      emergency_contact_phone: data.emergency_contact_phone,
+      medical_notes: data.medical_notes || null,
+      is_minor: isMinor,
+      // As on the online form, a minor's emergency contact IS the guardian
+      // who signed, so the guardian columns come from that one block.
+      guardian_name: isMinor ? data.emergency_contact_name : null,
+      guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
+      signed_at,
+      template_version: data.template_version ?? null,
+      // No IP: nobody connected from anywhere to sign this.
+      signer_ip: null,
+      signer_meta,
+    })
+    .select("id")
+    .single();
+  if (insErr || !inserted) throw new Error(insErr?.message || "Could not save the waiver.");
+
+  const path = `${inserted.id}.pdf`;
+  const { error: upErr } = await admin.storage
+    .from(BUCKET)
+    .upload(path, pdf, { contentType: "application/pdf", upsert: true });
+  if (upErr) {
+    // A paper waiver whose scan did not store is worth nothing: there is no
+    // generated PDF to fall back on, and no screen anywhere to attach one to
+    // afterwards. Take the empty row back out so the manager can simply file
+    // it again, rather than leaving a waiver that looks real and has no
+    // document behind it. If even the cleanup fails, say so plainly instead
+    // of pointing at a repair path that does not exist.
+    console.error("[filePaperWaiver] scan upload failed:", upErr);
+    const { error: cleanupErr } = await admin.from("waivers").delete().eq("id", inserted.id);
+    if (cleanupErr) {
+      console.error("[filePaperWaiver] could not remove the empty waiver row:", cleanupErr);
+      throw new Error(
+        "The scan could not be stored, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
+      );
+    }
+    throw new Error("The scan could not be stored. Nothing was filed, so please try again.");
+  }
+
+  const { error: pathErr } = await admin
+    .from("waivers")
+    .update({ pdf_path: path })
+    .eq("id", inserted.id);
+  if (pathErr) throw new Error(pathErr.message);
+
+  return { id: inserted.id, user_id: userId };
+}
+
+// ---- Manager: upload a scanned paper waiver, from the web form ----
 export const uploadPaperWaiver = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => paperWaiverUploadSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
-
-    if (isFutureSigningDate(data.signed_on, new Date().toISOString())) {
-      throw new Error("The signing date is in the future. Check the date on the form.");
-    }
-
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin;
-    const { buildScanPdf, decodeBase64 } = await import("./waiver-scan");
-
-    const email = normalizeEmail(data.email);
-
-    // Build the PDF BEFORE creating anything: an unreadable scan is the likely
-    // failure here, and it must not leave behind a waiver row with no document
-    // or a person record for an email nobody has actually filed a form for.
-    let pdf: Uint8Array;
-    try {
-      pdf = await buildScanPdf(
-        data.scan.map((file) => ({
-          name: file.name,
-          type: file.type,
-          bytes: decodeBase64(file.data),
-        })),
-      );
-    } catch (e) {
-      console.error("[uploadPaperWaiver] could not build the scan PDF:", e);
-      throw new Error(
-        e instanceof Error
-          ? e.message
-          : "We couldn't read that scan. Try a PDF, or photograph each page again.",
-      );
-    }
-
-    // Same person resolution as an online submission: an existing email attaches
-    // to that person untouched, a new one becomes a locked applicant. Never
-    // verified by this route — a manager holding a piece of paper is not proof
-    // that anyone can read the mailbox written on it.
-    const userId = await resolvePersonId(admin, {
-      email,
-      emailProven: false,
-      seed: {
-        first_name: data.first_name,
-        middle_name: data.middle_name || null,
-        last_name: data.last_name,
-        preferred_name: data.preferred_name || null,
-        phone: data.phone || null,
-      },
-    });
-
-    const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
-    // The date written on the form, not the moment it was filed: this is what
-    // the club's records show as the signing date, and what the lists order by.
-    // Midnight UTC keeps the club's own timezone (UTC+10/+11) reading back the
-    // same calendar date.
-    const signed_at = `${data.signed_on}T00:00:00.000Z`;
-
-    // Who filed it, when, and from what. This is the paper equivalent of the IP
-    // and browser context an online submission carries: the provenance of the
-    // record, which for a scan is the manager who vouched for it.
-    const signer_meta: SignerMeta = {
-      source: PAPER_WAIVER_SOURCE,
-      uploaded_at: new Date().toISOString(),
-      uploaded_by: context.userId,
-      scan_files: data.scan.map((f) => f.name),
-    };
-    try {
-      const { data: manager } = await admin.auth.admin.getUserById(context.userId);
-      if (manager.user?.email) signer_meta.uploaded_by_email = manager.user.email;
-    } catch (e) {
-      console.error("[uploadPaperWaiver] could not resolve the uploading manager:", e);
-    }
-
-    const { data: inserted, error: insErr } = await admin
-      .from("waivers")
-      .insert({
-        user_id: userId,
-        first_name: data.first_name,
-        middle_name: data.middle_name || null,
-        last_name: data.last_name,
-        preferred_name: data.preferred_name || null,
-        date_of_birth: data.date_of_birth,
-        address: data.address,
-        phone: data.phone,
-        email,
-        uts_student_number: data.uts_student_number?.trim() || null,
-        sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
-        emergency_contact_name: data.emergency_contact_name,
-        emergency_contact_relationship: data.emergency_contact_relationship || null,
-        emergency_contact_phone: data.emergency_contact_phone,
-        medical_notes: data.medical_notes || null,
-        is_minor: isMinor,
-        // As on the online form, a minor's emergency contact IS the guardian
-        // who signed, so the guardian columns come from that one block.
-        guardian_name: isMinor ? data.emergency_contact_name : null,
-        guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
-        signed_at,
-        template_version: data.template_version ?? null,
-        // No IP: nobody connected from anywhere to sign this.
-        signer_ip: null,
-        signer_meta,
-      })
-      .select("id")
-      .single();
-    if (insErr || !inserted) throw new Error(insErr?.message || "Could not save the waiver.");
-
-    const path = `${inserted.id}.pdf`;
-    const { error: upErr } = await admin.storage
-      .from(BUCKET)
-      .upload(path, pdf, { contentType: "application/pdf", upsert: true });
-    if (upErr) {
-      // A paper waiver whose scan did not store is worth nothing: there is no
-      // generated PDF to fall back on, and no screen anywhere to attach one to
-      // afterwards. Take the empty row back out so the manager can simply file
-      // it again, rather than leaving a waiver that looks real and has no
-      // document behind it. If even the cleanup fails, say so plainly instead
-      // of pointing at a repair path that does not exist.
-      console.error("[uploadPaperWaiver] scan upload failed:", upErr);
-      const { error: cleanupErr } = await admin.from("waivers").delete().eq("id", inserted.id);
-      if (cleanupErr) {
-        console.error("[uploadPaperWaiver] could not remove the empty waiver row:", cleanupErr);
-        throw new Error(
-          "The scan could not be stored, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
-        );
-      }
-      throw new Error("The scan could not be stored. Nothing was filed, so please try again.");
-    }
-
-    const { error: pathErr } = await admin
-      .from("waivers")
-      .update({ pdf_path: path })
-      .eq("id", inserted.id);
-    if (pathErr) throw new Error(pathErr.message);
-
-    return { ok: true as const, id: inserted.id, user_id: userId };
+    const { id, user_id } = await filePaperWaiver(supabaseAdmin, data, context.userId);
+    return { ok: true as const, id, user_id };
   });
 
 // ---- Manager: approve / unapprove a waiver submission ----

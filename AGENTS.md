@@ -75,6 +75,17 @@ driven directly by the bundled skill.
   - `edit_invoice` — correct an invoice's detail fields. Cannot set `status` to
     `active` (activation grants the member role + emails the member, so it runs
     through bank reconciliation, not a raw edit).
+  - `file_waiver` — file a scanned paper waiver (migration / bulk filing from
+    paper records). Same params as the manager's paper-upload form
+    (`paperWaiverUploadSchema`); dispatches to `filePaperWaiver` in
+    `src/lib/waiver.functions.ts`, the same function the web form calls, so an
+    agent-filed waiver and a manager's own upload are identical. Always lands
+    **pending**: it never approves, emails anyone, or marks the email verified
+    — approving is a separate, deliberate manager action because it promotes
+    the record, unlocks the login, emails a sign-in link and assigns the free
+    trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is the
+    token's owner, or the `AGENT_ENV_KEY_UPLOADER` sentinel for the break-glass
+    env key, which has no owner to resolve.
 - **Agent glue:** `.claude/skills/uts-manager-agent/` — a skill (with a `curl`
   helper) that documents how to call the endpoint. An MCP wrapper is equally
   simple: one tool per manifest action, forwarding to this endpoint.

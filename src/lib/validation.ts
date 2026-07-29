@@ -880,7 +880,12 @@ export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 // manager-agent.ts and the skill at .claude/skills/uts-manager-agent/.
 
 /** Actions the manager agent endpoint accepts. Order mirrors AGENT_MANIFEST. */
-export const managerAgentActions = ["list_users", "list_invoices", "edit_invoice"] as const;
+export const managerAgentActions = [
+  "list_users",
+  "list_invoices",
+  "edit_invoice",
+  "file_waiver",
+] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
 /** Payment methods an invoice can carry (mirrors the memberships CHECK). */

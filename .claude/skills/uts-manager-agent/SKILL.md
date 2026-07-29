@@ -2,9 +2,10 @@
 name: uts-manager-agent
 description: >-
   Perform UTS Jitsu manager actions (list members and their status, edit an
-  invoice's details) against the live site via its manager agent HTTP API. Use
-  when a club manager asks an agent to look up members/invoices or correct
-  invoice details (price, payment reference, notes, status). Requires the
+  invoice's details, file a scanned paper waiver) against the live site via its
+  manager agent HTTP API. Use when a club manager asks an agent to look up
+  members/invoices, correct invoice details (price, payment reference, notes,
+  status), or migrate/bulk-file waivers the club holds on paper. Requires the
   UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
 ---
 
@@ -92,9 +93,70 @@ scripts/agent.sh edit_invoice '{"id":"<uuid>","price_cents":24500,"notes":"stude
 > the member role and emails the member, so it must go through bank
 > reconciliation / the manager UI — not a raw invoice edit.
 
+### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
+
+The agent equivalent of a manager using **Upload a paper waiver** on the site.
+Files one waiver per call: attaches to the person with the given email (or
+creates a locked applicant if that email is new to the club), stores the scan
+as the waiver's PDF, and lands the row **pending**.
+
+`params` mirror the web form exactly — see the live manifest for the full list,
+but the shape is: `first_name`, `middle_name` (optional), `last_name`,
+`preferred_name` (optional), `date_of_birth` (`YYYY-MM-DD`), `address`, `phone`,
+`email`, `uts_student_number` (optional), `sms_whatsapp_consent` (optional,
+default false), `emergency_contact_name`, `emergency_contact_relationship`
+(required if the participant was under 18 on `signed_on`, else optional),
+`emergency_contact_phone`, `medical_notes` (optional), `signed_on`
+(`YYYY-MM-DD` — the date on the paper, not today), `template_version` (optional
+int, or omit/null for a form you can't place), and `scan`: an array of
+`{ "name", "type", "data" }` (1–20 files, `type` is `application/pdf` |
+`image/png` | `image/jpeg`, `data` is raw base64 with **no** `data:` prefix),
+joined into one PDF in array order. 10 MB decoded total per call.
+
+```bash
+scripts/agent.sh file_waiver '{
+  "first_name": "Ada", "last_name": "Lovelace",
+  "date_of_birth": "1990-12-10", "address": "1 Broadway, Ultimo NSW",
+  "phone": "0400000000", "email": "ada@example.com",
+  "emergency_contact_name": "Charles Babbage",
+  "emergency_contact_phone": "0400000001",
+  "signed_on": "2024-03-02",
+  "scan": [{"name": "waiver.pdf", "type": "application/pdf", "data": "<base64>"}]
+}'
+```
+
+> **Read before running a migration batch:**
+>
+> - **It never approves, emails, or verifies.** Filing is not approving:
+>   approval is what promotes the record onto the person's profile, unlocks
+>   their login, **emails them a sign-in link**, and **assigns the free trial**.
+>   `file_waiver` does none of that — every row lands pending, exactly like a
+>   manager's own upload. Approving hundreds of migrated people would email all
+>   of them and hand out that many trials; that decision belongs to the manager
+>   running the migration, made deliberately (through the site, one at a time or
+>   with an explicit follow-up they've asked for), never as a side effect of
+>   filing.
+> - **A waiver's `email` is its identity key.** A typo creates a second person
+>   instead of attaching to the right one — check each address against source
+>   data before sending it, especially in a scripted loop.
+> - **A PDF is mandatory.** If a source record has no scan/document behind it,
+>   this action is not the right tool for it — that's a data-only record, not a
+>   waiver.
+> - **Filing order does not decide who looks active.** A person's active waiver
+>   is whichever one was most recently _approved_, not most recently signed.
+>   Filing (or later approving) a backlog out of chronological order can leave
+>   an older submission looking like the current one — flag this to the manager
+>   rather than approving on their behalf.
+
 ## Guidance
 
 - Confirm the target invoice with the manager (member name + amount) before an
   `edit_invoice` — it writes to live records.
+- Before a `file_waiver` batch, confirm scope with the manager: how many
+  records, whether any should be flagged for review rather than filed
+  automatically, and that leaving everything pending (not approved) is what
+  they want.
 - On `ok: false`, read `error.code`/`error.message`; `invalid_params` responses
-  include an `issues` array pointing at the offending field.
+  include an `issues` array pointing at the offending field. `file_waiver`
+  failures (an unreadable scan, a storage hiccup) come back as
+  `file_waiver_failed` with a plain-English message.
