@@ -180,13 +180,23 @@ async function activateMembershipRow(
 
   // Auto-grant the `member` role on a paid activation (idempotent — the table
   // has UNIQUE(user_id, role)).
+  // Logged rather than thrown: the membership is already active by this point,
+  // so failing here would report a paid-up activation as an error and invite a
+  // retry that resets the dates and re-sends the confirmation email. A missing
+  // role is recoverable by hand; the log is what makes it findable.
   if (membership.user_id && isPaid) {
-    await admin
+    const { error: roleErr } = await admin
       .from("user_roles")
       .upsert(
         { user_id: membership.user_id, role: "member" },
         { onConflict: "user_id,role", ignoreDuplicates: true },
       );
+    if (roleErr) {
+      console.error(
+        `[activateMembershipRow] could not grant the member role to ${membership.user_id}:`,
+        roleErr,
+      );
+    }
   }
 
   // Confirmation email (best-effort — never fail activation on a send error).
@@ -231,28 +241,39 @@ async function activateMembershipRow(
 export async function assignTrialMembership(userId: string): Promise<void> {
   const admin = await adminClient();
 
-  const { data: trialPlans } = await admin.from("membership_plans").select("*").eq("kind", "trial");
+  // Every read throws rather than returning early: "the query failed" and "this
+  // club has no trial plan" / "they already had one" are three different things,
+  // and only the last two mean skip. The caller logs and retries on the next
+  // approval, so a throw here costs a retry — a swallowed error would either
+  // deny someone their trial or hand them a second one.
+  const { data: trialPlans, error: tpErr } = await admin
+    .from("membership_plans")
+    .select("*")
+    .eq("kind", "trial");
+  if (tpErr) throw new Error(tpErr.message);
   const planIds = (trialPlans ?? []).map((p) => p.id);
   if (!planIds.length) return;
 
   // One free trial per person, ever (mirrors startMembership's rule).
-  const { data: existing } = await admin
+  const { data: existing, error: exErr } = await admin
     .from("memberships")
     .select("id")
     .eq("user_id", userId)
     .in("plan_id", planIds)
     .limit(1)
     .maybeSingle();
+  if (exErr) throw new Error(exErr.message);
   if (existing) return;
 
   const plan = (trialPlans ?? []).find((p) => p.is_active);
   if (!plan) return;
 
-  const { data: who } = await admin
+  const { data: who, error: whoErr } = await admin
     .from("profiles")
     .select("first_name, last_name")
     .eq("user_id", userId)
     .maybeSingle();
+  if (whoErr) throw new Error(whoErr.message);
   const surname = who?.last_name || who?.first_name || "";
 
   const { data: inserted, error } = await admin
@@ -301,26 +322,40 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
 
-    const [{ data: rows, error }, { data: plans }, { data: profile }, { data: waiverRows }] =
-      await Promise.all([
-        admin
-          .from("memberships")
-          .select("*")
-          .eq("user_id", context.userId)
-          .order("created_at", { ascending: false }),
-        admin.from("membership_plans").select("*"),
-        // The student number lives on the profile; used to prefill the student
-        // rate on the membership page.
-        admin
-          .from("profiles")
-          .select("uts_student_number")
-          .eq("user_id", context.userId)
-          .maybeSingle(),
-        // Waiver states feed the lifecycle: approved => visitor+, pending-only
-        // => applicant.
-        admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
-      ]);
+    const [
+      { data: rows, error },
+      { data: plans, error: plErr },
+      { data: profile, error: prErr },
+      { data: waiverRows, error: wErr },
+    ] = await Promise.all([
+      admin
+        .from("memberships")
+        .select("*")
+        .eq("user_id", context.userId)
+        .order("created_at", { ascending: false }),
+      admin.from("membership_plans").select("*"),
+      // The student number lives on the profile; used to prefill the student
+      // rate on the membership page.
+      admin
+        .from("profiles")
+        .select("uts_student_number")
+        .eq("user_id", context.userId)
+        .maybeSingle(),
+      // Waiver states feed the lifecycle: approved => visitor+, pending-only
+      // => applicant.
+      admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
+    ]);
+    // An errored waivers read would tell an approved member they are still a
+    // lead on their own membership page; an errored plans read would price every
+    // plan as if it had no kind. Neither may degrade to an empty list.
     if (error) throw new Error(error.message);
+    if (plErr) throw new Error(plErr.message);
+    if (wErr) throw new Error(wErr.message);
+    // The profile is the exception: it supplies nothing but a prefill for the
+    // student-number box, which the member can type themselves. Failing the
+    // whole page over an empty prefill would cost them more than the prefill is
+    // worth, so log it and render.
+    if (prErr) console.error("[getMyMemberships] student-number prefill lookup failed:", prErr);
 
     const hasApprovedWaiver = (waiverRows ?? []).some((w) => w.approval_status === "approved");
     const hasPendingWaiver = (waiverRows ?? []).length > 0 && !hasApprovedWaiver;
@@ -360,14 +395,21 @@ export const startMembership = createServerFn({ method: "POST" })
     if (!plan) throw new Error("That plan is not available.");
 
     // One free trial per member.
+    //
+    // The read throws rather than degrading, for the same reason the guard in
+    // assignTrialMembership does: a failed query and "they have not had a trial"
+    // are different answers, and only the second one may hand out a trial. This
+    // is the member-driven half of that pair, so a swallowed error here is the
+    // easier one to hit — the member can keep pressing until a read fails.
     if (plan.kind === "trial") {
-      const { data: existing } = await admin
+      const { data: existing, error: exErr } = await admin
         .from("memberships")
         .select("id")
         .eq("user_id", context.userId)
         .eq("plan_id", plan.id)
         .limit(1)
         .maybeSingle();
+      if (exErr) throw new Error(exErr.message);
       if (existing) throw new Error("You've already started your free trial.");
     }
 
@@ -381,11 +423,17 @@ export const startMembership = createServerFn({ method: "POST" })
     // Resolve the member's name once: the surname drives the human-friendly
     // reference, and the full name is used in emails. Falls back gracefully when
     // the member has not signed a waiver yet.
-    const { data: who } = await admin
+    // Throws rather than falling back to an empty surname: this reference is
+    // written onto the invoice and is what the member quotes on their transfer
+    // and the manager reads off the bank statement. A degraded read would mint a
+    // permanently nameless reference on a real invoice, where retrying costs the
+    // member one more click.
+    const { data: who, error: whoErr } = await admin
       .from("profiles")
       .select("first_name, middle_name, last_name, preferred_name")
       .eq("user_id", context.userId)
       .maybeSingle();
+    if (whoErr) throw new Error(whoErr.message);
     const surname = who?.last_name || who?.first_name || "";
 
     // Per-session plans carry a session date (defaults to today) so each drop-in
@@ -405,11 +453,15 @@ export const startMembership = createServerFn({ method: "POST" })
       .eq("user_id", context.userId)
       .eq("plan_id", plan.id)
       .eq("status", "pending");
-    const { data: existingPending } = await (
+    // A failed read here defeats exactly what the reuse is for: it would report
+    // no pending enrollment, insert a duplicate invoice and re-send the payment
+    // email for one the member already has.
+    const { data: existingPending, error: pendErr } = await (
       sessionDate ? pendingBase.eq("session_date", sessionDate) : pendingBase
     )
       .limit(1)
       .maybeSingle();
+    if (pendErr) throw new Error(pendErr.message);
 
     let inserted: MembershipRow;
     if (existingPending) {
@@ -558,11 +610,15 @@ export const listMemberships = createServerFn({ method: "GET" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
 
-    const [{ data: rows, error }, { data: plans }] = await Promise.all([
+    const [{ data: rows, error }, { data: plans, error: plErr }] = await Promise.all([
       admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(500),
       admin.from("membership_plans").select("*"),
     ]);
     if (error) throw new Error(error.message);
+    // An errored plans read would render every invoice with no plan name and no
+    // kind, which reads as "these invoices are for nothing" rather than as a
+    // failure. Same for the profiles read below and the member names.
+    if (plErr) throw new Error(plErr.message);
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
 
     // Resolve each member's display name from their profile and their email
@@ -571,13 +627,14 @@ export const listMemberships = createServerFn({ method: "GET" })
     const nameByUser = new Map<string, string>();
     let emailByUser = new Map<string, string>();
     if (userIds.length) {
-      const [{ data: profiles }, emails] = await Promise.all([
+      const [{ data: profiles, error: prErr }, emails] = await Promise.all([
         admin
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
         emailsByUserId(admin, userIds),
       ]);
+      if (prErr) throw new Error(prErr.message);
       emailByUser = emails;
       for (const p of profiles ?? []) {
         nameByUser.set(p.user_id, nameWithPreferred(p));
@@ -601,28 +658,42 @@ export const listClubUsers = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { aggregateClubUsers, profileUserIds, LEADS_LIMIT } = await import("@/lib/club-users");
 
-    const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
-      await Promise.all([
-        admin
-          .from("profiles")
-          .select(
-            "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
-          )
-          .limit(5000),
-        admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
-        admin.from("membership_plans").select("*"),
-        // ALL waivers: approved => visitor+, pending-only => applicant.
-        admin.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
-        // Interest registrations are the LEAD phase of the funnel; the
-        // aggregation drops any whose email already belongs to a person.
-        admin
-          .from("interest_registrations")
-          .select("email, name, phone, created_at")
-          .order("created_at", { ascending: false })
-          .limit(LEADS_LIMIT)
-          .then((r) => (r.data ?? []) as ClubUserLead[]),
-      ]);
-    if (error) throw new Error(error.message);
+    const [
+      { data: profiles, error: pErr },
+      { data: rows, error: mErr },
+      { data: plans, error: plErr },
+      { data: waivers, error: wErr },
+      { data: leadRows, error: lErr },
+    ] = await Promise.all([
+      admin
+        .from("profiles")
+        .select(
+          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
+        )
+        .limit(5000),
+      admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+      admin.from("membership_plans").select("*"),
+      // ALL waivers: approved => visitor+, pending-only => applicant.
+      admin.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+      // Interest registrations are the LEAD phase of the funnel; the
+      // aggregation drops any whose email already belongs to a person.
+      admin
+        .from("interest_registrations")
+        .select("email, name, phone, created_at")
+        .order("created_at", { ascending: false })
+        .limit(LEADS_LIMIT),
+    ]);
+    // Every read here fails the whole screen. A failed query must never reach
+    // the aggregation as an empty list: an errored waivers read would drop every
+    // applicant and visitor in the club to `lead` with "Waiver: none", and a
+    // manager filtering for who needs approving would see no work waiting.
+    if (pErr) throw new Error(pErr.message);
+    if (mErr) throw new Error(mErr.message);
+    if (plErr) throw new Error(plErr.message);
+    if (wErr) throw new Error(wErr.message);
+    if (lErr) throw new Error(lErr.message);
+
+    const leads = (leadRows ?? []) as ClubUserLead[];
 
     // Surface the cap rather than silently truncating the funnel's lead list.
     if (leads.length >= LEADS_LIMIT) {
@@ -640,10 +711,13 @@ export const listClubUsers = createServerFn({ method: "GET" })
     let rolesRows: { user_id: string; role: string }[] = [];
     let emails: ClubUserEmail[] = [];
     if (userIds.length) {
-      const [{ data: roles }, resolved] = await Promise.all([
+      // The email RPC is the one deliberate degradation (see clubUserEmailRows);
+      // a failed roles read must not silently strip everyone's manager pill.
+      const [{ data: roles, error: rErr }, resolved] = await Promise.all([
         admin.from("user_roles").select("user_id, role").in("user_id", userIds),
         clubUserEmailRows(admin, userIds),
       ]);
+      if (rErr) throw new Error(rErr.message);
       rolesRows = (roles ?? []) as { user_id: string; role: string }[];
       emails = resolved;
     }
@@ -690,11 +764,15 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
       if (membership.status === "active") {
         return { ok: true as const, id: data.id, status: data.status };
       }
-      const { data: plan } = await admin
+      // Both outcomes stop the activation, but they are not the same problem:
+      // "Plan not found." for a broken query sends a manager to the plan
+      // catalogue to look for a plan that is sitting right there.
+      const { data: plan, error: planErr } = await admin
         .from("membership_plans")
         .select("*")
         .eq("id", membership.plan_id)
         .maybeSingle();
+      if (planErr) throw new Error(planErr.message);
       if (!plan) throw new Error("Plan not found.");
       await activateMembershipRow(admin, membership, plan, {
         paymentMethod: membership.payment_method || "manual",
@@ -787,11 +865,15 @@ export const matchTransaction = createServerFn({ method: "POST" })
     if (mErr) throw new Error(mErr.message);
     if (!membership) throw new Error("Membership not found.");
 
-    const { data: plan } = await admin
+    // Same distinction as setMembershipStatus: a manager matching a payment by
+    // hand needs to know the difference between a missing plan and a read that
+    // fell over.
+    const { data: plan, error: planErr } = await admin
       .from("membership_plans")
       .select("*")
       .eq("id", membership.plan_id)
       .maybeSingle();
+    if (planErr) throw new Error(planErr.message);
     if (!plan) throw new Error("Plan not found.");
 
     if (membership.status !== "active") {
@@ -812,21 +894,39 @@ export const matchTransaction = createServerFn({ method: "POST" })
 
 /**
  * Match every unmatched bank transaction against pending memberships by unique
- * reference + amount, activating each match. Returns a small summary.
+ * reference + amount, activating each match. Returns a small summary, where a
+ * null `unmatched` means the trailing count could not be read (see below).
+ *
+ * Exported for its tests: it takes its client as a parameter, which the server
+ * functions wrapping it do not, so this is the one part of the import path a
+ * unit test can drive.
  */
-async function reconcileUnmatched(
+export async function reconcileUnmatched(
   admin: MembershipClient,
-): Promise<{ matched: number; unmatched: number }> {
-  const { data: txns } = await admin
+): Promise<{ matched: number; unmatched: number | null }> {
+  // Reconciliation reports a count back to the manager, so a failed read must
+  // not read as "nothing to match": an errored pending-memberships query would
+  // otherwise answer an import with "0 matched" while every payment sat there
+  // waiting, and the manager would go chasing members who had already paid.
+  const { data: txns, error: txErr } = await admin
     .from("bank_transactions")
     .select("*")
     .eq("status", "unmatched");
-  const { data: pending } = await admin.from("memberships").select("*").eq("status", "pending");
+  if (txErr) throw new Error(txErr.message);
+  const { data: pending, error: pdErr } = await admin
+    .from("memberships")
+    .select("*")
+    .eq("status", "pending");
+  if (pdErr) throw new Error(pdErr.message);
   const pendingList = (pending ?? []) as MembershipRow[];
   const planIds = [...new Set(pendingList.map((m) => m.plan_id))];
   const planById = new Map<string, MembershipPlanRow>();
   if (planIds.length) {
-    const { data: plans } = await admin.from("membership_plans").select("*").in("id", planIds);
+    const { data: plans, error: plErr } = await admin
+      .from("membership_plans")
+      .select("*")
+      .in("id", planIds);
+    if (plErr) throw new Error(plErr.message);
     for (const p of (plans ?? []) as MembershipPlanRow[]) planById.set(p.id, p);
   }
 
@@ -868,9 +968,19 @@ async function reconcileUnmatched(
     matched++;
   }
 
-  const { count } = await admin
+  // The one read here that does not throw. Every match above has already
+  // committed, so failing now would report a reconciliation that worked as a
+  // failed import, and would throw away the matched count with it. `null` says
+  // "we could not count", which is neither the false all-clear of reporting 0
+  // nor a lie about what happened. The manager's screen reloads the unmatched
+  // list straight after either way, so the real answer arrives regardless.
+  const { count, error: cErr } = await admin
     .from("bank_transactions")
     .select("id", { count: "exact", head: true })
     .eq("status", "unmatched");
+  if (cErr) {
+    console.error("[reconcile] could not count unmatched transactions after reconciling:", cErr);
+    return { matched, unmatched: null };
+  }
   return { matched, unmatched: count ?? 0 };
 }

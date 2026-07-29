@@ -68,8 +68,8 @@ export const getClubUser = createServerFn({ method: "POST" })
     // manager decides an approval from, so "the query failed" must never render
     // as "there is nothing there": an errored memberships read would otherwise
     // feed an empty list to the aggregation below and show a paid-up member as a
-    // visitor with no memberships. Stricter than listClubUsers, which throws on
-    // its memberships read but still swallows the other four.
+    // visitor with no memberships. `listClubUsers` holds the same line for the
+    // directory it lists this person in.
     if (pErr) throw new Error(pErr.message);
     if (wErr) throw new Error(wErr.message);
     if (mErr) throw new Error(mErr.message);
