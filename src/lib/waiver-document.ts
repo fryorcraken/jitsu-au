@@ -3,6 +3,7 @@
  * `src/components/site/WaiverDocument.tsx`). Kept server-import-free and
  * side-effect-free so they stay unit-testable.
  */
+import { buildHealthPlaceholders, type HealthAnswerDraft } from "./waiver-health";
 
 export type WaiverBlock =
   | { kind: "hr" }
@@ -13,8 +14,12 @@ export type WaiverBlock =
 /**
  * Parse the template body the same way the PDF renderer does
  * (`src/lib/waiver-pdf.ts`): split on blank lines, then recognise `---`, `# `,
- * `## `, and plain paragraphs. Single newlines inside a paragraph collapse to
- * spaces, matching the PDF.
+ * `## `, and plain paragraphs.
+ *
+ * A single newline inside a paragraph is kept as a line break (the PDF wraps
+ * each line separately, and the HTML renders the text pre-line). The document
+ * is a form: "Full name: ..." and "Date of birth: ..." on consecutive lines
+ * must stay on consecutive lines, not run together into one sentence.
  */
 export function parseWaiverBlocks(body: string): WaiverBlock[] {
   const blocks: WaiverBlock[] = [];
@@ -28,7 +33,7 @@ export function parseWaiverBlocks(body: string): WaiverBlock[] {
     } else if (block.startsWith("## ")) {
       blocks.push({ kind: "h2", text: block.slice(3) });
     } else {
-      blocks.push({ kind: "p", text: block.replace(/\n/g, " ") });
+      blocks.push({ kind: "p", text: block });
     }
   }
   return blocks;
@@ -46,13 +51,23 @@ export type WaiverPlaceholderInput = {
   phone: string;
   email: string;
   emergencyContactName: string;
+  /** How the emergency contact is related; the "relationship to minor" too. */
+  emergencyContactRelationship: string;
   emergencyContactPhone: string;
   medicalNotes: string;
+  /** The five health answers; unanswered ones render as "Not answered". */
+  healthAnswers: HealthAnswerDraft;
   signatureName: string;
   clubName: string;
+  /** Under 18: ticks the minor box and fills the guardian tokens. */
+  isMinor: boolean;
   /** Pre-formatted signing date for `{{signed_date}}` (empty string if unsigned). */
   signedDate: string;
 };
+
+/** Ticked / unticked box, in characters the PDF's standard font can encode. */
+const TICKED = "[X]";
+const UNTICKED = "[  ]";
 
 /**
  * Map waiver field values to the `{{token}}` names used in template bodies.
@@ -73,12 +88,35 @@ export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<strin
     phone: v.phone,
     email: v.email,
     emergency_contact_name: v.emergencyContactName,
+    emergency_contact_relationship: v.emergencyContactRelationship,
     emergency_contact_phone: v.emergencyContactPhone,
     medical_notes: v.medicalNotes || "None provided",
+    ...buildHealthPlaceholders(v.healthAnswers),
+    // The participant-type boxes at the top of the form: exactly one is ticked,
+    // from the date of birth the signer gave.
+    adult_checkbox: v.isMinor ? UNTICKED : TICKED,
+    minor_checkbox: v.isMinor ? TICKED : UNTICKED,
+    // For a minor the guardian IS the emergency contact, so the guardian tokens
+    // read off that one block rather than a second copy of the same person.
+    guardian_name: v.isMinor ? v.emergencyContactName : "N/A",
+    guardian_relationship: v.isMinor ? v.emergencyContactRelationship : "N/A",
     signature_name: v.signatureName || v.fullName,
     signed_date: v.signedDate,
     club_name: v.clubName,
   };
+}
+
+/**
+ * Does the body actually print any of these `{{tokens}}`?
+ *
+ * The health answers are evidence with no column behind them: the signed
+ * document is their only record. If the current template does not reference
+ * them — the version live before this form shipped does not, and a manager can
+ * always delete a token — they would be collected and then vanish. Both
+ * renderers use this to fall back to a section of their own.
+ */
+export function bodyReferences(body: string, tokens: string[]): boolean {
+  return tokens.some((token) => new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`).test(body));
 }
 
 /**

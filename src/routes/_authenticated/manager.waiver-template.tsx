@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
 import { getCurrentWaiverTemplate, saveWaiverTemplate } from "@/lib/waiver.functions";
 import type { AcknowledgementDef } from "@/lib/validation";
+import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
@@ -25,9 +26,15 @@ const PLACEHOLDERS = [
   "address",
   "phone",
   "email",
+  "adult_checkbox",
+  "minor_checkbox",
   "emergency_contact_name",
+  "emergency_contact_relationship",
   "emergency_contact_phone",
+  ...healthQuestions.map((q) => `health_${q.id}`),
   "medical_notes",
+  "guardian_name",
+  "guardian_relationship",
   "signature_name",
   "signed_date",
   "club_name",
@@ -40,9 +47,21 @@ const SAMPLE: Record<string, string> = {
   address: "123 Broadway, Ultimo NSW 2007",
   phone: "0400 000 000",
   email: "jane@example.com",
+  adult_checkbox: "[X]",
+  minor_checkbox: "[  ]",
   emergency_contact_name: "John Sample",
+  emergency_contact_relationship: "Partner",
   emergency_contact_phone: "0400 111 222",
-  medical_notes: "None",
+  ...buildHealthPlaceholders({
+    drugs: false,
+    blackouts: false,
+    device: false,
+    impairments: true,
+    other: false,
+  }),
+  medical_notes: "Weak left ankle, taped for training.",
+  guardian_name: "N/A",
+  guardian_relationship: "N/A",
   signature_name: "Jane Sample",
   signed_date: new Date().toLocaleDateString("en-AU"),
   club_name: "UTS Jitsu",

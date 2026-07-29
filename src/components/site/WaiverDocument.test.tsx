@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { WaiverDocument, type WaiverDocumentProps } from "./WaiverDocument";
 import {
   applyWaiverPlaceholders,
+  bodyReferences,
   buildWaiverPlaceholders,
   parseWaiverBlocks,
 } from "@/lib/waiver-document";
@@ -16,8 +17,16 @@ const base: WaiverDocumentProps = {
   phone: "0400 000 000",
   email: "jane@example.com",
   emergencyContactName: "John Sample",
+  emergencyContactRelationship: "Partner",
   emergencyContactPhone: "0400 111 222",
   medicalNotes: "",
+  healthAnswers: {
+    drugs: false,
+    blackouts: false,
+    device: false,
+    impairments: false,
+    other: false,
+  },
   acknowledgements: [],
   signatureName: "Jane Sample",
   templateTitle: "Training Waiver",
@@ -32,12 +41,21 @@ const base: WaiverDocumentProps = {
 };
 
 describe("parseWaiverBlocks", () => {
-  it("recognises headings, rules, and paragraphs, and joins wrapped lines", () => {
-    expect(parseWaiverBlocks("# H1\n\n## H2\n\n---\n\nline one\nline two")).toEqual([
+  it("recognises headings, rules, and paragraphs", () => {
+    expect(parseWaiverBlocks("# H1\n\n## H2\n\n---\n\nparagraph")).toEqual([
       { kind: "h1", text: "H1" },
       { kind: "h2", text: "H2" },
       { kind: "hr" },
-      { kind: "p", text: "line one line two" },
+      { kind: "p", text: "paragraph" },
+    ]);
+  });
+
+  // The document is a form: "Full name: …" and "Date of birth: …" on
+  // consecutive lines must stay on consecutive lines. They used to be joined
+  // into one run-on sentence.
+  it("keeps a single newline inside a paragraph as a line break", () => {
+    expect(parseWaiverBlocks("Full name: Jane\nDate of birth: 1995-06-12")).toEqual([
+      { kind: "p", text: "Full name: Jane\nDate of birth: 1995-06-12" },
     ]);
   });
 
@@ -56,11 +74,20 @@ describe("waiver placeholders", () => {
     phone: "0400",
     email: "jane@example.com",
     emergencyContactName: "John",
+    emergencyContactRelationship: "Partner",
     emergencyContactPhone: "0411",
     medicalNotes: "",
+    healthAnswers: {
+      drugs: false,
+      blackouts: false,
+      device: true,
+      impairments: false,
+      other: false,
+    },
+    isMinor: false,
+    signedDate: "21/07/2026",
     signatureName: "",
     clubName: "UTS Jitsu",
-    signedDate: "21/07/2026",
   };
   const values = buildWaiverPlaceholders(input);
 
@@ -94,6 +121,38 @@ describe("waiver placeholders", () => {
   it("preferred_name falls back to the full name when there is no first name", () => {
     const noFirst = buildWaiverPlaceholders({ ...input, preferredName: "", firstName: "" });
     expect(noFirst.preferred_name).toBe("Jane Sample");
+  });
+
+  it("renders each health answer as Yes or No", () => {
+    expect(values.health_device).toBe("Yes");
+    expect(values.health_drugs).toBe("No");
+  });
+
+  it("ticks exactly one participant-type box, from the age", () => {
+    expect(values.adult_checkbox).toBe("[X]");
+    expect(values.minor_checkbox).toBe("[  ]");
+    const minor = buildWaiverPlaceholders({ ...input, isMinor: true });
+    expect(minor.adult_checkbox).toBe("[  ]");
+    expect(minor.minor_checkbox).toBe("[X]");
+  });
+
+  // For a minor the guardian IS the emergency contact, so the guardian tokens
+  // read off that one block instead of a second copy of the same person.
+  it("fills the guardian tokens from the emergency contact for a minor only", () => {
+    expect(values.guardian_name).toBe("N/A");
+    expect(values.guardian_relationship).toBe("N/A");
+    const minor = buildWaiverPlaceholders({ ...input, isMinor: true });
+    expect(minor.guardian_name).toBe("John");
+    expect(minor.guardian_relationship).toBe("Partner");
+  });
+
+  it("reports whether the body prints a token, so a renderer can fall back", () => {
+    expect(bodyReferences("Blackouts: {{health_blackouts}}", ["health_blackouts"])).toBe(true);
+    // Whitespace inside the braces is how the substituter accepts them too.
+    expect(bodyReferences("{{ health_drugs }}", ["health_drugs"])).toBe(true);
+    expect(bodyReferences("# Terms\n\nTrain safely.", ["health_drugs"])).toBe(false);
+    // A near-miss must not read as "the body covers it".
+    expect(bodyReferences("health_drugs", ["health_drugs"])).toBe(false);
   });
 
   it("fills known tokens and leaves unknown tokens intact", () => {
@@ -142,6 +201,22 @@ describe("WaiverDocument", () => {
     const declined = screen.getByText("I release UTS Jitsu from liability.").closest("li")!;
     expect(within(accepted).getByText("✓")).toBeInTheDocument();
     expect(within(declined).queryByText("✓")).not.toBeInTheDocument();
+  });
+
+  // The health answers have no column behind them, so a template that never
+  // prints them would lose them entirely. The document falls back to a section
+  // of its own, matching the PDF.
+  it("prints the health declaration when the body does not", () => {
+    render(<WaiverDocument {...base} healthAnswers={{ ...base.healthAnswers, drugs: true }} />);
+    expect(screen.getByText("Health declaration")).toBeInTheDocument();
+    expect(screen.getByText(/prescribed any drugs/)).toBeInTheDocument();
+    expect(screen.getAllByText("Yes").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("leaves it to the body when the body prints it", () => {
+    render(<WaiverDocument {...base} templateBody={"Drugs: {{health_drugs}}"} />);
+    expect(screen.queryByText("Health declaration")).not.toBeInTheDocument();
+    expect(screen.getByText(/Drugs: No/)).toBeInTheDocument();
   });
 
   it("omits the acknowledgements section when there are none", () => {
