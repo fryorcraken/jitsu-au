@@ -4,7 +4,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { Pill } from "@/components/site/StatusPill";
+import { formatDate } from "@/lib/dates";
+import {
+  ROLE_CLASS,
+  lifecycleClass,
+  membershipClass,
+  verificationClass,
+} from "@/lib/status-colours";
 import { lifecycleStatuses } from "@/lib/validation";
 import { emailVerificationLabel } from "@/lib/email-verification";
 import { listClubUsers } from "@/lib/membership.functions";
@@ -19,50 +26,10 @@ export const Route = createFileRoute("/_authenticated/manager/users")({
 
 type Row = Awaited<ReturnType<typeof listClubUsers>>[number];
 
-const LIFECYCLE_CLASS: Record<string, string> = {
-  lead: "bg-slate-100 text-slate-800",
-  applicant: "bg-amber-100 text-amber-800",
-  visitor: "bg-sky-100 text-sky-800",
-  member: "bg-green-100 text-green-800",
-  lapsed: "bg-red-100 text-red-800",
-};
-
-// Verified means someone opened a link we sent to that address. Amber rather
-// than red: an unverified address is a thing to notice before emailing someone
-// a sign-in link, not a fault.
-const VERIFICATION_CLASS: Record<string, string> = {
-  verified: "bg-green-100 text-green-800",
-  unverified: "bg-amber-100 text-amber-800",
-};
-
-const MEMBERSHIP_CLASS: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  active: "bg-green-100 text-green-800",
-  expired: "bg-red-100 text-red-800",
-  cancelled: "bg-slate-100 text-slate-800",
-};
-
 type SortKey = "name" | "recent" | "status" | "sessions";
 
 const selectClass =
   "h-9 rounded-md border border-input bg-background px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
-
-function fmtDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString("en-AU") : "none";
-}
-
-function Pill({ label, className }: { label: string; className: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        className,
-      )}
-    >
-      {label}
-    </span>
-  );
-}
 
 function ManagerUsersPage() {
   const navigate = useNavigate();
@@ -276,9 +243,9 @@ function ManagerUsersPage() {
                             {r.user_id ? (
                               <Pill
                                 label={emailVerificationLabel(r.email_confirmed_at)}
-                                className={
-                                  VERIFICATION_CLASS[emailVerificationLabel(r.email_confirmed_at)]
-                                }
+                                className={verificationClass(
+                                  emailVerificationLabel(r.email_confirmed_at),
+                                )}
                               />
                             ) : null}
                           </div>
@@ -290,20 +257,14 @@ function ManagerUsersPage() {
                       <td className="px-3 py-2">
                         <Pill
                           label={r.lifecycle_status}
-                          className={
-                            LIFECYCLE_CLASS[r.lifecycle_status] ?? "bg-slate-100 text-slate-800"
-                          }
+                          className={lifecycleClass(r.lifecycle_status)}
                         />
                       </td>
                       <td className="px-3 py-2">
                         {r.roles.length ? (
                           <div className="flex flex-wrap gap-1">
                             {r.roles.map((roleName) => (
-                              <Pill
-                                key={roleName}
-                                label={roleName}
-                                className="bg-indigo-100 text-indigo-800"
-                              />
+                              <Pill key={roleName} label={roleName} className={ROLE_CLASS} />
                             ))}
                           </div>
                         ) : (
@@ -313,7 +274,7 @@ function ManagerUsersPage() {
                       <td className="px-3 py-2">
                         {r.is_uts_student ? (r.uts_student_number ?? "Yes") : "No"}
                       </td>
-                      <td className="px-3 py-2">{fmtDate(r.waiver_signed_at)}</td>
+                      <td className="px-3 py-2">{formatDate(r.waiver_signed_at)}</td>
                       {/* Classes trained, whatever paid for them. Not the same
                           as credits used, which lives on the membership. */}
                       <td className="px-3 py-2">{r.sessions_attended || "—"}</td>
@@ -324,10 +285,7 @@ function ManagerUsersPage() {
                             {r.latest_membership_status ? (
                               <Pill
                                 label={r.latest_membership_status}
-                                className={
-                                  MEMBERSHIP_CLASS[r.latest_membership_status] ??
-                                  "bg-slate-100 text-slate-800"
-                                }
+                                className={membershipClass(r.latest_membership_status)}
                               />
                             ) : null}
                           </div>
@@ -335,7 +293,7 @@ function ManagerUsersPage() {
                           "—"
                         )}
                       </td>
-                      <td className="px-3 py-2">{fmtDate(r.first_seen_at)}</td>
+                      <td className="px-3 py-2">{formatDate(r.first_seen_at)}</td>
                     </tr>
                   ))}
                 </tbody>
