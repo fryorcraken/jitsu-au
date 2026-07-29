@@ -62,7 +62,11 @@ stale cache.
   `offline.html` instead of the browser's error page. No HTML is ever cached, so
   a signed-in page can never be served to someone else on the same device.
 - **Static assets** (scripts, styles, fonts, images) are served from cache and
-  refreshed in the background, so a launch on a bad connection still paints.
+  refreshed in the background, so a launch on a bad connection still paints. The
+  asset cache is capped at `MAX_ASSET_ENTRIES` and drops its oldest entries past
+  that: build assets are content-hashed, so every deploy adds a fresh set of URLs
+  that nothing will ever ask for again, and an install that hoards them can get
+  its whole origin storage reclaimed by the browser, auth session included.
 - **Nothing else is intercepted.** Supabase calls and server functions are `fetch`
   requests with an empty `destination`, so they fall straight through.
 

@@ -32,6 +32,13 @@ const SHELL_ASSETS = [OFFLINE_URL, "/manifest.webmanifest", "/icons/icon-192.png
 // an API call.
 const CACHEABLE_DESTINATIONS = new Set(["style", "script", "font", "image"]);
 
+// Build assets are content-hashed, so every deploy adds a fresh set of URLs and
+// none of the old ones are ever requested again. Left alone the asset cache
+// would grow for the life of the install, and a browser reclaiming storage
+// under pressure can take the stored auth session with it. A few times the
+// working set is plenty.
+const MAX_ASSET_ENTRIES = 200;
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
@@ -101,7 +108,10 @@ async function handleAsset(request) {
       // `basic` means same-origin and readable. Opaque and error responses are
       // not worth keeping and would poison the cache.
       if (response.ok && response.type === "basic") {
-        cache.put(request, response.clone()).catch(() => {});
+        cache
+          .put(request, response.clone())
+          .then(() => trimCache(cache, MAX_ASSET_ENTRIES))
+          .catch(() => {});
       }
       return response;
     })
@@ -115,4 +125,13 @@ async function handleAsset(request) {
     });
 
   return cached ?? fromNetwork;
+}
+
+/** Drop the oldest entries once a cache grows past `max`. */
+async function trimCache(cache, max) {
+  const keys = await cache.keys();
+  if (keys.length <= max) return;
+  // The Cache API returns keys in insertion order, so the front of the list is
+  // what was added longest ago: after a deploy that is last deploy's assets.
+  await Promise.all(keys.slice(0, keys.length - max).map((key) => cache.delete(key)));
 }
