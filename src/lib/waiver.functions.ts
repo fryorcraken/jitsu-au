@@ -23,6 +23,7 @@ import {
   parseTemplateAcks,
   resolveAcknowledgements,
 } from "@/lib/waiver-acknowledgements";
+import { userIdByEmail } from "@/lib/supabase-rpc";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -267,9 +268,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     if (callerId) {
       userId = callerId;
     } else {
-      const { data: existingId, error: lookupErr } = await admin.rpc("user_id_by_email", {
-        _email: email,
-      });
+      const { data: existingId, error: lookupErr } = await userIdByEmail(admin, email);
       if (lookupErr) throw new Error(lookupErr.message);
       if (existingId) {
         userId = existingId;
@@ -282,7 +281,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         if (createErr || !created.user) {
           // A concurrent submission may have just created the user; re-resolve
           // before treating it as a failure.
-          const { data: racedId } = await admin.rpc("user_id_by_email", { _email: email });
+          const { data: racedId } = await userIdByEmail(admin, email);
           if (!racedId) {
             console.error("[submitWaiverWithPdf] could not register email:", createErr);
             throw new Error(

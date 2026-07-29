@@ -23,6 +23,7 @@ import {
   type VerificationPurpose,
 } from "@/lib/email-verification";
 import { VerifyEmail } from "@/lib/email-templates/verify-email";
+import { userIdByEmail } from "@/lib/supabase-rpc";
 
 // Mirror the sender configuration used by the other transactional senders.
 const SITE_NAME = "UTS Jitsu";
@@ -159,7 +160,7 @@ export async function redeemVerificationToken(
   // stored user_id, so a later email change is caught by the match check below.
   let userId = row.user_id;
   if (!userId) {
-    const { data: resolved } = await admin.rpc("user_id_by_email", { _email: row.email });
+    const { data: resolved } = await userIdByEmail(admin, row.email);
     userId = resolved ?? null;
   }
   // No person record yet. Not a failure: the token stays live and the waiver
