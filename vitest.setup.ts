@@ -19,6 +19,16 @@ if (!window.matchMedia) {
   }));
 }
 
+// jsdom does not implement ResizeObserver either; Radix primitives (checkbox,
+// select, popover) measure their trigger on mount and throw without it.
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 afterEach(() => {
   cleanup();
 });
