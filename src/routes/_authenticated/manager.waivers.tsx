@@ -4,6 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
+import { runApproval } from "@/lib/waiver-approval";
+import type { WaiverApprovalStatus } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 import {
   getGoogleDriveStatus,
@@ -100,24 +102,19 @@ function WaiversPage() {
     }
   }
 
-  async function setApproval(id: string, status: "approved" | "pending") {
+  async function setApproval(id: string, status: WaiverApprovalStatus) {
     setApprovingId(id);
-    try {
-      await approve({ data: { id, status } });
-      // Statuses are derived per person (active vs superseded), so refetch the
-      // list rather than patch one row locally.
-      const data = await fetchList();
-      setRows(data as Row[]);
-      toast.success(
-        status === "approved"
-          ? "Waiver approved. The member's record has been updated."
-          : "Approval removed. The waiver is pending again.",
-      );
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update approval");
-    } finally {
-      setApprovingId(null);
-    }
+    // Statuses are derived per person (active vs superseded), so refresh by
+    // refetching the list rather than patching one row locally.
+    const outcome = await runApproval({
+      status,
+      approve: () => approve({ data: { id, status } }),
+      refresh: async () => {
+        setRows((await fetchList()) as Row[]);
+      },
+    });
+    setApprovingId(null);
+    if (outcome.kind !== "stale") toast[outcome.severity](outcome.message);
   }
 
   async function saveToDrive(id: string) {
