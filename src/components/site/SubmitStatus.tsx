@@ -1,7 +1,7 @@
 import { AlertTriangle, RefreshCw, WifiOff } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import type { SubmitFailureKind } from "@/lib/submit-resilience";
+import { isInfrastructureBody, type SubmitFailureKind } from "@/lib/submit-resilience";
 import type { ResilientSubmitStatus } from "@/hooks/use-resilient-submit";
 
 type Props = {
@@ -80,7 +80,14 @@ export function SubmitStatus({
   // wrong email), so show what it said. Everything else is a connection problem,
   // where the message would be "Failed to fetch" and the useful thing to say is
   // that nothing was lost.
-  const isRefusal = failureKind === "server";
+  //
+  // The `isInfrastructureBody` guard is belt-and-braces on top of the classifier.
+  // TanStack's client throws `new Error(await response.text())` for a response it
+  // cannot parse, so a gateway page or this app's own HTML error page can arrive
+  // as an ordinary Error. That must never be printed at somebody mid-way through
+  // signing a waiver.
+  const raw = error?.message ?? "";
+  const isRefusal = failureKind === "server" && Boolean(raw) && !isInfrastructureBody(raw);
   return (
     <div
       className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4"
@@ -88,9 +95,7 @@ export function SubmitStatus({
     >
       <p className="flex items-start gap-2 text-sm font-medium">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-        {isRefusal
-          ? (error?.message ?? "We couldn't accept that.")
-          : "We couldn't get through to us just now."}
+        {isRefusal ? raw : "We couldn't get through to us just now."}
       </p>
       {!isRefusal && (
         <p className="text-sm text-muted-foreground">

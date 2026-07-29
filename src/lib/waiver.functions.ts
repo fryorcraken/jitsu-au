@@ -442,6 +442,40 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // failed, and the reliable thing they do next is sign again. So a failure
     // here comes back as `pdf_ready: false` and the page says so plainly.
 
+    /**
+     * Tell the member and the managers, with or without a copy.
+     *
+     * Best-effort, and it runs on the failure paths too. A waiver whose PDF
+     * never materialised is the one case where silence is worst: the signer is
+     * told on screen that it counted, so if no email follows and no manager is
+     * notified, a signed waiver with no document sits in the table with nobody
+     * aware of it. The emails degrade to "no download link, we will sort it
+     * out" rather than not being sent at all.
+     */
+    const notify = async (pdfUrl: string | null) => {
+      try {
+        const { sendWaiverEmails } = await import("./waiver-email.server");
+        await sendWaiverEmails({
+          waiverId: inserted.id,
+          memberName: full_name,
+          memberGreetingName: greetingName({
+            preferred_name: data.preferred_name,
+            first_name: data.first_name,
+            middle_name: data.middle_name,
+            last_name: data.last_name,
+          }),
+          memberEmail: email,
+          pdfUrl,
+          admin: supabaseAdmin,
+          // Lets the confirmation email add a "confirm your email address"
+          // button, but only for someone whose address is still unproven.
+          userId,
+        });
+      } catch (e) {
+        console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);
+      }
+    };
+
     // Generate PDF (signature images are embedded into it, not stored separately).
     // PDF rendering pulls in pdf-lib and can fail for reasons the signer can't
     // act on (a malformed template, a corrupt signature image, a bundling/interop
@@ -478,6 +512,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       });
     } catch (e) {
       console.error("[submitWaiverWithPdf] PDF generation failed:", e);
+      await notify(null);
       return { ok: true, waiver_id: inserted.id, pdf_url: null, pdf_ready: false };
     }
 
@@ -487,6 +522,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
     if (upErr) {
       console.error("[submitWaiverWithPdf] PDF upload failed:", upErr);
+      await notify(null);
       return { ok: true, waiver_id: inserted.id, pdf_url: null, pdf_ready: false };
     }
 
@@ -494,36 +530,18 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 
     const signedUrl = await signStoredPdf(admin, path);
 
-    // Notify the member and every manager, with a longer-lived link to the PDF
-    // (Lovable's email API can't carry binary attachments, so we send a secure,
-    // expiring download link). Best-effort — a send failure must not fail the
-    // waiver submission, which is already durably saved.
+    // A longer-lived link for the email (Lovable's email API can't carry binary
+    // attachments, so we send a secure, expiring download link).
+    let emailUrl: string | null = null;
     try {
       const { data: emailSigned } = await supabaseAdmin.storage
         .from(BUCKET)
         .createSignedUrl(path, 60 * 60 * 24 * 7);
-      if (emailSigned?.signedUrl) {
-        const { sendWaiverEmails } = await import("./waiver-email.server");
-        await sendWaiverEmails({
-          waiverId: inserted.id,
-          memberName: full_name,
-          memberGreetingName: greetingName({
-            preferred_name: data.preferred_name,
-            first_name: data.first_name,
-            middle_name: data.middle_name,
-            last_name: data.last_name,
-          }),
-          memberEmail: email,
-          pdfUrl: emailSigned.signedUrl,
-          admin: supabaseAdmin,
-          // Lets the confirmation email add a "confirm your email address"
-          // button, but only for someone whose address is still unproven.
-          userId,
-        });
-      }
+      emailUrl = emailSigned?.signedUrl ?? null;
     } catch (e) {
-      console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);
+      console.error("[submitWaiverWithPdf] could not mint the email PDF link:", e);
     }
+    await notify(emailUrl);
 
     return {
       ok: true,

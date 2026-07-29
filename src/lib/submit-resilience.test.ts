@@ -63,13 +63,42 @@ describe("classifySubmitFailure", () => {
     }
   });
 
-  it("retries a transient status but not a refusal", () => {
-    // A 500/502/504 is a gateway or cold-start problem; a 400/403 is an answer.
+  it("retries a transient status but not a refusal, when a status is attached", () => {
+    // Belt-and-braces: TanStack's server-function client attaches no status, so
+    // this branch is for other transports. The HTML-body case below is the one
+    // that actually fires in this app.
     expect(classifySubmitFailure({ status: 502, message: "Bad Gateway" })).toBe("network");
     expect(classifySubmitFailure({ status: 504 })).toBe("network");
     expect(classifySubmitFailure({ status: 429 })).toBe("network");
     expect(classifySubmitFailure({ status: 400 })).toBe("server");
     expect(classifySubmitFailure({ response: { status: 403 } })).toBe("server");
+  });
+
+  it("retries an HTTP error page delivered as an Error message", () => {
+    // The real shape of a gateway failure here. TanStack's client does
+    // `throw new Error(await response.text())` for a response it cannot parse,
+    // so a Cloudflare 502 page or this app's own renderErrorPage() HTML arrives
+    // as a plain Error carrying the whole body and NO status. Classified as a
+    // refusal it would skip every retry on exactly the failures this module
+    // exists for, and print an HTML document at someone mid-way through signing.
+    const cloudflare = new Error(
+      "<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>...</body></html>",
+    );
+    expect(classifySubmitFailure(cloudflare)).toBe("network");
+    expect(classifySubmitFailure(new Error("<html><body>Service Unavailable</body></html>"))).toBe(
+      "network",
+    );
+    // An overlong body with no markup is still not something a human wrote.
+    expect(classifySubmitFailure(new Error("x".repeat(500)))).toBe("network");
+  });
+
+  it("still treats a one-sentence message as a refusal", () => {
+    expect(classifySubmitFailure(new Error("Please accept: the terms"))).toBe("server");
+    expect(
+      classifySubmitFailure(
+        new Error("You're signed in as a@b.com, so the waiver must use that email."),
+      ),
+    ).toBe("server");
   });
 
   it("treats a message thrown by the handler as a final server refusal", () => {
@@ -209,6 +238,34 @@ describe("submitWithRetry", () => {
     expect(result.ok && result.value).toBe("saved");
     expect(result.ok && result.confirmed).toBe(false);
     expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands confirm() its own abort signal, never an already-aborted one", async () => {
+    // Without a signal of its own a stalled confirmation never rejects, so the
+    // whole submission parks on "checking..." forever with the retries it exists
+    // to shortcut never running. Sharing the attempt's signal would be just as
+    // bad: that one has already fired.
+    const { sleep } = recordingSleep();
+    const signals: AbortSignal[] = [];
+    const attemptSignal = AbortSignal.abort();
+
+    await submitWithRetry({
+      ...base,
+      sleep,
+      attempts: 2,
+      createSignal: (ms) => (ms === 10_000 ? new AbortController().signal : attemptSignal),
+      confirmTimeoutMs: 10_000,
+      run: async () => {
+        throw timeoutError();
+      },
+      confirm: async (signal) => {
+        signals.push(signal);
+        return null;
+      },
+    });
+
+    expect(signals).toHaveLength(2);
+    for (const s of signals) expect(s.aborted).toBe(false);
   });
 
   it("survives a confirm() that itself fails", async () => {

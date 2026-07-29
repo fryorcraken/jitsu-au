@@ -36,8 +36,10 @@ function Contact() {
   const formRef = useRef<HTMLFormElement | null>(null);
   const send = useResilientSubmit<{ ok: true; duplicate: boolean }>(INTAKE_SUBMIT);
 
-  // Re-reads the live form on every attempt, so "Try again" needs no state of
-  // its own and a failure leaves the message exactly as it was typed.
+  // Reads the live form each time it is called, so "Try again" needs no state of
+  // its own and a failure leaves the message exactly as it was typed. (Automatic
+  // retries inside one call reuse this snapshot, which is what we want: they are
+  // resending the same submission, not a newly edited one.)
   async function send0() {
     const form = formRef.current;
     if (!form) return;

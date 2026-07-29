@@ -98,6 +98,37 @@ function statusOf(err: unknown): number | undefined {
 }
 
 /**
+ * The longest a message can be and still plausibly be one a human wrote for the
+ * signer. Server refusals in this app are one sentence ("Please accept: ...").
+ */
+const MAX_HUMAN_MESSAGE = 300;
+
+/**
+ * Whether an error message is really an HTTP response body rather than a
+ * message the server meant for this person.
+ *
+ * This matters more than it looks. TanStack's client has two exits for a failed
+ * server function: a *serialized* error (the handler's own `throw`), and, for
+ * anything it cannot parse, `throw new Error(await response.text())` — an Error
+ * whose message is **the entire response body**, with no status attached.
+ *
+ * So a Cloudflare 502 page, a 429, or this app's own `renderErrorPage()` HTML
+ * (src/server.ts turns a catastrophic 500 into `content-type: text/html`) all
+ * arrive as an ordinary `Error` and are indistinguishable from a refusal by
+ * shape alone. Left unclassified they were treated as final: no retry on
+ * exactly the gateway hiccups this module exists for, and `SubmitStatus`
+ * rendering a whole HTML document to the signer as the reason.
+ *
+ * Markup or an essay is infrastructure. One sentence is a person talking.
+ */
+export function isInfrastructureBody(message: string): boolean {
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > MAX_HUMAN_MESSAGE) return true;
+  return /^</.test(trimmed) || /<!doctype|<html|<body|<head[\s>]/i.test(trimmed);
+}
+
+/**
  * Decide whether a failed attempt is worth repeating.
  *
  * The distinction that matters is "the server said no" versus "we never heard
@@ -118,6 +149,8 @@ export function classifySubmitFailure(err: unknown, online: boolean = true): Sub
     typeof err === "object" && err !== null ? (err as { name?: string }).name : undefined;
   if (name === "AbortError" || name === "TimeoutError") return "timeout";
 
+  // Only some transports attach a status. TanStack's server-function client does
+  // not, so this is a belt-and-braces branch rather than the main path.
   const status = statusOf(err);
   if (typeof status === "number") return isTransientStatus(status) ? "network" : "server";
 
@@ -132,6 +165,9 @@ export function classifySubmitFailure(err: unknown, online: boolean = true): Sub
   ) {
     return "network";
   }
+
+  // An HTTP error page that arrived as an Error. Retryable, and never shown.
+  if (isInfrastructureBody(message)) return "network";
 
   return "server";
 }
@@ -166,10 +202,16 @@ export type SubmitWithRetryOptions<T> = {
    * Asks the server whether this submission already landed. Resolves to the
    * result if it did, `null` if it did not. Optional, best-effort: a throw here
    * is swallowed and the retry loop simply continues.
+   *
+   * Receives its own short signal. It must never be given the attempt's, and
+   * never left unbounded: a check that hangs would strand the whole submission
+   * on "checking..." with the retries it was meant to shortcut never running.
    */
-  confirm?: () => Promise<T | null>;
+  confirm?: (signal: AbortSignal) => Promise<T | null>;
   attempts?: number;
   timeoutMs?: number;
+  /** Ceiling for one `confirm()` call. Short: it is one indexed row read. */
+  confirmTimeoutMs?: number;
   onState?: (state: SubmitDriverState) => void;
   /** Injected for tests: no real waiting, no real network, no real events. */
   sleep?: (ms: number) => Promise<void>;
@@ -184,23 +226,46 @@ const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 const defaultIsOnline = () =>
   typeof navigator === "undefined" || typeof navigator.onLine !== "boolean" || navigator.onLine;
 
+/** How long to sit in the offline state before trying anyway. */
+const OFFLINE_WAIT_CAP_MS = 60_000;
+const OFFLINE_POLL_MS = 2_000;
+
+/**
+ * Wait for the connection to come back, but never forever.
+ *
+ * `navigator.onLine` false-negatives (VPN toggles, captive portals, some
+ * desktop network-change states), and in those cases the `online` event may
+ * never fire at all. Waiting on the event alone would strand the submission in
+ * a state with no button and no way out but a reload. So: poll as well, and
+ * give up waiting after a cap and just try the send. A wasted attempt is a far
+ * better outcome than a form that cannot be submitted.
+ */
 const defaultWaitForOnline = () =>
   new Promise<void>((resolve) => {
     if (typeof window === "undefined") return resolve();
+    let settled = false;
     const done = () => {
+      if (settled) return;
+      settled = true;
       window.removeEventListener("online", done);
+      clearInterval(poll);
+      clearTimeout(cap);
       resolve();
     };
+    const poll = setInterval(() => {
+      if (defaultIsOnline()) done();
+    }, OFFLINE_POLL_MS);
+    const cap = setTimeout(done, OFFLINE_WAIT_CAP_MS);
     window.addEventListener("online", done);
   });
 
 /**
  * Run `run` until it succeeds, the server refuses, or the attempts run out.
  *
- * Being offline never consumes an attempt: it waits on the `online` event for as
- * long as the page is open, then sends. That is deliberate. Someone on a train
- * should come out of a tunnel to a submitted waiver, not to a form that gave up
- * three stations ago.
+ * Being offline never consumes an attempt: it waits for the connection to come
+ * back (capped, see `defaultWaitForOnline`) and then sends. That is deliberate.
+ * Someone on a train should come out of a tunnel to a submitted waiver, not to a
+ * form that gave up three stations ago.
  */
 export async function submitWithRetry<T>(
   options: SubmitWithRetryOptions<T>,
@@ -210,6 +275,7 @@ export async function submitWithRetry<T>(
     confirm,
     attempts = 3,
     timeoutMs = 20_000,
+    confirmTimeoutMs = 10_000,
     onState,
     sleep = defaultSleep,
     isOnline = defaultIsOnline,
@@ -243,7 +309,11 @@ export async function submitWithRetry<T>(
       if (confirm) {
         onState?.({ phase: "confirming", attempt });
         try {
-          const landed = await confirm();
+          // Its own short signal. Sharing the attempt's (already aborted) signal
+          // would make this a no-op, and passing none at all would let a stalled
+          // check hang the whole submission on "checking..." forever, with the
+          // retries it exists to shortcut never running.
+          const landed = await confirm(createSignal(confirmTimeoutMs));
           if (landed !== null && landed !== undefined) {
             return { ok: true, value: landed, attempts: attempt, confirmed: true };
           }

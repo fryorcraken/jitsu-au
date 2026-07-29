@@ -468,8 +468,8 @@ function Waiver() {
       // A lost reply is not an answer. Before retrying, ask whether this exact
       // submission already landed: if it did, the person is finished and must
       // not be sent back to the form.
-      confirm: async (submissionId) => {
-        const res = await checkSubmission({ data: { client_submission_id: submissionId } });
+      confirm: async (submissionId, signal) => {
+        const res = await checkSubmission({ signal, data: { client_submission_id: submissionId } });
         if (!res.found || !res.waiver_id) return null;
         return {
           ok: true as const,
@@ -488,35 +488,55 @@ function Waiver() {
     }
   }
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  /**
+   * The client-side checks, run before anything is sent.
+   *
+   * Both the submit button and the failure panel's "Try again" go through this.
+   * The form stays editable behind a failure, so a retry that skipped these
+   * could send a waiver whose signature had since been cleared, or one whose
+   * date of birth now makes the signer a minor with no guardian signature. The
+   * server would reject it, and the signer would be shown a raw Zod issue dump
+   * instead of the plain sentence they get here.
+   */
+  function readyToSend(): boolean {
     if (missingHealthAnswers(health).length > 0) {
       toast.error("Please answer yes or no to every health question.");
-      return;
+      return false;
     }
     if (anyHealthConcern(health) && !medical.trim()) {
       toast.error("Please give details of anything you answered yes to.");
-      return;
+      return false;
     }
     if (missingRequiredAcks(ackDefs, acks).length > 0) {
       toast.error("Please read and accept the required acknowledgements.");
-      return;
+      return false;
     }
     const sigImg = signatureMode === "draw" ? signatureImage : "";
     const sigName = signatureMode === "type" ? signatureName : "";
     if (!sigImg && !sigName.trim()) {
       toast.error("Please add your signature by drawing it or typing your name.");
-      return;
+      return false;
     }
     if (isMinor) {
       const gImg = guardianSignatureMode === "draw" ? guardianSignatureImage : "";
       const gName = guardianSignatureMode === "type" ? guardianSignature : "";
       if (!gImg && !gName.trim()) {
         toast.error("A parent or guardian must sign for participants under 18.");
-        return;
+        return false;
       }
     }
+    return true;
+  }
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!readyToSend()) return;
     await sendWaiver();
+  }
+
+  function onRetry() {
+    if (!readyToSend()) return;
+    void sendWaiver();
   }
 
   // Shown only for a confirmed server response. The waiver being saved and the
@@ -552,8 +572,8 @@ function Waiver() {
             <>
               <p className="mt-3 text-muted-foreground">
                 Thanks, your waiver is signed and saved. We couldn't get your PDF copy ready just
-                now, so we'll email it to you shortly. There is nothing else for you to do, and you
-                do not need to sign again.
+                now, so there is no download here. You do not need to sign again. We've let the club
+                know, and you can reply to your confirmation email any time if you want a copy.
               </p>
               <div className="mt-8 flex flex-wrap justify-center gap-3">
                 <Button asChild size="lg">
@@ -965,7 +985,7 @@ function Waiver() {
               attempts={send.attempts}
               error={send.error}
               failureKind={send.failureKind}
-              onRetry={() => void sendWaiver()}
+              onRetry={onRetry}
               fallback={
                 <p className="text-sm text-muted-foreground">
                   Everything you filled in is saved on this device, so you can come back to this

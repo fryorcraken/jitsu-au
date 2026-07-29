@@ -31,8 +31,12 @@ export type ResilientSubmitConfig = {
 
 export type RunSubmit<T> = {
   run: (signal: AbortSignal, submissionId: string) => Promise<T>;
-  /** Optional "did this already land?" check. See submit-resilience.ts. */
-  confirm?: (submissionId: string) => Promise<T | null>;
+  /**
+   * Optional "did this already land?" check. See submit-resilience.ts. The
+   * signal is a short one of its own; pass it to the request or a stalled check
+   * strands the submission.
+   */
+  confirm?: (submissionId: string, signal: AbortSignal) => Promise<T | null>;
 };
 
 /**
@@ -103,7 +107,7 @@ export function useResilientSubmit<T>(config: ResilientSubmitConfig) {
         attempts: config.attempts,
         timeoutMs: config.timeoutMs,
         run: (signal) => run(signal, submissionId),
-        confirm: confirm ? () => confirm(submissionId) : undefined,
+        confirm: confirm ? (signal) => confirm(submissionId, signal) : undefined,
         onState: (state) => {
           if (!mounted.current) return;
           clearSlowTimer();

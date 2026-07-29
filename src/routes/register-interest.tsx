@@ -47,9 +47,11 @@ function RegisterInterest() {
   /**
    * Read the form and send it, retrying through a bad connection.
    *
-   * The inputs are uncontrolled, so re-reading the live form is also what makes
-   * "Try again" work without threading any state through: whatever is on screen
-   * is what gets sent, and a failure leaves every field exactly as it was.
+   * The inputs are uncontrolled, so reading the live form here is also what
+   * makes "Try again" work without threading any state through: whatever is on
+   * screen is what gets sent, and a failure leaves every field exactly as it
+   * was. Automatic retries within one call reuse this snapshot, which is right:
+   * they are resending the same submission.
    */
   async function send0() {
     const form = formRef.current;

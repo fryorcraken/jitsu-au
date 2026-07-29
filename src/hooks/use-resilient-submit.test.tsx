@@ -94,7 +94,8 @@ describe("useResilientSubmit", () => {
     // The case the whole change is for: the waiver was saved and the reply was
     // lost. The page must end on the success screen, not send the signer back.
     const run = vi.fn().mockRejectedValue(timeoutError());
-    const confirm = vi.fn(async () => "already-saved");
+    // Typed with both parameters so the call assertion below can read the signal.
+    const confirm = vi.fn(async (_id: string, _signal: AbortSignal) => "already-saved");
     const { result } = renderHook(() => useResilientSubmit<string>(CONFIG));
 
     await act(async () => {
@@ -104,7 +105,10 @@ describe("useResilientSubmit", () => {
     });
 
     expect(result.current.status).toBe("succeeded");
-    expect(confirm).toHaveBeenCalledWith(result.current.submissionId);
+    // The submission id, plus a live signal of its own so a stalled check cannot
+    // strand the submission on "checking...".
+    expect(confirm).toHaveBeenCalledWith(result.current.submissionId, expect.any(AbortSignal));
+    expect(confirm.mock.calls[0][1].aborted).toBe(false);
   });
 
   it("adopts a submission id restored from a draft", async () => {

@@ -30,6 +30,18 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
   // starting value, not a binding, and re-running on a changed prop would wipe
   // whatever has been drawn since.
   const initialRef = useRef(initialDataUrl);
+  /**
+   * The last signature we know is real, kept out of the canvas on purpose.
+   *
+   * `fromDataURL` sets `_isEmpty = false` synchronously but only paints in
+   * `image.onload`, so for one macrotask the pad reports "not empty" over a
+   * blank canvas. Re-reading `toDataURL()` inside a resize can therefore capture
+   * that blank and then write it back as the signature. Browsers fire resize in
+   * bursts (keyboard animation, URL-bar collapse, rotation), so this is not a
+   * narrow window: it is the exact bug the resize handler was fixed to stop,
+   * coming back through the fix itself.
+   */
+  const lastGoodRef = useRef(initialDataUrl ?? "");
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -44,10 +56,13 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
      * which meant that on a phone, opening the on-screen keyboard for the next
      * field erased the signature the person had just drawn. They usually did not
      * notice until the form refused to submit.
+     *
+     * The value comes from `lastGoodRef`, never from the canvas: see the ref's
+     * comment for why reading the canvas here can capture a blank.
      */
     const resize = () => {
       const pad = padRef.current;
-      const previous = pad && !pad.isEmpty() ? pad.toDataURL("image/png") : "";
+      const previous = lastGoodRef.current;
       const rect = canvas.getBoundingClientRect();
       // A hidden pad (the inactive tab of the draw/type switch) measures 0x0.
       // Resizing to that would throw away the signature for good, so skip it and
@@ -76,9 +91,12 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
       void pad.fromDataURL(restored, { width: rect.width, height: rect.height });
     }
 
+    // A finished stroke is the only moment the canvas is definitively settled,
+    // so it is the only moment we trust it as the new known-good value.
     const emit = () => {
-      if (pad.isEmpty()) onChange?.("");
-      else onChange?.(pad.toDataURL("image/png"));
+      const next = pad.isEmpty() ? "" : pad.toDataURL("image/png");
+      lastGoodRef.current = next;
+      onChange?.(next);
     };
     pad.addEventListener("endStroke", emit);
     window.addEventListener("resize", resize);
@@ -92,11 +110,11 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
   useImperativeHandle(
     ref,
     () => ({
-      isEmpty: () => padRef.current?.isEmpty() ?? true,
-      toDataURL: () =>
-        padRef.current && !padRef.current.isEmpty() ? padRef.current.toDataURL("image/png") : "",
+      isEmpty: () => lastGoodRef.current === "",
+      toDataURL: () => lastGoodRef.current,
       clear: () => {
         padRef.current?.clear();
+        lastGoodRef.current = "";
         onChange?.("");
       },
     }),
@@ -122,6 +140,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
           variant="ghost"
           onClick={() => {
             padRef.current?.clear();
+            lastGoodRef.current = "";
             onChange?.("");
           }}
         >

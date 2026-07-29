@@ -119,10 +119,13 @@ The waiver is the one form where "it silently did not go through" is expensive:
 twenty fields, five health answers and a hand-drawn signature, filled in on a
 phone, often at the gym. The page is built so that ends in a definite answer.
 
-- **It retries.** Up to five attempts over roughly two minutes, with a 45s
-  timeout each (the handler creates an auth user, renders a PDF, uploads it and
-  sends emails, so it is genuinely slow). Being offline does not spend an
-  attempt: it waits for the connection and sends itself when it returns.
+- **It retries.** Up to five attempts, each with a 45s timeout (the handler
+  creates an auth user, renders a PDF, uploads it and sends emails, so it is
+  genuinely slow), spaced by a backoff of 1s, 2s, 5s and 10s. A worst case where
+  every attempt times out therefore runs about four minutes before giving up.
+  Being offline does not spend an attempt: it waits for the connection and sends
+  itself when it returns, up to a minute, after which it tries anyway rather
+  than sitting there.
 - **It asks instead of guessing.** Aborting a request client-side does not stop
   the server, so a timeout never means "it did not happen". After any dropped
   attempt the page calls `checkWaiverSubmission` with its submission id. If the

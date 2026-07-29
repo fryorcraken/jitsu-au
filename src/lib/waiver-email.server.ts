@@ -84,8 +84,17 @@ export interface WaiverEmailParams {
   /** What to call the signer to their face: preferred name, else first name. */
   memberGreetingName: string;
   memberEmail: string;
-  /** Short-lived signed URL to the generated waiver PDF. */
-  pdfUrl: string;
+  /**
+   * Short-lived signed URL to the generated waiver PDF, or null when the copy
+   * could not be produced.
+   *
+   * Null still sends. The waiver row is durable before the PDF exists, so a
+   * render or upload failure leaves a signed waiver with no document: the member
+   * needs to know it counted (so they do not sign again), and a manager needs to
+   * know to chase the copy. Staying silent on that path is how a waiver ends up
+   * recorded with nobody aware it has no signature attached.
+   */
+  pdfUrl: string | null;
   /** Service-role client, used to resolve manager recipients. */
   admin: AdminClient;
   /** The person this waiver belongs to, used to check whether their address is proven. */
