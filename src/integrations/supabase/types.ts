@@ -878,7 +878,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      clear_email_confirmation: { Args: { _user_id: string }; Returns: undefined }
+      clear_email_confirmation: {
+        Args: { _user_id: string }
+        Returns: undefined
+      }
       has_active_paid_membership: {
         Args: { _user_id: string }
         Returns: boolean
@@ -894,7 +897,7 @@ export type Database = {
         Args: { _user_ids: string[] }
         Returns: {
           email: string
-          email_confirmed_at: string | null
+          email_confirmed_at: string
           user_id: string
         }[]
       }
