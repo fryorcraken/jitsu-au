@@ -297,11 +297,19 @@ which goes through the `SECURITY DEFINER` `has_role()`, kept working.
 
 This is a version **history**, not a set of selectable documents: the partial
 unique index means exactly one row is live, and that row is the whole of what
-`/waiver` serves. Rows are only ever added, never edited in place or deleted —
-`waivers.template_version` points back here, so removing a version erases the
-readable record of what its signers agreed to. `/manager/waiver-template` lists
-every version and can promote any of them (`setCurrentWaiverTemplate`); saving
-in the editor appends a new version and promotes it in one step.
+`/waiver` serves. Rows are added, never edited in place — a change is a new
+version, so a signed waiver's `template_version` keeps meaning what it meant.
+
+**These rows are not the evidence.** The signed PDF embeds the full template
+text at signing time, so a member's own document says what they agreed to
+without this table. The one gap is a waiver whose PDF never generated
+(`pdf_path IS NULL`, a handled failure path in `submitWaiverWithPdf`): for that
+one, `template_version` is the only pointer. So deleting an old version is
+cheap-but-not-free once the club is live, and free before then.
+
+`/manager/waiver-template` lists every version and can promote any of them
+(`setCurrentWaiverTemplate`); saving in the editor appends a new version and
+promotes it in one step.
 
 ---
 

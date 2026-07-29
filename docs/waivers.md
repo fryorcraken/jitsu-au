@@ -220,10 +220,12 @@ There are two ways a version becomes live:
 
 Promoting never touches waivers already signed. Each one records the
 `template_version` it was signed against and its PDF carries that version's full
-text, so the evidence is fixed at signing time.
+text, so the evidence is fixed at signing time and does not depend on this table.
 
-Old versions are kept, always. They are the only readable record of what a past
-signer agreed to beyond their own PDF, and they cost a row.
+Old versions are normally kept, but they are not sacred: the signed PDF is the
+record (rule 3). The narrow exception is a waiver whose PDF failed to generate,
+which has only its `template_version` to go on. The short pre-application-form
+waiver was deleted outright before launch, when no signature yet mattered.
 
 ### Visitor or member uses the member area
 
