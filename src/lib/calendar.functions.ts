@@ -415,8 +415,12 @@ async function materializeSeries(
  * query for the furthest generated date per entry, and it only materialises the
  * ones running low. Best-effort — a failure here must never break a calendar
  * read, so it is caught and logged.
+ *
+ * Exported for the check-in screen, which lists classes without going through
+ * any calendar read: without it, the first date of a brand-new weekly entry
+ * could be un-check-in-able on the day it runs.
  */
-async function topUpHorizon(admin: CalendarClient): Promise<void> {
+export async function topUpHorizon(admin: CalendarClient): Promise<void> {
   try {
     const { data: series } = await admin.from("calendar_series").select("*").eq("is_active", true);
     if (!series?.length) return;

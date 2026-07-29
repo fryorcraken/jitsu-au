@@ -301,25 +301,37 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
 
-    const [{ data: rows, error }, { data: plans }, { data: profile }, { data: waiverRows }] =
-      await Promise.all([
-        admin
-          .from("memberships")
-          .select("*")
-          .eq("user_id", context.userId)
-          .order("created_at", { ascending: false }),
-        admin.from("membership_plans").select("*"),
-        // The student number lives on the profile; used to prefill the student
-        // rate on the membership page.
-        admin
-          .from("profiles")
-          .select("uts_student_number")
-          .eq("user_id", context.userId)
-          .maybeSingle(),
-        // Waiver states feed the lifecycle: approved => visitor+, pending-only
-        // => applicant.
-        admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
-      ]);
+    const [
+      { data: rows, error },
+      { data: plans },
+      { data: profile },
+      { data: waiverRows },
+      { count: sessionsAttended },
+    ] = await Promise.all([
+      admin
+        .from("memberships")
+        .select("*")
+        .eq("user_id", context.userId)
+        .order("created_at", { ascending: false }),
+      admin.from("membership_plans").select("*"),
+      // The student number lives on the profile; used to prefill the student
+      // rate on the membership page.
+      admin
+        .from("profiles")
+        .select("uts_student_number")
+        .eq("user_id", context.userId)
+        .maybeSingle(),
+      // Waiver states feed the lifecycle: approved => visitor+, pending-only
+      // => applicant.
+      admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
+      // How many classes they have trained. Deliberately just the count: a
+      // member has no business reading the club's coverage bookkeeping, and
+      // "no cover" against a class they attended reads as an accusation.
+      admin
+        .from("session_checkins")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", context.userId),
+    ]);
     if (error) throw new Error(error.message);
 
     const hasApprovedWaiver = (waiverRows ?? []).some((w) => w.approval_status === "approved");
@@ -339,7 +351,12 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         price_cents: r.price_cents,
       })),
     });
-    return { lifecycle, memberships, uts_student_number: utsStudentNumber };
+    return {
+      lifecycle,
+      memberships,
+      uts_student_number: utsStudentNumber,
+      sessions_attended: sessionsAttended ?? 0,
+    };
   });
 
 // ---- Member: start a membership ----
@@ -601,27 +618,36 @@ export const listClubUsers = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { aggregateClubUsers, profileUserIds, LEADS_LIMIT } = await import("@/lib/club-users");
 
-    const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
-      await Promise.all([
-        admin
-          .from("profiles")
-          .select(
-            "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
-          )
-          .limit(5000),
-        admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
-        admin.from("membership_plans").select("*"),
-        // ALL waivers: approved => visitor+, pending-only => applicant.
-        admin.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
-        // Interest registrations are the LEAD phase of the funnel; the
-        // aggregation drops any whose email already belongs to a person.
-        admin
-          .from("interest_registrations")
-          .select("email, name, phone, created_at")
-          .order("created_at", { ascending: false })
-          .limit(LEADS_LIMIT)
-          .then((r) => (r.data ?? []) as ClubUserLead[]),
-      ]);
+    const [
+      { data: profiles },
+      { data: rows, error },
+      { data: plans },
+      { data: waivers },
+      { data: checkins },
+      leads,
+    ] = await Promise.all([
+      admin
+        .from("profiles")
+        .select(
+          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
+        )
+        .limit(5000),
+      admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+      admin.from("membership_plans").select("*"),
+      // ALL waivers: approved => visitor+, pending-only => applicant.
+      admin.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+      // Attendance, counted per person. Only the user id is read: this is
+      // "classes trained", not "credits used".
+      admin.from("session_checkins").select("user_id").limit(50000),
+      // Interest registrations are the LEAD phase of the funnel; the
+      // aggregation drops any whose email already belongs to a person.
+      admin
+        .from("interest_registrations")
+        .select("email, name, phone, created_at")
+        .order("created_at", { ascending: false })
+        .limit(LEADS_LIMIT)
+        .then((r) => (r.data ?? []) as ClubUserLead[]),
+    ]);
     if (error) throw new Error(error.message);
 
     // Surface the cap rather than silently truncating the funnel's lead list.
@@ -665,6 +691,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
       })),
       plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
       roles: rolesRows,
+      checkins: checkins ?? [],
     });
   });
 

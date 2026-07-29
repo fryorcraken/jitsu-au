@@ -19,6 +19,11 @@ import type { ClubUserEmail } from "@/lib/club-users";
 /** Max waiver / membership rows one person's page pulls. */
 const WAIVERS_LIMIT = 100;
 const MEMBERSHIPS_LIMIT = 100;
+/**
+ * Check-ins shown on a person's page. The card shows the total attendance count
+ * from the aggregation, so this only caps the visible history, not the number.
+ */
+const CHECKINS_LIMIT = 100;
 
 /** Throw unless the caller holds the `manager` role (checked via the RLS RPC). */
 async function requireManager(context: { supabase: MembershipClient; userId: string }) {
@@ -46,6 +51,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: plans, error: plErr },
       { data: roles, error: rErr },
       { data: emailRows, error: emailErr },
+      { data: checkins, error: cErr },
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("user_id", data.userId).maybeSingle(),
       admin
@@ -63,6 +69,12 @@ export const getClubUser = createServerFn({ method: "POST" })
       admin.from("membership_plans").select("id, name, kind"),
       admin.from("user_roles").select("user_id, role").eq("user_id", data.userId),
       admin.rpc("user_emails", { _user_ids: [data.userId] }),
+      admin
+        .from("session_checkins")
+        .select("id, event_id, checked_in_at, coverage, membership_id, consumed_credit, warnings")
+        .eq("user_id", data.userId)
+        .order("checked_in_at", { ascending: false })
+        .limit(CHECKINS_LIMIT),
     ]);
     // Every read except the email RPC fails the whole page. This is the screen a
     // manager decides an approval from, so "the query failed" must never render
@@ -75,6 +87,7 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (mErr) throw new Error(mErr.message);
     if (plErr) throw new Error(plErr.message);
     if (rErr) throw new Error(rErr.message);
+    if (cErr) throw new Error(cErr.message);
     if (!profile) throw new Error("User not found.");
 
     const waiverRows = waivers ?? [];
@@ -128,9 +141,24 @@ export const getClubUser = createServerFn({ method: "POST" })
       })),
       plans: planRows,
       roles: roles ?? [],
+      checkins: (checkins ?? []).map(() => ({ user_id: data.userId })),
     });
 
     const statuses = deriveWaiverListStatuses(waiverRows);
+
+    // Name the class each check-in belongs to. A separate read rather than an
+    // embedded join so the row shapes stay the generated ones.
+    const checkinRows = checkins ?? [];
+    if (checkinRows.length >= CHECKINS_LIMIT)
+      console.warn(`[getClubUser] check-ins capped at ${CHECKINS_LIMIT}; older ones truncated`);
+    const eventIds = [...new Set(checkinRows.map((c) => c.event_id))];
+    const { data: events } = eventIds.length
+      ? await admin.from("calendar_events").select("id, title, starts_at").in("id", eventIds)
+      : { data: [] };
+    const eventById = new Map((events ?? []).map((e) => [e.id, e]));
+    const planNameByMembership = new Map(
+      membershipRows.map((m) => [m.id, planById.get(m.plan_id)?.name ?? null]),
+    );
 
     return {
       // Only the derived headline fields, not the whole aggregate. Its
@@ -144,6 +172,9 @@ export const getClubUser = createServerFn({ method: "POST" })
         phone: summary.phone,
         roles: summary.roles,
         lifecycle_status: summary.lifecycle_status,
+        // Classes trained, whatever paid for them: the coaching and grading
+        // number, not "credits used".
+        sessions_attended: summary.sessions_attended,
         first_seen_at: summary.first_seen_at,
       },
       // Straight off the `profiles` row, so the screen can show the club's live
@@ -175,6 +206,19 @@ export const getClubUser = createServerFn({ method: "POST" })
         starts_at: m.starts_at,
         ends_at: m.ends_at,
         sessions_remaining: m.sessions_remaining,
+      })),
+      // Their attendance, newest first. `membership_id` with no cover is what
+      // the needs-attention flow fixes, and it can be fixed from here too.
+      checkins: checkinRows.map((c) => ({
+        id: c.id,
+        event_id: c.event_id,
+        event_title: eventById.get(c.event_id)?.title ?? null,
+        event_starts_at: eventById.get(c.event_id)?.starts_at ?? null,
+        checked_in_at: c.checked_in_at,
+        coverage: c.coverage,
+        plan_name: c.membership_id ? (planNameByMembership.get(c.membership_id) ?? null) : null,
+        consumed_credit: c.consumed_credit,
+        warnings: c.warnings,
       })),
       // The frozen submission, in full: what a manager reads to decide whether
       // to approve. The PDF is fetched separately, as a short-lived signed URL.

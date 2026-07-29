@@ -52,8 +52,10 @@ Responses are `{ "ok": true, "action", "result" }` or
 
 Returns everyone known to the club, one row per person, with their
 `lifecycle_status` (`lead | applicant | visitor | member | lapsed`), `roles`,
-and their `invoices` (each with an `id` you can pass to `edit_invoice`). A
-`lead` (registered interest only) has `user_id: null` and no invoices.
+`sessions_attended` (classes they have been checked in to, all-time — not the
+same as credits left, which is on each invoice), and their `invoices` (each with
+an `id` you can pass to `edit_invoice`). A `lead` (registered interest only) has
+`user_id: null`, no invoices, and `sessions_attended: 0`.
 
 ```bash
 scripts/agent.sh list_users '{"status":"member","limit":50}'

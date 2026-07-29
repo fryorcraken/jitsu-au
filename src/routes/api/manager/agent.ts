@@ -148,27 +148,36 @@ async function handleListUsers(params: unknown) {
   const db = await adminClient();
   const pdb = db;
 
-  const [{ data: profiles }, { data: rows, error }, { data: plans }, { data: waivers }, leads] =
-    await Promise.all([
-      pdb
-        .from("profiles")
-        .select(
-          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
-        )
-        .limit(5000),
-      db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
-      db.from("membership_plans").select("*"),
-      // ALL waivers: approved => visitor+, pending-only => applicant.
-      pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
-      // Interest registrations are the LEAD phase of the funnel; the
-      // aggregation drops any whose email already belongs to a person.
-      db
-        .from("interest_registrations")
-        .select("email, name, phone, created_at")
-        .order("created_at", { ascending: false })
-        .limit(LEADS_LIMIT)
-        .then((r) => (r.data ?? []) as ClubUserLead[]),
-    ]);
+  const [
+    { data: profiles },
+    { data: rows, error },
+    { data: plans },
+    { data: waivers },
+    { data: checkins },
+    leads,
+  ] = await Promise.all([
+    pdb
+      .from("profiles")
+      .select(
+        "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
+      )
+      .limit(5000),
+    db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+    db.from("membership_plans").select("*"),
+    // ALL waivers: approved => visitor+, pending-only => applicant.
+    pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+    // Attendance, counted per person: "who has been coming" is squarely this
+    // API's use case, and it costs one read on the shared aggregation path.
+    db.from("session_checkins").select("user_id").limit(50000),
+    // Interest registrations are the LEAD phase of the funnel; the
+    // aggregation drops any whose email already belongs to a person.
+    db
+      .from("interest_registrations")
+      .select("email, name, phone, created_at")
+      .order("created_at", { ascending: false })
+      .limit(LEADS_LIMIT)
+      .then((r) => (r.data ?? []) as ClubUserLead[]),
+  ]);
   if (error) throw new AgentError(500, "db_error", error.message);
   if (leads.length >= LEADS_LIMIT) {
     console.warn(
@@ -211,6 +220,7 @@ async function handleListUsers(params: unknown) {
     })),
     plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
     roles: rolesRows,
+    checkins: checkins ?? [],
   });
 
   // The agent surface also returns each person's invoices, projected from their
@@ -229,6 +239,7 @@ async function handleListUsers(params: unknown) {
     email: u.email,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
+    sessions_attended: u.sessions_attended,
     invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) =>
       projectInvoice(m, planById.get(m.plan_id)),
     ),

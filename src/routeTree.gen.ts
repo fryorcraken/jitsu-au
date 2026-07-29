@@ -29,6 +29,7 @@ import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
+import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
@@ -144,6 +145,12 @@ const AuthenticatedManagerCalendarRoute =
     path: '/manager/calendar',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerCheckInRoute =
+  AuthenticatedManagerCheckInRouteImport.update({
+    id: '/manager/check-in',
+    path: '/manager/check-in',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerMembershipPlansRoute =
   AuthenticatedManagerMembershipPlansRouteImport.update({
     id: '/manager/membership-plans',
@@ -238,6 +245,7 @@ export interface FileRoutesByFullPath {
   '/membership': typeof AuthenticatedMembershipRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
+  '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -272,6 +280,7 @@ export interface FileRoutesByTo {
   '/membership': typeof AuthenticatedMembershipRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
+  '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -308,6 +317,7 @@ export interface FileRoutesById {
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
+  '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -344,6 +354,7 @@ export interface FileRouteTypes {
     | '/membership'
     | '/manager/api-tokens'
     | '/manager/calendar'
+    | '/manager/check-in'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -378,6 +389,7 @@ export interface FileRouteTypes {
     | '/membership'
     | '/manager/api-tokens'
     | '/manager/calendar'
+    | '/manager/check-in'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -413,6 +425,7 @@ export interface FileRouteTypes {
     | '/_authenticated/membership'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/calendar'
+    | '/_authenticated/manager/check-in'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
@@ -594,6 +607,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerCalendarRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/check-in': {
+      id: '/_authenticated/manager/check-in'
+      path: '/manager/check-in'
+      fullPath: '/manager/check-in'
+      preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/membership-plans': {
       id: '/_authenticated/manager/membership-plans'
       path: '/manager/membership-plans'
@@ -693,6 +713,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedMembershipRoute: typeof AuthenticatedMembershipRoute
   AuthenticatedManagerApiTokensRoute: typeof AuthenticatedManagerApiTokensRoute
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
+  AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
@@ -708,6 +729,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedMembershipRoute: AuthenticatedMembershipRoute,
   AuthenticatedManagerApiTokensRoute: AuthenticatedManagerApiTokensRoute,
   AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
+  AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,
