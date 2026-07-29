@@ -38,7 +38,7 @@ jobs:
       FAIL_CATEGORIES: SECURITY
       FAIL_LEVELS: WARN,ERROR
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Guards the gating logic itself (CSV parsing, thresholds, allowlist
       # matching) with inline fixtures — no database needed, so it runs first
