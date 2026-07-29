@@ -345,13 +345,17 @@ export const getMyMemberships = createServerFn({ method: "GET" })
       // => applicant.
       admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
     ]);
-    // None of these may degrade to an empty list. An errored waivers read would
-    // tell an approved member they are still a lead on their own membership
-    // page; an errored plans read would price every plan as if it had no kind.
+    // An errored waivers read would tell an approved member they are still a
+    // lead on their own membership page; an errored plans read would price every
+    // plan as if it had no kind. Neither may degrade to an empty list.
     if (error) throw new Error(error.message);
     if (plErr) throw new Error(plErr.message);
-    if (prErr) throw new Error(prErr.message);
     if (wErr) throw new Error(wErr.message);
+    // The profile is the exception: it supplies nothing but a prefill for the
+    // student-number box, which the member can type themselves. Failing the
+    // whole page over an empty prefill would cost them more than the prefill is
+    // worth, so log it and render.
+    if (prErr) console.error("[getMyMemberships] student-number prefill lookup failed:", prErr);
 
     const hasApprovedWaiver = (waiverRows ?? []).some((w) => w.approval_status === "approved");
     const hasPendingWaiver = (waiverRows ?? []).length > 0 && !hasApprovedWaiver;

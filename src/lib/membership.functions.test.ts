@@ -32,21 +32,14 @@ const TRIAL_PLAN = {
  * walks. Each read is supplied per-test so a single one can be made to fail
  * while the rest succeed — the shape of a real outage.
  */
-function fakeAdmin(reads: {
-  trialPlans?: Result;
-  existingTrial?: Result;
-  profile?: Result;
-  inserted?: Result;
-}) {
+function fakeAdmin(reads: { trialPlans?: Result; existingTrial?: Result; profile?: Result }) {
   const inserts: unknown[] = [];
   const updates: unknown[] = [];
 
   const trialPlans = reads.trialPlans ?? ok([TRIAL_PLAN]);
   const existingTrial = reads.existingTrial ?? ok(null);
   const profile = reads.profile ?? ok({ first_name: "Ada", last_name: "Lovelace" });
-  const inserted =
-    reads.inserted ??
-    ok({ id: "mem-1", user_id: "user-1", plan_id: TRIAL_PLAN.id, price_cents: 0 });
+  const inserted = ok({ id: "mem-1", user_id: "user-1", plan_id: TRIAL_PLAN.id, price_cents: 0 });
 
   const admin = {
     from: (table: string) => ({
