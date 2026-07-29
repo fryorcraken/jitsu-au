@@ -145,6 +145,12 @@ Two things it deliberately does not do:
   sent to that address. A manager holding a piece of paper is not that, however
   legible the handwriting.
 
+One thing to know when filing a backlog: the date on the paper is the club's
+record of when they signed and what the lists order by, but it does **not**
+decide which waiver is active. That is still the most recently **approved** one
+(rule 5), so approving an old paper form today makes it that person's active
+waiver even if they signed a newer one online. The upload form says so.
+
 Because the record is otherwise identical to an online one, it says how it
 arrived: a **Paper** badge on the waivers list and on the person's page, and a
 **Filing record** (who filed it, when, from which files) where an online waiver

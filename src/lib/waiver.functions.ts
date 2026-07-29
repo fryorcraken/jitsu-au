@@ -631,9 +631,10 @@ export const uploadPaperWaiver = createServerFn({ method: "POST" })
     });
 
     const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
-    // The date written on the form, not the moment it was filed: waivers are
-    // ordered and superseded by this. Midnight UTC keeps the club's own
-    // timezone (UTC+10/+11) reading back the same calendar date.
+    // The date written on the form, not the moment it was filed: this is what
+    // the club's records show as the signing date, and what the lists order by.
+    // Midnight UTC keeps the club's own timezone (UTC+10/+11) reading back the
+    // same calendar date.
     const signed_at = `${data.signed_on}T00:00:00.000Z`;
 
     // Who filed it, when, and from what. This is the paper equivalent of the IP
@@ -690,10 +691,21 @@ export const uploadPaperWaiver = createServerFn({ method: "POST" })
       .from(BUCKET)
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
     if (upErr) {
+      // A paper waiver whose scan did not store is worth nothing: there is no
+      // generated PDF to fall back on, and no screen anywhere to attach one to
+      // afterwards. Take the empty row back out so the manager can simply file
+      // it again, rather than leaving a waiver that looks real and has no
+      // document behind it. If even the cleanup fails, say so plainly instead
+      // of pointing at a repair path that does not exist.
       console.error("[uploadPaperWaiver] scan upload failed:", upErr);
-      throw new Error(
-        "The waiver was saved, but the scan could not be stored. Upload it again from the person's page.",
-      );
+      const { error: cleanupErr } = await admin.from("waivers").delete().eq("id", inserted.id);
+      if (cleanupErr) {
+        console.error("[uploadPaperWaiver] could not remove the empty waiver row:", cleanupErr);
+        throw new Error(
+          "The scan could not be stored, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
+        );
+      }
+      throw new Error("The scan could not be stored. Nothing was filed, so please try again.");
     }
 
     const { error: pathErr } = await admin

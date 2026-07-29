@@ -568,9 +568,11 @@ export const paperWaiverUploadSchema = z
     emergency_contact_relationship: z.string().trim().max(80).optional().or(z.literal("")),
     emergency_contact_phone: z.string().trim().min(1).max(30),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
-    // The date written on the paper, not the date it was filed. Waivers are
-    // ordered and superseded by this, so filing an old form must not make it
-    // look like the newest one.
+    // The date written on the paper, not the date it was filed. This is the
+    // club's record of when they signed, and what the lists order by. It does
+    // NOT decide which waiver is active: that is the most recently APPROVED one
+    // (deriveWaiverListStatuses), so approving a backlog of old forms makes the
+    // last one approved active regardless of its date.
     signed_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     // Which version of the form the paper is, when the manager can tell. Null
     // is honest for an undated legacy form and is what the screens already

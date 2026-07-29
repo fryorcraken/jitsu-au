@@ -270,8 +270,9 @@ function UploadPaperWaiverPage() {
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                The date written on the paper, not today. Waivers are ordered by it, so an old form
-                filed now does not supersede a newer one.
+                The date written on the paper, not today. It is what the club's records show as when
+                they signed. Filing an old form is fine, but be aware that approving it makes it
+                their active waiver whatever its date, because active means most recently approved.
               </p>
             </div>
             <div>
