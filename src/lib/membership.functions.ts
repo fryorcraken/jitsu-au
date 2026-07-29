@@ -32,6 +32,7 @@ import type {
   ClubUserProfile,
   ClubUserWaiver,
 } from "@/lib/club-users";
+import { userEmails } from "@/lib/supabase-rpc";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -46,9 +47,9 @@ async function emailsByUserId(
   userIds: string[],
 ): Promise<Map<string, string>> {
   if (!userIds.length) return new Map();
-  const { data, error } = await admin.rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await userEmails(admin, userIds);
   if (error || !data) return new Map();
-  return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
+  return new Map(data.map((e) => [e.user_id, e.email]));
 }
 
 /**
@@ -64,9 +65,9 @@ async function clubUserEmailRows(
   userIds: string[],
 ): Promise<ClubUserEmail[]> {
   if (!userIds.length) return [];
-  const { data, error } = await admin.rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await userEmails(admin, userIds);
   if (error || !data) return [];
-  return (data as ClubUserEmail[]).map((e) => ({
+  return data.map((e) => ({
     user_id: e.user_id,
     email: e.email,
     email_confirmed_at: e.email_confirmed_at ?? null,
@@ -327,6 +328,7 @@ export const getMyMemberships = createServerFn({ method: "GET" })
       { data: plans, error: plErr },
       { data: profile, error: prErr },
       { data: waiverRows, error: wErr },
+      { count: sessionsAttended, error: cErr },
     ] = await Promise.all([
       admin
         .from("memberships")
@@ -344,6 +346,13 @@ export const getMyMemberships = createServerFn({ method: "GET" })
       // Waiver states feed the lifecycle: approved => visitor+, pending-only
       // => applicant.
       admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
+      // How many classes they have trained. Deliberately just the count: a
+      // member has no business reading the club's coverage bookkeeping, and
+      // "no cover" against a class they attended reads as an accusation.
+      admin
+        .from("session_checkins")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", context.userId),
     ]);
     // An errored waivers read would tell an approved member they are still a
     // lead on their own membership page; an errored plans read would price every
@@ -356,6 +365,10 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     // whole page over an empty prefill would cost them more than the prefill is
     // worth, so log it and render.
     if (prErr) console.error("[getMyMemberships] student-number prefill lookup failed:", prErr);
+    // Same posture for the attendance count: it drives one sentence, and the
+    // page hides that sentence at zero, so a failed count reads as "not shown"
+    // rather than as a wrong number.
+    if (cErr) console.error("[getMyMemberships] attendance count failed:", cErr);
 
     const hasApprovedWaiver = (waiverRows ?? []).some((w) => w.approval_status === "approved");
     const hasPendingWaiver = (waiverRows ?? []).length > 0 && !hasApprovedWaiver;
@@ -374,7 +387,12 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         price_cents: r.price_cents,
       })),
     });
-    return { lifecycle, memberships, uts_student_number: utsStudentNumber };
+    return {
+      lifecycle,
+      memberships,
+      uts_student_number: utsStudentNumber,
+      sessions_attended: sessionsAttended ?? 0,
+    };
   });
 
 // ---- Member: start a membership ----
@@ -656,13 +674,15 @@ export const listClubUsers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
-    const { aggregateClubUsers, profileUserIds, LEADS_LIMIT } = await import("@/lib/club-users");
+    const { aggregateClubUsers, profileUserIds, LEADS_LIMIT, CHECKINS_LIMIT } =
+      await import("@/lib/club-users");
 
     const [
       { data: profiles, error: pErr },
       { data: rows, error: mErr },
       { data: plans, error: plErr },
       { data: waivers, error: wErr },
+      { data: checkins, error: cErr },
       { data: leadRows, error: lErr },
     ] = await Promise.all([
       admin
@@ -675,6 +695,9 @@ export const listClubUsers = createServerFn({ method: "GET" })
       admin.from("membership_plans").select("*"),
       // ALL waivers: approved => visitor+, pending-only => applicant.
       admin.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+      // Attendance, counted per person. Only the user id is read: this is
+      // "classes trained", not "credits used".
+      admin.from("session_checkins").select("user_id").limit(CHECKINS_LIMIT),
       // Interest registrations are the LEAD phase of the funnel; the
       // aggregation drops any whose email already belongs to a person.
       admin
@@ -691,11 +714,18 @@ export const listClubUsers = createServerFn({ method: "GET" })
     if (mErr) throw new Error(mErr.message);
     if (plErr) throw new Error(plErr.message);
     if (wErr) throw new Error(wErr.message);
+    if (cErr) throw new Error(cErr.message);
     if (lErr) throw new Error(lErr.message);
 
     const leads = (leadRows ?? []) as ClubUserLead[];
 
-    // Surface the cap rather than silently truncating the funnel's lead list.
+    // Surface the caps rather than silently truncating. A truncated check-in
+    // read would under-report attendance, which reads as a real number.
+    if ((checkins ?? []).length >= CHECKINS_LIMIT) {
+      console.warn(
+        `[listClubUsers] session_checkins capped at ${CHECKINS_LIMIT}; counts truncated`,
+      );
+    }
     if (leads.length >= LEADS_LIMIT) {
       console.warn(
         `[listClubUsers] interest_registrations capped at ${LEADS_LIMIT}; leads truncated`,
@@ -739,6 +769,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
       })),
       plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
       roles: rolesRows,
+      checkins: checkins ?? [],
     });
   });
 

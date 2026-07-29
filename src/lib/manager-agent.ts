@@ -37,7 +37,7 @@ export const AGENT_MANIFEST: {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, and invoices.",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended).",
       params: [
         {
           name: "status",

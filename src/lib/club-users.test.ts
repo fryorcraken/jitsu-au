@@ -292,6 +292,30 @@ describe("aggregateClubUsers", () => {
     expect(u2.roles).toEqual([]);
   });
 
+  it("counts the classes each person has attended", () => {
+    const users = aggregate({
+      profiles: [profile({ user_id: "u1" }), profile({ user_id: "u2", first_name: "Bob" })],
+      checkins: [{ user_id: "u1" }, { user_id: "u1" }, { user_id: "u2" }],
+    });
+    expect(users.find((u) => u.user_id === "u1")!.sessions_attended).toBe(2);
+    expect(users.find((u) => u.user_id === "u2")!.sessions_attended).toBe(1);
+  });
+
+  it("reports nobody as having attended when there are no check-ins", () => {
+    const users = aggregate({ profiles: [profile()] });
+    expect(users[0].sessions_attended).toBe(0);
+  });
+
+  it("ignores a check-in for someone who is not a person here, and never counts a lead", () => {
+    const users = aggregate({
+      profiles: [profile({ user_id: "u1" })],
+      leads: [lead({ name: "Amy Lead", email: "amy@example.com" })],
+      checkins: [{ user_id: "u1" }, { user_id: "ghost" }],
+    });
+    expect(users.find((u) => u.user_id === "u1")!.sessions_attended).toBe(1);
+    expect(users.find((u) => u.user_id === null)!.sessions_attended).toBe(0);
+  });
+
   it("sorts persons and leads together by name A-Z", () => {
     const users = aggregate({
       profiles: [profile({ user_id: "u1", first_name: "Zoe", last_name: null })],

@@ -29,7 +29,7 @@ import {
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
-import { aggregateClubUsers, profileUserIds, LEADS_LIMIT } from "@/lib/club-users";
+import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
 import type {
   ClubUserEmail,
   ClubUserLead,
@@ -39,6 +39,7 @@ import type {
 import { hashToken } from "@/lib/manager-api-tokens";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
+import { userEmails } from "@/lib/supabase-rpc";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -51,9 +52,9 @@ import type { AppClient } from "@/lib/profile-types";
  */
 async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUserEmail[]> {
   if (!userIds.length) return [];
-  const { data, error } = await pdb.rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await userEmails(pdb, userIds);
   if (error || !data) return [];
-  return (data as ClubUserEmail[]).map((e) => ({
+  return data.map((e) => ({
     user_id: e.user_id,
     email: e.email,
     email_confirmed_at: e.email_confirmed_at ?? null,
@@ -157,6 +158,7 @@ async function handleListUsers(params: unknown) {
     { data: rows, error },
     { data: plans, error: plErr },
     { data: waivers, error: wErr },
+    { data: checkins, error: cErr },
     { data: leadRows, error: lErr },
   ] = await Promise.all([
     pdb
@@ -169,6 +171,9 @@ async function handleListUsers(params: unknown) {
     db.from("membership_plans").select("*"),
     // ALL waivers: approved => visitor+, pending-only => applicant.
     pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+    // Attendance, counted per person: "who has been coming" is squarely this
+    // API's use case, and it costs one read on the shared aggregation path.
+    db.from("session_checkins").select("user_id").limit(CHECKINS_LIMIT),
     // Interest registrations are the LEAD phase of the funnel; the
     // aggregation drops any whose email already belongs to a person.
     db
@@ -185,9 +190,15 @@ async function handleListUsers(params: unknown) {
   if (error) throw new AgentError(500, "db_error", error.message);
   if (plErr) throw new AgentError(500, "db_error", plErr.message);
   if (wErr) throw new AgentError(500, "db_error", wErr.message);
+  if (cErr) throw new AgentError(500, "db_error", cErr.message);
   if (lErr) throw new AgentError(500, "db_error", lErr.message);
 
   const leads = (leadRows ?? []) as ClubUserLead[];
+  if ((checkins ?? []).length >= CHECKINS_LIMIT) {
+    console.warn(
+      `[agent.list_users] session_checkins capped at ${CHECKINS_LIMIT}; counts truncated`,
+    );
+  }
   if (leads.length >= LEADS_LIMIT) {
     console.warn(
       `[agent.list_users] interest_registrations capped at ${LEADS_LIMIT}; leads truncated`,
@@ -231,6 +242,7 @@ async function handleListUsers(params: unknown) {
     })),
     plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
     roles: rolesRows,
+    checkins: checkins ?? [],
   });
 
   // The agent surface also returns each person's invoices, projected from their
@@ -249,6 +261,7 @@ async function handleListUsers(params: unknown) {
     email: u.email,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
+    sessions_attended: u.sessions_attended,
     invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) =>
       projectInvoice(m, planById.get(m.plan_id)),
     ),

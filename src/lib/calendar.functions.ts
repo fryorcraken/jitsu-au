@@ -28,6 +28,7 @@ import type {
   EntryDetailsPatch,
 } from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
+import { userEmails } from "@/lib/supabase-rpc";
 
 const SITE_URL = "https://jitsu.au";
 /**
@@ -333,7 +334,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
-        pdb.rpc("user_emails", { _user_ids: userIds }),
+        userEmails(pdb, userIds),
       ]);
       // Surface these: silently falling back to "Someone" with no email would
       // look like missing data rather than a broken lookup.
@@ -342,7 +343,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
       // Manager-facing list, so it shows the preferred name in the nickname
       // position (`Ada "Addy" Lovelace`), matching the other manager views.
       for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
-      for (const e of (emails ?? []) as { user_id: string; email: string }[]) {
+      for (const e of emails ?? []) {
         emailByUser.set(e.user_id, e.email);
       }
     }
@@ -415,8 +416,12 @@ async function materializeSeries(
  * query for the furthest generated date per entry, and it only materialises the
  * ones running low. Best-effort — a failure here must never break a calendar
  * read, so it is caught and logged.
+ *
+ * Exported for the check-in screen, which lists classes without going through
+ * any calendar read: without it, the first date of a brand-new weekly entry
+ * could be un-check-in-able on the day it runs.
  */
-async function topUpHorizon(admin: CalendarClient): Promise<void> {
+export async function topUpHorizon(admin: CalendarClient): Promise<void> {
   try {
     const { data: series } = await admin.from("calendar_series").select("*").eq("is_active", true);
     if (!series?.length) return;
@@ -660,6 +665,23 @@ export const deleteEvent = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     const admin = await adminClient();
+
+    // Check-ins cascade with the event, and their credits do NOT come back:
+    // deleting a class five people were checked in to would silently burn five
+    // sessions with no record that it happened. Delete is for a mistake made
+    // before anyone turned up; once they have, cancelling is the honest move
+    // (it keeps the row, the attendance and the RSVPs).
+    const { count, error: cErr } = await admin
+      .from("session_checkins")
+      .select("id", { count: "exact", head: true })
+      .eq("event_id", data.id);
+    if (cErr) throw new Error(cErr.message);
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        `${count} ${count === 1 ? "person has" : "people have"} been checked in to this class, so deleting it would take their sessions with it. Cancel it instead.`,
+      );
+    }
+
     const { error } = await admin.from("calendar_events").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true as const, id: data.id };

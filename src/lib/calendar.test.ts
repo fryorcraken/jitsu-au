@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addMinutes,
+  clubLocalDate,
   diffOccurrences,
   generateOccurrences,
   tzOffsetMinutes,
@@ -31,6 +32,24 @@ describe("tzOffsetMinutes (Sydney DST)", () => {
   it("is +600 in winter (AEST) and +660 in summer (AEDT)", () => {
     expect(tzOffsetMinutes(new Date("2026-07-06T00:00:00Z"), SYDNEY)).toBe(600);
     expect(tzOffsetMinutes(new Date("2026-01-26T00:00:00Z"), SYDNEY)).toBe(660);
+  });
+});
+
+describe("clubLocalDate", () => {
+  it("gives the club's date, not UTC's, for a Sydney morning", () => {
+    // 09:00 Sydney on 5 Aug is still 4 Aug in UTC.
+    expect(clubLocalDate(new Date("2026-08-04T23:00:00Z"), SYDNEY)).toBe("2026-08-05");
+  });
+
+  it("holds across midnight at the club", () => {
+    expect(clubLocalDate(new Date("2026-08-04T14:00:00Z"), SYDNEY)).toBe("2026-08-05");
+    expect(clubLocalDate(new Date("2026-08-04T13:59:00Z"), SYDNEY)).toBe("2026-08-04");
+  });
+
+  it("uses the offset in force at the instant, so daylight saving cannot shift it", () => {
+    // AEDT (+11) on 4 Apr 2026, AEST (+10) the day after the change.
+    expect(clubLocalDate(new Date("2026-04-04T13:30:00Z"), SYDNEY)).toBe("2026-04-05");
+    expect(clubLocalDate(new Date("2026-07-05T14:30:00Z"), SYDNEY)).toBe("2026-07-06");
   });
 });
 

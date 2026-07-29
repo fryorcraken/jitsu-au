@@ -87,6 +87,8 @@ src/
     lovable/email/auth/   Lovable auth-email webhook + preview routes
     index.tsx, about.tsx, classes.tsx, pricing.tsx, instructors.tsx,
     faq.tsx, contact.tsx, register-interest.tsx, waiver.tsx, auth.tsx, ...
+    robots[.]txt.ts         /robots.txt (escaped dot; see the SEO section)
+    sitemap[.]xml.ts        /sitemap.xml
     routeTree.gen.ts      AUTO-GENERATED route tree — never edit by hand
   components/
     ui/                   shadcn/ui primitives (generated; avoid hand-editing)
@@ -156,6 +158,37 @@ Read `src/routes/README.md` before touching routes. Key points:
   have verified exists live, in the generator's own style. It is listed in
   `.prettierignore` so `bun run format` cannot reformat it: Prettier would
   rewrite all ~1400 lines and the next regen would revert them.
+
+> [!WARNING]
+> **Never trust the nullability of an RPC's return type, and never hand-fix it
+> in `types.ts`.** A function's declared return type says nothing about NULL,
+> and there is nowhere for the generator to look it up: a scalar function
+> returns NULL whenever its body selects no row (`user_id_by_email` is
+> `SELECT id ... LIMIT 1`, so an unknown address yields NULL, which is the whole
+> point of it), and a `RETURNS TABLE (...)` declares OUT parameters recorded in
+> `pg_proc` as names and types only. Nullability is a **column** property
+> (`pg_attribute.attnotnull`) — which is exactly why the generated `Row` types
+> are accurate and these are not. So every entry under
+> `Database["public"]["Functions"]` prints its bare declared type.
+>
+> A hand-correction in `types.ts` does not survive: the file is regenerated from
+> the live database and every regeneration erases the edit, turning `main` red
+> on whatever contract test was pinning it. That happened on 2026-07-29.
+>
+> **Call these through `src/lib/supabase-rpc.ts` instead** — thin wrappers that
+> declare the app's real shape in a file we own, returning the same
+> `{ data, error }` so error handling is unchanged. They still route the
+> function name and arguments through the generated types, which ARE reliable
+> (they come from `pg_proc` directly), so a renamed parameter still fails the
+> typecheck.
+>
+> Add a wrapper when a function's real nullability differs from the generated
+> one. Three kinds do not need one: `SELECT EXISTS(...)` never returns NULL
+> (`has_role`, `has_active_paid_membership`), `RETURNS void` has no data to type
+> (`clear_email_confirmation`), and anything whose callers read only `error`.
+> In `schema-contract.test.ts`, pin a function's COLUMN NAMES with
+> `RequireColumns`, never its nullability; pin the wrapper's own declared shape
+> in `supabase-rpc.test.ts`, since a runtime test cannot see a type.
 
 ## Auth & roles
 
@@ -347,13 +380,44 @@ hand-produce a public-npm lock.
   `@/lib/utils`. Reuse `components/ui` primitives and the `SiteLayout`
   (`SiteHeader`/`SiteFooter`) shell for pages. Theme tokens (`bg-background`,
   `text-muted-foreground`, etc.) come from `styles.css`.
-- Every public page sets SEO `head()` meta (title/description/og/canonical);
-  manager pages set `robots: noindex`. Match the existing pattern when adding pages.
+- **SEO:** every public page sets its own `head()` meta (title/description/og)
+  **and its own `rel="canonical"`**; manager and other private pages set
+  `robots: noindex`. Match the existing pattern when adding pages, and see the
+  SEO section below for the two things that are easy to get wrong.
 - **Copy voice:** user-facing website copy must read like a person wrote it, not
   an AI. **No em dashes (`—`) in prose** — rewrite with a full stop, comma,
   colon, or "and"/"but". See the "Writing style for website copy" section in
   `AGENTS.md` for the full rules and allowed exceptions (numeric en-dash ranges,
   empty-value placeholder glyphs).
+
+## SEO
+
+`src/lib/seo.ts` holds everything crawlers are told: the canonical origin, the
+list of indexable pages, the robots rules, and the club's structured data. It is
+served by two routes whose filenames escape the dot so the router does not read
+it as a path separator (`robots[.]txt.ts` → `/robots.txt`,
+`sitemap[.]xml.ts` → `/sitemap.xml`).
+
+**Adding a public page? Add it to `PUBLIC_PAGES` in `src/lib/seo.ts`.**
+`src/lib/seo.test.ts` reads the route files and fails if an indexable page is
+missing from the sitemap (or a `noindex` one is listed), so this is enforced,
+not just documented.
+
+Two non-obvious rules:
+
+- **Never put a `rel="canonical"` in `__root.tsx`.** TanStack Router _replaces_
+  a parent's meta tag when a child declares the same name/property, but it
+  _appends_ `<link>`s. A site-wide canonical therefore shipped a second,
+  competing canonical on every subpage, which is the same as having none.
+- **`robots.txt` blocks only what a crawler can never usefully read** (`/api/`,
+  `/lovable/`, and the client-rendered auth-gated areas). Public pages that must
+  stay out of the index (`/waiver`, `/thank-you`, the auth screens) are
+  server-rendered with `robots: noindex` instead: a crawler has to be allowed to
+  fetch a page in order to see that tag, so blocking it in robots.txt would
+  leave the URL eligible for a bare, contentless listing.
+
+Non-production hosts (Lovable previews, branch deploys) are served a blanket
+`Disallow: /`, so a preview never competes with `jitsu.au` in search results.
 
 ## Environment variables
 

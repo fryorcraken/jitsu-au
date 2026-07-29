@@ -129,13 +129,59 @@ export type _VerificationTokenUserIdIsNullable = Expect<
  * Verified state is read from `auth.users` through this RPC. There is
  * deliberately no `email_verified` column on `profiles`: one store, nothing to
  * drift. If `email_confirmed_at` disappears from the RPC's shape, every badge
- * in the manager UI silently reads `undefined` (i.e. "unverified") — so pin it.
+ * in the manager UI silently reads `undefined` (i.e. "unverified") — so pin the
+ * COLUMN NAMES.
+ *
+ * Deliberately not the nullability. The generator cannot know it for a function:
+ * a `RETURNS TABLE (...)` declares OUT parameters, which carry no `attnotnull`,
+ * and a scalar function's declared type says nothing either, so every function
+ * return here prints non-null whether or not it is. Pinning `string | null`
+ * only pinned a hand-edit that the next regeneration erased. The app's real
+ * shape lives in `src/lib/supabase-rpc.ts` instead, and is pinned there.
+ *
+ * `RequireColumns`, not an exact key match: adding a column to the RPC is a
+ * legitimate additive change and must not redden `main`.
  */
-export type _UserEmailsReturnsConfirmation = Expect<
-  Equals<
-    Database["public"]["Functions"]["user_emails"]["Returns"][number]["email_confirmed_at"],
-    string | null
-  >
+export type _UserEmailsReturnsConfirmation = RequireColumns<
+  Database["public"]["Functions"]["user_emails"]["Returns"][number],
+  "user_id" | "email" | "email_confirmed_at"
+>;
+
+// ---- session_checkins: attendance and what paid for it ----
+export type _CheckinColumns = RequireColumns<
+  Tables["session_checkins"]["Row"],
+  | "event_id"
+  | "user_id"
+  | "checked_in_at"
+  | "checked_in_by"
+  | "coverage"
+  | "membership_id"
+  | "consumed_credit"
+  | "closed_membership"
+  | "warnings"
+>;
+
+/**
+ * Exactly `string`, not `string | null`: the column is NOT NULL DEFAULT 'none'
+ * and every screen compares it directly (`coverage === "none"` is what puts a
+ * check-in in the needs-attention list). A nullable widening here would mean the
+ * NOT NULL was dropped live, and uncovered check-ins would quietly stop being
+ * listed as needing attention.
+ */
+export type _CheckinCoverageIsString = Expect<
+  Equals<Tables["session_checkins"]["Row"]["coverage"], string>
+>;
+
+/**
+ * Both NOT NULL, and both load-bearing for undo: `consumed_credit` decides
+ * whether a session is given back, `closed_membership` decides whether the
+ * membership is reopened. A nullable third state would make undo guess.
+ */
+export type _CheckinFlagsAreBooleans = Expect<
+  Equals<Tables["session_checkins"]["Row"]["consumed_credit"], boolean>
+>;
+export type _CheckinClosedFlagIsBoolean = Expect<
+  Equals<Tables["session_checkins"]["Row"]["closed_membership"], boolean>
 >;
 
 /**

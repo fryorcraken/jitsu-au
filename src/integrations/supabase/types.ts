@@ -619,6 +619,70 @@ export type Database = {
         }
         Relationships: []
       }
+      session_checkins: {
+        Row: {
+          checked_in_at: string
+          checked_in_by: string | null
+          closed_membership: boolean
+          consumed_credit: boolean
+          coverage: string
+          event_id: string
+          id: string
+          membership_id: string | null
+          note: string | null
+          user_id: string
+          warnings: string[]
+        }
+        Insert: {
+          checked_in_at?: string
+          checked_in_by?: string | null
+          closed_membership?: boolean
+          consumed_credit?: boolean
+          coverage?: string
+          event_id: string
+          id?: string
+          membership_id?: string | null
+          note?: string | null
+          user_id: string
+          warnings?: string[]
+        }
+        Update: {
+          checked_in_at?: string
+          checked_in_by?: string | null
+          closed_membership?: boolean
+          consumed_credit?: boolean
+          coverage?: string
+          event_id?: string
+          id?: string
+          membership_id?: string | null
+          note?: string | null
+          user_id?: string
+          warnings?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_checkins_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "calendar_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_checkins_membership_id_fkey"
+            columns: ["membership_id"]
+            isOneToOne: false
+            referencedRelation: "memberships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "session_checkins_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -814,7 +878,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      clear_email_confirmation: { Args: { _user_id: string }; Returns: undefined }
+      clear_email_confirmation: {
+        Args: { _user_id: string }
+        Returns: undefined
+      }
       has_active_paid_membership: {
         Args: { _user_id: string }
         Returns: boolean
@@ -830,7 +897,7 @@ export type Database = {
         Args: { _user_ids: string[] }
         Returns: {
           email: string
-          email_confirmed_at: string | null
+          email_confirmed_at: string
           user_id: string
         }[]
       }
