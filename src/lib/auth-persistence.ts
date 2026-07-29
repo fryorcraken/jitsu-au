@@ -36,6 +36,36 @@ export function shouldForgetSession(
   return remember === "false" && sessionActive === null;
 }
 
+/**
+ * Whether `href` is the landing URL of a Supabase auth email link (sign-in,
+ * invite or password recovery).
+ *
+ * Supabase puts the tokens in the URL fragment for email links, and a PKCE
+ * `code` in the query string for the exchange flow. Either way a session that
+ * exists during such a page load was created *by that link*, in this tab.
+ *
+ * This matters because email links open in a fresh tab, where `sessionStorage`
+ * is always empty, which looks identical to "the browser was restarted". Left
+ * unchecked, a user who once unchecked "Keep me signed in" would be signed
+ * straight back out by the very link that just signed them in.
+ */
+export function isAuthCallbackUrl(href: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return false;
+  }
+  const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
+  return (
+    fragment.has("access_token") ||
+    fragment.has("error") ||
+    fragment.has("error_code") ||
+    url.searchParams.has("code") ||
+    url.searchParams.has("token_hash")
+  );
+}
+
 /** Record the user's "remember me" choice at sign-in time (client only). */
 export function rememberSession(remember: boolean): void {
   if (typeof window === "undefined") return;
@@ -47,13 +77,22 @@ export function rememberSession(remember: boolean): void {
  * Honour a previous "don't remember me" choice on app start by clearing a
  * session that outlived its browser session, then (re)mark this browser
  * session as active so in-session reloads keep the user signed in.
+ *
+ * `initialHref` must be the URL as it was when the page loaded. The caller has
+ * to capture it up front, because the Supabase client strips an email link's
+ * tokens out of the address bar as soon as it initialises, which is well
+ * before this runs.
  */
-export function applyRememberPreference(): void {
+export function applyRememberPreference(initialHref: string): void {
   if (typeof window === "undefined") return;
   const remember = localStorage.getItem(REMEMBER_STORAGE_KEY);
   const sessionActive = sessionStorage.getItem(SESSION_ACTIVE_KEY);
 
-  if (shouldForgetSession(remember, sessionActive)) {
+  // Note that the stored preference itself is left alone on a callback landing.
+  // "Don't remember me" is a durable privacy choice, so a session started from
+  // an email link is still discarded on the next browser restart. It just is
+  // not discarded by the link that created it.
+  if (!isAuthCallbackUrl(initialHref) && shouldForgetSession(remember, sessionActive)) {
     // `scope: "local"` clears the stored session without a network round-trip.
     void supabase.auth.signOut({ scope: "local" });
     localStorage.removeItem(REMEMBER_STORAGE_KEY);

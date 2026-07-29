@@ -133,26 +133,35 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+// Captured at module load, before anything touches the Supabase client: an
+// email link lands with its tokens in the URL fragment, and Supabase clears
+// them from the address bar the moment it initialises.
+const initialHref = typeof window === "undefined" ? "" : window.location.href;
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
 
   useEffect(() => {
     let mounted = true;
+    let unsubscribe: (() => void) | undefined;
     import("@/lib/auth-persistence").then(({ applyRememberPreference }) => {
-      if (mounted) applyRememberPreference();
+      if (mounted) applyRememberPreference(initialHref);
     });
     import("@/integrations/supabase/client").then(({ supabase }) => {
-      if (!mounted) return;
       const { data: sub } = supabase.auth.onAuthStateChange((event) => {
         if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
         router.invalidate();
         if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
       });
-      return () => sub.subscription.unsubscribe();
+      // The import resolves asynchronously, so the effect may already have been
+      // cleaned up by the time we get here.
+      if (!mounted) sub.subscription.unsubscribe();
+      else unsubscribe = () => sub.subscription.unsubscribe();
     });
     return () => {
       mounted = false;
+      unsubscribe?.();
     };
   }, [queryClient, router]);
 
