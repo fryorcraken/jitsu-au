@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   NEUTRAL_STATUS_CLASS,
   coverageClass,
@@ -79,5 +81,49 @@ describe("status colours", () => {
     // They are different things in different vocabularies; the shared module
     // must not quietly collapse them because they share a word.
     expect(membershipClass("pending")).not.toBe(waiverClass("pending"));
+  });
+});
+
+/**
+ * The guard that actually stops #71 recurring.
+ *
+ * Every test above passes whether or not a single screen uses these modules,
+ * which is how this PR shipped with the account page still hand-rolling its own
+ * badge (a superseded waiver painted exactly like a pending one). The failure
+ * mode is a route rolling its own copy, so that is what gets checked, by
+ * reading the route files the way `seo.test.ts` does.
+ */
+describe("no screen rolls its own status pill", () => {
+  const roots = ["src/routes", "src/components/site"];
+
+  function walk(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return walk(path);
+      if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) return [];
+      return [path];
+    });
+  }
+
+  const files = roots.flatMap(walk);
+
+  it("finds route files to check", () => {
+    // A broken walk would make every assertion below vacuously true.
+    expect(files.length).toBeGreaterThan(20);
+  });
+
+  it("declares the badge in exactly one place", () => {
+    const owners = files.filter((f) => /function Pill\(/.test(readFileSync(f, "utf8")));
+    expect(owners).toEqual(["src/components/site/StatusPill.tsx"]);
+  });
+
+  it("keeps the status palette out of the screens", () => {
+    // `bg-<hue>-100 text-<hue>-800` is unmistakably a status colour, so it
+    // belongs in status-colours.ts. Other palette shades are left alone: a
+    // marketing callout is entitled to its own colour.
+    for (const file of files) {
+      const offenders = readFileSync(file, "utf8").match(/bg-(\w+)-100 text-\1-800/g);
+      expect(offenders, `${file} hardcodes a status colour`).toBeNull();
+    }
   });
 });
