@@ -147,9 +147,16 @@ describe("buildClubJsonLd", () => {
 
   it("declares a sports club at the canonical URL", () => {
     expect(club["@context"]).toBe("https://schema.org");
-    expect(club["@type"]).toBe("SportsClub");
     expect(club.url).toBe(`${SITE_ORIGIN}/`);
     expect(club.name).toBe("UTS Jitsu");
+  });
+
+  it("is typed as both a club and a sports organisation", () => {
+    // `address` needs SportsClub; `sport` needs SportsOrganization, which
+    // SportsClub does not inherit. Dropping either type makes one of them an
+    // unknown property to a validator.
+    expect(club["@type"]).toEqual(["SportsClub", "SportsOrganization"]);
+    expect(club.sport).toBe("Japanese Jiu-Jitsu");
   });
 
   it("carries a postal address a search engine can place on a map", () => {

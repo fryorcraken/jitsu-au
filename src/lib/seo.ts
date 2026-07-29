@@ -154,7 +154,11 @@ export function buildRobotsTxt(host: string | null | undefined): string {
 export function buildClubJsonLd(): Record<string, unknown> {
   return {
     "@context": "https://schema.org",
-    "@type": "SportsClub",
+    // Two types on purpose. `SportsClub` is the place you train at, and it is
+    // what carries `address`. `sport` belongs to `SportsOrganization`, which
+    // `SportsClub` does not inherit from, so a validator reports it as an
+    // unknown property unless the club is declared as both. It is both.
+    "@type": ["SportsClub", "SportsOrganization"],
     "@id": `${SITE_ORIGIN}/#club`,
     name: "UTS Jitsu",
     description:
