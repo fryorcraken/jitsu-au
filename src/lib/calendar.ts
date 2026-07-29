@@ -75,6 +75,18 @@ export function tzOffsetMinutes(instant: Date, timeZone: string): number {
 }
 
 /**
+ * The calendar date (YYYY-MM-DD) that `instant` falls on in `timeZone`.
+ *
+ * Needed wherever "today" means today at the club rather than today in UTC: at
+ * 09:00 in Sydney the UTC date is still yesterday, so `toISOString().slice(0,10)`
+ * puts every morning class on the wrong day.
+ */
+export function clubLocalDate(instant: Date, timeZone: string = CLUB_TIME_ZONE): string {
+  const shifted = new Date(instant.getTime() + tzOffsetMinutes(instant, timeZone) * 60000);
+  return shifted.toISOString().slice(0, 10);
+}
+
+/**
  * The absolute instant whose local time in `timeZone` is `dateStr`T`timeStr`
  * (e.g. "2026-01-26" + "18:00" in Australia/Sydney). Resolves the offset at the
  * candidate instant and corrects once for DST boundaries.

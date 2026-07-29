@@ -99,6 +99,9 @@ is no "Add dates" button; that was an implementation detail leaking into the UI.
    untouched, because they happened.
 6. **See who's coming** — a going/maybe tally per date, expandable to the list of
    names and emails.
+7. **Check people in** — who actually turned up, on the `/manager/check-in`
+   screen. A check-in belongs to a date on this calendar, and a **cancelled**
+   date cannot be checked in to. See `docs/check-in.md`.
 
 Deleting an entry outright exists for mistakes only, and only for one-off
 entries: deleting a single date of a repeat would just be regenerated at the next

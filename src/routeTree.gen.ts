@@ -22,6 +22,8 @@ import { Route as InstructorsRouteImport } from './routes/instructors'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as RegisterInterestRouteImport } from './routes/register-interest'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ThankYouRouteImport } from './routes/thank-you'
 import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as WaiverRouteImport } from './routes/waiver'
@@ -29,6 +31,7 @@ import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
+import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
@@ -108,6 +111,16 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ThankYouRoute = ThankYouRouteImport.update({
   id: '/thank-you',
   path: '/thank-you',
@@ -143,6 +156,12 @@ const AuthenticatedManagerCalendarRoute =
   AuthenticatedManagerCalendarRouteImport.update({
     id: '/manager/calendar',
     path: '/manager/calendar',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerCheckInRoute =
+  AuthenticatedManagerCheckInRouteImport.update({
+    id: '/manager/check-in',
+    path: '/manager/check-in',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedManagerMembershipPlansRoute =
@@ -238,6 +257,8 @@ export interface FileRoutesByFullPath {
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
@@ -245,6 +266,7 @@ export interface FileRoutesByFullPath {
   '/membership': typeof AuthenticatedMembershipRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
+  '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -273,6 +295,8 @@ export interface FileRoutesByTo {
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
@@ -280,6 +304,7 @@ export interface FileRoutesByTo {
   '/membership': typeof AuthenticatedMembershipRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
+  '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -310,6 +335,8 @@ export interface FileRoutesById {
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
@@ -317,6 +344,7 @@ export interface FileRoutesById {
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
+  '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -347,6 +375,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sitemap.xml'
     | '/thank-you'
     | '/update-password'
     | '/waiver'
@@ -354,6 +384,7 @@ export interface FileRouteTypes {
     | '/membership'
     | '/manager/api-tokens'
     | '/manager/calendar'
+    | '/manager/check-in'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -382,6 +413,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sitemap.xml'
     | '/thank-you'
     | '/update-password'
     | '/waiver'
@@ -389,6 +422,7 @@ export interface FileRouteTypes {
     | '/membership'
     | '/manager/api-tokens'
     | '/manager/calendar'
+    | '/manager/check-in'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -418,6 +452,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sitemap.xml'
     | '/thank-you'
     | '/update-password'
     | '/waiver'
@@ -425,6 +461,7 @@ export interface FileRouteTypes {
     | '/_authenticated/membership'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/calendar'
+    | '/_authenticated/manager/check-in'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
@@ -455,6 +492,8 @@ export interface RootRouteChildren {
   PricingRoute: typeof PricingRoute
   RegisterInterestRoute: typeof RegisterInterestRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  RobotsDottxtRoute: typeof RobotsDottxtRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ThankYouRoute: typeof ThankYouRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
@@ -558,6 +597,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/thank-you': {
       id: '/thank-you'
       path: '/thank-you'
@@ -605,6 +658,13 @@ declare module '@tanstack/react-router' {
       path: '/manager/calendar'
       fullPath: '/manager/calendar'
       preLoaderRoute: typeof AuthenticatedManagerCalendarRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/check-in': {
+      id: '/_authenticated/manager/check-in'
+      path: '/manager/check-in'
+      fullPath: '/manager/check-in'
+      preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/manager/membership-plans': {
@@ -713,6 +773,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedMembershipRoute: typeof AuthenticatedMembershipRoute
   AuthenticatedManagerApiTokensRoute: typeof AuthenticatedManagerApiTokensRoute
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
+  AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
@@ -729,6 +790,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedMembershipRoute: AuthenticatedMembershipRoute,
   AuthenticatedManagerApiTokensRoute: AuthenticatedManagerApiTokensRoute,
   AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
+  AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,
@@ -761,6 +823,8 @@ const rootRouteChildren: RootRouteChildren = {
   PricingRoute: PricingRoute,
   RegisterInterestRoute: RegisterInterestRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  RobotsDottxtRoute: RobotsDottxtRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ThankYouRoute: ThankYouRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,

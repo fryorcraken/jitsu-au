@@ -196,6 +196,12 @@ function MembershipPage() {
                   </tbody>
                 </table>
               </div>
+              {mine.sessions_attended > 0 && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  You have trained {mine.sessions_attended} time
+                  {mine.sessions_attended === 1 ? "" : "s"} with us.
+                </p>
+              )}
               {mine.memberships.some((m) => m.status === "pending") && (
                 <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                   <Mail className="h-4 w-4" />
