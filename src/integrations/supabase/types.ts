@@ -168,6 +168,7 @@ export type Database = {
           id: string
           last_used_at: string | null
           revoked_at: string | null
+          token: string | null
           token_hash: string
           token_prefix: string
           user_id: string
@@ -177,6 +178,7 @@ export type Database = {
           id?: string
           last_used_at?: string | null
           revoked_at?: string | null
+          token?: string | null
           token_hash: string
           token_prefix: string
           user_id: string
@@ -186,6 +188,7 @@ export type Database = {
           id?: string
           last_used_at?: string | null
           revoked_at?: string | null
+          token?: string | null
           token_hash?: string
           token_prefix?: string
           user_id?: string

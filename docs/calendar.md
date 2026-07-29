@@ -114,7 +114,10 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
 3. **Get a calendar link** — a private URL (`/api/calendar/<token>`) to add to a
    phone or laptop calendar. New dates, changes and cancellations then sync on
    their own. It includes members-only entries only while that person is a paid
-   member. The link is shown once, stored only as a hash, and revocable.
+   member. It is minted on the first visit to `/calendar` and shown there every
+   visit after that: one permanent link per person, with nothing to press and no
+   replace or turn-off buttons. Losing the link is not a failure state, since it
+   is always on the page.
 
 ## Rules
 
@@ -125,8 +128,9 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
    survive. Deletion is for mistakes only.
 3. **One RSVP per person per date**, owned by that person.
 4. **No public calendar feed.** Only per-person links, so a subscriber can never
-   silently miss a members-only entry. Links are secrets: stored hashed, shown
-   once, revocable.
+   silently miss a members-only entry. A link is a secret, but a durable one:
+   like any calendar app's private ICS address it is stored and shown to its
+   owner whenever they ask, not shown once and then unrecoverable.
 5. **"Member" means paid.** Members-only visibility keys off an active, non-trial
    membership with a price above zero (mirroring `deriveLifecycleStatus`), via the
    `has_active_paid_membership` helper used in RLS.

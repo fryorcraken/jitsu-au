@@ -413,17 +413,25 @@ so `20260728120000_calendar_revoke_client_grants.sql` REVOKEs them explicitly.
 ### `calendar_feed_tokens` — per-person private calendar links
 
 `id` PK, `user_id → auth.users(id) ON DELETE CASCADE`, `token_prefix`,
-`token_hash` (SHA-256, unique; raw shown once), `created_at`, `last_used_at`,
-`revoked_at`. Partial indexes: fast lookup of live tokens by hash, and at most
-one live token per person. The token rides in the URL path
-(`/api/calendar/<token>`) since calendar apps can't send an auth header. There is
-**no public/anon feed** — a personal feed carries members-only events only while
-that person is a paid member, so a subscriber never silently misses one.
-**RLS:** a person reads/creates/revokes their own token; minting and feed lookup
-run through the service role; `authenticated` gets SELECT only, so a client
-cannot clear its own `revoked_at` and resurrect a link it just revoked. The
-owner can read their own row including `token_hash`, which is harmless: the hash
-is not reversible and grants no access by itself.
+`token_hash` (SHA-256, unique), `token` (the raw token, nullable), `created_at`,
+`last_used_at`, `revoked_at`. Partial indexes: fast lookup of live tokens by
+hash, uniqueness on a non-null `token`, and at most one live token per person.
+The token rides in the URL path (`/api/calendar/<token>`) since calendar apps
+can't send an auth header. There is **no public/anon feed** — a personal feed
+carries members-only events only while that person is a paid member, so a
+subscriber never silently misses one.
+
+`token` exists because `/calendar` shows the member their link on every visit
+rather than once at creation (`20260728180000`), and a hash cannot be reversed.
+The hash column stays and is still what the feed route looks up. Rows minted
+before that migration have `token IS NULL`; the server re-mints those in place
+the next time their owner opens the page, which retires the old URL.
+
+**RLS:** a person reads their own token row; minting and feed lookup run through
+the service role; `authenticated` gets SELECT only, so a client cannot clear its
+own `revoked_at`. The owner's row now carries the live token, which is what the
+page shows them anyway. There is no member-facing rotate or revoke: the link is
+permanent, the way a private ICS address is in any calendar app.
 
 ---
 
