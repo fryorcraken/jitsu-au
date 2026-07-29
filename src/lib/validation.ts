@@ -448,6 +448,17 @@ export const saveTemplateSchema = z.object({
   acknowledgements: templateAcknowledgementsSchema.default([]),
 });
 
+// ---- Manager: promote an existing template version to the live one ----
+//
+// Saving from the editor always writes a NEW version. Promoting is the other
+// half: it makes an existing row the one `/waiver` serves, which is how a
+// template that arrived any other way (a migration seeding a draft, say) goes
+// live without being retyped into the editor first.
+export const setCurrentTemplateSchema = z.object({
+  id: z.string().uuid(),
+});
+export type SetCurrentTemplateInput = z.infer<typeof setCurrentTemplateSchema>;
+
 // ---- Manager: approve / unapprove a signed waiver ----
 
 /** The member-facing status a manager can set on a signed waiver. */

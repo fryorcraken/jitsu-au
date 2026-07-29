@@ -201,6 +201,30 @@ submission, and only while it is still pending, because that is the one waiting
 on a decision. Older submissions and approved ones (active or superseded) start
 collapsed; a manager can open any of them by hand.
 
+### Manager changes the waiver text
+
+`/manager/waiver-template` is the club's waiver document, versioned. The screen
+lists every version newest first, marks the one that is **live** (the single
+`waiver_templates.is_current = true` row, the only thing `/waiver` serves), and
+opens on it. Selecting any other version loads it into the editor to read or
+work from; an unsaved edit is confirmed before it is discarded.
+
+There are two ways a version becomes live:
+
+- **Save as new version** — writes the edited text as version N+1 and makes it
+  live in the same step. This is the everyday path.
+- **Make version N live** — promotes a version that already exists. This is the
+  path for a template that arrived any other way: a migration that seeded a
+  draft, or an older version the club wants back. Without it a seeded draft is
+  unreachable, which is exactly what happened to the application form.
+
+Promoting never touches waivers already signed. Each one records the
+`template_version` it was signed against and its PDF carries that version's full
+text, so the evidence is fixed at signing time.
+
+Old versions are kept, always. They are the only readable record of what a past
+signer agreed to beyond their own PDF, and they cost a row.
+
 ### Visitor or member uses the member area
 
 Login exists only via approval (sign-in link email; magic link or password

@@ -22,6 +22,7 @@ import {
   profileFullName,
   resolveNamePrefill,
   saveTemplateSchema,
+  setCurrentTemplateSchema,
   splitFullName,
   stopRepeatingSchema,
   waiverApprovalSchema,
@@ -737,6 +738,22 @@ describe("saveTemplateSchema", () => {
         acknowledgements: [{ id: "x", label: "", required: true }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("setCurrentTemplateSchema", () => {
+  it("accepts a template id", () => {
+    expect(
+      setCurrentTemplateSchema.safeParse({ id: "11111111-1111-1111-1111-111111111111" }).success,
+    ).toBe(true);
+  });
+
+  it("rejects anything that is not a uuid", () => {
+    // The handler clears `is_current` on every row before setting it on the
+    // target, so a version number or a title reaching it would demote the live
+    // waiver and promote nothing.
+    expect(setCurrentTemplateSchema.safeParse({ id: "2" }).success).toBe(false);
+    expect(setCurrentTemplateSchema.safeParse({}).success).toBe(false);
   });
 });
 

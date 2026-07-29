@@ -87,7 +87,7 @@ export type _WaiverSubmissionColumns = RequireColumns<
 // ---- waiver_templates: the manager-editable acknowledgements ----
 export type _TemplateColumns = RequireColumns<
   Tables["waiver_templates"]["Row"],
-  "acknowledgements" | "body_md" | "is_current" | "version"
+  "acknowledgements" | "body_md" | "created_at" | "id" | "is_current" | "title" | "version"
 >;
 
 // ---- profiles: the fields waiver approval copies across ----

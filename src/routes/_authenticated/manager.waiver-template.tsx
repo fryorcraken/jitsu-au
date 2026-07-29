@@ -9,11 +9,17 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Trash2 } from "lucide-react";
-import { getCurrentWaiverTemplate, saveWaiverTemplate } from "@/lib/waiver.functions";
+import {
+  listWaiverTemplates,
+  saveWaiverTemplate,
+  setCurrentWaiverTemplate,
+} from "@/lib/waiver.functions";
 import type { AcknowledgementDef } from "@/lib/validation";
 import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
@@ -74,29 +80,86 @@ export const Route = createFileRoute("/_authenticated/manager/waiver-template")(
   component: EditorPage,
 });
 
+type TemplateVersion = Awaited<ReturnType<typeof listWaiverTemplates>>[number];
+
 function EditorPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
-  const fetchCurrent = useServerFn(getCurrentWaiverTemplate);
+  const fetchTemplates = useServerFn(listWaiverTemplates);
   const save = useServerFn(saveWaiverTemplate);
+  const promote = useServerFn(setCurrentWaiverTemplate);
 
+  const [templates, setTemplates] = useState<TemplateVersion[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [acks, setAcks] = useState<AcknowledgementDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+
+  const selected = templates.find((t) => t.id === selectedId) ?? null;
+
+  function load(template: TemplateVersion) {
+    setSelectedId(template.id);
+    setTitle(template.title);
+    setBody(template.body_md);
+    setAcks(template.acknowledgements ?? []);
+  }
 
   useEffect(() => {
-    fetchCurrent().then((t) => {
-      if (t) {
-        setTitle(t.title);
-        setBody(t.body_md);
-        setAcks(t.acknowledgements ?? []);
-      }
-      setLoading(false);
-    });
-  }, [fetchCurrent]);
+    fetchTemplates()
+      .then((rows) => {
+        setTemplates(rows);
+        // Open on the live version when there is one, otherwise the newest
+        // draft, so a template seeded outside the editor is never invisible.
+        const opening = rows.find((t) => t.is_current) ?? rows[0];
+        if (opening) load(opening);
+      })
+      .catch((e) => {
+        // A non-manager is redirected by the effect below; anything else is
+        // worth saying out loud rather than leaving a blank editor.
+        if (!(e instanceof Error) || !e.message.includes("Forbidden")) {
+          toast.error(e instanceof Error ? e.message : "Could not load waiver versions");
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [fetchTemplates]);
+
+  // Editing a version and saving writes a NEW version, so an unsaved edit is
+  // lost by switching away from it. Warn rather than discard silently.
+  const dirty =
+    selected !== null &&
+    (title !== selected.title ||
+      body !== selected.body_md ||
+      JSON.stringify(acks) !== JSON.stringify(selected.acknowledgements ?? []));
+
+  function selectVersion(template: TemplateVersion) {
+    if (template.id === selectedId) return;
+    if (dirty && !window.confirm("Discard your unsaved changes and open this version?")) return;
+    load(template);
+  }
+
+  async function onPromote() {
+    if (!selected || selected.is_current) return;
+    if (
+      !window.confirm(
+        `Make version ${selected.version} the waiver everyone signs from now on? Waivers already signed keep the version they were signed against.`,
+      )
+    )
+      return;
+    setPromoting(true);
+    try {
+      await promote({ data: { id: selected.id } });
+      setTemplates((prev) => prev.map((t) => ({ ...t, is_current: t.id === selected.id })));
+      toast.success(`Version ${selected.version} is now live`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change the live version");
+    } finally {
+      setPromoting(false);
+    }
+  }
 
   function addAck() {
     setAcks((prev) => [...prev, { id: crypto.randomUUID(), label: "", required: true }]);
@@ -121,7 +184,14 @@ function EditorPage() {
         .map((a) => ({ ...a, label: a.label.trim() }))
         .filter((a) => a.label.length > 0);
       const res = await save({ data: { title, body_md: body, acknowledgements: cleanAcks } });
-      toast.success(`Saved version ${res.version}`);
+      setAcks(cleanAcks);
+      // Saving both creates and promotes, so re-read rather than patching the
+      // list by hand: the new version is live and every other one is not.
+      const rows = await fetchTemplates();
+      setTemplates(rows);
+      const created = rows.find((t) => t.version === res.version);
+      if (created) load(created);
+      toast.success(`Saved version ${res.version}, now live`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -147,8 +217,8 @@ function EditorPage() {
           <div>
             <h1 className="text-3xl font-black">Waiver template</h1>
             <p className="text-sm text-muted-foreground">
-              Edit the waiver text. Saving creates a new version. Past versions stay linked to their
-              signed waivers.
+              Edit the waiver text. Saving creates a new version and makes it the one people sign.
+              Past versions stay linked to the waivers signed against them.
             </p>
           </div>
           <Button asChild variant="outline">
@@ -230,6 +300,46 @@ function EditorPage() {
           </div>
 
           <aside className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Versions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Only one version is live at a time. Pick one to read or edit it.
+                </p>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => selectVersion(t)}
+                    aria-current={t.id === selectedId}
+                    className={cn(
+                      "flex w-full flex-col gap-1 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted",
+                      t.id === selectedId && "border-primary bg-muted",
+                    )}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="font-medium">Version {t.version}</span>
+                      {t.is_current ? <Badge>Live</Badge> : <Badge variant="outline">Draft</Badge>}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{t.title}</span>
+                  </button>
+                ))}
+                {selected && !selected.is_current && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    disabled={promoting}
+                    onClick={onPromote}
+                  >
+                    {promoting ? "Making live..." : `Make version ${selected.version} live`}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Placeholders</CardTitle>

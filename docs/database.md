@@ -295,6 +295,14 @@ which goes through the `SECURITY DEFINER` `has_role()`, kept working.
 
 **RLS:** anyone reads the current template; managers read all and insert/update.
 
+This is a version **history**, not a set of selectable documents: the partial
+unique index means exactly one row is live, and that row is the whole of what
+`/waiver` serves. Rows are only ever added, never edited in place or deleted —
+`waivers.template_version` points back here, so removing a version erases the
+readable record of what its signers agreed to. `/manager/waiver-template` lists
+every version and can promote any of them (`setCurrentWaiverTemplate`); saving
+in the editor appends a new version and promotes it in one step.
+
 ---
 
 ## Membership ledger

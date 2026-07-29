@@ -12,6 +12,7 @@ import {
   nameWithPreferred,
   normalizeEmail,
   saveTemplateSchema,
+  setCurrentTemplateSchema,
   waiverApprovalSchema,
   waiverSubmitSchema,
   waiverToProfileFields,
@@ -84,6 +85,23 @@ function serverSupabase() {
       },
     },
   });
+}
+
+/**
+ * Manager gate for a server function. Fails closed either way, but a broken
+ * role RPC surfaces its own message: "Forbidden" would tell a manager they lost
+ * access when what actually broke was the check.
+ */
+async function requireManager(context: {
+  supabase: SupabaseClient<Database>;
+  userId: string;
+}): Promise<void> {
+  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
+    _user_id: context.userId,
+    _role: "manager",
+  });
+  if (error) throw new Error(error.message);
+  if (!isMgr) throw new Error("Forbidden");
 }
 
 // ---- Current template (public) ----
@@ -436,17 +454,94 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     return { ok: true as const, pdf_url: signed.signedUrl, waiver_id: inserted.id };
   });
 
+// ---- Manager: list every template version ----
+//
+// The editor used to see only `is_current`, so a version that arrived by any
+// other route (a migration seeding a draft, an older version someone wants to
+// read back) was invisible in the UI even though the table had always held the
+// full history. Managers can read every row by RLS; this goes through the
+// service role like the rest of the manager reads.
+export const listWaiverTemplates = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("waiver_templates")
+      .select("id, version, title, body_md, acknowledgements, is_current, created_at")
+      .order("version", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((t) => ({
+      id: t.id,
+      version: t.version,
+      title: t.title,
+      body_md: t.body_md,
+      acknowledgements: parseTemplateAcks(t.acknowledgements),
+      is_current: t.is_current,
+      created_at: t.created_at,
+    }));
+  });
+
+// ---- Manager: promote an existing version to the live one ----
+//
+// The partial unique index allows exactly one `is_current = true`, so this is
+// necessarily two writes: clear, then set. Between them the club has NO live
+// waiver and `/waiver` would refuse to render, so the target is verified first
+// and the previous version is put back if the promotion itself fails.
+export const setCurrentWaiverTemplate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => setCurrentTemplateSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: target, error: tErr } = await supabaseAdmin
+      .from("waiver_templates")
+      .select("id, version, is_current")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (tErr) throw new Error(tErr.message);
+    if (!target) throw new Error("That waiver version no longer exists.");
+    if (target.is_current) return { ok: true as const, version: target.version };
+
+    const { data: previous, error: pErr } = await supabaseAdmin
+      .from("waiver_templates")
+      .select("id")
+      .eq("is_current", true)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+
+    const { error: clearErr } = await supabaseAdmin
+      .from("waiver_templates")
+      .update({ is_current: false })
+      .eq("is_current", true);
+    if (clearErr) throw new Error(clearErr.message);
+
+    const { error: setErr } = await supabaseAdmin
+      .from("waiver_templates")
+      .update({ is_current: true })
+      .eq("id", target.id);
+    if (setErr) {
+      // Leaving the club with no live waiver would take the signing page down,
+      // so restore what was current before failing.
+      if (previous) {
+        await supabaseAdmin
+          .from("waiver_templates")
+          .update({ is_current: true })
+          .eq("id", previous.id);
+      }
+      throw new Error(setErr.message);
+    }
+
+    return { ok: true as const, version: target.version };
+  });
+
 // ---- Manager: save new template version ----
 export const saveWaiverTemplate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => saveTemplateSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const { data: isMgr, error: rErr } = await context.supabase.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "manager",
-    });
-    if (rErr) throw new Error(rErr.message);
-    if (!isMgr) throw new Error("Forbidden");
+    await requireManager(context);
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -489,14 +584,7 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
 export const listWaivers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    // Fail-closed either way, but "Forbidden" for a failed role check tells a
-    // manager they lost their access when the RPC is what broke.
-    const { data: isMgr, error: rErr } = await context.supabase.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "manager",
-    });
-    if (rErr) throw new Error(rErr.message);
-    if (!isMgr) throw new Error("Forbidden");
+    await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
     // Each row shows the SUBMITTED name/email (the frozen submission), plus a
@@ -538,12 +626,7 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => waiverApprovalSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const { data: isMgr, error: rErr } = await context.supabase.rpc("has_role", {
-      _user_id: context.userId,
-      _role: "manager",
-    });
-    if (rErr) throw new Error(rErr.message);
-    if (!isMgr) throw new Error("Forbidden");
+    await requireManager(context);
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
