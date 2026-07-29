@@ -95,8 +95,12 @@ This audit also turned up a table that was in the live database and nowhere
 else: **`session_checkins`**, a per-event attendance model with membership
 credit consumption, created directly against production with no migration, type,
 doc or code in this repo. It was empty and nothing referenced it, so
-`20260728170000_drop_session_checkins.sql` drops it; that migration records the
-full design should the feature be rebuilt deliberately.
+`20260728170000_drop_session_checkins.sql` drops it, recording the full design in
+its comment. The feature was then rebuilt deliberately in
+`20260729120000_session_checkins.sql` — with the REVOKE every table now has, a
+migration, generated types, tests and a product spec (`docs/check-in.md`). See
+the `## Check-ins` section below for what changed from that recorded design and
+why.
 
 ## People and waivers: the shape
 
@@ -312,9 +316,10 @@ which goes through the `SECURITY DEFINER` `has_role()`, kept working.
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
 Constraint: the student rate requires a `uts_student_number`. The `member` role
 is granted on paid activation. The member's display name/email come from their
-profile (via `user_id`). **RLS:** users read own; managers read/update all;
-direct member INSERT is revoked (all inserts go through the service-role
-`startMembership`).
+profile (via `user_id`). `sessions_remaining` is set at activation and spent by a
+**check-in** — see `session_checkins` below, the only writer that decrements it.
+**RLS:** users read own; managers read/update all; direct member INSERT is
+revoked (all inserts go through the service-role `startMembership`).
 
 ### `bank_transactions` — statement import + reconciliation
 
@@ -443,6 +448,68 @@ the service role; `authenticated` gets SELECT only, so a client cannot clear its
 own `revoked_at`. The owner's row now carries the live token, which is what the
 page shows them anyway. There is no member-facing rotate or revoke: the link is
 permanent, the way a private ICS address is in any calendar app.
+
+---
+
+## Check-ins
+
+The attendance record, and the only thing in this app that ever spends a
+membership's session credits. Product spec: **`docs/check-in.md`**.
+
+### `session_checkins` — who was on the mat, and what paid for it
+
+`id` PK, `event_id → calendar_events(id) ON DELETE CASCADE`,
+`user_id → profiles(user_id) ON DELETE CASCADE`, `checked_in_at` (NOT NULL,
+defaults to now), `checked_in_by → auth.users(id) ON DELETE SET NULL`,
+`coverage` (NOT NULL, `trial|session|period|none`, default `none`),
+`membership_id → memberships(id) ON DELETE SET NULL`, `consumed_credit`
+(NOT NULL boolean), `closed_membership` (NOT NULL boolean), `warnings`
+(NOT NULL `text[]`, default `{}`), `note`.
+
+**Constraints.** `UNIQUE (event_id, user_id)` — one check-in per person per
+class, and half the concurrency guard: the server inserts the row _before_
+touching any credit and lets `23505` pick the loser of a race. It only guards
+_creating_ a check-in; attaching cover to an existing row is guarded in the
+server, which claims the row with `WHERE coverage = 'none'` and refunds what it
+took if it loses. Two CHECKs keep the record coherent: an uncovered check-in has
+no membership, and a closed membership must have consumed a credit.
+
+Two constraints are deliberately ABSENT, both because `membership_id` is
+`ON DELETE SET NULL`: that runs an `UPDATE` on the check-in row, CHECKs are
+re-evaluated on `UPDATE`, and either would abort a `DELETE FROM memberships` with
+a cryptic error. So there is no biconditional on the first, and no
+`consumed_credit = false OR membership_id IS NOT NULL`. The write path already
+guarantees both; what survives a deleted membership is an honest "a credit was
+spent, from a membership that no longer exists".
+
+**Indexes.** `(user_id)` for the per-person attendance count, and a partial
+`(checked_in_at DESC) WHERE coverage = 'none'` for the needs-attention list —
+the only query that scans across events. No standalone `(event_id)` index: the
+UNIQUE index already leads on it.
+
+**`coverage` is stored, not derived**, mirroring `membership_plans.kind` plus
+`none`. A manager may edit a plan's kind afterwards, and that must not rewrite
+what happened, the same reason a waiver freezes its submission. `insurance` is
+absent from the list on purpose: yearly insurance is affiliation, never mat time.
+`warnings` holds stable machine codes (`checkInWarnings` in
+`src/lib/validation.ts`), never sentences, so the wording can change without a
+migration.
+
+**Grants.** `REVOKE ALL FROM anon, authenticated` before anything else, then
+`GRANT ALL TO service_role`. The client roles hold **nothing**: every read and
+write goes through a manager-only server function
+(`src/lib/checkin.functions.ts`), so nothing here appears in
+`supabase/lint/client-grants-expected.txt`.
+
+**RLS:** managers select/insert/update/delete via `has_role()`, and a person may
+read their own rows. With no client grant these policies are unreachable; they
+are defence in depth, already correct on the day someone adds a grant.
+
+**Related writes.** `memberships.sessions_remaining` is set once at activation
+(`activateMembershipRow`) and decremented only here, with a compare-and-set on
+the balance that was read. When it reaches zero the membership's status becomes
+`expired` and `closed_membership` records that this check-in did it, so undo
+reverses exactly what happened rather than guessing.
 
 ---
 

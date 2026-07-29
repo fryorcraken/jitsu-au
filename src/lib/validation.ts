@@ -952,6 +952,69 @@ export const rsvpSchema = z.object({
 });
 export type RsvpInput = z.infer<typeof rsvpSchema>;
 
+// ---- Check-ins (see docs/check-in.md) ----
+
+/**
+ * What covered a class, mirroring `membership_plans.kind` plus `none`. Stored on
+ * the check-in as a record of what paid for it at the time, so editing a plan
+ * afterwards cannot rewrite history. `insurance` is absent on purpose: yearly
+ * insurance buys affiliation and cover, never mat time.
+ *
+ * Must match the CHECK constraint in the `session_checkins` migration.
+ */
+export const coverageSources = ["trial", "session", "period", "none"] as const;
+export type CoverageSource = (typeof coverageSources)[number];
+
+/**
+ * Stable machine codes explaining a check-in, stored in `session_checkins.warnings`.
+ * Codes rather than sentences so the wording can change without a migration, and
+ * so the "needs attention" list can say *why* something is uncovered instead of
+ * just that it is.
+ */
+export const checkInWarnings = [
+  /** Nothing active covered this class; attach it to a membership later. */
+  "no_cover",
+  /** This took the final credit, so the membership is now finished. */
+  "last_credit",
+  /** They hold a membership still marked active but past its end date. */
+  "membership_ended",
+  /** They hold an active credit membership with nothing left on it. */
+  "credits_exhausted",
+  /** A membership is waiting on payment: the money has not landed yet. */
+  "payment_pending",
+  /** A concurrent check-in took the credit first; this one needs attaching. */
+  "coverage_race",
+] as const;
+export type CheckInWarning = (typeof checkInWarnings)[number];
+
+/** Manager: the roster and coverage preview for one class. */
+export const checkInBoardSchema = z.object({ event_id: z.string().uuid() });
+export type CheckInBoardInput = z.infer<typeof checkInBoardSchema>;
+
+/** Manager: check one person in to one class. */
+export const checkInSchema = z.object({
+  event_id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  note: z.string().trim().max(500).optional().or(z.literal("")),
+});
+export type CheckInInput = z.infer<typeof checkInSchema>;
+
+/** Manager: undo a check-in, refunding whatever credit it spent. */
+export const undoCheckInSchema = z.object({ id: z.string().uuid() });
+export type UndoCheckInInput = z.infer<typeof undoCheckInSchema>;
+
+/**
+ * Manager: give an uncovered check-in its cover. Without `membership_id` the
+ * server re-runs the same precedence rules the door would have applied, which is
+ * the right answer once a late payment has been reconciled; supplying one is the
+ * override for when a manager wants a specific membership to absorb it.
+ */
+export const attachCheckInSchema = z.object({
+  id: z.string().uuid(),
+  membership_id: z.string().uuid().optional(),
+});
+export type AttachCheckInInput = z.infer<typeof attachCheckInSchema>;
+
 /**
  * Parse a "$245", "245", "20.50" or "2,450.00" money string into integer cents.
  * Returns null for blanks / unparseable input. Used by the CSV importer.
