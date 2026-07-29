@@ -88,6 +88,39 @@ export interface WaiverEmailParams {
   pdfUrl: string;
   /** Service-role client, used to resolve manager recipients. */
   admin: AdminClient;
+  /** The person this waiver belongs to, used to check whether their address is proven. */
+  userId?: string | null;
+}
+
+/**
+ * A verification link for the confirmation email, or null when the address is
+ * already proven (or when minting fails, or there is no person to attach it to).
+ *
+ * This is the only place the product asks a member to verify anything, so it
+ * has to stay conditional: someone who arrived from their interest email is
+ * already verified and must not be nagged to confirm what they just confirmed.
+ */
+async function verificationLinkFor(
+  admin: AdminClient,
+  userId: string | null | undefined,
+  email: string,
+): Promise<string | null> {
+  if (!userId) return null;
+  try {
+    const { data, error } = await admin.auth.admin.getUserById(userId);
+    if (error || !data.user) return null;
+    if (data.user.email_confirmed_at) return null;
+
+    const { mintVerificationToken } = await import("@/lib/email-verification.server");
+    const { buildVerifyUrl } = await import("@/lib/email-verification");
+    const token = await mintVerificationToken(admin, { email, purpose: "waiver", userId });
+    return buildVerifyUrl({ siteUrl: SITE_URL, token, next: "/account" });
+  } catch (e) {
+    // The waiver is already saved and the PDF already rendered; a missing
+    // confirm button is not a reason to lose the confirmation email itself.
+    console.error("[waiver-email] could not build a verification link:", e);
+    return null;
+  }
 }
 
 /**
@@ -103,6 +136,7 @@ export async function sendWaiverEmails({
   memberEmail,
   pdfUrl,
   admin,
+  userId,
 }: WaiverEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -111,27 +145,21 @@ export async function sendWaiverEmails({
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
-  const [memberHtml, notifyRecipients] = await Promise.all([
-    render(
-      React.createElement(WaiverConfirmationEmail, {
-        siteName: SITE_NAME,
-        siteUrl: SITE_URL,
-        // The member-facing greeting: call them what they asked to be called.
-        memberName: memberGreetingName,
-        pdfUrl,
-      }),
-    ),
+  const [verifyUrl, notifyRecipients] = await Promise.all([
+    verificationLinkFor(admin, userId, memberEmail),
     getManagerEmails(admin),
   ]);
-  const memberText = await render(
-    React.createElement(WaiverConfirmationEmail, {
-      siteName: SITE_NAME,
-      siteUrl: SITE_URL,
-      memberName: memberGreetingName,
-      pdfUrl,
-    }),
-    { plainText: true },
-  );
+
+  const memberEl = React.createElement(WaiverConfirmationEmail, {
+    siteName: SITE_NAME,
+    siteUrl: SITE_URL,
+    // The member-facing greeting: call them what they asked to be called.
+    memberName: memberGreetingName,
+    pdfUrl,
+    verifyUrl,
+  });
+  const memberHtml = await render(memberEl);
+  const memberText = await render(memberEl, { plainText: true });
 
   const managerEl = React.createElement(WaiverNotificationEmail, {
     siteName: SITE_NAME,

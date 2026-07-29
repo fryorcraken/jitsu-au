@@ -31,16 +31,24 @@ type AdminClient = SupabaseClient<Database>;
  * Build the prefilled waiver link carried over from the interest form, so the
  * applicant can sign without re-typing their details. Mirrors the in-app
  * `<Link to="/waiver" search={{ name, email, phone }} />` on the success screen.
+ *
+ * `token` is what makes the EMAILED version of this link different from the
+ * in-app one. The name/email/phone params prove nothing (the success screen
+ * builds the same URL), but a token that only ever existed in that inbox does:
+ * clicking it verifies the address, and carrying it through to submission means
+ * the person record is created already verified. Omitted for the in-app link.
  */
 export function buildWaiverUrl(params: {
   name: string;
   email: string;
   phone?: string | null;
+  token?: string | null;
 }): string {
   const search = new URLSearchParams();
   if (params.name) search.set("name", params.name);
   if (params.email) search.set("email", params.email);
   if (params.phone) search.set("phone", params.phone);
+  if (params.token) search.set("vt", params.token);
   const qs = search.toString();
   return qs ? `${SITE_URL}/waiver?${qs}` : `${SITE_URL}/waiver`;
 }
@@ -103,7 +111,18 @@ export async function sendInterestEmails({
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
-  const waiverUrl = buildWaiverUrl({ name, email, phone });
+  // Mint the proof-of-click token that rides on the applicant's waiver link.
+  // Best-effort: if minting fails they still get a working (unverified) prefill
+  // link, which is exactly the behaviour before verification existed.
+  let verificationToken: string | null = null;
+  try {
+    const { mintVerificationToken } = await import("@/lib/email-verification.server");
+    verificationToken = await mintVerificationToken(admin, { email, purpose: "interest" });
+  } catch (e) {
+    console.error("[interest-email] could not mint a verification token:", e);
+  }
+
+  const waiverUrl = buildWaiverUrl({ name, email, phone, token: verificationToken });
 
   const applicantEl = React.createElement(InterestConfirmationEmail, {
     siteName: SITE_NAME,

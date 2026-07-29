@@ -197,8 +197,16 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 
 - `user_id_by_email(text) → uuid` — resolve a person by email at submission
   (indexed lookup on `auth.users`).
-- `user_emails(uuid[]) → (user_id, email)` — batch email resolution for the
-  manager directory, invoices, and transactional emails.
+- `user_emails(uuid[]) → (user_id, email, email_confirmed_at)` — batch email
+  resolution for the manager directory, invoices, and transactional emails. The
+  confirmation stamp rides along so a screen can badge verified state in the
+  same round trip that resolves the address.
+- `clear_email_confirmation(uuid) → void` — drops `auth.users.email_confirmed_at`
+  back to NULL. Called immediately after a manager corrects someone's address:
+  the auth admin API can _set_ a confirmation but does not reliably _clear_ one,
+  and "a changed address is always unverified" has to be a guarantee rather than
+  a hope about GoTrue's behaviour. Only `email_confirmed_at` is written —
+  `confirmed_at` is a generated column.
 
 ---
 
@@ -416,17 +424,25 @@ so `20260728120000_calendar_revoke_client_grants.sql` REVOKEs them explicitly.
 ### `calendar_feed_tokens` — per-person private calendar links
 
 `id` PK, `user_id → auth.users(id) ON DELETE CASCADE`, `token_prefix`,
-`token_hash` (SHA-256, unique; raw shown once), `created_at`, `last_used_at`,
-`revoked_at`. Partial indexes: fast lookup of live tokens by hash, and at most
-one live token per person. The token rides in the URL path
-(`/api/calendar/<token>`) since calendar apps can't send an auth header. There is
-**no public/anon feed** — a personal feed carries members-only events only while
-that person is a paid member, so a subscriber never silently misses one.
-**RLS:** a person reads/creates/revokes their own token; minting and feed lookup
-run through the service role; `authenticated` gets SELECT only, so a client
-cannot clear its own `revoked_at` and resurrect a link it just revoked. The
-owner can read their own row including `token_hash`, which is harmless: the hash
-is not reversible and grants no access by itself.
+`token_hash` (SHA-256, unique), `token` (the raw token, nullable), `created_at`,
+`last_used_at`, `revoked_at`. Partial indexes: fast lookup of live tokens by
+hash, uniqueness on a non-null `token`, and at most one live token per person.
+The token rides in the URL path (`/api/calendar/<token>`) since calendar apps
+can't send an auth header. There is **no public/anon feed** — a personal feed
+carries members-only events only while that person is a paid member, so a
+subscriber never silently misses one.
+
+`token` exists because `/calendar` shows the member their link on every visit
+rather than once at creation (`20260728180000`), and a hash cannot be reversed.
+The hash column stays and is still what the feed route looks up. Rows minted
+before that migration have `token IS NULL`; the server re-mints those in place
+the next time their owner opens the page, which retires the old URL.
+
+**RLS:** a person reads their own token row; minting and feed lookup run through
+the service role; `authenticated` gets SELECT only, so a client cannot clear its
+own `revoked_at`. The owner's row now carries the live token, which is what the
+page shows them anyway. There is no member-facing rotate or revoke: the link is
+permanent, the way a private ICS address is in any calendar app.
 
 ---
 
@@ -451,6 +467,38 @@ grants off.
 
 `key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. First use:
 markdown `invoice_payment_instructions`. **RLS:** manager-only.
+
+### `email_verification_tokens` — proof that someone can read an address
+
+`id` PK, `user_id → auth.users(id) ON DELETE CASCADE` (**nullable**), `email`
+(normalized, the address being proven), `purpose`
+(`interest | waiver | manager_resend | self_resend | email_change`),
+`token_prefix`, `token_hash` (SHA-256, unique; raw never stored), `created_at`,
+`expires_at`, `last_used_at`, `revoked_at`. Partial indexes on the hash and on
+the email, both `WHERE revoked_at IS NULL`.
+
+The verified state itself is **not** here — it lives on
+`auth.users.email_confirmed_at`, which Supabase already stamps on a magic-link
+sign-in. This table only holds the links that let someone prove an address any
+other way, and two things about it differ from the other token tables on
+purpose:
+
+- **`user_id` is nullable.** A token minted for an interest registration belongs
+  to a **lead**, who has no person record yet. It binds to the address, and the
+  proof is applied at waiver submission when the person is created (they are
+  born verified). Binding to a user id would make that journey impossible.
+- **Tokens are reusable, not single-use.** The interest token also rides on the
+  waiver prefill link that people return to, and confirming twice is a no-op.
+  `last_used_at` records the latest redemption instead of burning the row.
+
+A token only ever proves the address it was mailed to: redemption re-checks it
+against the account's current email, so links sent before a manager corrected a
+typo are inert. Expiry is 180 days.
+
+**RLS:** enabled with **no policies** and no client grants (`REVOKE ALL` from
+anon/authenticated) — unlike `calendar_feed_tokens` there is nothing here a
+person needs to see about their own row, so minting, redeeming and revoking all
+run through the service role.
 
 ### `manager_api_tokens` — manager agent API credentials
 
@@ -507,3 +555,10 @@ lifts the ban. There is no self-serve sign-up. Two triggers fire:
 `profiles.user_id`, `waivers.user_id`, `memberships.user_id`,
 `user_roles.user_id` and the various `*_by` columns reference it. The server
 reads emails via `user_id_by_email` / `user_emails` (service-role-only).
+
+`email_confirmed_at` on this table is the **only** record of whether an address
+has been verified — deliberately not copied onto `profiles`, so there is nothing
+to drift. It means one thing: someone opened a link the club sent there. Supabase
+sets it natively on a magic-link sign-in; `email_verification_tokens` covers the
+other routes; and `clear_email_confirmation` drops it whenever a manager changes
+the address. Nothing in the product can assert it by hand.

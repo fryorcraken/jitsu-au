@@ -6,14 +6,7 @@ import { CalendarPlus, Clock, MapPin, User } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  createMyFeedToken,
-  getCalendar,
-  getMyFeedToken,
-  getMyRsvps,
-  revokeMyFeedToken,
-  setRsvp,
-} from "@/lib/calendar.functions";
+import { getCalendar, getMyCalendarFeedUrl, getMyRsvps, setRsvp } from "@/lib/calendar.functions";
 import type { RsvpResponse } from "@/lib/validation";
 
 export const Route = createFileRoute("/calendar")({
@@ -79,9 +72,7 @@ function CalendarPage() {
   const loadCalendar = useServerFn(getCalendar);
   const loadRsvps = useServerFn(getMyRsvps);
   const saveRsvp = useServerFn(setRsvp);
-  const loadFeed = useServerFn(getMyFeedToken);
-  const makeFeed = useServerFn(createMyFeedToken);
-  const dropFeed = useServerFn(revokeMyFeedToken);
+  const loadFeedUrl = useServerFn(getMyCalendarFeedUrl);
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [signedIn, setSignedIn] = useState(false);
@@ -89,9 +80,8 @@ function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [rsvps, setRsvps] = useState<Record<string, RsvpResponse | undefined>>({});
   const [savingRsvp, setSavingRsvp] = useState<Set<string>>(new Set());
-  const [hasFeed, setHasFeed] = useState(false);
   const [feedUrl, setFeedUrl] = useState<string | null>(null);
-  const [feedBusy, setFeedBusy] = useState(false);
+  const [feedFailed, setFeedFailed] = useState(false);
 
   const refreshRsvps = useCallback(() => {
     loadRsvps()
@@ -112,16 +102,18 @@ function CalendarPage() {
         setLoading(false);
         if (data.signed_in) {
           refreshRsvps();
-          loadFeed()
-            .then((t) => setHasFeed(Boolean(t)))
-            .catch(() => {});
+          // The link is minted on first ask and shown on every visit after that,
+          // so there is nothing for the member to press to get one.
+          loadFeedUrl()
+            .then(({ url }) => setFeedUrl(url))
+            .catch(() => setFeedFailed(true));
         }
       })
       .catch((e) => {
         toast.error(e instanceof Error ? e.message : "Could not load the calendar");
         setLoading(false);
       });
-  }, [loadCalendar, loadFeed, refreshRsvps]);
+  }, [loadCalendar, loadFeedUrl, refreshRsvps]);
 
   async function respond(eventId: string, response: RsvpResponse) {
     // Per-event, so replying to one event doesn't re-enable another's buttons.
@@ -143,41 +135,15 @@ function CalendarPage() {
     }
   }
 
-  async function createFeed() {
-    // Minting revokes the current token, so any calendar already subscribed to
-    // the old URL silently stops updating. Make that explicit.
-    if (
-      hasFeed &&
-      !window.confirm(
-        "This replaces your current calendar link. Any calendar already using the old link will stop updating. Continue?",
-      )
-    ) {
-      return;
-    }
-    setFeedBusy(true);
+  async function copyFeedUrl() {
+    if (!feedUrl) return;
     try {
-      const { url } = await makeFeed();
-      setFeedUrl(url);
-      setHasFeed(true);
-      toast.success("Your calendar link is ready. Copy it now, it's shown once.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not create the calendar link");
-    } finally {
-      setFeedBusy(false);
-    }
-  }
-
-  async function removeFeed() {
-    setFeedBusy(true);
-    try {
-      await dropFeed();
-      setHasFeed(false);
-      setFeedUrl(null);
-      toast.success("Calendar link turned off. The old link no longer works.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not turn off the calendar link");
-    } finally {
-      setFeedBusy(false);
+      await navigator.clipboard.writeText(feedUrl);
+      toast.success("Calendar link copied.");
+    } catch {
+      // Clipboard access can be blocked (older browsers, no secure context).
+      // The link is on screen either way, so this is only a convenience.
+      toast.error("Could not copy it. Select the link and copy it by hand.");
     }
   }
 
@@ -208,32 +174,28 @@ function CalendarPage() {
                 Add this calendar to your own
               </div>
               <p className="text-sm text-muted-foreground">
-                Get a private link for your calendar app. New sessions, events and cancellations
+                Add this private link to your calendar app. New sessions, events and cancellations
                 then stay in sync on their own.
                 {seesMembersOnly
                   ? " Your link includes members-only events."
                   : " Members-only events are included once you have a paid membership."}
               </p>
               {feedUrl ? (
-                <div className="space-y-1">
-                  <code className="block overflow-x-auto rounded bg-background px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="min-w-0 flex-1 overflow-x-auto rounded bg-background px-3 py-2 text-xs">
                     {feedUrl}
                   </code>
-                  <p className="text-xs text-muted-foreground">
-                    Copy this now. For your security we only show it once.
-                  </p>
-                </div>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={createFeed} disabled={feedBusy}>
-                  {hasFeed ? "Replace my link" : "Get my calendar link"}
-                </Button>
-                {hasFeed ? (
-                  <Button size="sm" variant="outline" onClick={removeFeed} disabled={feedBusy}>
-                    Turn off my link
+                  <Button size="sm" variant="outline" onClick={copyFeedUrl}>
+                    Copy
                   </Button>
-                ) : null}
-              </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {feedFailed
+                    ? "We could not load your link just now. Refresh the page to try again."
+                    : "Loading your link..."}
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">

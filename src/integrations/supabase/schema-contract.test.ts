@@ -107,6 +107,37 @@ export type _InterestColumns = RequireColumns<
   "sms_whatsapp_consent"
 >;
 
+// ---- email_verification_tokens: proof that someone can read an address ----
+export type _VerificationTokenColumns = RequireColumns<
+  Tables["email_verification_tokens"]["Row"],
+  "token_hash" | "token_prefix" | "email" | "purpose" | "expires_at" | "revoked_at" | "last_used_at"
+>;
+
+/**
+ * `user_id` is NULLABLE here, and that is load-bearing rather than incidental.
+ *
+ * A token is minted for an interest registration before any person record
+ * exists, so it binds to the ADDRESS and the proof is applied when they sign a
+ * waiver. If a regeneration ever tightened this to `string`, the whole
+ * lead-verified-before-signing journey would stop compiling, which is the point.
+ */
+export type _VerificationTokenUserIdIsNullable = Expect<
+  Equals<Tables["email_verification_tokens"]["Row"]["user_id"], string | null>
+>;
+
+/**
+ * Verified state is read from `auth.users` through this RPC. There is
+ * deliberately no `email_verified` column on `profiles`: one store, nothing to
+ * drift. If `email_confirmed_at` disappears from the RPC's shape, every badge
+ * in the manager UI silently reads `undefined` (i.e. "unverified") — so pin it.
+ */
+export type _UserEmailsReturnsConfirmation = Expect<
+  Equals<
+    Database["public"]["Functions"]["user_emails"]["Returns"][number]["email_confirmed_at"],
+    string | null
+  >
+>;
+
 describe("live schema contract", () => {
   it("is enforced by the typechecker, not by this test", () => {
     // Nothing to assert at runtime: the contract is the type declarations above,

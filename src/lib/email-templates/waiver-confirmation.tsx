@@ -17,6 +17,12 @@ interface WaiverConfirmationEmailProps {
   siteUrl: string;
   memberName: string;
   pdfUrl: string;
+  /**
+   * Present only when the signer's address has not been proven yet. Someone who
+   * came from their interest email is already verified and must not be asked to
+   * confirm what they just confirmed.
+   */
+  verifyUrl?: string | null;
 }
 
 /** Sent to the person who just signed a waiver, with a link to their PDF copy. */
@@ -25,6 +31,7 @@ export const WaiverConfirmationEmail = ({
   siteUrl,
   memberName,
   pdfUrl,
+  verifyUrl,
 }: WaiverConfirmationEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -46,6 +53,17 @@ export const WaiverConfirmationEmail = ({
           A manager will review your submission. You&apos;ll be cleared to train once it&apos;s
           approved.
         </Text>
+        {verifyUrl ? (
+          <>
+            <Text style={text}>
+              One last thing. Tap below so we know we can reach you at this address. That&apos;s
+              where your approval and sign-in link will go.
+            </Text>
+            <Button style={button} href={verifyUrl}>
+              Confirm your email address
+            </Button>
+          </>
+        ) : null}
         <Text style={footer}>
           This download link expires after a few days. If it stops working, sign in to your account
           to view your waiver again.
