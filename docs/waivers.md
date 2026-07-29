@@ -111,6 +111,43 @@ Submit again with the same email. Always accepted, whatever phase that email's
 person is in: a resubmission attaches to the existing person and never
 modifies them. Managers decide which submission to approve.
 
+### Email verification
+
+The email **is** the person here, and it is typed by hand into a public form, so
+a typo produces a person record attached to a mailbox nobody reads. Verification
+makes that visible.
+
+**Verified means: someone opened a link the club sent to that address.** Proof of
+mailbox control, nothing more. It is stored once, on
+`auth.users.email_confirmed_at`, and can never be asserted by hand — there is no
+"mark as verified" anywhere in the product, because a badge a manager could set
+would only mean "a manager believed this".
+
+It gates **nothing**. An unverified person can sign, be approved, be assigned a
+membership, and train. The badge exists so a manager can see the risk at the
+moment it matters (approval emails a sign-in link to that address), not to put a
+wall at the door.
+
+How people get verified, in descending order of how many it catches:
+
+- **Signing in with a login link.** Supabase stamps the confirmation natively, so
+  nearly everyone who becomes an active member is verified without anyone doing
+  anything. Same for password resets.
+- **The waiver link in their interest confirmation email.** That link carries an
+  unguessable token (`?vt=`); the name/email params alone prove nothing, since
+  the in-app success screen builds the same URL. Opening it verifies them, and
+  because a lead has no person record yet, the proof is held on the token and
+  applied at submission — so they are **created already verified**.
+- **The "confirm your email address" button** in the waiver confirmation email,
+  shown only to a signer whose address is still unproven. The only place the
+  product asks a member to verify anything.
+- **A resend**, from the manager's person page or the member's own account page.
+
+Where it shows: a green/amber pill beside the email on `/manager/users` and on
+the person detail page (with the date), and on the member's account page.
+
+**Changing an address always drops it back to unverified** — see below.
+
 ### Email edge cases
 
 - **Signed-in people sign for themselves.** The form locks the email field to
@@ -123,6 +160,18 @@ modifies them. Managers decide which submission to approve.
 - **Signing in with an applicant's email** does nothing special: the auth page
   responds identically for unknown, locked, and active emails, so nothing is
   leaked about who exists.
+- **A manager can correct an address** from the person's detail page. It is the
+  only email-editing path in the product (there is still no self-serve version:
+  the address is the identity, so moving it moves the login too). Changing it
+  always drops the person to unverified, revokes every live link sent to the old
+  address, and sends a fresh confirmation to the new one. Refused if the new
+  address already belongs to another person — merging two people is a separate
+  problem. Re-saving the same address is a no-op, so nobody loses a badge to a
+  stray click.
+- **Signed waivers keep the address as submitted.** They are frozen evidence of
+  what was signed, so after a correction the person's live email and their
+  waiver's email legitimately differ. The detail page says so rather than
+  looking broken.
 
 ### Manager reviews and approves
 

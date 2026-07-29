@@ -16,6 +16,8 @@ import {
   startGoogleDriveConnect,
 } from "@/lib/google-drive.functions";
 import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
+import { requestMyEmailVerification } from "@/lib/email-verification.functions";
+import { isEmailVerified } from "@/lib/email-verification";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({
@@ -23,6 +25,63 @@ export const Route = createFileRoute("/_authenticated/account")({
   }),
   component: AccountPage,
 });
+
+/**
+ * Whether this account's address has been confirmed, and a way to ask for a
+ * fresh link if not.
+ *
+ * `email_confirmed_at` is already on the session user, so this needs no server
+ * round trip to render. Most people reading this page arrived by clicking a
+ * sign-in link, which is itself the proof, so for them it is just reassurance.
+ */
+function EmailVerificationNote({
+  email,
+  emailConfirmedAt,
+}: {
+  email: string | undefined;
+  emailConfirmedAt: string | undefined;
+}) {
+  const requestVerification = useServerFn(requestMyEmailVerification);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  if (isEmailVerified(emailConfirmedAt)) {
+    return <span className="text-green-700"> · email confirmed</span>;
+  }
+
+  async function send() {
+    setBusy(true);
+    try {
+      const res = await requestVerification();
+      setSent(true);
+      toast.success(
+        res.alreadyVerified
+          ? "Your email is already confirmed."
+          : `Confirmation link sent to ${email ?? "your email"}.`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not send that email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {" · "}
+      <span className="text-amber-700">email not confirmed yet</span>{" "}
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="h-auto p-0"
+        disabled={busy}
+        onClick={send}
+      >
+        {busy ? "Sending..." : sent ? "Send again" : "Send verification email"}
+      </Button>
+    </>
+  );
+}
 
 function AccountPage() {
   const { user } = useAuth();
@@ -36,6 +95,7 @@ function AccountPage() {
         <h1 className="text-3xl font-black">Your account</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Signed in as <strong>{user.email}</strong>
+          <EmailVerificationNote email={user.email} emailConfirmedAt={user.email_confirmed_at} />
           {roles.length > 0 && <> · Roles: {roles.join(", ")}</>}
         </p>
       </div>

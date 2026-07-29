@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { lifecycleStatuses } from "@/lib/validation";
+import { emailVerificationLabel } from "@/lib/email-verification";
 import { listClubUsers } from "@/lib/membership.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
@@ -24,6 +25,14 @@ const LIFECYCLE_CLASS: Record<string, string> = {
   visitor: "bg-sky-100 text-sky-800",
   member: "bg-green-100 text-green-800",
   lapsed: "bg-red-100 text-red-800",
+};
+
+// Verified means someone opened a link we sent to that address. Amber rather
+// than red: an unverified address is a thing to notice before emailing someone
+// a sign-in link, not a fault.
+const VERIFICATION_CLASS: Record<string, string> = {
+  verified: "bg-green-100 text-green-800",
+  unverified: "bg-amber-100 text-amber-800",
 };
 
 const MEMBERSHIP_CLASS: Record<string, string> = {
@@ -248,7 +257,26 @@ function ManagerUsersPage() {
                           (r.name ?? "—")
                         )}
                       </td>
-                      <td className="px-3 py-2">{r.email ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        {r.email ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span>{r.email}</span>
+                            {/* Leads have no person record, so nothing has been
+                                proven about them either way. Badging one would
+                                claim more than the club knows. */}
+                            {r.user_id ? (
+                              <Pill
+                                label={emailVerificationLabel(r.email_confirmed_at)}
+                                className={
+                                  VERIFICATION_CLASS[emailVerificationLabel(r.email_confirmed_at)]
+                                }
+                              />
+                            ) : null}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td className="px-3 py-2">{r.phone ?? "—"}</td>
                       <td className="px-3 py-2">
                         <Pill

@@ -300,6 +300,45 @@ export type Database = {
         }
         Relationships: []
       }
+      email_verification_tokens: {
+        Row: {
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          last_used_at: string | null
+          purpose: string
+          revoked_at: string | null
+          token_hash: string
+          token_prefix: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          expires_at: string
+          id?: string
+          last_used_at?: string | null
+          purpose: string
+          revoked_at?: string | null
+          token_hash: string
+          token_prefix: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          last_used_at?: string | null
+          purpose?: string
+          revoked_at?: string | null
+          token_hash?: string
+          token_prefix?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       event_rsvps: {
         Row: {
           created_at: string
@@ -769,6 +808,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      clear_email_confirmation: { Args: { _user_id: string }; Returns: undefined }
       has_active_paid_membership: {
         Args: { _user_id: string }
         Returns: boolean
@@ -784,6 +824,7 @@ export type Database = {
         Args: { _user_ids: string[] }
         Returns: {
           email: string
+          email_confirmed_at: string | null
           user_id: string
         }[]
       }

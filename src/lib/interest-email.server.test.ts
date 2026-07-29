@@ -19,6 +19,20 @@ describe("buildWaiverUrl", () => {
   it("falls back to the bare waiver path when nothing is provided", () => {
     expect(buildWaiverUrl({ name: "", email: "" })).toBe("https://jitsu.au/waiver");
   });
+
+  it("carries the verification token when one was minted", () => {
+    // This is what makes the EMAILED link different from the in-app one: the
+    // name/email params prove nothing, an unguessable token does.
+    expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", token: "utsj_abc123" })).toBe(
+      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com&vt=utsj_abc123",
+    );
+  });
+
+  it("omits the token when minting failed, leaving a working prefill link", () => {
+    expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", token: null })).toBe(
+      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com",
+    );
+  });
 });
 
 describe("sendInterestEmails", () => {

@@ -42,15 +42,22 @@ import type { AppClient } from "@/lib/profile-types";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
- * service-role `user_emails` RPC; empty map on failure. Degraded mode: persons
+ * service-role `user_emails` RPC; empty list on failure. Degraded mode: persons
  * render with a null email and leads aren't deduped against them (a person
  * could transiently appear twice) — rare and non-destructive.
+ *
+ * Keeps the whole row, including `email_confirmed_at`, so an agent listing
+ * members sees the same verified state a manager sees on screen.
  */
-async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<Map<string, string>> {
-  if (!userIds.length) return new Map();
+async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUserEmail[]> {
+  if (!userIds.length) return [];
   const { data, error } = await pdb.rpc("user_emails", { _user_ids: userIds });
-  if (error || !data) return new Map();
-  return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
+  if (error || !data) return [];
+  return (data as ClubUserEmail[]).map((e) => ({
+    user_id: e.user_id,
+    email: e.email,
+    email_confirmed_at: e.email_confirmed_at ?? null,
+  }));
 }
 
 function json(body: unknown, status = 200): Response {
@@ -177,7 +184,7 @@ async function handleListUsers(params: unknown) {
   // Roles + emails are scoped to the club's known people.
   const userIds = profileUserIds(profileRows);
   let rolesRows: { user_id: string; role: string }[] = [];
-  let emails = new Map<string, string>();
+  let emails: ClubUserEmail[] = [];
   if (userIds.length) {
     const [{ data: roles }, resolved] = await Promise.all([
       db.from("user_roles").select("user_id, role").in("user_id", userIds),
@@ -190,7 +197,7 @@ async function handleListUsers(params: unknown) {
   // Shared aggregation: one row per person with name/roles/lifecycle resolved.
   const aggregated = aggregateClubUsers({
     profiles: profileRows,
-    emails: [...emails].map(([user_id, email]) => ({ user_id, email })),
+    emails,
     waivers: waiverRows,
     leads,
     memberships: memberships.map((m) => ({
@@ -263,7 +270,8 @@ async function handleListInvoices(params: unknown) {
         .in("user_id", userIds),
       emailsByUserId(pdb, userIds),
     ]);
-    emailByUser = resolved;
+    // The invoice listing only needs the address, not its verified state.
+    emailByUser = new Map(resolved.map((e) => [e.user_id, e.email]));
     for (const p of profiles ?? []) {
       nameByUser.set(p.user_id, nameWithPreferred(p));
     }

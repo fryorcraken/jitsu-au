@@ -12,6 +12,7 @@ import {
   deriveWaiverListStatuses,
   interestSchema,
   isUtsStudent,
+  managerEmailChangeSchema,
   normalizeEmail,
   profileFullName,
   resolveNamePrefill,
@@ -510,6 +511,14 @@ describe("waiverSubmitSchema", () => {
     expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
   });
 
+  it("accepts an optional verification token, and works fine without one", () => {
+    // A walk-in signer has no token; someone who came from their interest email
+    // does. Both are ordinary submissions, so neither may be rejected here.
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, vt: "utsj_abc123" }).success).toBe(true);
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, vt: "" }).success).toBe(true);
+    expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+  });
+
   it("accepts optional client_meta and rejects oversized values", () => {
     const withMeta = waiverSubmitSchema.safeParse({
       ...validAdult,
@@ -698,6 +707,43 @@ describe("waiverApprovalSchema", () => {
   });
 });
 
+describe("managerEmailChangeSchema", () => {
+  const userId = "11111111-1111-1111-1111-111111111111";
+
+  it("accepts a user id and a new address", () => {
+    const r = managerEmailChangeSchema.safeParse({ userId, email: "  Ada@Example.com " });
+    // Trimmed here; lowercasing is `normalizeEmail`'s job at the call site, so
+    // the schema keeps the address as typed apart from surrounding space.
+    expect(r.success && r.data.email).toBe("Ada@Example.com");
+  });
+
+  it("rejects a malformed address", () => {
+    expect(managerEmailChangeSchema.safeParse({ userId, email: "not-an-email" }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects a non-uuid user id", () => {
+    expect(
+      managerEmailChangeSchema.safeParse({ userId: "nope", email: "ada@example.com" }).success,
+    ).toBe(false);
+  });
+
+  it("has no way to assert verification", () => {
+    // The product rule, pinned as a shape: there is no "mark as verified" input.
+    // A badge a manager could set would only mean "a manager believed this",
+    // which is the state this whole feature exists to replace. Correcting an
+    // address sends a fresh link; that is the entire remedy.
+    const r = managerEmailChangeSchema.safeParse({
+      userId,
+      email: "ada@example.com",
+      email_confirmed_at: "2026-01-01T00:00:00Z",
+      verified: true,
+    });
+    expect(r.success && Object.keys(r.data).sort()).toEqual(["email", "userId"]);
+  });
+});
+
 describe("waiverPrefillSearchSchema", () => {
   it("keeps string prefill values as-is", () => {
     const r = waiverPrefillSearchSchema.safeParse({
@@ -710,6 +756,11 @@ describe("waiverPrefillSearchSchema", () => {
       email: "sensei+test9@sydneyjitsu.com.au",
       phone: "+61 400 000 000",
     });
+  });
+
+  it("keeps the verification token from an emailed link", () => {
+    const r = waiverPrefillSearchSchema.safeParse({ email: "ada@example.com", vt: "utsj_abc123" });
+    expect(r.success && r.data.vt).toBe("utsj_abc123");
   });
 
   it("coerces an all-digits phone (parsed as a number by the router) to a string", () => {

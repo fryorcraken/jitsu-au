@@ -4,12 +4,19 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { ChevronDown, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { deriveExpandedWaivers, formatCents } from "@/lib/validation";
+import { emailVerificationLabel, isEmailVerified } from "@/lib/email-verification";
 import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
-import { getClubUser } from "@/lib/club-user.functions";
+import {
+  getClubUser,
+  resendClubUserVerification,
+  setClubUserEmail,
+} from "@/lib/club-user.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
@@ -41,6 +48,12 @@ const MEMBERSHIP_CLASS: Record<string, string> = {
   active: "bg-green-100 text-green-800",
   expired: "bg-red-100 text-red-800",
   cancelled: "bg-slate-100 text-slate-800",
+};
+
+// Keep in step with manager.users.tsx: a manager moves between both screens.
+const VERIFICATION_CLASS: Record<string, string> = {
+  verified: "bg-green-100 text-green-800",
+  unverified: "bg-amber-100 text-amber-800",
 };
 
 // The same three derived statuses the signed-waivers screen shows, in the same
@@ -119,6 +132,133 @@ function SignerMeta({ meta }: { meta: unknown }) {
         />
       ))}
     </>
+  );
+}
+
+/**
+ * The person's email address: what it is, whether anyone has proved they can
+ * read it, and the two things a manager can do about it.
+ *
+ * Correcting an address is the only email-editing path in the product, and it
+ * always drops the person back to unverified: the new address has never been
+ * proven, whatever was true of the old one. There is deliberately no "mark as
+ * verified" here, because a badge a manager could set would only ever mean "a
+ * manager believed this".
+ */
+function EmailCard({
+  userId,
+  email,
+  emailConfirmedAt,
+  onChanged,
+}: {
+  userId: string;
+  email: string | null;
+  emailConfirmedAt: string | null;
+  onChanged: () => void;
+}) {
+  const changeEmail = useServerFn(setClubUserEmail);
+  const resend = useServerFn(resendClubUserVerification);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(email ?? "");
+  const [busy, setBusy] = useState(false);
+  const verified = isEmailVerified(emailConfirmedAt);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const res = await changeEmail({ data: { userId, email: draft } });
+      if (!res.changed) {
+        toast.success("That's already their email. Nothing changed.");
+      } else if (res.verificationSent) {
+        toast.success("Email updated. We sent a confirmation link to the new address.");
+      } else {
+        // The address moved but the email did not go out. Say so plainly: the
+        // manager is the only one who can act on it, and telling them a link
+        // was sent would surface as "the member never got anything" days later.
+        toast.warning("Email updated, but we couldn't send the confirmation link. Try resending.");
+      }
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update that email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendAgain() {
+    setBusy(true);
+    try {
+      const res = await resend({ data: { userId } });
+      toast.success(
+        res.alreadyVerified
+          ? "That address is already confirmed."
+          : "Verification email sent to " + res.email,
+      );
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not send that email.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border p-4">
+      <h2 className="mb-3 text-lg font-bold">Email</h2>
+      <p className="mb-3 text-sm text-muted-foreground">
+        {verified
+          ? `Confirmed on ${fmtDate(emailConfirmedAt)}, when they opened a link we sent here.`
+          : "Nobody has opened a link we sent to this address yet. Approving a waiver emails a sign-in link here, so a typo means it goes nowhere."}
+      </p>
+
+      {editing ? (
+        <form onSubmit={save} className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[16rem] flex-1">
+            <Label htmlFor="member-email">New email</Label>
+            <Input
+              id="member-email"
+              type="email"
+              required
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+          </div>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Saving..." : "Save"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => {
+              setDraft(email ?? "");
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </form>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">{email ?? "—"}</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
+            Change email
+          </Button>
+          {!verified && email ? (
+            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={sendAgain}>
+              {busy ? "Sending..." : "Resend verification"}
+            </Button>
+          ) : null}
+        </div>
+      )}
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        Changing this moves their login too. Signed waivers keep the address as it was typed, as
+        evidence, so an older submission below can legitimately show a different one.
+      </p>
+    </div>
   );
 }
 
@@ -320,12 +460,18 @@ function ManagerUserPage() {
               <Pill key={role} label={role} className="bg-indigo-100 text-indigo-800" />
             ))}
           </div>
-          <p className="text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             {/* Every person has an email (it lives on their login record), so a
                 missing one here means the lookup failed, not that we hold none. */}
-            {summary.email ?? "Email lookup failed"}
-            {summary.phone ? ` · ${summary.phone}` : ""}
-          </p>
+            <span>{summary.email ?? "Email lookup failed"}</span>
+            {summary.email ? (
+              <Pill
+                label={emailVerificationLabel(summary.email_confirmed_at)}
+                className={VERIFICATION_CLASS[emailVerificationLabel(summary.email_confirmed_at)]}
+              />
+            ) : null}
+            {summary.phone ? <span>· {summary.phone}</span> : null}
+          </div>
           <p className="text-sm text-muted-foreground">
             First seen {fmtDate(summary.first_seen_at)}
           </p>
@@ -339,6 +485,13 @@ function ManagerUserPage() {
           </Button>
         </div>
       </div>
+
+      <EmailCard
+        userId={userId}
+        email={summary.email}
+        emailConfirmedAt={summary.email_confirmed_at}
+        onChanged={() => void load(false)}
+      />
 
       <div className="rounded-lg border p-4">
         <h2 className="mb-3 text-lg font-bold">Profile</h2>

@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -25,6 +25,36 @@ import {
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
+
+/**
+ * Whether the email being submitted was already proven by a click.
+ *
+ * `vt` is the token from the interest confirmation email, carried across on the
+ * prefill link. It is treated as a hint and never as an instruction: the token
+ * must be live, and the address it was mailed to must be the address actually
+ * being submitted. Someone who edits the email field on a prefilled form gets
+ * no verification from the old token, which is the point.
+ *
+ * Never throws. A missing, expired, or mismatched token just means "not proven",
+ * which is the ordinary state for a walk-in signer.
+ */
+async function proveSubmittedEmail(
+  admin: SupabaseClient<Database>,
+  vt: string | undefined,
+  submittedEmail: string,
+): Promise<boolean> {
+  const raw = (vt || "").trim();
+  if (!raw) return false;
+  try {
+    const { lookupVerificationToken } = await import("@/lib/email-verification.server");
+    const { tokenProvesEmail } = await import("@/lib/email-verification");
+    const token = await lookupVerificationToken(admin, raw);
+    return Boolean(token && tokenProvesEmail(token.email, submittedEmail));
+  } catch (e) {
+    console.error("[submitWaiverWithPdf] verification token lookup failed:", e);
+    return false;
+  }
+}
 
 /**
  * Best-effort real client IP from the proxy headers, kept on the waiver as a
@@ -207,6 +237,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // credentials — an applicant, not a login yet: they cannot sign in until a
     // manager approves a waiver and lifts the ban). The ensure_profile trigger
     // creates the profile row; seed a new person's name/phone onto it.
+    //
+    // If they arrived from the link in their interest confirmation email, that
+    // click already proved the mailbox. `emailProven` carries the proof into
+    // the moment the person is created, so they are born verified rather than
+    // being asked to confirm an address they have demonstrably just read.
+    const emailProven = await proveSubmittedEmail(admin, data.vt, email);
+
     let userId: string;
     if (callerId) {
       userId = callerId;
@@ -220,6 +257,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       } else {
         const { data: created, error: createErr } = await admin.auth.admin.createUser({
           email,
+          email_confirm: emailProven,
           ban_duration: "876000h", // ~100 years: an applicant, not a login yet
         });
         if (createErr || !created.user) {
@@ -249,6 +287,19 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
             { onConflict: "user_id" },
           );
         }
+      }
+    }
+
+    // A person who ALREADY existed and clicked their emailed link: apply the
+    // proof to them too. Idempotent, so it is a harmless no-op for someone just
+    // created with `email_confirm` above, which keeps this to one code path.
+    // Best-effort — a hiccup here must not fail a signed waiver.
+    if (emailProven) {
+      const { error: confirmErr } = await admin.auth.admin.updateUserById(userId, {
+        email_confirm: true,
+      });
+      if (confirmErr) {
+        console.error("[submitWaiverWithPdf] could not record email verification:", confirmErr);
       }
     }
 
@@ -366,6 +417,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           memberEmail: email,
           pdfUrl: emailSigned.signedUrl,
           admin: supabaseAdmin,
+          // Lets the confirmation email add a "confirm your email address"
+          // button, but only for someone whose address is still unproven.
+          userId,
         });
       }
     } catch (e) {

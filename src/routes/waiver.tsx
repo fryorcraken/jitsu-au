@@ -18,6 +18,7 @@ import {
   getCurrentWaiverTemplate,
   getMyProfile,
 } from "@/lib/waiver.functions";
+import { redeemWaiverEmailVerification } from "@/lib/email-verification.functions";
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { useAuth } from "@/hooks/useAuth";
@@ -168,6 +169,21 @@ function Waiver() {
     if (user?.email) setEmail(user.email);
   }, [user]);
 
+  // Arriving from the link in an interest confirmation email is itself proof
+  // that the address is real, so redeem it on open rather than waiting for a
+  // submission that may never come. Fire and forget: this is a side benefit of
+  // landing here, and nothing on the page depends on it. A visitor who has no
+  // person record yet is a no-op server-side, and the token stays live so the
+  // submission below can still carry the proof into their new record.
+  const verificationToken = search.vt;
+  const redeemVerification = useServerFn(redeemWaiverEmailVerification);
+  useEffect(() => {
+    if (!verificationToken) return;
+    redeemVerification({ data: { token: verificationToken } }).catch(() => {
+      /* verification is best-effort; never surface it to the signer */
+    });
+  }, [verificationToken, redeemVerification]);
+
   // ---- Live preview (HTML rendering of the waiver, mirrors the PDF) ----
   const previewSignatureImage = signatureMode === "draw" ? signatureImage : "";
   const previewGuardianSignatureImage =
@@ -250,6 +266,10 @@ function Waiver() {
             platform: navigator.platform ?? "",
             languages: [...(navigator.languages ?? [])].slice(0, 10),
           },
+          // Carries the interest email's proof into the person record created
+          // by this submission. Re-checked server-side against the email
+          // actually submitted, so editing the email field forfeits it.
+          vt: verificationToken ?? "",
           hp: "",
         },
       });

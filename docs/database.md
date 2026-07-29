@@ -196,8 +196,16 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 
 - `user_id_by_email(text) → uuid` — resolve a person by email at submission
   (indexed lookup on `auth.users`).
-- `user_emails(uuid[]) → (user_id, email)` — batch email resolution for the
-  manager directory, invoices, and transactional emails.
+- `user_emails(uuid[]) → (user_id, email, email_confirmed_at)` — batch email
+  resolution for the manager directory, invoices, and transactional emails. The
+  confirmation stamp rides along so a screen can badge verified state in the
+  same round trip that resolves the address.
+- `clear_email_confirmation(uuid) → void` — drops `auth.users.email_confirmed_at`
+  back to NULL. Called immediately after a manager corrects someone's address:
+  the auth admin API can _set_ a confirmation but does not reliably _clear_ one,
+  and "a changed address is always unverified" has to be a guarantee rather than
+  a hope about GoTrue's behaviour. Only `email_confirmed_at` is written —
+  `confirmed_at` is a generated column.
 
 ---
 
@@ -457,6 +465,38 @@ grants off.
 `key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. First use:
 markdown `invoice_payment_instructions`. **RLS:** manager-only.
 
+### `email_verification_tokens` — proof that someone can read an address
+
+`id` PK, `user_id → auth.users(id) ON DELETE CASCADE` (**nullable**), `email`
+(normalized, the address being proven), `purpose`
+(`interest | waiver | manager_resend | self_resend | email_change`),
+`token_prefix`, `token_hash` (SHA-256, unique; raw never stored), `created_at`,
+`expires_at`, `last_used_at`, `revoked_at`. Partial indexes on the hash and on
+the email, both `WHERE revoked_at IS NULL`.
+
+The verified state itself is **not** here — it lives on
+`auth.users.email_confirmed_at`, which Supabase already stamps on a magic-link
+sign-in. This table only holds the links that let someone prove an address any
+other way, and two things about it differ from the other token tables on
+purpose:
+
+- **`user_id` is nullable.** A token minted for an interest registration belongs
+  to a **lead**, who has no person record yet. It binds to the address, and the
+  proof is applied at waiver submission when the person is created (they are
+  born verified). Binding to a user id would make that journey impossible.
+- **Tokens are reusable, not single-use.** The interest token also rides on the
+  waiver prefill link that people return to, and confirming twice is a no-op.
+  `last_used_at` records the latest redemption instead of burning the row.
+
+A token only ever proves the address it was mailed to: redemption re-checks it
+against the account's current email, so links sent before a manager corrected a
+typo are inert. Expiry is 180 days.
+
+**RLS:** enabled with **no policies** and no client grants (`REVOKE ALL` from
+anon/authenticated) — unlike `calendar_feed_tokens` there is nothing here a
+person needs to see about their own row, so minting, redeeming and revoking all
+run through the service role.
+
 ### `manager_api_tokens` — manager agent API credentials
 
 `id` PK, `label`, `token_prefix`, `token_hash` (SHA-256, unique; raw shown once),
@@ -512,3 +552,10 @@ lifts the ban. There is no self-serve sign-up. Two triggers fire:
 `profiles.user_id`, `waivers.user_id`, `memberships.user_id`,
 `user_roles.user_id` and the various `*_by` columns reference it. The server
 reads emails via `user_id_by_email` / `user_emails` (service-role-only).
+
+`email_confirmed_at` on this table is the **only** record of whether an address
+has been verified — deliberately not copied onto `profiles`, so there is nothing
+to drift. It means one thing: someone opened a link the club sent there. Supabase
+sets it natively on a magic-link sign-in; `email_verification_tokens` covers the
+other routes; and `clear_email_confirmation` drops it whenever a manager changes
+the address. Nothing in the product can assert it by hand.

@@ -38,6 +38,12 @@ export type ClubUserProfile = {
 export type ClubUserEmail = {
   user_id: string;
   email: string;
+  /**
+   * When someone last proved they can read this address, by opening a link we
+   * sent there. Null means nobody ever has. Lives on `auth.users`, never copied
+   * onto `profiles`, so there is only one thing to trust.
+   */
+  email_confirmed_at?: string | null;
 };
 
 /** The waiver fields the aggregation reads (ALL waivers, any status). */
@@ -88,6 +94,12 @@ export type ClubUser = {
   /** What to call them: preferred name, else first name. Null for a bare lead. */
   greeting_name: string | null;
   email: string | null;
+  /**
+   * When this address was proven, or null if never. Always null for a lead:
+   * they have no person record to hold a confirmation, so their proof (if any)
+   * is held on the token until they sign a waiver. See `email-verification.ts`.
+   */
+  email_confirmed_at: string | null;
   phone: string | null;
   roles: string[];
   lifecycle_status: LifecycleStatus;
@@ -128,6 +140,9 @@ export function aggregateClubUsers(input: {
 }): ClubUser[] {
   const planById = new Map(input.plans.map((p) => [p.id, p]));
   const emailByUser = new Map(input.emails.map((e) => [e.user_id, e.email]));
+  const emailConfirmedByUser = new Map(
+    input.emails.map((e) => [e.user_id, e.email_confirmed_at ?? null]),
+  );
 
   // Waiver states per person: latest APPROVED signature (the waiver on file)
   // plus whether any submission exists at all.
@@ -202,6 +217,7 @@ export function aggregateClubUsers(input: {
       name: nameWithPreferred(p) || null,
       greeting_name: greetingName(p) || null,
       email: emailByUser.get(p.user_id) ?? null,
+      email_confirmed_at: emailConfirmedByUser.get(p.user_id) ?? null,
       phone: p.phone,
       roles: rolesByUser.get(p.user_id) ?? [],
       lifecycle_status,
@@ -232,6 +248,8 @@ export function aggregateClubUsers(input: {
       name: lead.name.trim() || null,
       greeting_name: null,
       email,
+      // A lead has no person record, so there is nothing here to badge.
+      email_confirmed_at: null,
       phone: lead.phone,
       roles: [],
       lifecycle_status: "lead",
