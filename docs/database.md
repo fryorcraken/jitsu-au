@@ -248,7 +248,7 @@ above do not exist as far as the compiler is concerned. See the warning under
 | `guardian_relationship`          | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
 | `pdf_path`                       | `text`        | yes  | The signed PDF in the `waivers` Storage bucket.                                                                                                                                                                 |
 | `template_version`               | `int`         | yes  | Which `waiver_templates.version` was signed.                                                                                                                                                                    |
-| `signer_ip`                      | `text`        | yes  | The signer's real IP (legal/forensic record).                                                                                                                                                                   |
+| `signer_ip`                      | `text`        | yes  | The signer's real IP (legal/forensic record). NULL for a scanned paper form, where nobody connected to sign.                                                                                                    |
 | `signer_meta`                    | `jsonb`       | no   | Default `'{}'`. Signing-context evidence: request headers (user agent, language, client hints) + browser-reported timezone/screen/viewport/platform/languages (`buildSignerMeta`). Never copied to the profile. |
 | `approval_status`                | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                                                                                                                                                         |
 | `approved_at`                    | `timestamptz` | yes  | NULL while pending.                                                                                                                                                                                             |
@@ -261,6 +261,15 @@ and the five yes/no **health declaration** answers — all
 captured inside the PDF only. The displayed **pending / active /
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
 person, the latest approved waiver is active.
+
+**How a submission arrived** is not a column. A waiver filed from a scanned
+paper form (`/manager/waivers/upload`) is an ordinary row in every respect
+(approved, superseded and downloaded identically); the one difference is its
+`signer_meta`, which records who filed it rather than which browser signed it:
+`source: "paper_upload"`, `uploaded_by`, `uploaded_by_email`, `uploaded_at` and
+`scan_files`. `isPaperWaiver()` is the single reader of that marker. If paper
+waivers ever need to be queried or reported on in bulk, promote it to a real
+`source` column then, rather than filtering on jsonb.
 
 **Grants:** `SELECT` for `authenticated`, and nothing else for either client
 role. The grant is not there for anything in `src/` — it exists because the PDF

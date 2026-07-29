@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_ENV_KEY_UPLOADER,
   AGENT_MANIFEST,
   AgentError,
   bearerToken,
@@ -8,7 +9,7 @@ import {
   projectInvoice,
   safeEqual,
 } from "./manager-agent";
-import { editInvoiceSchema, managerAgentActions } from "./validation";
+import { editInvoiceSchema, managerAgentActions, paperWaiverUploadSchema } from "./validation";
 import type { MembershipPlanRow, MembershipRow } from "./membership-types";
 
 describe("safeEqual", () => {
@@ -135,6 +136,55 @@ describe("AGENT_MANIFEST", () => {
     const edit = AGENT_MANIFEST.actions.find((a) => a.name === "edit_invoice")!;
     const required = edit.params.filter((p) => p.required).map((p) => p.name);
     expect(required).toEqual(["id"]);
+  });
+
+  it("documents file_waiver's required params in step with the schema", () => {
+    const file = AGENT_MANIFEST.actions.find((a) => a.name === "file_waiver")!;
+    const documented = new Set(file.params.filter((p) => p.required).map((p) => p.name));
+    // The manifest is prose an agent reads before acting; if it stops matching
+    // what the Zod schema actually enforces, the endpoint would reject a call
+    // the manifest said was fine. emergency_contact_relationship is left off
+    // this list on purpose: required only for a minor, and the manifest says
+    // so in its description rather than as an unconditional required flag.
+    const schemaRequired = new Set([
+      "first_name",
+      "last_name",
+      "date_of_birth",
+      "address",
+      "phone",
+      "email",
+      "emergency_contact_name",
+      "emergency_contact_phone",
+      "signed_on",
+      "scan",
+    ]);
+    expect(documented).toEqual(schemaRequired);
+    for (const name of schemaRequired) {
+      expect(
+        paperWaiverUploadSchema.safeParse({
+          first_name: "Ada",
+          last_name: "Lovelace",
+          date_of_birth: "1990-01-01",
+          address: "1 Broadway",
+          phone: "0400000000",
+          email: "ada@example.com",
+          emergency_contact_name: "Charles",
+          emergency_contact_phone: "0400000001",
+          signed_on: "2020-01-01",
+          scan: [{ name: "w.pdf", type: "application/pdf", data: "aGlw" }],
+          [name]: undefined,
+        }).success,
+        name,
+      ).toBe(false);
+    }
+  });
+});
+
+describe("AGENT_ENV_KEY_UPLOADER", () => {
+  it("is not a UUID, so filePaperWaiver knows to skip resolving it to a real user", () => {
+    expect(AGENT_ENV_KEY_UPLOADER).not.toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
   });
 });
 
