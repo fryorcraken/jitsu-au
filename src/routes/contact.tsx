@@ -1,12 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
+import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { submitContact } from "@/lib/submissions.functions";
 import { VENUE_NAME, VENUE_ADDRESS, GOOGLE_MAPS_URL, APPLE_MAPS_URL } from "@/lib/venue";
 import { Phone, MessageCircle, MapPin, ExternalLink } from "lucide-react";
@@ -31,28 +33,42 @@ export const Route = createFileRoute("/contact")({
 function Contact() {
   const navigate = useNavigate();
   const submit = useServerFn(submitContact);
-  const [loading, setLoading] = useState(false);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const send = useResilientSubmit<{ ok: true; duplicate: boolean }>(INTAKE_SUBMIT);
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  // Re-reads the live form on every attempt, so "Try again" needs no state of
+  // its own and a failure leaves the message exactly as it was typed.
+  async function send0() {
+    const form = formRef.current;
+    if (!form) return;
+    const fd = new FormData(form);
+
+    const outcome = await send.submit({
+      run: async (signal, submissionId) => {
+        const res = await submit({
+          signal,
+          data: {
+            // Same id on every attempt: a retry after a lost reply is this
+            // message, not a second copy of it in the club's inbox.
+            client_submission_id: submissionId,
+            name: String(fd.get("name") || ""),
+            email: String(fd.get("email") || ""),
+            subject: String(fd.get("subject") || ""),
+            message: String(fd.get("message") || ""),
+            hp: String(fd.get("hp") || ""),
+          },
+        });
+        if (!res?.ok) throw new Error("We couldn't send your message. Please try again.");
+        return res;
+      },
+    });
+
+    if (outcome.ok) navigate({ to: "/thank-you", search: { kind: "contact" } });
+  }
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    setLoading(true);
-    try {
-      await submit({
-        data: {
-          name: String(fd.get("name") || ""),
-          email: String(fd.get("email") || ""),
-          subject: String(fd.get("subject") || ""),
-          message: String(fd.get("message") || ""),
-          hp: String(fd.get("hp") || ""),
-        },
-      });
-      navigate({ to: "/thank-you", search: { kind: "contact" } });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
+    void send0();
   }
 
   return (
@@ -107,7 +123,11 @@ function Contact() {
             </div>
           </div>
 
-          <form onSubmit={onSubmit} className="space-y-5 rounded-2xl border bg-card p-6 md:p-8">
+          <form
+            ref={formRef}
+            onSubmit={onSubmit}
+            className="space-y-5 rounded-2xl border bg-card p-6 md:p-8"
+          >
             <input type="text" name="hp" tabIndex={-1} autoComplete="off" className="hidden" />
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
@@ -141,9 +161,23 @@ function Contact() {
                 className="mt-1.5"
               />
             </div>
-            <Button type="submit" size="lg" disabled={loading} className="w-full">
-              {loading ? "Sending..." : "Send message"}
+            <Button type="submit" size="lg" disabled={send.busy} className="w-full">
+              {send.busy ? "Sending..." : "Send message"}
             </Button>
+
+            <SubmitStatus
+              status={send.status}
+              attempt={send.attempt}
+              attempts={send.attempts}
+              error={send.error}
+              failureKind={send.failureKind}
+              onRetry={() => void send0()}
+              fallback={
+                <p className="text-sm text-muted-foreground">
+                  You can also call or WhatsApp us on the numbers above.
+                </p>
+              }
+            />
           </form>
         </div>
 

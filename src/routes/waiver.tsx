@@ -13,17 +13,29 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CheckCircle2, Download } from "lucide-react";
 import { SignaturePad, type SignaturePadHandle } from "@/components/site/SignaturePad";
+import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { WaiverDocument } from "@/components/site/WaiverDocument";
 import {
   submitWaiverWithPdf,
   getCurrentWaiverTemplate,
   getMyProfile,
+  checkWaiverSubmission,
+  type WaiverSubmitResult,
 } from "@/lib/waiver.functions";
 import { redeemWaiverEmailVerification } from "@/lib/email-verification.functions";
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { anyHealthConcern, healthQuestions, missingHealthAnswers } from "@/lib/waiver-health";
 import { useAuth } from "@/hooks/useAuth";
+import { useResilientSubmit } from "@/hooks/use-resilient-submit";
+import { WAIVER_SUBMIT } from "@/lib/submit-resilience";
+import {
+  clearDraft,
+  draftHasContent,
+  readDraft,
+  writeDraft,
+  type WaiverDraft,
+} from "@/lib/waiver-draft";
 import {
   resolveNamePrefill,
   waiverPrefillSearchSchema,
@@ -87,10 +99,20 @@ function Waiver() {
     [first_name, last_name, name],
   );
 
-  const [loading, setLoading] = useState(false);
+  const send = useResilientSubmit<WaiverSubmitResult>(WAIVER_SUBMIT);
+  const checkSubmission = useServerFn(checkWaiverSubmission);
   // Accepted acknowledgements keyed by the template's acknowledgement id.
   const [acks, setAcks] = useState<Record<string, boolean>>({});
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  /**
+   * The confirmed outcome. Set only from a server response, never from a toast:
+   * the success screen used to be able to appear off the back of a toast that
+   * fired whether or not anything came back.
+   */
+  const [result, setResult] = useState<{ pdfUrl: string | null; pdfReady: boolean } | null>(null);
+  /** True once a draft from this browser session has been put back on screen. */
+  const [restored, setRestored] = useState(false);
+  /** Blocks draft writes until the restore pass has run, so it can't erase one. */
+  const [hydrated, setHydrated] = useState(false);
 
   // Controlled form fields so we can render a live PDF preview. Seed name /
   // contact fields from the Step 1 details when arriving via the trial flow.
@@ -151,6 +173,10 @@ function Waiver() {
 
   useEffect(() => {
     if (authLoading || !user) return;
+    // A restored draft is what this person actually typed, so it outranks the
+    // stored profile. Without this gate the profile prefill lands after the
+    // restore (it waits on the auth session) and quietly overwrites it.
+    if (restored) return;
     fetchMine()
       .then((row) => {
         if (!row) return;
@@ -179,7 +205,7 @@ function Waiver() {
       .catch(() => {
         /* no profile yet */
       });
-  }, [authLoading, user, fetchMine]);
+  }, [authLoading, user, fetchMine, restored]);
 
   // A signed-in person signs for their own account: the waiver's email is
   // their login email, and the field is locked (the server enforces the match).
@@ -201,6 +227,145 @@ function Waiver() {
       /* verification is best-effort; never surface it to the signer */
     });
   }, [verificationToken, redeemVerification]);
+
+  // ---- Session draft ----
+  //
+  // Twenty fields, five health answers and a hand-drawn signature. A reload, a
+  // crashed mobile tab, or a phone evicting a backgrounded page used to lose all
+  // of it, and nobody fills that in twice. See lib/waiver-draft.ts for why this
+  // is sessionStorage and not localStorage.
+
+  const adoptSubmissionId = send.adoptSubmissionId;
+  /** A restored draft's submission id, still to be checked against the server. */
+  const [pendingCheckId, setPendingCheckId] = useState<string | null>(null);
+
+  // Restore once, on mount. In an effect, not during render: the route is SSR'd,
+  // and reading sessionStorage while rendering would break hydration.
+  useEffect(() => {
+    const draft = readDraft();
+    if (!draft) {
+      setHydrated(true);
+      return;
+    }
+    // Reuse the draft's id even when there is nothing worth restoring, so a
+    // submission that was in flight when the tab died can still be identified.
+    adoptSubmissionId(draft.submissionId);
+    if (draftHasContent(draft)) {
+      setFirstName(draft.firstName);
+      setMiddleName(draft.middleName);
+      setLastName(draft.lastName);
+      setPreferredName(draft.preferredName);
+      setDob(draft.dob);
+      setPhone(draft.phone);
+      setEmail(draft.email);
+      setAddress(draft.address);
+      setUtsStudentNumber(draft.utsStudentNumber);
+      setSmsConsent(draft.smsConsent);
+      setEcName(draft.ecName);
+      setEcRelationship(draft.ecRelationship);
+      setEcPhone(draft.ecPhone);
+      setHealth((prev) => ({ ...prev, ...draft.health }));
+      setMedical(draft.medical);
+      setAcks(draft.acks);
+      setSignatureMode(draft.signatureMode);
+      setSignatureName(draft.signatureName);
+      setSignatureImage(draft.signatureImage);
+      setGuardianSignatureMode(draft.guardianSignatureMode);
+      setGuardianSignature(draft.guardianSignature);
+      setGuardianSignatureImage(draft.guardianSignatureImage);
+      setRestored(true);
+      setPendingCheckId(draft.submissionId);
+    }
+    setHydrated(true);
+  }, [adoptSubmissionId]);
+
+  // The tab may have died mid-submit. Ask whether that one landed before showing
+  // somebody a form to fill in again: the answer is cheap, and signing a second
+  // waiver because the first reply was lost is exactly what we are avoiding.
+  useEffect(() => {
+    if (!pendingCheckId) return;
+    let cancelled = false;
+    checkSubmission({ data: { client_submission_id: pendingCheckId } })
+      .then((res) => {
+        if (cancelled || !res.found) return;
+        setResult({ pdfUrl: res.pdf_url, pdfReady: Boolean(res.pdf_url) });
+        clearDraft();
+      })
+      .catch(() => {
+        /* best-effort: an unanswerable check just leaves the form as it is */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingCheckId, checkSubmission]);
+
+  const draftSnapshot = useMemo<WaiverDraft>(
+    () => ({
+      submissionId: send.submissionId,
+      firstName,
+      middleName,
+      lastName,
+      preferredName,
+      dob,
+      phone,
+      email,
+      address,
+      utsStudentNumber,
+      smsConsent,
+      ecName,
+      ecRelationship,
+      ecPhone,
+      health,
+      medical,
+      acks,
+      signatureMode,
+      signatureName,
+      signatureImage,
+      guardianSignatureMode,
+      guardianSignature,
+      guardianSignatureImage,
+    }),
+    [
+      send.submissionId,
+      firstName,
+      middleName,
+      lastName,
+      preferredName,
+      dob,
+      phone,
+      email,
+      address,
+      utsStudentNumber,
+      smsConsent,
+      ecName,
+      ecRelationship,
+      ecPhone,
+      health,
+      medical,
+      acks,
+      signatureMode,
+      signatureName,
+      signatureImage,
+      guardianSignatureMode,
+      guardianSignature,
+      guardianSignatureImage,
+    ],
+  );
+
+  // Debounced so typing does not serialise a signature PNG on every keystroke.
+  // Gated on `hydrated` so the first render cannot overwrite a stored draft with
+  // an empty form before the restore above has had a chance to run.
+  useEffect(() => {
+    if (!hydrated || result) return;
+    const timer = setTimeout(() => writeDraft(draftSnapshot), 500);
+    return () => clearTimeout(timer);
+  }, [hydrated, result, draftSnapshot]);
+
+  /** Throw away a restored draft and start over, for someone signing afresh. */
+  function startFresh() {
+    clearDraft();
+    window.location.assign("/waiver");
+  }
 
   // ---- Live preview (HTML rendering of the waiver, mirrors the PDF) ----
   const previewSignatureImage = signatureMode === "draw" ? signatureImage : "";
@@ -235,6 +400,94 @@ function Waiver() {
     signedDate: new Date(previewSignedAt).toLocaleDateString("en-AU"),
   });
 
+  /**
+   * Send the waiver, and keep sending it.
+   *
+   * Split out from the form's submit handler so the failure panel's "Try again"
+   * runs exactly the same path, with the same submission id. Everything the
+   * server needs is read from state, so nothing has to be threaded through.
+   */
+  async function sendWaiver() {
+    const sigImg = signatureMode === "draw" ? signatureImage : "";
+    const sigName = signatureMode === "type" ? signatureName : "";
+
+    const outcome = await send.submit({
+      run: async (signal, submissionId) => {
+        const res = await submit({
+          signal,
+          data: {
+            // The same id on every attempt. It is what lets the server
+            // recognise a retry as this waiver rather than signing a second
+            // one, and what `confirm` below asks about.
+            client_submission_id: submissionId,
+            first_name: firstName,
+            middle_name: middleName,
+            last_name: lastName,
+            preferred_name: preferredName,
+            date_of_birth: dob,
+            address,
+            phone,
+            email,
+            uts_student_number: utsStudentNumber,
+            sms_whatsapp_consent: smsConsent,
+            emergency_contact_name: ecName,
+            emergency_contact_relationship: ecRelationship,
+            emergency_contact_phone: ecPhone,
+            // Every question is answered by this point (guarded below), so the
+            // draft narrows to the five booleans the server requires.
+            health_answers: health as HealthAnswers,
+            medical_notes: medical,
+            acknowledgements: acks,
+            signature_name: sigName,
+            signature_image: sigImg,
+            is_minor: isMinor,
+            guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
+            guardian_signature_image:
+              guardianSignatureMode === "draw" ? guardianSignatureImage : "",
+            // Browser context stored with the submission as signing evidence.
+            client_meta: {
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "",
+              screen: `${window.screen.width}x${window.screen.height}`,
+              viewport: `${window.innerWidth}x${window.innerHeight}`,
+              platform: navigator.platform ?? "",
+              languages: [...(navigator.languages ?? [])].slice(0, 10),
+            },
+            // Carries the interest email's proof into the person record created
+            // by this submission. Re-checked server-side against the email
+            // actually submitted, so editing the email field forfeits it.
+            vt: verificationToken ?? "",
+            hp: "",
+          },
+        });
+        // Only the server gets to say this is signed. The old code showed a
+        // success toast unconditionally, so "Waiver signed" could appear over a
+        // response that carried nothing.
+        if (!res?.ok) throw new Error("We couldn't save your waiver. Please try again.");
+        return res;
+      },
+      // A lost reply is not an answer. Before retrying, ask whether this exact
+      // submission already landed: if it did, the person is finished and must
+      // not be sent back to the form.
+      confirm: async (submissionId) => {
+        const res = await checkSubmission({ data: { client_submission_id: submissionId } });
+        if (!res.found || !res.waiver_id) return null;
+        return {
+          ok: true as const,
+          waiver_id: res.waiver_id,
+          pdf_url: res.pdf_url,
+          pdf_ready: Boolean(res.pdf_url),
+        };
+      },
+    });
+
+    if (outcome.ok) {
+      setResult({ pdfUrl: outcome.value.pdf_url, pdfReady: outcome.value.pdf_ready });
+      // Signed and recorded: the draft has done its job, and it holds health
+      // answers and a signature that should not outlive it.
+      clearDraft();
+    }
+  }
+
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (missingHealthAnswers(health).length > 0) {
@@ -263,80 +516,55 @@ function Waiver() {
         return;
       }
     }
-    setLoading(true);
-    try {
-      const res = await submit({
-        data: {
-          first_name: firstName,
-          middle_name: middleName,
-          last_name: lastName,
-          preferred_name: preferredName,
-          date_of_birth: dob,
-          address,
-          phone,
-          email,
-          uts_student_number: utsStudentNumber,
-          sms_whatsapp_consent: smsConsent,
-          emergency_contact_name: ecName,
-          emergency_contact_relationship: ecRelationship,
-          emergency_contact_phone: ecPhone,
-          // Every question is answered by this point (guarded above), so the
-          // draft narrows to the five booleans the server requires.
-          health_answers: health as HealthAnswers,
-          medical_notes: medical,
-          acknowledgements: acks,
-          signature_name: sigName,
-          signature_image: sigImg,
-          is_minor: isMinor,
-          guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
-          guardian_signature_image: guardianSignatureMode === "draw" ? guardianSignatureImage : "",
-          // Browser context stored with the submission as signing evidence.
-          client_meta: {
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "",
-            screen: `${window.screen.width}x${window.screen.height}`,
-            viewport: `${window.innerWidth}x${window.innerHeight}`,
-            platform: navigator.platform ?? "",
-            languages: [...(navigator.languages ?? [])].slice(0, 10),
-          },
-          // Carries the interest email's proof into the person record created
-          // by this submission. Re-checked server-side against the email
-          // actually submitted, so editing the email field forfeits it.
-          vt: verificationToken ?? "",
-          hp: "",
-        },
-      });
-      if (res.pdf_url) setPdfUrl(res.pdf_url);
-      toast.success("Waiver signed. Download your copy below.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
+    await sendWaiver();
   }
 
-  if (pdfUrl) {
+  // Shown only for a confirmed server response. The waiver being saved and the
+  // PDF copy being ready are two different facts, and conflating them is what
+  // used to report a perfectly good signed waiver as a failure.
+  if (result) {
     return (
       <SiteLayout>
         <section className="mx-auto flex max-w-xl flex-col items-center px-4 py-24 text-center">
           <CheckCircle2 className="h-16 w-16 text-primary" />
           <h1 className="mt-6 text-3xl font-bold md:text-4xl">Waiver signed</h1>
-          <p className="mt-3 text-muted-foreground">
-            Thanks. A copy has been saved. Download your signed waiver PDF below.
-          </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <Button asChild size="lg">
-              <a href={pdfUrl} target="_blank" rel="noopener" download>
-                <Download className="mr-2 h-4 w-4" /> Download waiver PDF
-              </a>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/">Back home</Link>
-            </Button>
-          </div>
-          <p className="mt-6 text-xs text-muted-foreground">
-            The download link expires in 1 hour. Signed-in members can re-download from their
-            account.
-          </p>
+          {result.pdfReady && result.pdfUrl ? (
+            <>
+              <p className="mt-3 text-muted-foreground">
+                Thanks. A copy has been saved. Download your signed waiver PDF below.
+              </p>
+              <div className="mt-8 flex flex-wrap justify-center gap-3">
+                <Button asChild size="lg">
+                  <a href={result.pdfUrl} target="_blank" rel="noopener" download>
+                    <Download className="mr-2 h-4 w-4" /> Download waiver PDF
+                  </a>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link to="/">Back home</Link>
+                </Button>
+              </div>
+              <p className="mt-6 text-xs text-muted-foreground">
+                The download link expires in 1 hour. Signed-in members can re-download from their
+                account.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-3 text-muted-foreground">
+                Thanks, your waiver is signed and saved. We couldn't get your PDF copy ready just
+                now, so we'll email it to you shortly. There is nothing else for you to do, and you
+                do not need to sign again.
+              </p>
+              <div className="mt-8 flex flex-wrap justify-center gap-3">
+                <Button asChild size="lg">
+                  <Link to="/">Back home</Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link to="/classes">See classes</Link>
+                </Button>
+              </div>
+            </>
+          )}
         </section>
       </SiteLayout>
     );
@@ -355,6 +583,19 @@ function Waiver() {
         <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-card p-6 md:p-8">
             <input type="hidden" name="hp" value="" />
+
+            {restored && (
+              <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                We brought back what you had already filled in. Check it over before you sign.{" "}
+                <button
+                  type="button"
+                  onClick={startFresh}
+                  className="underline hover:text-foreground"
+                >
+                  Start fresh instead
+                </button>
+              </p>
+            )}
 
             {user && (
               <p className="rounded-md bg-primary/10 px-3 py-2 text-xs text-primary">
@@ -642,9 +883,14 @@ function Waiver() {
                   <TabsTrigger value="type">Type</TabsTrigger>
                 </TabsList>
                 <TabsContent value="draw" className="mt-3">
+                  {/* The pad mounts before the draft restore effect runs, so a
+                      restored signature would arrive too late for it. Keying on
+                      `restored` remounts it once, with the signature showing. */}
                   <SignaturePad
+                    key={restored ? "restored" : "fresh"}
                     ref={sigPadRef}
                     onChange={setSignatureImage}
+                    initialDataUrl={signatureImage}
                     ariaLabel="Your signature"
                   />
                 </TabsContent>
@@ -688,8 +934,10 @@ function Waiver() {
                       </TabsList>
                       <TabsContent value="draw" className="mt-3">
                         <SignaturePad
+                          key={restored ? "restored" : "fresh"}
                           ref={gSigPadRef}
                           onChange={setGuardianSignatureImage}
+                          initialDataUrl={guardianSignatureImage}
                           ariaLabel="Guardian signature"
                         />
                       </TabsContent>
@@ -707,9 +955,24 @@ function Waiver() {
               )}
             </fieldset>
 
-            <Button type="submit" size="lg" disabled={loading} className="w-full">
-              {loading ? "Generating PDF..." : "Sign and download waiver"}
+            <Button type="submit" size="lg" disabled={send.busy} className="w-full">
+              {send.busy ? "Signing your waiver..." : "Sign and download waiver"}
             </Button>
+
+            <SubmitStatus
+              status={send.status}
+              attempt={send.attempt}
+              attempts={send.attempts}
+              error={send.error}
+              failureKind={send.failureKind}
+              onRetry={() => void sendWaiver()}
+              fallback={
+                <p className="text-sm text-muted-foreground">
+                  Everything you filled in is saved on this device, so you can come back to this
+                  page and finish. You can also just turn up and sign at the gym.
+                </p>
+              }
+            />
           </form>
 
           <aside className="lg:sticky lg:top-24 lg:self-start">

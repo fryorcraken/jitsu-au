@@ -241,6 +241,7 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 | `approved_at`                    | `timestamptz` | yes  | NULL while pending.                                                                                                                                                                                             |
 | `approved_by`                    | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager.                                                                                                                                              |
 | `signed_at`                      | `timestamptz` | no   | When the waiver was signed.                                                                                                                                                                                     |
+| `client_submission_id`           | `uuid`        | yes  | The browser's per-form-fill idempotency key, behind a partial unique index. Looked up before any work so a retry cannot mint a second signed waiver. See "Public intake" below.                                 |
 | `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                                                |
 
 **Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks,
@@ -528,16 +529,45 @@ service role only.
 ### `interest_registrations`
 
 `id` PK, `name`, `email`, `phone`, `uts_student`, `experience`, `message`,
-`sms_whatsapp_consent`, `created_at`. **RLS:** anon INSERT under a validating
-`WITH CHECK` (name/email/phone/experience/message length + email format).
-Each row is a **lead**: kept exactly as submitted, creating no person record.
-The manager directory merges leads in by normalized email until the email
-belongs to a person (they signed the waiver).
+`sms_whatsapp_consent`, `client_submission_id`, `created_at`. **RLS:** anon
+INSERT under a validating `WITH CHECK` (name/email/phone/experience/message
+length + email format). Each row is a **lead**: kept exactly as submitted,
+creating no person record. The manager directory merges leads in by normalized
+email until the email belongs to a person (they signed the waiver).
 
 ### `contact_messages`
 
-`id` PK, `name`, `email`, `subject`, `message`, `created_at`. **RLS:** anon
-INSERT under a validating `WITH CHECK`.
+`id` PK, `name`, `email`, `subject`, `message`, `client_submission_id`,
+`created_at`. **RLS:** anon INSERT under a validating `WITH CHECK`.
+
+### `client_submission_id` (all three intake paths)
+
+A nullable `uuid` on `interest_registrations`, `contact_messages` and `waivers`,
+each behind a **partial unique index** (`WHERE client_submission_id IS NOT NULL`,
+so the pre-existing NULL rows stay legal). Added by
+`20260729020000_submission_idempotency.sql`.
+
+The browser mints one per form fill and resends it unchanged on every retry. It
+exists because the public forms now retry hard through a bad connection:
+**aborting a request client-side does not stop the server**, so an automatic
+retry can race a first attempt that is still committing. Without a key to
+recognise, that is a duplicate lead, or a duplicate signed waiver plus a second
+round of emails to the member and every manager.
+
+How each path detects a repeat differs, and it follows from the grants:
+
+- `interest_registrations` / `contact_messages` are written **as `anon`**, which
+  holds `INSERT` and deliberately no `SELECT`. They cannot look first, so they
+  read the unique violation (SQLSTATE `23505`) as "already recorded", return
+  `ok`, and **skip the emails**.
+- `waivers` is written with the **service role**, so `submitWaiverWithPdf` looks
+  the id up before doing any work and returns the existing row. The same read
+  backs `checkWaiverSubmission`, the endpoint a signer's browser calls to ask
+  whether a submission whose reply was lost actually landed.
+
+Nullable on purpose: a client cached from before this shipped sends nothing and
+must still be able to submit. It simply gets no dedupe protection, which is the
+behaviour it already had.
 
 ---
 

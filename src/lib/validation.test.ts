@@ -473,6 +473,27 @@ describe("interestSchema", () => {
   it("allows an empty honeypot", () => {
     expect(interestSchema.safeParse({ ...valid, hp: "" }).success).toBe(true);
   });
+
+  it("accepts a client_submission_id, and works without one", () => {
+    // The idempotency key is optional so a client cached from before it shipped
+    // still submits. Present, absent and "not set" (empty string) all pass.
+    expect(
+      interestSchema.safeParse({
+        ...valid,
+        client_submission_id: "3f7c1a2e-9b4d-4c8a-8e21-5d6f0a1b2c3d",
+      }).success,
+    ).toBe(true);
+    expect(interestSchema.safeParse({ ...valid, client_submission_id: "" }).success).toBe(true);
+    expect(interestSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects a client_submission_id that is not a uuid", () => {
+    // Anything else would land in the uuid column as a cast error at insert
+    // time, which is a 500 rather than a validation message.
+    expect(interestSchema.safeParse({ ...valid, client_submission_id: "abc123" }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe("contactSchema", () => {
@@ -492,6 +513,17 @@ describe("contactSchema", () => {
 
   it("rejects a message over 2000 chars", () => {
     expect(contactSchema.safeParse({ ...valid, message: "x".repeat(2001) }).success).toBe(false);
+  });
+
+  it("accepts an optional client_submission_id and rejects a malformed one", () => {
+    expect(
+      contactSchema.safeParse({
+        ...valid,
+        client_submission_id: "3f7c1a2e-9b4d-4c8a-8e21-5d6f0a1b2c3d",
+      }).success,
+    ).toBe(true);
+    expect(contactSchema.safeParse({ ...valid, client_submission_id: "" }).success).toBe(true);
+    expect(contactSchema.safeParse({ ...valid, client_submission_id: "nope" }).success).toBe(false);
   });
 });
 
@@ -529,6 +561,25 @@ describe("waiverSubmitSchema", () => {
     expect(waiverSubmitSchema.safeParse({ ...validAdult, vt: "utsj_abc123" }).success).toBe(true);
     expect(waiverSubmitSchema.safeParse({ ...validAdult, vt: "" }).success).toBe(true);
     expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+  });
+
+  it("accepts an optional client_submission_id and rejects a malformed one", () => {
+    // The key that makes retrying a waiver safe. It must never be required (an
+    // older cached client sends none), and it must never be accepted in a shape
+    // the uuid column would reject at insert time.
+    expect(
+      waiverSubmitSchema.safeParse({
+        ...validAdult,
+        client_submission_id: "3f7c1a2e-9b4d-4c8a-8e21-5d6f0a1b2c3d",
+      }).success,
+    ).toBe(true);
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, client_submission_id: "" }).success).toBe(
+      true,
+    );
+    expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, client_submission_id: "not-a-uuid" }).success,
+    ).toBe(false);
   });
 
   it("accepts optional client_meta and rejects oversized values", () => {

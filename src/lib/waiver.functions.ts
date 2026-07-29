@@ -26,6 +26,60 @@ import {
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
 
+/** How long a returned download link stays usable. */
+const PDF_URL_TTL_SECONDS = 60 * 60;
+
+/** Postgres unique-violation, raised by the partial index on the submission id. */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * What a signer's browser gets back from a submission.
+ *
+ * `ok` and `pdf_ready` are deliberately separate. The waiver row is durable well
+ * before the PDF exists, and the two used to be conflated: a pdf-lib or storage
+ * failure threw, so a waiver that WAS recorded was reported to the person who
+ * signed it as an outright failure. They would then sign again. Reporting the
+ * durable part honestly, and the copy as a separate fact, is the fix.
+ */
+export type WaiverSubmitResult = {
+  ok: true;
+  waiver_id: string;
+  pdf_url: string | null;
+  pdf_ready: boolean;
+};
+
+/**
+ * Mint a fresh download link for an already-stored waiver PDF.
+ *
+ * Returns null when the row has no PDF yet, which is a real state: a first
+ * attempt that is still mid-flight has inserted its row but not finished
+ * rendering. Never throws, because every caller is on a path where the waiver is
+ * already saved and a missing link must not turn that into an error.
+ *
+ * Exported for its tests: it is a plain function taking its client as a
+ * parameter, unlike the `createServerFn` handlers around it, which die on
+ * "No Start context found in AsyncLocalStorage" when called from the runner.
+ */
+export async function signStoredPdf(
+  admin: SupabaseClient<Database>,
+  pdfPath: string | null,
+): Promise<string | null> {
+  if (!pdfPath) return null;
+  try {
+    const { data, error } = await admin.storage
+      .from(BUCKET)
+      .createSignedUrl(pdfPath, PDF_URL_TTL_SECONDS);
+    if (error) {
+      console.error("[waiver] could not sign stored PDF:", error);
+      return null;
+    }
+    return data?.signedUrl ?? null;
+  } catch (e) {
+    console.error("[waiver] could not sign stored PDF:", e);
+    return null;
+  }
+}
+
 /**
  * Whether the email being submitted was already proven by a click.
  *
@@ -150,12 +204,35 @@ export const listMyWaivers = createServerFn({ method: "GET" })
 // ---- Submit waiver + generate PDF ----
 export const submitWaiverWithPdf = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => waiverSubmitSchema.parse(data))
-  .handler(async ({ data }) => {
-    if (data.hp) return { ok: true as const, pdf_url: null };
+  .handler(async ({ data }): Promise<WaiverSubmitResult> => {
+    if (data.hp) return { ok: true, waiver_id: "", pdf_url: null, pdf_ready: false };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
     const { renderWaiverPdf } = await import("./waiver-pdf");
+
+    // ---- Has this exact submission already been signed? ----
+    //
+    // The client resends the same id on every retry, and it retries hard: a lost
+    // reply says nothing about whether the work happened. Checking first, before
+    // any auth-user creation or PDF work, is what makes that safe. Without it a
+    // retry after a timeout would mint a SECOND signed waiver and email the
+    // member and every manager all over again.
+    const submissionId = data.client_submission_id || null;
+    if (submissionId) {
+      const { data: already, error: dupErr } = await admin
+        .from("waivers")
+        .select("id, pdf_path")
+        .eq("client_submission_id", submissionId)
+        .maybeSingle();
+      // A failed lookup must not block a signature. Falling through risks a
+      // duplicate; refusing guarantees a lost waiver, and that is the worse one.
+      if (dupErr) console.error("[submitWaiverWithPdf] submission lookup failed:", dupErr);
+      if (already) {
+        const url = await signStoredPdf(admin, already.pdf_path);
+        return { ok: true, waiver_id: already.id, pdf_url: url, pdf_ready: Boolean(url) };
+      }
+    }
 
     const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
     // Email is the person's identity key (always provided); normalize it so
@@ -312,6 +389,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const { data: inserted, error: insErr } = await admin
       .from("waivers")
       .insert({
+        client_submission_id: submissionId,
         user_id: userId,
         first_name: data.first_name,
         middle_name: data.middle_name || null,
@@ -340,14 +418,36 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       })
       .select("id")
       .single();
+    if (insErr?.code === UNIQUE_VIOLATION && submissionId) {
+      // Two attempts of the same submission were genuinely in flight at once
+      // (the lookup above ran before the first one committed). The index did its
+      // job; adopt the row that won rather than failing a signed waiver.
+      const { data: raced } = await admin
+        .from("waivers")
+        .select("id, pdf_path")
+        .eq("client_submission_id", submissionId)
+        .maybeSingle();
+      if (raced) {
+        const url = await signStoredPdf(admin, raced.pdf_path);
+        return { ok: true, waiver_id: raced.id, pdf_url: url, pdf_ready: Boolean(url) };
+      }
+    }
+    // The last point at which throwing is right: nothing is saved yet, so
+    // "it failed" is the truth and the signer should try again.
     if (insErr || !inserted) throw new Error(insErr?.message || "Could not save waiver.");
+
+    // ---- Past here the waiver IS saved. Nothing below may throw. ----
+    //
+    // Everything that follows produces the *copy* of a document that already
+    // legally exists. Throwing would tell the person who just signed that it
+    // failed, and the reliable thing they do next is sign again. So a failure
+    // here comes back as `pdf_ready: false` and the page says so plainly.
 
     // Generate PDF (signature images are embedded into it, not stored separately).
     // PDF rendering pulls in pdf-lib and can fail for reasons the signer can't
     // act on (a malformed template, a corrupt signature image, a bundling/interop
-    // fault). The waiver row is already durably saved at this point, so log the
-    // real error server-side for diagnosis and surface a plain, non-technical
-    // message instead of leaking internal library errors to the member.
+    // fault). Log the real error server-side for diagnosis; the member is told
+    // their waiver is signed and that the copy will follow.
     let pdf: Uint8Array;
     try {
       pdf = await renderWaiverPdf({
@@ -379,9 +479,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       });
     } catch (e) {
       console.error("[submitWaiverWithPdf] PDF generation failed:", e);
-      throw new Error(
-        "Your waiver was saved, but we couldn't generate the PDF copy. Please contact the club so we can send it to you.",
-      );
+      return { ok: true, waiver_id: inserted.id, pdf_url: null, pdf_ready: false };
     }
 
     const path = `${inserted.id}.pdf`;
@@ -390,17 +488,12 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
     if (upErr) {
       console.error("[submitWaiverWithPdf] PDF upload failed:", upErr);
-      throw new Error(
-        "Your waiver was saved, but we couldn't store the PDF copy. Please contact the club so we can send it to you.",
-      );
+      return { ok: true, waiver_id: inserted.id, pdf_url: null, pdf_ready: false };
     }
 
     await admin.from("waivers").update({ pdf_path: path }).eq("id", inserted.id);
 
-    const { data: signed, error: signErr } = await supabaseAdmin.storage
-      .from(BUCKET)
-      .createSignedUrl(path, 60 * 60);
-    if (signErr) throw new Error(signErr.message);
+    const signedUrl = await signStoredPdf(admin, path);
 
     // Notify the member and every manager, with a longer-lived link to the PDF
     // (Lovable's email API can't carry binary attachments, so we send a secure,
@@ -433,8 +526,49 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);
     }
 
-    return { ok: true as const, pdf_url: signed.signedUrl, waiver_id: inserted.id };
+    return {
+      ok: true,
+      waiver_id: inserted.id,
+      pdf_url: signedUrl,
+      pdf_ready: Boolean(signedUrl),
+    };
   });
+
+// ---- "Did my waiver land?" ----
+//
+// The whole point of this endpoint is that a lost reply is not an answer.
+// Aborting a request client-side does not stop the server, so a timeout leaves
+// the browser unable to tell "never arrived" from "arrived, reply dropped".
+// Before this existed the page guessed, and it guessed "failed" — so a signer
+// whose waiver the club already had was told to try again.
+//
+// Keyed on the client's own submission id and nothing else, so it answers only
+// about a submission the caller made, and returns no personal data: whether it
+// landed, and a link to the copy. Safe to call repeatedly, and safe to call when
+// nothing landed at all.
+export const checkWaiverSubmission = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) =>
+    z.object({ client_submission_id: z.string().uuid() }).parse(data),
+  )
+  .handler(
+    async ({
+      data,
+    }): Promise<{ found: boolean; waiver_id: string | null; pdf_url: string | null }> => {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: row, error } = await supabaseAdmin
+        .from("waivers")
+        .select("id, pdf_path")
+        .eq("client_submission_id", data.client_submission_id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!row) return { found: false, waiver_id: null, pdf_url: null };
+      return {
+        found: true,
+        waiver_id: row.id,
+        pdf_url: await signStoredPdf(supabaseAdmin, row.pdf_path),
+      };
+    },
+  );
 
 // ---- Manager: save new template version ----
 export const saveWaiverTemplate = createServerFn({ method: "POST" })

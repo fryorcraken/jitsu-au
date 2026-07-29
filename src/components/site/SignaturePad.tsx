@@ -12,27 +12,55 @@ export type SignaturePadHandle = {
 type Props = {
   onChange?: (dataUrl: string) => void;
   ariaLabel?: string;
+  /**
+   * A signature to start from, e.g. one restored from a saved draft. Applied
+   * once, on mount: after that the pad owns its own content and re-applying
+   * would fight the person drawing on it.
+   */
+  initialDataUrl?: string;
 };
 
 export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function SignaturePad(
-  { onChange, ariaLabel = "Signature pad" },
+  { onChange, ariaLabel = "Signature pad", initialDataUrl }: Props,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const padRef = useRef<SignaturePadLib | null>(null);
+  // Read inside the mount effect rather than listed as a dependency: this is a
+  // starting value, not a binding, and re-running on a changed prop would wipe
+  // whatever has been drawn since.
+  const initialRef = useRef(initialDataUrl);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ratio = Math.max(window.devicePixelRatio || 1, 1);
+
+    /**
+     * Resize the backing store, preserving what is drawn.
+     *
+     * Changing canvas.width/height blanks the canvas, so the signature has to be
+     * captured and re-applied around it. This used to just call `pad.clear()`,
+     * which meant that on a phone, opening the on-screen keyboard for the next
+     * field erased the signature the person had just drawn. They usually did not
+     * notice until the form refused to submit.
+     */
     const resize = () => {
+      const pad = padRef.current;
+      const previous = pad && !pad.isEmpty() ? pad.toDataURL("image/png") : "";
       const rect = canvas.getBoundingClientRect();
+      // A hidden pad (the inactive tab of the draw/type switch) measures 0x0.
+      // Resizing to that would throw away the signature for good, so skip it and
+      // let the next visible resize do the work.
+      if (rect.width === 0 || rect.height === 0) return;
       canvas.width = rect.width * ratio;
       canvas.height = rect.height * ratio;
       const ctx = canvas.getContext("2d");
       ctx?.scale(ratio, ratio);
-      padRef.current?.clear();
+      pad?.clear();
+      if (previous) void pad?.fromDataURL(previous, { width: rect.width, height: rect.height });
     };
+
     const pad = new SignaturePadLib(canvas, {
       backgroundColor: "rgba(255,255,255,0)",
       penColor: "#0f172a",
@@ -41,6 +69,13 @@ export const SignaturePad = forwardRef<SignaturePadHandle, Props>(function Signa
     });
     padRef.current = pad;
     resize();
+
+    const restored = initialRef.current;
+    if (restored) {
+      const rect = canvas.getBoundingClientRect();
+      void pad.fromDataURL(restored, { width: rect.width, height: rect.height });
+    }
+
     const emit = () => {
       if (pad.isEmpty()) onChange?.("");
       else onChange?.(pad.toDataURL("image/png"));

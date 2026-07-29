@@ -138,6 +138,30 @@ export type _UserEmailsReturnsConfirmation = Expect<
   >
 >;
 
+/**
+ * The idempotency key that makes retrying a form submission safe.
+ *
+ * Every public form now retries hard through a bad connection, because the
+ * failure that matters is a waiver that never lands. Aborting a request
+ * client-side does not stop the server, so a retry can race a first attempt that
+ * is still committing: without this column the second one files a duplicate lead
+ * or a duplicate SIGNED WAIVER and re-sends every email.
+ *
+ * Nullable, because an older cached client sends nothing and must still submit.
+ * Pinned here so a regeneration that loses the column fails the typecheck rather
+ * than silently turning the dedupe off.
+ */
+export type _SubmissionIdempotencyColumns = RequireColumns<
+  Tables["waivers"]["Row"] &
+    Tables["interest_registrations"]["Row"] &
+    Tables["contact_messages"]["Row"],
+  "client_submission_id"
+>;
+
+export type _WaiverSubmissionIdIsNullable = Expect<
+  Equals<Tables["waivers"]["Row"]["client_submission_id"], string | null>
+>;
+
 describe("live schema contract", () => {
   it("is enforced by the typechecker, not by this test", () => {
     // Nothing to assert at runtime: the contract is the type declarations above,

@@ -1,15 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { toast } from "sonner";
 import { CheckCircle2, ChevronDown, FileSignature } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { composeFullName } from "@/lib/validation";
+import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
+import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { submitInterest } from "@/lib/submissions.functions";
 
 export const Route = createFileRoute("/register-interest")({
@@ -37,37 +39,60 @@ type Captured = { firstName: string; lastName: string; email: string; phone: str
 
 function RegisterInterest() {
   const submit = useServerFn(submitInterest);
-  const [loading, setLoading] = useState(false);
   const [showNote, setShowNote] = useState(false);
   const [done, setDone] = useState<Captured | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const send = useResilientSubmit<{ ok: true; duplicate: boolean }>(INTAKE_SUBMIT);
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
+  /**
+   * Read the form and send it, retrying through a bad connection.
+   *
+   * The inputs are uncontrolled, so re-reading the live form is also what makes
+   * "Try again" work without threading any state through: whatever is on screen
+   * is what gets sent, and a failure leaves every field exactly as it was.
+   */
+  async function send0() {
+    const form = formRef.current;
+    if (!form) return;
+    const fd = new FormData(form);
     const firstName = String(fd.get("first_name") || "").trim();
     const lastName = String(fd.get("last_name") || "").trim();
     const email = String(fd.get("email") || "");
     const phone = String(fd.get("phone") || "");
-    setLoading(true);
-    try {
-      await submit({
-        data: {
-          // The lead is stored as a single name; the waiver keeps the
-          // structured parts. Compose here so the DB column is unchanged.
-          name: composeFullName(firstName, "", lastName),
-          email,
-          phone,
-          experience: String(fd.get("experience") || ""),
-          message: String(fd.get("message") || ""),
-          hp: String(fd.get("hp") || ""),
-        },
-      });
-      setDone({ firstName, lastName, email, phone });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
+
+    const outcome = await send.submit({
+      run: async (signal, submissionId) => {
+        const res = await submit({
+          signal,
+          data: {
+            // Every attempt carries the same id, so a retry after a lost reply
+            // is recognised as this registration rather than filed as a second
+            // person (and emailed a second time).
+            client_submission_id: submissionId,
+            // The lead is stored as a single name; the waiver keeps the
+            // structured parts. Compose here so the DB column is unchanged.
+            name: composeFullName(firstName, "", lastName),
+            email,
+            phone,
+            experience: String(fd.get("experience") || ""),
+            message: String(fd.get("message") || ""),
+            hp: String(fd.get("hp") || ""),
+          },
+        });
+        // Only the server gets to say this worked. Anything else is a bug
+        // upstream, and treating it as success would tell someone they are on
+        // the list when they are not.
+        if (!res?.ok) throw new Error("We couldn't save your details. Please try again.");
+        return res;
+      },
+    });
+
+    if (outcome.ok) setDone({ firstName, lastName, email, phone });
+  }
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    void send0();
   }
 
   // ---- Step 2: lead captured, offer the (prefilled) waiver as the next step ----
@@ -142,7 +167,11 @@ function RegisterInterest() {
           needed.
         </p>
 
-        <form onSubmit={onSubmit} className="mt-8 space-y-5 rounded-2xl border bg-card p-6 md:p-8">
+        <form
+          ref={formRef}
+          onSubmit={onSubmit}
+          className="mt-8 space-y-5 rounded-2xl border bg-card p-6 md:p-8"
+        >
           <input type="text" name="hp" tabIndex={-1} autoComplete="off" className="hidden" />
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
@@ -215,9 +244,18 @@ function RegisterInterest() {
             )}
           </div>
 
-          <Button type="submit" size="lg" disabled={loading} className="w-full">
-            {loading ? "Saving..." : "Continue"}
+          <Button type="submit" size="lg" disabled={send.busy} className="w-full">
+            {send.busy ? "Saving..." : "Continue"}
           </Button>
+
+          <SubmitStatus
+            status={send.status}
+            attempt={send.attempt}
+            attempts={send.attempts}
+            error={send.error}
+            failureKind={send.failureKind}
+            onRetry={() => void send0()}
+          />
         </form>
       </section>
     </SiteLayout>
