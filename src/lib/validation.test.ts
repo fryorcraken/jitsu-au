@@ -555,6 +555,20 @@ describe("waiverSubmitSchema", () => {
     expect(oversized.success).toBe(false);
   });
 
+  it("carries the template version the signer read, and only a real one", () => {
+    // The server compares this against the live template and refuses a mismatch,
+    // so a submission cannot be filed against text that was promoted while the
+    // form was open. Optional, so a client that predates it still submits.
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, template_version: 2 }).success).toBe(true);
+    expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, template_version: 0 }).success).toBe(
+      false,
+    );
+    expect(waiverSubmitSchema.safeParse({ ...validAdult, template_version: 1.5 }).success).toBe(
+      false,
+    );
+  });
+
   it("accepts a drawn signature (image) with no typed name", () => {
     const result = waiverSubmitSchema.safeParse({
       ...validAdult,

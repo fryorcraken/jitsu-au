@@ -364,6 +364,15 @@ export const waiverSubmitSchema = z
     guardian_signature_image: sigImage,
     // Self-reported browser context, stored on the waiver as signing evidence.
     client_meta: waiverClientMetaSchema.optional(),
+    // Which template version the signer actually READ, sent back so the server
+    // can refuse to file a signature against different text.
+    //
+    // A manager can promote a new version while someone has the form open; the
+    // page holds its template for the life of the tab. Without this the server
+    // would file the submission against whatever is live at that moment, and the
+    // signed PDF would carry a document the signer never saw. Optional so a
+    // client that predates this still submits.
+    template_version: z.number().int().positive().optional(),
     // Proof-of-click token from the interest confirmation email, carried through
     // from the prefill link. When it matches the address being submitted, the
     // person record is created already verified. Never required, and never

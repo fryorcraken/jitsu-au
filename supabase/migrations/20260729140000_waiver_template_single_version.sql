@@ -20,8 +20,9 @@
 -- never sees the moment in between where no template is current and `/waiver`
 -- would refuse to render.
 --
--- Idempotent: re-running it is a no-op once the application form is the only
--- template left.
+-- Idempotent, and safe to re-run at any later date: the promotion is a no-op
+-- once the application form is live, and the deletion names the one row it is
+-- meant to remove, so versions saved after this ran are never touched.
 
 DO $$
 DECLARE
@@ -50,10 +51,38 @@ BEGIN
   WHERE id = target
     AND is_current = false;
 
-  -- Nothing points at these rows — `waivers.template_version` is a plain int,
-  -- not a foreign key — so this leaves the application form as the one and only
-  -- version.
+  -- Enforce the premise this migration is written on, rather than trusting the
+  -- comment above to still be true whenever a human gets round to applying it.
+  --
+  -- A signed waiver normally carries its own PDF with the full template text, so
+  -- deleting the row it was signed against loses nothing. The exception is a
+  -- waiver whose PDF never generated (`pdf_path IS NULL`, a handled failure path
+  -- in `submitWaiverWithPdf`): `template_version` is then the only pointer to
+  -- what its signer agreed to, and deleting that row destroys the last record of
+  -- it. Refuse instead, and let a person decide.
+  IF EXISTS (
+    SELECT 1
+    FROM public.waivers w
+    WHERE w.pdf_path IS NULL
+      AND w.template_version IN (
+        SELECT version FROM public.waiver_templates WHERE id <> target
+      )
+  ) THEN
+    RAISE EXCEPTION
+      'A signed waiver with no PDF still points at a template version this would delete. Resolve that waiver before running this.';
+  END IF;
+
+  -- Delete the short waiver this replaces, BY NAME.
+  --
+  -- Not `id <> target`: this migration ships alongside the screen that makes
+  -- saving new versions routine, so a re-run months later would take "everything
+  -- that is not the application form" to mean the club's current legal document
+  -- and silently delete it. Naming the row it is meant to remove keeps a re-run
+  -- a genuine no-op no matter what has been added since.
+  --
+  -- Safe to delete: `waivers.template_version` is a plain int, not a foreign key.
   DELETE FROM public.waiver_templates
-  WHERE id <> target;
+  WHERE id <> target
+    AND title = 'UTS Jitsu Training Waiver';
 END
 $$;

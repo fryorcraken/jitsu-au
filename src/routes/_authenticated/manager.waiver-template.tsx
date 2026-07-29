@@ -20,6 +20,7 @@ import type { AcknowledgementDef } from "@/lib/validation";
 import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { isDirty, meaningfulAcks, versionLabel } from "@/lib/waiver-template-editor";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
@@ -129,11 +130,16 @@ function EditorPage() {
 
   // Editing a version and saving writes a NEW version, so an unsaved edit is
   // lost by switching away from it. Warn rather than discard silently.
-  const dirty =
-    selected !== null &&
-    (title !== selected.title ||
-      body !== selected.body_md ||
-      JSON.stringify(acks) !== JSON.stringify(selected.acknowledgements ?? []));
+  const dirty = isDirty(
+    { title, body_md: body, acknowledgements: acks },
+    selected && {
+      title: selected.title,
+      body_md: selected.body_md,
+      acknowledgements: selected.acknowledgements ?? [],
+    },
+  );
+
+  const liveVersion = templates.find((t) => t.is_current)?.version ?? null;
 
   function selectVersion(template: TemplateVersion) {
     if (template.id === selectedId) return;
@@ -143,6 +149,17 @@ function EditorPage() {
 
   async function onPromote() {
     if (!selected || selected.is_current) return;
+    // Promoting publishes the STORED row, not what is in the editor. Saying so
+    // matters most to the manager who has just rewritten a clause: without this
+    // they read "now live", see their own edit still on screen, and believe it
+    // is what people are signing.
+    if (
+      dirty &&
+      !window.confirm(
+        `Your unsaved changes are not part of version ${selected.version} and will not go live. Save them as a new version first, or continue to make the stored version ${selected.version} live?`,
+      )
+    )
+      return;
     if (
       !window.confirm(
         `Make version ${selected.version} the waiver everyone signs from now on? Waivers already signed keep the version they were signed against.`,
@@ -180,18 +197,22 @@ function EditorPage() {
   async function onSave() {
     setSaving(true);
     try {
-      const cleanAcks = acks
-        .map((a) => ({ ...a, label: a.label.trim() }))
-        .filter((a) => a.label.length > 0);
+      const cleanAcks = meaningfulAcks(acks);
       const res = await save({ data: { title, body_md: body, acknowledgements: cleanAcks } });
       setAcks(cleanAcks);
-      // Saving both creates and promotes, so re-read rather than patching the
-      // list by hand: the new version is live and every other one is not.
-      const rows = await fetchTemplates();
-      setTemplates(rows);
-      const created = rows.find((t) => t.version === res.version);
-      if (created) load(created);
+      // Report the save the moment it succeeds. Refreshing the list is a second
+      // round trip, and reporting after it meant a failure THERE was announced
+      // as "Save failed" for a version that had been written and made live —
+      // whereupon the obvious response, saving again, files a duplicate.
       toast.success(`Saved version ${res.version}, now live`);
+      try {
+        const rows = await fetchTemplates();
+        setTemplates(rows);
+        const created = rows.find((t) => t.version === res.version);
+        if (created) load(created);
+      } catch {
+        toast.warning("Saved. The version list could not be refreshed, so reload to see it.");
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -321,7 +342,11 @@ function EditorPage() {
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className="font-medium">Version {t.version}</span>
-                      {t.is_current ? <Badge>Live</Badge> : <Badge variant="outline">Draft</Badge>}
+                      {t.is_current ? (
+                        <Badge>Live</Badge>
+                      ) : (
+                        <Badge variant="outline">{versionLabel(t, liveVersion)}</Badge>
+                      )}
                     </span>
                     <span className="text-xs text-muted-foreground">{t.title}</span>
                   </button>
