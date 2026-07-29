@@ -41,6 +41,26 @@ const UNCOVERED_LIMIT = 100;
 const MEMBERSHIP_COLUMNS =
   "id, user_id, plan_id, status, price_cents, sessions_remaining, starts_at, ends_at, created_at";
 
+type MembershipSelection = Pick<
+  Database["public"]["Tables"]["memberships"]["Row"],
+  | "id"
+  | "user_id"
+  | "plan_id"
+  | "status"
+  | "price_cents"
+  | "sessions_remaining"
+  | "starts_at"
+  | "ends_at"
+  | "created_at"
+>;
+
+/**
+ * How many ids to put in one `.in()` filter. PostgREST renders it into the query
+ * string, so a few hundred UUIDs blow past the proxy's request-line limit — the
+ * same reason the calendar chunks its RSVP tally.
+ */
+const ID_CHUNK = 100;
+
 async function adminClient(): Promise<CheckinClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin as unknown as CheckinClient;
@@ -72,15 +92,27 @@ async function coverageCandidatesByUser(
   const byUser = new Map<string, CoverageCandidate[]>();
   if (!userIds.length) return byUser;
 
-  const [{ data: memberships, error: mErr }, { data: plans, error: pErr }] = await Promise.all([
-    admin.from("memberships").select(MEMBERSHIP_COLUMNS).in("user_id", userIds),
-    admin.from("membership_plans").select("id, name, kind"),
-  ]);
-  if (mErr) throw new Error(mErr.message);
+  const { data: plans, error: pErr } = await admin
+    .from("membership_plans")
+    .select("id, name, kind");
   if (pErr) throw new Error(pErr.message);
 
+  // Chunked, for the same reason the calendar chunks its RSVP tally: `.in()`
+  // becomes a query-string filter, and the whole roster's worth of UUIDs blows
+  // past the proxy's request-line limit. The board passes every person in the
+  // club, so this is not a theoretical size.
+  const rows: MembershipSelection[] = [];
+  for (let i = 0; i < userIds.length; i += ID_CHUNK) {
+    const { data, error } = await admin
+      .from("memberships")
+      .select(MEMBERSHIP_COLUMNS)
+      .in("user_id", userIds.slice(i, i + ID_CHUNK));
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+  }
+
   const planById = new Map((plans ?? []).map((p) => [p.id, p]));
-  for (const m of memberships ?? []) {
+  for (const m of rows) {
     if (!m.user_id) continue;
     const plan = planById.get(m.plan_id);
     const list = byUser.get(m.user_id) ?? [];
@@ -166,7 +198,6 @@ async function applyCoverage(
     checkInId: string;
     userId: string;
     at: string;
-    actorId: string;
     onlyMembershipId?: string;
   },
 ): Promise<CoverageDecision> {
@@ -207,7 +238,10 @@ async function applyCoverage(
       consumed_credit: decision.consumes_credit,
       closed_membership: decision.closes_membership,
       warnings: decision.warnings,
-      ...(decision.membership_id ? { checked_in_by: input.actorId } : {}),
+      // `checked_in_by` is deliberately NOT touched here. It records who put
+      // this person on the mat, set once at insert; attaching cover afterwards
+      // is a different act by possibly a different manager, and overwriting it
+      // would erase the only record of who was on the door.
     })
     .eq("id", input.checkInId);
   if (error) throw new Error(error.message);
@@ -493,7 +527,6 @@ export const checkInPerson = createServerFn({ method: "POST" })
       checkInId: inserted.id,
       userId: data.user_id,
       at: event.starts_at,
-      actorId: ctx.userId,
     });
     return { already_checked_in: false, decision };
   });
@@ -533,7 +566,6 @@ export const attachCheckInCoverage = createServerFn({ method: "POST" })
       checkInId: row.id,
       userId: row.user_id,
       at: event?.starts_at ?? row.checked_in_at,
-      actorId: ctx.userId,
       onlyMembershipId: data.membership_id,
     });
     return { decision };
