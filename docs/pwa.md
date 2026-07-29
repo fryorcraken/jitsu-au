@@ -12,23 +12,15 @@ Tapping the icon opens `start_url`, which is `/app` — a route that renders not
 of its own. It works out who is holding the phone and forwards them, replacing the
 history entry so the launch route never shows up when you press back:
 
-| On launch                                            | Lands on                  |
-| ---------------------------------------------------- | ------------------------- |
-| Signed in                                            | `/account` (member area)  |
-| Signed out, but someone has signed in on this device | `/auth?redirect=/account` |
-| Signed out, nobody has ever signed in on this device | `/` (public home page)    |
+| On launch  | Lands on                 |
+| ---------- | ------------------------ |
+| Signed in  | `/account` (member area) |
+| Signed out | `/` (public home page)   |
 
-The middle row is the reason the rule is not simply "signed out goes home". Tapping
-an installed icon is a stronger signal than opening a website, so a member whose
-session has lapsed should get the sign-in screen, not the marketing page. The last
-row is why it is not simply "signed out goes to sign-in": there is no self-serve
-sign-up, so a prospective member who installed the app off the website would be
-staring at a form they cannot use.
-
-"Has signed in on this device" is a flag in `localStorage`
-(`uts-jitsu.pwa.known-member`), written whenever Supabase reports a sign-in and
-whenever the launch route finds a live session. It survives sign-out on purpose:
-the next launch should still offer to sign back in.
+Signed out means the home page even for a member whose session has lapsed. There
+is no self-serve sign-up, so sending every signed-out launch to the sign-in screen
+would strand a prospective member on a form they cannot use, and a member who is
+signed out reaches "Member login" from the home page header in one tap.
 
 The rule itself lives in `resolveLaunchScreen` (`src/lib/pwa.ts`) and is unit
 tested in `src/lib/pwa.test.ts`; `src/routes/app.tsx` is only the wiring.
@@ -44,7 +36,7 @@ icon): Your account, Class calendar, Class times.
 | `public/icons/*`                 | Generated icon set (192/512 plain, 192/512 maskable, iOS touch) |
 | `public/sw.js`                   | The service worker                                              |
 | `public/offline.html`            | The card shown when a page is opened with no connection         |
-| `src/lib/pwa.ts`                 | The launch rule and the "known member" flag                     |
+| `src/lib/pwa.ts`                 | The launch rule                                                 |
 | `src/lib/service-worker.ts`      | Registration (production only)                                  |
 | `src/routes/app.tsx`             | The `start_url` route                                           |
 | `scripts/generate-pwa-icons.mjs` | Regenerates the icons from `public/logo.png`                    |

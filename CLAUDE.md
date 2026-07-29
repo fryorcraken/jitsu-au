@@ -278,7 +278,8 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   the respective public table.
 - **Installed app** (`routes/app.tsx` → `lib/pwa.ts`): the site is installable, and
   the manifest's `start_url` is `/app`, a route that forwards you to the screen you
-  actually wanted (member area / sign-in / home). Full spec: `docs/pwa.md`.
+  actually wanted (member area when signed in, home page otherwise). Full spec:
+  `docs/pwa.md`.
 - **Auth emails** (`routes/lovable/email/auth/webhook.ts`): a Lovable
   `createAuthEmailHandler` dispatches React-email templates from
   `src/lib/email-templates/` for signup, invite, magic-link, recovery, etc.

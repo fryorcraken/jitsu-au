@@ -1,12 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { AuthPending } from "@/components/site/AuthPending";
-import {
-  MEMBER_HOME_PATH,
-  hasSignedInBefore,
-  rememberSignedIn,
-  resolveLaunchScreen,
-} from "@/lib/pwa";
+import { MEMBER_HOME_PATH, resolveLaunchScreen } from "@/lib/pwa";
 
 /**
  * The installed app's launch screen (`start_url` in the web manifest).
@@ -32,19 +27,11 @@ export const Route = createFileRoute("/app")({
   pendingComponent: () => <AuthPending label="Opening UTS Jitsu" />,
   beforeLoad: async () => {
     const { data } = await supabase.auth.getSession();
-    if (data.session) rememberSignedIn();
-
-    const screen = resolveLaunchScreen({
-      hasSession: Boolean(data.session),
-      hasSignedInBefore: hasSignedInBefore(),
-    });
+    const screen = resolveLaunchScreen({ hasSession: Boolean(data.session) });
 
     // `replace` so the launch route never sits in the back stack: pressing back
     // from the member area should leave the app, not bounce through here.
     if (screen === "member") throw redirect({ to: MEMBER_HOME_PATH, replace: true });
-    if (screen === "sign-in") {
-      throw redirect({ to: "/auth", search: { redirect: MEMBER_HOME_PATH }, replace: true });
-    }
     throw redirect({ to: "/", replace: true });
   },
   component: () => <AuthPending label="Opening UTS Jitsu" />,

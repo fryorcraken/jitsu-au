@@ -1,54 +1,19 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it, beforeEach } from "vitest";
-import {
-  KNOWN_MEMBER_KEY,
-  PWA_LAUNCH_PATH,
-  hasSignedInBefore,
-  rememberSignedIn,
-  resolveLaunchScreen,
-} from "./pwa";
+import { describe, expect, it } from "vitest";
+import { PWA_LAUNCH_PATH, resolveLaunchScreen } from "./pwa";
 
 describe("resolveLaunchScreen", () => {
   it("opens the member area when there is a session", () => {
-    expect(resolveLaunchScreen({ hasSession: true, hasSignedInBefore: true })).toBe("member");
+    expect(resolveLaunchScreen({ hasSession: true })).toBe("member");
   });
 
-  it("opens the member area even on a device with no sign-in history", () => {
-    // A live session is proof enough on its own; the history flag is only the
-    // fallback for when the session has gone.
-    expect(resolveLaunchScreen({ hasSession: true, hasSignedInBefore: false })).toBe("member");
-  });
-
-  it("sends a lapsed member to sign in", () => {
-    expect(resolveLaunchScreen({ hasSession: false, hasSignedInBefore: true })).toBe("sign-in");
-  });
-
-  it("sends someone who has never signed in to the public home page", () => {
-    // There is no self-serve sign-up, so a sign-in form would be a dead end for
-    // a prospective member who installed the app from the website.
-    expect(resolveLaunchScreen({ hasSession: false, hasSignedInBefore: false })).toBe("home");
-  });
-});
-
-describe("sign-in history", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  it("is false until someone signs in", () => {
-    expect(hasSignedInBefore()).toBe(false);
-  });
-
-  it("is remembered across launches once someone signs in", () => {
-    rememberSignedIn();
-    expect(localStorage.getItem(KNOWN_MEMBER_KEY)).toBe("1");
-    expect(hasSignedInBefore()).toBe(true);
-  });
-
-  it("ignores any other stored value", () => {
-    localStorage.setItem(KNOWN_MEMBER_KEY, "maybe");
-    expect(hasSignedInBefore()).toBe(false);
+  it("sends anyone signed out to the public home page", () => {
+    // Including a member whose session has lapsed: there is no self-serve
+    // sign-up, so a sign-in screen would be a dead end for a prospective member
+    // who installed the app off the website, and the home page header carries
+    // "Member login" for everyone else.
+    expect(resolveLaunchScreen({ hasSession: false })).toBe("home");
   });
 });
 

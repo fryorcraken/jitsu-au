@@ -178,12 +178,6 @@ function RootComponent() {
     import("@/integrations/supabase/client").then(({ supabase }) => {
       const { data: sub } = supabase.auth.onAuthStateChange((event) => {
         if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-        // Remembering that this device has had a member on it is what lets the
-        // installed app open on the sign-in screen once a session lapses,
-        // rather than the marketing home page.
-        if (event === "SIGNED_IN") {
-          void import("@/lib/pwa").then(({ rememberSignedIn }) => rememberSignedIn());
-        }
         router.invalidate();
         if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
       });
