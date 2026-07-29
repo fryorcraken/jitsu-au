@@ -395,14 +395,21 @@ export const startMembership = createServerFn({ method: "POST" })
     if (!plan) throw new Error("That plan is not available.");
 
     // One free trial per member.
+    //
+    // The read throws rather than degrading, for the same reason the guard in
+    // assignTrialMembership does: a failed query and "they have not had a trial"
+    // are different answers, and only the second one may hand out a trial. This
+    // is the member-driven half of that pair, so a swallowed error here is the
+    // easier one to hit — the member can keep pressing until a read fails.
     if (plan.kind === "trial") {
-      const { data: existing } = await admin
+      const { data: existing, error: exErr } = await admin
         .from("memberships")
         .select("id")
         .eq("user_id", context.userId)
         .eq("plan_id", plan.id)
         .limit(1)
         .maybeSingle();
+      if (exErr) throw new Error(exErr.message);
       if (existing) throw new Error("You've already started your free trial.");
     }
 
@@ -416,11 +423,17 @@ export const startMembership = createServerFn({ method: "POST" })
     // Resolve the member's name once: the surname drives the human-friendly
     // reference, and the full name is used in emails. Falls back gracefully when
     // the member has not signed a waiver yet.
-    const { data: who } = await admin
+    // Throws rather than falling back to an empty surname: this reference is
+    // written onto the invoice and is what the member quotes on their transfer
+    // and the manager reads off the bank statement. A degraded read would mint a
+    // permanently nameless reference on a real invoice, where retrying costs the
+    // member one more click.
+    const { data: who, error: whoErr } = await admin
       .from("profiles")
       .select("first_name, middle_name, last_name, preferred_name")
       .eq("user_id", context.userId)
       .maybeSingle();
+    if (whoErr) throw new Error(whoErr.message);
     const surname = who?.last_name || who?.first_name || "";
 
     // Per-session plans carry a session date (defaults to today) so each drop-in
@@ -440,11 +453,15 @@ export const startMembership = createServerFn({ method: "POST" })
       .eq("user_id", context.userId)
       .eq("plan_id", plan.id)
       .eq("status", "pending");
-    const { data: existingPending } = await (
+    // A failed read here defeats exactly what the reuse is for: it would report
+    // no pending enrollment, insert a duplicate invoice and re-send the payment
+    // email for one the member already has.
+    const { data: existingPending, error: pendErr } = await (
       sessionDate ? pendingBase.eq("session_date", sessionDate) : pendingBase
     )
       .limit(1)
       .maybeSingle();
+    if (pendErr) throw new Error(pendErr.message);
 
     let inserted: MembershipRow;
     if (existingPending) {
@@ -747,11 +764,15 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
       if (membership.status === "active") {
         return { ok: true as const, id: data.id, status: data.status };
       }
-      const { data: plan } = await admin
+      // Both outcomes stop the activation, but they are not the same problem:
+      // "Plan not found." for a broken query sends a manager to the plan
+      // catalogue to look for a plan that is sitting right there.
+      const { data: plan, error: planErr } = await admin
         .from("membership_plans")
         .select("*")
         .eq("id", membership.plan_id)
         .maybeSingle();
+      if (planErr) throw new Error(planErr.message);
       if (!plan) throw new Error("Plan not found.");
       await activateMembershipRow(admin, membership, plan, {
         paymentMethod: membership.payment_method || "manual",
@@ -844,11 +865,15 @@ export const matchTransaction = createServerFn({ method: "POST" })
     if (mErr) throw new Error(mErr.message);
     if (!membership) throw new Error("Membership not found.");
 
-    const { data: plan } = await admin
+    // Same distinction as setMembershipStatus: a manager matching a payment by
+    // hand needs to know the difference between a missing plan and a read that
+    // fell over.
+    const { data: plan, error: planErr } = await admin
       .from("membership_plans")
       .select("*")
       .eq("id", membership.plan_id)
       .maybeSingle();
+    if (planErr) throw new Error(planErr.message);
     if (!plan) throw new Error("Plan not found.");
 
     if (membership.status !== "active") {
@@ -869,11 +894,16 @@ export const matchTransaction = createServerFn({ method: "POST" })
 
 /**
  * Match every unmatched bank transaction against pending memberships by unique
- * reference + amount, activating each match. Returns a small summary.
+ * reference + amount, activating each match. Returns a small summary, where a
+ * null `unmatched` means the trailing count could not be read (see below).
+ *
+ * Exported for its tests: it takes its client as a parameter, which the server
+ * functions wrapping it do not, so this is the one part of the import path a
+ * unit test can drive.
  */
-async function reconcileUnmatched(
+export async function reconcileUnmatched(
   admin: MembershipClient,
-): Promise<{ matched: number; unmatched: number }> {
+): Promise<{ matched: number; unmatched: number | null }> {
   // Reconciliation reports a count back to the manager, so a failed read must
   // not read as "nothing to match": an errored pending-memberships query would
   // otherwise answer an import with "0 matched" while every payment sat there
@@ -938,10 +968,19 @@ async function reconcileUnmatched(
     matched++;
   }
 
+  // The one read here that does not throw. Every match above has already
+  // committed, so failing now would report a reconciliation that worked as a
+  // failed import, and would throw away the matched count with it. `null` says
+  // "we could not count", which is neither the false all-clear of reporting 0
+  // nor a lie about what happened. The manager's screen reloads the unmatched
+  // list straight after either way, so the real answer arrives regardless.
   const { count, error: cErr } = await admin
     .from("bank_transactions")
     .select("id", { count: "exact", head: true })
     .eq("status", "unmatched");
-  if (cErr) throw new Error(cErr.message);
+  if (cErr) {
+    console.error("[reconcile] could not count unmatched transactions after reconciling:", cErr);
+    return { matched, unmatched: null };
+  }
   return { matched, unmatched: count ?? 0 };
 }
