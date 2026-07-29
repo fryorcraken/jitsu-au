@@ -200,11 +200,20 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 (EXECUTE revoked from PUBLIC/anon/authenticated, granted to `service_role`):
 
 - `user_id_by_email(text) → uuid` — resolve a person by email at submission
-  (indexed lookup on `auth.users`).
+  (indexed lookup on `auth.users`). **Returns NULL when nobody has that
+  address**, which is the ordinary result for a new signer and what
+  `submitWaiverWithPdf` branches on.
 - `user_emails(uuid[]) → (user_id, email, email_confirmed_at)` — batch email
   resolution for the manager directory, invoices, and transactional emails. The
   confirmation stamp rides along so a screen can badge verified state in the
-  same round trip that resolves the address.
+  same round trip that resolves the address. **`email_confirmed_at` is NULL**
+  for anyone who has never proved their address, which is most people.
+
+Both are called through `src/lib/supabase-rpc.ts`, never `.rpc()` directly: the
+generated types print every function return as non-null, so those two NULLs
+above do not exist as far as the compiler is concerned. See the warning under
+"Supabase clients" in `CLAUDE.md`.
+
 - `clear_email_confirmation(uuid) → void` — drops `auth.users.email_confirmed_at`
   back to NULL. Called immediately after a manager corrects someone's address:
   the auth admin API can _set_ a confirmation but does not reliably _clear_ one,

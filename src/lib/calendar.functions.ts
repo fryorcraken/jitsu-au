@@ -28,6 +28,7 @@ import type {
   EntryDetailsPatch,
 } from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
+import { userEmails } from "@/lib/supabase-rpc";
 
 const SITE_URL = "https://jitsu.au";
 /**
@@ -333,7 +334,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
-        pdb.rpc("user_emails", { _user_ids: userIds }),
+        userEmails(pdb, userIds),
       ]);
       // Surface these: silently falling back to "Someone" with no email would
       // look like missing data rather than a broken lookup.
@@ -342,7 +343,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
       // Manager-facing list, so it shows the preferred name in the nickname
       // position (`Ada "Addy" Lovelace`), matching the other manager views.
       for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
-      for (const e of (emails ?? []) as { user_id: string; email: string }[]) {
+      for (const e of emails ?? []) {
         emailByUser.set(e.user_id, e.email);
       }
     }

@@ -15,6 +15,7 @@ import {
 } from "@/lib/validation";
 import type { MembershipClient } from "@/lib/membership-types";
 import type { ClubUserEmail } from "@/lib/club-users";
+import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
 
 /** Max waiver / membership rows one person's page pulls. */
 const WAIVERS_LIMIT = 100;
@@ -71,7 +72,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         .limit(MEMBERSHIPS_LIMIT),
       admin.from("membership_plans").select("id, name, kind"),
       admin.from("user_roles").select("user_id, role").eq("user_id", data.userId),
-      admin.rpc("user_emails", { _user_ids: [data.userId] }),
+      userEmails(admin, [data.userId]),
       admin
         .from("session_checkins")
         .select("id, event_id, checked_in_at, coverage, membership_id, consumed_credit, warnings")
@@ -124,7 +125,7 @@ export const getClubUser = createServerFn({ method: "POST" })
     // person always HAS an email — it lives on their login record — so log it:
     // the screen can only say the lookup failed, and nothing else would.
     if (emailErr) console.error("[getClubUser] email lookup failed:", emailErr);
-    const emails = ((emailRows ?? []) as ClubUserEmail[]).map((e) => ({
+    const emails = (emailRows ?? []).map((e) => ({
       user_id: e.user_id,
       email: e.email,
       email_confirmed_at: e.email_confirmed_at ?? null,
@@ -299,7 +300,7 @@ export const setClubUserEmail = createServerFn({ method: "POST" })
     // One person per email is the model's core invariant: profiles, waivers and
     // memberships all hang off a single auth user resolved by address. Merging
     // two people is a different problem, so refuse rather than half-do it.
-    const { data: clash, error: clashErr } = await admin.rpc("user_id_by_email", { _email: email });
+    const { data: clash, error: clashErr } = await userIdByEmail(admin, email);
     if (clashErr) throw new Error(clashErr.message);
     if (clash && clash !== data.userId) {
       throw new Error("That email already belongs to another person.");
