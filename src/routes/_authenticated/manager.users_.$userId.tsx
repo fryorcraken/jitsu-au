@@ -11,6 +11,7 @@ import { Pill } from "@/components/site/StatusPill";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import {
   ROLE_CLASS,
+  coverageClass,
   lifecycleClass,
   membershipClass,
   verificationClass,
@@ -556,11 +557,8 @@ function ManagerUserPage() {
                     <td className="px-3 py-2">
                       <Pill
                         label={c.coverage === "none" ? "No cover" : (c.plan_name ?? "Membership")}
-                        className={
-                          c.coverage === "none"
-                            ? "bg-red-100 text-red-800"
-                            : "bg-green-100 text-green-800"
-                        }
+                        className={coverageClass(c.coverage)}
+                        preserveCase
                       />
                     </td>
                     <td className="px-3 py-2">{c.consumed_credit ? "Yes" : "No"}</td>
