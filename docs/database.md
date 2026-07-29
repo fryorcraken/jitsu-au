@@ -467,13 +467,20 @@ defaults to now), `checked_in_by → auth.users(id) ON DELETE SET NULL`,
 (NOT NULL `text[]`, default `{}`), `note`.
 
 **Constraints.** `UNIQUE (event_id, user_id)` — one check-in per person per
-class, and the concurrency guard: the server inserts the row _before_ touching
-any credit and lets `23505` pick the loser of a race, so a credit can never be
-spent twice for one class. Three CHECKs keep the record coherent: an uncovered
-check-in has no membership, a consumed credit must name one, and a closed
-membership must have consumed one. The converse of the first is deliberately not
-asserted, because `membership_id` is `ON DELETE SET NULL` and a biconditional
-would make deleting a membership fail on a CHECK violation.
+class, and half the concurrency guard: the server inserts the row _before_
+touching any credit and lets `23505` pick the loser of a race. It only guards
+_creating_ a check-in; attaching cover to an existing row is guarded in the
+server, which claims the row with `WHERE coverage = 'none'` and refunds what it
+took if it loses. Two CHECKs keep the record coherent: an uncovered check-in has
+no membership, and a closed membership must have consumed a credit.
+
+Two constraints are deliberately ABSENT, both because `membership_id` is
+`ON DELETE SET NULL`: that runs an `UPDATE` on the check-in row, CHECKs are
+re-evaluated on `UPDATE`, and either would abort a `DELETE FROM memberships` with
+a cryptic error. So there is no biconditional on the first, and no
+`consumed_credit = false OR membership_id IS NOT NULL`. The write path already
+guarantees both; what survives a deleted membership is an honest "a credit was
+spent, from a membership that no longer exists".
 
 **Indexes.** `(user_id)` for the per-person attendance count, and a partial
 `(checked_in_at DESC) WHERE coverage = 'none'` for the needs-attention list —

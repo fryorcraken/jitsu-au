@@ -214,11 +214,17 @@ function CheckInPage() {
     setBusy(true);
     try {
       const res = await undo({ data: { id } });
-      toast.success(
-        res.refunded
-          ? `Removed ${name ?? "the check-in"} and gave the session back.`
-          : `Removed ${name ?? "the check-in"}.`,
-      );
+      if (!res.removed) {
+        // Somebody else undid it while this screen was open. Saying "removed"
+        // would claim this click did something it did not.
+        toast.info("That check-in was already removed.");
+      } else {
+        toast.success(
+          res.refunded
+            ? `Removed ${name ?? "the check-in"} and gave the session back.`
+            : `Removed ${name ?? "the check-in"}.`,
+        );
+      }
       await Promise.all([reloadBoard(), reloadUncovered()]);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not undo that check-in");
@@ -321,7 +327,7 @@ function CheckInPage() {
               <tr>
                 <th className="px-3 py-2">Person</th>
                 <th className="px-3 py-2">Covered by</th>
-                <th className="px-3 py-2">Note</th>
+                <th className="px-3 py-2">Why</th>
                 <th className="px-3 py-2">Time</th>
                 <th className="px-3 py-2" />
               </tr>

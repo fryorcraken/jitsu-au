@@ -24,7 +24,7 @@ import {
   undoCheckInSchema,
 } from "@/lib/validation";
 import type { CheckInWarning } from "@/lib/validation";
-import { lapsedMembershipIds, resolveCoverage } from "@/lib/checkin";
+import { attachableMemberships, lapsedMembershipIds, resolveCoverage } from "@/lib/checkin";
 import type { CoverageCandidate, CoverageDecision } from "@/lib/checkin";
 import { topUpHorizon } from "@/lib/calendar.functions";
 import type { ClubUserEmail } from "@/lib/club-users";
@@ -37,6 +37,8 @@ const EVENT_WINDOW_DAYS = 14;
 const ROSTER_LIMIT = 2000;
 /** Uncovered check-ins shown in the needs-attention list. */
 const UNCOVERED_LIMIT = 100;
+/** Classes offered in the picker. Ample for a 28-day window at club volumes. */
+const EVENT_LIMIT = 500;
 
 const MEMBERSHIP_COLUMNS =
   "id, user_id, plan_id, status, price_cents, sessions_remaining, starts_at, ends_at, created_at";
@@ -115,11 +117,19 @@ async function coverageCandidatesByUser(
   for (const m of rows) {
     if (!m.user_id) continue;
     const plan = planById.get(m.plan_id);
+    // `plan_id` is NOT NULL REFERENCES membership_plans, and the plans above are
+    // read in full, so this cannot happen. If it ever does, drop the membership
+    // rather than guess a kind: guessing "session" would let an undescribable
+    // row spend a credit. Loud, because it would mean the FK is gone.
+    if (!plan) {
+      console.error(`[checkin] membership ${m.id} references a plan that does not exist`);
+      continue;
+    }
     const list = byUser.get(m.user_id) ?? [];
     list.push({
       id: m.id,
-      kind: plan?.kind ?? "session",
-      plan_name: plan?.name ?? null,
+      kind: plan.kind,
+      plan_name: plan.name,
       status: m.status,
       price_cents: m.price_cents,
       sessions_remaining: m.sessions_remaining,
@@ -149,18 +159,28 @@ async function emailsByUserId(
  * finished semester finally stops reading as current. Best-effort: a failure
  * here must never stop someone getting on the mat.
  */
-async function closeLapsed(admin: CheckinClient, candidates: CoverageCandidate[]): Promise<void> {
-  const ids = lapsedMembershipIds(candidates, new Date().toISOString());
+async function closeLapsed(
+  admin: CheckinClient,
+  candidates: CoverageCandidate[],
+  keepOpen: string | null,
+): Promise<void> {
+  // Never close the membership this check-in just drew on. Coverage resolves at
+  // the CLASS's start, so back-filling last week's roster can legitimately spend
+  // a pack that has since run out of days; closing it in the same breath would
+  // be correct as of now but would make the credit we just took unrefundable by
+  // undo, which needs the row to still be active.
+  const ids = lapsedMembershipIds(candidates, new Date().toISOString()).filter(
+    (id) => id !== keepOpen,
+  );
   if (!ids.length) return;
-  try {
-    await admin
-      .from("memberships")
-      .update({ status: "expired" })
-      .in("id", ids)
-      .eq("status", "active");
-  } catch (e) {
-    console.error("[checkin] could not close lapsed memberships:", e);
-  }
+  // supabase-js returns `{ error }` rather than throwing, so this has to be
+  // destructured: a try/catch around it would never fire.
+  const { error } = await admin
+    .from("memberships")
+    .update({ status: "expired" })
+    .in("id", ids)
+    .eq("status", "active");
+  if (error) console.error("[checkin] could not close lapsed memberships:", error.message);
 }
 
 /**
@@ -191,8 +211,13 @@ async function spendCredit(admin: CheckinClient, decision: CoverageDecision): Pr
  * Shared by checking someone in at the door and by attaching an uncovered
  * check-in afterwards, so a late attach applies exactly the rules the door would
  * have applied. `at` is the class's start instant, never "now".
+ *
+ * Exported, and taking its client as a parameter, so the credit-moving path can
+ * be driven from a unit test — a `createServerFn` handler cannot be (it dies on
+ * "No Start context found in AsyncLocalStorage"). Same seam as
+ * `reconcileUnmatched` in membership.functions.ts.
  */
-async function applyCoverage(
+export async function applyCoverage(
   admin: CheckinClient,
   input: {
     checkInId: string;
@@ -203,7 +228,6 @@ async function applyCoverage(
 ): Promise<CoverageDecision> {
   const candidates =
     (await coverageCandidatesByUser(admin, [input.userId])).get(input.userId) ?? [];
-  await closeLapsed(admin, candidates);
 
   const resolve = (list: CoverageCandidate[]) =>
     resolveCoverage({ memberships: list, at: input.at, only: input.onlyMembershipId });
@@ -230,7 +254,16 @@ async function applyCoverage(
     }
   }
 
-  const { error } = await admin
+  // Claim the check-in row, and only then is the credit really spent.
+  //
+  // `UNIQUE (event_id, user_id)` guards checking someone in, because that path
+  // creates the row. It does NOT guard attaching cover afterwards: that row
+  // already exists, so two managers attaching the same one — one from the
+  // needs-attention list, one from the person's page — would both resolve, both
+  // spend, and take two credits for one class. `.eq("coverage", "none")` makes
+  // the row itself the claim: exactly one update matches, and the loser hands
+  // back what it took.
+  const { data: claimed, error } = await admin
     .from("session_checkins")
     .update({
       coverage: decision.coverage,
@@ -243,35 +276,46 @@ async function applyCoverage(
       // is a different act by possibly a different manager, and overwriting it
       // would erase the only record of who was on the door.
     })
-    .eq("id", input.checkInId);
-  if (error) throw new Error(error.message);
+    .eq("id", input.checkInId)
+    .eq("coverage", "none")
+    .select("id");
+
+  if (error || (claimed ?? []).length === 0) {
+    // Either the write failed or somebody else got there first. Both mean this
+    // call must not keep the credit it took: refunding is safe precisely
+    // because we know the exact row and amount we moved.
+    if (decision.consumes_credit) await refundCredit(admin, decision);
+    if (error) throw new Error(error.message);
+    throw new Error("Someone else covered that check-in first. Reload to see where it landed.");
+  }
+
+  // Only now, and never the membership this check-in just drew on.
+  await closeLapsed(admin, candidates, decision.membership_id);
   return decision;
 }
 
 /**
- * The memberships a manager may attach an uncovered check-in to, with the
- * unusable ones labelled rather than hidden — "finished" is the answer to
- * "why can't I pick that one?".
+ * Put back a credit this call took but could not record, restoring the closure
+ * it caused. The mirror of `spendCredit`, guarded the same way so it cannot
+ * clobber a concurrent decrement.
  */
-function attachableMemberships(candidates: CoverageCandidate[], at: string) {
-  return candidates.map((m) => {
-    const decision = resolveCoverage({ memberships: candidates, at, only: m.id });
-    return {
-      id: m.id,
-      plan_name: m.plan_name,
-      status: m.status,
-      sessions_remaining: m.sessions_remaining,
-      usable: decision.coverage !== "none",
-      reason:
-        decision.coverage !== "none"
-          ? null
-          : m.status !== "active"
-            ? m.status
-            : m.sessions_remaining === 0
-              ? "no credits left"
-              : "not valid for this class",
-    };
-  });
+async function refundCredit(admin: CheckinClient, decision: CoverageDecision): Promise<void> {
+  const { error } = await admin
+    .from("memberships")
+    .update({
+      sessions_remaining: decision.sessions_remaining_before,
+      ...(decision.closes_membership ? { status: "active" } : {}),
+    })
+    .eq("id", decision.membership_id as string)
+    .eq("sessions_remaining", decision.sessions_remaining_after as number);
+  if (error) {
+    // Nothing left to do but make it findable: the check-in did not stick, so
+    // the credit is short by one and only a human can reconcile that.
+    console.error(
+      `[checkin] could not refund a credit on membership ${decision.membership_id}:`,
+      error.message,
+    );
+  }
 }
 
 // ---- Manager: the classes a check-in can be recorded against ----
@@ -295,9 +339,13 @@ export const listCheckInEvents = createServerFn({ method: "GET" })
       .gte("starts_at", `${dateFromNow(-EVENT_WINDOW_DAYS)}T00:00:00.000Z`)
       .lte("starts_at", `${dateFromNow(EVENT_WINDOW_DAYS)}T23:59:59.999Z`)
       .order("starts_at", { ascending: true })
-      .limit(200);
+      .limit(EVENT_LIMIT);
     if (error) throw new Error(error.message);
     const events = data ?? [];
+    // Ordered ascending, so hitting the cap drops the FUTURE end of the window —
+    // including today's class, which is the one the screen exists for.
+    if (events.length === EVENT_LIMIT)
+      console.warn(`[checkin] class list capped at ${EVENT_LIMIT}; later classes are missing`);
 
     // Attendance tally per class. Chunked: `.in()` becomes a query-string
     // filter, and a few hundred UUIDs blow past the proxy's request-line limit.
@@ -588,45 +636,56 @@ export const undoCheckIn = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => undoCheckInSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CheckinClient; userId: string });
-    const admin = await adminClient();
-
-    const { data: deleted, error } = await admin
-      .from("session_checkins")
-      .delete()
-      .eq("id", data.id)
-      .select("id, membership_id, consumed_credit, closed_membership")
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!deleted) return { refunded: false };
-    if (!deleted.consumed_credit || !deleted.membership_id) return { refunded: false };
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const { data: m, error: mErr } = await admin
-        .from("memberships")
-        .select("id, status, sessions_remaining, ends_at")
-        .eq("id", deleted.membership_id)
-        .maybeSingle();
-      if (mErr) throw new Error(mErr.message);
-      // The membership is gone: nothing to refund, and the check-in is already
-      // removed, so there is nothing left to reconcile.
-      if (!m || m.sessions_remaining === null) return { refunded: false };
-
-      // Reopen only what THIS check-in closed, and only if the end date has not
-      // also passed — a membership a manager expired by hand stays expired.
-      const stillWithinDates = !m.ends_at || new Date(m.ends_at).getTime() >= Date.now();
-      const reopen = deleted.closed_membership && m.status === "expired" && stillWithinDates;
-
-      const { data: updated, error: uErr } = await admin
-        .from("memberships")
-        .update({
-          sessions_remaining: m.sessions_remaining + 1,
-          ...(reopen ? { status: "active" } : {}),
-        })
-        .eq("id", m.id)
-        .eq("sessions_remaining", m.sessions_remaining)
-        .select("id");
-      if (uErr) throw new Error(uErr.message);
-      if ((updated ?? []).length > 0) return { refunded: true, reopened: reopen };
-    }
-    throw new Error("The check-in was removed but the session could not be given back. Try again.");
+    return undoCheckInRow(await adminClient(), data.id);
   });
+
+/**
+ * The body of `undoCheckIn`, taking its client as a parameter so the refund can
+ * be driven from a unit test (see the note on `applyCoverage`).
+ */
+export async function undoCheckInRow(
+  admin: CheckinClient,
+  id: string,
+): Promise<{ removed: boolean; refunded: boolean; reopened?: boolean }> {
+  const { data: deleted, error } = await admin
+    .from("session_checkins")
+    .delete()
+    .eq("id", id)
+    .select("id, membership_id, consumed_credit, closed_membership")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  // Nothing deleted: another manager undid it first. Say so rather than
+  // reporting a no-op as a successful removal.
+  if (!deleted) return { removed: false, refunded: false };
+  if (!deleted.consumed_credit || !deleted.membership_id) return { removed: true, refunded: false };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data: m, error: mErr } = await admin
+      .from("memberships")
+      .select("id, status, sessions_remaining, ends_at")
+      .eq("id", deleted.membership_id)
+      .maybeSingle();
+    if (mErr) throw new Error(mErr.message);
+    // The membership is gone: nothing to refund, and the check-in is already
+    // removed, so there is nothing left to reconcile.
+    if (!m || m.sessions_remaining === null) return { removed: true, refunded: false };
+
+    // Reopen only what THIS check-in closed, and only if the end date has not
+    // also passed — a membership a manager expired by hand stays expired.
+    const stillWithinDates = !m.ends_at || new Date(m.ends_at).getTime() >= Date.now();
+    const reopen = deleted.closed_membership && m.status === "expired" && stillWithinDates;
+
+    const { data: updated, error: uErr } = await admin
+      .from("memberships")
+      .update({
+        sessions_remaining: m.sessions_remaining + 1,
+        ...(reopen ? { status: "active" } : {}),
+      })
+      .eq("id", m.id)
+      .eq("sessions_remaining", m.sessions_remaining)
+      .select("id");
+    if (uErr) throw new Error(uErr.message);
+    if ((updated ?? []).length > 0) return { removed: true, refunded: true, reopened: reopen };
+  }
+  throw new Error("The check-in was removed but the session could not be given back. Try again.");
+}

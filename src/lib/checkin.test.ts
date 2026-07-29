@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  attachableMemberships,
   coveragePreviewLabel,
   lapsedMembershipIds,
   pickDefaultEvent,
@@ -175,6 +176,69 @@ describe("resolveCoverage", () => {
     expect(resolveCoverage({ memberships: [ended], at: "2026-09-01T08:00:00.000Z" }).coverage).toBe(
       "none",
     );
+  });
+});
+
+// The manager's override on the attach flow: "use THIS membership", not
+// whatever the precedence would have picked.
+describe("resolveCoverage with an override", () => {
+  it("uses the named membership even when precedence would pick another", () => {
+    const d = resolveCoverage({
+      memberships: [trial(), membership()],
+      at: AT,
+      only: "m1",
+    });
+    expect(d.membership_id).toBe("m1");
+    expect(d.coverage).toBe("session");
+  });
+
+  it("covers nothing when the named membership cannot pay", () => {
+    const d = resolveCoverage({
+      memberships: [trial(), membership({ status: "expired" })],
+      at: AT,
+      only: "m1",
+    });
+    expect(d.coverage).toBe("none");
+    expect(d.membership_id).toBeNull();
+  });
+
+  // The override picks what pays; it must not hide what else is wrong with the
+  // account, or a manager fixes one thing and never sees the next.
+  it("still reports warnings from the memberships it did not consider", () => {
+    const d = resolveCoverage({
+      memberships: [trial(), semester({ status: "pending" })],
+      at: AT,
+      only: "trial",
+    });
+    expect(d.coverage).toBe("trial");
+    expect(d.warnings).toContain("payment_pending");
+  });
+});
+
+describe("attachableMemberships", () => {
+  it("marks what could pay, and says why the rest cannot", () => {
+    const rows = attachableMemberships(
+      [
+        trial(),
+        membership({ id: "spent", sessions_remaining: 0 }),
+        semester({ id: "cancelled", status: "cancelled" }),
+        membership({ id: "old", ends_at: "2026-01-01T00:00:00.000Z" }),
+      ],
+      AT,
+    );
+    const by = (id: string) => rows.find((r) => r.id === id)!;
+    expect(by("trial")).toMatchObject({ usable: true, reason: null });
+    expect(by("spent")).toMatchObject({ usable: false, reason: "no credits left" });
+    expect(by("cancelled")).toMatchObject({ usable: false, reason: "cancelled" });
+    expect(by("old")).toMatchObject({ usable: false, reason: "not valid for this class" });
+  });
+
+  it("never claims a membership is usable when attaching it would cover nothing", () => {
+    const rows = attachableMemberships([trial({ sessions_remaining: 0 })], AT);
+    expect(rows[0].usable).toBe(false);
+    expect(
+      resolveCoverage({ memberships: [trial({ sessions_remaining: 0 })], at: AT }).coverage,
+    ).toBe("none");
   });
 });
 

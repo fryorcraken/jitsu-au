@@ -222,10 +222,32 @@ export function coveragePreviewLabel(input: {
   return `${plan}, ${input.sessions_remaining_before ?? 0} left`;
 }
 
-/** The badge on a check-in that already happened. */
-export function coverageLabel(coverage: string, planName: string | null): string {
-  if (coverage === "none") return "No cover";
-  return planName ?? "Membership";
+/**
+ * The memberships a manager may attach an uncovered check-in to, with the
+ * unusable ones labelled rather than hidden — "finished" is the answer to "why
+ * can't I pick that one?". Each is asked the real question, by running the same
+ * resolution restricted to it, so the list cannot claim a membership is usable
+ * when attaching it would resolve to nothing.
+ */
+export function attachableMemberships(candidates: CoverageCandidate[], at: string) {
+  return candidates.map((m) => {
+    const decision = resolveCoverage({ memberships: candidates, at, only: m.id });
+    return {
+      id: m.id,
+      plan_name: m.plan_name,
+      status: m.status,
+      sessions_remaining: m.sessions_remaining,
+      usable: decision.coverage !== "none",
+      reason:
+        decision.coverage !== "none"
+          ? null
+          : m.status !== "active"
+            ? m.status
+            : m.sessions_remaining === 0
+              ? "no credits left"
+              : "not valid for this class",
+    };
+  });
 }
 
 export type PickableEvent = { id: string; starts_at: string; status: string };

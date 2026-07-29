@@ -20,8 +20,10 @@ import type { ClubUserEmail } from "@/lib/club-users";
 const WAIVERS_LIMIT = 100;
 const MEMBERSHIPS_LIMIT = 100;
 /**
- * Check-ins shown on a person's page. The card shows the total attendance count
- * from the aggregation, so this only caps the visible history, not the number.
+ * Check-ins shown on a person's page. This caps the VISIBLE HISTORY only: the
+ * headline total comes from its own exact count below, because feeding the
+ * capped array to the aggregation would silently report anyone past the cap as
+ * having trained exactly 100 times.
  */
 const CHECKINS_LIMIT = 100;
 
@@ -52,6 +54,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: roles, error: rErr },
       { data: emailRows, error: emailErr },
       { data: checkins, error: cErr },
+      { count: checkinCount, error: ccErr },
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("user_id", data.userId).maybeSingle(),
       admin
@@ -75,6 +78,13 @@ export const getClubUser = createServerFn({ method: "POST" })
         .eq("user_id", data.userId)
         .order("checked_in_at", { ascending: false })
         .limit(CHECKINS_LIMIT),
+      // The real total, uncapped. `/manager/users` counts the same thing a
+      // different way, and the two must agree or a manager reading a grading
+      // decision off this page gets a number nobody else sees.
+      admin
+        .from("session_checkins")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", data.userId),
     ]);
     // Every read except the email RPC fails the whole page. This is the screen a
     // manager decides an approval from, so "the query failed" must never render
@@ -88,6 +98,7 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (plErr) throw new Error(plErr.message);
     if (rErr) throw new Error(rErr.message);
     if (cErr) throw new Error(cErr.message);
+    if (ccErr) throw new Error(ccErr.message);
     if (!profile) throw new Error("User not found.");
 
     const waiverRows = waivers ?? [];
@@ -141,7 +152,9 @@ export const getClubUser = createServerFn({ method: "POST" })
       })),
       plans: planRows,
       roles: roles ?? [],
-      checkins: (checkins ?? []).map(() => ({ user_id: data.userId })),
+      // Deliberately NOT passed: the aggregation counts the array it is given,
+      // and the read above is capped at CHECKINS_LIMIT. The total comes from the
+      // exact count instead, below.
     });
 
     const statuses = deriveWaiverListStatuses(waiverRows);
@@ -173,8 +186,9 @@ export const getClubUser = createServerFn({ method: "POST" })
         roles: summary.roles,
         lifecycle_status: summary.lifecycle_status,
         // Classes trained, whatever paid for them: the coaching and grading
-        // number, not "credits used".
-        sessions_attended: summary.sessions_attended,
+        // number, not "credits used". From the exact count, so it agrees with
+        // /manager/users however long their history is.
+        sessions_attended: checkinCount ?? 0,
         first_seen_at: summary.first_seen_at,
       },
       // Straight off the `profiles` row, so the screen can show the club's live

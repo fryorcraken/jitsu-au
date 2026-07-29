@@ -60,19 +60,27 @@ CREATE TABLE public.session_checkins (
   -- sentences: the wording is the UI's job and must not need a migration.
   warnings TEXT[] NOT NULL DEFAULT '{}'::TEXT[],
   note TEXT,
-  -- One check-in per person per class. This is not tidiness, it is the
+  -- One check-in per person per class. This is not tidiness, it is half the
   -- concurrency guard: two managers tapping the same name, or one manager
-  -- double-tapping, race here and exactly one wins, so a credit can never be
-  -- spent twice for one class. The server inserts FIRST and lets 23505 pick the
-  -- loser, rather than reading then writing across a multi-second window.
+  -- double-tapping, race here and exactly one wins. The server inserts FIRST and
+  -- lets 23505 pick the loser, rather than reading then writing across a
+  -- multi-second window. The other half is in the server: attaching cover to an
+  -- EXISTING row cannot be guarded here, so that path claims the row with
+  -- `WHERE coverage = 'none'` and refunds if it loses.
   CONSTRAINT session_checkins_one_per_event UNIQUE (event_id, user_id),
   -- Uncovered means unattached. The converse is deliberately NOT asserted:
   -- `membership_id` is ON DELETE SET NULL, and a biconditional would make
   -- deleting a membership fail on a CHECK violation.
   CONSTRAINT session_checkins_uncovered_has_no_membership
     CHECK (coverage <> 'none' OR membership_id IS NULL),
-  CONSTRAINT session_checkins_credit_needs_membership
-    CHECK (consumed_credit = false OR membership_id IS NOT NULL),
+  -- There is deliberately NO `consumed_credit = false OR membership_id IS NOT
+  -- NULL` here, for the same reason. ON DELETE SET NULL runs an UPDATE on this
+  -- row, CHECKs are re-evaluated on UPDATE, and such a constraint would abort
+  -- any `DELETE FROM memberships` whose credits had ever been spent — with a
+  -- cryptic error and no way through, in the dashboard where a manager cleans
+  -- up a bad invoice. The write path already guarantees the pairing; what
+  -- survives a deleted membership is an honest "a credit was spent, from a
+  -- membership that no longer exists".
   CONSTRAINT session_checkins_close_needs_credit
     CHECK (closed_membership = false OR consumed_credit = true)
 );

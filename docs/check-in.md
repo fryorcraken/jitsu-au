@@ -91,9 +91,10 @@ people in to a class that did not run.
 2. **A check-in belongs to a class on the calendar.** Enforced as a foreign key,
    not a convention.
 3. **One check-in per person per class**, enforced by a unique constraint. That
-   constraint is also the concurrency guard: two managers tapping the same name
-   race there, and exactly one wins, so a credit can never be spent twice for one
-   class.
+   constraint is also half the concurrency guard: two managers tapping the same
+   name race there and exactly one wins. It only guards *creating* a check-in,
+   though, so **attaching** cover claims the existing row instead, and a manager
+   who loses that race has the credit handed straight back rather than spent.
 4. **The row is written before the credit moves.** If anything fails in between,
    the result is an uncovered check-in that the needs-attention list already
    knows how to fix. The other order fails as a spent credit with no attendance
@@ -128,3 +129,9 @@ people in to a class that did not run.
   refuses to activate an invoice.
 - **An expiry job.** Check-in closes memberships it finds past their end date,
   but nothing sweeps the whole table on a schedule. That is a separate change.
+  It never closes the membership the same check-in just drew on, because
+  back-filling an older roster can legitimately spend a pass that has since run
+  out of days.
+- **Deleting a class people attended.** Delete is for a class nobody turned up
+  to; once there are check-ins it is refused, because deleting would take their
+  sessions with it and never give them back. Cancel keeps the record.
