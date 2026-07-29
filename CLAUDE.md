@@ -161,14 +161,15 @@ Read `src/routes/README.md` before touching routes. Key points:
 
 > [!WARNING]
 > **Never trust the nullability of an RPC's return type, and never hand-fix it
-> in `types.ts`.** Nullability in Postgres is a column property
-> (`pg_attribute.attnotnull`), which is why the generated `Row` types are
-> accurate. A function's results are not columns: `RETURNS TABLE (...)` compiles
-> to OUT parameters, recorded in `pg_proc` as names and types only, with no
-> nullability to read. So **every** entry under
-> `Database["public"]["Functions"]` prints non-null whether or not it is — e.g.
-> `user_id_by_email: Returns: string`, when returning NULL for an unknown
-> address is the whole point of it.
+> in `types.ts`.** A function's declared return type says nothing about NULL,
+> and there is nowhere for the generator to look it up: a scalar function
+> returns NULL whenever its body selects no row (`user_id_by_email` is
+> `SELECT id ... LIMIT 1`, so an unknown address yields NULL, which is the whole
+> point of it), and a `RETURNS TABLE (...)` declares OUT parameters recorded in
+> `pg_proc` as names and types only. Nullability is a **column** property
+> (`pg_attribute.attnotnull`) — which is exactly why the generated `Row` types
+> are accurate and these are not. So every entry under
+> `Database["public"]["Functions"]` prints its bare declared type.
 >
 > A hand-correction in `types.ts` does not survive: the file is regenerated from
 > the live database and every regeneration erases the edit, turning `main` red
@@ -176,11 +177,18 @@ Read `src/routes/README.md` before touching routes. Key points:
 >
 > **Call these through `src/lib/supabase-rpc.ts` instead** — thin wrappers that
 > declare the app's real shape in a file we own, returning the same
-> `{ data, error }` so error handling is unchanged. Add a wrapper there when a
-> new function's real nullability differs from the generated one; a function
-> that is `SELECT EXISTS(...)` (`has_role`, `has_active_paid_membership`) never
-> returns NULL and can be called directly. In `schema-contract.test.ts`, pin a
-> function's COLUMN NAMES, never its nullability.
+> `{ data, error }` so error handling is unchanged. They still route the
+> function name and arguments through the generated types, which ARE reliable
+> (they come from `pg_proc` directly), so a renamed parameter still fails the
+> typecheck.
+>
+> Add a wrapper when a function's real nullability differs from the generated
+> one. Three kinds do not need one: `SELECT EXISTS(...)` never returns NULL
+> (`has_role`, `has_active_paid_membership`), `RETURNS void` has no data to type
+> (`clear_email_confirmation`), and anything whose callers read only `error`.
+> In `schema-contract.test.ts`, pin a function's COLUMN NAMES with
+> `RequireColumns`, never its nullability; pin the wrapper's own declared shape
+> in `supabase-rpc.test.ts`, since a runtime test cannot see a type.
 
 ## Auth & roles
 

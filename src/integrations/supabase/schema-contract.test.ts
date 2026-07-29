@@ -133,16 +133,18 @@ export type _VerificationTokenUserIdIsNullable = Expect<
  * COLUMN NAMES.
  *
  * Deliberately not the nullability. The generator cannot know it for a function:
- * `RETURNS TABLE (...)` compiles to OUT parameters, which carry no `attnotnull`,
- * so every function return here prints non-null whether or not it is. Pinning
- * `string | null` only pinned a hand-edit that the next regeneration erased.
- * The app's real shape lives in `src/lib/supabase-rpc.ts` instead.
+ * a `RETURNS TABLE (...)` declares OUT parameters, which carry no `attnotnull`,
+ * and a scalar function's declared type says nothing either, so every function
+ * return here prints non-null whether or not it is. Pinning `string | null`
+ * only pinned a hand-edit that the next regeneration erased. The app's real
+ * shape lives in `src/lib/supabase-rpc.ts` instead, and is pinned there.
+ *
+ * `RequireColumns`, not an exact key match: adding a column to the RPC is a
+ * legitimate additive change and must not redden `main`.
  */
-export type _UserEmailsReturnsConfirmation = Expect<
-  Equals<
-    keyof Database["public"]["Functions"]["user_emails"]["Returns"][number],
-    "user_id" | "email" | "email_confirmed_at"
-  >
+export type _UserEmailsReturnsConfirmation = RequireColumns<
+  Database["public"]["Functions"]["user_emails"]["Returns"][number],
+  "user_id" | "email" | "email_confirmed_at"
 >;
 
 // ---- session_checkins: attendance and what paid for it ----

@@ -1,5 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { userEmails, userIdByEmail } from "./supabase-rpc";
+import type { ClubUserEmail } from "./club-users";
+
+/**
+ * The declared shapes are the whole point of this module, and a runtime test
+ * cannot see them: `RpcResult<T>` adds `| null` itself, so `RpcResult<string>`
+ * and `RpcResult<string | null>` behave identically at runtime and
+ * `expect(data).toBeNull()` passes either way. These assertions fail to compile
+ * if someone narrows a wrapper back to what the generated types claim.
+ *
+ * Same trick as `src/integrations/supabase/schema-contract.test.ts`, which is
+ * where the generated side of the same contract is pinned.
+ */
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type Expect<T extends true> = T;
+
+type Awaited_<T> = T extends Promise<infer U> ? U : never;
+
+/** An unknown address resolves to null, which is the ordinary result. */
+export type _UserIdByEmailIsNullable = Expect<
+  Equals<Awaited_<ReturnType<typeof userIdByEmail>>["data"], string | null>
+>;
+
+/** The rows carry the app's own `ClubUserEmail`, not the generated row type. */
+export type _UserEmailsReturnsClubUserEmails = Expect<
+  Equals<Awaited_<ReturnType<typeof userEmails>>["data"], ClubUserEmail[] | null>
+>;
+
+/** ...and that type keeps a nullable confirmation stamp. */
+export type _ConfirmationStampIsNullable = Expect<
+  Equals<NonNullable<ClubUserEmail["email_confirmed_at"]> | null, string | null>
+>;
 
 /**
  * A stand-in for a Supabase client's `.rpc()`. Records what it was called with
@@ -59,10 +91,21 @@ describe("userEmails", () => {
     expect(data).toEqual([{ user_id: "u1", email: "ada@example.com", email_confirmed_at: null }]);
   });
 
-  it("normalizes a missing result to null", async () => {
+  it("hands a failure back with no rows", async () => {
     const { client } = fakeClient({ data: null, error: { message: "denied" } });
     const { data, error } = await userEmails(client, ["u1"]);
     expect(data).toBeNull();
     expect(error?.message).toBe("denied");
+  });
+
+  it("normalizes an absent result to null", async () => {
+    // The `?? null` in each wrapper is the module's only runtime behavior.
+    // PostgREST returns null rather than undefined, but the wrappers are what
+    // guarantee callers never have to tell the two apart, so pin it.
+    const { client } = fakeClient({ data: undefined, error: null });
+    expect((await userEmails(client, ["u1"])).data).toBeNull();
+
+    const idClient = fakeClient({ data: undefined, error: null });
+    expect((await userIdByEmail(idClient.client, "nobody@example.com")).data).toBeNull();
   });
 });

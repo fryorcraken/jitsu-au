@@ -151,7 +151,7 @@ async function emailsByUserId(
   if (!userIds.length) return new Map();
   const { data, error } = await userEmails(admin, userIds);
   if (error || !data) return new Map();
-  return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
+  return new Map(data.map((e) => [e.user_id, e.email]));
 }
 
 /**

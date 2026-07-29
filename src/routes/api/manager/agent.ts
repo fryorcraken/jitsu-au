@@ -54,7 +54,7 @@ async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUs
   if (!userIds.length) return [];
   const { data, error } = await userEmails(pdb, userIds);
   if (error || !data) return [];
-  return (data as ClubUserEmail[]).map((e) => ({
+  return data.map((e) => ({
     user_id: e.user_id,
     email: e.email,
     email_confirmed_at: e.email_confirmed_at ?? null,

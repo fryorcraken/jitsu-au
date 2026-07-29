@@ -125,7 +125,7 @@ export const getClubUser = createServerFn({ method: "POST" })
     // person always HAS an email — it lives on their login record — so log it:
     // the screen can only say the lookup failed, and nothing else would.
     if (emailErr) console.error("[getClubUser] email lookup failed:", emailErr);
-    const emails = ((emailRows ?? []) as ClubUserEmail[]).map((e) => ({
+    const emails = (emailRows ?? []).map((e) => ({
       user_id: e.user_id,
       email: e.email,
       email_confirmed_at: e.email_confirmed_at ?? null,

@@ -343,7 +343,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
       // Manager-facing list, so it shows the preferred name in the nickname
       // position (`Ada "Addy" Lovelace`), matching the other manager views.
       for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
-      for (const e of (emails ?? []) as { user_id: string; email: string }[]) {
+      for (const e of emails ?? []) {
         emailByUser.set(e.user_id, e.email);
       }
     }

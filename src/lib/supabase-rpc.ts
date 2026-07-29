@@ -1,13 +1,17 @@
 // Typed wrappers for the Postgres functions this app calls by RPC.
 //
 // WHY THIS FILE EXISTS: the generated Supabase types get function-return
-// NULLABILITY wrong, and cannot do otherwise. Nullability in Postgres is a
-// column property (`pg_attribute.attnotnull`), which is why the generated
-// `Row` types are accurate. A function's results are not columns: `RETURNS
-// TABLE (...)` compiles to OUT parameters, recorded in `pg_proc` as names and
-// types only, with no nullability bit to read. So the generator prints the bare
-// type for every function return, and everything in `Database["public"]
-// ["Functions"]` reads as non-null whether or not it is.
+// NULLABILITY wrong, and cannot do otherwise.
+//
+// A function's declared return type never says whether it can return NULL, and
+// there is nowhere for the generator to look it up. A scalar function returns
+// NULL whenever its body selects no row — `user_id_by_email` is `SELECT id ...
+// LIMIT 1`, so an unknown address yields NULL. A `RETURNS TABLE (...)` function
+// declares OUT parameters, recorded in `pg_proc` as names and types only, with
+// no `attnotnull` to read; that is the bit the generator DOES read for table
+// columns, which is why the generated `Row` types are accurate and these are
+// not. So everything under `Database["public"]["Functions"]` prints its bare
+// declared type, non-null, whether or not that is true.
 //
 // Hand-correcting `types.ts` does not hold: it is regenerated from the live
 // database, and every regeneration erases the edit (it has, once already).
@@ -17,39 +21,64 @@
 //
 // Only the functions whose real nullability differs from the generated one need
 // a wrapper. `has_role` and `has_active_paid_membership` are `SELECT EXISTS(...)`
-// and never return NULL, so they are fine called directly.
+// and never return NULL; `clear_email_confirmation` returns void and its callers
+// read only `error`. Those are all fine called directly.
+import type { Database } from "@/integrations/supabase/types";
 import type { ClubUserEmail } from "./club-users";
+
+/** The functions the generated types know about, and the arguments each takes.
+ * Only the RETURN types are untrustworthy: names and argument names come
+ * straight out of `pg_proc` and are as reliable as the table types. */
+type RpcName = keyof Database["public"]["Functions"];
+type RpcArgs<N extends RpcName> = Database["public"]["Functions"][N]["Args"];
+
+/** PostgREST's error, kept structural so a call site can still read `code` /
+ * `details` / `hint`, and a test can hand over a bare `{ message }`. */
+export type PostgrestErrorLike = {
+  message: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+};
 
 /**
  * Any Supabase client, whichever generated `Database` generic it carries.
  *
- * Structural rather than `SupabaseClient<Database>` because the callers hold
- * several different client types (`MembershipClient`, `CheckinClient`,
- * `AppClient`, the plain admin client), and this module's whole purpose is to
- * stop deriving its result types from the generated ones anyway.
+ * Structural rather than `SupabaseClient<Database>` because callers hold it
+ * under several aliases, and this module deliberately does not take its result
+ * types from the generated ones. The signature stays callable, so an object
+ * that merely has an `rpc` property of some other type is still rejected.
  */
-type RpcCapable = { rpc: unknown };
-
-type RawRpc = (
-  fn: string,
-  args: Record<string, unknown>,
-) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+type RpcCapable = {
+  rpc: <N extends RpcName>(
+    fn: N,
+    args: RpcArgs<N>,
+  ) => PromiseLike<{ data: unknown; error: PostgrestErrorLike | null }>;
+};
 
 /**
- * Call an RPC without the generated return type.
+ * Call an RPC, keeping the generated argument checking and dropping only the
+ * generated RETURN type — the one part of `Functions` that cannot be trusted.
  *
- * `.rpc()` is typed per function name from `Database["public"]["Functions"]`,
- * which is exactly the typing this module exists to override — so the widening
- * happens here, once, instead of as a cast at every call site. `.call(db, ...)`
- * rather than a plain call because the real method is bound to its client.
+ * Routing `fn` and `args` through `RpcName` / `RpcArgs` keeps the compile-time
+ * bind between these calls and the live schema: rename the function or one of
+ * its parameters and this stops building, which is where that should fail. Only
+ * `data` is widened, and each wrapper below re-narrows it to the shape the
+ * database actually returns.
+ *
+ * `.call(db, ...)` rather than a plain call because the real method reads
+ * `this` — it delegates to the client's REST handle.
  */
-function callRpc(db: RpcCapable, fn: string, args: Record<string, unknown>) {
-  return (db.rpc as RawRpc).call(db, fn, args);
+function callRpc<N extends RpcName>(db: RpcCapable, fn: N, args: RpcArgs<N>) {
+  return db.rpc.call(db, fn, args) as PromiseLike<{
+    data: unknown;
+    error: PostgrestErrorLike | null;
+  }>;
 }
 
 /** The `{ data, error }` shape PostgREST returns, so call sites keep their own
  * error handling exactly as it was. */
-export type RpcResult<T> = { data: T | null; error: { message: string } | null };
+export type RpcResult<T> = { data: T | null; error: PostgrestErrorLike | null };
 
 /**
  * Resolve an email address to the person's auth user id.
