@@ -275,6 +275,7 @@ export type Database = {
       }
       contact_messages: {
         Row: {
+          client_submission_id: string | null
           created_at: string
           email: string
           id: string
@@ -283,6 +284,7 @@ export type Database = {
           subject: string | null
         }
         Insert: {
+          client_submission_id?: string | null
           created_at?: string
           email: string
           id?: string
@@ -291,6 +293,7 @@ export type Database = {
           subject?: string | null
         }
         Update: {
+          client_submission_id?: string | null
           created_at?: string
           email?: string
           id?: string
@@ -376,6 +379,7 @@ export type Database = {
       }
       interest_registrations: {
         Row: {
+          client_submission_id: string | null
           created_at: string
           email: string
           experience: string | null
@@ -387,6 +391,7 @@ export type Database = {
           uts_student: boolean
         }
         Insert: {
+          client_submission_id?: string | null
           created_at?: string
           email: string
           experience?: string | null
@@ -398,6 +403,7 @@ export type Database = {
           uts_student?: boolean
         }
         Update: {
+          client_submission_id?: string | null
           created_at?: string
           email?: string
           experience?: string | null
@@ -778,6 +784,7 @@ export type Database = {
           approval_status: string
           approved_at: string | null
           approved_by: string | null
+          client_submission_id: string | null
           created_at: string
           date_of_birth: string
           email: string
@@ -808,6 +815,7 @@ export type Database = {
           approval_status?: string
           approved_at?: string | null
           approved_by?: string | null
+          client_submission_id?: string | null
           created_at?: string
           date_of_birth: string
           email: string
@@ -838,6 +846,7 @@ export type Database = {
           approval_status?: string
           approved_at?: string | null
           approved_by?: string | null
+          client_submission_id?: string | null
           created_at?: string
           date_of_birth?: string
           email?: string
