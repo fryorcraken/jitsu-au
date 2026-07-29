@@ -14,7 +14,12 @@
 // read by a server-rendered route as happily as by a component. The badge that
 // wears these classes is `@/components/site/StatusPill`.
 import type { VerificationLabel } from "./email-verification";
-import type { LifecycleStatus, MembershipStatus, WaiverListStatus } from "./validation";
+import type {
+  CoverageSource,
+  LifecycleStatus,
+  MembershipStatus,
+  WaiverListStatus,
+} from "./validation";
 
 /** Used for a status no map knows. Reads as "no signal", never as an alarm. */
 export const NEUTRAL_STATUS_CLASS = "bg-slate-100 text-slate-800";
@@ -54,6 +59,16 @@ const WAIVER: Record<WaiverListStatus, string> = {
   superseded: "bg-muted text-muted-foreground line-through",
 };
 
+// What paid for a class on the check-in board. Red is right for "none" here,
+// unlike elsewhere: it is the one state a manager has to act on before the
+// person steps on the mat.
+const COVERAGE: Record<CoverageSource, string> = {
+  trial: "bg-sky-100 text-sky-800",
+  session: "bg-indigo-100 text-indigo-800",
+  period: "bg-green-100 text-green-800",
+  none: "bg-red-100 text-red-800",
+};
+
 /** A role assignment (`member`, `manager`). One colour covers every role. */
 export const ROLE_CLASS = "bg-indigo-100 text-indigo-800";
 
@@ -75,4 +90,9 @@ export function verificationClass(label: string): string {
 /** Colour for a waiver's derived status (`pending` / `active` / `superseded`). */
 export function waiverClass(status: string): string {
   return WAIVER[status as WaiverListStatus] ?? NEUTRAL_STATUS_CLASS;
+}
+
+/** Colour for what covers a check-in (`trial` / `session` / `period` / `none`). */
+export function coverageClass(source: string): string {
+  return COVERAGE[source as CoverageSource] ?? NEUTRAL_STATUS_CLASS;
 }

@@ -138,6 +138,43 @@ export type _UserEmailsReturnsConfirmation = Expect<
   >
 >;
 
+// ---- session_checkins: attendance and what paid for it ----
+export type _CheckinColumns = RequireColumns<
+  Tables["session_checkins"]["Row"],
+  | "event_id"
+  | "user_id"
+  | "checked_in_at"
+  | "checked_in_by"
+  | "coverage"
+  | "membership_id"
+  | "consumed_credit"
+  | "closed_membership"
+  | "warnings"
+>;
+
+/**
+ * Exactly `string`, not `string | null`: the column is NOT NULL DEFAULT 'none'
+ * and every screen compares it directly (`coverage === "none"` is what puts a
+ * check-in in the needs-attention list). A nullable widening here would mean the
+ * NOT NULL was dropped live, and uncovered check-ins would quietly stop being
+ * listed as needing attention.
+ */
+export type _CheckinCoverageIsString = Expect<
+  Equals<Tables["session_checkins"]["Row"]["coverage"], string>
+>;
+
+/**
+ * Both NOT NULL, and both load-bearing for undo: `consumed_credit` decides
+ * whether a session is given back, `closed_membership` decides whether the
+ * membership is reopened. A nullable third state would make undo guess.
+ */
+export type _CheckinFlagsAreBooleans = Expect<
+  Equals<Tables["session_checkins"]["Row"]["consumed_credit"], boolean>
+>;
+export type _CheckinClosedFlagIsBoolean = Expect<
+  Equals<Tables["session_checkins"]["Row"]["closed_membership"], boolean>
+>;
+
 describe("live schema contract", () => {
   it("is enforced by the typechecker, not by this test", () => {
     // Nothing to assert at runtime: the contract is the type declarations above,

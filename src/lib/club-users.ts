@@ -22,6 +22,13 @@ import type { LifecycleStatus, MembershipPlanKind, MembershipStatus } from "./va
 /** Max interest-registration (lead) rows the directory pulls in one page. */
 export const LEADS_LIMIT = 2000;
 
+/**
+ * Max check-in rows read to count attendance. One row per person per class, so
+ * this is years of training for a club this size; the cap exists so a runaway
+ * read cannot take the directory down with it.
+ */
+export const CHECKINS_LIMIT = 50000;
+
 /** The profile fields the aggregation reads (one row per person). */
 export type ClubUserProfile = {
   user_id: string;
@@ -85,6 +92,16 @@ export type ClubUserRole = {
   role: string;
 };
 
+/**
+ * One recorded attendance. Only the person is needed: this counts classes
+ * trained, whatever paid for them, which is the coaching and grading number.
+ * How many credits a membership has left is a different question and lives on
+ * the membership.
+ */
+export type ClubUserCheckin = {
+  user_id: string;
+};
+
 /** One aggregated person (or lead) known to the club. */
 export type ClubUser = {
   /** Null for a lead — they have no person record yet. */
@@ -110,6 +127,8 @@ export type ClubUser = {
   latest_plan_name: string | null;
   latest_membership_status: MembershipStatus | null;
   membership_count: number;
+  /** Classes this person has been checked in to, all-time. Always 0 for a lead. */
+  sessions_attended: number;
   first_seen_at: string | null;
 };
 
@@ -137,6 +156,7 @@ export function aggregateClubUsers(input: {
   plans: ClubUserPlan[];
   roles: ClubUserRole[];
   leads: ClubUserLead[];
+  checkins?: ClubUserCheckin[];
 }): ClubUser[] {
   const planById = new Map(input.plans.map((p) => [p.id, p]));
   const emailByUser = new Map(input.emails.map((e) => [e.user_id, e.email]));
@@ -166,6 +186,10 @@ export function aggregateClubUsers(input: {
   for (const list of membershipsByUser.values()) {
     list.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   }
+
+  const checkinsByUser = new Map<string, number>();
+  for (const c of input.checkins ?? [])
+    checkinsByUser.set(c.user_id, (checkinsByUser.get(c.user_id) ?? 0) + 1);
 
   const rolesByUser = new Map<string, string[]>();
   for (const r of input.roles) {
@@ -228,6 +252,7 @@ export function aggregateClubUsers(input: {
       latest_plan_name: latest ? (planById.get(latest.plan_id)?.name ?? null) : null,
       latest_membership_status: latest ? (latest.status as MembershipStatus) : null,
       membership_count: ms.length,
+      sessions_attended: checkinsByUser.get(p.user_id) ?? 0,
       first_seen_at,
     };
   });
@@ -260,6 +285,8 @@ export function aggregateClubUsers(input: {
       latest_plan_name: null,
       latest_membership_status: null,
       membership_count: 0,
+      // A lead has never been on the mat: there is no person record to check in.
+      sessions_attended: 0,
       first_seen_at: lead.created_at,
     });
   }

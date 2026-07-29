@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachCheckInSchema,
   buildSignerMeta,
   cancelEventSchema,
+  checkInSchema,
+  checkInWarnings,
   composeFullName,
   contactSchema,
+  coverageSources,
+  undoCheckInSchema,
   createCalendarEntrySchema,
   rsvpSchema,
   updateCalendarEntrySchema,
@@ -1055,5 +1060,51 @@ describe("stopRepeatingSchema", () => {
   it("takes the series, not one of its dates", () => {
     expect(stopRepeatingSchema.safeParse({ series_id: crypto.randomUUID() }).success).toBe(true);
     expect(stopRepeatingSchema.safeParse({ series_id: "not-a-uuid" }).success).toBe(false);
+  });
+});
+
+describe("check-in schemas", () => {
+  it("checkInSchema needs a real class and a real person", () => {
+    const ok = { event_id: crypto.randomUUID(), user_id: crypto.randomUUID() };
+    expect(checkInSchema.safeParse(ok).success).toBe(true);
+    expect(checkInSchema.safeParse({ ...ok, event_id: "not-a-uuid" }).success).toBe(false);
+    expect(checkInSchema.safeParse({ event_id: ok.event_id }).success).toBe(false);
+  });
+
+  it("checkInSchema takes an optional note and caps its length", () => {
+    const base = { event_id: crypto.randomUUID(), user_id: crypto.randomUUID() };
+    expect(checkInSchema.safeParse({ ...base, note: "" }).success).toBe(true);
+    expect(checkInSchema.safeParse({ ...base, note: "Guest of a member" }).success).toBe(true);
+    expect(checkInSchema.safeParse({ ...base, note: "x".repeat(501) }).success).toBe(false);
+  });
+
+  it("attachCheckInSchema works with and without a chosen membership", () => {
+    const id = crypto.randomUUID();
+    // No membership id: re-run the same precedence the door would have applied.
+    expect(attachCheckInSchema.safeParse({ id }).success).toBe(true);
+    expect(attachCheckInSchema.safeParse({ id, membership_id: crypto.randomUUID() }).success).toBe(
+      true,
+    );
+    expect(attachCheckInSchema.safeParse({ id, membership_id: "nope" }).success).toBe(false);
+  });
+
+  it("undoCheckInSchema takes the check-in, not the membership", () => {
+    expect(undoCheckInSchema.safeParse({ id: crypto.randomUUID() }).success).toBe(true);
+    expect(undoCheckInSchema.safeParse({ id: "not-a-uuid" }).success).toBe(false);
+  });
+
+  // These two lists are mirrored by CHECK constraints and stored values in the
+  // `session_checkins` migration. Pinning them here means a divergence fails a
+  // test rather than a production insert.
+  it("pins the coverage sources and warning codes the database expects", () => {
+    expect([...coverageSources]).toEqual(["trial", "session", "period", "none"]);
+    expect([...checkInWarnings]).toEqual([
+      "no_cover",
+      "last_credit",
+      "membership_ended",
+      "credits_exhausted",
+      "payment_pending",
+      "coverage_race",
+    ]);
   });
 });

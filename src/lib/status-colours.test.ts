@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   NEUTRAL_STATUS_CLASS,
+  coverageClass,
   lifecycleClass,
   membershipClass,
   verificationClass,
   waiverClass,
 } from "./status-colours";
-import { lifecycleStatuses, membershipStatuses, waiverListStatuses } from "@/lib/validation";
+import {
+  coverageSources,
+  lifecycleStatuses,
+  membershipStatuses,
+  waiverListStatuses,
+} from "@/lib/validation";
 
 describe("status colours", () => {
   it("gives every lifecycle phase a colour", () => {
@@ -28,11 +34,27 @@ describe("status colours", () => {
     expect(colours.size).toBe(lifecycleStatuses.length);
   });
 
+  it("gives every coverage source a colour", () => {
+    for (const source of coverageSources) {
+      expect(coverageClass(source)).toMatch(/^bg-/);
+    }
+  });
+
+  it("flags an uncovered check-in in red", () => {
+    // The one state on the board a manager has to act on before the person
+    // steps on the mat, so it is the one place red is right.
+    expect(coverageClass("none")).toContain("red");
+    for (const source of coverageSources.filter((s) => s !== "none")) {
+      expect(coverageClass(source)).not.toContain("red");
+    }
+  });
+
   it("falls back to neutral for a status it does not know", () => {
     expect(lifecycleClass("banished")).toBe(NEUTRAL_STATUS_CLASS);
     expect(membershipClass("refunded")).toBe(NEUTRAL_STATUS_CLASS);
     expect(verificationClass("maybe")).toBe(NEUTRAL_STATUS_CLASS);
     expect(waiverClass("shredded")).toBe(NEUTRAL_STATUS_CLASS);
+    expect(coverageClass("barter")).toBe(NEUTRAL_STATUS_CLASS);
   });
 
   it("badges an unverified address as a thing to notice, not a fault", () => {

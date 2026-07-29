@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   CalendarDays,
   ChevronLeft,
+  ClipboardCheck,
   CreditCard,
   FileText,
   KeyRound,
@@ -42,6 +43,8 @@ const memberNav: NavItem[] = [
 ];
 
 const managerNav: NavItem[] = [
+  // First: the highest-frequency manager screen, used at the door every class.
+  { to: "/manager/check-in", label: "Check in", icon: ClipboardCheck },
   { to: "/manager/users", label: "Users", icon: Users },
   { to: "/manager/memberships", label: "Memberships", icon: CreditCard },
   { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },

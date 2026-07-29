@@ -26,6 +26,7 @@ import {
   resendClubUserVerification,
   setClubUserEmail,
 } from "@/lib/club-user.functions";
+import { attachCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { runApproval } from "@/lib/waiver-approval";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -235,6 +236,13 @@ function ManagerUserPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const attachCoverage = useServerFn(attachCheckInCoverage);
+  // Which membership a manager picked for an uncovered check-in, if they chose
+  // to override. Blank means "whatever covers it now", which is almost always
+  // right: a check-in is uncovered because a payment had not landed yet.
+  const [attachChoice, setAttachChoice] = useState<Record<string, string>>({});
+  const [attaching, setAttaching] = useState<string | null>(null);
+
   const load = useCallback(
     async (resetOpen: boolean) => {
       const seq = ++loadSeq.current;
@@ -302,6 +310,26 @@ function ManagerUserPage() {
     if (!detail) return;
     for (const w of detail.waivers) if (open.has(w.id)) void ensurePdfUrl(w);
   }, [detail, open, ensurePdfUrl]);
+
+  async function attachCheckIn(id: string) {
+    setAttaching(id);
+    try {
+      const chosen = attachChoice[id];
+      const res = await attachCoverage({
+        data: { id, ...(chosen ? { membership_id: chosen } : {}) },
+      });
+      if (res.decision.coverage === "none") {
+        toast.warning("Still nothing covers that class. Sort their membership out first.");
+      } else {
+        toast.success(`Attached to ${res.decision.plan_name ?? "their membership"}.`);
+      }
+      await load(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not attach that check-in");
+    } finally {
+      setAttaching(null);
+    }
+  }
 
   function retryPdf(id: string) {
     setPdfs((prev) => omitKey(prev, id));
@@ -375,7 +403,7 @@ function ManagerUserPage() {
     );
   }
 
-  const { user: summary, profile, memberships, waivers } = detail;
+  const { user: summary, profile, memberships, waivers, checkins } = detail;
 
   return (
     <section className="mx-auto max-w-5xl space-y-8 px-4 py-10">
@@ -484,6 +512,91 @@ function ManagerUserPage() {
                     <td className="px-3 py-2">{formatDate(m.starts_at)}</td>
                     <td className="px-3 py-2">{formatDate(m.ends_at)}</td>
                     <td className="px-3 py-2">{m.sessions_remaining ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-bold">Sessions</h2>
+        <p className="text-sm text-muted-foreground">
+          {summary.sessions_attended === 0
+            ? "They have not been checked in to a class yet."
+            : `They have trained ${summary.sessions_attended} time${
+                summary.sessions_attended === 1 ? "" : "s"
+              }.`}{" "}
+          A check-in with no cover can be attached to a membership from the{" "}
+          <Link className="underline" to="/manager/check-in">
+            check-in screen
+          </Link>
+          .
+        </p>
+        {checkins.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left">
+                <tr>
+                  <th className="px-3 py-2">Class</th>
+                  <th className="px-3 py-2">When</th>
+                  <th className="px-3 py-2">Covered by</th>
+                  <th className="px-3 py-2">Used a session</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {checkins.map((c) => (
+                  <tr key={c.id} className="border-t">
+                    <td className="px-3 py-2 font-medium">{c.event_title ?? "Unknown class"}</td>
+                    <td className="px-3 py-2">
+                      {formatDateTime(c.event_starts_at ?? c.checked_in_at)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Pill
+                        label={c.coverage === "none" ? "No cover" : (c.plan_name ?? "Membership")}
+                        className={
+                          c.coverage === "none"
+                            ? "bg-red-100 text-red-800"
+                            : "bg-green-100 text-green-800"
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2">{c.consumed_credit ? "Yes" : "No"}</td>
+                    <td className="px-3 py-2">
+                      {c.coverage === "none" ? (
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <select
+                            aria-label="Membership to attach this check-in to"
+                            className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm"
+                            value={attachChoice[c.id] ?? ""}
+                            onChange={(e) =>
+                              setAttachChoice((prev) => ({ ...prev, [c.id]: e.target.value }))
+                            }
+                          >
+                            <option value="">Whatever covers it now</option>
+                            {memberships.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.plan_name ?? "Membership"} ({m.status}
+                                {m.sessions_remaining != null
+                                  ? `, ${m.sessions_remaining} left`
+                                  : ""}
+                                )
+                              </option>
+                            ))}
+                          </select>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={attaching === c.id}
+                            onClick={() => attachCheckIn(c.id)}
+                          >
+                            Attach
+                          </Button>
+                        </div>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

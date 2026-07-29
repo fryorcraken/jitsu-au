@@ -26,7 +26,7 @@ export const Route = createFileRoute("/_authenticated/manager/users")({
 
 type Row = Awaited<ReturnType<typeof listClubUsers>>[number];
 
-type SortKey = "name" | "recent" | "status";
+type SortKey = "name" | "recent" | "status" | "sessions";
 
 const selectClass =
   "h-9 rounded-md border border-input bg-background px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
@@ -83,6 +83,13 @@ function ManagerUsersPage() {
     const sorted = [...filtered];
     if (sort === "name") {
       sorted.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+    } else if (sort === "sessions") {
+      // Who has been training most, which is the question a manager actually
+      // asks of this column.
+      sorted.sort(
+        (a, b) =>
+          b.sessions_attended - a.sessions_attended || (a.name ?? "").localeCompare(b.name ?? ""),
+      );
     } else if (sort === "recent") {
       // Newest first-seen at the top; users with no date sort last.
       sorted.sort((a, b) => (b.first_seen_at ?? "").localeCompare(a.first_seen_at ?? ""));
@@ -180,6 +187,7 @@ function ManagerUsersPage() {
             <option value="name">Sort: name (A to Z)</option>
             <option value="recent">Sort: most recent</option>
             <option value="status">Sort: lifecycle status</option>
+            <option value="sessions">Sort: sessions attended</option>
           </select>
         </div>
 
@@ -203,6 +211,7 @@ function ManagerUsersPage() {
                     <th className="px-3 py-2">Roles</th>
                     <th className="px-3 py-2">UTS student</th>
                     <th className="px-3 py-2">Waiver</th>
+                    <th className="px-3 py-2">Sessions</th>
                     <th className="px-3 py-2">Latest membership</th>
                     <th className="px-3 py-2">First seen</th>
                   </tr>
@@ -266,6 +275,9 @@ function ManagerUsersPage() {
                         {r.is_uts_student ? (r.uts_student_number ?? "Yes") : "No"}
                       </td>
                       <td className="px-3 py-2">{formatDate(r.waiver_signed_at)}</td>
+                      {/* Classes trained, whatever paid for them. Not the same
+                          as credits used, which lives on the membership. */}
+                      <td className="px-3 py-2">{r.sessions_attended || "—"}</td>
                       <td className="px-3 py-2">
                         {r.latest_plan_name ? (
                           <div className="flex flex-col gap-1">

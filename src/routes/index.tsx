@@ -4,6 +4,7 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { Button } from "@/components/ui/button";
+import { buildClubJsonLd } from "@/lib/seo";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -24,6 +25,12 @@ export const Route = createFileRoute("/")({
       { property: "og:url", content: "https://jitsu.au/" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/" }],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify(buildClubJsonLd()),
+      },
+    ],
   }),
   component: Home,
 });

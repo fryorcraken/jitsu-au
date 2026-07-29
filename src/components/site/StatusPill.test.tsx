@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Pill } from "./StatusPill";
-import { ROLE_CLASS, lifecycleClass } from "@/lib/status-colours";
+import { ROLE_CLASS, coverageClass, lifecycleClass } from "@/lib/status-colours";
 
 describe("Pill", () => {
   it("renders its label", () => {
@@ -15,6 +15,13 @@ describe("Pill", () => {
     // "Manager" on the person page.
     render(<Pill label="manager" className={ROLE_CLASS} />);
     expect(screen.getByText("manager")).toHaveClass("capitalize");
+  });
+
+  it("leaves a written label alone when asked", () => {
+    // The check-in board badges a plan name, not an enum value. Capitalising it
+    // would render "Unlimited Monthly".
+    render(<Pill label="Unlimited monthly" className={coverageClass("period")} preserveCase />);
+    expect(screen.getByText("Unlimited monthly")).not.toHaveClass("capitalize");
   });
 
   it("wears the colour it is given, on top of the shared badge shape", () => {
