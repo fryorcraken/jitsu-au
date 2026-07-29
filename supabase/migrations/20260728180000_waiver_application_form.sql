@@ -33,8 +33,17 @@ ALTER TABLE public.profiles
 --
 -- A NEW version, not an edit of the current one: every already-signed waiver
 -- keeps pointing at the template version it was actually signed against.
-
-UPDATE public.waiver_templates SET is_current = false WHERE is_current = true;
+--
+-- It arrives as `is_current = false`, i.e. a DRAFT. Nothing about the signing
+-- page changes when this runs: `/waiver` keeps serving whatever version is
+-- current until a manager has read this one and promoted it (by hand, or via
+-- /manager/waiver-template). A legal document goes live when a person says so,
+-- not as a side effect of a migration.
+--
+-- Because it claims nothing, the partial unique index
+-- `waiver_templates_only_one_current` is not in play and the previously current
+-- version needs no demotion. Promoting later is the two-step the app already
+-- runs in `saveWaiverTemplate`: clear `is_current`, then set it on this row.
 
 INSERT INTO public.waiver_templates (version, title, body_md, acknowledgements, is_current)
 VALUES (
@@ -220,5 +229,6 @@ $md$,
       "required": true
     }
   ]$json$::jsonb,
-  true
+  -- Draft. A manager promotes it after reading it; see the note above.
+  false
 );

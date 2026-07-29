@@ -518,6 +518,7 @@ export type Database = {
           date_of_birth: string | null
           emergency_contact_name: string | null
           emergency_contact_phone: string | null
+          emergency_contact_relationship: string | null
           first_name: string | null
           guardian_name: string | null
           guardian_relationship: string | null
@@ -538,6 +539,7 @@ export type Database = {
           date_of_birth?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
+          emergency_contact_relationship?: string | null
           first_name?: string | null
           guardian_name?: string | null
           guardian_relationship?: string | null
@@ -558,6 +560,7 @@ export type Database = {
           date_of_birth?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
+          emergency_contact_relationship?: string | null
           first_name?: string | null
           guardian_name?: string | null
           guardian_relationship?: string | null
@@ -674,6 +677,7 @@ export type Database = {
           email: string
           emergency_contact_name: string
           emergency_contact_phone: string
+          emergency_contact_relationship: string | null
           first_name: string
           guardian_name: string | null
           guardian_relationship: string | null
@@ -703,6 +707,7 @@ export type Database = {
           email: string
           emergency_contact_name: string
           emergency_contact_phone: string
+          emergency_contact_relationship?: string | null
           first_name: string
           guardian_name?: string | null
           guardian_relationship?: string | null
@@ -732,6 +737,7 @@ export type Database = {
           email?: string
           emergency_contact_name?: string
           emergency_contact_phone?: string
+          emergency_contact_relationship?: string | null
           first_name?: string
           guardian_name?: string | null
           guardian_relationship?: string | null
