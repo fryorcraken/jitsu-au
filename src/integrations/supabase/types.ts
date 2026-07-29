@@ -897,7 +897,7 @@ export type Database = {
         Args: { _user_ids: string[] }
         Returns: {
           email: string
-          email_confirmed_at: string | null
+          email_confirmed_at: string
           user_id: string
         }[]
       }
