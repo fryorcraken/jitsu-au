@@ -251,6 +251,20 @@ export const setClubUserEmail = createServerFn({ method: "POST" })
     });
     if (updErr) throw new Error(updErr.message);
 
+    // Assert the address actually MOVED, rather than trusting that it did.
+    // Some GoTrue configurations answer an email update by parking the new
+    // address in a pending `email_change` and leaving `email` alone. That would
+    // return success here while the person still holds the wrong address — the
+    // exact failure this feature exists to make visible. Re-read and check.
+    const { data: after, error: afterErr } = await admin.auth.admin.getUserById(data.userId);
+    if (afterErr) throw new Error(afterErr.message);
+    const moved = after.user?.email ? normalizeEmail(after.user.email) === email : false;
+    if (!moved) {
+      throw new Error(
+        "The login record did not accept that email. Nothing was changed. Check the address and try again.",
+      );
+    }
+
     // The guarantee. The admin API declines to SET a confirmation when asked
     // not to, but does not reliably CLEAR an existing one, so drop it outright
     // rather than trusting GoTrue to have done it.
@@ -261,27 +275,42 @@ export const setClubUserEmail = createServerFn({ method: "POST" })
 
     // Links already sitting in the old inbox go inert now rather than waiting
     // out their expiry: whoever reads that mailbox is not the person we hold.
-    // Best-effort — the address has already moved, and a stale token cannot
-    // verify the new address anyway (the redemption re-checks the match).
+    // Its own try/catch: a failed revoke must not skip the send below, or the
+    // manager would be told a link went out when none did. A stale token cannot
+    // verify the new address anyway (redemption re-checks the match), so this
+    // is tidiness rather than the security boundary.
+    if (current) {
+      try {
+        const { revokeVerificationTokensForEmail } =
+          await import("@/lib/email-verification.server");
+        await revokeVerificationTokensForEmail(admin, current);
+      } catch (e) {
+        console.error("[setClubUserEmail] could not revoke old-address tokens:", e);
+      }
+    }
+
+    // Report what actually happened. The screen tells the manager a link was
+    // sent, so that claim has to be true: a mail provider outage must show as
+    // "address changed, no email sent", not as a confident lie they will only
+    // discover when the member says nothing arrived.
+    let verificationSent = false;
     try {
-      const { revokeVerificationTokensForEmail, sendVerificationEmail } =
-        await import("@/lib/email-verification.server");
-      if (current) await revokeVerificationTokensForEmail(admin, current);
-      await sendVerificationEmail({
+      const { sendVerificationEmail } = await import("@/lib/email-verification.server");
+      ({ sent: verificationSent } = await sendVerificationEmail({
         admin,
         to: email,
         purpose: "email_change",
         userId: data.userId,
         next: "/account",
-      });
+      }));
     } catch (e) {
-      console.error("[setClubUserEmail] post-change verification email failed:", e);
+      console.error("[setClubUserEmail] verification email failed:", e);
     }
 
     // NB: waiver rows keep the address as SUBMITTED. They are frozen evidence of
     // what was signed, so a corrected account email legitimately diverges from
     // them, and the detail screen says so rather than looking broken.
-    return { ok: true as const, email, changed: true, verified: false };
+    return { ok: true as const, email, changed: true, verified: false, verificationSent };
   });
 
 /** Manager: send the person a fresh "confirm your email address" link. */

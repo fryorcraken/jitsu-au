@@ -168,11 +168,16 @@ function EmailCard({
     setBusy(true);
     try {
       const res = await changeEmail({ data: { userId, email: draft } });
-      toast.success(
-        res.changed
-          ? "Email updated. We sent a confirmation link to the new address."
-          : "That's already their email. Nothing changed.",
-      );
+      if (!res.changed) {
+        toast.success("That's already their email. Nothing changed.");
+      } else if (res.verificationSent) {
+        toast.success("Email updated. We sent a confirmation link to the new address.");
+      } else {
+        // The address moved but the email did not go out. Say so plainly: the
+        // manager is the only one who can act on it, and telling them a link
+        // was sent would surface as "the member never got anything" days later.
+        toast.warning("Email updated, but we couldn't send the confirmation link. Try resending.");
+      }
       setEditing(false);
       onChanged();
     } catch (err) {
