@@ -159,6 +159,8 @@ Fix: after any migration that adds/renames columns or tables, bring `src/integra
 
 Do **not** reach for a `never`/`unknown` cast to silence a stale type. Those casts are what let `waivers.approval_status` be missing from production for a week with a green build — the cast disables the only check that would have caught it. Fix the types instead.
 
+**Exception, and it is not a small one: never hand-fix the NULLABILITY of an RPC's return type.** "Hand-add only what you verified exists live" applies to a missing **column** on a table, where the generator does read nullability (`pg_attribute.attnotnull`) and is right. It does not apply to anything under `Database["public"]["Functions"]`: a function's declared return type says nothing about NULL and the generator has nowhere to look it up, so every RPC return prints non-null whether or not it is. A hand-fix there is erased by the next regeneration — `email_confirmed_at` was corrected by hand on 2026-07-29 and regenerated away hours later, taking `main` red with the contract test pinning it. Wrap such an RPC in `src/lib/supabase-rpc.ts` instead, and see "Supabase clients" in `CLAUDE.md`.
+
 ### 2. `.maybeSingle()` returns `T | null`, but helpers often take `T | undefined`
 
 Symptom (typecheck, e.g. `src/routes/api/manager/agent.ts`): `Type 'null' is not assignable to type '{...} | undefined'` when passing a `.maybeSingle()` result into a helper whose optional parameter is typed `T | undefined` (default TS optional-parameter shape).

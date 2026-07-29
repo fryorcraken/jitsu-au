@@ -4,7 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Check, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Pill } from "@/components/site/StatusPill";
+import { membershipClass } from "@/lib/status-colours";
 import { formatCents } from "@/lib/validation";
 import { listMemberships, setMembershipStatus } from "@/lib/membership.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -17,13 +18,6 @@ export const Route = createFileRoute("/_authenticated/manager/memberships")({
 });
 
 type Row = Awaited<ReturnType<typeof listMemberships>>[number];
-
-const STATUS_CLASS: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  active: "bg-green-100 text-green-800",
-  expired: "bg-red-100 text-red-800",
-  cancelled: "bg-slate-100 text-slate-800",
-};
 
 function ManagerMembershipsPage() {
   const navigate = useNavigate();
@@ -131,14 +125,7 @@ function ManagerMembershipsPage() {
                     <td className="px-3 py-2">{r.uts_student_number ?? "—"}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.payment_reference}</td>
                     <td className="px-3 py-2">
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                          STATUS_CLASS[r.status] ?? "bg-slate-100 text-slate-800",
-                        )}
-                      >
-                        {r.status}
-                      </span>
+                      <Pill label={r.status} className={membershipClass(r.status)} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       {r.status === "active" ? (

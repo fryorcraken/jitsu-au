@@ -49,6 +49,14 @@ export type ClubUserEmail = {
    * When someone last proved they can read this address, by opening a link we
    * sent there. Null means nobody ever has. Lives on `auth.users`, never copied
    * onto `profiles`, so there is only one thing to trust.
+   *
+   * OPTIONAL on purpose, and not the same thing as nullable. The live RPC always
+   * projects the column, but code deploys and migrations go live by different
+   * routes (see docs/database-changes.md), so a build running against a database
+   * that predates `20260729000000_email_verification.sql` gets rows without the
+   * key at all. Every consumer normalizes with `?? null`, which turns both the
+   * missing key and a real NULL into "nobody has proved this address" — the safe
+   * reading. `ClubUser.email_confirmed_at` below is the normalized, required form.
    */
   email_confirmed_at?: string | null;
 };

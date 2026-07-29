@@ -27,6 +27,7 @@ import {
   parseTemplateAcks,
   resolveAcknowledgements,
 } from "@/lib/waiver-acknowledgements";
+import { userIdByEmail } from "@/lib/supabase-rpc";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -109,9 +110,7 @@ async function resolvePersonId(
   admin: SupabaseClient<Database>,
   opts: { email: string; emailProven: boolean; seed: PersonSeed },
 ): Promise<string> {
-  const { data: existingId, error: lookupErr } = await admin.rpc("user_id_by_email", {
-    _email: opts.email,
-  });
+  const { data: existingId, error: lookupErr } = await userIdByEmail(admin, opts.email);
   if (lookupErr) throw new Error(lookupErr.message);
   if (existingId) return existingId;
 
@@ -123,7 +122,7 @@ async function resolvePersonId(
   if (createErr || !created.user) {
     // A concurrent submission may have just created the user; re-resolve before
     // treating it as a failure.
-    const { data: racedId } = await admin.rpc("user_id_by_email", { _email: opts.email });
+    const { data: racedId } = await userIdByEmail(admin, opts.email);
     if (racedId) return racedId;
     console.error("[resolvePersonId] could not register email:", createErr);
     throw new Error("We couldn't register that email address. Check it for typos and try again.");

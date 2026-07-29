@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Pill } from "@/components/site/StatusPill";
+import { formatDate } from "@/lib/dates";
+import { waiverClass } from "@/lib/status-colours";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { connectAppUser } from "@/integrations/lovable/appUserConnectorClient";
 import {
@@ -172,19 +175,15 @@ function WaiversCard() {
                 className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
               >
                 <span>
-                  Signed {new Date(w.signed_at).toLocaleDateString("en-AU")}
+                  Signed {formatDate(w.signed_at)}
                   {w.template_version != null && (
                     <span className="text-muted-foreground"> (v{w.template_version})</span>
-                  )}
-                  <span
-                    className={
-                      w.status === "active"
-                        ? "ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary"
-                        : "ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
-                    }
-                  >
-                    {w.status}
-                  </span>
+                  )}{" "}
+                  {/* The same three statuses, and the same colours, a manager
+                      sees. The two-way ternary this replaced painted a
+                      superseded waiver exactly like a pending one, so a member
+                      who had re-signed could not tell which one counted. */}
+                  <Pill label={w.status} className={waiverClass(w.status)} />
                 </span>
                 {w.has_pdf && (
                   <Button size="sm" variant="outline" onClick={() => download(w.id)}>

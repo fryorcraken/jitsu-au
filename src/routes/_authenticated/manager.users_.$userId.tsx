@@ -7,6 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Pill } from "@/components/site/StatusPill";
+import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
+import {
+  ROLE_CLASS,
+  coverageClass,
+  lifecycleClass,
+  membershipClass,
+  verificationClass,
+  waiverClass,
+} from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import {
   deriveExpandedWaivers,
@@ -42,73 +52,11 @@ export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
 type Detail = Awaited<ReturnType<typeof getClubUser>>;
 type Waiver = Detail["waivers"][number];
 
-const LIFECYCLE_CLASS: Record<string, string> = {
-  lead: "bg-slate-100 text-slate-800",
-  applicant: "bg-amber-100 text-amber-800",
-  visitor: "bg-sky-100 text-sky-800",
-  member: "bg-green-100 text-green-800",
-  lapsed: "bg-red-100 text-red-800",
-};
-
-const MEMBERSHIP_CLASS: Record<string, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  active: "bg-green-100 text-green-800",
-  expired: "bg-red-100 text-red-800",
-  cancelled: "bg-slate-100 text-slate-800",
-};
-
-// Keep in step with manager.users.tsx: a manager moves between both screens.
-const VERIFICATION_CLASS: Record<string, string> = {
-  verified: "bg-green-100 text-green-800",
-  unverified: "bg-amber-100 text-amber-800",
-};
-
-// The same three derived statuses the signed-waivers screen shows, in the same
-// colours: a manager moves between both screens, so "pending" must not be grey
-// on one and amber on the other. Keep in step with manager.waivers.tsx.
-const WAIVER_CLASS: Record<Waiver["status"], string> = {
-  pending: "bg-muted text-muted-foreground",
-  active: "bg-primary/15 text-primary",
-  superseded: "bg-muted text-muted-foreground line-through",
-};
-
 /** A copy of `record` without `key`. */
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const next = { ...record };
   delete next[key];
   return next;
-}
-
-function fmtDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString("en-AU") : "—";
-}
-
-/**
- * A `DATE` column arrives as `YYYY-MM-DD`. `new Date` would read that as UTC
- * midnight and shift it a day back for a manager in a negative-offset timezone,
- * so format the parts directly: a birth date has no timezone.
- */
-function fmtDateOnly(value: string | null): string {
-  if (!value) return "—";
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : value;
-}
-
-function fmtDateTime(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString("en-AU") : "—";
-}
-
-function Pill({ label, className }: { label: string; className: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
-        className,
-      )}
-    >
-      {label}
-    </span>
-  );
 }
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
@@ -216,7 +164,7 @@ function EmailCard({
       <h2 className="mb-3 text-lg font-bold">Email</h2>
       <p className="mb-3 text-sm text-muted-foreground">
         {verified
-          ? `Confirmed on ${fmtDate(emailConfirmedAt)}, when they opened a link we sent here.`
+          ? `Confirmed on ${formatDate(emailConfirmedAt)}, when they opened a link we sent here.`
           : "Nobody has opened a link we sent to this address yet. Approving a waiver emails a sign-in link here, so a typo means it goes nowhere."}
       </p>
 
@@ -471,10 +419,10 @@ function ManagerUserPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Pill
               label={summary.lifecycle_status}
-              className={LIFECYCLE_CLASS[summary.lifecycle_status] ?? "bg-slate-100 text-slate-800"}
+              className={lifecycleClass(summary.lifecycle_status)}
             />
             {summary.roles.map((role) => (
-              <Pill key={role} label={role} className="bg-indigo-100 text-indigo-800" />
+              <Pill key={role} label={role} className={ROLE_CLASS} />
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
@@ -484,13 +432,13 @@ function ManagerUserPage() {
             {summary.email ? (
               <Pill
                 label={emailVerificationLabel(summary.email_confirmed_at)}
-                className={VERIFICATION_CLASS[emailVerificationLabel(summary.email_confirmed_at)]}
+                className={verificationClass(emailVerificationLabel(summary.email_confirmed_at))}
               />
             ) : null}
             {summary.phone ? <span>· {summary.phone}</span> : null}
           </div>
           <p className="text-sm text-muted-foreground">
-            First seen {fmtDate(summary.first_seen_at)}
+            First seen {formatDate(summary.first_seen_at)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -517,7 +465,7 @@ function ManagerUserPage() {
         </p>
         <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Preferred name" value={profile.preferred_name} />
-          <Field label="Date of birth" value={fmtDateOnly(profile.date_of_birth)} />
+          <Field label="Date of birth" value={formatDateOnly(profile.date_of_birth)} />
           <Field label="Phone" value={profile.phone} />
           <Field label="Address" value={profile.address} />
           <Field label="UTS student number" value={profile.uts_student_number} />
@@ -536,7 +484,7 @@ function ManagerUserPage() {
             label="SMS / WhatsApp consent"
             value={profile.sms_whatsapp_consent ? "Yes" : "No"}
           />
-          <Field label="Record updated" value={fmtDateTime(profile.updated_at)} />
+          <Field label="Record updated" value={formatDateTime(profile.updated_at)} />
         </dl>
       </div>
 
@@ -563,15 +511,12 @@ function ManagerUserPage() {
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2 font-medium">{m.plan_name ?? "—"}</td>
                     <td className="px-3 py-2">
-                      <Pill
-                        label={m.status}
-                        className={MEMBERSHIP_CLASS[m.status] ?? "bg-slate-100 text-slate-800"}
-                      />
+                      <Pill label={m.status} className={membershipClass(m.status)} />
                     </td>
                     <td className="px-3 py-2">{formatCents(m.price_cents)}</td>
                     <td className="px-3 py-2">{m.payment_reference ?? "—"}</td>
-                    <td className="px-3 py-2">{fmtDate(m.starts_at)}</td>
-                    <td className="px-3 py-2">{fmtDate(m.ends_at)}</td>
+                    <td className="px-3 py-2">{formatDate(m.starts_at)}</td>
+                    <td className="px-3 py-2">{formatDate(m.ends_at)}</td>
                     <td className="px-3 py-2">{m.sessions_remaining ?? "—"}</td>
                   </tr>
                 ))}
@@ -612,16 +557,13 @@ function ManagerUserPage() {
                   <tr key={c.id} className="border-t">
                     <td className="px-3 py-2 font-medium">{c.event_title ?? "Unknown class"}</td>
                     <td className="px-3 py-2">
-                      {fmtDateTime(c.event_starts_at ?? c.checked_in_at)}
+                      {formatDateTime(c.event_starts_at ?? c.checked_in_at)}
                     </td>
                     <td className="px-3 py-2">
                       <Pill
                         label={c.coverage === "none" ? "No cover" : (c.plan_name ?? "Membership")}
-                        className={
-                          c.coverage === "none"
-                            ? "bg-red-100 text-red-800"
-                            : "bg-green-100 text-green-800"
-                        }
+                        className={coverageClass(c.coverage)}
+                        preserveCase
                       />
                     </td>
                     <td className="px-3 py-2">{c.consumed_credit ? "Yes" : "No"}</td>
@@ -692,12 +634,12 @@ function ManagerUserPage() {
                       className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")}
                     />
                     <span>
-                      <span className="font-medium">{fmtDateTime(w.signed_at)}</span>
+                      <span className="font-medium">{formatDateTime(w.signed_at)}</span>
                       <span className="ml-2 text-xs text-muted-foreground">
                         v{w.template_version ?? "—"}
                       </span>
                     </span>
-                    <Pill label={w.status} className={WAIVER_CLASS[w.status]} />
+                    <Pill label={w.status} className={waiverClass(w.status)} />
                     {isPaperWaiver(w.signer_meta) && (
                       <Pill label="paper" className="bg-muted text-muted-foreground" />
                     )}
@@ -735,7 +677,7 @@ function ManagerUserPage() {
                       <Field label="Name as signed" value={w.full_name} />
                       <Field label="Email" value={w.email} />
                       <Field label="Phone" value={w.phone} />
-                      <Field label="Date of birth" value={fmtDateOnly(w.date_of_birth)} />
+                      <Field label="Date of birth" value={formatDateOnly(w.date_of_birth)} />
                       <Field label="Address" value={w.address} />
                       <Field label="UTS student number" value={w.uts_student_number} />
                       <Field label="Emergency contact" value={w.emergency_contact_name} />
@@ -756,7 +698,7 @@ function ManagerUserPage() {
                         label="SMS / WhatsApp consent"
                         value={w.sms_whatsapp_consent ? "Yes" : "No"}
                       />
-                      <Field label="Approved" value={fmtDateTime(w.approved_at)} />
+                      <Field label="Approved" value={formatDateTime(w.approved_at)} />
                     </dl>
 
                     {!w.has_pdf ? (
@@ -773,7 +715,7 @@ function ManagerUserPage() {
                     ) : pdf?.url ? (
                       <iframe
                         src={pdf.url}
-                        title={`Signed waiver ${fmtDateTime(w.signed_at)}`}
+                        title={`Signed waiver ${formatDateTime(w.signed_at)}`}
                         referrerPolicy="no-referrer"
                         className="h-[70vh] w-full rounded-md border bg-muted"
                       />

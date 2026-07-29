@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Pill } from "@/components/site/StatusPill";
+import { waiverClass } from "@/lib/status-colours";
+import { formatDateTime } from "@/lib/dates";
 import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { runApproval } from "@/lib/waiver-approval";
 import type { WaiverApprovalStatus } from "@/lib/validation";
-import { cn } from "@/lib/utils";
 import {
   getGoogleDriveStatus,
   listMyDriveUploads,
@@ -35,12 +37,6 @@ type Row = {
   approved_at: string | null;
   // A scanned paper form a manager filed, rather than one signed on the site.
   is_paper: boolean;
-};
-
-const STATUS_STYLES: Record<Row["status"], string> = {
-  pending: "bg-muted text-muted-foreground",
-  active: "bg-primary/15 text-primary",
-  superseded: "bg-muted text-muted-foreground line-through",
 };
 
 type DriveUpload = {
@@ -198,7 +194,7 @@ function WaiversPage() {
                       <td className="px-3 py-2 font-medium">{r.full_name}</td>
                       <td className="px-3 py-2">{r.email}</td>
                       <td className="px-3 py-2">
-                        {new Date(r.signed_at).toLocaleString("en-AU")}
+                        {formatDateTime(r.signed_at)}
                         {r.is_paper && (
                           <span
                             className="ml-2 inline-block rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
@@ -210,14 +206,7 @@ function WaiversPage() {
                       </td>
                       <td className="px-3 py-2">v{r.template_version ?? "—"}</td>
                       <td className="px-3 py-2">
-                        <span
-                          className={cn(
-                            "inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize",
-                            STATUS_STYLES[r.status],
-                          )}
-                        >
-                          {r.status}
-                        </span>
+                        <Pill label={r.status} className={waiverClass(r.status)} />
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">

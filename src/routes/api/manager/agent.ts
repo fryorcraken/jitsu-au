@@ -42,6 +42,7 @@ import { hashToken } from "@/lib/manager-api-tokens";
 import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
+import { userEmails } from "@/lib/supabase-rpc";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -54,9 +55,9 @@ import type { AppClient } from "@/lib/profile-types";
  */
 async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUserEmail[]> {
   if (!userIds.length) return [];
-  const { data, error } = await pdb.rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await userEmails(pdb, userIds);
   if (error || !data) return [];
-  return (data as ClubUserEmail[]).map((e) => ({
+  return data.map((e) => ({
     user_id: e.user_id,
     email: e.email,
     email_confirmed_at: e.email_confirmed_at ?? null,

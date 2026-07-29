@@ -28,6 +28,7 @@ import { attachableMemberships, lapsedMembershipIds, resolveCoverage } from "@/l
 import type { CoverageCandidate, CoverageDecision } from "@/lib/checkin";
 import { topUpHorizon } from "@/lib/calendar.functions";
 import type { ClubUserEmail } from "@/lib/club-users";
+import { userEmails } from "@/lib/supabase-rpc";
 
 type CheckinClient = SupabaseClient<Database>;
 
@@ -148,9 +149,9 @@ async function emailsByUserId(
   userIds: string[],
 ): Promise<Map<string, string>> {
   if (!userIds.length) return new Map();
-  const { data, error } = await admin.rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await userEmails(admin, userIds);
   if (error || !data) return new Map();
-  return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
+  return new Map(data.map((e) => [e.user_id, e.email]));
 }
 
 /**
