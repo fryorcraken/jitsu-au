@@ -443,19 +443,24 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: maxRow } = await supabaseAdmin
+    // A failed read here would number the new template 1 and collide with the
+    // existing version 1, so the manager's save would fail on a duplicate-key
+    // message that says nothing about what actually went wrong.
+    const { data: maxRow, error: maxErr } = await supabaseAdmin
       .from("waiver_templates")
       .select("version")
       .order("version", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (maxErr) throw new Error(maxErr.message);
     const nextVersion = (maxRow?.version ?? 0) + 1;
 
     // Clear current flag on all rows
-    await supabaseAdmin
+    const { error: clearErr } = await supabaseAdmin
       .from("waiver_templates")
       .update({ is_current: false })
       .eq("is_current", true);
+    if (clearErr) throw new Error(clearErr.message);
 
     const { data: created, error } = await supabaseAdmin
       .from("waiver_templates")
@@ -477,10 +482,13 @@ export const saveWaiverTemplate = createServerFn({ method: "POST" })
 export const listWaivers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data: isMgr } = await context.supabase.rpc("has_role", {
+    // Fail-closed either way, but "Forbidden" for a failed role check tells a
+    // manager they lost their access when the RPC is what broke.
+    const { data: isMgr, error: rErr } = await context.supabase.rpc("has_role", {
       _user_id: context.userId,
       _role: "manager",
     });
+    if (rErr) throw new Error(rErr.message);
     if (!isMgr) throw new Error("Forbidden");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
