@@ -7,7 +7,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { deriveWaiverListStatuses, nameWithPreferred } from "@/lib/validation";
+import {
+  deriveWaiverListStatuses,
+  managerEmailChangeSchema,
+  nameWithPreferred,
+  normalizeEmail,
+} from "@/lib/validation";
 import type { MembershipClient } from "@/lib/membership-types";
 import type { ClubUserEmail } from "@/lib/club-users";
 
@@ -98,6 +103,7 @@ export const getClubUser = createServerFn({ method: "POST" })
     const emails = ((emailRows ?? []) as ClubUserEmail[]).map((e) => ({
       user_id: e.user_id,
       email: e.email,
+      email_confirmed_at: e.email_confirmed_at ?? null,
     }));
 
     // One aggregation path for the funnel phase and the headline fields: reuse
@@ -134,6 +140,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       user: {
         name: summary.name,
         email: summary.email,
+        email_confirmed_at: summary.email_confirmed_at,
         phone: summary.phone,
         roles: summary.roles,
         lifecycle_status: summary.lifecycle_status,
@@ -195,4 +202,111 @@ export const getClubUser = createServerFn({ method: "POST" })
         status: statuses.get(w.id) ?? ("pending" as const),
       })),
     };
+  });
+
+// ---- Manager: correct a person's email address ----
+//
+// The only email-editing path in the product. The address is the identity, so
+// moving it moves the login itself, and everything the club sends afterwards.
+//
+// The rule this enforces: a changed address is ALWAYS unverified. Whatever was
+// proven about the old address says nothing about the new one, and the whole
+// point of the badge is that it cannot be set by someone's say-so.
+export const setClubUserEmail = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => managerEmailChangeSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context as { supabase: MembershipClient; userId: string });
+
+    const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
+    const email = normalizeEmail(data.email);
+
+    const { data: got, error: getErr } = await admin.auth.admin.getUserById(data.userId);
+    if (getErr) throw new Error(getErr.message);
+    if (!got.user) throw new Error("User not found.");
+
+    const current = got.user.email ? normalizeEmail(got.user.email) : "";
+    // Re-saving the same address must not cost someone their verified badge.
+    if (current === email) {
+      return {
+        ok: true as const,
+        email,
+        changed: false,
+        verified: Boolean(got.user.email_confirmed_at),
+      };
+    }
+
+    // One person per email is the model's core invariant: profiles, waivers and
+    // memberships all hang off a single auth user resolved by address. Merging
+    // two people is a different problem, so refuse rather than half-do it.
+    const { data: clash, error: clashErr } = await admin.rpc("user_id_by_email", { _email: email });
+    if (clashErr) throw new Error(clashErr.message);
+    if (clash && clash !== data.userId) {
+      throw new Error("That email already belongs to another person.");
+    }
+
+    const { error: updErr } = await admin.auth.admin.updateUserById(data.userId, {
+      email,
+      email_confirm: false,
+    });
+    if (updErr) throw new Error(updErr.message);
+
+    // The guarantee. The admin API declines to SET a confirmation when asked
+    // not to, but does not reliably CLEAR an existing one, so drop it outright
+    // rather than trusting GoTrue to have done it.
+    const { error: clearErr } = await admin.rpc("clear_email_confirmation", {
+      _user_id: data.userId,
+    });
+    if (clearErr) throw new Error(clearErr.message);
+
+    // Links already sitting in the old inbox go inert now rather than waiting
+    // out their expiry: whoever reads that mailbox is not the person we hold.
+    // Best-effort — the address has already moved, and a stale token cannot
+    // verify the new address anyway (the redemption re-checks the match).
+    try {
+      const { revokeVerificationTokensForEmail, sendVerificationEmail } =
+        await import("@/lib/email-verification.server");
+      if (current) await revokeVerificationTokensForEmail(admin, current);
+      await sendVerificationEmail({
+        admin,
+        to: email,
+        purpose: "email_change",
+        userId: data.userId,
+        next: "/account",
+      });
+    } catch (e) {
+      console.error("[setClubUserEmail] post-change verification email failed:", e);
+    }
+
+    // NB: waiver rows keep the address as SUBMITTED. They are frozen evidence of
+    // what was signed, so a corrected account email legitimately diverges from
+    // them, and the detail screen says so rather than looking broken.
+    return { ok: true as const, email, changed: true, verified: false };
+  });
+
+/** Manager: send the person a fresh "confirm your email address" link. */
+export const resendClubUserVerification = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context as { supabase: MembershipClient; userId: string });
+
+    const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
+    const { data: got, error } = await admin.auth.admin.getUserById(data.userId);
+    if (error) throw new Error(error.message);
+    if (!got.user?.email) throw new Error("That person has no email on file.");
+    if (got.user.email_confirmed_at) {
+      return { ok: true as const, alreadyVerified: true, email: got.user.email };
+    }
+
+    const { sendVerificationEmail } = await import("@/lib/email-verification.server");
+    const { sent } = await sendVerificationEmail({
+      admin,
+      to: got.user.email,
+      purpose: "manager_resend",
+      userId: data.userId,
+      next: "/account",
+    });
+    if (!sent) throw new Error("We couldn't send that email just now. Try again shortly.");
+    return { ok: true as const, alreadyVerified: false, email: got.user.email };
   });

@@ -326,6 +326,11 @@ export const waiverSubmitSchema = z
     guardian_signature_image: sigImage,
     // Self-reported browser context, stored on the waiver as signing evidence.
     client_meta: waiverClientMetaSchema.optional(),
+    // Proof-of-click token from the interest confirmation email, carried through
+    // from the prefill link. When it matches the address being submitted, the
+    // person record is created already verified. Never required, and never
+    // trusted for anything beyond that: it is re-checked server-side.
+    vt: z.string().trim().max(120).optional().or(z.literal("")),
     hp: z.string().max(0).optional(),
   })
   .refine(
@@ -371,6 +376,8 @@ export const waiverPrefillSearchSchema = z.object({
   name: z.coerce.string().max(120).optional().catch(undefined),
   email: z.coerce.string().max(255).optional().catch(undefined),
   phone: z.coerce.string().max(30).optional().catch(undefined),
+  // Email-verification token, present only on links that arrived by email.
+  vt: z.coerce.string().max(120).optional().catch(undefined),
 });
 export type WaiverPrefillSearch = z.infer<typeof waiverPrefillSearchSchema>;
 
@@ -404,6 +411,22 @@ export const waiverApprovalSchema = z.object({
   status: z.enum(waiverApprovalStatuses),
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
+
+// ---- Manager: correct a person's email address ----
+//
+// The only email-editing path in the product. There is no self-serve version:
+// the address IS the identity (one address, one person, one profile), so moving
+// it moves the login as well as the record.
+//
+// Note what is NOT here: any way to assert that an address is verified. A badge
+// a manager could set would only mean "a manager believed this", which is the
+// state the club is already in. Correcting an address sends a fresh link; that
+// is the whole remedy.
+export const managerEmailChangeSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().trim().email().max(255),
+});
+export type ManagerEmailChangeInput = z.infer<typeof managerEmailChangeSchema>;
 
 // ---- Memberships ----
 

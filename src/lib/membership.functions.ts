@@ -51,6 +51,28 @@ async function emailsByUserId(
   return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
 }
 
+/**
+ * The same lookup, keeping the whole row rather than just the address.
+ *
+ * The people directory needs `email_confirmed_at` alongside the email to badge
+ * verified state, and it is the only caller that does — everywhere else wants a
+ * plain user-id -> address map, so that stays the simpler helper above.
+ * Degrades to an empty list on failure, matching `emailsByUserId`.
+ */
+async function clubUserEmailRows(
+  admin: MembershipClient,
+  userIds: string[],
+): Promise<ClubUserEmail[]> {
+  if (!userIds.length) return [];
+  const { data, error } = await admin.rpc("user_emails", { _user_ids: userIds });
+  if (error || !data) return [];
+  return (data as ClubUserEmail[]).map((e) => ({
+    user_id: e.user_id,
+    email: e.email,
+    email_confirmed_at: e.email_confirmed_at ?? null,
+  }));
+}
+
 // Public/anon reads. Mirrors the pattern in waiver.functions.ts but typed with
 // the memberships-aware Database so `.from("membership_plans")` type-checks.
 function serverSupabase(): MembershipClient {
@@ -616,11 +638,11 @@ export const listClubUsers = createServerFn({ method: "GET" })
     // Roles + emails are scoped to the club's known people.
     const userIds = profileUserIds(profileRows);
     let rolesRows: { user_id: string; role: string }[] = [];
-    let emails = new Map<string, string>();
+    let emails: ClubUserEmail[] = [];
     if (userIds.length) {
       const [{ data: roles }, resolved] = await Promise.all([
         admin.from("user_roles").select("user_id, role").in("user_id", userIds),
-        emailsByUserId(admin, userIds),
+        clubUserEmailRows(admin, userIds),
       ]);
       rolesRows = (roles ?? []) as { user_id: string; role: string }[];
       emails = resolved;
@@ -629,7 +651,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
     // The one shared aggregation code path (also used by the manager agent API).
     return aggregateClubUsers({
       profiles: profileRows,
-      emails: [...emails].map(([user_id, email]) => ({ user_id, email })),
+      emails,
       waivers: waiverRows,
       leads,
       memberships: memberships.map((m) => ({

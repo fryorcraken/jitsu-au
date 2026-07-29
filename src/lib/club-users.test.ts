@@ -109,6 +109,24 @@ describe("aggregateClubUsers", () => {
     expect(u.phone).toBe("222");
   });
 
+  it("carries the email confirmation stamp through to the row", () => {
+    const [u] = aggregate({
+      profiles: [profile({ user_id: "u1" })],
+      emails: [
+        { user_id: "u1", email: "ada@example.com", email_confirmed_at: "2026-02-02T00:00:00Z" },
+      ],
+    });
+    expect(u.email_confirmed_at).toBe("2026-02-02T00:00:00Z");
+  });
+
+  it("reports an unproven address as null rather than guessing", () => {
+    const [u] = aggregate({
+      profiles: [profile({ user_id: "u1" })],
+      emails: [{ user_id: "u1", email: "ada@example.com" }],
+    });
+    expect(u.email_confirmed_at).toBeNull();
+  });
+
   it("surfaces the preferred name in both the list name and the greeting name", () => {
     const [u] = aggregate({
       profiles: [profile({ first_name: "Ada", last_name: "Lovelace", preferred_name: "Addy" })],
@@ -185,6 +203,10 @@ describe("aggregateClubUsers", () => {
     expect(l.email).toBe("lead@example.com");
     expect(l.phone).toBe("0400 999 999");
     expect(l.first_seen_at).toBe("2026-01-05T00:00:00Z");
+    // A lead has no person record, so there is nothing to have confirmed. Any
+    // proof they gave by clicking their interest email is held on the token
+    // until they sign a waiver and a person exists to carry it.
+    expect(l.email_confirmed_at).toBeNull();
   });
 
   it("drops a lead whose email already belongs to a person (case-insensitive)", () => {
