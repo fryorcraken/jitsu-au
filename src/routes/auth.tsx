@@ -99,6 +99,15 @@ function SignInForms({ redirect }: { redirect?: string }) {
         >
           Login with password
         </Button>
+        <p className="text-center text-sm">
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => setSent(false)}
+          >
+            Use a different email
+          </button>
+        </p>
       </div>
     );
   }
