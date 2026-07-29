@@ -27,6 +27,10 @@ describe("approvalFailureMessage", () => {
   it("falls back for a thrown non-Error", () => {
     expect(approvalFailureMessage("boom")).toBe("Failed to update approval");
   });
+
+  it("falls back rather than showing a blank toast", () => {
+    expect(approvalFailureMessage(new Error("   "))).toBe("Failed to update approval");
+  });
 });
 
 describe("approvalRefreshFailureMessage", () => {
@@ -45,8 +49,14 @@ describe("approvalRefreshFailureMessage", () => {
     );
   });
 
+  it("drops the trailing colon when the error has nothing to say", () => {
+    expect(approvalRefreshFailureMessage(new Error(""))).toBe(
+      "Saved, but the page could not be refreshed.",
+    );
+  });
+
   it("never claims the approval failed", () => {
-    for (const thrown of [new Error("Failed to fetch"), "boom", undefined]) {
+    for (const thrown of [new Error("Failed to fetch"), "boom", undefined, new Error("")]) {
       expect(approvalRefreshFailureMessage(thrown)).toMatch(/^Saved, but/);
       expect(approvalRefreshFailureMessage(thrown)).not.toContain("Failed to update approval");
     }

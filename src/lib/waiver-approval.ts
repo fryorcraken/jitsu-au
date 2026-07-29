@@ -7,18 +7,25 @@
 // live here — shared, and unit-testable away from the components — to stop a
 // refetch that failed being reported as an approval that failed.
 
-export type ApprovalStatus = "approved" | "pending";
+import type { WaiverApprovalStatus } from "./validation";
+
+/**
+ * A map rather than a ternary so a new approval status is a type error here
+ * instead of silently borrowing the "unapproved" wording.
+ */
+const SUCCESS: Record<WaiverApprovalStatus, string> = {
+  approved: "Waiver approved. The member's record has been updated.",
+  pending: "Approval removed. The waiver is pending again.",
+};
 
 /** The approval and the refetch both landed: say what changed. */
-export function approvalSuccessMessage(status: ApprovalStatus): string {
-  return status === "approved"
-    ? "Waiver approved. The member's record has been updated."
-    : "Approval removed. The waiver is pending again.";
+export function approvalSuccessMessage(status: WaiverApprovalStatus): string {
+  return SUCCESS[status];
 }
 
 /** The approval itself failed, so nothing was written. */
 export function approvalFailureMessage(e: unknown): string {
-  return e instanceof Error ? e.message : "Failed to update approval";
+  return reason(e) ?? "Failed to update approval";
 }
 
 /**
@@ -26,7 +33,15 @@ export function approvalFailureMessage(e: unknown): string {
  * on screen is stale, not wrong, and clicking Approve again would be pointless.
  */
 export function approvalRefreshFailureMessage(e: unknown): string {
-  return e instanceof Error
-    ? `Saved, but the page could not be refreshed: ${e.message}`
+  const why = reason(e);
+  return why
+    ? `Saved, but the page could not be refreshed: ${why}`
     : "Saved, but the page could not be refreshed.";
+}
+
+/** The thrown value's message, when there is one worth showing a person. */
+function reason(e: unknown): string | undefined {
+  if (!(e instanceof Error)) return undefined;
+  const message = e.message.trim();
+  return message || undefined;
 }

@@ -8,8 +8,8 @@ import {
   approvalFailureMessage,
   approvalRefreshFailureMessage,
   approvalSuccessMessage,
-  type ApprovalStatus,
 } from "@/lib/waiver-approval";
+import type { WaiverApprovalStatus } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 import {
   getGoogleDriveStatus,
@@ -106,7 +106,7 @@ function WaiversPage() {
     }
   }
 
-  async function setApproval(id: string, status: ApprovalStatus) {
+  async function setApproval(id: string, status: WaiverApprovalStatus) {
     setApprovingId(id);
     try {
       await approve({ data: { id, status } });

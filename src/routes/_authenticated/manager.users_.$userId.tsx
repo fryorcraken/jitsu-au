@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { deriveExpandedWaivers, formatCents } from "@/lib/validation";
+import type { WaiverApprovalStatus } from "@/lib/validation";
 import { emailVerificationLabel, isEmailVerified } from "@/lib/email-verification";
 import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
@@ -22,7 +23,6 @@ import {
   approvalFailureMessage,
   approvalRefreshFailureMessage,
   approvalSuccessMessage,
-  type ApprovalStatus,
 } from "@/lib/waiver-approval";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
@@ -383,7 +383,7 @@ function ManagerUserPage() {
     });
   }
 
-  async function setApproval(id: string, status: ApprovalStatus) {
+  async function setApproval(id: string, status: WaiverApprovalStatus) {
     markApproving(id, true);
     try {
       await approve({ data: { id, status } });
