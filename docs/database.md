@@ -244,7 +244,7 @@ Two SECURITY DEFINER SQL helpers expose the one email store to the server
 | `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                                                |
 
 **Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks,
-the signer's initials, and the five yes/no **health declaration** answers — all
+and the five yes/no **health declaration** answers — all
 captured inside the PDF only. The displayed **pending / active /
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
 person, the latest approved waiver is active.

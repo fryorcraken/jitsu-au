@@ -354,9 +354,6 @@ export const waiverSubmitSchema = z
     // Map of acknowledgement id -> accepted. Which ids are *required* is defined
     // on the template, so that check lives in `missingRequiredAcks`, not here.
     acknowledgements: z.record(z.string(), z.boolean()).default({}),
-    // Initials typed against the acknowledgement block, as on the paper form.
-    // Evidence of assent, so it lives in the PDF only, never in a column.
-    initials: z.string().trim().min(1).max(10),
     signature_name: z.string().trim().max(120).optional().or(z.literal("")),
     signature_image: sigImage,
     is_minor: z.boolean().optional().default(false),

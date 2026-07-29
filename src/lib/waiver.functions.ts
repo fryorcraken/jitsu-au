@@ -364,7 +364,6 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         medical_notes: data.medical_notes || "",
         health_answers: data.health_answers,
         acknowledgements: resolveAcknowledgements(ackDefs, answers),
-        initials: data.initials,
         signature_name: data.signature_name || "",
         signed_at,
         template_title: tpl.title,

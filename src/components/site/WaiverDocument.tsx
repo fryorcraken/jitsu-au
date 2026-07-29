@@ -32,8 +32,6 @@ export type WaiverDocumentProps = {
   healthAnswers: HealthAnswerDraft;
   /** Template-defined acknowledgements + whether each was accepted. */
   acknowledgements: { label: string; checked: boolean }[];
-  /** Initials typed against the acknowledgement block. */
-  initials: string;
   /** Typed signature name (used when the participant did not draw). */
   signatureName: string;
   /** Data URL (image/png) of the drawn participant signature, if any. */
@@ -144,7 +142,6 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     medicalNotes,
     healthAnswers,
     acknowledgements,
-    initials,
     signatureName,
     signatureImage,
     templateTitle,
@@ -175,7 +172,6 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     emergencyContactPhone,
     medicalNotes,
     healthAnswers,
-    initials,
     signatureName,
     clubName,
     isMinor,
@@ -277,12 +273,6 @@ export function WaiverDocument(props: WaiverDocumentProps) {
               ))}
             </ul>
           </section>
-        ) : null}
-
-        {/* Initials, when the body did not print them. Same reasoning as the
-            health declaration above: no column stands behind them. */}
-        {initials && !bodyReferences(templateBody, ["initials"]) ? (
-          <p className="mt-4 text-sm font-semibold text-slate-900">Initials: {initials}</p>
         ) : null}
 
         {/* Participant signature */}

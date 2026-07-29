@@ -113,7 +113,6 @@ function Waiver() {
   const [ecPhone, setEcPhone] = useState("");
   const [health, setHealth] = useState<HealthDraft>(emptyHealthDraft);
   const [medical, setMedical] = useState("");
-  const [initials, setInitials] = useState("");
   const [signatureName, setSignatureName] = useState("");
   const [signatureImage, setSignatureImage] = useState("");
   const [signatureMode, setSignatureMode] = useState<"draw" | "type">("draw");
@@ -230,7 +229,6 @@ function Waiver() {
     emergencyContactPhone: ecPhone,
     medicalNotes: medical,
     healthAnswers: health,
-    initials,
     signatureName: signatureMode === "type" ? signatureName : "",
     clubName: "UTS Jitsu",
     isMinor,
@@ -249,10 +247,6 @@ function Waiver() {
     }
     if (missingRequiredAcks(ackDefs, acks).length > 0) {
       toast.error("Please read and accept the required acknowledgements.");
-      return;
-    }
-    if (!initials.trim()) {
-      toast.error("Please add your initials against the acknowledgements.");
       return;
     }
     const sigImg = signatureMode === "draw" ? signatureImage : "";
@@ -291,7 +285,6 @@ function Waiver() {
           health_answers: health as HealthAnswers,
           medical_notes: medical,
           acknowledgements: acks,
-          initials,
           signature_name: sigName,
           signature_image: sigImg,
           is_minor: isMinor,
@@ -638,27 +631,6 @@ function Waiver() {
               </fieldset>
             )}
 
-            {/* Outside the acknowledgements block on purpose: initials are
-                required whatever the template says, so a template with no
-                acknowledgements must not hide the only field standing between
-                the signer and a submit button that refuses them. */}
-            <fieldset className="space-y-3 border-t pt-6">
-              <legend className="text-sm font-semibold">Your initials</legend>
-              <Input
-                id="initials"
-                required
-                maxLength={10}
-                value={initials}
-                onChange={(e) => setInitials(e.target.value)}
-                placeholder="e.g. JS"
-                className="max-w-[120px]"
-                aria-label="Your initials"
-              />
-              <p className="text-xs text-muted-foreground">
-                Initial here to confirm the statements above, as you would on paper.
-              </p>
-            </fieldset>
-
             <fieldset className="space-y-3 border-t pt-6">
               <legend className="text-sm font-semibold">Signature</legend>
               <Tabs
@@ -766,7 +738,6 @@ function Waiver() {
                 medicalNotes={medical}
                 healthAnswers={health}
                 acknowledgements={resolveAcknowledgements(ackDefs, acks)}
-                initials={initials}
                 signatureName={signatureMode === "type" ? signatureName : ""}
                 signatureImage={previewSignatureImage}
                 isMinor={isMinor}

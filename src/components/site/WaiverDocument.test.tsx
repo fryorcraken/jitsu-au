@@ -28,7 +28,6 @@ const base: WaiverDocumentProps = {
     other: false,
   },
   acknowledgements: [],
-  initials: "JS",
   signatureName: "Jane Sample",
   templateTitle: "Training Waiver",
   templateBody: "# Terms\n\nYou **must** train safely.\n\n---\n\n## Notes\n\nBe kind.",
@@ -85,7 +84,6 @@ describe("waiver placeholders", () => {
       impairments: false,
       other: false,
     },
-    initials: "JS",
     isMinor: false,
     signedDate: "21/07/2026",
     signatureName: "",
@@ -151,10 +149,10 @@ describe("waiver placeholders", () => {
   it("reports whether the body prints a token, so a renderer can fall back", () => {
     expect(bodyReferences("Blackouts: {{health_blackouts}}", ["health_blackouts"])).toBe(true);
     // Whitespace inside the braces is how the substituter accepts them too.
-    expect(bodyReferences("{{ initials }}", ["initials"])).toBe(true);
-    expect(bodyReferences("# Terms\n\nTrain safely.", ["health_drugs", "initials"])).toBe(false);
+    expect(bodyReferences("{{ health_drugs }}", ["health_drugs"])).toBe(true);
+    expect(bodyReferences("# Terms\n\nTrain safely.", ["health_drugs"])).toBe(false);
     // A near-miss must not read as "the body covers it".
-    expect(bodyReferences("initials", ["initials"])).toBe(false);
+    expect(bodyReferences("health_drugs", ["health_drugs"])).toBe(false);
   });
 
   it("fills known tokens and leaves unknown tokens intact", () => {
@@ -205,26 +203,20 @@ describe("WaiverDocument", () => {
     expect(within(declined).queryByText("✓")).not.toBeInTheDocument();
   });
 
-  // The health answers and the initials have no column behind them, so a
-  // template that never prints them would lose them entirely. The document
-  // falls back to a section of its own, matching the PDF.
-  it("prints the health declaration and initials when the body does not", () => {
+  // The health answers have no column behind them, so a template that never
+  // prints them would lose them entirely. The document falls back to a section
+  // of its own, matching the PDF.
+  it("prints the health declaration when the body does not", () => {
     render(<WaiverDocument {...base} healthAnswers={{ ...base.healthAnswers, drugs: true }} />);
     expect(screen.getByText("Health declaration")).toBeInTheDocument();
     expect(screen.getByText(/prescribed any drugs/)).toBeInTheDocument();
     expect(screen.getAllByText("Yes").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/Initials: JS/)).toBeInTheDocument();
   });
 
-  it("leaves both to the body when the body prints them", () => {
-    render(
-      <WaiverDocument
-        {...base}
-        templateBody={"Drugs: {{health_drugs}}\n\nInitials: {{initials}}"}
-      />,
-    );
+  it("leaves it to the body when the body prints it", () => {
+    render(<WaiverDocument {...base} templateBody={"Drugs: {{health_drugs}}"} />);
     expect(screen.queryByText("Health declaration")).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Initials: JS/)).toHaveLength(1);
+    expect(screen.getByText(/Drugs: No/)).toBeInTheDocument();
   });
 
   it("omits the acknowledgements section when there are none", () => {

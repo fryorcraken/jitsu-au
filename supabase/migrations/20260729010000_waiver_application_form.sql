@@ -96,7 +96,7 @@ Details of anything answered yes:
 
 ## Acknowledgement
 
-I acknowledge each of the statements ticked on this form, and I initial them here: {{initials}}
+I acknowledge each of the statements ticked on this form.
 
 ---
 

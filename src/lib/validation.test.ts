@@ -516,7 +516,6 @@ describe("waiverSubmitSchema", () => {
     emergency_contact_relationship: "Colleague",
     emergency_contact_phone: "0400000001",
     health_answers: noConcerns,
-    initials: "AL",
     signature_name: "Ada Lovelace",
   };
 
@@ -660,14 +659,6 @@ describe("waiverSubmitSchema", () => {
     expect(
       waiverSubmitSchema.safeParse({ ...validAdult, emergency_contact_relationship: "  " }).success,
     ).toBe(false);
-  });
-
-  it("requires initials against the acknowledgements", () => {
-    const { initials: _omitted, ...withoutInitials } = validAdult;
-    expect(waiverSubmitSchema.safeParse(withoutInitials).success).toBe(false);
-    expect(waiverSubmitSchema.safeParse({ ...validAdult, initials: "ABCDEFGHIJK" }).success).toBe(
-      false,
-    );
   });
 
   it("requires every health question to be answered", () => {

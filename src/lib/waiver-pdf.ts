@@ -24,8 +24,6 @@ export type WaiverPdfData = {
   health_answers: HealthAnswerDraft;
   /** Template-defined acknowledgements + whether each was accepted. */
   acknowledgements: { label: string; checked: boolean }[];
-  /** Initials typed against the acknowledgement block. */
-  initials: string;
   signature_name: string;
   signed_at: string;
   template_title: string;
@@ -295,7 +293,6 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     emergencyContactPhone: data.emergency_contact_phone,
     medicalNotes: data.medical_notes,
     healthAnswers: data.health_answers,
-    initials: data.initials,
     signatureName: data.signature_name,
     clubName: data.club_name,
     isMinor: data.is_minor,
@@ -372,13 +369,6 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       }
       y -= Math.max(16, lines.length * 12 + 4);
     }
-  }
-
-  // Same reasoning as the health declaration: the initials are evidence with
-  // no column behind them, so print them when the body did not.
-  if (data.initials && !bodyReferences(data.template_body, ["initials"])) {
-    y -= 4;
-    drawText(`Initials: ${data.initials}`, { size: 10, font: bold });
   }
 
   // Signature

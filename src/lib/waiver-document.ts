@@ -57,8 +57,6 @@ export type WaiverPlaceholderInput = {
   medicalNotes: string;
   /** The five health answers; unanswered ones render as "Not answered". */
   healthAnswers: HealthAnswerDraft;
-  /** Initials typed against the acknowledgement block. */
-  initials: string;
   signatureName: string;
   clubName: string;
   /** Under 18: ticks the minor box and fills the guardian tokens. */
@@ -94,7 +92,6 @@ export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<strin
     emergency_contact_phone: v.emergencyContactPhone,
     medical_notes: v.medicalNotes || "None provided",
     ...buildHealthPlaceholders(v.healthAnswers),
-    initials: v.initials,
     // The participant-type boxes at the top of the form: exactly one is ticked,
     // from the date of birth the signer gave.
     adult_checkbox: v.isMinor ? UNTICKED : TICKED,
@@ -112,11 +109,11 @@ export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<strin
 /**
  * Does the body actually print any of these `{{tokens}}`?
  *
- * The health answers and the initials are evidence with no column behind them:
- * the signed document is their only record. If the current template does not
- * reference them — the version live before this form shipped does not, and a
- * manager can always delete a token — they would be collected and then vanish.
- * Both renderers use this to fall back to a section of their own.
+ * The health answers are evidence with no column behind them: the signed
+ * document is their only record. If the current template does not reference
+ * them — the version live before this form shipped does not, and a manager can
+ * always delete a token — they would be collected and then vanish. Both
+ * renderers use this to fall back to a section of their own.
  */
 export function bodyReferences(body: string, tokens: string[]): boolean {
   return tokens.some((token) => new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`).test(body));

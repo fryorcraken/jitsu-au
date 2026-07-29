@@ -107,7 +107,6 @@ const base: WaiverPdfData = {
     other: false,
   },
   acknowledgements: [{ label: "I accept the risks.", checked: true }],
-  initials: "JS",
   signature_name: "Jane Sample",
   signed_at: "2026-07-21T10:00:00.000Z",
   template_title: "Training Waiver",
@@ -188,10 +187,10 @@ describe("winAnsiSafe", () => {
 });
 
 describe("renderWaiverPdf", () => {
-  // The health answers and the initials have no column behind them: the signed
-  // document is their only record. A template that never references them (the
-  // version live before this form shipped does not) would otherwise collect
-  // five safety answers and print them nowhere.
+  // The health answers have no column behind them: the signed document is
+  // their only record. A template that never references them (the version live
+  // before this form shipped does not) would otherwise collect five safety
+  // answers and print them nowhere.
   it("prints the health declaration when the body does not reference it", async () => {
     const doc = await expectValidPdf(
       await renderWaiverPdf({
@@ -205,21 +204,19 @@ describe("renderWaiverPdf", () => {
     const printed = texts.map((t) => t.text).join(" ");
     expect(printed).toContain("Health declaration");
     expect(printed).toContain("Yes");
-    expect(printed).toContain("Initials: JS");
   });
 
   it("leaves the declaration to the body when the body does reference it", async () => {
     const doc = await expectValidPdf(
       await renderWaiverPdf({
         ...base,
-        template_body: "Blackouts: {{health_blackouts}}\n\nInitials: {{initials}}",
+        template_body: "Blackouts: {{health_blackouts}}",
       }),
     );
     const { texts } = readPlacements(doc, doc.getPage(0));
     const printed = texts.map((t) => t.text).join(" ");
     expect(printed).not.toContain("Health declaration");
-    // Once each, from the body, not twice.
-    expect(printed.match(/Initials: JS/g) ?? []).toHaveLength(1);
+    expect(printed).toContain("Blackouts:");
   });
 
   it("renders a template body containing characters the font cannot encode", async () => {
