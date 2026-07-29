@@ -18,6 +18,12 @@ import {
   setClubUserEmail,
 } from "@/lib/club-user.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
+import {
+  approvalFailureMessage,
+  approvalRefreshFailureMessage,
+  approvalSuccessMessage,
+  type ApprovalStatus,
+} from "@/lib/waiver-approval";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
@@ -377,12 +383,12 @@ function ManagerUserPage() {
     });
   }
 
-  async function setApproval(id: string, status: "approved" | "pending") {
+  async function setApproval(id: string, status: ApprovalStatus) {
     markApproving(id, true);
     try {
       await approve({ data: { id, status } });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update approval");
+      toast.error(approvalFailureMessage(e));
       markApproving(id, false);
       return;
     }
@@ -392,17 +398,9 @@ function ManagerUserPage() {
     try {
       const refreshed = await load(false);
       if (!refreshed) return; // a newer load owns the screen; it will say so
-      toast.success(
-        status === "approved"
-          ? "Waiver approved. The member's record has been updated."
-          : "Approval removed. The waiver is pending again.",
-      );
+      toast.success(approvalSuccessMessage(status));
     } catch (e) {
-      toast.error(
-        e instanceof Error
-          ? `Saved, but the page could not be refreshed: ${e.message}`
-          : "Saved, but the page could not be refreshed.",
-      );
+      toast.error(approvalRefreshFailureMessage(e));
     } finally {
       markApproving(id, false);
     }

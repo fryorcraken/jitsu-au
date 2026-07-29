@@ -4,6 +4,12 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
+import {
+  approvalFailureMessage,
+  approvalRefreshFailureMessage,
+  approvalSuccessMessage,
+  type ApprovalStatus,
+} from "@/lib/waiver-approval";
 import { cn } from "@/lib/utils";
 import {
   getGoogleDriveStatus,
@@ -100,21 +106,24 @@ function WaiversPage() {
     }
   }
 
-  async function setApproval(id: string, status: "approved" | "pending") {
+  async function setApproval(id: string, status: ApprovalStatus) {
     setApprovingId(id);
     try {
       await approve({ data: { id, status } });
-      // Statuses are derived per person (active vs superseded), so refetch the
-      // list rather than patch one row locally.
+    } catch (e) {
+      toast.error(approvalFailureMessage(e));
+      setApprovingId(null);
+      return;
+    }
+    // The approval is committed from here on, so a refetch failure must not be
+    // reported as a failed approval. Statuses are derived per person (active vs
+    // superseded), so refetch the list rather than patch one row locally.
+    try {
       const data = await fetchList();
       setRows(data as Row[]);
-      toast.success(
-        status === "approved"
-          ? "Waiver approved. The member's record has been updated."
-          : "Approval removed. The waiver is pending again.",
-      );
+      toast.success(approvalSuccessMessage(status));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update approval");
+      toast.error(approvalRefreshFailureMessage(e));
     } finally {
       setApprovingId(null);
     }
