@@ -38,12 +38,14 @@ function fakeAdmin(opts: {
   upload?: { error: { message: string } | null };
   delete?: { error: { message: string } | null };
   pdfPathUpdate?: { error: { message: string } | null };
+  remove?: { error: { message: string } | null };
   getUserByIdEmail?: string | null;
 }) {
   const inserted = opts.insert ?? ok({ id: "waiver-1" });
   const upload = opts.upload ?? { error: null };
   const del = opts.delete ?? { error: null };
   const pdfPathUpdate = opts.pdfPathUpdate ?? { error: null };
+  const remove = opts.remove ?? { error: null };
 
   const calls = {
     rpc: [] as string[],
@@ -53,6 +55,7 @@ function fakeAdmin(opts: {
     updates: [] as unknown[],
     deletes: [] as string[],
     uploads: [] as { path: string; bytes: unknown }[],
+    removes: [] as string[][],
     getUserById: [] as string[],
   };
 
@@ -113,6 +116,11 @@ function fakeAdmin(opts: {
           expect(bucket).toBe("waivers");
           calls.uploads.push({ path, bytes });
           return Promise.resolve(upload);
+        },
+        remove: (paths: string[]) => {
+          expect(bucket).toBe("waivers");
+          calls.removes.push(paths);
+          return Promise.resolve(remove);
         },
       }),
     },
@@ -248,6 +256,38 @@ describe("filePaperWaiver", () => {
     const { admin } = fakeAdmin({
       existingId: EXISTING_USER,
       upload: { error: { message: "storage down" } },
+      delete: { error: { message: "row locked" } },
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      filePaperWaiver(admin as any, validInput, MANAGER_ID),
+    ).rejects.toThrow(/could not be cleaned up/i);
+  });
+
+  it("unwinds the row AND the already-stored scan when linking pdf_path fails", async () => {
+    // The scan uploaded fine, so this is the case a plain "upload failed" retry
+    // would not catch: without cleanup, the PDF sits in storage with no row
+    // pointing at it (or a row with a null pdf_path a manager could approve
+    // blind), and a retry files a second waiver alongside the orphaned first.
+    const { admin, calls } = fakeAdmin({
+      existingId: EXISTING_USER,
+      pdfPathUpdate: { error: { message: "statement timeout" } },
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      filePaperWaiver(admin as any, validInput, MANAGER_ID),
+    ).rejects.toThrow(/try again/i);
+    expect(calls.uploads[0].path).toBe("waiver-1.pdf");
+    expect(calls.deletes).toEqual(["waiver-1"]);
+    expect(calls.removes).toEqual([["waiver-1.pdf"]]);
+  });
+
+  it("says so when the orphaned waiver row could not be removed either", async () => {
+    const { admin } = fakeAdmin({
+      existingId: EXISTING_USER,
+      pdfPathUpdate: { error: { message: "statement timeout" } },
       delete: { error: { message: "row locked" } },
     });
     const { filePaperWaiver } = await import("./waiver.functions");

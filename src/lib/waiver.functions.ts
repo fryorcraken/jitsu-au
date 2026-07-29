@@ -850,23 +850,60 @@ export async function filePaperWaiver(
     // document behind it. If even the cleanup fails, say so plainly instead
     // of pointing at a repair path that does not exist.
     console.error("[filePaperWaiver] scan upload failed:", upErr);
-    const { error: cleanupErr } = await admin.from("waivers").delete().eq("id", inserted.id);
-    if (cleanupErr) {
-      console.error("[filePaperWaiver] could not remove the empty waiver row:", cleanupErr);
-      throw new Error(
-        "The scan could not be stored, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
-      );
-    }
-    throw new Error("The scan could not be stored. Nothing was filed, so please try again.");
+    const rowRemoved = await removeAbandonedWaiverRow(admin, inserted.id);
+    throw new Error(
+      rowRemoved
+        ? "The scan could not be stored. Nothing was filed, so please try again."
+        : "The scan could not be stored, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
+    );
   }
 
   const { error: pathErr } = await admin
     .from("waivers")
     .update({ pdf_path: path })
     .eq("id", inserted.id);
-  if (pathErr) throw new Error(pathErr.message);
+  if (pathErr) {
+    // The scan IS durably stored at this point, but nothing points at it: an
+    // approval here would promote a waiver with no retrievable document, found
+    // out only later when a manager tries to open it (getWaiverPdfUrl throws
+    // "Waiver PDF not found"). Unwind the row exactly as the upload failure
+    // above does, and also remove the now-orphaned scan, so a retry starts
+    // clean instead of leaving either behind.
+    console.error("[filePaperWaiver] could not point the waiver at its scan:", pathErr);
+    const rowRemoved = await removeAbandonedWaiverRow(admin, inserted.id);
+    const { error: scanCleanupErr } = await admin.storage.from(BUCKET).remove([path]);
+    if (scanCleanupErr) {
+      console.error("[filePaperWaiver] could not remove the orphaned scan:", scanCleanupErr);
+    }
+    throw new Error(
+      rowRemoved
+        ? "Could not finish filing the waiver. Nothing was filed, so please try again."
+        : "Could not finish filing the waiver, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
+    );
+  }
 
   return { id: inserted.id, user_id: userId };
+}
+
+/**
+ * Remove a waiver row that failed partway through filing, so a manager can
+ * simply file it again rather than a half-filed row sitting in their list.
+ * Returns whether the removal succeeded, so the caller can tell the manager
+ * plainly when it did not: a row that genuinely could not be removed needs a
+ * different message ("go check for it") than one that was cleaned up ("try
+ * again"). Logs its own failure and never throws — a cleanup failure must
+ * never mask the original error the caller is already surfacing.
+ */
+async function removeAbandonedWaiverRow(
+  admin: SupabaseClient<Database>,
+  waiverId: string,
+): Promise<boolean> {
+  const { error } = await admin.from("waivers").delete().eq("id", waiverId);
+  if (error) {
+    console.error("[filePaperWaiver] could not remove the half-filed waiver row:", error);
+    return false;
+  }
+  return true;
 }
 
 // ---- Manager: upload a scanned paper waiver, from the web form ----
