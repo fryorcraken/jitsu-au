@@ -129,12 +129,19 @@ export type _VerificationTokenUserIdIsNullable = Expect<
  * Verified state is read from `auth.users` through this RPC. There is
  * deliberately no `email_verified` column on `profiles`: one store, nothing to
  * drift. If `email_confirmed_at` disappears from the RPC's shape, every badge
- * in the manager UI silently reads `undefined` (i.e. "unverified") — so pin it.
+ * in the manager UI silently reads `undefined` (i.e. "unverified") — so pin the
+ * COLUMN NAMES.
+ *
+ * Deliberately not the nullability. The generator cannot know it for a function:
+ * `RETURNS TABLE (...)` compiles to OUT parameters, which carry no `attnotnull`,
+ * so every function return here prints non-null whether or not it is. Pinning
+ * `string | null` only pinned a hand-edit that the next regeneration erased.
+ * The app's real shape lives in `src/lib/supabase-rpc.ts` instead.
  */
 export type _UserEmailsReturnsConfirmation = Expect<
   Equals<
-    Database["public"]["Functions"]["user_emails"]["Returns"][number]["email_confirmed_at"],
-    string | null
+    keyof Database["public"]["Functions"]["user_emails"]["Returns"][number],
+    "user_id" | "email" | "email_confirmed_at"
   >
 >;
 

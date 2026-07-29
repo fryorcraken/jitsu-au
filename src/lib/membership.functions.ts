@@ -32,6 +32,7 @@ import type {
   ClubUserProfile,
   ClubUserWaiver,
 } from "@/lib/club-users";
+import { userEmails } from "@/lib/supabase-rpc";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -46,7 +47,7 @@ async function emailsByUserId(
   userIds: string[],
 ): Promise<Map<string, string>> {
   if (!userIds.length) return new Map();
-  const { data, error } = await admin.rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await userEmails(admin, userIds);
   if (error || !data) return new Map();
   return new Map((data as ClubUserEmail[]).map((e) => [e.user_id, e.email]));
 }
@@ -64,7 +65,7 @@ async function clubUserEmailRows(
   userIds: string[],
 ): Promise<ClubUserEmail[]> {
   if (!userIds.length) return [];
-  const { data, error } = await admin.rpc("user_emails", { _user_ids: userIds });
+  const { data, error } = await userEmails(admin, userIds);
   if (error || !data) return [];
   return (data as ClubUserEmail[]).map((e) => ({
     user_id: e.user_id,

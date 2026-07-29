@@ -171,6 +171,16 @@ after verifying it exists live — see "Supabase clients" in `CLAUDE.md`. That i
 same assertion in a different file, so it is only safe because the SQL was
 applied and checked first.
 
+⚠️ **That exception does not extend to nullability, and never to a function's
+return type.** The generator reads `pg_attribute.attnotnull` for table columns,
+so `Row` types are right; a function's results are OUT parameters with no such
+bit, so everything under `Database["public"]["Functions"]` prints non-null
+regardless of the truth. A hand-fix there is erased by the next regeneration —
+`email_confirmed_at` was corrected by hand on 2026-07-29, regenerated away hours
+later, and took `main` red with the contract test that pinned it. RPCs whose real
+nullability differs go through `src/lib/supabase-rpc.ts`, and contract tests pin
+a function's column NAMES only. See "Supabase clients" in `CLAUDE.md`.
+
 ## Sequencing schema changes and the code that depends on them
 
 The database and the app deploy through **different paths** — a migration only

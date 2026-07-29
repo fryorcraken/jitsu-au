@@ -28,6 +28,7 @@ import type {
   EntryDetailsPatch,
 } from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
+import { userEmails } from "@/lib/supabase-rpc";
 
 const SITE_URL = "https://jitsu.au";
 /**
@@ -333,7 +334,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
-        pdb.rpc("user_emails", { _user_ids: userIds }),
+        userEmails(pdb, userIds),
       ]);
       // Surface these: silently falling back to "Someone" with no email would
       // look like missing data rather than a broken lookup.
