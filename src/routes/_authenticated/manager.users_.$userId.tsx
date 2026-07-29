@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { deriveExpandedWaivers, formatCents } from "@/lib/validation";
+import { deriveExpandedWaivers, formatCents, isPaperWaiver } from "@/lib/validation";
 import { emailVerificationLabel, isEmailVerified } from "@/lib/email-verification";
 import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
@@ -596,6 +596,9 @@ function ManagerUserPage() {
                       </span>
                     </span>
                     <Pill label={w.status} className={WAIVER_CLASS[w.status]} />
+                    {isPaperWaiver(w.signer_meta) && (
+                      <Pill label="paper" className="bg-muted text-muted-foreground" />
+                    )}
                   </CollapsibleTrigger>
                   <div className="flex flex-wrap items-center gap-2">
                     {w.status === "pending" ? (
@@ -678,10 +681,15 @@ function ManagerUserPage() {
 
                     <details className="text-sm">
                       <summary className="cursor-pointer text-muted-foreground">
-                        Signing record
+                        {isPaperWaiver(w.signer_meta) ? "Filing record" : "Signing record"}
                       </summary>
                       <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-                        <Field label="Signer IP" value={w.signer_ip} />
+                        {/* Nobody connected from anywhere to sign a paper form,
+                            so an empty "Signer IP" row would read as missing
+                            evidence rather than evidence that does not exist. */}
+                        {!isPaperWaiver(w.signer_meta) && (
+                          <Field label="Signer IP" value={w.signer_ip} />
+                        )}
                         <SignerMeta meta={w.signer_meta} />
                       </dl>
                     </details>
