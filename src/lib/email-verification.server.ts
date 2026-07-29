@@ -93,12 +93,16 @@ export async function lookupVerificationToken(
   rawToken: string,
 ): Promise<{ id: string; user_id: string | null; email: string } | null> {
   const token_hash = await hashToken(rawToken);
-  const { data: row } = await admin
+  const { data: row, error } = await admin
     .from("email_verification_tokens")
     .select("id, user_id, email, expires_at, revoked_at")
     .eq("token_hash", token_hash)
     .is("revoked_at", null)
     .maybeSingle();
+  // Fail closed, but say so: a failed read is indistinguishable from an unknown
+  // token to every caller, so without this line a broken lookup would quietly
+  // present as "nobody is arriving from their email any more".
+  if (error) console.error("[email-verification] token lookup failed:", error);
   if (!row || !isVerificationTokenLive(row)) return null;
   return { id: row.id, user_id: row.user_id, email: row.email };
 }
@@ -128,12 +132,15 @@ export async function redeemVerificationToken(
   rawToken: string,
 ): Promise<RedemptionOutcome> {
   const token_hash = await hashToken(rawToken);
-  const { data: row } = await admin
+  const { data: row, error: lookupErr } = await admin
     .from("email_verification_tokens")
     .select("id, user_id, email, expires_at, revoked_at")
     .eq("token_hash", token_hash)
     .is("revoked_at", null)
     .maybeSingle();
+  // Same reasoning as `lookupVerificationToken`: the visitor is redirected on
+  // regardless, so a broken read would otherwise be entirely silent.
+  if (lookupErr) console.error("[email-verification] token lookup failed:", lookupErr);
   if (!row || !isVerificationTokenLive(row)) return { result: "no_token" };
 
   // Stamp the redemption. Best-effort: a PostgrestBuilder is a lazy thenable,
