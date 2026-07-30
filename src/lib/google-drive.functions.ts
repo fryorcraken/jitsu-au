@@ -5,7 +5,7 @@ import { profileFullName } from "@/lib/validation";
 
 const GATEWAY_BASE_URL = "https://connector-gateway.lovable.dev";
 const CONNECTOR_ID = "google_drive";
-const FOLDER_NAME = "UTS Jitsu Waivers";
+export const DEFAULT_FOLDER_NAME = "UTS Jitsu Waivers";
 const SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
@@ -83,7 +83,7 @@ export const saveGoogleDriveConnection = createServerFn({ method: "POST" })
     return { ok: true as const, email };
   });
 
-// ---- Status: is Google Drive connected? ----
+// ---- Status: is Google Drive connected, and which folder is configured? ----
 export const getGoogleDriveStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -95,7 +95,101 @@ export const getGoogleDriveStatus = createServerFn({ method: "GET" })
       connected: true as const,
       email: conn.connectedEmail,
       folderId: (conn.metadata.folderId as string | undefined) ?? null,
+      folderName: (conn.metadata.folderName as string | undefined) ?? null,
     };
+  });
+
+// ---- Set (or change) the manager's Drive destination folder ----
+// Resolved once here, by name (search-or-create), rather than lazily on every
+// waiver save. `uploadWaiverToDrive` then just reuses the cached folder id.
+export const setGoogleDriveFolder = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ folderName: z.string().trim().min(1).max(200) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { getConnectionForUser, updateConnectionMetadata } =
+      await import("./app-user-connections.server");
+    const conn = await getConnectionForUser(context.userId, CONNECTOR_ID);
+    if (!conn) throw new Error("Connect your Google account first.");
+
+    const folderId = await ensureFolder(conn.connectionAPIKey, data.folderName);
+    await updateConnectionMetadata(context.userId, CONNECTOR_ID, {
+      ...conn.metadata,
+      folderId,
+      folderName: data.folderName,
+    });
+    return { ok: true as const, folderId, folderName: data.folderName };
+  });
+
+// ---- Resolve a Picker-selected folder id to its canonical name ----
+// Exported as a plain function (fetch injected) so it's testable without a
+// `createServerFn` context — see checkin.functions.ts's `applyCoverage` for
+// the same pattern. The id came from a folder the manager granted this app
+// access to via Picker under the connector's own OAuth client, so there's no
+// name-based search-or-create to do here (see ensureFolder). What's left is
+// confirming the server-side connection can actually see it — catches a
+// folder picked under a different Google account than the one connected —
+// and reading back its canonical name rather than trusting whatever the
+// picker UI displayed.
+export async function resolvePickedFolder(
+  fetchFolder: (folderId: string) => Promise<Response>,
+  folderId: string,
+): Promise<{ id: string; name: string }> {
+  const res = await fetchFolder(folderId);
+  if (!res.ok) {
+    throw new Error(
+      "Could not access that folder from the server. Pick it while signed into the same Google account you connected.",
+    );
+  }
+  const found = (await res.json()) as { id: string; name?: string; mimeType?: string };
+  if (found.mimeType !== "application/vnd.google-apps.folder") {
+    throw new Error("That isn't a folder.");
+  }
+  return { id: found.id, name: found.name ?? "Untitled folder" };
+}
+
+// ---- Set the manager's Drive destination folder from a Google Picker pick ----
+export const setGoogleDriveFolderFromPicker = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ folderId: z.string().trim().min(1).max(200) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { getConnectionForUser, updateConnectionMetadata } =
+      await import("./app-user-connections.server");
+    const conn = await getConnectionForUser(context.userId, CONNECTOR_ID);
+    if (!conn) throw new Error("Connect your Google account first.");
+
+    const { callAsAppUser } = await import("@/integrations/lovable/appUserConnector");
+    let folder;
+    try {
+      folder = await resolvePickedFolder(
+        (folderId) =>
+          callAsAppUser({
+            gatewayBaseUrl: GATEWAY_BASE_URL,
+            connectionAPIKey: conn.connectionAPIKey,
+            connectorId: CONNECTOR_ID,
+            path: `/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType`,
+          }),
+        data.folderId,
+      );
+    } catch (e) {
+      // The client sees a friendly "same Google account" message either way;
+      // this keeps the real cause (a genuine permission mismatch vs. a
+      // transient Drive API error) visible to whoever reads server logs.
+      console.error("[setGoogleDriveFolderFromPicker] resolvePickedFolder failed:", e);
+      throw e;
+    }
+
+    await updateConnectionMetadata(context.userId, CONNECTOR_ID, {
+      ...conn.metadata,
+      folderId: folder.id,
+      folderName: folder.name,
+    });
+    return { ok: true as const, folderId: folder.id, folderName: folder.name };
   });
 
 // ---- Disconnect ----
@@ -122,11 +216,19 @@ export const disconnectGoogleDrive = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-// ---- Helper: find or create the target folder on Drive ----
-async function ensureFolder(connectionAPIKey: string): Promise<string> {
+// ---- Helper: find or create the named folder on Drive ----
+// The `drive.file` scope only lets `files.list` see folders this app itself
+// created (or the user opened via a picker), so this can only ever reuse a
+// folder from a prior run of this function, never one the manager made by
+// hand in Drive with the same name. That's an accepted limitation of the
+// scope, not a bug: broadening to `drive` or `drive.readonly` would let
+// discovery work generally, but only at the cost of consent for the whole
+// Drive instead of just this app's files.
+async function ensureFolder(connectionAPIKey: string, folderName: string): Promise<string> {
   const { callAsAppUser } = await import("@/integrations/lovable/appUserConnector");
+  const escapedName = folderName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const q = encodeURIComponent(
-    `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
   );
   const search = await callAsAppUser({
     gatewayBaseUrl: GATEWAY_BASE_URL,
@@ -147,7 +249,7 @@ async function ensureFolder(connectionAPIKey: string): Promise<string> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: FOLDER_NAME,
+        name: folderName,
         mimeType: "application/vnd.google-apps.folder",
       }),
     },
@@ -222,13 +324,10 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
     if (dlErr || !pdfBlob) throw new Error(dlErr?.message ?? "Failed to download PDF.");
     const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
 
-    let folderId =
-      (conn.metadata.folderId as string | undefined) ?? (await ensureFolder(conn.connectionAPIKey));
-    if (!conn.metadata.folderId) {
-      await updateConnectionMetadata(context.userId, CONNECTOR_ID, {
-        ...conn.metadata,
-        folderId,
-      });
+    let folderId = conn.metadata.folderId as string | undefined;
+    const folderName = conn.metadata.folderName as string | undefined;
+    if (!folderId || !folderName) {
+      throw new Error("Set up a Drive folder on your account page before saving waivers.");
     }
 
     const signedDate = new Date(waiver.signed_at).toISOString().slice(0, 10);
@@ -245,8 +344,8 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
         pdf: pdfBytes,
       });
     } catch (e) {
-      // Folder may have been deleted; retry once with a fresh folder.
-      folderId = await ensureFolder(conn.connectionAPIKey);
+      // Folder may have been deleted; retry once, re-resolving the configured name.
+      folderId = await ensureFolder(conn.connectionAPIKey, folderName);
       await updateConnectionMetadata(context.userId, CONNECTOR_ID, {
         ...conn.metadata,
         folderId,

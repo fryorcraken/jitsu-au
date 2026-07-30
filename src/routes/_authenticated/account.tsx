@@ -13,9 +13,12 @@ import { waiverClass } from "@/lib/status-colours";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { connectAppUser } from "@/integrations/lovable/appUserConnectorClient";
 import {
+  DEFAULT_FOLDER_NAME,
   disconnectGoogleDrive,
   getGoogleDriveStatus,
   saveGoogleDriveConnection,
+  setGoogleDriveFolder,
+  setGoogleDriveFolderFromPicker,
   startGoogleDriveConnect,
 } from "@/lib/google-drive.functions";
 import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
@@ -274,21 +277,31 @@ function GoogleDriveCard() {
   const start = useServerFn(startGoogleDriveConnect);
   const save = useServerFn(saveGoogleDriveConnection);
   const disconnect = useServerFn(disconnectGoogleDrive);
+  const setFolder = useServerFn(setGoogleDriveFolder);
+  const saveFolderFromPicker = useServerFn(setGoogleDriveFolderFromPicker);
 
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [savedFolderName, setSavedFolderName] = useState<string | null>(null);
+  const [folderNameInput, setFolderNameInput] = useState("");
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
 
   const refresh = () =>
     status()
       .then((s) => {
         setConnected(s.connected);
         setEmail(s.connected ? (s.email ?? null) : null);
+        const name = s.connected ? (s.folderName ?? null) : null;
+        setSavedFolderName(name);
+        setFolderNameInput(name ?? DEFAULT_FOLDER_NAME);
       })
       .catch(() => {
         setConnected(false);
         setEmail(null);
+        setSavedFolderName(null);
       })
       .finally(() => setLoading(false));
 
@@ -336,33 +349,102 @@ function GoogleDriveCard() {
     }
   }
 
+  async function onSaveFolder(e: React.FormEvent) {
+    e.preventDefault();
+    const folderName = folderNameInput.trim();
+    if (!folderName) return;
+    setFolderBusy(true);
+    try {
+      const result = await setFolder({ data: { folderName } });
+      setSavedFolderName(result.folderName);
+      toast.success(`Waivers will save to "${result.folderName}"`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to set the Drive folder");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function onBrowseFolder() {
+    const clientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
+    if (!clientId) {
+      toast.error("Browsing isn't set up yet. Type the folder name instead.");
+      return;
+    }
+    setPickerBusy(true);
+    try {
+      const { pickDriveFolder } = await import("@/lib/google-picker");
+      const picked = await pickDriveFolder(clientId);
+      if (!picked) return;
+      const result = await saveFolderFromPicker({ data: { folderId: picked.id } });
+      setSavedFolderName(result.folderName);
+      setFolderNameInput(result.folderName);
+      toast.success(`Waivers will save to "${result.folderName}"`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to pick a folder");
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Google Drive</CardTitle>
         <CardDescription>
-          Connect your Google account to save signed waivers to a &ldquo;UTS Jitsu Waivers&rdquo;
-          folder in your Drive.
+          Connect your Google account to save signed waivers to a folder in your Drive.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading...</p>
         ) : connected ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm">
-              Connected
-              {email ? (
-                <>
-                  {" "}
-                  as <strong>{email}</strong>
-                </>
-              ) : null}
-              .
-            </p>
-            <Button variant="outline" onClick={onDisconnect} disabled={busy}>
-              {busy ? "Working..." : "Disconnect"}
-            </Button>
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm">
+                Connected
+                {email ? (
+                  <>
+                    {" "}
+                    as <strong>{email}</strong>
+                  </>
+                ) : null}
+                .
+              </p>
+              <Button variant="outline" onClick={onDisconnect} disabled={busy}>
+                {busy ? "Working..." : "Disconnect"}
+              </Button>
+            </div>
+            <form onSubmit={onSaveFolder} className="space-y-2">
+              <Label htmlFor="drive-folder-name">Drive folder</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="drive-folder-name"
+                  value={folderNameInput}
+                  onChange={(e) => setFolderNameInput(e.target.value)}
+                  placeholder={DEFAULT_FOLDER_NAME}
+                  className="max-w-xs"
+                  disabled={folderBusy}
+                />
+                <Button type="submit" variant="outline" size="sm" disabled={folderBusy}>
+                  {folderBusy ? "Saving..." : savedFolderName ? "Update folder" : "Save folder"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onBrowseFolder}
+                  disabled={pickerBusy}
+                >
+                  {pickerBusy ? "Opening..." : "Browse in Drive"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {savedFolderName
+                  ? `Waivers save to "${savedFolderName}" in your Drive. Browsing lets you pick any folder you have access to; typing a name will only find one this app made before (a folder you made yourself in Drive with the same name won't be found).`
+                  : "Browse to pick any folder you have access to, or type a name and we'll create it (a folder you made yourself in Drive with the same name won't be found by typing)."}
+              </p>
+            </form>
           </div>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-3">

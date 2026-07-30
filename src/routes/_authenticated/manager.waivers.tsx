@@ -61,6 +61,7 @@ function WaiversPage() {
   const [loading, setLoading] = useState(true);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
+  const [driveFolderReady, setDriveFolderReady] = useState(false);
   const [uploads, setUploads] = useState<Record<string, DriveUpload>>({});
   const [uploadingId, setUploadingId] = useState<string | null>(null);
 
@@ -80,8 +81,14 @@ function WaiversPage() {
         setLoading(false);
       });
     fetchDriveStatus()
-      .then((s) => setDriveConnected(s.connected))
-      .catch(() => setDriveConnected(false));
+      .then((s) => {
+        setDriveConnected(s.connected);
+        setDriveFolderReady(s.connected && Boolean(s.folderId));
+      })
+      .catch(() => {
+        setDriveConnected(false);
+        setDriveFolderReady(false);
+      });
     fetchDriveUploads()
       .then((list) => {
         const map: Record<string, DriveUpload> = {};
@@ -159,7 +166,7 @@ function WaiversPage() {
           </div>
         </div>
 
-        {!driveConnected && (
+        {!driveConnected ? (
           <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
             Connect Google Drive on your{" "}
             <Link to="/account" className="underline">
@@ -167,7 +174,15 @@ function WaiversPage() {
             </Link>{" "}
             to save waivers directly to your Drive.
           </div>
-        )}
+        ) : !driveFolderReady ? (
+          <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            Set up a Drive folder on your{" "}
+            <Link to="/account" className="underline">
+              account page
+            </Link>{" "}
+            before saving waivers to Drive.
+          </div>
+        ) : null}
 
         {loading ? (
           <p>Loading...</p>
@@ -235,7 +250,7 @@ function WaiversPage() {
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
-                          {driveConnected && r.pdf_path ? (
+                          {driveFolderReady && r.pdf_path ? (
                             up?.drive_web_view_link ? (
                               <Button size="sm" variant="outline" asChild>
                                 <a
