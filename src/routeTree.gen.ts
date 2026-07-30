@@ -9,133 +9,49 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
-import { Route as AboutRouteImport } from './routes/about'
-import { Route as AppRouteImport } from './routes/app'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as CalendarRouteImport } from './routes/calendar'
-import { Route as ClassesRouteImport } from './routes/classes'
-import { Route as CodeOfConductRouteImport } from './routes/code-of-conduct'
-import { Route as ContactRouteImport } from './routes/contact'
-import { Route as FaqRouteImport } from './routes/faq'
-import { Route as FirstClassRouteImport } from './routes/first-class'
-import { Route as InstructorsRouteImport } from './routes/instructors'
-import { Route as PricingRouteImport } from './routes/pricing'
-import { Route as RegisterInterestRouteImport } from './routes/register-interest'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
-import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
-import { Route as ThankYouRouteImport } from './routes/thank-you'
-import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as WaiverRouteImport } from './routes/waiver'
-import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
+import { Route as UpdatePasswordRouteImport } from './routes/update-password'
+import { Route as ThankYouRouteImport } from './routes/thank-you'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as RegisterInterestRouteImport } from './routes/register-interest'
+import { Route as PricingRouteImport } from './routes/pricing'
+import { Route as InstructorsRouteImport } from './routes/instructors'
+import { Route as FirstClassRouteImport } from './routes/first-class'
+import { Route as FaqRouteImport } from './routes/faq'
+import { Route as ContactRouteImport } from './routes/contact'
+import { Route as CodeOfConductRouteImport } from './routes/code-of-conduct'
+import { Route as ClassesRouteImport } from './routes/classes'
+import { Route as CalendarRouteImport } from './routes/calendar'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AppRouteImport } from './routes/app'
+import { Route as AboutRouteImport } from './routes/about'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
-import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
-import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
-import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
-import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
-import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
-import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
-import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
-import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
-import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
-import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
-import { Route as ApiCalendarTokenRouteImport } from './routes/api/calendar/$token'
-import { Route as ApiManagerAgentRouteImport } from './routes/api/manager/agent'
+import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as ApiVerifyEmailTokenRouteImport } from './routes/api/verify-email/$token'
-import { Route as AuthenticatedManagerUsersUserIdRouteImport } from './routes/_authenticated/manager.users_.$userId'
-import { Route as AuthenticatedManagerWaiversUploadRouteImport } from './routes/_authenticated/manager.waivers_.upload'
-import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
+import { Route as ApiManagerAgentRouteImport } from './routes/api/manager/agent'
+import { Route as ApiCalendarTokenRouteImport } from './routes/api/calendar/$token'
+import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
+import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
+import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
+import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
+import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
+import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
+import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
+import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
+import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
+import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as LovableEmailAuthWebhookRouteImport } from './routes/lovable/email/auth/webhook'
+import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
+import { Route as AuthenticatedManagerWaiversUploadRouteImport } from './routes/_authenticated/manager.waivers_.upload'
+import { Route as AuthenticatedManagerUsersUserIdRouteImport } from './routes/_authenticated/manager.users_.$userId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
-  id: '/_authenticated',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/app',
-  path: '/app',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CalendarRoute = CalendarRouteImport.update({
-  id: '/calendar',
-  path: '/calendar',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ClassesRoute = ClassesRouteImport.update({
-  id: '/classes',
-  path: '/classes',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CodeOfConductRoute = CodeOfConductRouteImport.update({
-  id: '/code-of-conduct',
-  path: '/code-of-conduct',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ContactRoute = ContactRouteImport.update({
-  id: '/contact',
-  path: '/contact',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FaqRoute = FaqRouteImport.update({
-  id: '/faq',
-  path: '/faq',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FirstClassRoute = FirstClassRouteImport.update({
-  id: '/first-class',
-  path: '/first-class',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const InstructorsRoute = InstructorsRouteImport.update({
-  id: '/instructors',
-  path: '/instructors',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PricingRoute = PricingRouteImport.update({
-  id: '/pricing',
-  path: '/pricing',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RegisterInterestRoute = RegisterInterestRouteImport.update({
-  id: '/register-interest',
-  path: '/register-interest',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
-  id: '/robots.txt',
-  path: '/robots.txt',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
-  id: '/sitemap.xml',
-  path: '/sitemap.xml',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ThankYouRoute = ThankYouRouteImport.update({
-  id: '/thank-you',
-  path: '/thank-you',
+const WaiverRoute = WaiverRouteImport.update({
+  id: '/waiver',
+  path: '/waiver',
   getParentRoute: () => rootRouteImport,
 } as any)
 const UpdatePasswordRoute = UpdatePasswordRouteImport.update({
@@ -143,67 +59,124 @@ const UpdatePasswordRoute = UpdatePasswordRouteImport.update({
   path: '/update-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WaiverRoute = WaiverRouteImport.update({
-  id: '/waiver',
-  path: '/waiver',
+const ThankYouRoute = ThankYouRouteImport.update({
+  id: '/thank-you',
+  path: '/thank-you',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
-  id: '/account',
-  path: '/account',
-  getParentRoute: () => AuthenticatedRouteRoute,
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegisterInterestRoute = RegisterInterestRouteImport.update({
+  id: '/register-interest',
+  path: '/register-interest',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InstructorsRoute = InstructorsRouteImport.update({
+  id: '/instructors',
+  path: '/instructors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FirstClassRoute = FirstClassRouteImport.update({
+  id: '/first-class',
+  path: '/first-class',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FaqRoute = FaqRouteImport.update({
+  id: '/faq',
+  path: '/faq',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContactRoute = ContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CodeOfConductRoute = CodeOfConductRouteImport.update({
+  id: '/code-of-conduct',
+  path: '/code-of-conduct',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ClassesRoute = ClassesRouteImport.update({
+  id: '/classes',
+  path: '/classes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalendarRoute = CalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedMembershipRoute = AuthenticatedMembershipRouteImport.update({
   id: '/membership',
   path: '/membership',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedManagerApiTokensRoute =
-  AuthenticatedManagerApiTokensRouteImport.update({
-    id: '/manager/api-tokens',
-    path: '/manager/api-tokens',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerCalendarRoute =
-  AuthenticatedManagerCalendarRouteImport.update({
-    id: '/manager/calendar',
-    path: '/manager/calendar',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerCheckInRoute =
-  AuthenticatedManagerCheckInRouteImport.update({
-    id: '/manager/check-in',
-    path: '/manager/check-in',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerMembershipPlansRoute =
-  AuthenticatedManagerMembershipPlansRouteImport.update({
-    id: '/manager/membership-plans',
-    path: '/manager/membership-plans',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerMembershipsRoute =
-  AuthenticatedManagerMembershipsRouteImport.update({
-    id: '/manager/memberships',
-    path: '/manager/memberships',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerReconciliationRoute =
-  AuthenticatedManagerReconciliationRouteImport.update({
-    id: '/manager/reconciliation',
-    path: '/manager/reconciliation',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerSettingsRoute =
-  AuthenticatedManagerSettingsRouteImport.update({
-    id: '/manager/settings',
-    path: '/manager/settings',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerUsersRoute =
-  AuthenticatedManagerUsersRouteImport.update({
-    id: '/manager/users',
-    path: '/manager/users',
+const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiVerifyEmailTokenRoute = ApiVerifyEmailTokenRouteImport.update({
+  id: '/api/verify-email/$token',
+  path: '/api/verify-email/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiManagerAgentRoute = ApiManagerAgentRouteImport.update({
+  id: '/api/manager/agent',
+  path: '/api/manager/agent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCalendarTokenRoute = ApiCalendarTokenRouteImport.update({
+  id: '/api/calendar/$token',
+  path: '/api/calendar/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedManagerWaiversRoute =
+  AuthenticatedManagerWaiversRouteImport.update({
+    id: '/manager/waivers',
+    path: '/manager/waivers',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedManagerWaiverTemplateRoute =
@@ -212,49 +185,76 @@ const AuthenticatedManagerWaiverTemplateRoute =
     path: '/manager/waiver-template',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedManagerWaiversRoute =
-  AuthenticatedManagerWaiversRouteImport.update({
-    id: '/manager/waivers',
-    path: '/manager/waivers',
+const AuthenticatedManagerUsersRoute =
+  AuthenticatedManagerUsersRouteImport.update({
+    id: '/manager/users',
+    path: '/manager/users',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const ApiCalendarTokenRoute = ApiCalendarTokenRouteImport.update({
-  id: '/api/calendar/$token',
-  path: '/api/calendar/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiManagerAgentRoute = ApiManagerAgentRouteImport.update({
-  id: '/api/manager/agent',
-  path: '/api/manager/agent',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiVerifyEmailTokenRoute = ApiVerifyEmailTokenRouteImport.update({
-  id: '/api/verify-email/$token',
-  path: '/api/verify-email/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedManagerUsersUserIdRoute =
-  AuthenticatedManagerUsersUserIdRouteImport.update({
-    id: '/manager/users_/$userId',
-    path: '/manager/users/$userId',
+const AuthenticatedManagerSettingsRoute =
+  AuthenticatedManagerSettingsRouteImport.update({
+    id: '/manager/settings',
+    path: '/manager/settings',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerReconciliationRoute =
+  AuthenticatedManagerReconciliationRouteImport.update({
+    id: '/manager/reconciliation',
+    path: '/manager/reconciliation',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerMembershipsRoute =
+  AuthenticatedManagerMembershipsRouteImport.update({
+    id: '/manager/memberships',
+    path: '/manager/memberships',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerMembershipPlansRoute =
+  AuthenticatedManagerMembershipPlansRouteImport.update({
+    id: '/manager/membership-plans',
+    path: '/manager/membership-plans',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerCheckInRoute =
+  AuthenticatedManagerCheckInRouteImport.update({
+    id: '/manager/check-in',
+    path: '/manager/check-in',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerCalendarRoute =
+  AuthenticatedManagerCalendarRouteImport.update({
+    id: '/manager/calendar',
+    path: '/manager/calendar',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerApiTokensRoute =
+  AuthenticatedManagerApiTokensRouteImport.update({
+    id: '/manager/api-tokens',
+    path: '/manager/api-tokens',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const LovableEmailAuthWebhookRoute = LovableEmailAuthWebhookRouteImport.update({
+  id: '/lovable/email/auth/webhook',
+  path: '/lovable/email/auth/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LovableEmailAuthPreviewRoute = LovableEmailAuthPreviewRouteImport.update({
+  id: '/lovable/email/auth/preview',
+  path: '/lovable/email/auth/preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedManagerWaiversUploadRoute =
   AuthenticatedManagerWaiversUploadRouteImport.update({
     id: '/manager/waivers_/upload',
     path: '/manager/waivers/upload',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const LovableEmailAuthPreviewRoute = LovableEmailAuthPreviewRouteImport.update({
-  id: '/lovable/email/auth/preview',
-  path: '/lovable/email/auth/preview',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LovableEmailAuthWebhookRoute = LovableEmailAuthWebhookRouteImport.update({
-  id: '/lovable/email/auth/webhook',
-  path: '/lovable/email/auth/webhook',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const AuthenticatedManagerUsersUserIdRoute =
+  AuthenticatedManagerUsersUserIdRouteImport.update({
+    id: '/manager/users_/$userId',
+    path: '/manager/users/$userId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -532,130 +532,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated': {
-      id: '/_authenticated'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/app': {
-      id: '/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/calendar': {
-      id: '/calendar'
-      path: '/calendar'
-      fullPath: '/calendar'
-      preLoaderRoute: typeof CalendarRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/classes': {
-      id: '/classes'
-      path: '/classes'
-      fullPath: '/classes'
-      preLoaderRoute: typeof ClassesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/code-of-conduct': {
-      id: '/code-of-conduct'
-      path: '/code-of-conduct'
-      fullPath: '/code-of-conduct'
-      preLoaderRoute: typeof CodeOfConductRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/contact': {
-      id: '/contact'
-      path: '/contact'
-      fullPath: '/contact'
-      preLoaderRoute: typeof ContactRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/faq': {
-      id: '/faq'
-      path: '/faq'
-      fullPath: '/faq'
-      preLoaderRoute: typeof FaqRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/first-class': {
-      id: '/first-class'
-      path: '/first-class'
-      fullPath: '/first-class'
-      preLoaderRoute: typeof FirstClassRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/instructors': {
-      id: '/instructors'
-      path: '/instructors'
-      fullPath: '/instructors'
-      preLoaderRoute: typeof InstructorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/pricing': {
-      id: '/pricing'
-      path: '/pricing'
-      fullPath: '/pricing'
-      preLoaderRoute: typeof PricingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/register-interest': {
-      id: '/register-interest'
-      path: '/register-interest'
-      fullPath: '/register-interest'
-      preLoaderRoute: typeof RegisterInterestRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/robots.txt': {
-      id: '/robots.txt'
-      path: '/robots.txt'
-      fullPath: '/robots.txt'
-      preLoaderRoute: typeof RobotsDottxtRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sitemap.xml': {
-      id: '/sitemap.xml'
-      path: '/sitemap.xml'
-      fullPath: '/sitemap.xml'
-      preLoaderRoute: typeof SitemapDotxmlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/thank-you': {
-      id: '/thank-you'
-      path: '/thank-you'
-      fullPath: '/thank-you'
-      preLoaderRoute: typeof ThankYouRouteImport
+    '/waiver': {
+      id: '/waiver'
+      path: '/waiver'
+      fullPath: '/waiver'
+      preLoaderRoute: typeof WaiverRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/update-password': {
@@ -665,19 +546,131 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UpdatePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/waiver': {
-      id: '/waiver'
-      path: '/waiver'
-      fullPath: '/waiver'
-      preLoaderRoute: typeof WaiverRouteImport
+    '/thank-you': {
+      id: '/thank-you'
+      path: '/thank-you'
+      fullPath: '/thank-you'
+      preLoaderRoute: typeof ThankYouRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/account': {
-      id: '/_authenticated/account'
-      path: '/account'
-      fullPath: '/account'
-      preLoaderRoute: typeof AuthenticatedAccountRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/register-interest': {
+      id: '/register-interest'
+      path: '/register-interest'
+      fullPath: '/register-interest'
+      preLoaderRoute: typeof RegisterInterestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/instructors': {
+      id: '/instructors'
+      path: '/instructors'
+      fullPath: '/instructors'
+      preLoaderRoute: typeof InstructorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/first-class': {
+      id: '/first-class'
+      path: '/first-class'
+      fullPath: '/first-class'
+      preLoaderRoute: typeof FirstClassRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/faq': {
+      id: '/faq'
+      path: '/faq'
+      fullPath: '/faq'
+      preLoaderRoute: typeof FaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/contact': {
+      id: '/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof ContactRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/code-of-conduct': {
+      id: '/code-of-conduct'
+      path: '/code-of-conduct'
+      fullPath: '/code-of-conduct'
+      preLoaderRoute: typeof CodeOfConductRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/classes': {
+      id: '/classes'
+      path: '/classes'
+      fullPath: '/classes'
+      preLoaderRoute: typeof ClassesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/membership': {
       id: '/_authenticated/membership'
@@ -686,81 +679,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMembershipRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/manager/api-tokens': {
-      id: '/_authenticated/manager/api-tokens'
-      path: '/manager/api-tokens'
-      fullPath: '/manager/api-tokens'
-      preLoaderRoute: typeof AuthenticatedManagerApiTokensRouteImport
+    '/_authenticated/account': {
+      id: '/_authenticated/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AuthenticatedAccountRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/manager/calendar': {
-      id: '/_authenticated/manager/calendar'
-      path: '/manager/calendar'
-      fullPath: '/manager/calendar'
-      preLoaderRoute: typeof AuthenticatedManagerCalendarRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/check-in': {
-      id: '/_authenticated/manager/check-in'
-      path: '/manager/check-in'
-      fullPath: '/manager/check-in'
-      preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/membership-plans': {
-      id: '/_authenticated/manager/membership-plans'
-      path: '/manager/membership-plans'
-      fullPath: '/manager/membership-plans'
-      preLoaderRoute: typeof AuthenticatedManagerMembershipPlansRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/memberships': {
-      id: '/_authenticated/manager/memberships'
-      path: '/manager/memberships'
-      fullPath: '/manager/memberships'
-      preLoaderRoute: typeof AuthenticatedManagerMembershipsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/reconciliation': {
-      id: '/_authenticated/manager/reconciliation'
-      path: '/manager/reconciliation'
-      fullPath: '/manager/reconciliation'
-      preLoaderRoute: typeof AuthenticatedManagerReconciliationRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/settings': {
-      id: '/_authenticated/manager/settings'
-      path: '/manager/settings'
-      fullPath: '/manager/settings'
-      preLoaderRoute: typeof AuthenticatedManagerSettingsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/users': {
-      id: '/_authenticated/manager/users'
-      path: '/manager/users'
-      fullPath: '/manager/users'
-      preLoaderRoute: typeof AuthenticatedManagerUsersRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/waiver-template': {
-      id: '/_authenticated/manager/waiver-template'
-      path: '/manager/waiver-template'
-      fullPath: '/manager/waiver-template'
-      preLoaderRoute: typeof AuthenticatedManagerWaiverTemplateRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/waivers': {
-      id: '/_authenticated/manager/waivers'
-      path: '/manager/waivers'
-      fullPath: '/manager/waivers'
-      preLoaderRoute: typeof AuthenticatedManagerWaiversRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/api/calendar/$token': {
-      id: '/api/calendar/$token'
-      path: '/api/calendar/$token'
-      fullPath: '/api/calendar/$token'
-      preLoaderRoute: typeof ApiCalendarTokenRouteImport
+    '/api/verify-email/$token': {
+      id: '/api/verify-email/$token'
+      path: '/api/verify-email/$token'
+      fullPath: '/api/verify-email/$token'
+      preLoaderRoute: typeof ApiVerifyEmailTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/manager/agent': {
@@ -770,26 +700,89 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiManagerAgentRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/verify-email/$token': {
-      id: '/api/verify-email/$token'
-      path: '/api/verify-email/$token'
-      fullPath: '/api/verify-email/$token'
-      preLoaderRoute: typeof ApiVerifyEmailTokenRouteImport
+    '/api/calendar/$token': {
+      id: '/api/calendar/$token'
+      path: '/api/calendar/$token'
+      fullPath: '/api/calendar/$token'
+      preLoaderRoute: typeof ApiCalendarTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/manager/users_/$userId': {
-      id: '/_authenticated/manager/users_/$userId'
-      path: '/manager/users/$userId'
-      fullPath: '/manager/users/$userId'
-      preLoaderRoute: typeof AuthenticatedManagerUsersUserIdRouteImport
+    '/_authenticated/manager/waivers': {
+      id: '/_authenticated/manager/waivers'
+      path: '/manager/waivers'
+      fullPath: '/manager/waivers'
+      preLoaderRoute: typeof AuthenticatedManagerWaiversRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/manager/waivers_/upload': {
-      id: '/_authenticated/manager/waivers_/upload'
-      path: '/manager/waivers/upload'
-      fullPath: '/manager/waivers/upload'
-      preLoaderRoute: typeof AuthenticatedManagerWaiversUploadRouteImport
+    '/_authenticated/manager/waiver-template': {
+      id: '/_authenticated/manager/waiver-template'
+      path: '/manager/waiver-template'
+      fullPath: '/manager/waiver-template'
+      preLoaderRoute: typeof AuthenticatedManagerWaiverTemplateRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/users': {
+      id: '/_authenticated/manager/users'
+      path: '/manager/users'
+      fullPath: '/manager/users'
+      preLoaderRoute: typeof AuthenticatedManagerUsersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/settings': {
+      id: '/_authenticated/manager/settings'
+      path: '/manager/settings'
+      fullPath: '/manager/settings'
+      preLoaderRoute: typeof AuthenticatedManagerSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/reconciliation': {
+      id: '/_authenticated/manager/reconciliation'
+      path: '/manager/reconciliation'
+      fullPath: '/manager/reconciliation'
+      preLoaderRoute: typeof AuthenticatedManagerReconciliationRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/memberships': {
+      id: '/_authenticated/manager/memberships'
+      path: '/manager/memberships'
+      fullPath: '/manager/memberships'
+      preLoaderRoute: typeof AuthenticatedManagerMembershipsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/membership-plans': {
+      id: '/_authenticated/manager/membership-plans'
+      path: '/manager/membership-plans'
+      fullPath: '/manager/membership-plans'
+      preLoaderRoute: typeof AuthenticatedManagerMembershipPlansRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/check-in': {
+      id: '/_authenticated/manager/check-in'
+      path: '/manager/check-in'
+      fullPath: '/manager/check-in'
+      preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/calendar': {
+      id: '/_authenticated/manager/calendar'
+      path: '/manager/calendar'
+      fullPath: '/manager/calendar'
+      preLoaderRoute: typeof AuthenticatedManagerCalendarRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/api-tokens': {
+      id: '/_authenticated/manager/api-tokens'
+      path: '/manager/api-tokens'
+      fullPath: '/manager/api-tokens'
+      preLoaderRoute: typeof AuthenticatedManagerApiTokensRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/lovable/email/auth/webhook': {
+      id: '/lovable/email/auth/webhook'
+      path: '/lovable/email/auth/webhook'
+      fullPath: '/lovable/email/auth/webhook'
+      preLoaderRoute: typeof LovableEmailAuthWebhookRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/lovable/email/auth/preview': {
       id: '/lovable/email/auth/preview'
@@ -798,12 +791,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LovableEmailAuthPreviewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/lovable/email/auth/webhook': {
-      id: '/lovable/email/auth/webhook'
-      path: '/lovable/email/auth/webhook'
-      fullPath: '/lovable/email/auth/webhook'
-      preLoaderRoute: typeof LovableEmailAuthWebhookRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/manager/waivers_/upload': {
+      id: '/_authenticated/manager/waivers_/upload'
+      path: '/manager/waivers/upload'
+      fullPath: '/manager/waivers/upload'
+      preLoaderRoute: typeof AuthenticatedManagerWaiversUploadRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/users_/$userId': {
+      id: '/_authenticated/manager/users_/$userId'
+      path: '/manager/users/$userId'
+      fullPath: '/manager/users/$userId'
+      preLoaderRoute: typeof AuthenticatedManagerUsersUserIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
   }
 }
@@ -879,13 +879,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
