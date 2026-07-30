@@ -15,6 +15,8 @@ import {
   canonicalUrl,
   isProductionHost,
 } from "./seo";
+import { Route as RootRoute } from "@/routes/__root";
+import { Route as AboutRoute } from "@/routes/about";
 
 describe("canonicalUrl", () => {
   it("keeps the trailing slash on the home page", () => {
@@ -79,6 +81,60 @@ describe("buildPageMeta", () => {
   it("sets the <title> tag", () => {
     const meta = buildPageMeta({ title: "Page Title", description: "D", path: "/" });
     expect(meta.find((m) => "title" in m)).toMatchObject({ title: "Page Title" });
+  });
+});
+
+/**
+ * Mirrors the merge in `@tanstack/react-router`'s head-tag builder
+ * (`headContentUtils.cjs`: `buildTagsFromMatches`/`useTags`): matches are
+ * walked leaf-first, and a tag is dropped once its `name`/`property` has
+ * already been emitted by a more leaf-specific match.
+ */
+function mergeRouteMeta(matchMetaArrays: Record<string, unknown>[][]): Record<string, unknown>[] {
+  const seen = new Set<string>();
+  const merged: Record<string, unknown>[] = [];
+  for (let i = matchMetaArrays.length - 1; i >= 0; i--) {
+    for (const tag of matchMetaArrays[i]) {
+      const key =
+        typeof tag.name === "string"
+          ? tag.name
+          : typeof tag.property === "string"
+            ? tag.property
+            : undefined;
+      if (key) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      merged.push(tag);
+    }
+  }
+  return merged;
+}
+
+// This exercises the real root and page `head()` functions (not just
+// `buildPageMeta`'s own output), through a reimplementation of the router's
+// actual merge algorithm, so it fails the way the original bug did: before
+// the fix, /about didn't declare twitter:title, and this would have resolved
+// to the root's generic "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney"
+// instead of the page's own "About UTS Jitsu".
+describe("root + page head merge (regression guard for the Twitter Card bug)", () => {
+  it("resolves /about's merged twitter:title/description to its own tags, not the root's fallback", () => {
+    const rootMeta = (RootRoute.options.head as () => { meta: Record<string, unknown>[] })().meta;
+    const aboutMeta = (AboutRoute.options.head as () => { meta: Record<string, unknown>[] })().meta;
+    const merged = mergeRouteMeta([rootMeta, aboutMeta]);
+    const contentFor = (key: string) =>
+      merged.find((m) => m.name === key || m.property === key)?.content;
+
+    expect(contentFor("og:title")).toBe("About UTS Jitsu");
+    expect(contentFor("twitter:title")).toBe("About UTS Jitsu");
+    expect(contentFor("og:description")).toBe(
+      "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
+    );
+    expect(contentFor("twitter:description")).toBe(
+      "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
+    );
+    // No page overrides twitter:card, so the root's shared default survives the merge.
+    expect(contentFor("twitter:card")).toBe("summary_large_image");
   });
 });
 
