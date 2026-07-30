@@ -148,7 +148,7 @@ describe("buildSitemapXml", () => {
 
 describe("SOCIAL_IMAGE", () => {
   it("is an absolute URL, which is the only form the social crawlers accept", () => {
-    expect(SOCIAL_IMAGE.url).toBe(`${SITE_ORIGIN}/logo.png`);
+    expect(SOCIAL_IMAGE.url.startsWith(`${SITE_ORIGIN}/`)).toBe(true);
   });
 
   it("is big enough for a large summary card", () => {
@@ -157,9 +157,10 @@ describe("SOCIAL_IMAGE", () => {
     expect(SOCIAL_IMAGE.height).toBeGreaterThanOrEqual(157);
   });
 
-  it("is served from the public directory, so the file actually exists", () => {
-    const file = join(import.meta.dirname, "..", "..", "public", "logo.png");
-    expect(() => readFileSync(file)).not.toThrow();
+  it("points at the training1 asset checked into the repo, so the path is not a typo", () => {
+    const assetFile = join(import.meta.dirname, "..", "assets", "training1.jpg.asset.json");
+    const asset = JSON.parse(readFileSync(assetFile, "utf8"));
+    expect(SOCIAL_IMAGE.url).toBe(`${SITE_ORIGIN}${asset.url}`);
   });
 });
 

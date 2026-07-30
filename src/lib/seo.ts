@@ -46,12 +46,17 @@ export const PRODUCTION_HOSTS = [
  *
  * The root route already sets `twitter:card: summary_large_image`, which asks
  * for a picture; without one, a shared link renders as a bare grey box.
+ *
+ * This is the same training photo used as the homepage hero
+ * (`src/assets/training1.jpg.asset.json`), served from Lovable's asset host
+ * rather than `public/`. Width/height match the intrinsic size set on that
+ * `<img>` in `routes/index.tsx`.
  */
 export const SOCIAL_IMAGE = {
-  url: `${SITE_ORIGIN}/logo.png`,
-  width: 786,
-  height: 491,
-  alt: "UTS Jitsu",
+  url: `${SITE_ORIGIN}/__l5e/assets-v1/97ff8dff-f2a6-4130-8e98-19cdc723872d/training1.jpg`,
+  width: 1600,
+  height: 1205,
+  alt: "UTS Jitsu students training on the mat",
 } as const;
 
 /**
