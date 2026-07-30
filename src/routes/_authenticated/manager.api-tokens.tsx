@@ -241,7 +241,7 @@ function ApiTokensPage() {
           </CardContent>
         </Card>
 
-        {/* Onboarding: paste-able prompt + skill pointer. */}
+        {/* Onboarding: paste-able prompt for the manager's own coding agent. */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Connect your agent</CardTitle>
@@ -262,16 +262,7 @@ function ApiTokensPage() {
             </div>
 
             <div className="rounded-md border p-3 text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">Using Claude Code?</p>
-              <p className="mt-1">
-                This repo ships a ready-made skill,{" "}
-                <code className="font-mono">uts-manager-agent</code> (in{" "}
-                <code className="font-mono">.claude/skills/</code>), that wraps these calls. Set{" "}
-                <code className="font-mono">UTS_MANAGER_API_URL={baseUrl}</code> and{" "}
-                <code className="font-mono">UTS_MANAGER_API_KEY=&lt;your token&gt;</code>, then ask
-                it to list members or edit an invoice.
-              </p>
-              <p className="mt-2">
+              <p>
                 The action list is always live at{" "}
                 <a className="underline" href={manifestUrl}>
                   {manifestUrl}
