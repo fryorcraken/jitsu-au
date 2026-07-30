@@ -15,11 +15,12 @@
 
 The schema reference lives in **`docs/database.md`** (every table: columns,
 RLS, relationships, storage). The product spec for the waiver/profile/account
-flows lives in **`docs/waivers.md`**. The intended schema is defined by the
-migrations in `supabase/migrations/*.sql`.
+flows lives in **`docs/waivers.md`**, and the club's house rules and how people
+agree to them in **`docs/code-of-conduct.md`**. The intended schema is defined by
+the migrations in `supabase/migrations/*.sql`.
 
 **When you change a migration, a table, or the code that reads/writes it,
-update `docs/database.md` (and `docs/waivers.md` if the product behavior
+update `docs/database.md` (and the matching product doc if the behavior
 changed) in the same change** so the docs and the code do not drift.
 
 ⚠️ **Committing a migration does not apply it.** Nothing in this pipeline runs

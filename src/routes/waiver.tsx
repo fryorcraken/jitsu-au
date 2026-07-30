@@ -106,8 +106,18 @@ function Waiver() {
    * The confirmed outcome. Set only from a server response, never from a toast:
    * the success screen used to be able to appear off the back of a toast that
    * fired whether or not anything came back.
+   *
+   * `codeOfConductUrl` carries a token, because an applicant cannot log in yet
+   * and the code of conduct still has to know who is signing it. Null on a
+   * recovery path (a dropped-then-confirmed submit, or a restored pending
+   * check on mount): only the original submit response mints the token, and
+   * the confirmation email carries the same link independently either way.
    */
-  const [result, setResult] = useState<{ pdfUrl: string | null; pdfReady: boolean } | null>(null);
+  const [result, setResult] = useState<{
+    pdfUrl: string | null;
+    pdfReady: boolean;
+    codeOfConductUrl: string | null;
+  } | null>(null);
   /** True once a draft from this browser session has been put back on screen. */
   const [restored, setRestored] = useState(false);
   /** Blocks draft writes until the restore pass has run, so it can't erase one. */
@@ -287,7 +297,7 @@ function Waiver() {
     checkSubmission({ data: { client_submission_id: pendingCheckId } })
       .then((res) => {
         if (cancelled || !res.found) return;
-        setResult({ pdfUrl: res.pdf_url, pdfReady: Boolean(res.pdf_url) });
+        setResult({ pdfUrl: res.pdf_url, pdfReady: Boolean(res.pdf_url), codeOfConductUrl: null });
         clearDraft();
       })
       .catch(() => {
@@ -478,12 +488,20 @@ function Waiver() {
           waiver_id: res.waiver_id,
           pdf_url: res.pdf_url,
           pdf_ready: Boolean(res.pdf_url),
+          // This recovery path re-derives the outcome from `checkWaiverSubmission`,
+          // which answers only "did it land" and carries no token; the original
+          // attempt's confirmation email already has the working link.
+          code_of_conduct_url: null,
         };
       },
     });
 
     if (outcome.ok) {
-      setResult({ pdfUrl: outcome.value.pdf_url, pdfReady: outcome.value.pdf_ready });
+      setResult({
+        pdfUrl: outcome.value.pdf_url,
+        pdfReady: outcome.value.pdf_ready,
+        codeOfConductUrl: outcome.value.code_of_conduct_url,
+      });
       // Signed and recorded: the draft has done its job, and it holds health
       // answers and a signature that should not outlive it.
       clearDraft();
@@ -586,6 +604,25 @@ function Waiver() {
                 </Button>
               </div>
             </>
+          )}
+
+          {/* The code of conduct, offered while they are still here. It is not
+              required before training, so this is an invitation and not a step:
+              the same link is in their confirmation email if they close the tab.
+              A plain anchor because the link carries a token in its query.
+              Independent of whether the PDF rendered: both branches above get it. */}
+          {result.codeOfConductUrl && (
+            <div className="mt-10 w-full rounded-2xl border bg-card p-6 text-left">
+              <h2 className="text-lg font-bold">One more thing, when you have a minute</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Please read our code of conduct and agree to it. It covers how we train together:
+                hygiene, mat etiquette, gear, and keeping each other safe. You can train before you
+                do this, and we have emailed you the same link so you can come back to it.
+              </p>
+              <Button asChild className="mt-4">
+                <a href={result.codeOfConductUrl}>Read the code of conduct</a>
+              </Button>
+            </div>
           )}
         </section>
       </SiteLayout>

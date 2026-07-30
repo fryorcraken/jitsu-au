@@ -94,6 +94,10 @@ export const PUBLIC_PAGES: SitemapPage[] = [
   { path: "/faq", changefreq: "monthly", priority: 0.7 },
   { path: "/calendar", changefreq: "daily", priority: 0.6 },
   { path: "/contact", changefreq: "yearly", priority: 0.5 },
+  // Indexable on purpose. A club that publishes the rules it trains by is worth
+  // finding, and the page is readable by anyone: the signing form only appears
+  // for someone the site can already identify.
+  { path: "/code-of-conduct", changefreq: "yearly", priority: 0.4 },
 ];
 
 /**

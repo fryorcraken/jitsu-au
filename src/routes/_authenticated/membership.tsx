@@ -16,6 +16,8 @@ import {
   type LifecycleStatus,
 } from "@/lib/validation";
 import { getMyMemberships, listMembershipPlans, startMembership } from "@/lib/membership.functions";
+import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
+import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
 export const Route = createFileRoute("/_authenticated/membership")({
   head: () => ({
@@ -52,6 +54,43 @@ const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string }> 
     blurb: "Your membership has lapsed. Renew below to keep training.",
   },
 };
+
+/**
+ * A one-line nudge to read the code of conduct, shown only to someone who has
+ * not agreed to the current version.
+ *
+ * This page is where the club actually wants it signed: joining as a paying
+ * member is the moment the house rules start to matter. It is still not a
+ * condition of anything, so it renders as a note and never blocks a plan, and it
+ * disappears entirely once they have agreed.
+ */
+function CodeOfConductNudge() {
+  const fetchSigner = useServerFn(getCodeOfConductSigner);
+  const [state, setState] = useState<CodeOfConductState | null>(null);
+
+  useEffect(() => {
+    fetchSigner({ data: { token: "" } })
+      .then((res) => setState(res.status?.state ?? null))
+      .catch(() => setState(null));
+  }, [fetchSigner]);
+
+  if (state === null || state === "signed") return null;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
+      <p className="text-sm text-muted-foreground">
+        {state === "outdated"
+          ? "We have updated our code of conduct since you agreed to it. Please have another read."
+          : "While you're here, please read our code of conduct and agree to it. It takes a minute."}
+      </p>
+      <Button asChild size="sm" variant="outline">
+        <Link to="/code-of-conduct" search={{ t: undefined }}>
+          Read it
+        </Link>
+      </Button>
+    </div>
+  );
+}
 
 function MembershipPage() {
   const navigate = useNavigate();
@@ -213,6 +252,8 @@ function MembershipPage() {
             </CardContent>
           )}
         </Card>
+
+        <CodeOfConductNudge />
 
         <div>
           <div className="flex flex-wrap items-end justify-between gap-4">
