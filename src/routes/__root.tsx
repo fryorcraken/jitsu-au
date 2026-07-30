@@ -15,6 +15,9 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
 
+const FONT_HREF =
+  "https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;900&display=swap";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -132,9 +135,26 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png", sizes: "180x180" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      // Preload (not `rel="stylesheet"`) so the fetch starts immediately without
+      // holding back first paint of every headline on a cross-origin CSS
+      // round-trip, on top of the app's own stylesheet. The script below turns
+      // it into a real stylesheet once loaded.
       {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;900&display=swap",
+        rel: "preload",
+        as: "style",
+        href: FONT_HREF,
+      },
+    ],
+    scripts: [
+      {
+        // TanStack Router's `links` config renders through React, which drops
+        // inline `onload="..."` attributes (they read as suspicious event-handler
+        // props and get silently stripped) — so the classic "preload as=style,
+        // swap rel on load" trick has to be wired up imperatively here instead.
+        // The link starts as `media="print"` (fetches but doesn't apply/block)
+        // and flips to `media="all"` once loaded, applying the already-cached
+        // response.
+        children: `(function(){var l=document.createElement("link");l.rel="stylesheet";l.media="print";l.href=${JSON.stringify(FONT_HREF)};l.onload=function(){l.media="all"};document.head.appendChild(l)})();`,
       },
     ],
   }),

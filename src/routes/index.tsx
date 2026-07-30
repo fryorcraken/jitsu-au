@@ -15,7 +15,14 @@ export const Route = createFileRoute("/")({
         "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
       path: "/",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/" }],
+    links: [
+      { rel: "canonical", href: "https://jitsu.au/" },
+      // Hero image is the page's LCP element but sits well into the body, so the
+      // preloader would otherwise only discover it after parsing the head and
+      // everything above it in the markup. Preloading it here lets the browser
+      // start the fetch immediately, in parallel with the stylesheets.
+      { rel: "preload", as: "image", href: heroAsset.url, fetchPriority: "high" },
+    ],
     scripts: [
       {
         type: "application/ld+json",
@@ -67,6 +74,7 @@ function Home() {
               alt="UTS Jitsu students training on the mat"
               width={1600}
               height={1205}
+              fetchPriority="high"
               className="aspect-[4/3] w-full rounded-2xl object-cover shadow-xl ring-1 ring-black/5"
             />
           </div>
