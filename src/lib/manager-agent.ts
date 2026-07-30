@@ -187,7 +187,7 @@ export function classifyAction(
 ):
   | { ok: true; action: string }
   | { ok: false; code: "missing_action" | "unknown_action"; message: string } {
-  if (action === undefined) {
+  if (action === undefined || action === null) {
     return { ok: false, code: "missing_action", message: "Missing required field: action." };
   }
   if (typeof action !== "string" || !validActions.includes(action)) {

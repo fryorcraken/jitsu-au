@@ -87,7 +87,11 @@ one editable field: `price_cents` (integer cents), `notes` (pass `null` to clear
 a mistaken note), `payment_reference`, `payment_method`
 (`bank_transfer | stripe | manual`), `status` (`pending | cancelled | expired`).
 Any other key is rejected, naming itself in the error — so a typo like `price`
-doesn't get silently ignored.
+doesn't get silently ignored. This includes the read-only fields a `list_*`
+call decorates an invoice with (`plan_code`, `plan_name`, `price`, `is_student`,
+`paid_at`, `starts_at`, `ends_at`, `created_at`, `member_name`,
+`member_email`): send only `id` plus the field(s) you're actually changing,
+never a listed invoice echoed back wholesale.
 
 ```bash
 scripts/agent.sh edit_invoice '{"id":"<uuid>","price_cents":24500,"notes":"student rate applied"}'

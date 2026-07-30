@@ -92,6 +92,14 @@ describe("classifyAction", () => {
     expect((classifyAction("nope", valid) as { code: string }).code).toBe("unknown_action");
   });
 
+  it("treats an explicit null action as missing, not unknown", () => {
+    expect(classifyAction(null, valid)).toEqual({
+      ok: false,
+      code: "missing_action",
+      message: "Missing required field: action.",
+    });
+  });
+
   it("accepts a valid action", () => {
     expect(classifyAction("edit_invoice", valid)).toEqual({ ok: true, action: "edit_invoice" });
   });

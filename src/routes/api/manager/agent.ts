@@ -74,9 +74,10 @@ function json(body: unknown, status = 200): Response {
 
 /**
  * Only GET (manifest) and POST (dispatch) carry behaviour. Every other method
- * used to fall through to the GET manifest handler and return 200 — harmless
- * today, but a trap if a future handler ever dispatches on method. Reject
- * explicitly instead.
+ * used to fall through to the site's normal SSR router (no matching handler
+ * on this route), returning the marketing homepage HTML with a 200 — harmless
+ * but confusing, and a trap if a future handler ever dispatches on method.
+ * Reject explicitly instead.
  */
 function methodNotAllowed(): Response {
   return new Response(
