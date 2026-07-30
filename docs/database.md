@@ -585,7 +585,7 @@ markdown `invoice_payment_instructions`. **RLS:** manager-only.
 
 `id` PK, `user_id → auth.users(id) ON DELETE CASCADE` (**nullable**), `email`
 (normalized, the address being proven), `purpose`
-(`interest | waiver | manager_resend | self_resend | email_change`),
+(`interest | waiver | manager_resend | self_resend | email_change | code_of_conduct`),
 `token_prefix`, `token_hash` (SHA-256, unique; raw never stored), `created_at`,
 `expires_at`, `last_used_at`, `revoked_at`. Partial indexes on the hash and on
 the email, both `WHERE revoked_at IS NULL`.
@@ -608,10 +608,47 @@ A token only ever proves the address it was mailed to: redemption re-checks it
 against the account's current email, so links sent before a manager corrected a
 typo are inert. Expiry is 180 days.
 
+The `code_of_conduct` purpose is the one token that does a second job. It rides
+on the "sign the code of conduct" link offered after a waiver and repeated in the
+confirmation email, and it is how that page knows who is signing: the person is a
+locked applicant at that point and cannot sign in at all. Opening it still proves
+the address, like every other token here.
+
 **RLS:** enabled with **no policies** and no client grants (`REVOKE ALL` from
 anon/authenticated) — unlike `calendar_feed_tokens` there is nothing here a
 person needs to see about their own row, so minting, redeeming and revoking all
 run through the service role.
+
+### `code_of_conduct_acceptances` — who agreed to the house rules
+
+`id` PK, `user_id → profiles(user_id) ON DELETE CASCADE` (**not null**),
+`version` (the document version agreed to), `accepted_at`, `full_name`, `email`
+(both copied from the person's record by the server, as evidence),
+`signature_name` (what they typed to sign), `signer_ip`, `signer_meta` (jsonb),
+`created_at`. Index on `(user_id, accepted_at DESC)`.
+
+The product spec is `docs/code-of-conduct.md`. Three things about the shape:
+
+- **There is no template table.** The document lives in the repo
+  (`src/lib/code-of-conduct.ts`) and `CODE_OF_CONDUCT_VERSION` is bumped by hand.
+  House rules change by committee decision, and a git diff says more about what
+  changed than a row would. An acceptance older than the current version reads as
+  out of date, which is a prompt to re-read and never a block.
+- **There is no PDF and no approval.** Nothing here gates anything: signing the
+  code of conduct is not required before training, so there is no pending state
+  and no manager decision to record. The text of each version is in git, so
+  freezing a copy per acceptance would only duplicate it.
+- **`user_id` is NOT NULL**, unlike `email_verification_tokens.user_id`. A
+  verification token can exist before its person does; the code of conduct is
+  only ever signed by somebody the club already holds, and signing it never
+  creates a person.
+
+Re-signing is always allowed and only ever adds a row, so the history of what
+somebody agreed to and when stays intact.
+
+**RLS:** enabled. Read policies for the owner and for managers as defence in
+depth; no client grants (`REVOKE ALL` from anon/authenticated), so every read and
+the insert run through the service role.
 
 ### `manager_api_tokens` — manager agent API credentials
 

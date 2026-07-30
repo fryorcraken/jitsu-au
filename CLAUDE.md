@@ -243,6 +243,10 @@ Core tables:
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.
+- `code_of_conduct_acceptances` — who agreed to the club's house rules, and to
+  which version. The document itself lives in the repo (`src/lib/code-of-conduct.ts`),
+  not in a table: no template editor, no PDF, no approval. Signing it is never a
+  gate on anything. Product flows: `docs/code-of-conduct.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.

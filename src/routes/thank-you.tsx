@@ -3,6 +3,7 @@ import { CheckCircle2 } from "lucide-react";
 import { z } from "zod";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
+import { buildPageMeta } from "@/lib/seo";
 
 const searchSchema = z.object({
   kind: z.enum(["interest", "waiver", "contact"]).catch("interest"),
@@ -12,10 +13,12 @@ export const Route = createFileRoute("/thank-you")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "Thank you | UTS Jitsu" },
-      { name: "description", content: "Thanks for reaching out to UTS Jitsu." },
+      ...buildPageMeta({
+        title: "Thank you | UTS Jitsu",
+        description: "Thanks for reaching out to UTS Jitsu.",
+        path: "/thank-you",
+      }),
       { name: "robots", content: "noindex" },
-      { property: "og:url", content: "https://jitsu.au/thank-you" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/thank-you" }],
   }),

@@ -7,19 +7,16 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { faqItems } from "@/lib/faq";
+import { buildPageMeta } from "@/lib/seo";
 
 export const Route = createFileRoute("/faq")({
   head: () => ({
-    meta: [
-      { title: "FAQ | UTS Jitsu" },
-      {
-        name: "description",
-        content: "Answers to common questions about starting Japanese Jiu-Jitsu at UTS Jitsu.",
-      },
-      { property: "og:title", content: "FAQ | UTS Jitsu" },
-      { property: "og:description", content: "Trial classes, gear, experience needed, and more." },
-      { property: "og:url", content: "https://jitsu.au/faq" },
-    ],
+    meta: buildPageMeta({
+      title: "FAQ | UTS Jitsu",
+      description: "Answers to common questions about starting Japanese Jiu-Jitsu at UTS Jitsu.",
+      ogDescription: "Trial classes, gear, experience needed, and more.",
+      path: "/faq",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/faq" }],
     scripts: [
       {

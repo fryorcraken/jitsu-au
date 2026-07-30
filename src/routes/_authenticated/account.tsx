@@ -19,6 +19,8 @@ import {
   startGoogleDriveConnect,
 } from "@/lib/google-drive.functions";
 import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
+import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
+import type { CodeOfConductState } from "@/lib/code-of-conduct";
 import { requestMyEmailVerification } from "@/lib/email-verification.functions";
 import { isEmailVerified } from "@/lib/email-verification";
 
@@ -117,6 +119,8 @@ function AccountPage() {
 
       <WaiversCard />
 
+      <CodeOfConductCard />
+
       {isManager && <GoogleDriveCard />}
 
       <ChangePasswordCard />
@@ -196,6 +200,69 @@ function WaiversCard() {
         )}
         <Button asChild variant="outline" size="sm">
           <Link to="/waiver">Sign an updated waiver</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Where this member stands on the club's house rules.
+ *
+ * Reads through the same server function the public page uses: a signed-in
+ * caller is identified by their session, so no token is involved here. Signing
+ * itself happens on `/code-of-conduct`, because agreeing to a document you
+ * cannot see on the same screen is not agreement.
+ */
+function CodeOfConductCard() {
+  const fetchSigner = useServerFn(getCodeOfConductSigner);
+  const [state, setState] = useState<CodeOfConductState | null>(null);
+  const [acceptedAt, setAcceptedAt] = useState<string | null>(null);
+  const [acceptedVersion, setAcceptedVersion] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchSigner({ data: { token: "" } })
+      .then((res) => {
+        if (!res.status) return;
+        setState(res.status.state);
+        setAcceptedAt(res.status.accepted_at);
+        setAcceptedVersion(res.status.accepted_version);
+      })
+      .catch(() => {
+        /* nothing to show is the honest fallback here */
+      })
+      .finally(() => setLoading(false));
+  }, [fetchSigner]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Code of conduct</CardTitle>
+        <CardDescription>
+          The rules we train by. Signing it is not required before you train, and we ask for it
+          around the time you join as a paying member.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : state === "signed" ? (
+          <p className="text-sm text-muted-foreground">
+            You agreed to version {acceptedVersion} on {formatDate(acceptedAt)}.
+          </p>
+        ) : state === "outdated" ? (
+          <p className="text-sm text-muted-foreground">
+            You agreed to version {acceptedVersion} on {formatDate(acceptedAt)}. We have updated it
+            since, so please have another read.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">You have not agreed to it yet.</p>
+        )}
+        <Button asChild variant={state === "signed" ? "outline" : "default"} size="sm">
+          <Link to="/code-of-conduct" search={{ t: undefined }}>
+            {state === "signed" ? "Read the code of conduct" : "Read and sign it"}
+          </Link>
         </Button>
       </CardContent>
     </Card>

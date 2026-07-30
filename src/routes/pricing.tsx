@@ -5,6 +5,7 @@ import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
 import { formatCents } from "@/lib/validation";
 import { listMembershipPlans } from "@/lib/membership.functions";
+import { buildPageMeta } from "@/lib/seo";
 
 type PlanSummary = Awaited<ReturnType<typeof listMembershipPlans>>[number];
 
@@ -20,20 +21,13 @@ export const Route = createFileRoute("/pricing")({
     }
   },
   head: () => ({
-    meta: [
-      { title: "Pricing | UTS Jitsu" },
-      {
-        name: "description",
-        content:
-          "UTS student and general public fees for Japanese Jiu-Jitsu at UTS Ultimo. Casual, semester, and yearly options.",
-      },
-      { property: "og:title", content: "Pricing | UTS Jitsu" },
-      {
-        property: "og:description",
-        content: "Casual, semester and yearly options. First two sessions are always free.",
-      },
-      { property: "og:url", content: "https://jitsu.au/pricing" },
-    ],
+    meta: buildPageMeta({
+      title: "Pricing | UTS Jitsu",
+      description:
+        "UTS student and general public fees for Japanese Jiu-Jitsu at UTS Ultimo. Casual, semester, and yearly options.",
+      ogDescription: "Casual, semester and yearly options. First two sessions are always free.",
+      path: "/pricing",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/pricing" }],
   }),
   component: Pricing,

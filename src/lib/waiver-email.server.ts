@@ -9,6 +9,7 @@ import { render } from "@react-email/render";
 import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { buildCodeOfConductUrl } from "@/lib/code-of-conduct";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
 
@@ -99,6 +100,13 @@ export interface WaiverEmailParams {
   admin: AdminClient;
   /** The person this waiver belongs to, used to check whether their address is proven. */
   userId?: string | null;
+  /**
+   * Proof-of-click token for the "sign the code of conduct" link, when one could
+   * be minted. Without it the email still goes out, just without that button:
+   * the code of conduct never blocks anything, so it is not worth failing a
+   * waiver confirmation over.
+   */
+  codeOfConductToken?: string | null;
 }
 
 /**
@@ -146,6 +154,7 @@ export async function sendWaiverEmails({
   pdfUrl,
   admin,
   userId,
+  codeOfConductToken,
 }: WaiverEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -166,6 +175,11 @@ export async function sendWaiverEmails({
     memberName: memberGreetingName,
     pdfUrl,
     verifyUrl,
+    // Only offered when the token exists: a code-of-conduct link with no token
+    // lands on a page the signer cannot sign from, which is worse than no link.
+    codeOfConductUrl: codeOfConductToken
+      ? buildCodeOfConductUrl({ siteUrl: SITE_URL, token: codeOfConductToken })
+      : null,
   });
   const memberHtml = await render(memberEl);
   const memberText = await render(memberEl, { plainText: true });

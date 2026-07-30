@@ -9,11 +9,15 @@ import {
   CLUB_SOCIAL_URLS,
   SOCIAL_IMAGE,
   buildClubJsonLd,
+  buildPageMeta,
   buildRobotsTxt,
   buildSitemapXml,
   canonicalUrl,
   isProductionHost,
 } from "./seo";
+import { Route as RootRoute } from "@/routes/__root";
+import { Route as AboutRoute } from "@/routes/about";
+import { GOOGLE_MAPS_URL } from "./venue";
 
 describe("canonicalUrl", () => {
   it("keeps the trailing slash on the home page", () => {
@@ -22,6 +26,116 @@ describe("canonicalUrl", () => {
 
   it("appends other paths to the origin without a trailing slash", () => {
     expect(canonicalUrl("/about")).toBe("https://jitsu.au/about");
+  });
+});
+
+type MetaEntry = ReturnType<typeof buildPageMeta>[number];
+
+/** Reads a meta entry's `content` by its `name` or `property` key. */
+function metaContent(meta: MetaEntry[], key: string): unknown {
+  for (const m of meta) {
+    const record = m as Record<string, unknown>;
+    if (record.name === key || record.property === key) return record.content;
+  }
+  return undefined;
+}
+
+describe("buildPageMeta", () => {
+  // The bug this guards against: the root route sets generic og:*/twitter:*
+  // tags as a fallback, and the router only replaces a tag whose own
+  // name/property is repeated by a child. A page that overrode og:title but
+  // not twitter:title kept the home page's title in Twitter/Slack/iMessage
+  // previews, on every route that didn't happen to also set twitter:title.
+  it("mirrors og:title/og:description onto twitter:title/twitter:description", () => {
+    const meta = buildPageMeta({
+      title: "Page Title",
+      description: "Page description.",
+      ogTitle: "Social title",
+      ogDescription: "Social description.",
+      path: "/page",
+    });
+    expect(metaContent(meta, "twitter:title")).toBe("Social title");
+    expect(metaContent(meta, "twitter:description")).toBe("Social description.");
+    expect(metaContent(meta, "og:title")).toBe("Social title");
+    expect(metaContent(meta, "og:description")).toBe("Social description.");
+  });
+
+  it("falls og:title/og:description/twitter:* back to title/description when unset", () => {
+    const meta = buildPageMeta({
+      title: "Page Title",
+      description: "Page description.",
+      path: "/page",
+    });
+    for (const key of ["og:title", "twitter:title"]) {
+      expect(metaContent(meta, key)).toBe("Page Title");
+    }
+    for (const key of ["og:description", "twitter:description"]) {
+      expect(metaContent(meta, key)).toBe("Page description.");
+    }
+  });
+
+  it("builds an absolute og:url from the given path", () => {
+    const meta = buildPageMeta({ title: "T", description: "D", path: "/about" });
+    expect(metaContent(meta, "og:url")).toBe("https://jitsu.au/about");
+  });
+
+  it("sets the <title> tag", () => {
+    const meta = buildPageMeta({ title: "Page Title", description: "D", path: "/" });
+    expect(meta.find((m) => "title" in m)).toMatchObject({ title: "Page Title" });
+  });
+});
+
+/**
+ * Mirrors the merge in `@tanstack/react-router`'s head-tag builder
+ * (`headContentUtils.cjs`: `buildTagsFromMatches`/`useTags`): matches are
+ * walked leaf-first, and a tag is dropped once its `name`/`property` has
+ * already been emitted by a more leaf-specific match.
+ */
+function mergeRouteMeta(matchMetaArrays: Record<string, unknown>[][]): Record<string, unknown>[] {
+  const seen = new Set<string>();
+  const merged: Record<string, unknown>[] = [];
+  for (let i = matchMetaArrays.length - 1; i >= 0; i--) {
+    for (const tag of matchMetaArrays[i]) {
+      const key =
+        typeof tag.name === "string"
+          ? tag.name
+          : typeof tag.property === "string"
+            ? tag.property
+            : undefined;
+      if (key) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      merged.push(tag);
+    }
+  }
+  return merged;
+}
+
+// This exercises the real root and page `head()` functions (not just
+// `buildPageMeta`'s own output), through a reimplementation of the router's
+// actual merge algorithm, so it fails the way the original bug did: before
+// the fix, /about didn't declare twitter:title, and this would have resolved
+// to the root's generic "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney"
+// instead of the page's own "About UTS Jitsu".
+describe("root + page head merge (regression guard for the Twitter Card bug)", () => {
+  it("resolves /about's merged twitter:title/description to its own tags, not the root's fallback", () => {
+    const rootMeta = (RootRoute.options.head as () => { meta: Record<string, unknown>[] })().meta;
+    const aboutMeta = (AboutRoute.options.head as () => { meta: Record<string, unknown>[] })().meta;
+    const merged = mergeRouteMeta([rootMeta, aboutMeta]);
+    const contentFor = (key: string) =>
+      merged.find((m) => m.name === key || m.property === key)?.content;
+
+    expect(contentFor("og:title")).toBe("About UTS Jitsu");
+    expect(contentFor("twitter:title")).toBe("About UTS Jitsu");
+    expect(contentFor("og:description")).toBe(
+      "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
+    );
+    expect(contentFor("twitter:description")).toBe(
+      "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
+    );
+    // No page overrides twitter:card, so the root's shared default survives the merge.
+    expect(contentFor("twitter:card")).toBe("summary_large_image");
   });
 });
 
@@ -173,11 +287,20 @@ describe("buildClubJsonLd", () => {
     expect(club.name).toBe("UTS Jitsu");
   });
 
-  it("is typed as both a club and a sports organisation", () => {
+  it("is typed as a club, a sports organisation, a local business and an organisation", () => {
     // `address` needs SportsClub; `sport` needs SportsOrganization, which
     // SportsClub does not inherit. Dropping either type makes one of them an
-    // unknown property to a validator.
-    expect(club["@type"]).toEqual(["SportsClub", "SportsOrganization"]);
+    // unknown property to a validator. LocalBusiness and Organization are
+    // added explicitly (schema.org's own hierarchy already implies both
+    // through SportsClub -> SportsActivityLocation -> LocalBusiness ->
+    // Organization) because rich-result tooling keys off literal @type
+    // strings rather than walking the ontology.
+    expect(club["@type"]).toEqual([
+      "SportsClub",
+      "SportsOrganization",
+      "LocalBusiness",
+      "Organization",
+    ]);
     expect(club.sport).toBe("Japanese Jiu-Jitsu");
   });
 
@@ -197,6 +320,14 @@ describe("buildClubJsonLd", () => {
     expect(String(club.logo).startsWith(SITE_ORIGIN)).toBe(true);
     expect(String(club.image).startsWith(SITE_ORIGIN)).toBe(true);
   });
+
+  it("names the founder as a Person", () => {
+    expect(club.founder).toEqual({ "@type": "Person", name: "Franck Royer" });
+  });
+
+  it("points hasMap at the same deep link the site links out to", () => {
+    expect(club.hasMap).toBe(GOOGLE_MAPS_URL);
+  });
 });
 
 // Structured data that contradicts the visible page is worse than none, so the
@@ -205,6 +336,7 @@ describe("club details match the site", () => {
   const srcDir = join(import.meta.dirname, "..");
   const footer = readFileSync(join(srcDir, "components", "site", "SiteFooter.tsx"), "utf8");
   const contact = readFileSync(join(srcDir, "routes", "contact.tsx"), "utf8");
+  const instructors = readFileSync(join(srcDir, "routes", "instructors.tsx"), "utf8");
 
   it("uses the phone number the footer and contact page dial", () => {
     // "+61493631759" -> the local "0493631759" both pages link with tel:.
@@ -217,6 +349,11 @@ describe("club details match the site", () => {
     for (const url of CLUB_SOCIAL_URLS) {
       expect(footer).toContain(url);
     }
+  });
+
+  it("names the founder the instructors page credits as founder", () => {
+    expect(instructors).toContain("Franck Royer");
+    expect(instructors).toContain("founder");
   });
 });
 

@@ -61,6 +61,15 @@ export function SiteFooter() {
               </Link>
             </li>
             <li>
+              <Link
+                to="/code-of-conduct"
+                search={{ t: undefined }}
+                className="hover:text-foreground"
+              >
+                Code of conduct
+              </Link>
+            </li>
+            <li>
               <Link to="/contact" className="hover:text-foreground">
                 Contact us
               </Link>

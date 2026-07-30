@@ -200,6 +200,14 @@ arrived: a **Paper** badge on the waivers list and on the person's page, and a
 shows its signing IP and browser context. There is no signing IP on a paper
 waiver, and the panel says so by leaving it out rather than showing it empty.
 
+### Applicant is offered the code of conduct
+
+The waiver is the document that has to be signed before training. The club's
+house rules are a second document, and they are **not** a gate: the success
+screen offers them straight after the waiver, and the confirmation email carries
+the same link so it can be done later. The link holds a token, because an
+applicant cannot sign in yet. Full spec: `docs/code-of-conduct.md`.
+
 ### Mistake or changed details
 
 Submit again with the same email. Always accepted, whatever phase that email's

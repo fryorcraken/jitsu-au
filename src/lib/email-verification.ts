@@ -42,6 +42,14 @@ export const verificationPurposes = [
   "self_resend",
   /** A manager corrected the address; this proves the NEW one. */
   "email_change",
+  /**
+   * The "sign the code of conduct" link, offered after a waiver and repeated in
+   * the confirmation email. Someone who has just signed a waiver is a locked
+   * applicant with no way to log in, so this token is how they prove who they
+   * are when they come back to it days later. Opening it proves the mailbox as
+   * well, like every other token here.
+   */
+  "code_of_conduct",
 ] as const;
 export type VerificationPurpose = (typeof verificationPurposes)[number];
 
