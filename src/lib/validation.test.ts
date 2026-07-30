@@ -16,9 +16,15 @@ import {
   deriveExpandedWaivers,
   deriveWaiverListStatuses,
   interestSchema,
+  isFutureSigningDate,
+  isMinorOn,
+  isPaperWaiver,
   isUtsStudent,
   managerEmailChangeSchema,
+  MAX_SCAN_BYTES,
+  base64ByteLength,
   normalizeEmail,
+  paperWaiverUploadSchema,
   profileFullName,
   resolveNamePrefill,
   saveTemplateSchema,
@@ -1142,6 +1148,228 @@ describe("stopRepeatingSchema", () => {
   it("takes the series, not one of its dates", () => {
     expect(stopRepeatingSchema.safeParse({ series_id: crypto.randomUUID() }).success).toBe(true);
     expect(stopRepeatingSchema.safeParse({ series_id: "not-a-uuid" }).success).toBe(false);
+  });
+});
+
+describe("base64ByteLength", () => {
+  it("counts the decoded bytes without decoding", () => {
+    // "hi" -> "aGk=" (2 bytes, one pad), "hip" -> "aGlw" (3 bytes, no pad).
+    expect(base64ByteLength("aGk=")).toBe(2);
+    expect(base64ByteLength("aGlw")).toBe(3);
+    expect(base64ByteLength("YQ==")).toBe(1);
+    expect(base64ByteLength("")).toBe(0);
+  });
+
+  it("ignores whitespace, which a wrapped data URL carries", () => {
+    expect(base64ByteLength("aGlw\n")).toBe(3);
+    expect(base64ByteLength(" aG lw ")).toBe(3);
+  });
+});
+
+describe("isMinorOn", () => {
+  it("is true only for someone under 18 on the given date", () => {
+    expect(isMinorOn("2010-06-01", "2026-07-29")).toBe(true);
+    expect(isMinorOn("2000-06-01", "2026-07-29")).toBe(false);
+  });
+
+  it("turns 18 on the birthday itself, not the day after", () => {
+    expect(isMinorOn("2008-07-29", "2026-07-29")).toBe(false);
+    expect(isMinorOn("2008-07-30", "2026-07-29")).toBe(true);
+  });
+
+  it("compares date parts, so a Sydney manager gets the same answer as UTC", () => {
+    // Parsed as Dates these are UTC midnights, and the naive difference would
+    // shift by a day either side of the birthday for anyone west of Greenwich.
+    expect(isMinorOn("2008-12-31", "2026-12-31")).toBe(false);
+    expect(isMinorOn("2008-12-31", "2026-12-30")).toBe(true);
+  });
+
+  it("returns false for a malformed date rather than guessing", () => {
+    expect(isMinorOn("", "2026-07-29")).toBe(false);
+    expect(isMinorOn("2010-06-01", "not-a-date")).toBe(false);
+  });
+});
+
+describe("isFutureSigningDate", () => {
+  const now = "2026-07-29T12:00:00.000Z";
+
+  it("accepts today and any past date", () => {
+    expect(isFutureSigningDate("2026-07-29", now)).toBe(false);
+    expect(isFutureSigningDate("2019-01-02", now)).toBe(false);
+  });
+
+  it("allows one day of slack, because the club is UTC+10 and the server is UTC", () => {
+    // 10am Sydney on the 30th is still the 29th in UTC; a form dated that day
+    // is correct and must not be refused.
+    expect(isFutureSigningDate("2026-07-30", now)).toBe(false);
+  });
+
+  it("rejects a date beyond that slack", () => {
+    expect(isFutureSigningDate("2026-07-31", now)).toBe(true);
+    expect(isFutureSigningDate("2026-08-29", now)).toBe(true);
+  });
+
+  it("does not reject when the clock is unreadable", () => {
+    expect(isFutureSigningDate("2026-07-31", "nonsense")).toBe(false);
+  });
+});
+
+describe("isPaperWaiver", () => {
+  it("is true only for a signing context marked as a paper upload", () => {
+    expect(isPaperWaiver({ source: "paper_upload", uploaded_by: "u1" })).toBe(true);
+    expect(isPaperWaiver({ user_agent: "Mozilla/5.0", timezone: "Australia/Sydney" })).toBe(false);
+  });
+
+  it("is false for anything that is not an object of fields", () => {
+    expect(isPaperWaiver(null)).toBe(false);
+    expect(isPaperWaiver(undefined)).toBe(false);
+    expect(isPaperWaiver("paper_upload")).toBe(false);
+    expect(isPaperWaiver([{ source: "paper_upload" }])).toBe(false);
+  });
+});
+
+describe("paperWaiverUploadSchema", () => {
+  /** A one-page scan: base64 is not decoded by the schema, only sized. */
+  const onePage = [{ name: "waiver.pdf", type: "application/pdf" as const, data: "aGlw" }];
+
+  const validAdult = {
+    first_name: "Ada",
+    last_name: "Lovelace",
+    date_of_birth: "1990-12-10",
+    address: "1 Broadway, Ultimo NSW",
+    phone: "0400000000",
+    email: "ada@example.com",
+    emergency_contact_name: "Charles Babbage",
+    emergency_contact_phone: "0400000001",
+    signed_on: "2026-07-20",
+    scan: onePage,
+  };
+
+  it("accepts a filed adult form", () => {
+    expect(paperWaiverUploadSchema.safeParse(validAdult).success).toBe(true);
+  });
+
+  it("does not ask for a signature, ticks or health answers: they are on the scan", () => {
+    // The whole point of the scan being the signed document. If any of these
+    // ever became required here, a manager would be retyping evidence.
+    const parsed = paperWaiverUploadSchema.parse(validAdult);
+    expect(parsed).not.toHaveProperty("signature_name");
+    expect(parsed).not.toHaveProperty("acknowledgements");
+    expect(parsed).not.toHaveProperty("health_answers");
+  });
+
+  it("requires a scan, and caps how many files one upload carries", () => {
+    expect(paperWaiverUploadSchema.safeParse({ ...validAdult, scan: [] }).success).toBe(false);
+    const tooMany = Array.from({ length: 21 }, () => onePage[0]);
+    expect(paperWaiverUploadSchema.safeParse({ ...validAdult, scan: tooMany }).success).toBe(false);
+  });
+
+  it("rejects a file type that is not a PDF or a photo", () => {
+    const res = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      scan: [{ name: "waiver.docx", type: "application/msword", data: "aGlw" }],
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it("rejects a scan over the size limit, measured on the decoded bytes", () => {
+    // Base64 inflates by a third, so a limit checked on the string length would
+    // let a file a third over the cap straight through.
+    const oversized = "A".repeat(Math.ceil((MAX_SCAN_BYTES + 1024) / 3) * 4);
+    const res = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      scan: [{ name: "scan.png", type: "image/png", data: oversized }],
+    });
+    expect(res.success).toBe(false);
+    expect(res.error?.issues[0].path).toEqual(["scan"]);
+  });
+
+  it("sums the files, so a stack of photos cannot slip past the cap one at a time", () => {
+    const half = "A".repeat(Math.ceil((MAX_SCAN_BYTES * 0.6) / 3) * 4);
+    const res = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      scan: [
+        { name: "p1.jpg", type: "image/jpeg", data: half },
+        { name: "p2.jpg", type: "image/jpeg", data: half },
+      ],
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it("leaves the emergency contact relationship optional for an adult", () => {
+    // Older paper forms did not ask for it. A manager must not have to invent
+    // one to file a real document.
+    expect(paperWaiverUploadSchema.safeParse(validAdult).success).toBe(true);
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...validAdult, emergency_contact_relationship: "" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("requires the relationship when the applicant was under 18 when they signed", () => {
+    const minor = { ...validAdult, date_of_birth: "2012-01-05" };
+    const res = paperWaiverUploadSchema.safeParse(minor);
+    expect(res.success).toBe(false);
+    expect(res.error?.issues[0].path).toEqual(["emergency_contact_relationship"]);
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...minor, emergency_contact_relationship: "Mother" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("judges minority on the date signed, not on today", () => {
+    // A form signed in 2019 by a 16 year old is a minor's form forever, even
+    // though that person is an adult by the time it is filed.
+    const res = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      date_of_birth: "2003-05-01",
+      signed_on: "2019-06-01",
+    });
+    expect(res.success).toBe(false);
+    expect(res.error?.issues[0].path).toEqual(["emergency_contact_relationship"]);
+  });
+
+  it("requires the person fields the waivers table cannot store as null", () => {
+    for (const field of [
+      "first_name",
+      "last_name",
+      "date_of_birth",
+      "address",
+      "phone",
+      "email",
+      "emergency_contact_name",
+      "emergency_contact_phone",
+      "signed_on",
+    ]) {
+      const without = { ...validAdult } as Record<string, unknown>;
+      delete without[field];
+      expect(paperWaiverUploadSchema.safeParse(without).success, field).toBe(false);
+    }
+  });
+
+  it("insists on a real date for the signing date and the birth date", () => {
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...validAdult, signed_on: "20/07/2026" }).success,
+    ).toBe(false);
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...validAdult, date_of_birth: "10 Dec 1990" }).success,
+    ).toBe(false);
+  });
+
+  it("takes a template version or an honest null for a form nobody can place", () => {
+    expect(paperWaiverUploadSchema.safeParse({ ...validAdult, template_version: 3 }).success).toBe(
+      true,
+    );
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...validAdult, template_version: null }).success,
+    ).toBe(true);
+    expect(paperWaiverUploadSchema.safeParse({ ...validAdult, template_version: 0 }).success).toBe(
+      false,
+    );
+  });
+
+  it("defaults the SMS consent to no, so an unticked box is never consent", () => {
+    expect(paperWaiverUploadSchema.parse(validAdult).sms_whatsapp_consent).toBe(false);
   });
 });
 

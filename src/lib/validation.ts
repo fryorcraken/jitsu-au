@@ -501,6 +501,160 @@ export const waiverApprovalSchema = z.object({
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 
+// ---- Manager: upload a scanned paper waiver ----
+//
+// Some people fill the form on paper at the door. A manager scans it and files
+// it here, so the club has one place where every waiver lives. The scan IS the
+// signed document: signatures, ticked acknowledgements and the five health
+// answers are on the paper, exactly as they are inside a generated PDF for an
+// online submission (docs/waivers.md rule 3), so none of them are re-typed.
+//
+// What the manager does type is what the club needs as data rather than as
+// evidence: the person fields (which an approval promotes onto the profile) and
+// anything an instructor needs to hand. The required set is exactly the
+// `waivers` table's NOT NULL columns, so nothing here can produce a row the
+// online form could not.
+
+/**
+ * The `signer_meta.source` marking a waiver as a scanned paper form filed by a
+ * manager rather than signed on the site.
+ *
+ * It lives in the signing-context blob because that is what it is: evidence of
+ * how this submission reached the club. An online waiver's blob holds the
+ * browser and IP that signed it; a paper one holds who filed it, when, and from
+ * which files. Nothing else about the row differs, which is the point — a paper
+ * waiver is approved, superseded and downloaded exactly like any other.
+ */
+export const PAPER_WAIVER_SOURCE = "paper_upload";
+
+/** Whether a waiver's signing context says it was a scanned paper form. */
+export function isPaperWaiver(signerMeta: unknown): boolean {
+  return Boolean(
+    signerMeta &&
+    typeof signerMeta === "object" &&
+    !Array.isArray(signerMeta) &&
+    (signerMeta as Record<string, unknown>).source === PAPER_WAIVER_SOURCE,
+  );
+}
+
+/** The file types a scanned waiver can arrive as. */
+export const scanMimeTypes = ["application/pdf", "image/png", "image/jpeg"] as const;
+export type ScanMimeType = (typeof scanMimeTypes)[number];
+
+/** How much scan a single upload may carry, decoded. Roughly 20 phone photos. */
+export const MAX_SCAN_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Decoded byte length of a base64 string, without decoding it.
+ *
+ * The scan arrives as base64 in the request body, which inflates it by a third,
+ * so the size limit has to be checked against the real byte count. Doing that
+ * by decoding first would mean holding the decoded copy just to reject it.
+ */
+export function base64ByteLength(b64: string): number {
+  const clean = b64.replace(/\s+/g, "");
+  if (!clean) return 0;
+  const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
+}
+
+/** One scanned file: a whole PDF or a single photographed/scanned page. */
+export const scanFileSchema = z.object({
+  name: z.string().trim().min(1).max(255),
+  type: z.enum(scanMimeTypes),
+  /** Raw base64, no `data:` prefix. */
+  data: z.string().min(1),
+});
+export type ScanFile = z.infer<typeof scanFileSchema>;
+
+/**
+ * Whether someone born on `dateOfBirth` was under 18 on `onDate`.
+ *
+ * Derived rather than asked: the paper form records a birth date, and "is this
+ * a minor" is a fact about that date, not a separate answer a manager could
+ * mistype. Both arguments are plain `YYYY-MM-DD` dates with no timezone, so
+ * they are compared as parts (`new Date` would read them as UTC midnight and
+ * shift the answer by a day for anyone west of Greenwich).
+ */
+export function isMinorOn(dateOfBirth: string, onDate: string): boolean {
+  const dob = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOfBirth);
+  const on = /^(\d{4})-(\d{2})-(\d{2})$/.exec(onDate);
+  if (!dob || !on) return false;
+  const [, by, bm, bd] = dob.map(Number);
+  const [, oy, om, od] = on.map(Number);
+  let age = oy - by;
+  if (om < bm || (om === bm && od < bd)) age--;
+  return age < 18;
+}
+
+export const paperWaiverUploadSchema = z
+  .object({
+    // Person fields, mirroring the online form's rules so a paper record and an
+    // online one are the same shape.
+    first_name: z.string().trim().min(1).max(60),
+    middle_name: z.string().trim().max(60).optional().or(z.literal("")),
+    last_name: z.string().trim().min(1).max(60),
+    preferred_name: z.string().trim().max(60).optional().or(z.literal("")),
+    date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    address: z.string().trim().min(1).max(300),
+    phone: z.string().trim().min(1).max(30),
+    email: z.string().trim().email().max(255),
+    uts_student_number: z.string().trim().max(20).optional().or(z.literal("")),
+    sms_whatsapp_consent: z.boolean().optional().default(false),
+    emergency_contact_name: z.string().trim().min(1).max(120),
+    // Optional here, unlike the online form: older paper forms did not ask for
+    // it, and a manager must not have to invent one to file a real document.
+    // Required for a minor, where it is the relationship to the participant on
+    // the signed page (see the refine below).
+    emergency_contact_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+    emergency_contact_phone: z.string().trim().min(1).max(30),
+    medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
+    // The date written on the paper, not the date it was filed. This is the
+    // club's record of when they signed, and what the lists order by. It does
+    // NOT decide which waiver is active: that is the most recently APPROVED one
+    // (deriveWaiverListStatuses), so approving a backlog of old forms makes the
+    // last one approved active regardless of its date.
+    signed_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    // Which version of the form the paper is, when the manager can tell. Null
+    // is honest for an undated legacy form and is what the screens already
+    // render as "—".
+    template_version: z.number().int().positive().nullable().optional(),
+    // The scan itself: one PDF, a stack of photos, or any mix, merged in order
+    // into the single PDF this waiver's record points at.
+    scan: z.array(scanFileSchema).min(1).max(20),
+  })
+  .refine(
+    (d) =>
+      !isMinorOn(d.date_of_birth, d.signed_on) || Boolean(d.emergency_contact_relationship?.trim()),
+    {
+      message:
+        "The participant was under 18 when this was signed, so the guardian's relationship to them is required.",
+      path: ["emergency_contact_relationship"],
+    },
+  )
+  .refine((d) => d.scan.reduce((sum, f) => sum + base64ByteLength(f.data), 0) <= MAX_SCAN_BYTES, {
+    message: "The scan is too large. Keep the whole upload under 10 MB.",
+    path: ["scan"],
+  });
+
+export type PaperWaiverUploadInput = z.infer<typeof paperWaiverUploadSchema>;
+
+/**
+ * Whether a signing date is in the future, and so cannot be what the paper says.
+ *
+ * A day of slack, deliberately: the club is in Sydney (UTC+10/+11) and the
+ * server clock is UTC, so for most of a Sydney morning "today" is still
+ * tomorrow's date in UTC. Rejecting on a strict comparison would refuse forms
+ * dated the day they were signed. A day out is a typo nobody needs blocked;
+ * a form dated next month is the mistake worth catching.
+ */
+export function isFutureSigningDate(signedOn: string, nowIso: string): boolean {
+  const limit = new Date(nowIso);
+  if (Number.isNaN(limit.getTime())) return false;
+  limit.setUTCDate(limit.getUTCDate() + 1);
+  return signedOn > limit.toISOString().slice(0, 10);
+}
+
 // ---- Manager: correct a person's email address ----
 //
 // The only email-editing path in the product. There is no self-serve version:
@@ -767,7 +921,12 @@ export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 // manager-agent.ts and the skill at .claude/skills/uts-manager-agent/.
 
 /** Actions the manager agent endpoint accepts. Order mirrors AGENT_MANIFEST. */
-export const managerAgentActions = ["list_users", "list_invoices", "edit_invoice"] as const;
+export const managerAgentActions = [
+  "list_users",
+  "list_invoices",
+  "edit_invoice",
+  "file_waiver",
+] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
 /** Payment methods an invoice can carry (mirrors the memberships CHECK). */

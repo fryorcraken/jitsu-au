@@ -15,7 +15,7 @@ import {
   uploadWaiverToDrive,
 } from "@/lib/google-drive.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
-import { Download, Cloud, CloudCheck } from "lucide-react";
+import { Download, Cloud, CloudCheck, Upload } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/manager/waivers")({
   head: () => ({
@@ -35,6 +35,8 @@ type Row = {
   // older approved ones are "superseded", the rest are "pending".
   status: "pending" | "active" | "superseded";
   approved_at: string | null;
+  // A scanned paper form a manager filed, rather than one signed on the site.
+  is_paper: boolean;
 };
 
 type DriveUpload = {
@@ -145,9 +147,16 @@ function WaiversPage() {
               login if they don't have one yet.
             </p>
           </div>
-          <Button asChild variant="outline">
-            <Link to="/account">Back to account</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link to="/manager/waivers/upload">
+                <Upload className="mr-2 h-4 w-4" /> Upload a paper waiver
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/account">Back to account</Link>
+            </Button>
+          </div>
         </div>
 
         {!driveConnected && (
@@ -184,7 +193,17 @@ function WaiversPage() {
                     <tr key={r.id} className="border-t">
                       <td className="px-3 py-2 font-medium">{r.full_name}</td>
                       <td className="px-3 py-2">{r.email}</td>
-                      <td className="px-3 py-2">{formatDateTime(r.signed_at)}</td>
+                      <td className="px-3 py-2">
+                        {formatDateTime(r.signed_at)}
+                        {r.is_paper && (
+                          <span
+                            className="ml-2 inline-block rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                            title="Scanned paper form, filed by a manager"
+                          >
+                            Paper
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">v{r.template_version ?? "—"}</td>
                       <td className="px-3 py-2">
                         <Pill label={r.status} className={waiverClass(r.status)} />

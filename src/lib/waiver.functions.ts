@@ -4,20 +4,25 @@ import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
+  PAPER_WAIVER_SOURCE,
   buildSignerMeta,
   composeFullName,
   decodeDataUrlPng,
   deriveWaiverListStatuses,
   greetingName,
+  isFutureSigningDate,
+  isMinorOn,
+  isPaperWaiver,
   nameWithPreferred,
   normalizeEmail,
+  paperWaiverUploadSchema,
   saveTemplateSchema,
   setCurrentTemplateSchema,
   waiverApprovalSchema,
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "@/lib/validation";
-import type { SignerMeta } from "@/lib/validation";
+import type { PaperWaiverUploadInput, SignerMeta } from "@/lib/validation";
 import {
   missingRequiredAcks,
   parseTemplateAcks,
@@ -113,6 +118,83 @@ async function proveSubmittedEmail(
 }
 
 /**
+ * Fail unless the caller holds the manager role.
+ *
+ * Fail-closed either way, but "Forbidden" for a failed role check tells a
+ * manager they lost their access when the RPC is what broke, so the two are
+ * kept apart.
+ */
+async function requireManager(context: {
+  supabase: SupabaseClient<Database>;
+  userId: string;
+}): Promise<void> {
+  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
+    _user_id: context.userId,
+    _role: "manager",
+  });
+  if (error) throw new Error(error.message);
+  if (!isMgr) throw new Error("Forbidden");
+}
+
+/** The person fields a brand-new applicant's profile is seeded with. */
+type PersonSeed = {
+  first_name: string;
+  middle_name: string | null;
+  last_name: string;
+  preferred_name: string | null;
+  phone: string | null;
+};
+
+/**
+ * The person (auth user) an incoming waiver belongs to, creating them if this
+ * email is new to the club.
+ *
+ * Every submission belongs to a person, and a person is an auth user (the email
+ * lives on auth.users — the one email store). An EXISTING email, in any funnel
+ * phase, is fine and expected: resubmission is always allowed and never
+ * modifies the existing person. A new email gets a LOCKED auth user (long ban,
+ * no credentials — an applicant, not a login yet: they cannot sign in until a
+ * manager approves a waiver and lifts the ban), whose profile row the
+ * ensure_profile trigger creates and this seeds.
+ *
+ * Shared by the public signing page and the manager's paper-scan upload, so a
+ * waiver that arrives on paper produces exactly the same person record as one
+ * signed on the site.
+ */
+async function resolvePersonId(
+  admin: SupabaseClient<Database>,
+  opts: { email: string; emailProven: boolean; seed: PersonSeed },
+): Promise<string> {
+  const { data: existingId, error: lookupErr } = await userIdByEmail(admin, opts.email);
+  if (lookupErr) throw new Error(lookupErr.message);
+  if (existingId) return existingId;
+
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email: opts.email,
+    email_confirm: opts.emailProven,
+    ban_duration: "876000h", // ~100 years: an applicant, not a login yet
+  });
+  if (createErr || !created.user) {
+    // A concurrent submission may have just created the user; re-resolve before
+    // treating it as a failure.
+    const { data: racedId } = await userIdByEmail(admin, opts.email);
+    if (racedId) return racedId;
+    console.error("[resolvePersonId] could not register email:", createErr);
+    throw new Error("We couldn't register that email address. Check it for typos and try again.");
+  }
+
+  // Seed the fresh applicant profile (created by the ensure_profile trigger)
+  // with the basics. Best-effort field seed, keyed insert-safe.
+  await admin.from("profiles").upsert(
+    { user_id: created.user.id, ...opts.seed },
+    {
+      onConflict: "user_id",
+    },
+  );
+  return created.user.id;
+}
+
+/**
  * Best-effort real client IP from the proxy headers, kept on the waiver as a
  * forensic/legal record. Falls back through the common forwarding headers.
  */
@@ -140,23 +222,6 @@ function serverSupabase() {
       },
     },
   });
-}
-
-/**
- * Manager gate for a server function. Fails closed either way, but a broken
- * role RPC surfaces its own message: "Forbidden" would tell a manager they lost
- * access when what actually broke was the check.
- */
-async function requireManager(context: {
-  supabase: SupabaseClient<Database>;
-  userId: string;
-}): Promise<void> {
-  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
-    _user_id: context.userId,
-    _role: "manager",
-  });
-  if (error) throw new Error(error.message);
-  if (!isMgr) throw new Error("Forbidden");
 }
 
 // ---- Current template (public) ----
@@ -340,14 +405,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
 
-    // Every submission belongs to a person, and a person is an auth user (the
-    // email lives on auth.users — the one email store). Resolve the auth user
-    // by email — an EXISTING email (any funnel phase) is fine and expected:
-    // resubmission is always allowed and never modifies the existing person.
-    // If the email is new to the club, create a LOCKED auth user (long ban, no
-    // credentials — an applicant, not a login yet: they cannot sign in until a
-    // manager approves a waiver and lifts the ban). The ensure_profile trigger
-    // creates the profile row; seed a new person's name/phone onto it.
+    // The person this submission belongs to (see resolvePersonId).
     //
     // If they arrived from the link in their interest confirmation email, that
     // click already proved the mailbox. `emailProven` carries the proof into
@@ -355,49 +413,19 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // being asked to confirm an address they have demonstrably just read.
     const emailProven = await proveSubmittedEmail(admin, data.vt, email);
 
-    let userId: string;
-    if (callerId) {
-      userId = callerId;
-    } else {
-      const { data: existingId, error: lookupErr } = await userIdByEmail(admin, email);
-      if (lookupErr) throw new Error(lookupErr.message);
-      if (existingId) {
-        userId = existingId;
-      } else {
-        const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    const userId = callerId
+      ? callerId
+      : await resolvePersonId(admin, {
           email,
-          email_confirm: emailProven,
-          ban_duration: "876000h", // ~100 years: an applicant, not a login yet
+          emailProven,
+          seed: {
+            first_name: data.first_name,
+            middle_name: data.middle_name || null,
+            last_name: data.last_name,
+            preferred_name: data.preferred_name || null,
+            phone: data.phone || null,
+          },
         });
-        if (createErr || !created.user) {
-          // A concurrent submission may have just created the user; re-resolve
-          // before treating it as a failure.
-          const { data: racedId } = await userIdByEmail(admin, email);
-          if (!racedId) {
-            console.error("[submitWaiverWithPdf] could not register email:", createErr);
-            throw new Error(
-              "We couldn't register that email address. Check it for typos and try again.",
-            );
-          }
-          userId = racedId;
-        } else {
-          userId = created.user.id;
-          // Seed the fresh applicant profile (created by the ensure_profile
-          // trigger) with the basics. Best-effort field seed, keyed insert-safe.
-          await admin.from("profiles").upsert(
-            {
-              user_id: userId,
-              first_name: data.first_name,
-              middle_name: data.middle_name || null,
-              last_name: data.last_name,
-              preferred_name: data.preferred_name || null,
-              phone: data.phone || null,
-            },
-            { onConflict: "user_id" },
-          );
-        }
-      }
-    }
 
     // A person who ALREADY existed and clicked their emailed link: apply the
     // proof to them too. Idempotent, so it is a harmless no-op for someone just
@@ -803,7 +831,7 @@ export const listWaivers = createServerFn({ method: "GET" })
     const { data, error } = await admin
       .from("waivers")
       .select(
-        "id, user_id, first_name, middle_name, last_name, preferred_name, email, signed_at, template_version, pdf_path, approval_status, approved_at",
+        "id, user_id, first_name, middle_name, last_name, preferred_name, email, signed_at, template_version, pdf_path, approval_status, approved_at, signer_meta",
       )
       .order("signed_at", { ascending: false })
       .limit(500);
@@ -821,7 +849,224 @@ export const listWaivers = createServerFn({ method: "GET" })
       pdf_path: row.pdf_path,
       status: statuses.get(row.id) ?? "pending",
       approved_at: row.approved_at ?? null,
+      // A scanned paper form filed by a manager. Shown on the list because the
+      // row otherwise looks identical to one signed online, and the difference
+      // matters: there is no signing IP or browser record behind it.
+      is_paper: isPaperWaiver(row.signer_meta),
     }));
+  });
+
+// ---- Manager: file a scanned paper waiver ----
+//
+// The paper equivalent of the public signing page. Someone fills the form at
+// the door, a manager scans it, and it lands here as an ordinary submission so
+// the club has one place where every waiver lives.
+//
+// What it deliberately does NOT do:
+//   - approve anything. Approval promotes the details onto the profile, unlocks
+//     the login, emails a sign-in link and assigns the trial (docs/waivers.md
+//     rule 6). Those are the same consequences whatever the waiver arrived on,
+//     so a manager takes that step by hand, from the same button as always.
+//   - email anybody. Nobody just pressed submit: the signer is not sitting at a
+//     screen waiting for their copy, and the managers are the ones filing it.
+//     The confirmation emails would be answering a question no one asked.
+//
+// The actual work is `filePaperWaiver`, a plain function rather than part of
+// this createServerFn: the manager agent HTTP API (src/routes/api/manager/agent.ts,
+// action `file_waiver`) authenticates by API token, not a Supabase session, so
+// it cannot go through requireSupabaseAuth. Both entry points call the same
+// function after their own auth check, so a scripted migration and a manager's
+// own upload produce identical waivers.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function filePaperWaiver(
+  admin: SupabaseClient<Database>,
+  data: PaperWaiverUploadInput,
+  uploadedByUserId: string,
+): Promise<{ id: string; user_id: string }> {
+  if (isFutureSigningDate(data.signed_on, new Date().toISOString())) {
+    throw new Error("The signing date is in the future. Check the date on the form.");
+  }
+
+  const { buildScanPdf, decodeBase64 } = await import("./waiver-scan");
+
+  const email = normalizeEmail(data.email);
+
+  // Build the PDF BEFORE creating anything: an unreadable scan is the likely
+  // failure here, and it must not leave behind a waiver row with no document
+  // or a person record for an email nobody has actually filed a form for.
+  let pdf: Uint8Array;
+  try {
+    pdf = await buildScanPdf(
+      data.scan.map((file) => ({
+        name: file.name,
+        type: file.type,
+        bytes: decodeBase64(file.data),
+      })),
+    );
+  } catch (e) {
+    console.error("[filePaperWaiver] could not build the scan PDF:", e);
+    throw new Error(
+      e instanceof Error
+        ? e.message
+        : "We couldn't read that scan. Try a PDF, or photograph each page again.",
+    );
+  }
+
+  // Same person resolution as an online submission: an existing email attaches
+  // to that person untouched, a new one becomes a locked applicant. Never
+  // verified by this route — a manager holding a piece of paper is not proof
+  // that anyone can read the mailbox written on it.
+  const userId = await resolvePersonId(admin, {
+    email,
+    emailProven: false,
+    seed: {
+      first_name: data.first_name,
+      middle_name: data.middle_name || null,
+      last_name: data.last_name,
+      preferred_name: data.preferred_name || null,
+      phone: data.phone || null,
+    },
+  });
+
+  const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
+  // The date written on the form, not the moment it was filed: this is what
+  // the club's records show as the signing date, and what the lists order by.
+  // Midnight UTC keeps the club's own timezone (UTC+10/+11) reading back the
+  // same calendar date.
+  const signed_at = `${data.signed_on}T00:00:00.000Z`;
+
+  // Who filed it, when, and from what. This is the paper equivalent of the IP
+  // and browser context an online submission carries: the provenance of the
+  // record, which for a scan is the manager who vouched for it.
+  const signer_meta: SignerMeta = {
+    source: PAPER_WAIVER_SOURCE,
+    uploaded_at: new Date().toISOString(),
+    uploaded_by: uploadedByUserId,
+    scan_files: data.scan.map((f) => f.name),
+  };
+  // Not every caller resolves to a real auth user: the manager agent API's
+  // break-glass env-key fallback (docs: AGENTS.md) has no owner to look up, so
+  // skip the lookup rather than log a spurious not-found error every call.
+  if (UUID_RE.test(uploadedByUserId)) {
+    try {
+      const { data: manager } = await admin.auth.admin.getUserById(uploadedByUserId);
+      if (manager.user?.email) signer_meta.uploaded_by_email = manager.user.email;
+    } catch (e) {
+      console.error("[filePaperWaiver] could not resolve the uploading manager:", e);
+    }
+  }
+
+  const { data: inserted, error: insErr } = await admin
+    .from("waivers")
+    .insert({
+      user_id: userId,
+      first_name: data.first_name,
+      middle_name: data.middle_name || null,
+      last_name: data.last_name,
+      preferred_name: data.preferred_name || null,
+      date_of_birth: data.date_of_birth,
+      address: data.address,
+      phone: data.phone,
+      email,
+      uts_student_number: data.uts_student_number?.trim() || null,
+      sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+      emergency_contact_name: data.emergency_contact_name,
+      emergency_contact_relationship: data.emergency_contact_relationship || null,
+      emergency_contact_phone: data.emergency_contact_phone,
+      medical_notes: data.medical_notes || null,
+      is_minor: isMinor,
+      // As on the online form, a minor's emergency contact IS the guardian
+      // who signed, so the guardian columns come from that one block.
+      guardian_name: isMinor ? data.emergency_contact_name : null,
+      guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
+      signed_at,
+      template_version: data.template_version ?? null,
+      // No IP: nobody connected from anywhere to sign this.
+      signer_ip: null,
+      signer_meta,
+    })
+    .select("id")
+    .single();
+  if (insErr || !inserted) throw new Error(insErr?.message || "Could not save the waiver.");
+
+  const path = `${inserted.id}.pdf`;
+  const { error: upErr } = await admin.storage
+    .from(BUCKET)
+    .upload(path, pdf, { contentType: "application/pdf", upsert: true });
+  if (upErr) {
+    // A paper waiver whose scan did not store is worth nothing: there is no
+    // generated PDF to fall back on, and no screen anywhere to attach one to
+    // afterwards. Take the empty row back out so the manager can simply file
+    // it again, rather than leaving a waiver that looks real and has no
+    // document behind it. If even the cleanup fails, say so plainly instead
+    // of pointing at a repair path that does not exist.
+    console.error("[filePaperWaiver] scan upload failed:", upErr);
+    const rowRemoved = await removeAbandonedWaiverRow(admin, inserted.id);
+    throw new Error(
+      rowRemoved
+        ? "The scan could not be stored. Nothing was filed, so please try again."
+        : "The scan could not be stored, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
+    );
+  }
+
+  const { error: pathErr } = await admin
+    .from("waivers")
+    .update({ pdf_path: path })
+    .eq("id", inserted.id);
+  if (pathErr) {
+    // The scan IS durably stored at this point, but nothing points at it: an
+    // approval here would promote a waiver with no retrievable document, found
+    // out only later when a manager tries to open it (getWaiverPdfUrl throws
+    // "Waiver PDF not found"). Unwind the row exactly as the upload failure
+    // above does, and also remove the now-orphaned scan, so a retry starts
+    // clean instead of leaving either behind.
+    console.error("[filePaperWaiver] could not point the waiver at its scan:", pathErr);
+    const rowRemoved = await removeAbandonedWaiverRow(admin, inserted.id);
+    const { error: scanCleanupErr } = await admin.storage.from(BUCKET).remove([path]);
+    if (scanCleanupErr) {
+      console.error("[filePaperWaiver] could not remove the orphaned scan:", scanCleanupErr);
+    }
+    throw new Error(
+      rowRemoved
+        ? "Could not finish filing the waiver. Nothing was filed, so please try again."
+        : "Could not finish filing the waiver, and the half-filed waiver could not be cleaned up. Check this person's waivers before filing it again.",
+    );
+  }
+
+  return { id: inserted.id, user_id: userId };
+}
+
+/**
+ * Remove a waiver row that failed partway through filing, so a manager can
+ * simply file it again rather than a half-filed row sitting in their list.
+ * Returns whether the removal succeeded, so the caller can tell the manager
+ * plainly when it did not: a row that genuinely could not be removed needs a
+ * different message ("go check for it") than one that was cleaned up ("try
+ * again"). Logs its own failure and never throws — a cleanup failure must
+ * never mask the original error the caller is already surfacing.
+ */
+async function removeAbandonedWaiverRow(
+  admin: SupabaseClient<Database>,
+  waiverId: string,
+): Promise<boolean> {
+  const { error } = await admin.from("waivers").delete().eq("id", waiverId);
+  if (error) {
+    console.error("[filePaperWaiver] could not remove the half-filed waiver row:", error);
+    return false;
+  }
+  return true;
+}
+
+// ---- Manager: upload a scanned paper waiver, from the web form ----
+export const uploadPaperWaiver = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => paperWaiverUploadSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { id, user_id } = await filePaperWaiver(supabaseAdmin, data, context.userId);
+    return { ok: true as const, id, user_id };
   });
 
 // ---- Manager: approve / unapprove a waiver submission ----

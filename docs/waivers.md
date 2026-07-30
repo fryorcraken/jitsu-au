@@ -148,6 +148,58 @@ phone, often at the gym. The page is built so that ends in a definite answer.
 - **A hard failure stays on screen**, as a panel with "Try again" rather than a
   toast that fades, and it points out they can also sign at the gym.
 
+### Someone fills the form on paper
+
+Not everyone signs on a screen. A person can fill the form on paper at the door,
+and a manager files the scan from `/manager/waivers` ("Upload a paper waiver").
+Managers only: nobody else can create a waiver on another person's behalf.
+
+The same filing runs through the manager agent API too (`file_waiver`,
+AGENTS.md), so a manager's own AI agent can file one from a script — the case
+this is for is migrating a backlog of paper records the club already holds, not
+a member filing their own. It is the identical function behind both entry
+points, so an agent-filed waiver and one uploaded through the form are the same
+in every respect below, including landing pending and never being approved,
+emailed, or verified automatically.
+
+The scan **is** the signed document. Signatures, ticked acknowledgements and the
+five yes/no health answers stay on it and are never retyped, exactly as they
+live only inside the PDF of an online submission (rule 3). What the manager does
+type is what the club needs as data rather than as evidence: the person fields
+(which approval promotes onto the profile), anything an instructor needs to hand
+(the medical details box), the date written on the paper, and which version of
+the form it is when they can tell.
+
+Attach a PDF, or a photo of each page, or any mix of the two: several files are
+joined into one document in the order shown, so the waiver has the single PDF
+every screen already expects. Up to 10 MB in total.
+
+From there it is an ordinary submission. It attaches to the email's existing
+person, or creates a locked applicant if that email is new, and it lands
+**pending** like any other. Approving it does the same three things as always
+(rule 6), which is why filing is not approving: a scan reaching the club is not
+the same event as a manager deciding it is good.
+
+Two things it deliberately does not do:
+
+- **It emails nobody.** Nobody just pressed submit, so there is no signer waiting
+  for their copy and no manager to notify about their own filing.
+- **It never verifies the email.** Verified means someone opened a link the club
+  sent to that address. A manager holding a piece of paper is not that, however
+  legible the handwriting.
+
+One thing to know when filing a backlog: the date on the paper is the club's
+record of when they signed and what the lists order by, but it does **not**
+decide which waiver is active. That is still the most recently **approved** one
+(rule 5), so approving an old paper form today makes it that person's active
+waiver even if they signed a newer one online. The upload form says so.
+
+Because the record is otherwise identical to an online one, it says how it
+arrived: a **Paper** badge on the waivers list and on the person's page, and a
+**Filing record** (who filed it, when, from which files) where an online waiver
+shows its signing IP and browser context. There is no signing IP on a paper
+waiver, and the panel says so by leaving it out rather than showing it empty.
+
 ### Mistake or changed details
 
 Submit again with the same email. Always accepted, whatever phase that email's

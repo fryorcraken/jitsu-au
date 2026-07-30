@@ -19,9 +19,11 @@ import {
   listAgentUsersSchema,
   managerAgentActions,
   nameWithPreferred,
+  paperWaiverUploadSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
+  AGENT_ENV_KEY_UPLOADER,
   AGENT_MANIFEST,
   AgentError,
   bearerToken,
@@ -37,6 +39,7 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
@@ -79,14 +82,18 @@ async function adminClient(): Promise<MembershipClient> {
  * SHA-256 hash in manager_api_tokens, whose owner must still be a manager) or,
  * as a break-glass fallback, the MANAGER_AGENT_API_KEY env var. Throws
  * AgentError on any failure. On success, best-effort stamps last_used_at.
+ *
+ * Returns who is acting: the token owner's user id for a manager-issued token,
+ * or AGENT_ENV_KEY_UPLOADER for the break-glass key, which has no owner to
+ * resolve. `file_waiver` records this as the waiver's `uploaded_by`.
  */
-async function authenticate(request: Request): Promise<void> {
+async function authenticate(request: Request): Promise<string> {
   const token = bearerToken(request.headers.get("authorization"));
   if (!token) throw new AgentError(401, "unauthorized", "Missing bearer token.");
 
   // Break-glass env key (optional; constant-time compared).
   const envKey = process.env.MANAGER_AGENT_API_KEY;
-  if (envKey && safeEqual(token, envKey)) return;
+  if (envKey && safeEqual(token, envKey)) return AGENT_ENV_KEY_UPLOADER;
 
   const db = await adminClient();
   const tokenHash = await hashToken(token);
@@ -122,6 +129,8 @@ async function authenticate(request: Request): Promise<void> {
       () => {},
       () => {},
     );
+
+  return row.created_by;
 }
 
 /** Shape any thrown value into a stable JSON error response. */
@@ -365,7 +374,26 @@ async function handleEditInvoice(params: unknown) {
   };
 }
 
-async function dispatch(action: ManagerAgentAction, params: unknown) {
+// ---- action: file_waiver ----
+async function handleFileWaiver(params: unknown, actingAs: string) {
+  const input = paperWaiverUploadSchema.parse(params);
+  const db = await adminClient();
+  try {
+    const { id, user_id } = await filePaperWaiver(db, input, actingAs);
+    return { id, user_id };
+  } catch (e) {
+    // filePaperWaiver throws plain Errors with member-facing text (the manager
+    // web form renders `.message` directly); wrap so the agent gets the same
+    // message inside the endpoint's stable error envelope instead of a bare 500.
+    throw new AgentError(
+      422,
+      "file_waiver_failed",
+      e instanceof Error ? e.message : "Could not file the waiver.",
+    );
+  }
+}
+
+async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
       return handleListUsers(params);
@@ -373,6 +401,8 @@ async function dispatch(action: ManagerAgentAction, params: unknown) {
       return handleListInvoices(params);
     case "edit_invoice":
       return handleEditInvoice(params);
+    case "file_waiver":
+      return handleFileWaiver(params, actingAs);
   }
 }
 
@@ -390,7 +420,7 @@ export const Route = createFileRoute("/api/manager/agent")({
       },
       POST: async ({ request }) => {
         try {
-          await authenticate(request);
+          const actingAs = await authenticate(request);
           const body = (await request.json().catch(() => {
             throw new AgentError(400, "bad_json", "Request body must be valid JSON.");
           })) as { action?: unknown; params?: unknown };
@@ -407,7 +437,7 @@ export const Route = createFileRoute("/api/manager/agent")({
             );
           }
 
-          const result = await dispatch(action as ManagerAgentAction, body?.params ?? {});
+          const result = await dispatch(action as ManagerAgentAction, body?.params ?? {}, actingAs);
           return json({ ok: true, action, result });
         } catch (e) {
           return errorResponse(e);
