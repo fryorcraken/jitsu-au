@@ -29,3 +29,21 @@ authenticated_security_definer_function_executable_public_has_role
 # member's access. Revoking EXECUTE / SECURITY INVOKER would break members-only
 # visibility, so this exposure is intentional and accepted.
 authenticated_security_definer_function_executable_public_has_active_paid_membership
+
+# public.event_is_invite_only(_event_id) resolves whether an event is invite-only,
+# directly or through its parent series. It is called inside the calendar_events
+# SELECT policies, which are evaluated as the querying role, so BOTH anon (public
+# events) and authenticated must keep EXECUTE. It is SECURITY DEFINER because the
+# policy must read calendar_series, which no non-manager can read directly. It
+# returns a single boolean about an event id the caller already has, so it leaks
+# nothing. Revoking EXECUTE would make every calendar read fail with
+# "permission denied for function", so this exposure is intentional.
+anon_security_definer_function_executable_public_event_is_invite_only
+authenticated_security_definer_function_executable_public_event_is_invite_only
+
+# public.is_event_invitee(_event_id, _user_id) checks whether an RSVP row exists
+# for that person, which is how an invite-only event is unlocked for its invitees.
+# Same reasoning: called from the calendar_events SELECT policy as the querying
+# role, so `authenticated` must keep EXECUTE (anon is revoked). SECURITY DEFINER
+# so the check does not depend on the caller's own RLS over event_rsvps.
+authenticated_security_definer_function_executable_public_is_event_invitee
