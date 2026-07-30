@@ -219,6 +219,27 @@ describe("renderWaiverPdf", () => {
     expect(printed).toContain("Blackouts:");
   });
 
+  // {{adult_checkbox}}/{{minor_checkbox}}-style tokens substitute to `[X]
+  // label` / `[ ] label` lines. These must draw as real checkbox glyphs
+  // (indented label, boxed mark), never as literal bracket text.
+  it("draws [X]/[ ] template lines as checkboxes, not literal bracket text", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        template_body: "[X] Adult (18+)\n[ ] Minor (under 18)",
+      }),
+    );
+    const { texts } = readPlacements(doc, doc.getPage(0));
+    expect(texts.some((t) => t.text.includes("["))).toBe(false);
+    const adultLabel = texts.find((t) => t.text.startsWith("Adult"));
+    expect(adultLabel).toBeDefined();
+    // Indented past the checkbox glyph (margin 50 + 18), not flush with margin
+    // the way an ordinary paragraph line would be.
+    expect(adultLabel!.x).toBe(68);
+    // The ticked box draws a bold "X" mark of its own, distinct from the label.
+    expect(texts.filter((t) => t.text === "X").length).toBeGreaterThanOrEqual(1);
+  });
+
   it("renders a template body containing characters the font cannot encode", async () => {
     const doc = await expectValidPdf(
       await renderWaiverPdf({ ...base, template_body: "# ⚠ Warning ⚠\n\nTrain safely 🥋." }),

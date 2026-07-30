@@ -595,7 +595,7 @@ function Waiver() {
 
   return (
     <SiteLayout>
-      <section className="mx-auto max-w-6xl px-4 py-16 md:py-20">
+      <section className="mx-auto max-w-3xl px-4 py-16 md:py-20">
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Waiver</p>
         <h1 className="mt-3 text-4xl font-bold">Training waiver</h1>
         <p className="mt-3 max-w-2xl text-muted-foreground">
@@ -603,7 +603,7 @@ function Waiver() {
           private and used only for club administration.
         </p>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="mt-8">
           <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-card p-6 md:p-8">
             <input type="hidden" name="hp" value="" />
 
@@ -895,8 +895,54 @@ function Waiver() {
               </fieldset>
             )}
 
+            <div className="space-y-3 border-t pt-6">
+              <div>
+                <p className="text-sm font-semibold">Review your waiver</p>
+                <p className="text-xs text-muted-foreground">
+                  This is exactly what you're about to sign. Please read it before signing below.
+                </p>
+              </div>
+              {templateQ.data ? (
+                <WaiverDocument
+                  draft
+                  clubName="UTS Jitsu"
+                  templateTitle={templateQ.data.title}
+                  templateBody={templateQ.data.body_md}
+                  templateVersion={null}
+                  signedAt={previewSignedAt}
+                  fullName={fullName}
+                  firstName={firstName}
+                  preferredName={preferredName}
+                  dateOfBirth={dob}
+                  address={address}
+                  phone={phone}
+                  email={email}
+                  emergencyContactName={ecName}
+                  emergencyContactRelationship={ecRelationship}
+                  emergencyContactPhone={ecPhone}
+                  medicalNotes={medical}
+                  healthAnswers={health}
+                  acknowledgements={resolveAcknowledgements(ackDefs, acks)}
+                  signatureName={signatureMode === "type" ? signatureName : ""}
+                  signatureImage={previewSignatureImage}
+                  isMinor={isMinor}
+                  guardianName={ecName}
+                  guardianRelationship={ecRelationship}
+                  guardianSignature={guardianSignatureMode === "type" ? guardianSignature : ""}
+                  guardianSignatureImage={previewGuardianSignatureImage}
+                />
+              ) : (
+                <div className="flex h-64 items-center justify-center rounded-xl border bg-muted/30 text-sm text-muted-foreground">
+                  Preparing preview...
+                </div>
+              )}
+            </div>
+
             <fieldset className="space-y-3 border-t pt-6">
               <legend className="text-sm font-semibold">Signature</legend>
+              <p className="text-sm text-muted-foreground">
+                By signing below, you confirm you've read and agree to the waiver above.
+              </p>
               <Tabs
                 value={signatureMode}
                 onValueChange={(v) => setSignatureMode(v as "draw" | "type")}
@@ -997,47 +1043,6 @@ function Waiver() {
               }
             />
           </form>
-
-          <aside className="lg:sticky lg:top-24 lg:self-start">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold">Live preview</p>
-              <p className="text-xs text-muted-foreground">Updates as you type</p>
-            </div>
-            {templateQ.data ? (
-              <WaiverDocument
-                draft
-                clubName="UTS Jitsu"
-                templateTitle={templateQ.data.title}
-                templateBody={templateQ.data.body_md}
-                templateVersion={null}
-                signedAt={previewSignedAt}
-                fullName={fullName}
-                firstName={firstName}
-                preferredName={preferredName}
-                dateOfBirth={dob}
-                address={address}
-                phone={phone}
-                email={email}
-                emergencyContactName={ecName}
-                emergencyContactRelationship={ecRelationship}
-                emergencyContactPhone={ecPhone}
-                medicalNotes={medical}
-                healthAnswers={health}
-                acknowledgements={resolveAcknowledgements(ackDefs, acks)}
-                signatureName={signatureMode === "type" ? signatureName : ""}
-                signatureImage={previewSignatureImage}
-                isMinor={isMinor}
-                guardianName={ecName}
-                guardianRelationship={ecRelationship}
-                guardianSignature={guardianSignatureMode === "type" ? guardianSignature : ""}
-                guardianSignatureImage={previewGuardianSignatureImage}
-              />
-            ) : (
-              <div className="flex h-64 items-center justify-center rounded-xl border bg-muted/30 text-sm text-muted-foreground">
-                Preparing preview...
-              </div>
-            )}
-          </aside>
         </div>
       </section>
     </SiteLayout>

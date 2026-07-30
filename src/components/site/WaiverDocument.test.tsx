@@ -62,6 +62,27 @@ describe("parseWaiverBlocks", () => {
   it("skips blank blocks", () => {
     expect(parseWaiverBlocks("\n\n  \n\ntext")).toEqual([{ kind: "p", text: "text" }]);
   });
+
+  // The participant-type boxes ({{adult_checkbox}}/{{minor_checkbox}}) and any
+  // similar template line substitute to `[X] label` / `[ ] label`; these must
+  // parse as a checklist, not literal bracket text in a paragraph.
+  it("recognises consecutive [X]/[ ] lines as a checklist", () => {
+    expect(parseWaiverBlocks("[X] Adult (18+)\n[ ] Minor (under 18)")).toEqual([
+      {
+        kind: "checklist",
+        items: [
+          { checked: true, text: "Adult (18+)" },
+          { checked: false, text: "Minor (under 18)" },
+        ],
+      },
+    ]);
+  });
+
+  it("does not treat an ordinary paragraph that starts with a bracket as a checklist", () => {
+    expect(parseWaiverBlocks("[Note] Please read carefully.")).toEqual([
+      { kind: "p", text: "[Note] Please read carefully." },
+    ]);
+  });
 });
 
 describe("waiver placeholders", () => {
@@ -130,9 +151,9 @@ describe("waiver placeholders", () => {
 
   it("ticks exactly one participant-type box, from the age", () => {
     expect(values.adult_checkbox).toBe("[X]");
-    expect(values.minor_checkbox).toBe("[  ]");
+    expect(values.minor_checkbox).toBe("[ ]");
     const minor = buildWaiverPlaceholders({ ...input, isMinor: true });
-    expect(minor.adult_checkbox).toBe("[  ]");
+    expect(minor.adult_checkbox).toBe("[ ]");
     expect(minor.minor_checkbox).toBe("[X]");
   });
 
@@ -253,6 +274,16 @@ describe("WaiverDocument", () => {
     expect(screen.getByText("Parent / guardian consent")).toBeInTheDocument();
     expect(screen.getAllByText("Pat Sample").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Parent")).toBeInTheDocument();
+  });
+
+  it("renders [X]/[ ] template lines as real checkboxes, not literal brackets", () => {
+    render(<WaiverDocument {...base} templateBody={"[X] Adult (18+)\n[ ] Minor (under 18)"} />);
+    const adult = screen.getByText("Adult (18+)").closest("li")!;
+    const minor = screen.getByText("Minor (under 18)").closest("li")!;
+    expect(within(adult).getByText("✓")).toBeInTheDocument();
+    expect(within(minor).queryByText("✓")).not.toBeInTheDocument();
+    expect(screen.queryByText(/\[X\]/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\[ ?\]/)).not.toBeInTheDocument();
   });
 
   it("renders a drawn signature image when provided", () => {

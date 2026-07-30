@@ -3,6 +3,7 @@ import {
   applyWaiverPlaceholders,
   bodyReferences,
   buildWaiverPlaceholders,
+  matchChecklistLines,
 } from "./waiver-document";
 import { healthDeclarationLines, healthTokens, type HealthAnswerDraft } from "./waiver-health";
 
@@ -321,6 +322,39 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     if (block.startsWith("## ")) {
       y -= 4;
       drawText(block.slice(3), { size: 13, font: bold });
+      continue;
+    }
+    // `{{adult_checkbox}}`-style tokens substitute to `[X] label` / `[ ] label`
+    // lines: draw them as real checkbox glyphs, matching the acknowledgements
+    // below, never as literal bracket text.
+    const checklist = matchChecklistLines(block);
+    if (checklist) {
+      for (const item of checklist) {
+        const lines = wrap(item.text.replace(/\*\*(.+?)\*\*/g, "$1"), 11, font);
+        ensureSpace(Math.max(16, lines.length * 14 + 4));
+        page.drawRectangle({
+          x: margin,
+          y: y - 12,
+          width: 10,
+          height: 10,
+          borderColor: ink,
+          borderWidth: 0.8,
+        });
+        if (item.checked) {
+          page.drawText("X", { x: margin + 2, y: y - 11, size: 9, font: bold, color: primary });
+        }
+        for (let li = 0; li < lines.length; li++) {
+          page.drawText(winAnsiSafe(lines[li]), {
+            x: margin + 18,
+            y: y - 10 - li * 14,
+            size: 11,
+            font,
+            color: ink,
+          });
+        }
+        y -= Math.max(16, lines.length * 14 + 4);
+      }
+      y -= 4;
       continue;
     }
     // Single newlines are kept: the document is a form, and its "Full name: …"

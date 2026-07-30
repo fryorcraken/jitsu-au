@@ -225,6 +225,16 @@ export function WaiverDocument(props: WaiverDocumentProps) {
                   {renderInline(b.text)}
                 </h4>
               );
+            if (b.kind === "checklist")
+              return (
+                <ul key={i} className="space-y-1.5">
+                  {b.items.map((item, j) => (
+                    <Acknowledgement key={j} checked={item.checked}>
+                      {renderInline(item.text)}
+                    </Acknowledgement>
+                  ))}
+                </ul>
+              );
             return (
               // pre-line: single newlines in the template are line breaks, so
               // the form's field lines render one per line, as in the PDF.

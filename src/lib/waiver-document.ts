@@ -9,12 +9,34 @@ export type WaiverBlock =
   | { kind: "hr" }
   | { kind: "h1"; text: string }
   | { kind: "h2"; text: string }
-  | { kind: "p"; text: string };
+  | { kind: "p"; text: string }
+  | { kind: "checklist"; items: { checked: boolean; text: string }[] };
+
+/** A single `{{adult_checkbox}} Adult (18+)`-style line, once substituted. */
+const CHECKBOX_LINE = /^\[([ xX])\]\s+(.+)$/;
+
+/**
+ * If every non-blank line in a paragraph is a `[X] label` / `[ ] label` line
+ * (what `{{adult_checkbox}}`-style tokens substitute to), parse it as a
+ * checklist instead of a plain paragraph. Returns null for an ordinary
+ * paragraph, including one that merely happens to start with a bracket.
+ */
+export function matchChecklistLines(block: string): { checked: boolean; text: string }[] | null {
+  const lines = block.split("\n").map((l) => l.trim());
+  const items: { checked: boolean; text: string }[] = [];
+  for (const line of lines) {
+    if (!line) continue;
+    const m = CHECKBOX_LINE.exec(line);
+    if (!m) return null;
+    items.push({ checked: m[1].toLowerCase() === "x", text: m[2] });
+  }
+  return items.length > 0 ? items : null;
+}
 
 /**
  * Parse the template body the same way the PDF renderer does
  * (`src/lib/waiver-pdf.ts`): split on blank lines, then recognise `---`, `# `,
- * `## `, and plain paragraphs.
+ * `## `, `[X]`/`[ ]` checklist lines, and plain paragraphs.
  *
  * A single newline inside a paragraph is kept as a line break (the PDF wraps
  * each line separately, and the HTML renders the text pre-line). The document
@@ -26,12 +48,15 @@ export function parseWaiverBlocks(body: string): WaiverBlock[] {
   for (const raw of body.split(/\n{2,}/)) {
     const block = raw.trim();
     if (!block) continue;
+    const checklist = matchChecklistLines(block);
     if (block === "---") {
       blocks.push({ kind: "hr" });
     } else if (block.startsWith("# ")) {
       blocks.push({ kind: "h1", text: block.slice(2) });
     } else if (block.startsWith("## ")) {
       blocks.push({ kind: "h2", text: block.slice(3) });
+    } else if (checklist) {
+      blocks.push({ kind: "checklist", items: checklist });
     } else {
       blocks.push({ kind: "p", text: block });
     }
@@ -65,9 +90,14 @@ export type WaiverPlaceholderInput = {
   signedDate: string;
 };
 
-/** Ticked / unticked box, in characters the PDF's standard font can encode. */
+/**
+ * Ticked / unticked box, in characters the PDF's standard font can encode.
+ * Both renderers recognise a `[X] label` / `[ ] label` line (via
+ * `matchChecklistLines`) and draw it as an actual checkbox glyph, never this
+ * literal bracket text.
+ */
 const TICKED = "[X]";
-const UNTICKED = "[  ]";
+const UNTICKED = "[ ]";
 
 /**
  * Map waiver field values to the `{{token}}` names used in template bodies.
