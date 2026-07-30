@@ -124,7 +124,7 @@ export const Route = createFileRoute("/api/calendar/$token")({
 
 
         const ics = buildCalendar({
-          events: (events ?? []).map(toIcsEvent),
+          events: visible.map(toIcsEvent),
           calName: "UTS Jitsu",
           // All-day events are the club's calendar days, not UTC's.
           timeZone: CLUB_TIME_ZONE,
