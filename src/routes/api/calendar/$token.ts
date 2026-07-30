@@ -104,8 +104,27 @@ export const Route = createFileRoute("/api/calendar/$token")({
         const { data: events, error } = await query;
         if (error) return textResponse("Could not build calendar.", 500);
 
+        // Invite-only entries ride along only for someone actually invited (an
+        // RSVP row for that date) or a manager. A series marked invite only
+        // hides every date it generates, matching the read policies.
+        let visible = events ?? [];
+        if (!isMgr) {
+          const [{ data: rsvps }, { data: inviteSeries }] = await Promise.all([
+            admin.from("event_rsvps").select("event_id").eq("user_id", tokenRow.user_id),
+            admin.from("calendar_series").select("id").eq("invite_only", true),
+          ]);
+          const invited = new Set((rsvps ?? []).map((r) => r.event_id));
+          const inviteOnlySeries = new Set((inviteSeries ?? []).map((s) => s.id));
+          visible = visible.filter(
+            (e) =>
+              (!e.invite_only && !(e.series_id && inviteOnlySeries.has(e.series_id))) ||
+              invited.has(e.id),
+          );
+        }
+
+
         const ics = buildCalendar({
-          events: (events ?? []).map(toIcsEvent),
+          events: visible.map(toIcsEvent),
           calName: "UTS Jitsu",
           // All-day events are the club's calendar days, not UTC's.
           timeZone: CLUB_TIME_ZONE,

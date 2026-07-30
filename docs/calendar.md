@@ -50,15 +50,22 @@ past.
 
 ## Two settings that are easy to confuse
 
-| Setting                           | What it is                         | Effect                                                                                                |
-| --------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Who can see it** (`visibility`) | **Access.** `public` or `members`. | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member. |
-| **Invite only** (`invite_only`)   | **Display label.**                 | Enforces nothing. It just badges the entry "invite only" so people know attendance is by invitation.  |
+| Setting                           | What it is                            | Effect                                                                                                                          |
+| --------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Who can see it** (`visibility`) | **Access.** `public` or `members`.    | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member.                           |
+| **Invite only** (`invite_only`)   | **Access, and a badge.**              | Enforced. Only people invited to that date (they have an RSVP row) and managers can see it. Everyone else never sees the entry. |
 
-An entry can be public _and_ invite-only (visible to all, badged), or members-only
-_and_ not invite-only, or any other combination. Both settings apply to repeating
+Invite only is enforced in the database, not just in the interface: the
+`calendar_events` read policies hide an invite-only date from the public feed and
+from ordinary members. Marking a repeating entry invite only hides every date it
+generates the same way, so the series and its dates can never disagree. To let
+someone see an invite-only date, a manager creates their RSVP for it.
+
+An entry can be public and invite-only (only invitees see it), members-only and
+not invite-only, or any other combination. Both settings apply to repeating
 entries too, which is what the old two-form design made impossible: every date a
 repeat generated was forced to be public.
+
 
 ## Repeating: start and end dates
 
