@@ -71,7 +71,9 @@ curl -s "$UTS_MANAGER_API_URL/api/manager/agent" \
 
 ### `list_invoices` — find an invoice to edit
 
-Flat list of invoices (membership payment records) with member name/email.
+Flat list of invoices (membership payment records) with member name/email. The
+response's `total` is the full matching count regardless of `limit`, so you can
+tell a capped page from a complete one.
 `params` (optional): `status` (`pending | active | expired | cancelled`), `limit`.
 
 ```bash
@@ -81,9 +83,11 @@ scripts/agent.sh list_invoices '{"status":"pending"}'
 ### `edit_invoice` — correct an invoice's details
 
 `params`: `id` (**required** — the invoice UUID from a list call) plus at least
-one editable field: `price_cents` (integer cents), `notes`, `payment_reference`,
-`payment_method` (`bank_transfer | stripe | manual`), `status`
-(`pending | cancelled | expired`).
+one editable field: `price_cents` (integer cents), `notes` (pass `null` to clear
+a mistaken note), `payment_reference`, `payment_method`
+(`bank_transfer | stripe | manual`), `status` (`pending | cancelled | expired`).
+Any other key is rejected, naming itself in the error — so a typo like `price`
+doesn't get silently ignored.
 
 ```bash
 scripts/agent.sh edit_invoice '{"id":"<uuid>","price_cents":24500,"notes":"student rate applied"}'

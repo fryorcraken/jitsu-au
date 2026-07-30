@@ -943,11 +943,15 @@ export const editInvoiceSchema = z
   .object({
     id: z.string().uuid(),
     price_cents: z.number().int().min(0).max(1_000_000).optional(),
-    notes: z.string().trim().max(2000).optional(),
+    // Nullable: notes is a nullable column, and once a manager has written one
+    // there was otherwise no way back to blank. `null` clears it; `undefined`
+    // (the field simply absent) leaves it untouched, same as every other field.
+    notes: z.string().trim().max(2000).nullable().optional(),
     payment_reference: z.string().trim().min(1).max(64).optional(),
     payment_method: z.enum(invoicePaymentMethods).optional(),
     status: z.enum(["pending", "cancelled", "expired"]).optional(),
   })
+  .strict()
   .refine(
     (d) =>
       d.price_cents !== undefined ||

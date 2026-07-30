@@ -332,6 +332,22 @@ describe("filePaperWaiver", () => {
     expect(calls.createUser).toHaveLength(0);
   });
 
+  it("reports a bad base64 file by index, not the raw atob error", async () => {
+    decodeBase64.mockImplementationOnce(() => {
+      throw new DOMException(
+        "atob() called with invalid base64-encoded data. (Only whitespace, '+', '/', and alphanumeric characters are allowed.)",
+      );
+    });
+    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      filePaperWaiver(admin as any, validInput, MANAGER_ID),
+    ).rejects.toThrow("scan[0] is not valid base64.");
+    expect(calls.insert).toHaveLength(0);
+    expect(calls.createUser).toHaveLength(0);
+  });
+
   it("removes the empty row when the scan fails to store, and says so", async () => {
     const { admin, calls } = fakeAdmin({
       existingId: EXISTING_USER,

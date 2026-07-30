@@ -5,6 +5,7 @@ import {
   AgentError,
   bearerToken,
   buildInvoicePatch,
+  classifyAction,
   INVOICE_EDITABLE_FIELDS,
   projectInvoice,
   safeEqual,
@@ -65,6 +66,35 @@ describe("editInvoiceSchema", () => {
     expect(() => editInvoiceSchema.parse({ id: "nope", notes: "x" })).toThrow();
     expect(() => editInvoiceSchema.parse({ id, price_cents: -1 })).toThrow();
   });
+
+  it("accepts a null notes to clear it, distinct from omitting the field", () => {
+    expect(editInvoiceSchema.parse({ id, notes: null }).notes).toBeNull();
+    expect(editInvoiceSchema.parse({ id, price_cents: 100 }).notes).toBeUndefined();
+  });
+
+  it("names an unrecognized field instead of reporting no fields at all", () => {
+    const result = editInvoiceSchema.safeParse({ id, price: 999 });
+    expect(result.success).toBe(false);
+    expect(result.success ? "" : result.error.issues[0].message).toMatch(/price/);
+  });
+});
+
+describe("classifyAction", () => {
+  const valid = ["list_users", "edit_invoice"];
+
+  it("distinguishes a missing action from an invalid one", () => {
+    expect(classifyAction(undefined, valid)).toEqual({
+      ok: false,
+      code: "missing_action",
+      message: "Missing required field: action.",
+    });
+    expect(classifyAction("nope", valid).ok).toBe(false);
+    expect((classifyAction("nope", valid) as { code: string }).code).toBe("unknown_action");
+  });
+
+  it("accepts a valid action", () => {
+    expect(classifyAction("edit_invoice", valid)).toEqual({ ok: true, action: "edit_invoice" });
+  });
 });
 
 describe("buildInvoicePatch", () => {
@@ -74,6 +104,13 @@ describe("buildInvoicePatch", () => {
     const patch = buildInvoicePatch({ id, notes: "called member", status: "cancelled" });
     expect(patch).toEqual({ notes: "called member", status: "cancelled" });
     expect("price_cents" in patch).toBe(false);
+  });
+
+  it("writes an explicit null notes as a clear, distinct from an omitted field", () => {
+    const patch = buildInvoicePatch({ id, notes: null });
+    expect(patch).toEqual({ notes: null });
+    const untouched = buildInvoicePatch({ id, price_cents: 100 });
+    expect("notes" in untouched).toBe(false);
   });
 
   it("only ever writes whitelisted columns", () => {
