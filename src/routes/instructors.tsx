@@ -3,7 +3,7 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
 import { buildPageMeta } from "@/lib/seo";
-import franckImg from "@/assets/training3.jpg.asset.json";
+import franckImg from "@/assets/franck-royer.jpg.asset.json";
 
 export const Route = createFileRoute("/instructors")({
   head: () => ({
