@@ -8,23 +8,17 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getCalendar, getMyCalendarFeedUrl, getMyRsvps, setRsvp } from "@/lib/calendar.functions";
 import type { RsvpResponse } from "@/lib/validation";
+import { buildPageMeta } from "@/lib/seo";
 
 export const Route = createFileRoute("/calendar")({
   head: () => ({
-    meta: [
-      { title: "Calendar | UTS Jitsu" },
-      {
-        name: "description",
-        content:
-          "Upcoming UTS Jitsu training sessions and club events. Sign in to RSVP and add the calendar to your phone.",
-      },
-      { property: "og:title", content: "Calendar | UTS Jitsu" },
-      {
-        property: "og:description",
-        content: "Upcoming UTS Jitsu training sessions and club events.",
-      },
-      { property: "og:url", content: "https://jitsu.au/calendar" },
-    ],
+    meta: buildPageMeta({
+      title: "Calendar | UTS Jitsu",
+      description:
+        "Upcoming UTS Jitsu training sessions and club events. Sign in to RSVP and add the calendar to your phone.",
+      ogDescription: "Upcoming UTS Jitsu training sessions and club events.",
+      path: "/calendar",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/calendar" }],
   }),
   component: CalendarPage,

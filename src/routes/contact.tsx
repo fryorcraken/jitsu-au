@@ -12,19 +12,16 @@ import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { submitContact } from "@/lib/submissions.functions";
 import { VENUE_NAME, VENUE_ADDRESS, GOOGLE_MAPS_URL, APPLE_MAPS_URL } from "@/lib/venue";
 import { Phone, MessageCircle, MapPin, ExternalLink } from "lucide-react";
+import { buildPageMeta } from "@/lib/seo";
 
 export const Route = createFileRoute("/contact")({
   head: () => ({
-    meta: [
-      { title: "Contact UTS Jitsu" },
-      {
-        name: "description",
-        content: "Get in touch with UTS Jitsu by phone, WhatsApp, or message.",
-      },
-      { property: "og:title", content: "Contact UTS Jitsu" },
-      { property: "og:description", content: "Phone, WhatsApp, or send us a message." },
-      { property: "og:url", content: "https://jitsu.au/contact" },
-    ],
+    meta: buildPageMeta({
+      title: "Contact UTS Jitsu",
+      description: "Get in touch with UTS Jitsu by phone, WhatsApp, or message.",
+      ogDescription: "Phone, WhatsApp, or send us a message.",
+      path: "/contact",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/contact" }],
   }),
   component: Contact,

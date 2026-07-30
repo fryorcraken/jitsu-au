@@ -120,6 +120,54 @@ export function canonicalUrl(path: string): string {
   return path === "/" ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${path}`;
 }
 
+export type PageMetaOptions = {
+  /** <title> and search-result title. */
+  title: string;
+  /** <meta name="description">. */
+  description: string;
+  /** og:title / twitter:title. Defaults to `title`. */
+  ogTitle?: string;
+  /** og:description / twitter:description. Defaults to `description`. */
+  ogDescription?: string;
+  /** Root-relative path this page is served at, used to build og:url. */
+  path: string;
+};
+
+/** The meta tag shapes `buildPageMeta` produces (a route's `head().meta` array element). */
+export type PageMetaTag =
+  | { title: string }
+  | { name: string; content: string }
+  | { property: string; content: string };
+
+/**
+ * A page's title/description/OpenGraph/Twitter meta, keyed so the router
+ * replaces the root route's generic versions instead of leaving them next to
+ * a page-specific one. The root only sets `og:*`/`twitter:*` as a shared
+ * fallback; a page that overrode `og:title` but not `twitter:title` still
+ * showed the home page's title on Twitter/Slack/iMessage previews, since
+ * they're unrelated attributes as far as the head merge is concerned. Every
+ * page should build its social tags through this helper so the two stay in
+ * sync.
+ */
+export function buildPageMeta({
+  title,
+  description,
+  ogTitle = title,
+  ogDescription = description,
+  path,
+}: PageMetaOptions): PageMetaTag[] {
+  const url = canonicalUrl(path);
+  return [
+    { title },
+    { name: "description", content: description },
+    { property: "og:title", content: ogTitle },
+    { property: "og:description", content: ogDescription },
+    { property: "og:url", content: url },
+    { name: "twitter:title", content: ogTitle },
+    { name: "twitter:description", content: ogDescription },
+  ];
+}
+
 /** True when the request arrived on a hostname that serves the real site. */
 export function isProductionHost(host: string | null | undefined): boolean {
   if (!host) return false;

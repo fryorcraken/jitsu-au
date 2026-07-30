@@ -13,23 +13,17 @@ import { composeFullName } from "@/lib/validation";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { submitInterest } from "@/lib/submissions.functions";
+import { buildPageMeta } from "@/lib/seo";
 
 export const Route = createFileRoute("/register-interest")({
   head: () => ({
-    meta: [
-      { title: "Start your free trial | UTS Jitsu" },
-      {
-        name: "description",
-        content:
-          "Start your free trial at UTS Jitsu. Tell us who you are and we'll get you on the mat. Your first two classes are free.",
-      },
-      { property: "og:title", content: "Start your free trial | UTS Jitsu" },
-      {
-        property: "og:description",
-        content: "Tell us who you are and we'll get you on the mat. First two classes free.",
-      },
-      { property: "og:url", content: "https://jitsu.au/register-interest" },
-    ],
+    meta: buildPageMeta({
+      title: "Start your free trial | UTS Jitsu",
+      description:
+        "Start your free trial at UTS Jitsu. Tell us who you are and we'll get you on the mat. Your first two classes are free.",
+      ogDescription: "Tell us who you are and we'll get you on the mat. First two classes free.",
+      path: "/register-interest",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/register-interest" }],
   }),
   component: RegisterInterest,

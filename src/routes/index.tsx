@@ -4,26 +4,17 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { Button } from "@/components/ui/button";
-import { buildClubJsonLd } from "@/lib/seo";
+import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
   head: () => ({
-    meta: [
-      { title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
-      {
-        name: "description",
-        content:
-          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
-      },
-      { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
-      {
-        property: "og:description",
-        content:
-          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
-      },
-      { property: "og:url", content: "https://jitsu.au/" },
-    ],
+    meta: buildPageMeta({
+      title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney",
+      description:
+        "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+      path: "/",
+    }),
     links: [
       { rel: "canonical", href: "https://jitsu.au/" },
       // Hero image is the page's LCP element but sits well into the body, so the
