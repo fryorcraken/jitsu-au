@@ -1,25 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { buildPageMeta } from "@/lib/seo";
 import aboutImg from "@/assets/training2.jpg.asset.json";
 import teamImg from "@/assets/training4.jpg.asset.json";
 
 export const Route = createFileRoute("/about")({
   head: () => ({
-    meta: [
-      { title: "About UTS Jitsu | Practical Jiu-Jitsu in Sydney" },
-      {
-        name: "description",
-        content:
-          "Meet Franck Royer and learn about our approach to self-defence, community and fitness at UTS Jitsu.",
-      },
-      { property: "og:title", content: "About UTS Jitsu" },
-      {
-        property: "og:description",
-        content:
-          "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
-      },
-      { property: "og:url", content: "https://jitsu.au/about" },
-    ],
+    meta: buildPageMeta({
+      title: "About UTS Jitsu | Practical Jiu-Jitsu in Sydney",
+      description:
+        "Meet Franck Royer and learn about our approach to self-defence, community and fitness at UTS Jitsu.",
+      ogTitle: "About UTS Jitsu",
+      ogDescription:
+        "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
+      path: "/about",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/about" }],
   }),
   component: About,

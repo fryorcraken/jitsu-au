@@ -9,6 +9,7 @@ import {
   CLUB_SOCIAL_URLS,
   SOCIAL_IMAGE,
   buildClubJsonLd,
+  buildPageMeta,
   buildRobotsTxt,
   buildSitemapXml,
   canonicalUrl,
@@ -22,6 +23,62 @@ describe("canonicalUrl", () => {
 
   it("appends other paths to the origin without a trailing slash", () => {
     expect(canonicalUrl("/about")).toBe("https://jitsu.au/about");
+  });
+});
+
+type MetaEntry = ReturnType<typeof buildPageMeta>[number];
+
+/** Reads a meta entry's `content` by its `name` or `property` key. */
+function metaContent(meta: MetaEntry[], key: string): unknown {
+  for (const m of meta) {
+    const record = m as Record<string, unknown>;
+    if (record.name === key || record.property === key) return record.content;
+  }
+  return undefined;
+}
+
+describe("buildPageMeta", () => {
+  // The bug this guards against: the root route sets generic og:*/twitter:*
+  // tags as a fallback, and the router only replaces a tag whose own
+  // name/property is repeated by a child. A page that overrode og:title but
+  // not twitter:title kept the home page's title in Twitter/Slack/iMessage
+  // previews, on every route that didn't happen to also set twitter:title.
+  it("mirrors og:title/og:description onto twitter:title/twitter:description", () => {
+    const meta = buildPageMeta({
+      title: "Page Title",
+      description: "Page description.",
+      ogTitle: "Social title",
+      ogDescription: "Social description.",
+      path: "/page",
+    });
+    expect(metaContent(meta, "twitter:title")).toBe("Social title");
+    expect(metaContent(meta, "twitter:description")).toBe("Social description.");
+    expect(metaContent(meta, "og:title")).toBe("Social title");
+    expect(metaContent(meta, "og:description")).toBe("Social description.");
+  });
+
+  it("falls og:title/og:description/twitter:* back to title/description when unset", () => {
+    const meta = buildPageMeta({
+      title: "Page Title",
+      description: "Page description.",
+      path: "/page",
+    });
+    for (const key of ["og:title", "twitter:title"]) {
+      expect(metaContent(meta, key)).toBe("Page Title");
+    }
+    for (const key of ["og:description", "twitter:description"]) {
+      expect(metaContent(meta, key)).toBe("Page description.");
+    }
+  });
+
+  it("builds an absolute og:url from the given path", () => {
+    const meta = buildPageMeta({ title: "T", description: "D", path: "/about" });
+    expect(metaContent(meta, "og:url")).toBe("https://jitsu.au/about");
+  });
+
+  it("sets the <title> tag", () => {
+    const meta = buildPageMeta({ title: "Page Title", description: "D", path: "/" });
+    expect(meta.find((m) => "title" in m)).toMatchObject({ title: "Page Title" });
   });
 });
 

@@ -42,20 +42,19 @@ import {
   type HealthAnswers,
   type HealthQuestionId,
 } from "@/lib/validation";
+import { buildPageMeta } from "@/lib/seo";
 
 export const Route = createFileRoute("/waiver")({
   // Optional prefill carried over from Step 1 of the "Start your free trial" flow.
   validateSearch: waiverPrefillSearchSchema,
   head: () => ({
     meta: [
-      { title: "Sign waiver | UTS Jitsu" },
-      {
-        name: "description",
-        content: "Complete the UTS Jitsu training waiver before your first class.",
-      },
-      { property: "og:title", content: "Sign waiver | UTS Jitsu" },
-      { property: "og:description", content: "Complete the UTS Jitsu training waiver online." },
-      { property: "og:url", content: "https://jitsu.au/waiver" },
+      ...buildPageMeta({
+        title: "Sign waiver | UTS Jitsu",
+        description: "Complete the UTS Jitsu training waiver before your first class.",
+        ogDescription: "Complete the UTS Jitsu training waiver online.",
+        path: "/waiver",
+      }),
       { name: "robots", content: "noindex" },
     ],
     links: [{ rel: "canonical", href: "https://jitsu.au/waiver" }],
