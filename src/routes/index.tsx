@@ -4,26 +4,17 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { Button } from "@/components/ui/button";
-import { buildClubJsonLd } from "@/lib/seo";
+import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
   head: () => ({
-    meta: [
-      { title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
-      {
-        name: "description",
-        content:
-          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
-      },
-      { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
-      {
-        property: "og:description",
-        content:
-          "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
-      },
-      { property: "og:url", content: "https://jitsu.au/" },
-    ],
+    meta: buildPageMeta({
+      title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney",
+      description:
+        "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+      path: "/",
+    }),
     links: [
       { rel: "canonical", href: "https://jitsu.au/" },
       // Hero image is the page's LCP element but sits well into the body, so the
@@ -168,7 +159,11 @@ function Home() {
             {[
               { day: "Monday", time: "5:30 – 7:00pm" },
               { day: "Wednesday", time: "6:00 – 7:30pm" },
-              { day: "Saturday", time: "9:00 – 10:30am", note: "Colour belts only" },
+              {
+                day: "Saturday",
+                time: "10:30am – 12:00pm",
+                note: "Colour belts only, from September",
+              },
             ].map((s) => (
               <div key={s.day} className="rounded-xl border bg-card p-6">
                 <div className="flex items-center gap-2 text-primary">

@@ -10,7 +10,7 @@
 // `src/routes/sitemap[.]xml.ts`) are thin wrappers around the builders below,
 // so the rules stay unit-testable and free of any server import.
 
-import { VENUE_NAME } from "./venue";
+import { GOOGLE_MAPS_URL, VENUE_NAME } from "./venue";
 
 /** Canonical origin. Every `rel="canonical"` on the site points here. */
 export const SITE_ORIGIN = "https://jitsu.au";
@@ -94,6 +94,10 @@ export const PUBLIC_PAGES: SitemapPage[] = [
   { path: "/faq", changefreq: "monthly", priority: 0.7 },
   { path: "/calendar", changefreq: "daily", priority: 0.6 },
   { path: "/contact", changefreq: "yearly", priority: 0.5 },
+  // Indexable on purpose. A club that publishes the rules it trains by is worth
+  // finding, and the page is readable by anyone: the signing form only appears
+  // for someone the site can already identify.
+  { path: "/code-of-conduct", changefreq: "yearly", priority: 0.4 },
 ];
 
 /**
@@ -118,6 +122,54 @@ export const CRAWLER_DISALLOW = [
 /** Absolute URL for a root-relative path, e.g. "/about" -> "https://jitsu.au/about". */
 export function canonicalUrl(path: string): string {
   return path === "/" ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${path}`;
+}
+
+export type PageMetaOptions = {
+  /** <title> and search-result title. */
+  title: string;
+  /** <meta name="description">. */
+  description: string;
+  /** og:title / twitter:title. Defaults to `title`. */
+  ogTitle?: string;
+  /** og:description / twitter:description. Defaults to `description`. */
+  ogDescription?: string;
+  /** Root-relative path this page is served at, used to build og:url. */
+  path: string;
+};
+
+/** The meta tag shapes `buildPageMeta` produces (a route's `head().meta` array element). */
+export type PageMetaTag =
+  | { title: string }
+  | { name: string; content: string }
+  | { property: string; content: string };
+
+/**
+ * A page's title/description/OpenGraph/Twitter meta, keyed so the router
+ * replaces the root route's generic versions instead of leaving them next to
+ * a page-specific one. The root only sets `og:*`/`twitter:*` as a shared
+ * fallback; a page that overrode `og:title` but not `twitter:title` still
+ * showed the home page's title on Twitter/Slack/iMessage previews, since
+ * they're unrelated attributes as far as the head merge is concerned. Every
+ * page should build its social tags through this helper so the two stay in
+ * sync.
+ */
+export function buildPageMeta({
+  title,
+  description,
+  ogTitle = title,
+  ogDescription = description,
+  path,
+}: PageMetaOptions): PageMetaTag[] {
+  const url = canonicalUrl(path);
+  return [
+    { title },
+    { name: "description", content: description },
+    { property: "og:title", content: ogTitle },
+    { property: "og:description", content: ogDescription },
+    { property: "og:url", content: url },
+    { name: "twitter:title", content: ogTitle },
+    { name: "twitter:description", content: ogDescription },
+  ];
 }
 
 /** True when the request arrived on a hostname that serves the real site. */
@@ -172,11 +224,20 @@ export function buildRobotsTxt(host: string | null | undefined): string {
 export function buildClubJsonLd(): Record<string, unknown> {
   return {
     "@context": "https://schema.org",
-    // Two types on purpose. `SportsClub` is the place you train at, and it is
+    // Four types on purpose. `SportsClub` is the place you train at, and it is
     // what carries `address`. `sport` belongs to `SportsOrganization`, which
     // `SportsClub` does not inherit from, so a validator reports it as an
-    // unknown property unless the club is declared as both. It is both.
-    "@type": ["SportsClub", "SportsOrganization"],
+    // unknown property unless the club is declared as both.
+    //
+    // `SportsClub` -> `SportsActivityLocation` -> `LocalBusiness` already makes
+    // this a `LocalBusiness` (and, via `LocalBusiness` -> `Organization`, an
+    // `Organization` too) by schema.org's own class hierarchy, so these last two
+    // are redundant to a spec-following validator. They are listed explicitly
+    // anyway because the tools that actually drive rich results and local-search
+    // eligibility (Google's Rich Results Test among them) key off literal
+    // `@type` strings rather than walking the ontology, and `SportsClub` /
+    // `SportsOrganization` alone are too obscure for most of them to recognise.
+    "@type": ["SportsClub", "SportsOrganization", "LocalBusiness", "Organization"],
     "@id": `${SITE_ORIGIN}/#club`,
     name: "UTS Jitsu",
     description:
@@ -186,7 +247,14 @@ export function buildClubJsonLd(): Record<string, unknown> {
     image: SOCIAL_IMAGE.url,
     telephone: CLUB_PHONE_E164,
     sport: "Japanese Jiu-Jitsu",
+    // Instructors page lists Franck Royer as "Lead instructor & founder" at
+    // UTS Jitsu, Harris St. `foundingDate` is left out on purpose: the same
+    // page shows both an original ~2017 founding and a 2026 "reopened as
+    // head instructor" entry, so which one counts is a real ambiguity, not
+    // something to infer.
+    founder: { "@type": "Person", name: "Franck Royer" },
     areaServed: { "@type": "City", name: "Sydney" },
+    hasMap: GOOGLE_MAPS_URL,
     address: {
       "@type": "PostalAddress",
       streetAddress: "Harris Street",

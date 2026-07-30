@@ -5,6 +5,7 @@ import {
   cancelEventSchema,
   checkInSchema,
   checkInWarnings,
+  codeOfConductAcceptSchema,
   composeFullName,
   contactSchema,
   coverageSources,
@@ -890,6 +891,59 @@ describe("managerEmailChangeSchema", () => {
       verified: true,
     });
     expect(r.success && Object.keys(r.data).sort()).toEqual(["email", "userId"]);
+  });
+});
+
+describe("codeOfConductAcceptSchema", () => {
+  const valid = { agree: true as const, signature_name: "Ada Lovelace", version: 1 };
+
+  it("accepts an agreement signed with a typed name", () => {
+    const r = codeOfConductAcceptSchema.safeParse({ ...valid, token: " tok " });
+    expect(r.success && r.data.signature_name).toBe("Ada Lovelace");
+    expect(r.success && r.data.token).toBe("tok");
+  });
+
+  it("works without a token, for a signed-in member", () => {
+    expect(codeOfConductAcceptSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("refuses an unticked box", () => {
+    // `agree` is a literal, not a boolean, so an unticked box cannot reach the
+    // handler at all. An agreement from somebody who did not agree is not
+    // evidence of anything.
+    expect(codeOfConductAcceptSchema.safeParse({ ...valid, agree: false }).success).toBe(false);
+    expect(codeOfConductAcceptSchema.safeParse({ signature_name: "Ada", version: 1 }).success).toBe(
+      false,
+    );
+  });
+
+  it("requires a signature", () => {
+    expect(codeOfConductAcceptSchema.safeParse({ ...valid, signature_name: "   " }).success).toBe(
+      false,
+    );
+  });
+
+  it("requires the version that was read", () => {
+    expect(
+      codeOfConductAcceptSchema.safeParse({ agree: true, signature_name: "Ada" }).success,
+    ).toBe(false);
+    expect(codeOfConductAcceptSchema.safeParse({ ...valid, version: 0 }).success).toBe(false);
+  });
+
+  it("takes no name or email: the server reads those off the person's record", () => {
+    // The rule that stops anyone agreeing on somebody else's behalf by typing
+    // their address. If these ever become inputs, that protection is gone.
+    const r = codeOfConductAcceptSchema.safeParse({
+      ...valid,
+      full_name: "Someone Else",
+      email: "someone@example.com",
+      user_id: "11111111-1111-1111-1111-111111111111",
+    });
+    expect(r.success && Object.keys(r.data).sort()).toEqual(["agree", "signature_name", "version"]);
+  });
+
+  it("drops a submission with the honeypot filled", () => {
+    expect(codeOfConductAcceptSchema.safeParse({ ...valid, hp: "bot" }).success).toBe(false);
   });
 });
 

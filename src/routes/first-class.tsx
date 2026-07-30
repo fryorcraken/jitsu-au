@@ -14,24 +14,18 @@ import {
 } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
+import { buildPageMeta } from "@/lib/seo";
 
 export const Route = createFileRoute("/first-class")({
   head: () => ({
-    meta: [
-      { title: "Your First Class | UTS Jitsu" },
-      {
-        name: "description",
-        content:
-          "Nervous about your first Jiu-Jitsu class? Here's exactly what happens, what to bring and how the free trial works at UTS Jitsu in Ultimo.",
-      },
-      { property: "og:title", content: "Your First Class | UTS Jitsu" },
-      {
-        property: "og:description",
-        content:
-          "A step-by-step walkthrough of your first Japanese Jiu-Jitsu session in Ultimo: what to expect, what to bring and how the free trial works.",
-      },
-      { property: "og:url", content: "https://jitsu.au/first-class" },
-    ],
+    meta: buildPageMeta({
+      title: "Your First Class | UTS Jitsu",
+      description:
+        "Nervous about your first Jiu-Jitsu class? Here's exactly what happens, what to bring and how the free trial works at UTS Jitsu in Ultimo.",
+      ogDescription:
+        "A step-by-step walkthrough of your first Japanese Jiu-Jitsu session in Ultimo: what to expect, what to bring and how the free trial works.",
+      path: "/first-class",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/first-class" }],
   }),
   component: FirstClass,

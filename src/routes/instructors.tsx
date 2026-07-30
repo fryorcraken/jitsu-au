@@ -2,24 +2,18 @@ import { createFileRoute } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
-import franckImg from "@/assets/training3.jpg.asset.json";
+import { buildPageMeta } from "@/lib/seo";
+import franckImg from "@/assets/franck-royer.jpg.asset.json";
 
 export const Route = createFileRoute("/instructors")({
   head: () => ({
-    meta: [
-      { title: "Instructors | UTS Jitsu" },
-      {
-        name: "description",
-        content:
-          "Meet the instructors at UTS Jitsu, led by Franck Royer with 25+ years of martial arts experience.",
-      },
-      { property: "og:title", content: "Instructors | UTS Jitsu" },
-      {
-        property: "og:description",
-        content: "Meet Franck Royer and the coaching team at UTS Jitsu.",
-      },
-      { property: "og:url", content: "https://jitsu.au/instructors" },
-    ],
+    meta: buildPageMeta({
+      title: "Instructors | UTS Jitsu",
+      description:
+        "Meet the instructors at UTS Jitsu, led by Franck Royer with 25+ years of martial arts experience.",
+      ogDescription: "Meet Franck Royer and the coaching team at UTS Jitsu.",
+      path: "/instructors",
+    }),
     links: [{ rel: "canonical", href: "https://jitsu.au/instructors" }],
   }),
   component: Instructors,

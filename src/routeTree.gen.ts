@@ -16,6 +16,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as ClassesRouteImport } from './routes/classes'
+import { Route as CodeOfConductRouteImport } from './routes/code-of-conduct'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as FaqRouteImport } from './routes/faq'
 import { Route as FirstClassRouteImport } from './routes/first-class'
@@ -80,6 +81,11 @@ const CalendarRoute = CalendarRouteImport.update({
 const ClassesRoute = ClassesRouteImport.update({
   id: '/classes',
   path: '/classes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CodeOfConductRoute = CodeOfConductRouteImport.update({
+  id: '/code-of-conduct',
+  path: '/code-of-conduct',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ContactRoute = ContactRouteImport.update({
@@ -257,6 +263,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/calendar': typeof CalendarRoute
   '/classes': typeof ClassesRoute
+  '/code-of-conduct': typeof CodeOfConductRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
   '/first-class': typeof FirstClassRoute
@@ -296,6 +303,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/calendar': typeof CalendarRoute
   '/classes': typeof ClassesRoute
+  '/code-of-conduct': typeof CodeOfConductRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
   '/first-class': typeof FirstClassRoute
@@ -337,6 +345,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/calendar': typeof CalendarRoute
   '/classes': typeof ClassesRoute
+  '/code-of-conduct': typeof CodeOfConductRoute
   '/contact': typeof ContactRoute
   '/faq': typeof FaqRoute
   '/first-class': typeof FirstClassRoute
@@ -378,6 +387,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calendar'
     | '/classes'
+    | '/code-of-conduct'
     | '/contact'
     | '/faq'
     | '/first-class'
@@ -417,6 +427,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calendar'
     | '/classes'
+    | '/code-of-conduct'
     | '/contact'
     | '/faq'
     | '/first-class'
@@ -457,6 +468,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/calendar'
     | '/classes'
+    | '/code-of-conduct'
     | '/contact'
     | '/faq'
     | '/first-class'
@@ -498,6 +510,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   CalendarRoute: typeof CalendarRoute
   ClassesRoute: typeof ClassesRoute
+  CodeOfConductRoute: typeof CodeOfConductRoute
   ContactRoute: typeof ContactRoute
   FaqRoute: typeof FaqRoute
   FirstClassRoute: typeof FirstClassRoute
@@ -566,6 +579,13 @@ declare module '@tanstack/react-router' {
       path: '/classes'
       fullPath: '/classes'
       preLoaderRoute: typeof ClassesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/code-of-conduct': {
+      id: '/code-of-conduct'
+      path: '/code-of-conduct'
+      fullPath: '/code-of-conduct'
+      preLoaderRoute: typeof CodeOfConductRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/contact': {
@@ -837,6 +857,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   CalendarRoute: CalendarRoute,
   ClassesRoute: ClassesRoute,
+  CodeOfConductRoute: CodeOfConductRoute,
   ContactRoute: ContactRoute,
   FaqRoute: FaqRoute,
   FirstClassRoute: FirstClassRoute,

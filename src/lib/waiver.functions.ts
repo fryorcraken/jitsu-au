@@ -53,6 +53,15 @@ export type WaiverSubmitResult = {
   waiver_id: string;
   pdf_url: string | null;
   pdf_ready: boolean;
+  /**
+   * Root-relative link to sign the code of conduct, carrying a token so a
+   * still-locked applicant can get there without logging in. Null whenever the
+   * token could not be minted, or on a fast-path return that predates minting
+   * one (the honeypot drop, or an idempotent retry of an already-signed
+   * submission) — the confirmation email carries the same link independently,
+   * so this is never the only way back to it.
+   */
+  code_of_conduct_url: string | null;
 };
 
 /**
@@ -289,7 +298,14 @@ export const listMyWaivers = createServerFn({ method: "GET" })
 export const submitWaiverWithPdf = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => waiverSubmitSchema.parse(data))
   .handler(async ({ data }): Promise<WaiverSubmitResult> => {
-    if (data.hp) return { ok: true, waiver_id: "", pdf_url: null, pdf_ready: false };
+    if (data.hp)
+      return {
+        ok: true,
+        waiver_id: "",
+        pdf_url: null,
+        pdf_ready: false,
+        code_of_conduct_url: null,
+      };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
@@ -314,7 +330,15 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       if (dupErr) console.error("[submitWaiverWithPdf] submission lookup failed:", dupErr);
       if (already) {
         const url = await signStoredPdf(admin, already.pdf_path);
-        return { ok: true, waiver_id: already.id, pdf_url: url, pdf_ready: Boolean(url) };
+        return {
+          ok: true,
+          waiver_id: already.id,
+          pdf_url: url,
+          pdf_ready: Boolean(url),
+          // This retry didn't mint a token itself; the original attempt's
+          // confirmation email already carries the working link.
+          code_of_conduct_url: null,
+        };
       }
     }
 
@@ -440,6 +464,35 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       }
     }
 
+    // The code of conduct is the next thing we ask for, and the only moment
+    // most people will do it willingly is right now, while they are already
+    // filling forms in. They cannot log in yet (an applicant's login stays
+    // banned until a manager approves them), so the link has to carry its own
+    // proof of who they are: a token, exactly like the interest email's.
+    //
+    // Minted here, before the waiver insert even runs, so it is available to
+    // every `notify()` call below — including the PDF-failure paths, which
+    // must not lose it just because the copy didn't render.
+    //
+    // Best-effort, and deliberately so. Signing the code of conduct is optional
+    // and never blocks training, so a token that could not be minted costs the
+    // signer a button, not their waiver.
+    let codeOfConductToken: string | null = null;
+    try {
+      const { mintVerificationToken } = await import("./email-verification.server");
+      codeOfConductToken = await mintVerificationToken(admin, {
+        email,
+        purpose: "code_of_conduct",
+        userId,
+      });
+    } catch (e) {
+      console.error("[submitWaiverWithPdf] could not mint a code-of-conduct link:", e);
+    }
+    const { buildCodeOfConductUrl } = await import("./code-of-conduct");
+    const codeOfConductUrl = codeOfConductToken
+      ? buildCodeOfConductUrl({ token: codeOfConductToken })
+      : null;
+
     // The waiver row is the frozen submission: exactly what was typed
     // (including the email as submitted), plus provenance (template version,
     // signer IP, signing context) and timestamps. Signatures and
@@ -488,7 +541,15 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         .maybeSingle();
       if (raced) {
         const url = await signStoredPdf(admin, raced.pdf_path);
-        return { ok: true, waiver_id: raced.id, pdf_url: url, pdf_ready: Boolean(url) };
+        // The other attempt in this race is the one that will mint the token
+        // and send the emails; this one just adopts its row.
+        return {
+          ok: true,
+          waiver_id: raced.id,
+          pdf_url: url,
+          pdf_ready: Boolean(url),
+          code_of_conduct_url: null,
+        };
       }
     }
     // The last point at which throwing is right: nothing is saved yet, so
@@ -530,6 +591,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           // Lets the confirmation email add a "confirm your email address"
           // button, but only for someone whose address is still unproven.
           userId,
+          // So the email can offer the code of conduct too: the signer may well
+          // close this tab without doing it now, and this is the only way back
+          // in until a manager approves them.
+          codeOfConductToken,
         });
       } catch (e) {
         console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);
@@ -573,7 +638,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     } catch (e) {
       console.error("[submitWaiverWithPdf] PDF generation failed:", e);
       await notify(null);
-      return { ok: true, waiver_id: inserted.id, pdf_url: null, pdf_ready: false };
+      return {
+        ok: true,
+        waiver_id: inserted.id,
+        pdf_url: null,
+        pdf_ready: false,
+        code_of_conduct_url: codeOfConductUrl,
+      };
     }
 
     const path = `${inserted.id}.pdf`;
@@ -583,7 +654,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     if (upErr) {
       console.error("[submitWaiverWithPdf] PDF upload failed:", upErr);
       await notify(null);
-      return { ok: true, waiver_id: inserted.id, pdf_url: null, pdf_ready: false };
+      return {
+        ok: true,
+        waiver_id: inserted.id,
+        pdf_url: null,
+        pdf_ready: false,
+        code_of_conduct_url: codeOfConductUrl,
+      };
     }
 
     await admin.from("waivers").update({ pdf_path: path }).eq("id", inserted.id);
@@ -608,6 +685,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       waiver_id: inserted.id,
       pdf_url: signedUrl,
       pdf_ready: Boolean(signedUrl),
+      code_of_conduct_url: codeOfConductUrl,
     };
   });
 

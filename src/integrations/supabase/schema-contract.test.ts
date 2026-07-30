@@ -184,6 +184,39 @@ export type _CheckinClosedFlagIsBoolean = Expect<
   Equals<Tables["session_checkins"]["Row"]["closed_membership"], boolean>
 >;
 
+// ---- code_of_conduct_acceptances: who agreed to the house rules ----
+export type _CodeOfConductColumns = RequireColumns<
+  Tables["code_of_conduct_acceptances"]["Row"],
+  | "user_id"
+  | "version"
+  | "accepted_at"
+  | "full_name"
+  | "email"
+  | "signature_name"
+  | "signer_ip"
+  | "signer_meta"
+>;
+
+/**
+ * Exactly `number`, not `number | null`. Every screen compares this against
+ * `CODE_OF_CONDUCT_VERSION` to decide whether somebody's agreement is current,
+ * and a nullable widening would mean the NOT NULL was dropped live, quietly
+ * turning "agreed to nothing in particular" into a valid acceptance.
+ */
+export type _CodeOfConductVersionIsNumber = Expect<
+  Equals<Tables["code_of_conduct_acceptances"]["Row"]["version"], number>
+>;
+
+/**
+ * NOT NULL, unlike `email_verification_tokens.user_id` above, and the contrast
+ * is the design: a verification token binds to an ADDRESS because it may exist
+ * before the person does, whereas the code of conduct is only ever signed by
+ * somebody the club already holds. Signing it never creates a person.
+ */
+export type _CodeOfConductUserIdIsNotNull = Expect<
+  Equals<Tables["code_of_conduct_acceptances"]["Row"]["user_id"], string>
+>;
+
 /**
  * The idempotency key that makes retrying a form submission safe.
  *

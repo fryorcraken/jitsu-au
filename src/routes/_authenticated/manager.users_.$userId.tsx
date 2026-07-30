@@ -409,7 +409,14 @@ function ManagerUserPage() {
     );
   }
 
-  const { user: summary, profile, memberships, waivers, checkins } = detail;
+  const {
+    user: summary,
+    profile,
+    memberships,
+    waivers,
+    checkins,
+    code_of_conduct: codeOfConduct,
+  } = detail;
 
   return (
     <section className="mx-auto max-w-5xl space-y-8 px-4 py-10">
@@ -486,6 +493,34 @@ function ManagerUserPage() {
           />
           <Field label="Record updated" value={formatDateTime(profile.updated_at)} />
         </dl>
+      </div>
+
+      {/* House rules. Read-only on purpose: a manager cannot tick this on
+          somebody's behalf, for the same reason there is no "mark as verified"
+          button — an agreement a manager recorded would only mean "a manager
+          believed this". It sits here so the state is visible at the moment a
+          membership is being set up, which is when the club wants it signed. */}
+      <div className="rounded-lg border p-4">
+        <h2 className="mb-1 text-lg font-bold">Code of conduct</h2>
+        {codeOfConduct.state === "signed" ? (
+          <p className="text-sm text-muted-foreground">
+            Agreed to version {codeOfConduct.accepted_version} on{" "}
+            {formatDate(codeOfConduct.accepted_at)}, signed as {codeOfConduct.signature_name ?? "—"}
+            .
+          </p>
+        ) : codeOfConduct.state === "outdated" ? (
+          <p className="text-sm text-muted-foreground">
+            Agreed to version {codeOfConduct.accepted_version} on{" "}
+            {formatDate(codeOfConduct.accepted_at)}. The current version is{" "}
+            {codeOfConduct.current_version}, so it is worth asking them to read it again. Nothing is
+            blocked either way.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Not signed yet. They can sign it from their account page, or from the link in their
+            waiver confirmation email. It does not block training or a membership.
+          </p>
+        )}
       </div>
 
       <div className="space-y-3">

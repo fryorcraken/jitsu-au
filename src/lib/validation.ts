@@ -501,6 +501,41 @@ export const waiverApprovalSchema = z.object({
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 
+// ---- Code of conduct ----
+//
+// Deliberately small next to `waiverSubmitSchema`. The signer is a person the
+// club already has on file, so nothing about them is retyped here: the name and
+// email stored on the acceptance are copied server-side from their profile and
+// login. What the form actually collects is agreement and a signature.
+//
+// `token` is the proof-of-click token from the "sign it later" email. Someone
+// who just signed a waiver is a locked applicant and cannot log in yet, so
+// without it there would be no way to sign at all until a manager approved them.
+// It is optional because a signed-in member needs no token, and it is never
+// trusted client-side: the server resolves it and refuses anything expired,
+// revoked, or minted for an address the account no longer has.
+export const codeOfConductAcceptSchema = z.object({
+  token: z.string().trim().max(120).optional().or(z.literal("")),
+  // Must be ticked. A code of conduct signed by someone who did not agree to it
+  // is not evidence of anything, so this is `z.literal(true)` rather than a
+  // boolean the server has to remember to check.
+  agree: z.literal(true),
+  signature_name: z.string().trim().min(1).max(120),
+  // Which version they actually read. The server refuses a version it does not
+  // recognise rather than filing an agreement against unknown text, the same
+  // rule the waiver applies to its template version.
+  version: z.number().int().positive(),
+  client_meta: waiverClientMetaSchema.optional(),
+  hp: z.string().max(0).optional(), // honeypot
+});
+export type CodeOfConductAcceptInput = z.infer<typeof codeOfConductAcceptSchema>;
+
+/** Optional `?t=` token on a code-of-conduct link that arrived by email. */
+export const codeOfConductSearchSchema = z.object({
+  t: z.coerce.string().max(120).optional().catch(undefined),
+});
+export type CodeOfConductSearch = z.infer<typeof codeOfConductSearchSchema>;
+
 // ---- Manager: upload a scanned paper waiver ----
 //
 // Some people fill the form on paper at the door. A manager scans it and files

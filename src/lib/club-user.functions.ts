@@ -13,6 +13,7 @@ import {
   nameWithPreferred,
   normalizeEmail,
 } from "@/lib/validation";
+import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-conduct";
 import type { MembershipClient } from "@/lib/membership-types";
 import type { ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
@@ -56,6 +57,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: emailRows, error: emailErr },
       { data: checkins, error: cErr },
       { count: checkinCount, error: ccErr },
+      { data: codeOfConduct, error: cocErr },
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("user_id", data.userId).maybeSingle(),
       admin
@@ -86,6 +88,12 @@ export const getClubUser = createServerFn({ method: "POST" })
         .from("session_checkins")
         .select("id", { count: "exact", head: true })
         .eq("user_id", data.userId),
+      admin
+        .from("code_of_conduct_acceptances")
+        .select("id, version, accepted_at, signature_name")
+        .eq("user_id", data.userId)
+        .order("accepted_at", { ascending: false })
+        .limit(20),
     ]);
     // Every read except the email RPC fails the whole page. This is the screen a
     // manager decides an approval from, so "the query failed" must never render
@@ -125,6 +133,20 @@ export const getClubUser = createServerFn({ method: "POST" })
     // person always HAS an email — it lives on their login record — so log it:
     // the screen can only say the lookup failed, and nothing else would.
     if (emailErr) console.error("[getClubUser] email lookup failed:", emailErr);
+
+    // The code of conduct blocks nothing, so a failed read of it must not take
+    // the page down with it: a manager still has an approval to make, and an
+    // unreadable acceptance list is shown as "not signed yet" with a line in the
+    // server log rather than an error page over a nice-to-know.
+    if (cocErr) console.error("[getClubUser] code of conduct lookup failed:", cocErr);
+    // Highest VERSION agreed to, not the most recent row: re-signing an older
+    // version after a newer one is not a downgrade (`codeOfConductStatusFor`
+    // holds the same line for the member's own screens).
+    const codeOfConductRows = codeOfConduct ?? [];
+    const latestCode = codeOfConductRows.reduce<(typeof codeOfConductRows)[number] | null>(
+      (top, a) => (!top || a.version > top.version ? a : top),
+      null,
+    );
     const emails = (emailRows ?? []).map((e) => ({
       user_id: e.user_id,
       email: e.email,
@@ -236,6 +258,16 @@ export const getClubUser = createServerFn({ method: "POST" })
         consumed_credit: c.consumed_credit,
         warnings: c.warnings,
       })),
+      // House rules, not a gate. Shown so a manager can nudge somebody about it
+      // when they join as a paying member, which is when the club wants it
+      // signed. Nothing here stops an approval or a check-in.
+      code_of_conduct: {
+        state: codeOfConductState(latestCode?.version ?? null),
+        current_version: CODE_OF_CONDUCT_VERSION,
+        accepted_version: latestCode?.version ?? null,
+        accepted_at: latestCode?.accepted_at ?? null,
+        signature_name: latestCode?.signature_name ?? null,
+      },
       // The frozen submission, in full: what a manager reads to decide whether
       // to approve. The PDF is fetched separately, as a short-lived signed URL.
       waivers: waiverRows.map((w) => ({

@@ -28,6 +28,12 @@ interface WaiverConfirmationEmailProps {
    * confirm what they just confirmed.
    */
   verifyUrl?: string | null;
+  /**
+   * The "sign the code of conduct" link, carrying the token that identifies the
+   * signer. Absent when no token could be minted: an unsigned code of conduct
+   * blocks nothing, so the email is worth sending without the button.
+   */
+  codeOfConductUrl?: string | null;
 }
 
 /** Sent to the person who just signed a waiver, with a link to their PDF copy. */
@@ -37,6 +43,7 @@ export const WaiverConfirmationEmail = ({
   memberName,
   pdfUrl,
   verifyUrl,
+  codeOfConductUrl,
 }: WaiverConfirmationEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -63,6 +70,18 @@ export const WaiverConfirmationEmail = ({
           A manager will review your submission. You&apos;ll be cleared to train once it&apos;s
           approved.
         </Text>
+        {codeOfConductUrl ? (
+          <>
+            <Text style={text}>
+              When you have a minute, please read our code of conduct and agree to it. It covers how
+              we train together: hygiene, mat etiquette, gear, and keeping each other safe. You can
+              train before you do this, so there is no rush.
+            </Text>
+            <Button style={button} href={codeOfConductUrl}>
+              Read and sign the code of conduct
+            </Button>
+          </>
+        ) : null}
         {verifyUrl ? (
           <>
             <Text style={text}>
