@@ -5,6 +5,7 @@ import {
   SITE_ORIGIN,
   PUBLIC_PAGES,
   CRAWLER_DISALLOW,
+  CLUB_LOGO_URL,
   CLUB_PHONE_E164,
   CLUB_SOCIAL_URLS,
   SOCIAL_IMAGE,
@@ -262,7 +263,7 @@ describe("buildSitemapXml", () => {
 
 describe("SOCIAL_IMAGE", () => {
   it("is an absolute URL, which is the only form the social crawlers accept", () => {
-    expect(SOCIAL_IMAGE.url).toBe(`${SITE_ORIGIN}/logo.png`);
+    expect(SOCIAL_IMAGE.url.startsWith(`${SITE_ORIGIN}/`)).toBe(true);
   });
 
   it("is big enough for a large summary card", () => {
@@ -271,9 +272,10 @@ describe("SOCIAL_IMAGE", () => {
     expect(SOCIAL_IMAGE.height).toBeGreaterThanOrEqual(157);
   });
 
-  it("is served from the public directory, so the file actually exists", () => {
-    const file = join(import.meta.dirname, "..", "..", "public", "logo.png");
-    expect(() => readFileSync(file)).not.toThrow();
+  it("points at the training1 asset checked into the repo, so the path is not a typo", () => {
+    const assetFile = join(import.meta.dirname, "..", "assets", "training1.jpg.asset.json");
+    const asset = JSON.parse(readFileSync(assetFile, "utf8"));
+    expect(SOCIAL_IMAGE.url).toBe(`${SITE_ORIGIN}${asset.url}`);
   });
 });
 
@@ -318,6 +320,14 @@ describe("buildClubJsonLd", () => {
   it("uses absolute URLs for the logo and image", () => {
     expect(String(club.logo).startsWith(SITE_ORIGIN)).toBe(true);
     expect(String(club.image).startsWith(SITE_ORIGIN)).toBe(true);
+  });
+
+  it("points logo at the club's actual brand mark, not the social share photo", () => {
+    // Google reads structured-data `logo` for the Knowledge Panel and expects
+    // an actual brand mark; `image` is free to be the training photo instead.
+    expect(club.logo).toBe(CLUB_LOGO_URL);
+    expect(club.image).toBe(SOCIAL_IMAGE.url);
+    expect(club.logo).not.toBe(club.image);
   });
 
   it("names the founder as a Person", () => {
