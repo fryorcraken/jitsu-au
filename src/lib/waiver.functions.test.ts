@@ -34,8 +34,13 @@ vi.mock("./waiver-scan", () => ({
 
 type SignResult = { data: { signedUrl: string } | null; error: { message: string } | null };
 
-/** A service-role stub covering exactly the one storage chain the helper walks. */
-function fakeAdmin(result: SignResult | (() => never)) {
+/**
+ * A service-role stub covering exactly the one storage chain `signStoredPdf`
+ * walks. Named apart from the `filePaperWaiver` fake below, which covers a much
+ * larger surface (auth, profiles, the waivers table) for a different function
+ * in this same module.
+ */
+function fakeSignStoredPdfAdmin(result: SignResult | (() => never)) {
   const calls: Array<{ bucket: string; path: string; ttl: number }> = [];
   const admin = {
     storage: {
@@ -60,7 +65,7 @@ afterEach(() => {
 describe("signStoredPdf", () => {
   it("mints a one-hour link from the stored path", async () => {
     const { signStoredPdf } = await import("./waiver.functions");
-    const { admin, calls } = fakeAdmin({
+    const { admin, calls } = fakeSignStoredPdfAdmin({
       data: { signedUrl: "https://example.test/w1.pdf?token=abc" },
       error: null,
     });
@@ -76,7 +81,7 @@ describe("signStoredPdf", () => {
     // inserted its row but has not finished rendering. The retry that finds it
     // must still report the waiver as saved.
     const { signStoredPdf } = await import("./waiver.functions");
-    const { admin, calls } = fakeAdmin({ data: null, error: null });
+    const { admin, calls } = fakeSignStoredPdfAdmin({ data: null, error: null });
 
     await expect(signStoredPdf(admin, null)).resolves.toBeNull();
     expect(calls).toEqual([]);
@@ -85,7 +90,10 @@ describe("signStoredPdf", () => {
   it("swallows a storage error rather than failing a signed waiver", async () => {
     const { signStoredPdf } = await import("./waiver.functions");
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const { admin } = fakeAdmin({ data: null, error: { message: "Object not found" } });
+    const { admin } = fakeSignStoredPdfAdmin({
+      data: null,
+      error: { message: "Object not found" },
+    });
 
     await expect(signStoredPdf(admin, "w1.pdf")).resolves.toBeNull();
   });
@@ -96,7 +104,7 @@ describe("signStoredPdf", () => {
     // that would be reported to the signer as a failed submission.
     const { signStoredPdf } = await import("./waiver.functions");
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const { admin } = fakeAdmin(() => {
+    const { admin } = fakeSignStoredPdfAdmin(() => {
       throw new TypeError("Failed to fetch");
     });
 
