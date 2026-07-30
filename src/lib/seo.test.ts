@@ -17,6 +17,7 @@ import {
 } from "./seo";
 import { Route as RootRoute } from "@/routes/__root";
 import { Route as AboutRoute } from "@/routes/about";
+import { GOOGLE_MAPS_URL } from "./venue";
 
 describe("canonicalUrl", () => {
   it("keeps the trailing slash on the home page", () => {
@@ -285,11 +286,20 @@ describe("buildClubJsonLd", () => {
     expect(club.name).toBe("UTS Jitsu");
   });
 
-  it("is typed as both a club and a sports organisation", () => {
+  it("is typed as a club, a sports organisation, a local business and an organisation", () => {
     // `address` needs SportsClub; `sport` needs SportsOrganization, which
     // SportsClub does not inherit. Dropping either type makes one of them an
-    // unknown property to a validator.
-    expect(club["@type"]).toEqual(["SportsClub", "SportsOrganization"]);
+    // unknown property to a validator. LocalBusiness and Organization are
+    // added explicitly (schema.org's own hierarchy already implies both
+    // through SportsClub -> SportsActivityLocation -> LocalBusiness ->
+    // Organization) because rich-result tooling keys off literal @type
+    // strings rather than walking the ontology.
+    expect(club["@type"]).toEqual([
+      "SportsClub",
+      "SportsOrganization",
+      "LocalBusiness",
+      "Organization",
+    ]);
     expect(club.sport).toBe("Japanese Jiu-Jitsu");
   });
 
@@ -309,6 +319,14 @@ describe("buildClubJsonLd", () => {
     expect(String(club.logo).startsWith(SITE_ORIGIN)).toBe(true);
     expect(String(club.image).startsWith(SITE_ORIGIN)).toBe(true);
   });
+
+  it("names the founder as a Person", () => {
+    expect(club.founder).toEqual({ "@type": "Person", name: "Franck Royer" });
+  });
+
+  it("points hasMap at the same deep link the site links out to", () => {
+    expect(club.hasMap).toBe(GOOGLE_MAPS_URL);
+  });
 });
 
 // Structured data that contradicts the visible page is worse than none, so the
@@ -317,6 +335,7 @@ describe("club details match the site", () => {
   const srcDir = join(import.meta.dirname, "..");
   const footer = readFileSync(join(srcDir, "components", "site", "SiteFooter.tsx"), "utf8");
   const contact = readFileSync(join(srcDir, "routes", "contact.tsx"), "utf8");
+  const instructors = readFileSync(join(srcDir, "routes", "instructors.tsx"), "utf8");
 
   it("uses the phone number the footer and contact page dial", () => {
     // "+61493631759" -> the local "0493631759" both pages link with tel:.
@@ -329,6 +348,11 @@ describe("club details match the site", () => {
     for (const url of CLUB_SOCIAL_URLS) {
       expect(footer).toContain(url);
     }
+  });
+
+  it("names the founder the instructors page credits as founder", () => {
+    expect(instructors).toContain("Franck Royer");
+    expect(instructors).toContain("founder");
   });
 });
 
