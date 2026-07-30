@@ -12,6 +12,7 @@
 
 import { GOOGLE_MAPS_URL, VENUE_NAME } from "./venue";
 import trainingAsset from "../assets/training1.jpg.asset.json";
+import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
 /** Canonical origin. Every `rel="canonical"` on the site points here. */
 export const SITE_ORIGIN = "https://jitsu.au";
@@ -59,6 +60,14 @@ export const SOCIAL_IMAGE = {
   height: 1205,
   alt: "UTS Jitsu students training on the mat",
 } as const;
+
+/**
+ * The club's actual brand mark (the same file `SiteHeader` renders), as
+ * opposed to `SOCIAL_IMAGE` above. Structured data's `logo` field is read by
+ * Google for the Knowledge Panel and is expected to be a brand mark, not an
+ * arbitrary photo, so `buildClubJsonLd` uses this instead of `SOCIAL_IMAGE`.
+ */
+export const CLUB_LOGO_URL = `${SITE_ORIGIN}${logoAsset.url}`;
 
 /**
  * Club contact details that appear in structured data.
@@ -249,7 +258,7 @@ export function buildClubJsonLd(): Record<string, unknown> {
     description:
       "Japanese Jiu-Jitsu club training at UTS Ultimo in Sydney. Beginner-friendly classes in practical self-defence, with the first two sessions free.",
     url: `${SITE_ORIGIN}/`,
-    logo: SOCIAL_IMAGE.url,
+    logo: CLUB_LOGO_URL,
     image: SOCIAL_IMAGE.url,
     telephone: CLUB_PHONE_E164,
     sport: "Japanese Jiu-Jitsu",

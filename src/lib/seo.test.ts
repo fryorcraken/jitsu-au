@@ -5,6 +5,7 @@ import {
   SITE_ORIGIN,
   PUBLIC_PAGES,
   CRAWLER_DISALLOW,
+  CLUB_LOGO_URL,
   CLUB_PHONE_E164,
   CLUB_SOCIAL_URLS,
   SOCIAL_IMAGE,
@@ -319,6 +320,14 @@ describe("buildClubJsonLd", () => {
   it("uses absolute URLs for the logo and image", () => {
     expect(String(club.logo).startsWith(SITE_ORIGIN)).toBe(true);
     expect(String(club.image).startsWith(SITE_ORIGIN)).toBe(true);
+  });
+
+  it("points logo at the club's actual brand mark, not the social share photo", () => {
+    // Google reads structured-data `logo` for the Knowledge Panel and expects
+    // an actual brand mark; `image` is free to be the training photo instead.
+    expect(club.logo).toBe(CLUB_LOGO_URL);
+    expect(club.image).toBe(SOCIAL_IMAGE.url);
+    expect(club.logo).not.toBe(club.image);
   });
 
   it("names the founder as a Person", () => {
