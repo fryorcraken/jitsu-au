@@ -11,6 +11,7 @@
 // so the rules stay unit-testable and free of any server import.
 
 import { VENUE_NAME } from "./venue";
+import trainingAsset from "../assets/training1.jpg.asset.json";
 
 /** Canonical origin. Every `rel="canonical"` on the site points here. */
 export const SITE_ORIGIN = "https://jitsu.au";
@@ -48,12 +49,12 @@ export const PRODUCTION_HOSTS = [
  * for a picture; without one, a shared link renders as a bare grey box.
  *
  * This is the same training photo used as the homepage hero
- * (`src/assets/training1.jpg.asset.json`), served from Lovable's asset host
- * rather than `public/`. Width/height match the intrinsic size set on that
- * `<img>` in `routes/index.tsx`.
+ * (`src/assets/training1.jpg.asset.json`, imported above), served from
+ * Lovable's asset host rather than `public/`. Width/height match the
+ * intrinsic size set on that `<img>` in `routes/index.tsx`.
  */
 export const SOCIAL_IMAGE = {
-  url: `${SITE_ORIGIN}/__l5e/assets-v1/97ff8dff-f2a6-4130-8e98-19cdc723872d/training1.jpg`,
+  url: `${SITE_ORIGIN}${trainingAsset.url}`,
   width: 1600,
   height: 1205,
   alt: "UTS Jitsu students training on the mat",
