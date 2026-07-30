@@ -295,9 +295,28 @@ export function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
   }
 }
 
+// ---- Submission identity (idempotency) ----
+
+/**
+ * A uuid the browser mints once per form fill and sends on every attempt.
+ *
+ * It exists so a retry can be recognised as the SAME submission. Aborting a
+ * request client-side does not stop the server, so without this an automatic
+ * retry after a timeout can leave a duplicate lead, or a duplicate signed
+ * waiver plus a second round of emails. Each table carries it behind a partial
+ * unique index (20260729020000_submission_idempotency.sql).
+ *
+ * Optional on purpose: a client cached from before this shipped sends nothing
+ * and still submits successfully, it simply gets no dedupe protection. The
+ * empty-string branch mirrors the other optional fields here, which is what the
+ * forms send for "not set".
+ */
+export const clientSubmissionId = z.string().uuid().optional().or(z.literal(""));
+
 // ---- Interest registration ----
 
 export const interestSchema = z.object({
+  client_submission_id: clientSubmissionId,
   // The register form composes this from first + last name fields (each capped
   // at 60, matching the waiver), so allow up to 60 + " " + 60 = 121 characters.
   name: z.string().trim().min(1).max(121),
@@ -311,6 +330,7 @@ export const interestSchema = z.object({
 // ---- Contact message ----
 
 export const contactSchema = z.object({
+  client_submission_id: clientSubmissionId,
   name: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(255),
   subject: z.string().trim().max(150).optional().or(z.literal("")),
@@ -324,6 +344,7 @@ const sigImage = z.string().max(500_000).optional().or(z.literal(""));
 
 export const waiverSubmitSchema = z
   .object({
+    client_submission_id: clientSubmissionId,
     first_name: z.string().trim().min(1).max(60),
     middle_name: z.string().trim().max(60).optional().or(z.literal("")),
     last_name: z.string().trim().min(1).max(60),

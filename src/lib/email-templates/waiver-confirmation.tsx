@@ -16,7 +16,12 @@ interface WaiverConfirmationEmailProps {
   siteName: string;
   siteUrl: string;
   memberName: string;
-  pdfUrl: string;
+  /**
+   * Null when the copy could not be produced. The waiver is signed and recorded
+   * either way, so this email still goes out. Silence would leave the signer
+   * with nothing at all, which is how someone ends up signing a second time.
+   */
+  pdfUrl: string | null;
   /**
    * Present only when the signer's address has not been proven yet. Someone who
    * came from their interest email is already verified and must not be asked to
@@ -44,11 +49,16 @@ export const WaiverConfirmationEmail = ({
           <Link href={siteUrl} style={link}>
             <strong>{siteName}</strong>
           </Link>
-          . A copy is attached as a PDF via the secure link below.
+          .
+          {pdfUrl
+            ? " A copy is attached as a PDF via the secure link below."
+            : " We had trouble preparing your PDF copy, so there is no download link here. Your waiver is signed and saved, and there is no need to sign again. Reply to this email if you would like a copy and we will sort it out."}
         </Text>
-        <Button style={button} href={pdfUrl}>
-          Download your waiver (PDF)
-        </Button>
+        {pdfUrl && (
+          <Button style={button} href={pdfUrl}>
+            Download your waiver (PDF)
+          </Button>
+        )}
         <Text style={text}>
           A manager will review your submission. You&apos;ll be cleared to train once it&apos;s
           approved.

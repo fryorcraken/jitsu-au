@@ -16,7 +16,12 @@ interface WaiverNotificationEmailProps {
   siteName: string;
   memberName: string;
   memberEmail: string;
-  pdfUrl: string;
+  /**
+   * Null when the copy could not be produced. The waiver is still signed and
+   * recorded, so this email still goes out: a manager knowing to chase a missing
+   * document is the whole point of sending it.
+   */
+  pdfUrl: string | null;
   reviewUrl: string;
 }
 
@@ -41,12 +46,16 @@ export const WaiverNotificationEmail = ({
           <Link href={`mailto:${memberEmail}`} style={link}>
             {memberEmail}
           </Link>
-          ) just signed a training waiver for {siteName}. The signed PDF is available via the secure
-          link below.
+          ) just signed a training waiver for {siteName}.
+          {pdfUrl
+            ? " The signed PDF is available via the secure link below."
+            : " We could not produce the PDF copy this time, so there is no download link. The waiver itself is recorded. Please get in touch with them to sort out a copy."}
         </Text>
-        <Button style={button} href={pdfUrl}>
-          Download the signed waiver (PDF)
-        </Button>
+        {pdfUrl && (
+          <Button style={button} href={pdfUrl}>
+            Download the signed waiver (PDF)
+          </Button>
+        )}
         <Text style={text}>Review it and approve the member in the manager dashboard:</Text>
         <Text style={text}>
           <Link href={reviewUrl} style={link}>

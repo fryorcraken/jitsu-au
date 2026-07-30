@@ -113,6 +113,41 @@ login record is created (their email, no way to sign in) and their profile is
 seeded with name + phone. An existing person is left untouched. Either way the
 waiver row stores the full submission, and the person is now an applicant.
 
+### Signing on a bad connection
+
+The waiver is the one form where "it silently did not go through" is expensive:
+twenty fields, five health answers and a hand-drawn signature, filled in on a
+phone, often at the gym. The page is built so that ends in a definite answer.
+
+- **It retries.** Up to five attempts, each with a 45s timeout (the handler
+  creates an auth user, renders a PDF, uploads it and sends emails, so it is
+  genuinely slow), spaced by a backoff of 1s, 2s, 5s and 10s. A worst case where
+  every attempt times out therefore runs about four minutes before giving up.
+  Being offline does not spend an attempt: it waits for the connection and sends
+  itself when it returns, up to a minute, after which it tries anyway rather
+  than sitting there.
+- **It asks instead of guessing.** Aborting a request client-side does not stop
+  the server, so a timeout never means "it did not happen". After any dropped
+  attempt the page calls `checkWaiverSubmission` with its submission id. If the
+  waiver landed, the signer goes straight to the confirmation, even though the
+  original reply was lost.
+- **Retrying is safe** because every attempt carries the same
+  `client_submission_id`, which the server looks up before doing any work. One
+  signed waiver, one set of emails, however many times it is sent.
+- **Saved and "copy ready" are separate facts.** `submitWaiverWithPdf` returns
+  `{ ok, waiver_id, pdf_url, pdf_ready }`. Nothing after the waiver row is
+  inserted throws: a pdf-lib or storage failure comes back as `pdf_ready: false`
+  and the signer is told their waiver is signed and the copy will be emailed.
+  Reporting that as a failure is what used to make people sign a second time.
+- **Nothing typed is lost.** The half-filled form, signature included, is kept in
+  `sessionStorage` (`lib/waiver-draft.ts`) and put back after a reload or a
+  crashed tab. It carries the submission id, so a reload mid-submit checks
+  whether that one landed rather than sending another. It is cleared on success,
+  and it is session-scoped so health answers and a signature do not linger on a
+  shared machine.
+- **A hard failure stays on screen**, as a panel with "Try again" rather than a
+  toast that fades, and it points out they can also sign at the gym.
+
 ### Someone fills the form on paper
 
 Not everyone signs on a screen. A person can fill the form on paper at the door,
@@ -169,7 +204,9 @@ waiver, and the panel says so by leaving it out rather than showing it empty.
 
 Submit again with the same email. Always accepted, whatever phase that email's
 person is in: a resubmission attaches to the existing person and never
-modifies them. Managers decide which submission to approve.
+modifies them. Managers decide which submission to approve. (A deliberate
+resubmission is a fresh form fill with a fresh submission id, so it is a new
+waiver; only a **retry of the same fill** is deduplicated.)
 
 ### Email verification
 
