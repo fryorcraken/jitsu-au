@@ -10,7 +10,7 @@
 // `src/routes/sitemap[.]xml.ts`) are thin wrappers around the builders below,
 // so the rules stay unit-testable and free of any server import.
 
-import { VENUE_NAME } from "./venue";
+import { GOOGLE_MAPS_URL, VENUE_NAME } from "./venue";
 
 /** Canonical origin. Every `rel="canonical"` on the site points here. */
 export const SITE_ORIGIN = "https://jitsu.au";
@@ -172,11 +172,20 @@ export function buildRobotsTxt(host: string | null | undefined): string {
 export function buildClubJsonLd(): Record<string, unknown> {
   return {
     "@context": "https://schema.org",
-    // Two types on purpose. `SportsClub` is the place you train at, and it is
+    // Four types on purpose. `SportsClub` is the place you train at, and it is
     // what carries `address`. `sport` belongs to `SportsOrganization`, which
     // `SportsClub` does not inherit from, so a validator reports it as an
-    // unknown property unless the club is declared as both. It is both.
-    "@type": ["SportsClub", "SportsOrganization"],
+    // unknown property unless the club is declared as both.
+    //
+    // `SportsClub` -> `SportsActivityLocation` -> `LocalBusiness` already makes
+    // this a `LocalBusiness` (and, via `LocalBusiness` -> `Organization`, an
+    // `Organization` too) by schema.org's own class hierarchy, so these last two
+    // are redundant to a spec-following validator. They are listed explicitly
+    // anyway because the tools that actually drive rich results and local-search
+    // eligibility (Google's Rich Results Test among them) key off literal
+    // `@type` strings rather than walking the ontology, and `SportsClub` /
+    // `SportsOrganization` alone are too obscure for most of them to recognise.
+    "@type": ["SportsClub", "SportsOrganization", "LocalBusiness", "Organization"],
     "@id": `${SITE_ORIGIN}/#club`,
     name: "UTS Jitsu",
     description:
@@ -186,7 +195,14 @@ export function buildClubJsonLd(): Record<string, unknown> {
     image: SOCIAL_IMAGE.url,
     telephone: CLUB_PHONE_E164,
     sport: "Japanese Jiu-Jitsu",
+    // Instructors page lists Franck Royer as "Lead instructor & founder" at
+    // UTS Jitsu, Harris St. `foundingDate` is left out on purpose: the same
+    // page shows both an original ~2017 founding and a 2026 "reopened as
+    // head instructor" entry, so which one counts is a real ambiguity, not
+    // something to infer.
+    founder: { "@type": "Person", name: "Franck Royer" },
     areaServed: { "@type": "City", name: "Sydney" },
+    hasMap: GOOGLE_MAPS_URL,
     address: {
       "@type": "PostalAddress",
       streetAddress: "Harris Street",
