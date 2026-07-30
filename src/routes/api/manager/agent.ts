@@ -28,6 +28,7 @@ import {
   AgentError,
   bearerToken,
   buildInvoicePatch,
+  classifyAction,
   projectInvoice,
   safeEqual,
 } from "@/lib/manager-agent";
@@ -69,6 +70,30 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
+}
+
+/**
+ * Only GET (manifest) and POST (dispatch) carry behaviour. Every other method
+ * used to fall through to the site's normal SSR router (no matching handler
+ * on this route), returning the marketing homepage HTML with a 200 — harmless
+ * but confusing, and a trap if a future handler ever dispatches on method.
+ * Reject explicitly instead.
+ */
+function methodNotAllowed(): Response {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      error: { code: "method_not_allowed", message: "Method not allowed." },
+    }),
+    {
+      status: 405,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        allow: "GET, POST",
+      },
+    },
+  );
 }
 
 /** Load the service-role client. */
@@ -288,15 +313,24 @@ async function handleListInvoices(params: unknown) {
 
   let query = db.from("memberships").select("*").order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
-  const [{ data: rows, error }, { data: plans, error: plErr }] = await Promise.all([
-    query.limit(limit ?? 200),
-    db.from("membership_plans").select("*"),
-  ]);
+  // Separate exact-count read (matching the same filter, no limit) so a capped
+  // page still reports how many rows exist in total — list_users already does
+  // this for the same reason: without it a caller can't tell a full page from
+  // a truncated one, and there's no offset/cursor to page past the cap.
+  let countQuery = db.from("memberships").select("*", { count: "exact", head: true });
+  if (status) countQuery = countQuery.eq("status", status);
+  const [{ data: rows, error }, { data: plans, error: plErr }, { count, error: countErr }] =
+    await Promise.all([
+      query.limit(limit ?? 200),
+      db.from("membership_plans").select("*"),
+      countQuery,
+    ]);
   if (error) throw new AgentError(500, "db_error", error.message);
   // Without this, a failed plans read returns invoices whose plan name, kind and
   // price basis are all null — an agent asked to correct one has no way to tell
   // that from an invoice genuinely missing its plan.
   if (plErr) throw new AgentError(500, "db_error", plErr.message);
+  if (countErr) throw new AgentError(500, "db_error", countErr.message);
 
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
 
@@ -329,7 +363,7 @@ async function handleListInvoices(params: unknown) {
     member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
     member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
   }));
-  return { count: invoices.length, invoices };
+  return { count: invoices.length, total: count ?? invoices.length, invoices };
 }
 
 // ---- action: edit_invoice ----
@@ -425,17 +459,11 @@ export const Route = createFileRoute("/api/manager/agent")({
             throw new AgentError(400, "bad_json", "Request body must be valid JSON.");
           })) as { action?: unknown; params?: unknown };
 
-          const action = body?.action;
-          if (
-            typeof action !== "string" ||
-            !(managerAgentActions as readonly string[]).includes(action)
-          ) {
-            throw new AgentError(
-              400,
-              "unknown_action",
-              `Unknown action. Valid actions: ${managerAgentActions.join(", ")}.`,
-            );
+          const classified = classifyAction(body?.action, managerAgentActions);
+          if (!classified.ok) {
+            throw new AgentError(400, classified.code, classified.message);
           }
+          const action = classified.action;
 
           const result = await dispatch(action as ManagerAgentAction, body?.params ?? {}, actingAs);
           return json({ ok: true, action, result });
@@ -443,6 +471,9 @@ export const Route = createFileRoute("/api/manager/agent")({
           return errorResponse(e);
         }
       },
+      PUT: async () => methodNotAllowed(),
+      PATCH: async () => methodNotAllowed(),
+      DELETE: async () => methodNotAllowed(),
     },
   },
 });

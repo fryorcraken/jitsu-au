@@ -976,11 +976,18 @@ export async function filePaperWaiver(
   let pdf: Uint8Array;
   try {
     pdf = await buildScanPdf(
-      data.scan.map((file) => ({
-        name: file.name,
-        type: file.type,
-        bytes: decodeBase64(file.data),
-      })),
+      data.scan.map((file, i) => {
+        let bytes: Uint8Array;
+        try {
+          bytes = decodeBase64(file.data);
+        } catch {
+          // atob()'s own error message is a raw runtime string ("atob() called
+          // with invalid base64-encoded data...") — not something to show a
+          // manager. Name the offending file instead.
+          throw new Error(`scan[${i}] is not valid base64.`);
+        }
+        return { name: file.name, type: file.type, bytes };
+      }),
     );
   } catch (e) {
     console.error("[filePaperWaiver] could not build the scan PDF:", e);

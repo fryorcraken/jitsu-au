@@ -77,7 +77,11 @@ export const AGENT_MANIFEST: {
       params: [
         { name: "id", required: true, description: "Invoice (membership) UUID." },
         { name: "price_cents", required: false, description: "Amount owed, integer cents." },
-        { name: "notes", required: false, description: "Free-text manager notes." },
+        {
+          name: "notes",
+          required: false,
+          description: "Free-text manager notes. Pass null to clear it.",
+        },
         {
           name: "payment_reference",
           required: false,
@@ -170,6 +174,31 @@ export const AGENT_MANIFEST: {
  * to look up an owner's email for values that look like one.
  */
 export const AGENT_ENV_KEY_UPLOADER = "manager-agent-env-key";
+
+/**
+ * Classify a raw request body's `action` field before dispatch, distinguishing
+ * an absent field from a present-but-invalid one — otherwise both report
+ * "unknown_action" and a caller who built the body wrong (forgot the field
+ * entirely) reads the same message as one who typo'd the action name.
+ */
+export function classifyAction(
+  action: unknown,
+  validActions: readonly string[],
+):
+  | { ok: true; action: string }
+  | { ok: false; code: "missing_action" | "unknown_action"; message: string } {
+  if (action === undefined || action === null) {
+    return { ok: false, code: "missing_action", message: "Missing required field: action." };
+  }
+  if (typeof action !== "string" || !validActions.includes(action)) {
+    return {
+      ok: false,
+      code: "unknown_action",
+      message: `Unknown action. Valid actions: ${validActions.join(", ")}.`,
+    };
+  }
+  return { ok: true, action };
+}
 
 /** A dispatch/auth failure carrying the HTTP status + a stable machine code. */
 export class AgentError extends Error {
