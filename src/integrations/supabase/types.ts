@@ -273,6 +273,53 @@ export type Database = {
         }
         Relationships: []
       }
+      code_of_conduct_acceptances: {
+        Row: {
+          accepted_at: string
+          created_at: string
+          email: string
+          full_name: string
+          id: string
+          signature_name: string
+          signer_ip: string | null
+          signer_meta: Json
+          user_id: string
+          version: number
+        }
+        Insert: {
+          accepted_at?: string
+          created_at?: string
+          email: string
+          full_name: string
+          id?: string
+          signature_name: string
+          signer_ip?: string | null
+          signer_meta?: Json
+          user_id: string
+          version: number
+        }
+        Update: {
+          accepted_at?: string
+          created_at?: string
+          email?: string
+          full_name?: string
+          id?: string
+          signature_name?: string
+          signer_ip?: string | null
+          signer_meta?: Json
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "code_of_conduct_acceptances_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       contact_messages: {
         Row: {
           client_submission_id: string | null
