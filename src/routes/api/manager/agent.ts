@@ -15,11 +15,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ZodError } from "zod";
 import {
   editInvoiceSchema,
+  getDocumentSchema,
   listAgentInvoicesSchema,
   listAgentUsersSchema,
+  listDocumentAnnotationsSchema,
   managerAgentActions,
   nameWithPreferred,
   paperWaiverUploadSchema,
+  saveDocumentSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -40,6 +43,14 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
+import {
+  loadDocument,
+  projectAnnotation,
+  projectDocument,
+  saveDocument,
+} from "@/lib/document-admin";
+import { asDocumentClient } from "@/lib/document-types";
+import type { DocumentAnnotationRow, DocumentRow } from "@/lib/document-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
@@ -427,6 +438,131 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
   }
 }
 
+// ---- action: list_documents ----
+async function handleListDocuments() {
+  const db = asDocumentClient(await adminClient());
+
+  const [{ data: docs, error }, { data: versions, error: vErr }] = await Promise.all([
+    db.from("documents").select("*").order("slug"),
+    db
+      .from("document_versions")
+      .select("document_id, title, version, created_at, change_note, is_current"),
+  ]);
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (vErr) throw new AgentError(500, "db_error", vErr.message);
+
+  // Count versions per document as well as naming the live one: "this page has
+  // been rewritten nine times" is the context a manager wants before editing it.
+  //
+  // The live version is the one flagged `is_current`, NOT the highest-numbered
+  // one. Those differ whenever a manager has rolled back to an earlier version,
+  // and reporting the newest as live would have an agent read version 9, edit
+  // it, and publish it over the version 4 the club deliberately went back to.
+  const liveByDoc = new Map<string, (typeof versions)[number]>();
+  const countByDoc = new Map<string, number>();
+  for (const v of versions ?? []) {
+    countByDoc.set(v.document_id, (countByDoc.get(v.document_id) ?? 0) + 1);
+    if (v.is_current) liveByDoc.set(v.document_id, v);
+  }
+
+  const documents = ((docs ?? []) as DocumentRow[]).map((d) => {
+    const live = liveByDoc.get(d.id);
+    return {
+      slug: d.slug,
+      title: live?.title ?? null,
+      version: live?.version ?? null,
+      versions: countByDoc.get(d.id) ?? 0,
+      visibility: d.visibility,
+      annotations_enabled: d.annotations_enabled,
+      url: `/docs/${d.slug}`,
+      change_note: live?.change_note ?? null,
+      updated_at: live?.created_at ?? d.updated_at,
+    };
+  });
+  return { count: documents.length, documents };
+}
+
+// ---- action: get_document ----
+async function handleGetDocument(params: unknown) {
+  const input = getDocumentSchema.parse(params);
+  const db = asDocumentClient(await adminClient());
+  const loaded = await loadDocument(db, input.slug, input.version);
+  // A manager token sees every document, drafts included, so there is no
+  // visibility check here — unlike the public reader, which hides a missing
+  // document and a forbidden one behind the same words.
+  if (!loaded) throw new AgentError(404, "not_found", "No such document, or no such version.");
+  return { document: projectDocument(loaded) };
+}
+
+// ---- action: save_document ----
+async function handleSaveDocument(params: unknown, actingAs: string) {
+  const input = saveDocumentSchema.parse(params);
+  const db = asDocumentClient(await adminClient());
+  try {
+    const result = await saveDocument(db, input, actingAs);
+    return {
+      slug: result.slug,
+      version: result.version,
+      created: result.created,
+      url: `/docs/${result.slug}`,
+    };
+  } catch (e) {
+    // saveDocument throws plain Errors with manager-facing text (a promotion
+    // race, a failed insert). Wrap so the agent gets that message inside the
+    // endpoint's stable error envelope rather than a bare 500.
+    throw new AgentError(
+      422,
+      "save_document_failed",
+      e instanceof Error ? e.message : "Could not save the document.",
+    );
+  }
+}
+
+// ---- action: list_document_annotations ----
+async function handleListDocumentAnnotations(params: unknown) {
+  const input = listDocumentAnnotationsSchema.parse(params);
+  const db = asDocumentClient(await adminClient());
+
+  const { data: doc, error: docErr } = await db
+    .from("documents")
+    .select("id, slug")
+    .eq("slug", input.slug)
+    .maybeSingle();
+  if (docErr) throw new AgentError(500, "db_error", docErr.message);
+  if (!doc) throw new AgentError(404, "not_found", "No such document.");
+
+  let query = db
+    .from("document_annotations")
+    .select("*")
+    .eq("document_id", doc.id)
+    // SHARED only, and this is not an oversight to be fixed later: a private
+    // note is private from the club too (see the migration), which is what makes
+    // it usable for "things I want to remember". A manager reading feedback gets
+    // the conversation, never somebody's notebook.
+    .eq("visibility", "shared")
+    .order("created_at", { ascending: true });
+  if (input.version !== undefined) query = query.eq("document_version", input.version);
+  if (!input.include_resolved) query = query.is("resolved_at", null);
+
+  const { data: rows, error } = await query.limit(input.limit ?? 200);
+  if (error) throw new AgentError(500, "db_error", error.message);
+
+  const annotations = (rows ?? []) as DocumentAnnotationRow[];
+  const userIds = [...new Set(annotations.map((a) => a.user_id))];
+  const nameByUser = new Map<string, string>();
+  if (userIds.length) {
+    const { data: profiles, error: pErr } = await db
+      .from("profiles")
+      .select("user_id, first_name, middle_name, last_name, preferred_name")
+      .in("user_id", userIds);
+    if (pErr) throw new AgentError(500, "db_error", pErr.message);
+    for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
+  }
+
+  const projected = annotations.map((a) => projectAnnotation(a, nameByUser.get(a.user_id) ?? null));
+  return { count: projected.length, slug: doc.slug, annotations: projected };
+}
+
 async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
@@ -437,6 +573,14 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleEditInvoice(params);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
+    case "list_documents":
+      return handleListDocuments();
+    case "get_document":
+      return handleGetDocument(params);
+    case "save_document":
+      return handleSaveDocument(params, actingAs);
+    case "list_document_annotations":
+      return handleListDocumentAnnotations(params);
   }
 }
 

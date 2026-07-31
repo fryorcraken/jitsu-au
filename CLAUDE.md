@@ -247,6 +247,14 @@ Core tables:
   which version. The document itself lives in the repo (`src/lib/code-of-conduct.ts`),
   not in a table: no template editor, no PDF, no approval. Signing it is never a
   gate on anything. Product flows: `docs/code-of-conduct.md`.
+- `documents` / `document_versions` / `document_annotations` — versioned markdown
+  pages served at `/docs/<slug>` that members read and annotate. Versioning
+  copies `waiver_templates` (save writes a new version and promotes it; one
+  `is_current` per document). Annotations are anchored to a **block** by a hash
+  of that block's text, not its position, so editing one passage detaches only
+  its own comments. `visibility` is `private` (readable by its author alone,
+  **managers included**) or `shared` (a thread). Managers edit documents through
+  the manager agent API, not a web editor. Product flows: `docs/documents.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.

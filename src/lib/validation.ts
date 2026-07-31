@@ -5,6 +5,11 @@
 // pulling in server-only imports. Keep this file free of side effects and of any
 // server-only dependency (no supabase clients, no process.env reads).
 import { z } from "zod";
+// Domain constants for club documents. `documents.ts` is the same kind of
+// module as this one (pure, no server imports), and owns the vocabulary its
+// permission rules are written in; importing it here keeps the wire schema and
+// those rules from drifting into two different lists of visibilities.
+import { annotationVisibilities, documentVisibilities } from "./documents";
 
 // ---- Pure helpers ----
 
@@ -961,6 +966,10 @@ export const managerAgentActions = [
   "list_invoices",
   "edit_invoice",
   "file_waiver",
+  "list_documents",
+  "get_document",
+  "save_document",
+  "list_document_annotations",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -1265,3 +1274,107 @@ export function parseMoneyToCents(value: string): number | null {
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 100);
 }
+
+// ---- Club documents ----
+//
+// Versioned markdown pages people read at `/docs/<slug>` and annotate. The
+// domain rules (block anchoring, who may read/annotate) live in
+// `src/lib/documents.ts`; this file only validates what crosses the wire.
+
+/**
+ * The URL key of a document, mirroring the `documents.slug` CHECK exactly.
+ *
+ * Kept identical on purpose: `save_document` treats an unknown slug as "create
+ * this document", so a slug the app accepts but the database rejects would turn
+ * a manager's typo into a raw constraint-violation message instead of a clear
+ * one, after the request had already been accepted.
+ */
+export const documentSlugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(
+    /^[a-z0-9]+(-[a-z0-9]+)*$/,
+    "Use lowercase letters, numbers and single hyphens, e.g. house-rules.",
+  );
+
+/**
+ * Manager: save a document. Creates the document if the slug is new, and always
+ * writes a NEW version rather than editing text in place — same rule as the
+ * waiver template, for the same reason: annotations name the version they were
+ * written against, so rewriting a version underneath them would make that
+ * reference a lie.
+ *
+ * `visibility` and `annotations_enabled` are optional because they belong to the
+ * document, not the version: omitting them on an edit leaves the current setting
+ * alone rather than silently resetting a members-only document to the default.
+ */
+export const saveDocumentSchema = z.object({
+  slug: documentSlugSchema,
+  title: z.string().trim().min(1).max(200),
+  body_md: z.string().trim().min(1).max(200000),
+  visibility: z.enum(documentVisibilities).optional(),
+  annotations_enabled: z.boolean().optional(),
+  change_note: z.string().trim().max(500).optional().or(z.literal("")),
+});
+export type SaveDocumentInput = z.infer<typeof saveDocumentSchema>;
+
+/** Read one document. Without `version`, the live one. */
+export const getDocumentSchema = z.object({
+  slug: documentSlugSchema,
+  version: z.number().int().positive().optional(),
+});
+export type GetDocumentInput = z.infer<typeof getDocumentSchema>;
+
+/** Manager: list the annotations on a document, to read back what people said. */
+export const listDocumentAnnotationsSchema = z.object({
+  slug: documentSlugSchema,
+  /** Omit for every annotation; set to read one version's feedback in isolation. */
+  version: z.number().int().positive().optional(),
+  include_resolved: z.boolean().optional(),
+  limit: z.number().int().min(1).max(500).optional(),
+});
+export type ListDocumentAnnotationsInput = z.infer<typeof listDocumentAnnotationsSchema>;
+
+/**
+ * Write an annotation.
+ *
+ * `document_version` is the version the reader had on screen. The server stores
+ * it verbatim: unlike the waiver (which REFUSES a submission against a stale
+ * version, because a signature is evidence of what was read), a comment on an
+ * older wording is a perfectly good comment, and the reader is shown that the
+ * text has moved on rather than having their words thrown away.
+ */
+export const createAnnotationSchema = z.object({
+  slug: documentSlugSchema,
+  document_version: z.number().int().positive(),
+  /** Null/omitted anchors the annotation to the document as a whole. */
+  block_id: z.string().trim().max(100).optional().or(z.literal("")),
+  /** The passage as it stood, so a later edit can be reported honestly. */
+  quote: z.string().trim().max(2000).optional().or(z.literal("")),
+  visibility: z.enum(annotationVisibilities),
+  /** Set to reply to an existing shared annotation. */
+  parent_id: z.string().uuid().optional(),
+  body: z.string().trim().min(1).max(5000),
+  hp: z.string().max(0).optional().or(z.literal("")),
+});
+export type CreateAnnotationInput = z.infer<typeof createAnnotationSchema>;
+
+/** Edit your own annotation's text. Nothing else about it can change. */
+export const updateAnnotationSchema = z.object({
+  id: z.string().uuid(),
+  body: z.string().trim().min(1).max(5000),
+});
+export type UpdateAnnotationInput = z.infer<typeof updateAnnotationSchema>;
+
+/** Delete your own annotation (and, by cascade, its replies). */
+export const deleteAnnotationSchema = z.object({ id: z.string().uuid() });
+export type DeleteAnnotationInput = z.infer<typeof deleteAnnotationSchema>;
+
+/** Resolve or reopen a shared thread. */
+export const resolveAnnotationSchema = z.object({
+  id: z.string().uuid(),
+  resolved: z.boolean(),
+});
+export type ResolveAnnotationInput = z.infer<typeof resolveAnnotationSchema>;

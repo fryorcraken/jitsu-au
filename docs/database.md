@@ -673,6 +673,74 @@ service role only.
 
 ---
 
+## Club documents
+
+Versioned markdown pages members read and annotate, served at `/docs/<slug>`.
+The product spec is **`docs/documents.md`**. Added by
+`20260731120000_documents.sql`.
+
+### `documents` — a document's identity
+
+`id` PK, `slug` (**unique**, CHECK'd to lowercase kebab-case so it never needs
+escaping in a URL), `visibility` (`public | members | managers`, default
+`members`), `annotations_enabled` (default true), `created_at`, `updated_at`,
+`created_by → auth.users(id) ON DELETE SET NULL`.
+
+Nothing here is rewritten when the text changes: a slug is a permanent URL, and
+the text lives on the versions below. `visibility` is the only read gate, and it
+is enforced **in the server functions** (`canReadDocument` in
+`src/lib/documents.ts`), not by RLS — see the RLS note at the end of this section.
+
+### `document_versions` — the text, one row per save
+
+`id` PK, `document_id → documents(id) ON DELETE CASCADE`, `version` (**per
+document**, starting at 1), `title`, `body_md` (up to 200k), `change_note`,
+`is_current`, `created_at`, `created_by`. `UNIQUE (document_id, version)`, plus a
+**partial unique index** `document_versions_one_current_per_document` on
+`(document_id) WHERE is_current` — exactly one live version per document.
+
+Saving always writes a NEW row and promotes it, exactly like `waiver_templates`,
+so history is intact and an annotation can name the wording it was written
+against. The partial index makes promotion necessarily demote-then-promote;
+`promoteDocumentVersion` (`src/lib/document-admin.ts`) orders those two writes so
+a failure leaves the previous version live rather than leaving the document with
+none — and, unlike the waiver's global equivalent, **every write is scoped to one
+`document_id`**, since an unscoped clear would unpublish every other document.
+
+### `document_annotations` — private notes and shared comment threads
+
+`id` PK, `document_id → documents(id) ON DELETE CASCADE`, `document_version`
+(a plain integer, like `waivers.template_version` — not a FK), `user_id →
+profiles(user_id) ON DELETE CASCADE` (**not null**: there is no anonymous
+commenting), `block_id`, `quote`, `visibility` (`private | shared`), `parent_id →
+document_annotations(id) ON DELETE CASCADE`, `body`, `resolved_at`,
+`resolved_by`, `created_at`, `updated_at`. Indexes on `(document_id,
+created_at)`, `(user_id, created_at DESC)`, and a partial one on `parent_id`.
+
+Three things about the shape:
+
+- **Anchoring is content-derived, not positional.** `block_id` is a hash of the
+  block's own text (`blockId` in `src/lib/documents.ts`), so inserting a
+  paragraph does not move every annotation below it onto the wrong passage.
+  `quote` is the fallback anchor and the honesty mechanism: when neither
+  matches, the annotation is reported as being about wording that has since
+  changed rather than silently re-pointed.
+- **`visibility` is the whole privacy model.** A `private` note is readable only
+  by its author — **managers included**. That is deliberate and is what makes a
+  private note usable; `list_document_annotations` on the manager agent API
+  returns shared threads only.
+- **Threads are one level deep.** The CHECK
+  `document_annotations_private_has_no_parent` catches the half a constraint can
+  see (a private row with a parent); `createAnnotation` enforces the rest (no
+  replying to a private note, no replies to replies), since a CHECK cannot read
+  the parent row.
+
+**RLS:** enabled on all three, with owner/manager read policies as **defence in
+depth only** — there are no client grants (`REVOKE ALL` from anon/authenticated),
+so nothing here is reachable from a browser and `client-grants-expected.txt`
+needs no entry. Every read and write runs through a server function on the
+service role, which enforces visibility in code.
+
 ## Public intake (anon insert-only)
 
 ### `interest_registrations`
