@@ -29,9 +29,14 @@ import {
   bearerToken,
   buildInvoicePatch,
   classifyAction,
+  diffInvoicePatch,
+  invoiceEditAudit,
   projectInvoice,
+  reconciledEditBlockers,
+  reconciledEditMessage,
   safeEqual,
 } from "@/lib/manager-agent";
+import { DuplicateWaiverError } from "@/lib/waiver-duplicates";
 import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
 import type {
   ClubUserEmail,
@@ -161,7 +166,10 @@ async function authenticate(request: Request): Promise<string> {
 /** Shape any thrown value into a stable JSON error response. */
 function errorResponse(e: unknown): Response {
   if (e instanceof AgentError) {
-    return json({ ok: false, error: { code: e.code, message: e.message } }, e.httpStatus);
+    return json(
+      { ok: false, error: { code: e.code, message: e.message, ...(e.details ?? {}) } },
+      e.httpStatus,
+    );
   }
   if (e instanceof ZodError) {
     return json(
@@ -367,7 +375,7 @@ async function handleListInvoices(params: unknown) {
 }
 
 // ---- action: edit_invoice ----
-async function handleEditInvoice(params: unknown) {
+async function handleEditInvoice(params: unknown, actingAs: string) {
   const input = editInvoiceSchema.parse(params);
   const db = await adminClient();
 
@@ -380,6 +388,20 @@ async function handleEditInvoice(params: unknown) {
   if (!existing) throw new AgentError(404, "not_found", "Invoice not found.");
 
   const patch = buildInvoicePatch(input);
+  // What this edit would actually move, measured against the row as it stands.
+  // Submitting a field with the value it already has is not an edit: it neither
+  // trips the guard below nor gets recorded as a change that happened.
+  const diff = diffInvoicePatch(existing, patch);
+  const blocked = reconciledEditBlockers(existing, diff.changed, input.confirm_paid_edit);
+  if (blocked.length) {
+    throw new AgentError(
+      409,
+      "reconciled_invoice",
+      reconciledEditMessage(blocked, existing.paid_at!),
+      { blocked, paid_at: existing.paid_at, previous: diff.previous },
+    );
+  }
+
   const { data: updated, error: updErr } = await db
     .from("memberships")
     .update(patch)
@@ -400,11 +422,37 @@ async function handleEditInvoice(params: unknown) {
     .maybeSingle();
   if (planErr) console.error("[agent.edit_invoice] plan lookup failed after update:", planErr);
 
+  // The audit trail. There is no audit table, so the server log is where an
+  // invoice's edit history lives: without it, a disagreement between the books
+  // and the bank cannot be traced back to who changed what. console.info, not
+  // console.error — this is a normal event, and it must be findable as one.
+  if (diff.changed.length) {
+    console.info(
+      "[agent.edit_invoice] audit",
+      JSON.stringify(
+        invoiceEditAudit({
+          invoiceId: input.id,
+          actor: actingAs,
+          paidAt: existing.paid_at,
+          confirmed: input.confirm_paid_edit,
+          diff,
+          patch,
+          at: new Date().toISOString(),
+        }),
+      ),
+    );
+  }
+
   return {
     invoice: projectInvoice(
       updated as MembershipRow,
       (plan ?? undefined) as MembershipPlanRow | undefined,
     ),
+    // What moved, and what it held before. An edit that changed nothing comes
+    // back with an empty `changed`, so a caller can tell a real correction from
+    // a no-op instead of reading a 200 as proof something happened.
+    changed: diff.changed,
+    previous: diff.previous,
   };
 }
 
@@ -416,6 +464,12 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
     const { id, user_id } = await filePaperWaiver(db, input, actingAs);
     return { id, user_id };
   } catch (e) {
+    // A likely duplicate is a distinct, actionable outcome, not a generic
+    // failure: it comes back as a 409 with the waivers it collided with, so the
+    // caller can look at them and either stop or re-send with confirm_duplicate.
+    if (e instanceof DuplicateWaiverError) {
+      throw new AgentError(409, "duplicate_waiver", e.message, { existing: e.existing });
+    }
     // filePaperWaiver throws plain Errors with member-facing text (the manager
     // web form renders `.message` directly); wrap so the agent gets the same
     // message inside the endpoint's stable error envelope instead of a bare 500.
@@ -434,7 +488,7 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
     case "list_invoices":
       return handleListInvoices(params);
     case "edit_invoice":
-      return handleEditInvoice(params);
+      return handleEditInvoice(params, actingAs);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
   }

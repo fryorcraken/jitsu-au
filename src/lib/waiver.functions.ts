@@ -28,6 +28,8 @@ import {
   parseTemplateAcks,
   resolveAcknowledgements,
 } from "@/lib/waiver-acknowledgements";
+import { DuplicateWaiverError, toDuplicateRefs } from "@/lib/waiver-duplicates";
+import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 
 const BUCKET = "waivers";
@@ -949,6 +951,13 @@ export const listWaivers = createServerFn({ method: "GET" })
 //     screen waiting for their copy, and the managers are the ones filing it.
 //     The confirmation emails would be answering a question no one asked.
 //
+// What it DOES push back on: filing a waiver this person already has for the
+// same signing date. Signing repeatedly is allowed, but the same paper landing
+// twice is a bulk-import accident, and every extra pending copy is another
+// chance to approve the wrong one (the active waiver is the last APPROVED, not
+// the last signed). It throws DuplicateWaiverError; `confirm_duplicate` files
+// it anyway, for the corrected re-scan that is a genuine second document.
+//
 // The actual work is `filePaperWaiver`, a plain function rather than part of
 // this createServerFn: the manager agent HTTP API (src/routes/api/manager/agent.ts,
 // action `file_waiver`) authenticates by API token, not a Supabase session, so
@@ -1020,6 +1029,30 @@ export async function filePaperWaiver(
   // Midnight UTC keeps the club's own timezone (UTC+10/+11) reading back the
   // same calendar date.
   const signed_at = `${data.signed_on}T00:00:00.000Z`;
+
+  // Same person, same signing date: almost certainly the same piece of paper
+  // arriving twice. Warn and let the caller confirm rather than blocking, since
+  // a corrected re-scan of one signing date is legitimate. Checked here, not in
+  // the agent API, so the manager's own upload form gets the same speed bump.
+  if (!data.confirm_duplicate) {
+    const { data: sameDate, error: dupErr } = await admin
+      .from("waivers")
+      .select("id, approval_status, signed_at")
+      .eq("user_id", userId)
+      .eq("signed_at", signed_at)
+      .order("created_at", { ascending: true })
+      .limit(20);
+    // Fail closed. A duplicate slipping through silently is the thing being
+    // fixed, and the caller has a way past a transient read failure that does
+    // not involve guessing: confirm_duplicate files it regardless.
+    if (dupErr) {
+      console.error("[filePaperWaiver] duplicate check failed:", dupErr);
+      throw new Error(
+        "Could not check whether this waiver has already been filed. Try again, or send it with confirm_duplicate set to true to file it without the check.",
+      );
+    }
+    if (sameDate?.length) throw new DuplicateWaiverError(toDuplicateRefs(sameDate));
+  }
 
   // Who filed it, when, and from what. This is the paper equivalent of the IP
   // and browser context an online submission carries: the provenance of the
@@ -1144,14 +1177,32 @@ async function removeAbandonedWaiverRow(
 }
 
 // ---- Manager: upload a scanned paper waiver, from the web form ----
+/**
+ * A likely duplicate is not an error the form should throw away: the manager
+ * needs to see WHAT it collided with and then decide. So it comes back as a
+ * successful call with `filed: false` and the existing rows, and the screen
+ * offers to file it anyway (which re-sends with `confirm_duplicate: true`).
+ * Every other failure still throws, and the form toasts the message.
+ */
+export type UploadPaperWaiverResult =
+  | { ok: true; filed: true; id: string; user_id: string }
+  | { ok: true; filed: false; duplicate: DuplicateWaiverRef[] };
+
 export const uploadPaperWaiver = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => paperWaiverUploadSchema.parse(d))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<UploadPaperWaiverResult> => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { id, user_id } = await filePaperWaiver(supabaseAdmin, data, context.userId);
-    return { ok: true as const, id, user_id };
+    try {
+      const { id, user_id } = await filePaperWaiver(supabaseAdmin, data, context.userId);
+      return { ok: true as const, filed: true as const, id, user_id };
+    } catch (e) {
+      if (e instanceof DuplicateWaiverError) {
+        return { ok: true as const, filed: false as const, duplicate: e.existing };
+      }
+      throw e;
+    }
   });
 
 // ---- Manager: approve / unapprove a waiver submission ----

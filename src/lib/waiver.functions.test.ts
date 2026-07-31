@@ -128,6 +128,8 @@ const MANAGER_ID = "44444444-4444-4444-4444-444444444444";
 function fakeAdmin(opts: {
   existingId?: string | null;
   createUser?: Result;
+  /** Rows the same-person + same-signing-date duplicate probe finds. */
+  duplicates?: Result;
   insert?: Result;
   upload?: { error: { message: string } | null };
   delete?: { error: { message: string } | null };
@@ -146,6 +148,7 @@ function fakeAdmin(opts: {
     createUser: [] as unknown[],
     upsert: [] as unknown[],
     insert: [] as unknown[],
+    selects: [] as string[],
     updates: [] as unknown[],
     deletes: [] as string[],
     uploads: [] as { path: string; bytes: unknown }[],
@@ -185,7 +188,16 @@ function fakeAdmin(opts: {
         };
       }
       if (table === "waivers") {
+        const dupProbe = {
+          eq: () => dupProbe,
+          order: () => dupProbe,
+          limit: () => Promise.resolve(opts.duplicates ?? ok([])),
+        };
         return {
+          select: (cols: string) => {
+            calls.selects.push(cols);
+            return dupProbe;
+          },
           insert: (row: unknown) => {
             calls.insert.push(row);
             return { select: () => ({ single: () => Promise.resolve(inserted) }) };
@@ -241,6 +253,7 @@ const validInput: PaperWaiverUploadInput = {
   signed_on: "2020-01-15",
   template_version: 3,
   scan: [{ name: "waiver.pdf", type: "application/pdf", data: "aGlw" }],
+  confirm_duplicate: false,
 };
 
 describe("filePaperWaiver", () => {
@@ -405,6 +418,94 @@ describe("filePaperWaiver", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       filePaperWaiver(admin as any, validInput, MANAGER_ID),
     ).rejects.toThrow(/could not be cleaned up/i);
+  });
+
+  // Re-posting a byte-identical payload used to mint another waiver every time,
+  // leaving a pile of identical pending rows for one person. Each one is another
+  // chance to approve the wrong one, and the active waiver is the last APPROVED,
+  // not the last signed, so the insurance record depends on approval order.
+  it("refuses a second waiver for the same person and signing date", async () => {
+    const { admin, calls } = fakeAdmin({
+      existingId: EXISTING_USER,
+      duplicates: ok([
+        { id: "waiver-earlier", approval_status: "pending", signed_at: "2020-01-15T00:00:00.000Z" },
+      ]),
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { DuplicateWaiverError } = await import("./waiver-duplicates");
+
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      filePaperWaiver(admin as any, validInput, MANAGER_ID),
+    ).rejects.toBeInstanceOf(DuplicateWaiverError);
+    // Nothing filed, nothing uploaded: the refusal happens before the insert.
+    expect(calls.insert).toHaveLength(0);
+    expect(calls.uploads).toHaveLength(0);
+  });
+
+  it("carries the colliding waivers on the error so a caller can go and look", async () => {
+    const { admin } = fakeAdmin({
+      existingId: EXISTING_USER,
+      duplicates: ok([
+        { id: "waiver-a", approval_status: "pending", signed_at: "2020-01-15T00:00:00.000Z" },
+        { id: "waiver-b", approval_status: "approved", signed_at: "2020-01-15T00:00:00.000Z" },
+      ]),
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { DuplicateWaiverError } = await import("./waiver-duplicates");
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = await filePaperWaiver(admin as any, validInput, MANAGER_ID).catch((e) => e);
+    expect(err).toBeInstanceOf(DuplicateWaiverError);
+    expect((err as InstanceType<typeof DuplicateWaiverError>).existing).toEqual([
+      { id: "waiver-a", approval_status: "pending", signed_on: "2020-01-15" },
+      { id: "waiver-b", approval_status: "approved", signed_on: "2020-01-15" },
+    ]);
+  });
+
+  // A corrected re-scan of one signing date is a real second document, so the
+  // check warns and confirms rather than blocking outright.
+  it("files anyway when the caller confirms the duplicate", async () => {
+    const { admin, calls } = fakeAdmin({
+      existingId: EXISTING_USER,
+      duplicates: ok([
+        { id: "waiver-earlier", approval_status: "pending", signed_at: "2020-01-15T00:00:00.000Z" },
+      ]),
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const result = await filePaperWaiver(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      admin as any,
+      { ...validInput, confirm_duplicate: true },
+      MANAGER_ID,
+    );
+    expect(result).toEqual({ id: "waiver-1", user_id: EXISTING_USER });
+    expect(calls.insert).toHaveLength(1);
+    // Confirmed means the probe is not even run.
+    expect(calls.selects).toHaveLength(0);
+  });
+
+  it("files a waiver signed on a different date without complaint", async () => {
+    // The probe filters on signed_at, so a different date finds nothing.
+    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER, duplicates: ok([]) });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await filePaperWaiver(admin as any, validInput, MANAGER_ID);
+    expect(calls.selects).toEqual(["id, approval_status, signed_at"]);
+    expect(calls.insert).toHaveLength(1);
+  });
+
+  it("fails closed if the duplicate check itself errors, naming the way past it", async () => {
+    const { admin, calls } = fakeAdmin({
+      existingId: EXISTING_USER,
+      duplicates: { data: null, error: { message: "connection reset" } },
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      filePaperWaiver(admin as any, validInput, MANAGER_ID),
+    ).rejects.toThrow(/confirm_duplicate/);
+    expect(calls.insert).toHaveLength(0);
   });
 
   it("looks up the uploader's email for a real user id", async () => {

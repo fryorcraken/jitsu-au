@@ -194,6 +194,17 @@ decide which waiver is active. That is still the most recently **approved** one
 (rule 5), so approving an old paper form today makes it that person's active
 waiver even if they signed a newer one online. The upload form says so.
 
+**Filing the same paper twice stops for a look.** Signing is unlimited, but if
+the person already has a waiver signed on that date, filing another one pauses
+and shows what it collided with. That is the realistic accident here: an upload
+a manager could not tell had gone through, or an import batch that ran twice.
+Every extra copy is another pending waiver somebody could approve, and since the
+active one is the last **approved**, which copy got approved is what the club's
+insurance record ends up saying. It is a pause, not a block. A corrected re-scan
+of one signing date is a real second document, so "File it anyway" is right
+there (the agent API's equivalent is `confirm_duplicate`). What it is not for is
+pushing a retried batch through: work out how much of it already landed instead.
+
 Because the record is otherwise identical to an online one, it says how it
 arrived: a **Paper** badge on the waivers list and on the person's page, and a
 **Filing record** (who filed it, when, from which files) where an online waiver

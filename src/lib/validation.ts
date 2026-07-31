@@ -657,6 +657,14 @@ export const paperWaiverUploadSchema = z
     // The scan itself: one PDF, a stack of photos, or any mix, merged in order
     // into the single PDF this waiver's record points at.
     scan: z.array(scanFileSchema).min(1).max(20),
+    // Not part of the waiver: the caller saying "I know this person already has
+    // a waiver signed on this date, file it anyway". Filing the same paperwork
+    // twice is the realistic accident in a bulk import (a retried batch, a
+    // manager unsure the upload went through), and a pile of identical pending
+    // waivers is a pile of chances to approve the wrong one. Refiling IS
+    // legitimate for a corrected re-scan, so this warns and confirms rather
+    // than blocking — see filePaperWaiver / waiver-duplicates.ts.
+    confirm_duplicate: z.boolean().optional().default(false),
   })
   .refine(
     (d) =>
@@ -973,6 +981,11 @@ export const invoicePaymentMethods = ["bank_transfer", "stripe", "manual"] as co
  * editable, and `status` deliberately EXCLUDES "active": activation grants the
  * member role and emails the member, so it must run through bank reconciliation
  * / setMembershipStatus, never a raw field edit here.
+ *
+ * `confirm_paid_edit` is not a field to write: it is the caller saying "yes, I
+ * mean to rewrite the money record on an invoice that has already been paid"
+ * (see RECONCILED_GUARDED_FIELDS in manager-agent.ts). It deliberately does not
+ * satisfy the at-least-one-field refine below.
  */
 export const editInvoiceSchema = z
   .object({
@@ -985,6 +998,7 @@ export const editInvoiceSchema = z
     payment_reference: z.string().trim().min(1).max(64).optional(),
     payment_method: z.enum(invoicePaymentMethods).optional(),
     status: z.enum(["pending", "cancelled", "expired"]).optional(),
+    confirm_paid_edit: z.boolean().optional(),
   })
   .strict()
   .refine(

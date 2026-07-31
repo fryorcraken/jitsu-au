@@ -75,7 +75,18 @@ driven directly by the bundled skill.
   - `list_invoices` — invoices with member name/email (to find an id to edit).
   - `edit_invoice` — correct an invoice's detail fields. Cannot set `status` to
     `active` (activation grants the member role + emails the member, so it runs
-    through bank reconciliation, not a raw edit).
+    through bank reconciliation, not a raw edit). Returns `changed` + `previous`
+    alongside the updated invoice, and writes an audit line to the server log
+    (`[agent.edit_invoice] audit`) naming the actor and each field's old → new.
+    **On a paid invoice** (`paid_at` set) the money fields — `price_cents`,
+    `payment_reference`, `payment_method` (`RECONCILED_GUARDED_FIELDS`) — are
+    refused with `409 reconciled_invoice` unless `confirm_paid_edit` is passed:
+    a reconciled invoice's amount is a record of money that moved, and the
+    status it belongs to is already protected. `notes` and `status` stay freely
+    editable (a note claims nothing about money; expiring a membership that ran
+    its course is ordinary). There is **no audit table** — if the log is not
+    enough for the club's bookkeeping, that is a schema change and a product
+    decision, not something to add quietly.
   - `file_waiver` — file a scanned paper waiver (migration / bulk filing from
     paper records). Same params as the manager's paper-upload form
     (`paperWaiverUploadSchema`); dispatches to `filePaperWaiver` in
@@ -86,7 +97,12 @@ driven directly by the bundled skill.
     the record, unlocks the login, emails a sign-in link and assigns the free
     trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is the
     token's owner, or the `AGENT_ENV_KEY_UPLOADER` sentinel for the break-glass
-    env key, which has no owner to resolve.
+    env key, which has no owner to resolve. Filing a waiver the person already
+    has for the same `signed_on` is refused with `409 duplicate_waiver` (the
+    colliding rows come back in `error.existing`); `confirm_duplicate` files it
+    anyway, for the corrected re-scan that is a genuine second document. The
+    check lives in `filePaperWaiver`, so the manager's own upload form gets the
+    same speed bump (it renders a "file it anyway" step rather than a toast).
 - **Agent glue:** `.claude/skills/uts-manager-agent/` — a skill (with a `curl`
   helper) that documents how to call the endpoint. An MCP wrapper is equally
   simple: one tool per manifest action, forwarding to this endpoint.
@@ -105,6 +121,12 @@ the agent glue drifts from the deployed API:
 so a forgotten manifest update fails CI. The `GET` manifest is authoritative at
 runtime: the skill instructs agents to read it before acting, so an MCP/skill
 wrapper never needs hand-syncing beyond the human-readable docs above.
+
+**Bump `AGENT_MANIFEST.version` whenever the behaviour a client can rely on
+changes**, not only when an action is added or removed. A guard that starts
+refusing a call that used to succeed, or a new field in a response, is exactly
+what a client needs the version to tell it about. The version is pinned by a
+test so the bump is a deliberate edit, and the current value is `"2"`.
 
 ## Plans you show the user are product-level
 

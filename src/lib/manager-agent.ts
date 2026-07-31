@@ -31,13 +31,17 @@ export const AGENT_MANIFEST: {
   actions: AgentActionSpec[];
 } = {
   service: "uts-jitsu-manager-agent",
-  version: "1",
+  // Bumped when the behaviour a client can rely on changes, not just the action
+  // list. "2" adds the reconciled-invoice guard (edit_invoice), duplicate
+  // detection (file_waiver), the changed/previous echo on an edit, and the
+  // session-allowance fields on every invoice.
+  version: "2",
   actions: [
     {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended).",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended: LIFETIME check-ins across every plan they have held, so it does not tell you how much of the current plan is left). For that, read sessions_allowed and sessions_remaining on the invoice itself.",
       params: [
         {
           name: "status",
@@ -55,7 +59,7 @@ export const AGENT_MANIFEST: {
       name: "list_invoices",
       method: "POST",
       summary:
-        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit.",
+        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed (the plan's class allowance, null for a time-based plan) and sessions_remaining (what is left on this invoice).",
       params: [
         {
           name: "status",
@@ -73,7 +77,7 @@ export const AGENT_MANIFEST: {
       name: "edit_invoice",
       method: "POST",
       summary:
-        "Correct an invoice's detail fields. Cannot set status to 'active' — activation grants the member role and emails the member, so it runs through bank reconciliation, not here.",
+        "Correct an invoice's detail fields. Returns the updated invoice plus `changed` (the fields that actually moved) and `previous` (what they held before). Cannot set status to 'active' — activation grants the member role and emails the member, so it runs through bank reconciliation, not here. On an invoice that has been PAID (paid_at set), price_cents / payment_reference / payment_method describe money that already moved: they are refused with 409 reconciled_invoice unless confirm_paid_edit is true. Every edit is written to the server audit log (who, when, field, old -> new).",
       params: [
         { name: "id", required: true, description: "Invoice (membership) UUID." },
         { name: "price_cents", required: false, description: "Amount owed, integer cents." },
@@ -93,13 +97,19 @@ export const AGENT_MANIFEST: {
           description: "bank_transfer | stripe | manual.",
         },
         { name: "status", required: false, description: "pending | cancelled | expired." },
+        {
+          name: "confirm_paid_edit",
+          required: false,
+          description:
+            "Set true to allow price_cents / payment_reference / payment_method to be rewritten on an invoice that has already been paid. Not a field to write, and a no-op on an unpaid invoice.",
+        },
       ],
     },
     {
       name: "file_waiver",
       method: "POST",
       summary:
-        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active.",
+        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in the error); pass confirm_duplicate to file it anyway.",
       params: [
         { name: "first_name", required: true, description: "As written on the form." },
         { name: "middle_name", required: false, description: "As written on the form." },
@@ -162,6 +172,12 @@ export const AGENT_MANIFEST: {
           description:
             "Array of { name, type, data }, 1-20 files, type is application/pdf | image/png | image/jpeg, data is raw base64 (no data: prefix). Joined into one PDF in array order. 10 MB decoded total across all files in this call.",
         },
+        {
+          name: "confirm_duplicate",
+          required: false,
+          description:
+            "Set true to file even though this person already has a waiver signed on this date. Default false. Only use it when the second document is real (a corrected re-scan) — not to push a retried import past the check.",
+        },
       ],
     },
   ],
@@ -200,15 +216,28 @@ export function classifyAction(
   return { ok: true, action };
 }
 
-/** A dispatch/auth failure carrying the HTTP status + a stable machine code. */
+/**
+ * A dispatch/auth failure carrying the HTTP status + a stable machine code.
+ *
+ * `details` is merged into the response's `error` object for the failures where
+ * a message alone leaves the caller stuck: a blocked duplicate names the waivers
+ * it collided with, a blocked reconciled edit names the fields it refused.
+ */
 export class AgentError extends Error {
   code: string;
   httpStatus: number;
-  constructor(httpStatus: number, code: string, message: string) {
+  details?: Record<string, unknown>;
+  constructor(
+    httpStatus: number,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "AgentError";
     this.code = code;
     this.httpStatus = httpStatus;
+    this.details = details;
   }
 }
 
@@ -255,6 +284,109 @@ export function buildInvoicePatch(input: EditInvoiceInput): Partial<MembershipRo
   return patch;
 }
 
+export type InvoiceEditableField = (typeof INVOICE_EDITABLE_FIELDS)[number];
+
+/**
+ * The subset of editable fields that record money which actually moved through
+ * the bank. Once an invoice is paid, these are not "details" any more: they are
+ * the club's account of a real transaction, and rewriting one silently makes
+ * the books and the bank disagree with nothing to show what changed. Guarded on
+ * a paid invoice — still editable, but only when the caller says so.
+ *
+ * `status` is deliberately NOT here. Expiring or cancelling a membership that
+ * ran its course is an ordinary lifecycle move, not a rewrite of the payment,
+ * and the one status that has consequences ("active") is already refused by the
+ * schema. `notes` is free text about the invoice, never a claim about money.
+ */
+export const RECONCILED_GUARDED_FIELDS: readonly InvoiceEditableField[] = [
+  "price_cents",
+  "payment_reference",
+  "payment_method",
+];
+
+/** What an edit would actually change, and what those fields hold right now. */
+export type InvoiceEditDiff = {
+  /** Editable fields whose value would genuinely move (a no-op edit is empty). */
+  changed: InvoiceEditableField[];
+  /** The pre-edit value of each changed field, keyed by field name. */
+  previous: Partial<Record<InvoiceEditableField, unknown>>;
+};
+
+/**
+ * Compare a patch against the row it is about to be written over. Submitting a
+ * field with the value it already holds is not a change, so it neither trips the
+ * reconciled guard nor shows up in the audit trail as an edit that happened.
+ */
+export function diffInvoicePatch(
+  existing: Partial<Record<InvoiceEditableField, unknown>>,
+  patch: Partial<Record<InvoiceEditableField, unknown>>,
+): InvoiceEditDiff {
+  const changed: InvoiceEditableField[] = [];
+  const previous: Partial<Record<InvoiceEditableField, unknown>> = {};
+  for (const field of INVOICE_EDITABLE_FIELDS) {
+    if (!(field in patch)) continue;
+    const before = existing[field] ?? null;
+    const after = patch[field] ?? null;
+    if (before === after) continue;
+    changed.push(field);
+    previous[field] = before;
+  }
+  return { changed, previous };
+}
+
+/**
+ * Which of an edit's changed fields the reconciled guard refuses. Empty for an
+ * unpaid invoice (nothing has been reconciled yet), for an edit that only
+ * touches unguarded fields, and when the caller has confirmed.
+ */
+export function reconciledEditBlockers(
+  invoice: { paid_at: string | null },
+  changed: readonly InvoiceEditableField[],
+  confirmed: boolean | undefined,
+): InvoiceEditableField[] {
+  if (!invoice.paid_at || confirmed) return [];
+  return changed.filter((f) => RECONCILED_GUARDED_FIELDS.includes(f));
+}
+
+/** The message a caller gets when the reconciled guard refuses their edit. */
+export function reconciledEditMessage(blocked: readonly string[], paidAt: string): string {
+  return (
+    `This invoice was paid on ${paidAt}, so ${blocked.join(", ")} ${blocked.length === 1 ? "is" : "are"} a record of money that already moved. ` +
+    "Send the edit again with confirm_paid_edit set to true if you mean to correct it anyway."
+  );
+}
+
+/**
+ * The audit record of an invoice edit: who changed what, from what, to what.
+ * Written to the server log (there is no audit table) so a disagreement between
+ * the books and the bank can be reconstructed rather than guessed at. Pure and
+ * returned rather than logged here, so the shape is pinned by a test.
+ */
+export function invoiceEditAudit(opts: {
+  invoiceId: string;
+  actor: string;
+  paidAt: string | null;
+  confirmed: boolean | undefined;
+  diff: InvoiceEditDiff;
+  patch: Partial<Record<InvoiceEditableField, unknown>>;
+  at: string;
+}) {
+  return {
+    event: "invoice_edited",
+    invoice_id: opts.invoiceId,
+    actor: opts.actor,
+    at: opts.at,
+    reconciled: Boolean(opts.paidAt),
+    // Only meaningful on a reconciled invoice: elsewhere the flag was a no-op.
+    overridden: Boolean(opts.paidAt) && opts.confirmed === true,
+    changes: opts.diff.changed.map((field) => ({
+      field,
+      from: opts.diff.previous[field] ?? null,
+      to: opts.patch[field] ?? null,
+    })),
+  };
+}
+
 /** Client-safe projection of an invoice (membership) joined with its plan. */
 export function projectInvoice(m: MembershipRow, plan?: MembershipPlanRow) {
   return {
@@ -271,6 +403,13 @@ export function projectInvoice(m: MembershipRow, plan?: MembershipPlanRow) {
     paid_at: m.paid_at,
     starts_at: m.starts_at,
     ends_at: m.ends_at,
+    // The session allowance, as numbers rather than something to parse out of a
+    // plan code: `sessions_allowed` is what this plan grants (null for a plan
+    // measured in days, not classes), `sessions_remaining` is what is left on
+    // THIS invoice. Both differ from a person's `sessions_attended`, which is
+    // lifetime attendance across every plan they have ever held.
+    sessions_allowed: plan?.session_credits ?? null,
+    sessions_remaining: m.sessions_remaining,
     notes: m.notes,
     created_at: m.created_at,
   };

@@ -58,6 +58,18 @@ same as credits left, which is on each invoice), and their `invoices` (each with
 an `id` you can pass to `edit_invoice`). A `lead` (registered interest only) has
 `user_id: null`, no invoices, and `sessions_attended: 0`.
 
+> **Session counts: read the right one.** `sessions_attended` is **lifetime**
+> attendance across every plan the person has ever held, so on a second plan it
+> includes classes from the first and cannot answer "how much of this trial is
+> left". Each invoice carries that: `sessions_allowed` (what the plan grants,
+> `null` for a plan measured in days rather than classes) and
+> `sessions_remaining` (what is left on that invoice). Never parse the allowance
+> out of a plan code like `trial_2_session` — the code is a label and can change.
+
+`roles` is empty for a member on a **free** plan, including the trial: the
+`member` role is granted on a _paid_ activation, so an active $0 invoice with
+`roles: []` is correct, not a missed grant.
+
 ```bash
 scripts/agent.sh list_users '{"status":"member","limit":50}'
 # or raw:
@@ -73,7 +85,8 @@ curl -s "$UTS_MANAGER_API_URL/api/manager/agent" \
 
 Flat list of invoices (membership payment records) with member name/email. The
 response's `total` is the full matching count regardless of `limit`, so you can
-tell a capped page from a complete one.
+tell a capped page from a complete one. Each invoice also carries
+`sessions_allowed` and `sessions_remaining` (see the note under `list_users`).
 `params` (optional): `status` (`pending | active | expired | cancelled`), `limit`.
 
 ```bash
@@ -97,9 +110,27 @@ never a listed invoice echoed back wholesale.
 scripts/agent.sh edit_invoice '{"id":"<uuid>","price_cents":24500,"notes":"student rate applied"}'
 ```
 
+The result is `{ invoice, changed, previous }`: `changed` lists the fields that
+actually moved and `previous` holds what each one was, so you can report the
+correction accurately and spot a no-op (a field resubmitted at the value it
+already had comes back with `changed: []`). Every edit is written to the server
+audit log with who made it and each field's old and new value.
+
 > **You cannot set `status` to `active` here.** Activating a membership grants
 > the member role and emails the member, so it must go through bank
 > reconciliation / the manager UI — not a raw invoice edit.
+
+> **A paid invoice's money fields are guarded.** Once an invoice has a `paid_at`,
+> its `price_cents`, `payment_reference` and `payment_method` are the club's
+> record of money that actually moved through the bank. Changing one is refused
+> with `409 reconciled_invoice`, and the error names the `blocked` fields and
+> their `previous` values. Re-send with `"confirm_paid_edit": true` if the
+> correction is genuinely right (a real data-entry mistake). `notes` and `status`
+> are not guarded: a note claims nothing about money, and expiring or cancelling
+> a membership that ran its course is an ordinary lifecycle move.
+>
+> Ask the manager before overriding. "The price is wrong" and "the price was
+> recorded wrong" are different problems, and only the second one is fixed here.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 
@@ -116,10 +147,11 @@ default false), `emergency_contact_name`, `emergency_contact_relationship`
 (required if the participant was under 18 on `signed_on`, else optional),
 `emergency_contact_phone`, `medical_notes` (optional), `signed_on`
 (`YYYY-MM-DD` — the date on the paper, not today), `template_version` (optional
-int, or omit/null for a form you can't place), and `scan`: an array of
+int, or omit/null for a form you can't place), `scan`: an array of
 `{ "name", "type", "data" }` (1–20 files, `type` is `application/pdf` |
 `image/png` | `image/jpeg`, `data` is raw base64 with **no** `data:` prefix),
-joined into one PDF in array order. 10 MB decoded total per call.
+joined into one PDF in array order (10 MB decoded total per call), and
+`confirm_duplicate` (optional, default false — see below).
 
 ```bash
 scripts/agent.sh file_waiver '{
@@ -155,6 +187,15 @@ scripts/agent.sh file_waiver '{
 >   Filing (or later approving) a backlog out of chronological order can leave
 >   an older submission looking like the current one — flag this to the manager
 >   rather than approving on their behalf.
+> - **Filing the same paper twice is caught.** If the person already has a
+>   waiver signed on that `signed_on`, the call is refused with
+>   `409 duplicate_waiver` and the error's `existing` array lists the waivers it
+>   collided with (`id`, `approval_status`, `signed_on`). **A retried or
+>   duplicated import batch is the reason this exists — do not paper over it
+>   with `confirm_duplicate`.** Stop, work out how many of the batch already
+>   landed, and resume from there. Only set `"confirm_duplicate": true` when the
+>   second document is real (a corrected re-scan of the same signing date), and
+>   say so to the manager when you do.
 
 ## Guidance
 
@@ -168,3 +209,10 @@ scripts/agent.sh file_waiver '{
   include an `issues` array pointing at the offending field. `file_waiver`
   failures (an unreadable scan, a storage hiccup) come back as
   `file_waiver_failed` with a plain-English message.
+- Two error codes carry extra fields and both mean "stop and confirm", never
+  "retry with the flag set": `reconciled_invoice` (409, with `blocked`,
+  `paid_at`, `previous`) and `duplicate_waiver` (409, with `existing`). Both
+  have an override, and both overrides are the manager's call, not yours.
+- The manifest's `version` tells generations apart. It is `"2"` as of the
+  reconciled-invoice guard, duplicate detection, the `changed`/`previous` echo
+  and the session-allowance fields.
