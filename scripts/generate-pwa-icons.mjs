@@ -11,15 +11,17 @@ import { deflateSync, inflateSync } from "node:zlib";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { contentBounds, computeRenderGeometry } from "./pwa-icon-geometry.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = join(root, "public", "logo.png");
 const OUT_DIR = join(root, "public", "icons");
 
-// White, because the logo is drawn for a light background: the site header
-// already sets `bg-white` behind it. It also keeps every icon opaque, which is
-// what iOS wants for the home-screen icon.
-const BACKGROUND = [255, 255, 255];
+// UTS Sport Teal (`--color-brand-teal` in styles.css), with the wordmark
+// recoloured white on top of it. Keeps every icon opaque, which is what iOS
+// wants for the home-screen icon.
+const BACKGROUND = [0, 142, 170];
+const FOREGROUND = [255, 255, 255];
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -147,19 +149,21 @@ function encodePng(width, height, rgb) {
 }
 
 /**
- * Draw the source, scaled to fit `coverage` of a square canvas and centred,
- * over the flat background colour.
+ * Draw the source, scaled so the wordmark's own bounding box fills `coverage`
+ * of a square canvas and is centred within it, recoloured white over the flat
+ * background colour.
  *
  * The downscale is a box average over the source pixels landing in each target
  * pixel, which is what keeps a 786px-wide logo legible at 192px.
  */
-function render(source, size, coverage) {
-  const boxWidth = size * coverage;
-  const scale = Math.min(boxWidth / source.width, boxWidth / source.height);
-  const drawWidth = Math.round(source.width * scale);
-  const drawHeight = Math.round(source.height * scale);
-  const originX = Math.round((size - drawWidth) / 2);
-  const originY = Math.round((size - drawHeight) / 2);
+function render(source, bounds, size, coverage) {
+  const { drawWidth, drawHeight, originX, originY } = computeRenderGeometry({
+    sourceWidth: source.width,
+    sourceHeight: source.height,
+    bounds,
+    size,
+    coverage,
+  });
 
   const out = Buffer.alloc(size * size * 3);
   for (let i = 0; i < size * size; i++) {
@@ -168,38 +172,39 @@ function render(source, size, coverage) {
     out[i * 3 + 2] = BACKGROUND[2];
   }
 
+  // `drawWidth`/`drawHeight` cover the whole (padded) source at the
+  // content-derived scale, so for an unevenly-padded source they can extend
+  // past the canvas — these two guards clip that overflow. For the current
+  // logo.png the overflow is entirely padding (see contentBounds' doc
+  // comment), so this only ever discards blank pixels, never the wordmark
+  // itself; that's a property of this specific asset, not something enforced
+  // here, so re-check it visually if the source logo is ever replaced.
   for (let y = 0; y < drawHeight; y++) {
+    const py = originY + y;
+    if (py < 0 || py >= size) continue;
     const sy0 = Math.floor((y * source.height) / drawHeight);
     const sy1 = Math.max(sy0 + 1, Math.floor(((y + 1) * source.height) / drawHeight));
     for (let x = 0; x < drawWidth; x++) {
+      const px = originX + x;
+      if (px < 0 || px >= size) continue;
       const sx0 = Math.floor((x * source.width) / drawWidth);
       const sx1 = Math.max(sx0 + 1, Math.floor(((x + 1) * source.width) / drawWidth));
 
-      let r = 0;
-      let g = 0;
-      let b = 0;
       let alpha = 0;
       let count = 0;
       for (let sy = sy0; sy < sy1; sy++) {
         for (let sx = sx0; sx < sx1; sx++) {
           const at = (sy * source.width + sx) * 4;
-          const a = source.pixels[at + 3] / 255;
-          // Weight colour by alpha so transparent edge pixels do not drag
-          // whatever colour they happen to carry into the average.
-          r += source.pixels[at] * a;
-          g += source.pixels[at + 1] * a;
-          b += source.pixels[at + 2] * a;
-          alpha += a;
+          alpha += source.pixels[at + 3] / 255;
           count++;
         }
       }
       if (!count) continue;
       const coverAlpha = alpha / count;
-      const to = ((originY + y) * size + originX + x) * 3;
       if (coverAlpha <= 0) continue;
-      const src = [r / alpha, g / alpha, b / alpha];
+      const to = (py * size + px) * 3;
       for (let c = 0; c < 3; c++) {
-        out[to + c] = Math.round(src[c] * coverAlpha + BACKGROUND[c] * (1 - coverAlpha));
+        out[to + c] = Math.round(FOREGROUND[c] * coverAlpha + BACKGROUND[c] * (1 - coverAlpha));
       }
     }
   }
@@ -208,6 +213,7 @@ function render(source, size, coverage) {
 }
 
 const source = decodePng(readFileSync(SOURCE));
+const bounds = contentBounds(source);
 mkdirSync(OUT_DIR, { recursive: true });
 
 // `any` icons are shown as-is, so the logo can fill most of the square.
@@ -222,7 +228,7 @@ const targets = [
 ];
 
 for (const target of targets) {
-  const png = render(source, target.size, target.coverage);
+  const png = render(source, bounds, target.size, target.coverage);
   writeFileSync(join(OUT_DIR, target.file), png);
   console.log(`wrote public/icons/${target.file} (${png.length} bytes)`);
 }

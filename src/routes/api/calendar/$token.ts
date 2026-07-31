@@ -122,7 +122,6 @@ export const Route = createFileRoute("/api/calendar/$token")({
           );
         }
 
-
         const ics = buildCalendar({
           events: visible.map(toIcsEvent),
           calName: "UTS Jitsu",
