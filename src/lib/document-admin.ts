@@ -143,20 +143,6 @@ export async function saveDocument(
       .single();
     if (insErr || !inserted) throw new Error(insErr?.message ?? "Could not create the document.");
     document = inserted as DocumentRow;
-  } else {
-    const patch: Partial<DocumentRow> = { updated_at: new Date().toISOString() };
-    if (input.visibility !== undefined) patch.visibility = input.visibility;
-    if (input.annotations_enabled !== undefined) {
-      patch.annotations_enabled = input.annotations_enabled;
-    }
-    const { data: updated, error: updErr } = await db
-      .from("documents")
-      .update(patch)
-      .eq("id", document.id)
-      .select("*")
-      .single();
-    if (updErr || !updated) throw new Error(updErr?.message ?? "Could not update the document.");
-    document = updated as DocumentRow;
   }
 
   // A failed read here would number the new version 1 and collide with the
@@ -191,10 +177,46 @@ export async function saveDocument(
     .select("id, version")
     .single();
   if (verErr || !createdVersion) {
+    // A unique violation here is the version-number race, not a broken
+    // database: two saves read the same MAX(version) and both tried to write
+    // n+1. `MAX(version)+1` cannot be made atomic from PostgREST, so the job is
+    // to lose the race in words the caller can act on rather than surfacing
+    // `duplicate key value violates unique constraint ...`, which reads like a
+    // bug and tells an agent nothing about what to do next.
+    if (verErr && (verErr.code === "23505" || /duplicate key/i.test(verErr.message))) {
+      throw new Error(
+        "Someone else saved a version of this document a moment ago, so this save was not applied. Read it again before retrying.",
+      );
+    }
     throw new Error(verErr?.message ?? "Could not save the document version.");
   }
 
   await promoteDocumentVersion(db, createdVersion.id);
+
+  // The document's own settings are written LAST, and only when supplied.
+  //
+  // Ordering matters more than it looks: `visibility` lives here, so patching it
+  // first meant a save whose version insert then failed had already published a
+  // managers-only draft to whoever the new visibility admits — while returning
+  // an error that said the save had not happened. Doing it after means a failure
+  // leaves the new text live under the OLD visibility, which is the safe
+  // direction to fail.
+  if (!created && (input.visibility !== undefined || input.annotations_enabled !== undefined)) {
+    const patch: Partial<DocumentRow> = { updated_at: new Date().toISOString() };
+    if (input.visibility !== undefined) patch.visibility = input.visibility;
+    if (input.annotations_enabled !== undefined) {
+      patch.annotations_enabled = input.annotations_enabled;
+    }
+    const { data: updated, error: updErr } = await db
+      .from("documents")
+      .update(patch)
+      .eq("id", document.id)
+      .select("*")
+      .single();
+    if (updErr || !updated) throw new Error(updErr?.message ?? "Could not update the document.");
+    document = updated as DocumentRow;
+  }
+
   return {
     slug: document.slug,
     version: createdVersion.version,

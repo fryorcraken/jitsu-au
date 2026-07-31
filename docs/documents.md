@@ -45,7 +45,9 @@ public box.
   remember about this policy". The manager agent API cannot read private notes
   either.
 - A **shared comment** starts a thread everyone who can read the document sees.
-  Replies are one level deep: you reply to a comment, not to a reply.
+  Replies are one level deep: you reply to a comment, not to a reply. A reply is
+  always shared, and a request to post a private one is refused rather than
+  quietly published: a private note is not a conversation.
 
 Either can hang off a **passage** (pick a paragraph) or off the **document as a
 whole**.
@@ -92,6 +94,15 @@ swallowed. A manager who wants readers to understand a change writes a
 Commenting on an older version is allowed: unlike the waiver, which **refuses** a
 signature against stale text because a signature is evidence of what was read, a
 comment on older wording is a perfectly good comment.
+
+**Readers always get the live version.** There is no way for a member to open an
+older one, and that is deliberate rather than a missing feature: visibility is a
+property of the document, not of each version, so serving an older version to
+whoever the _current_ visibility admits would publish the drafting history of
+every document that was once managers-only. A manager drafting a policy at
+`managers` visibility and then publishing it to members would, without this,
+hand every member every draft they went through. Only the manager agent API can
+read a specific version.
 
 ## How managers edit documents
 

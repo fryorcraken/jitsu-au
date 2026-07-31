@@ -120,6 +120,14 @@ CREATE TABLE public.document_annotations (
   -- A reply. One level only (a reply may not itself be replied to) — enforced in
   -- `createAnnotation`, since a CHECK cannot look at the parent row. Threads
   -- stay readable and there is no tree to render.
+  --
+  -- CASCADE is deliberate: deleting a thread's root is a moderation action, and
+  -- taking an abusive comment off a page should take the conversation hanging
+  -- off it too. Note the second-order effect, which the UI cannot warn about:
+  -- combined with `user_id`'s CASCADE above, deleting ONE person's profile
+  -- deletes their roots, and with them OTHER people's replies. Deleting a
+  -- profile is already a destructive admin action; this is one more thing it
+  -- destroys. Recorded in docs/database.md.
   parent_id UUID REFERENCES public.document_annotations(id) ON DELETE CASCADE,
   body TEXT NOT NULL CHECK (char_length(body) BETWEEN 1 AND 5000),
   -- Resolving a thread. Set by the thread's author or a manager; a resolved
@@ -173,9 +181,27 @@ ALTER TABLE public.document_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.document_annotations ENABLE ROW LEVEL SECURITY;
 
 -- Defence in depth, as on `session_checkins` and `code_of_conduct_acceptances`:
--- with no client grant these policies are unreachable today, and they are
--- already right on the day somebody adds one. They deliberately encode the same
--- rules the server functions enforce, so the two cannot drift into disagreement.
+-- with no client grant these policies are unreachable today. They encode the
+-- READ rules the server functions enforce, so the two cannot drift into
+-- disagreement about who may see what.
+--
+-- Two things they are NOT, stated here so nobody mistakes them for a complete
+-- second lock:
+--
+--   * There are no INSERT/UPDATE/DELETE policies. Every write runs through a
+--     server function on the service role, and with RLS enabled and no policy,
+--     a client write is denied by default. That is the intended outcome, but it
+--     means these policies describe reads only.
+--   * The two policies below that sub-select `public.documents` carry a
+--     CO-REQUISITE: a policy expression runs with the CALLER's privileges, and
+--     `authenticated` holds no SELECT on `public.documents` (revoked above and
+--     never granted back). So anyone who reached them today would get
+--     `permission denied for table documents`, not a clean deny. This is the
+--     exact trap documented in docs/database-changes.md ("An RLS policy that
+--     references another table needs a grant on that table"). If a client grant
+--     is ever added to `document_versions` or `document_annotations`, it must
+--     come with either `GRANT SELECT ON public.documents` or a SECURITY DEFINER
+--     helper to do the lookup — adding the grant alone leaves these broken.
 CREATE POLICY "Signed-in people can read member documents"
   ON public.documents
   FOR SELECT TO authenticated USING (visibility IN ('public', 'members'));

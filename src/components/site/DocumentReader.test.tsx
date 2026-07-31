@@ -33,7 +33,6 @@ function annotation(over: Partial<ReaderAnnotation> = {}): ReaderAnnotation {
     parent_id: null,
     document_version: 3,
     author: "Sam",
-    author_user_id: "u-2",
     is_mine: false,
     can_edit: false,
     can_resolve: false,
@@ -47,16 +46,19 @@ function annotation(over: Partial<ReaderAnnotation> = {}): ReaderAnnotation {
 function renderReader(over: {
   annotations?: ReaderAnnotation[];
   viewer?: ReaderViewer;
-  onCreate?: (input: unknown) => Promise<void>;
+  document?: ReaderDocument;
+  onCreate?: (input: unknown) => Promise<boolean>;
 }) {
-  const onCreate = over.onCreate ?? vi.fn().mockResolvedValue(undefined);
+  // The write callbacks report success; the component clears its inputs only
+  // when they do. Default to success so the ordinary path is what is exercised.
+  const onCreate = over.onCreate ?? vi.fn().mockResolvedValue(true);
   render(
     <DocumentReader
-      document={document}
+      document={over.document ?? document}
       annotations={over.annotations ?? []}
       viewer={over.viewer ?? canAnnotate}
       onCreate={onCreate as never}
-      onUpdate={vi.fn().mockResolvedValue(undefined)}
+      onUpdate={vi.fn().mockResolvedValue(true)}
       onDelete={vi.fn().mockResolvedValue(undefined)}
       onResolve={vi.fn().mockResolvedValue(undefined)}
     />,
@@ -160,6 +162,66 @@ describe("DocumentReader", () => {
     expect(screen.queryByText("Handled already.")).not.toBeInTheDocument();
     await user.click(screen.getByLabelText(/Show resolved/i));
     expect(screen.getByText("Handled already.")).toBeInTheDocument();
+  });
+
+  // The server caps `quote` at 2000 characters. Sending a longer block's full
+  // text made it impossible to comment on a long passage at all: the reader
+  // wrote their comment and got a raw validation error back.
+  it("truncates the quote of a very long passage instead of failing to post", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(true);
+    const longBlock = "x".repeat(5000);
+    renderReader({ document: { ...document, body_md: longBlock }, onCreate });
+
+    await user.click(screen.getAllByRole("button", { name: /Comment on this passage/i })[0]);
+    await user.type(screen.getByPlaceholderText(/Start a comment thread/i), "Too long?");
+    await user.click(screen.getByRole("button", { name: /Post comment/i }));
+
+    const { quote } = onCreate.mock.calls[0][0] as { quote: string };
+    expect(quote).toHaveLength(2000);
+  });
+
+  it("keeps what the reader typed when the comment fails to save", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(false);
+    renderReader({ onCreate });
+
+    const box = screen.getByPlaceholderText(/Start a comment thread/i);
+    await user.type(box, "Worth keeping.");
+    await user.click(screen.getByRole("button", { name: /Post comment/i }));
+
+    expect(onCreate).toHaveBeenCalled();
+    expect(box).toHaveValue("Worth keeping.");
+  });
+
+  it("clears the box once the comment is saved", async () => {
+    const user = userEvent.setup();
+    renderReader({ onCreate: vi.fn().mockResolvedValue(true) });
+
+    const box = screen.getByPlaceholderText(/Start a comment thread/i);
+    await user.type(box, "Posted.");
+    await user.click(screen.getByRole("button", { name: /Post comment/i }));
+
+    expect(box).toHaveValue("");
+  });
+
+  // On a phone the hover-only gutter marker is hidden, so without this control
+  // there is no way to start a comment on a specific passage at all.
+  it("offers a way to comment on every passage, not only ones already commented on", () => {
+    renderReader({});
+    // Scoped to the document body: the composer in the rail has its own
+    // "Comment" toggle, which is not what this is about.
+    const body = screen.getByRole("article");
+    // Three blocks in the fixture, none of them annotated.
+    expect(within(body).getAllByRole("button", { name: /^Comment$/i })).toHaveLength(3);
+  });
+
+  it("offers no such control to a reader who cannot annotate", () => {
+    renderReader({
+      viewer: { signed_in: false, user_id: null, is_manager: false, can_annotate: false },
+    });
+    const body = screen.getByRole("article");
+    expect(within(body).queryByRole("button", { name: /^Comment$/i })).not.toBeInTheDocument();
   });
 
   it("offers a reply on a shared thread", () => {

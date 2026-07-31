@@ -11,7 +11,14 @@
 // bundled to the client, so a top-level import would ship the key.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { canAnnotate, canEditAnnotation, canReadDocument, canResolveThread } from "@/lib/documents";
+import {
+  ANNOTATIONS_LIMIT,
+  annotationReadFilter,
+  canAnnotate,
+  canEditAnnotation,
+  canReadDocument,
+  canResolveThread,
+} from "@/lib/documents";
 import type { AnnotationVisibility, Viewer } from "@/lib/documents";
 import { loadDocument, projectDocument } from "@/lib/document-admin";
 import { asDocumentClient } from "@/lib/document-types";
@@ -19,8 +26,8 @@ import type { DocumentAnnotationRow, DocumentClient, DocumentRow } from "@/lib/d
 import {
   createAnnotationSchema,
   deleteAnnotationSchema,
-  getDocumentSchema,
   greetingName,
+  readDocumentSchema,
   resolveAnnotationSchema,
   updateAnnotationSchema,
 } from "@/lib/validation";
@@ -81,13 +88,21 @@ async function resolveViewer(db: DocumentClient): Promise<Viewer> {
  */
 const NOT_FOUND = "That document does not exist, or is not available to you.";
 
-/** Read one document: the live version, or a named one. */
+/**
+ * Read one document, always the LIVE version.
+ *
+ * A reader cannot ask for an older version, and that is a security boundary
+ * rather than a missing feature: `visibility` lives on the document, not on each
+ * version, so honouring a `version` parameter here would hand every member the
+ * drafting history of any document that was once managers-only and has since
+ * been published. See `readDocumentSchema`.
+ */
 export const getDocument = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => getDocumentSchema.parse(d))
+  .inputValidator((d: unknown) => readDocumentSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     const viewer = await resolveViewer(db);
-    const loaded = await loadDocument(db, data.slug, data.version);
+    const loaded = await loadDocument(db, data.slug);
     if (!loaded) throw new Error(NOT_FOUND);
     if (!canReadDocument(loaded.document.visibility, viewer)) throw new Error(NOT_FOUND);
 
@@ -100,31 +115,6 @@ export const getDocument = createServerFn({ method: "POST" })
         can_annotate: canAnnotate(loaded.document, viewer),
       },
     };
-  });
-
-/** Every version of a document, newest first. Managers only. */
-export const listDocumentVersions = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ slug: z.string().trim().max(100) }).parse(d))
-  .handler(async ({ data }) => {
-    const db = await adminClient();
-    const viewer = await resolveViewer(db);
-    if (!viewer.isManager) throw new Error("Forbidden");
-
-    const { data: doc, error: docErr } = await db
-      .from("documents")
-      .select("id")
-      .eq("slug", data.slug)
-      .maybeSingle();
-    if (docErr) throw new Error(docErr.message);
-    if (!doc) throw new Error(NOT_FOUND);
-
-    const { data: rows, error } = await db
-      .from("document_versions")
-      .select("id, version, title, change_note, is_current, created_at")
-      .eq("document_id", doc.id)
-      .order("version", { ascending: false });
-    if (error) throw new Error(error.message);
-    return rows ?? [];
   });
 
 /** The documents this reader may see, for an index page. */
@@ -226,15 +216,26 @@ export const listAnnotations = createServerFn({ method: "POST" })
       .select("*")
       .eq("document_id", loaded.document.id)
       .order("created_at", { ascending: true })
-      .limit(1000);
-    query = viewer.userId
-      ? query.or(`visibility.eq.shared,user_id.eq.${viewer.userId}`)
-      : query.eq("visibility", "shared");
+      .limit(ANNOTATIONS_LIMIT);
+    const filter = annotationReadFilter(viewer);
+    query =
+      filter.mode === "shared-or-own"
+        ? query.or(filter.orExpression)
+        : query.eq("visibility", "shared");
 
     const { data: rows, error } = await query;
     if (error) throw new Error(error.message);
 
     const annotations = (rows ?? []) as DocumentAnnotationRow[];
+    // Truncation here is not cosmetic: the read is ordered oldest-first, so the
+    // rows dropped are the NEWEST, and a reply whose root survived while it did
+    // not gets promoted to a bogus top-level comment by `groupThreads`. Say so
+    // rather than rendering a quietly wrong thread.
+    if (annotations.length >= ANNOTATIONS_LIMIT) {
+      console.warn(
+        `[documents] annotations on "${data.slug}" capped at ${ANNOTATIONS_LIMIT}; newest comments and their threads are truncated`,
+      );
+    }
     const names = await authorNames(
       db,
       annotations.map((a) => a.user_id),
@@ -249,7 +250,9 @@ export const listAnnotations = createServerFn({ method: "POST" })
       parent_id: a.parent_id,
       document_version: a.document_version,
       author: names.get(a.user_id) ?? null,
-      author_user_id: a.user_id,
+      // No `author_user_id`: the UI never needs it (ownership arrives
+      // precomputed below), and shipping it would hand every member the auth
+      // UUID of everyone who has ever commented, for nothing.
       /** Precomputed so the UI never has to know the ownership rules. */
       is_mine: a.user_id === viewer.userId,
       can_edit: canEditAnnotation(a, viewer),
@@ -288,11 +291,23 @@ export const createAnnotation = createServerFn({ method: "POST" })
       throw new Error("Your club record is not set up yet, so comments are not available.");
     }
 
-    let visibility: AnnotationVisibility = data.visibility;
+    const visibility: AnnotationVisibility = data.visibility;
     let blockId = data.block_id || null;
     let quote = data.quote || null;
 
     if (data.parent_id) {
+      // Refuse a private reply rather than publishing it.
+      //
+      // This used to overwrite `visibility` with "shared", which took a request
+      // that said "keep this to myself" and posted it to a thread everyone
+      // reads. Today's UI always sends "shared" here, so it was unreachable from
+      // the app — but this is a public RPC, and every other override in this
+      // block fails closed. The one field the whole feature rests on must not be
+      // the exception. (The DB CHECK `document_annotations_private_has_no_parent`
+      // would have caught it, but only because the overwrite happened first.)
+      if (visibility === "private") {
+        throw new Error("A private note cannot be a reply. Post it on the passage instead.");
+      }
       const { data: parent, error: parentErr } = await db
         .from("document_annotations")
         .select("*")
@@ -314,10 +329,9 @@ export const createAnnotation = createServerFn({ method: "POST" })
       if (parentRow.parent_id) {
         throw new Error("Replies cannot be replied to. Reply to the original comment instead.");
       }
-      // A reply inherits its thread's anchor and visibility so it can never
-      // drift onto a different passage, or be filed as a private note under a
-      // public thread.
-      visibility = "shared";
+      // A reply inherits its thread's anchor so it can never drift onto a
+      // different passage. Visibility is NOT inherited — it is checked above,
+      // so a reply is already known to be shared.
       blockId = parentRow.block_id;
       quote = parentRow.quote;
     }

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  ANNOTATIONS_LIMIT,
+  annotationReadFilter,
   blockId,
   canAnnotate,
   canEditAnnotation,
@@ -64,6 +66,30 @@ describe("splitBlocks", () => {
     const blocks = splitBlocks("N/A\n\nSomething\n\nN/A");
     expect(blocks[0].id).not.toBe(blocks[2].id);
     expect(blocks[2].id).toBe(blockId("N/A", 1));
+  });
+
+  // A `.trim()` on each chunk silently stripped the leading 4 spaces off an
+  // indented code block, so it stopped being code and rendered as a paragraph:
+  // splitting the document changed what the document said.
+  it("keeps the indentation of an indented code block", () => {
+    const blocks = splitBlocks("Example:\n\n    const a = 1;\n    const b = 2;");
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].markdown).toBe("    const a = 1;\n    const b = 2;");
+  });
+
+  it("keeps the indentation of a fenced block nested in a list", () => {
+    const blocks = splitBlocks("- item\n\n  ```\n  code\n  ```");
+    expect(blocks[1].markdown.startsWith("  ```")).toBe(true);
+  });
+
+  // An unclosed fence swallows the rest of the document into one block. That is
+  // the honest reading of the source, but it makes everything below it a single
+  // unannotatable slab, so pin it as known behaviour rather than a surprise.
+  it("treats everything after an unclosed fence as one block", () => {
+    const blocks = splitBlocks("Intro\n\n```js\ncode\n\nPara\n\nMore");
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].markdown).toBe("Intro");
+    expect(blocks[1].markdown).toContain("More");
   });
 
   it("gives the same id to a paragraph that was only re-wrapped", () => {
@@ -180,6 +206,44 @@ describe("canEditAnnotation", () => {
 
   it("refuses a signed-out viewer", () => {
     expect(canEditAnnotation({ user_id: "u-member" }, anon)).toBe(false);
+  });
+});
+
+// The single most load-bearing rule in the feature: get this wrong and private
+// notes leak. It is pinned character-for-character because it is interpolated
+// into a PostgREST filter string, where a typo does not fail loudly — it just
+// selects the wrong rows.
+describe("annotationReadFilter", () => {
+  it("gives a signed-out reader shared annotations only", () => {
+    expect(annotationReadFilter(anon)).toEqual({ mode: "shared-only" });
+  });
+
+  it("gives a signed-in reader shared annotations plus their own", () => {
+    expect(annotationReadFilter(member)).toEqual({
+      mode: "shared-or-own",
+      orExpression: "visibility.eq.shared,user_id.eq.u-member",
+    });
+  });
+
+  // A manager is not special here, and that is the whole point of a private
+  // note: it is private from the club too.
+  it("does not widen the filter for a manager", () => {
+    expect(annotationReadFilter(manager)).toEqual({
+      mode: "shared-or-own",
+      orExpression: "visibility.eq.shared,user_id.eq.u-manager",
+    });
+  });
+
+  it("names the viewer's own id, never a literal, in the ownership clause", () => {
+    const { orExpression } = annotationReadFilter({ userId: "abc-123", isManager: false }) as {
+      orExpression: string;
+    };
+    expect(orExpression).toContain("user_id.eq.abc-123");
+    expect(orExpression).not.toContain("user_id.eq.shared");
+  });
+
+  it("caps a document's annotation read", () => {
+    expect(ANNOTATIONS_LIMIT).toBeGreaterThan(0);
   });
 });
 

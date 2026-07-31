@@ -732,8 +732,20 @@ Three things about the shape:
 - **Threads are one level deep.** The CHECK
   `document_annotations_private_has_no_parent` catches the half a constraint can
   see (a private row with a parent); `createAnnotation` enforces the rest (no
-  replying to a private note, no replies to replies), since a CHECK cannot read
-  the parent row.
+  replying to a private note, no replies to replies, and no private reply),
+  since a CHECK cannot read the parent row.
+- **Deleting a profile deletes other people's replies.** `user_id` and
+  `parent_id` both cascade, so removing one person takes their thread roots and,
+  with them, everybody else's replies to those threads. The `parent_id` cascade
+  is wanted (deleting an abusive root should take the conversation); this
+  second-order effect is the price, and unlike the in-app delete there is no
+  warning in front of it. Worth knowing before deleting a profile.
+
+**Readers never choose a version.** `visibility` lives on the document, not on
+each version, so serving an arbitrary version to a reader would publish a
+document's whole drafting history the moment it goes live. The public read
+(`readDocumentSchema`) has no `version` parameter at all; only the manager agent
+API can name one.
 
 **RLS:** enabled on all three, with owner/manager read policies as **defence in
 depth only** — there are no client grants (`REVOKE ALL` from anon/authenticated),

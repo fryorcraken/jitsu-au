@@ -104,9 +104,16 @@ export function splitBlocks(markdown: string): DocumentBlock[] {
   let current: string[] = [];
   let fence: string | null = null;
 
+  // Drop blank lines from each end, but NEVER the indentation on the first line.
+  // A plain `.trim()` here silently de-indents an indented code block ("    const
+  // a = 1;" becomes "const a = 1;"), which stops being code and renders as a
+  // paragraph — the document's own text changed by the act of splitting it.
   const flush = () => {
-    const text = current.join("\n").trim();
-    if (text) chunks.push(text);
+    const text = current
+      .join("\n")
+      .replace(/^(?:[ \t]*\n)+/, "")
+      .replace(/(?:\n[ \t]*)+$/, "");
+    if (text.trim()) chunks.push(text);
     current = [];
   };
 
@@ -262,6 +269,42 @@ export function groupThreads<A extends Threadable>(annotations: A[]): Thread<A>[
 
 /** Who is asking. `userId` is null for a signed-out visitor. */
 export type Viewer = { userId: string | null; isManager: boolean };
+
+/**
+ * How many annotations one read of a document returns. Documents are read in
+ * full, so this is a backstop against an unbounded payload rather than paging:
+ * a document with more comments than this needs a real pager, and the handler
+ * says so in the log rather than silently truncating.
+ */
+export const ANNOTATIONS_LIMIT = 1000;
+
+/**
+ * Which annotations a viewer may read, as a filter to apply to the query.
+ *
+ * This is the single most load-bearing rule in the feature, so it lives here as
+ * a pure function with a test pinning its exact output, rather than as a
+ * template literal inlined in a handler no unit test can reach. Getting it
+ * wrong leaks private notes.
+ *
+ * It is deliberately a QUERY filter and not a post-read `.filter(...)`: rows the
+ * viewer may not see are never fetched, so no later mapping bug can put one in
+ * the payload.
+ *
+ * A signed-out viewer gets shared annotations only. A signed-in one additionally
+ * gets their OWN, private included — and nobody else's private ones, managers
+ * included (`isManager` is deliberately not consulted here).
+ */
+export type AnnotationReadFilter =
+  | { mode: "shared-only" }
+  | { mode: "shared-or-own"; orExpression: string };
+
+export function annotationReadFilter(viewer: Viewer): AnnotationReadFilter {
+  if (!viewer.userId) return { mode: "shared-only" };
+  return {
+    mode: "shared-or-own",
+    orExpression: `visibility.eq.shared,user_id.eq.${viewer.userId}`,
+  };
+}
 
 /**
  * Whether this viewer may read a document at all.

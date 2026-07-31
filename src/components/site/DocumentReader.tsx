@@ -30,7 +30,6 @@ export type ReaderAnnotation = {
   parent_id: string | null;
   document_version: number;
   author: string | null;
-  author_user_id: string;
   is_mine: boolean;
   can_edit: boolean;
   can_resolve: boolean;
@@ -63,13 +62,18 @@ export type NewAnnotation = {
   parent_id?: string;
 };
 
+/**
+ * The write callbacks report whether they SUCCEEDED, and this component only
+ * clears a textarea or closes an editor when they did. A callback that swallows
+ * its error and resolves anyway throws away what the reader typed.
+ */
 type Props = {
   document: ReaderDocument;
   annotations: ReaderAnnotation[];
   viewer: ReaderViewer;
   busy?: boolean;
-  onCreate: (input: NewAnnotation) => Promise<void>;
-  onUpdate: (id: string, body: string) => Promise<void>;
+  onCreate: (input: NewAnnotation) => Promise<boolean>;
+  onUpdate: (id: string, body: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<void>;
   onResolve: (id: string, resolved: boolean) => Promise<void>;
 };
@@ -112,6 +116,10 @@ export function DocumentReader({
                 isSelected ? "border-primary/40 bg-muted/60" : "hover:bg-muted/40",
               )}
             >
+              {/* The wide-screen affordance: a gutter marker that appears on
+                  hover or keyboard focus. Hidden below `lg` because there is no
+                  gutter to put it in, which is why the small-screen control
+                  below is NOT conditional on the block already having comments. */}
               <button
                 type="button"
                 aria-label={`Comment on this passage${shared + notes ? `, ${shared + notes} existing` : ""}`}
@@ -126,11 +134,23 @@ export function DocumentReader({
                 <ReactMarkdown>{block.markdown}</ReactMarkdown>
               </div>
 
-              {(shared > 0 || notes > 0) && (
+              {/* Always rendered when there is anything to show OR the reader
+                  could add something. Gating this on `shared + notes > 0` (as it
+                  used to be) left phone users with no way to start a comment on
+                  a passage at all, since the gutter marker above is hidden
+                  there: the feature's headline capability, unreachable on a
+                  phone. */}
+              {(shared > 0 || notes > 0 || viewer.can_annotate) && (
                 <button
                   type="button"
+                  aria-pressed={isSelected}
                   onClick={() => setSelected(isSelected ? null : block.id)}
-                  className="mt-1 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+                  className={cn(
+                    "mt-1 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground",
+                    // With no comments yet the control is only worth the space
+                    // where it is the ONLY way in, i.e. below `lg`.
+                    shared === 0 && notes === 0 && "lg:hidden",
+                  )}
                 >
                   {shared > 0 && (
                     <span className="flex items-center gap-1">
@@ -142,6 +162,12 @@ export function DocumentReader({
                     <span className="flex items-center gap-1">
                       <Lock className="h-3 w-3" />
                       {notes}
+                    </span>
+                  )}
+                  {shared === 0 && notes === 0 && (
+                    <span className="flex items-center gap-1">
+                      <MessageSquare className="h-3 w-3" />
+                      Comment
                     </span>
                   )}
                 </button>
@@ -181,7 +207,7 @@ export function DocumentReader({
               onReply={(parentId, body) =>
                 onCreate({
                   block_id: selectedBlock.id,
-                  quote: selectedBlock.markdown,
+                  quote: quoteOf(selectedBlock.markdown),
                   visibility: "shared",
                   body,
                   parent_id: parentId,
@@ -190,11 +216,16 @@ export function DocumentReader({
             />
             {viewer.can_annotate ? (
               <Composer
+                // Keyed on the block so moving to a different passage starts a
+                // fresh composer. Without this the element persists across the
+                // change and a half-typed comment about paragraph A can be
+                // posted against paragraph B.
+                key={selectedBlock.id}
                 busy={busy}
                 onSubmit={(body, visibility) =>
                   onCreate({
                     block_id: selectedBlock.id,
-                    quote: selectedBlock.markdown,
+                    quote: quoteOf(selectedBlock.markdown),
                     visibility,
                     body,
                   })
@@ -293,10 +324,10 @@ function ThreadList({
 }: {
   annotations: ReaderAnnotation[];
   busy?: boolean;
-  onUpdate: (id: string, body: string) => Promise<void>;
+  onUpdate: (id: string, body: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<void>;
   onResolve: (id: string, resolved: boolean) => Promise<void>;
-  onReply: (parentId: string, body: string) => Promise<void>;
+  onReply: (parentId: string, body: string) => Promise<boolean>;
 }) {
   const threads = useMemo(() => groupThreads(annotations), [annotations]);
   if (!threads.length) {
@@ -332,10 +363,10 @@ function Thread({
   root: ReaderAnnotation;
   replies: ReaderAnnotation[];
   busy?: boolean;
-  onUpdate: (id: string, body: string) => Promise<void>;
+  onUpdate: (id: string, body: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<void>;
   onResolve: (id: string, resolved: boolean) => Promise<void>;
-  onReply: (parentId: string, body: string) => Promise<void>;
+  onReply: (parentId: string, body: string) => Promise<boolean>;
 }) {
   const [replying, setReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
@@ -378,9 +409,12 @@ function Thread({
                   size="sm"
                   disabled={busy || !replyBody.trim()}
                   onClick={async () => {
-                    await onReply(root.id, replyBody.trim());
-                    setReplyBody("");
-                    setReplying(false);
+                    // Only clear on success — a failed reply keeps what was
+                    // typed so it can be sent again.
+                    if (await onReply(root.id, replyBody.trim())) {
+                      setReplyBody("");
+                      setReplying(false);
+                    }
                   }}
                 >
                   Reply
@@ -415,12 +449,21 @@ function AnnotationCard({
 }: {
   annotation: ReaderAnnotation;
   busy?: boolean;
-  onUpdate: (id: string, body: string) => Promise<void>;
+  onUpdate: (id: string, body: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<void>;
   onResolve: (id: string, resolved: boolean) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  // Seeded from the annotation, and re-seeded whenever the stored body changes
+  // underneath (a refetch after somebody else's edit, or after your own).
+  // `useState(annotation.body)` alone captures the value once for the life of
+  // the card, so reopening the editor later showed stale text.
   const [draft, setDraft] = useState(annotation.body);
+  const [draftFor, setDraftFor] = useState(annotation.body);
+  if (draftFor !== annotation.body && !editing) {
+    setDraftFor(annotation.body);
+    setDraft(annotation.body);
+  }
 
   return (
     <div className="rounded-md bg-muted/50 p-3 text-sm">
@@ -460,8 +503,9 @@ function AnnotationCard({
               size="sm"
               disabled={busy || !draft.trim()}
               onClick={async () => {
-                await onUpdate(annotation.id, draft.trim());
-                setEditing(false);
+                // Closing the editor on failure would show the OLD body back,
+                // as though the edit had never been attempted.
+                if (await onUpdate(annotation.id, draft.trim())) setEditing(false);
               }}
             >
               Save
@@ -534,7 +578,7 @@ function Composer({
   onSubmit,
 }: {
   busy?: boolean;
-  onSubmit: (body: string, visibility: AnnotationVisibility) => Promise<void>;
+  onSubmit: (body: string, visibility: AnnotationVisibility) => Promise<boolean>;
 }) {
   const [body, setBody] = useState("");
   const [visibility, setVisibility] = useState<AnnotationVisibility>("shared");
@@ -585,8 +629,10 @@ function Composer({
           size="sm"
           disabled={busy || !body.trim()}
           onClick={async () => {
-            await onSubmit(body.trim(), visibility);
-            setBody("");
+            // Only clear on success. Emptying the box on a rejected comment,
+            // an expired session or a dropped connection loses what the reader
+            // wrote and gives them nothing to retry.
+            if (await onSubmit(body.trim(), visibility)) setBody("");
           }}
         >
           {visibility === "private" ? "Save note" : "Post comment"}
@@ -594,6 +640,22 @@ function Composer({
       </div>
     </div>
   );
+}
+
+/**
+ * The longest `quote` the server accepts (mirrors `createAnnotationSchema`).
+ * A block can legitimately be much longer than this — a big table, a long code
+ * sample, or the whole tail of a document whose fence was left unclosed — and
+ * sending the block's full text made commenting on such a passage impossible,
+ * failing with a raw validation message after the reader had written their
+ * comment. The quote is only a fallback anchor and a display string, so
+ * truncating it costs nothing: a block whose text changed at all already fails
+ * the quote lookup in `resolveAnchors`.
+ */
+const MAX_QUOTE = 2000;
+
+function quoteOf(markdown: string): string {
+  return markdown.length <= MAX_QUOTE ? markdown : markdown.slice(0, MAX_QUOTE);
 }
 
 /** First `max` characters of a block, for quoting it back in the rail. */

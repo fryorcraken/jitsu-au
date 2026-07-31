@@ -73,14 +73,25 @@ function DocumentPage() {
   const refreshAnnotations = () =>
     queryClient.invalidateQueries({ queryKey: ["document-annotations", slug] });
 
-  /** Run a write, refresh the thread list, and report failures in words. */
-  async function run(action: () => Promise<unknown>, failure: string) {
+  /**
+   * Run a write, refresh the thread list, and report failures in words.
+   *
+   * Returns whether it worked, and the caller uses that to decide whether to
+   * clear what the reader typed. Swallowing the error and resolving anyway meant
+   * the composer emptied itself on every failure — an expired session, a dropped
+   * connection, a rejected comment — and the reader lost what they had written
+   * along with any chance of retrying it. This repo already has
+   * `use-resilient-submit` and `waiver-draft` for exactly that reason.
+   */
+  async function run(action: () => Promise<unknown>, failure: string): Promise<boolean> {
     setBusy(true);
     try {
       await action();
       await refreshAnnotations();
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : failure);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -134,9 +145,11 @@ function DocumentPage() {
               </Badge>
             )}
           </div>
+          {/* No em dash: AGENTS.md bans them in user-facing copy, and this is
+              copy on the page. `·` is the separator docs.index.tsx already uses. */}
           <p className="mt-2 text-sm text-muted-foreground">
             Last updated {formatDate(document.updated_at)}
-            {document.change_note ? ` — ${document.change_note}` : ""}
+            {document.change_note ? ` · ${document.change_note}` : ""}
           </p>
           {!viewer.signed_in && (
             <p className="mt-3 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
@@ -174,10 +187,12 @@ function DocumentPage() {
           onUpdate={(id, body) =>
             run(() => update({ data: { id, body } }), "Could not save your edit")
           }
-          onDelete={(id) => run(() => remove({ data: { id } }), "Could not delete that")}
-          onResolve={(id, resolved) =>
-            run(() => resolve({ data: { id, resolved } }), "Could not update that thread")
-          }
+          onDelete={async (id) => {
+            await run(() => remove({ data: { id } }), "Could not delete that");
+          }}
+          onResolve={async (id, resolved) => {
+            await run(() => resolve({ data: { id, resolved } }), "Could not update that thread");
+          }}
         />
       </section>
     </SiteLayout>

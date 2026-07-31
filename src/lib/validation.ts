@@ -1320,7 +1320,25 @@ export const saveDocumentSchema = z.object({
 });
 export type SaveDocumentInput = z.infer<typeof saveDocumentSchema>;
 
-/** Read one document. Without `version`, the live one. */
+/**
+ * A reader opening a document. Deliberately has NO `version`: readers always get
+ * the live one.
+ *
+ * Letting a reader name a version would publish a document's whole drafting
+ * history the moment it goes live. A managers-only draft's earlier versions
+ * (internal figures, names, wording nobody agreed to publish) are readable by
+ * anyone the CURRENT visibility admits, because visibility lives on the document
+ * and not on each version. Version-by-version access needs a per-version record
+ * of what it was published under, which this schema does not have — so the
+ * public read does not offer it at all.
+ */
+export const readDocumentSchema = z.object({ slug: documentSlugSchema });
+export type ReadDocumentInput = z.infer<typeof readDocumentSchema>;
+
+/**
+ * Manager: read one document, optionally a named version. Manager-only for the
+ * reason above — a manager may read their own drafting history.
+ */
 export const getDocumentSchema = z.object({
   slug: documentSlugSchema,
   version: z.number().int().positive().optional(),

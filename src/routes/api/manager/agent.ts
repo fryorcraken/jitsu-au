@@ -438,32 +438,61 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
   }
 }
 
+/**
+ * Cap on documents returned by `list_documents`. Generous: a club with more
+ * pages than this has outgrown a flat list, and the handler warns rather than
+ * truncating in silence.
+ */
+const DOCUMENTS_LIMIT = 500;
+
 // ---- action: list_documents ----
 async function handleListDocuments() {
   const db = asDocumentClient(await adminClient());
 
-  const [{ data: docs, error }, { data: versions, error: vErr }] = await Promise.all([
-    db.from("documents").select("*").order("slug"),
-    db
-      .from("document_versions")
-      .select("document_id, title, version, created_at, change_note, is_current"),
-  ]);
-  if (error) throw new AgentError(500, "db_error", error.message);
-  if (vErr) throw new AgentError(500, "db_error", vErr.message);
-
-  // Count versions per document as well as naming the live one: "this page has
-  // been rewritten nine times" is the context a manager wants before editing it.
+  // Only the LIVE version of each document, not every version ever saved.
+  //
+  // Reading the whole `document_versions` table to pick out the current rows
+  // grows without bound (every save adds one) and would eventually be truncated
+  // by the server-side row cap — silently, and in the worst possible way: a
+  // document whose `is_current` row fell outside the window would be reported
+  // with `title: null, version: null`, a confident wrong answer of exactly the
+  // kind the comment in `handleListUsers` exists to prevent. `is_current` is a
+  // partial unique index, so this is one row per document by construction.
   //
   // The live version is the one flagged `is_current`, NOT the highest-numbered
   // one. Those differ whenever a manager has rolled back to an earlier version,
   // and reporting the newest as live would have an agent read version 9, edit
   // it, and publish it over the version 4 the club deliberately went back to.
-  const liveByDoc = new Map<string, (typeof versions)[number]>();
-  const countByDoc = new Map<string, number>();
-  for (const v of versions ?? []) {
-    countByDoc.set(v.document_id, (countByDoc.get(v.document_id) ?? 0) + 1);
-    if (v.is_current) liveByDoc.set(v.document_id, v);
+  const [{ data: docs, error }, { data: versions, error: vErr }] = await Promise.all([
+    db.from("documents").select("*").order("slug").limit(DOCUMENTS_LIMIT),
+    db
+      .from("document_versions")
+      .select("document_id, title, version, created_at, change_note")
+      .eq("is_current", true)
+      .limit(DOCUMENTS_LIMIT),
+  ]);
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (vErr) throw new AgentError(500, "db_error", vErr.message);
+  if ((docs ?? []).length >= DOCUMENTS_LIMIT) {
+    console.warn(`[agent.list_documents] documents capped at ${DOCUMENTS_LIMIT}; list truncated`);
   }
+
+  const liveByDoc = new Map((versions ?? []).map((v) => [v.document_id, v]));
+
+  // How many versions each document has, counted in the database rather than by
+  // reading the rows: "this page has been rewritten nine times" is context a
+  // manager wants before editing it, and it must not cost an unbounded read.
+  const countByDoc = new Map<string, number>();
+  await Promise.all(
+    ((docs ?? []) as DocumentRow[]).map(async (d) => {
+      const { count, error: cErr } = await db
+        .from("document_versions")
+        .select("*", { count: "exact", head: true })
+        .eq("document_id", d.id);
+      if (cErr) throw new AgentError(500, "db_error", cErr.message);
+      countByDoc.set(d.id, count ?? 0);
+    }),
+  );
 
   const documents = ((docs ?? []) as DocumentRow[]).map((d) => {
     const live = liveByDoc.get(d.id);
