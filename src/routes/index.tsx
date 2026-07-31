@@ -3,6 +3,7 @@ import { ArrowRight, Shield, Users, Dumbbell, Award, MapPin, Clock, Sparkles } f
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { CommonQuestions } from "@/components/site/CommonQuestions";
+import { YouTubeEmbed } from "@/components/site/YouTubeEmbed";
 import { Button } from "@/components/ui/button";
 import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
 import heroAsset from "@/assets/training1.jpg.asset.json";
@@ -78,6 +79,19 @@ function Home() {
               className="aspect-[4/3] w-full rounded-2xl object-cover shadow-xl ring-1 ring-black/5"
             />
           </div>
+        </div>
+      </section>
+
+      {/* Video */}
+      <section className="mx-auto max-w-4xl px-4 pt-4 pb-12">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold md:text-3xl">See a class in action</h2>
+          <p className="mt-2 text-muted-foreground">
+            A quick look at what training looks like on the mat.
+          </p>
+        </div>
+        <div className="mt-6">
+          <YouTubeEmbed videoId="jm75EhP1zMQ" title="UTS Jitsu class in action" />
         </div>
       </section>
 
