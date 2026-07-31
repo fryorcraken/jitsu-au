@@ -172,7 +172,11 @@ export const setGoogleDriveFolderFromPicker = createServerFn({ method: "POST" })
             gatewayBaseUrl: GATEWAY_BASE_URL,
             connectionAPIKey: conn.connectionAPIKey,
             connectorId: CONNECTOR_ID,
-            path: `/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType`,
+            // `supportsAllDrives` is required for anything living in a shared
+            // (team) drive: without it Drive answers 404 for a folder the
+            // connection can genuinely reach, which would read here as "wrong
+            // Google account".
+            path: `/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType&supportsAllDrives=true`,
           }),
         data.folderId,
       );
@@ -234,7 +238,7 @@ async function ensureFolder(connectionAPIKey: string, folderName: string): Promi
     gatewayBaseUrl: GATEWAY_BASE_URL,
     connectionAPIKey,
     connectorId: CONNECTOR_ID,
-    path: `/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1`,
+    path: `/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
   });
   if (!search.ok) throw new Error(`Drive folder search failed: ${await search.text()}`);
   const found = (await search.json()) as { files?: { id: string }[] };
@@ -282,7 +286,8 @@ async function uploadPdfToDrive(params: {
     gatewayBaseUrl: GATEWAY_BASE_URL,
     connectionAPIKey: params.connectionAPIKey,
     connectorId: CONNECTOR_ID,
-    path: "/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink",
+    // `supportsAllDrives` lets the parent folder be one in a shared drive.
+    path: "/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink&supportsAllDrives=true",
     init: {
       method: "POST",
       headers: { "Content-Type": `multipart/related; boundary=${boundary}` },

@@ -14,17 +14,34 @@ export interface PickedDriveFolder {
 
 type PickerResponse = Record<string, unknown>;
 
-interface GooglePickerView {
+export interface GooglePickerView {
   setSelectFolderEnabled: (enabled: boolean) => GooglePickerView;
   setIncludeFolders: (include: boolean) => GooglePickerView;
+  setMimeTypes: (mimeTypes: string) => GooglePickerView;
+  setParent: (parentId: string) => GooglePickerView;
+  setEnableDrives: (enabled: boolean) => GooglePickerView;
+  setOwnedByMe: (ownedByMe: boolean) => GooglePickerView;
+  setLabel: (label: string) => GooglePickerView;
 }
 
 interface GooglePickerBuilder {
   addView: (view: GooglePickerView) => GooglePickerBuilder;
   setOAuthToken: (token: string) => GooglePickerBuilder;
   setOrigin: (origin: string) => GooglePickerBuilder;
+  setTitle: (title: string) => GooglePickerBuilder;
+  setAppId: (appId: string) => GooglePickerBuilder;
+  setSelectableMimeTypes: (mimeTypes: string) => GooglePickerBuilder;
   setCallback: (cb: (data: PickerResponse) => void) => GooglePickerBuilder;
   build: () => { setVisible: (visible: boolean) => void };
+}
+
+export interface GooglePickerNamespace {
+  ViewId: { FOLDERS: string };
+  DocsView: new (viewId: string) => GooglePickerView;
+  PickerBuilder: new () => GooglePickerBuilder;
+  Action: { PICKED: string; CANCEL: string };
+  Response: { ACTION: string; DOCUMENTS: string };
+  Document: { ID: string; NAME: string };
 }
 
 declare global {
@@ -40,14 +57,7 @@ declare global {
           revoke(token: string, done: () => void): void;
         };
       };
-      picker: {
-        ViewId: { FOLDERS: string };
-        DocsView: new (viewId: string) => GooglePickerView;
-        PickerBuilder: new () => GooglePickerBuilder;
-        Action: { PICKED: string; CANCEL: string };
-        Response: { ACTION: string; DOCUMENTS: string };
-        Document: { ID: string; NAME: string };
-      };
+      picker: GooglePickerNamespace;
     };
     gapi?: {
       load: (api: string, callback: () => void) => void;
@@ -58,6 +68,8 @@ declare global {
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const GAPI_SRC = "https://apis.google.com/js/api.js";
 const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
+export const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -101,6 +113,45 @@ async function requestAccessToken(clientId: string): Promise<string> {
 }
 
 /**
+ * An OAuth client id looks like `<project-number>-<hash>.apps.googleusercontent.com`,
+ * and Picker's `setAppId` wants that leading project number. Google requires it
+ * for `drive.file`: without it the picker can show items but cannot record the
+ * per-file grant that makes the pick reachable by the app afterwards.
+ */
+export function appIdFromClientId(clientId: string): string | null {
+  const projectNumber = clientId.split("-")[0];
+  return /^\d+$/.test(projectNumber) ? projectNumber : null;
+}
+
+/**
+ * The three places a manager's waiver folder can live, each as its own tab.
+ *
+ * All of them are folders-only and folder-selectable: a bare
+ * `DocsView(FOLDERS)` still lists the files inside a folder once you navigate
+ * into one, and the picker will happily hand those back, which is why the
+ * builder also pins `setSelectableMimeTypes`.
+ *
+ * "My Drive" starts at `root` rather than the default flat listing of every
+ * folder in the account, so it browses as a tree the way Drive itself does.
+ * "Shared drives" is the only view that can reach a team/shared drive
+ * (`setEnableDrives`), and "Shared with me" covers a folder someone else owns
+ * and shared directly.
+ */
+export function buildFolderViews(picker: GooglePickerNamespace): GooglePickerView[] {
+  const folderView = () =>
+    new picker.DocsView(picker.ViewId.FOLDERS)
+      .setIncludeFolders(true)
+      .setSelectFolderEnabled(true)
+      .setMimeTypes(FOLDER_MIME_TYPE);
+
+  return [
+    folderView().setParent("root").setLabel("My Drive"),
+    folderView().setEnableDrives(true).setLabel("Shared drives"),
+    folderView().setOwnedByMe(false).setLabel("Shared with me"),
+  ];
+}
+
+/**
  * Opens Google Picker restricted to folder selection. Resolves with the
  * picked folder, or null if the manager closed the picker without choosing one.
  */
@@ -111,10 +162,6 @@ export async function pickDriveFolder(clientId: string): Promise<PickedDriveFold
 
   return new Promise((resolve, reject) => {
     try {
-      const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-        .setSelectFolderEnabled(true)
-        .setIncludeFolders(true);
-
       // The token is scoped to this one picker session and used nowhere else,
       // so once the manager has picked (or cancelled) there's no reason for it
       // to remain valid — revoke it rather than leave it live until Google's
@@ -124,12 +171,22 @@ export async function pickDriveFolder(clientId: string): Promise<PickedDriveFold
         resolve(result);
       };
 
-      const picker = new google.picker.PickerBuilder()
-        .addView(view)
+      const builder = new google.picker.PickerBuilder()
         .setOAuthToken(token)
         // Restricts the picker's postMessage response channel to this page's
         // own origin, per Google's Picker integration guidance.
         .setOrigin(window.location.origin)
+        .setTitle("Choose a folder for signed waivers")
+        // Belt and braces with the per-view mime filter: this is what actually
+        // stops the picker's Select button from accepting a file.
+        .setSelectableMimeTypes(FOLDER_MIME_TYPE);
+
+      const appId = appIdFromClientId(clientId);
+      if (appId) builder.setAppId(appId);
+
+      for (const view of buildFolderViews(google.picker)) builder.addView(view);
+
+      const picker = builder
         .setCallback((data: PickerResponse) => {
           const action = data[google.picker.Response.ACTION];
           if (action === google.picker.Action.PICKED) {
