@@ -7,7 +7,10 @@ describe("YouTubeEmbed", () => {
     render(<YouTubeEmbed videoId="jm75EhP1zMQ" title="UTS Jitsu class in action" />);
     const iframe = screen.getByTitle("UTS Jitsu class in action");
     expect(iframe.tagName).toBe("IFRAME");
-    expect(iframe).toHaveAttribute("src", "https://www.youtube-nocookie.com/embed/jm75EhP1zMQ");
+    expect(iframe).toHaveAttribute(
+      "src",
+      "https://www.youtube-nocookie.com/embed/jm75EhP1zMQ?rel=0",
+    );
     expect(iframe).toHaveAttribute("loading", "lazy");
   });
 });
