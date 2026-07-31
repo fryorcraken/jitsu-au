@@ -107,6 +107,7 @@ export const PUBLIC_PAGES: SitemapPage[] = [
   { path: "/about", changefreq: "monthly", priority: 0.7 },
   { path: "/instructors", changefreq: "monthly", priority: 0.7 },
   { path: "/faq", changefreq: "monthly", priority: 0.7 },
+  { path: "/blog", changefreq: "weekly", priority: 0.7 },
   { path: "/calendar", changefreq: "daily", priority: 0.6 },
   { path: "/contact", changefreq: "yearly", priority: 0.5 },
   // Indexable on purpose. A club that publishes the rules it trains by is worth
