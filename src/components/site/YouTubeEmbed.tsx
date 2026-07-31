@@ -16,7 +16,7 @@ export function YouTubeEmbed({ videoId, title, className }: YouTubeEmbedProps) {
     >
       <iframe
         className="h-full w-full"
-        src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0`}
+        src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&cc_load_policy=0`}
         title={title}
         loading="lazy"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
