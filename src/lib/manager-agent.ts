@@ -37,7 +37,7 @@ export const AGENT_MANIFEST: {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended).",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining.",
       params: [
         {
           name: "status",
@@ -271,6 +271,20 @@ export function projectInvoice(m: MembershipRow, plan?: MembershipPlanRow) {
     paid_at: m.paid_at,
     starts_at: m.starts_at,
     ends_at: m.ends_at,
+    // The plan's session allowance and this invoice's own remaining balance —
+    // set at activation (`activateMembershipRow`) and spent one-per-check-in
+    // (see `checkin.functions.ts`). Deliberately per-invoice, not lifetime:
+    // unlike `sessions_attended` on list_users (which counts all-time classes),
+    // this is scoped to what THIS plan grants, so it answers "how much of this
+    // trial/pack is left".
+    // sessions_allowed is null only when the plan carries no session credits
+    // (e.g. a period plan). sessions_remaining is ALSO null for a still-`pending`
+    // invoice on a session-credit plan (e.g. a paid `casual_session` awaiting
+    // bank transfer) — activation is what populates it, so null there means "not
+    // started yet", not "no allowance". Read status/paid_at alongside it rather
+    // than treating null as zero.
+    sessions_allowed: plan?.session_credits ?? null,
+    sessions_remaining: m.sessions_remaining,
     notes: m.notes,
     created_at: m.created_at,
   };

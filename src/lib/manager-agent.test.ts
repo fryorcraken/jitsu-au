@@ -168,6 +168,45 @@ describe("projectInvoice", () => {
     const p = projectInvoice(membership, undefined);
     expect(p.plan_code).toBeNull();
     expect(p.plan_name).toBeNull();
+    expect(p.sessions_allowed).toBeNull();
+  });
+
+  it("exposes the plan's session allowance and this invoice's own remaining balance", () => {
+    const trialPlan = {
+      id: "plan-2",
+      code: "trial_2_session",
+      name: "Free trial",
+      session_credits: 2,
+    } as MembershipPlanRow;
+    const trialMembership = { ...membership, plan_id: "plan-2", sessions_remaining: 1 };
+    const p = projectInvoice(trialMembership, trialPlan);
+    expect(p.sessions_allowed).toBe(2);
+    expect(p.sessions_remaining).toBe(1);
+  });
+
+  it("is null for a plan with no session credits", () => {
+    const p = projectInvoice(membership, plan);
+    expect(p.sessions_allowed).toBeNull();
+    expect(p.sessions_remaining).toBeNull();
+  });
+
+  it("distinguishes 'no session credits' from 'not yet activated'", () => {
+    // A paid session-credit plan (like casual_session) stays pending — and
+    // sessions_remaining null — until bank-transfer activation sets it, unlike
+    // the free trial which activates immediately. sessions_allowed must still
+    // report the allowance so a caller doesn't read a still-pending invoice as
+    // having no credits at all.
+    const casualPlan = {
+      id: "plan-3",
+      code: "casual_session",
+      name: "Casual class",
+      session_credits: 1,
+    } as MembershipPlanRow;
+    const pendingCasual = { ...membership, plan_id: "plan-3", status: "pending" as const };
+    const p = projectInvoice(pendingCasual, casualPlan);
+    expect(p.sessions_allowed).toBe(1);
+    expect(p.sessions_remaining).toBeNull();
+    expect(p.status).toBe("pending");
   });
 });
 
