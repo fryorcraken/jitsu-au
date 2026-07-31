@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ function EditBlogPostPage() {
   const [post, setPost] = useState<PostRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -39,6 +40,11 @@ function EditBlogPostPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load that post"))
       .finally(() => setLoading(false));
   }, [isManager, id, fetchPost]);
+
+  function goBack() {
+    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+    navigate({ to: "/manager/blog" });
+  }
 
   async function onSave(value: BlogPostEditorValue) {
     setSaving(true);
@@ -55,12 +61,25 @@ function EditBlogPostPage() {
         },
       });
       toast.success(value.status === "published" ? "Post published" : "Draft saved");
-      if (res.slug !== value.slug) {
-        // The slug changed (collision resolved, or the manager cleared the
-        // field to re-derive one) — reflect what was actually saved rather
-        // than leaving the form showing a slug the post isn't at.
-        setPost((prev) => (prev ? { ...prev, slug: res.slug } : prev));
-      }
+      // Reflect exactly what was saved as the new baseline — including the
+      // slug the server actually resolved (a collision, or a re-derivation
+      // when the field was cleared) — so the "unsaved changes" comparison in
+      // BlogPostEditor resets instead of reading as dirty right after a
+      // successful save.
+      setPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              title: value.title,
+              slug: res.slug,
+              excerpt: value.excerpt || null,
+              body_md: value.body_md,
+              cover_image_path: value.cover_image_path || null,
+              cover_image_url: value.cover_image_url,
+              status: value.status,
+            }
+          : prev,
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save that post");
     } finally {
@@ -75,8 +94,8 @@ function EditBlogPostPage() {
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-black">Edit post</h1>
-        <Button asChild variant="outline">
-          <Link to="/manager/blog">Back to posts</Link>
+        <Button variant="outline" onClick={goBack}>
+          Back to posts
         </Button>
       </div>
       <BlogPostEditor
@@ -92,6 +111,7 @@ function EditBlogPostPage() {
         }}
         saving={saving}
         onSave={onSave}
+        onDirtyChange={setDirty}
       />
     </section>
   );

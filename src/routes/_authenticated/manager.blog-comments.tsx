@@ -3,11 +3,22 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Pill } from "@/components/site/StatusPill";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { blogCommentClass } from "@/lib/status-colours";
 import { formatDateTime } from "@/lib/dates";
 import {
   blockCommenter,
+  countRepliesByParent,
   listBlockedCommenters,
   listCommentsForModeration,
   setCommentVisibility,
@@ -38,7 +49,17 @@ function BlogCommentsPage() {
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [blocked, setBlocked] = useState<BlockedRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Two separate id-spaces — a comment id and its author's user id are never
+  // the same value, but keying both actions off one shared `busyId` state
+  // meant blocking an author never disabled anything in the Blocked
+  // commenters panel below, and vice versa.
+  const [busyCommentId, setBusyCommentId] = useState<string | null>(null);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+
+  const [hideTarget, setHideTarget] = useState<CommentRow | null>(null);
+  const [hideReason, setHideReason] = useState("");
+  const [blockTarget, setBlockTarget] = useState<CommentRow | null>(null);
+  const [blockReason, setBlockReason] = useState("");
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -59,22 +80,25 @@ function BlogCommentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isManager]);
 
-  async function onHide(comment: CommentRow) {
-    const reason = window.prompt("Reason for hiding this comment (optional):") ?? "";
-    setBusyId(comment.id);
+  async function confirmHide() {
+    if (!hideTarget) return;
+    setBusyCommentId(hideTarget.id);
     try {
-      await setVisibility({ data: { id: comment.id, status: "hidden", reason } });
+      await setVisibility({
+        data: { id: hideTarget.id, status: "hidden", reason: hideReason.trim() },
+      });
       toast.success("Comment hidden");
+      setHideTarget(null);
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not hide that comment");
     } finally {
-      setBusyId(null);
+      setBusyCommentId(null);
     }
   }
 
   async function onUnhide(comment: CommentRow) {
-    setBusyId(comment.id);
+    setBusyCommentId(comment.id);
     try {
       await setVisibility({ data: { id: comment.id, status: "visible" } });
       toast.success("Comment restored");
@@ -82,32 +106,27 @@ function BlogCommentsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not restore that comment");
     } finally {
-      setBusyId(null);
+      setBusyCommentId(null);
     }
   }
 
-  async function onBlock(comment: CommentRow) {
-    if (
-      !window.confirm(
-        `Block ${comment.author_name} from commenting anywhere on the blog? This is the extreme option — use "Hide" for just this comment.`,
-      )
-    )
-      return;
-    const reason = window.prompt("Reason (optional):") ?? "";
-    setBusyId(comment.id);
+  async function confirmBlock() {
+    if (!blockTarget) return;
+    setBusyUserId(blockTarget.user_id);
     try {
-      await block({ data: { user_id: comment.user_id, reason } });
-      toast.success(`${comment.author_name} is now blocked from commenting`);
+      await block({ data: { user_id: blockTarget.user_id, reason: blockReason.trim() } });
+      toast.success(`${blockTarget.author_name} is now blocked from commenting`);
+      setBlockTarget(null);
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not block that person");
     } finally {
-      setBusyId(null);
+      setBusyUserId(null);
     }
   }
 
   async function onUnblock(row: BlockedRow) {
-    setBusyId(row.user_id);
+    setBusyUserId(row.user_id);
     try {
       await unblock({ data: { user_id: row.user_id } });
       toast.success(`${row.name} can comment again`);
@@ -115,13 +134,15 @@ function BlogCommentsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not unblock that person");
     } finally {
-      setBusyId(null);
+      setBusyUserId(null);
     }
   }
 
   if (loading) return <div className="p-8">Loading...</div>;
 
   const blockedUserIds = new Set(blocked.map((b) => b.user_id));
+  const replyCountByParent = countRepliesByParent(comments);
+  const hideTargetReplyCount = hideTarget ? (replyCountByParent.get(hideTarget.id) ?? 0) : 0;
 
   return (
     <section className="mx-auto max-w-6xl space-y-10 px-4 py-10">
@@ -136,87 +157,117 @@ function BlogCommentsPage() {
         <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[820px] text-sm">
             <thead className="bg-muted/50 text-left">
               <tr>
-                <th className="p-3">Post</th>
-                <th className="p-3">Author</th>
-                <th className="p-3">Comment</th>
-                <th className="p-3">Status</th>
-                <th className="p-3">Posted</th>
-                <th className="p-3" />
+                <th scope="col" className="p-3">
+                  Post
+                </th>
+                <th scope="col" className="p-3">
+                  Author
+                </th>
+                <th scope="col" className="p-3">
+                  Comment
+                </th>
+                <th scope="col" className="p-3">
+                  Status
+                </th>
+                <th scope="col" className="p-3">
+                  Posted
+                </th>
+                <th scope="col" className="p-3">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {comments.map((c) => (
-                <tr key={c.id} className="border-t align-top">
-                  <td className="p-3">
-                    {c.post_slug ? (
-                      <Link
-                        to="/blog/$slug"
-                        params={{ slug: c.post_slug }}
-                        className="hover:underline"
-                      >
-                        {c.post_title}
-                      </Link>
-                    ) : (
-                      c.post_title
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <div>{c.author_name}</div>
-                    {c.author_email && (
-                      <div className="text-xs text-muted-foreground">{c.author_email}</div>
-                    )}
-                    {blockedUserIds.has(c.user_id) && (
-                      <Pill label="blocked" className={blogCommentClass("hidden")} />
-                    )}
-                  </td>
-                  <td className="max-w-sm p-3">
-                    <p className="whitespace-pre-wrap">{c.body}</p>
-                    {c.hidden_reason && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Reason: {c.hidden_reason}
-                      </p>
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <Pill label={c.status} className={blogCommentClass(c.status)} />
-                  </td>
-                  <td className="p-3 text-muted-foreground">{formatDateTime(c.created_at)}</td>
-                  <td className="space-x-1 p-3 text-right">
-                    {c.status === "visible" ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busyId === c.id}
-                        onClick={() => onHide(c)}
-                      >
-                        Hide
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busyId === c.id}
-                        onClick={() => onUnhide(c)}
-                      >
-                        Unhide
-                      </Button>
-                    )}
-                    {!blockedUserIds.has(c.user_id) && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busyId === c.id}
-                        onClick={() => onBlock(c)}
-                      >
-                        Block author
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {comments.map((c) => {
+                const replyCount = replyCountByParent.get(c.id) ?? 0;
+                return (
+                  <tr key={c.id} className="border-t align-top">
+                    <td className="p-3">
+                      {c.post_slug ? (
+                        <Link
+                          to="/blog/$slug"
+                          params={{ slug: c.post_slug }}
+                          className="hover:underline"
+                        >
+                          {c.post_title}
+                        </Link>
+                      ) : (
+                        c.post_title
+                      )}
+                    </td>
+                    <td className="p-3">
+                      {c.parent_comment_id && (
+                        <span className="mr-1 text-xs text-muted-foreground">↳ reply</span>
+                      )}
+                      <div>{c.author_name}</div>
+                      {c.author_email && (
+                        <div className="text-xs text-muted-foreground">{c.author_email}</div>
+                      )}
+                      {blockedUserIds.has(c.user_id) && (
+                        <Pill label="blocked" className={blogCommentClass("hidden")} />
+                      )}
+                    </td>
+                    <td className="max-w-sm p-3">
+                      <p className="whitespace-pre-wrap break-words">{c.body}</p>
+                      {replyCount > 0 && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {replyCount} {replyCount === 1 ? "reply" : "replies"}
+                        </p>
+                      )}
+                      {c.hidden_reason && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Reason: {c.hidden_reason}
+                        </p>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      <Pill label={c.status} className={blogCommentClass(c.status)} />
+                    </td>
+                    <td className="p-3 text-muted-foreground">{formatDateTime(c.created_at)}</td>
+                    <td className="space-x-1 p-3 text-right">
+                      {c.status === "visible" ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busyCommentId === c.id}
+                          onClick={() => {
+                            setHideReason("");
+                            setHideTarget(c);
+                          }}
+                        >
+                          Hide
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busyCommentId === c.id}
+                          onClick={() => onUnhide(c)}
+                        >
+                          Unhide
+                        </Button>
+                      )}
+                      {!blockedUserIds.has(c.user_id) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          disabled={busyUserId === c.user_id}
+                          onClick={() => {
+                            setBlockReason("");
+                            setBlockTarget(c);
+                          }}
+                        >
+                          Block author
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -231,14 +282,24 @@ function BlogCommentsPage() {
           <p className="mt-3 text-sm text-muted-foreground">Nobody is blocked.</p>
         ) : (
           <div className="mt-3 overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-muted/50 text-left">
                 <tr>
-                  <th className="p-3">Name</th>
-                  <th className="p-3">Email</th>
-                  <th className="p-3">Reason</th>
-                  <th className="p-3">Blocked</th>
-                  <th className="p-3" />
+                  <th scope="col" className="p-3">
+                    Name
+                  </th>
+                  <th scope="col" className="p-3">
+                    Email
+                  </th>
+                  <th scope="col" className="p-3">
+                    Reason
+                  </th>
+                  <th scope="col" className="p-3">
+                    Blocked
+                  </th>
+                  <th scope="col" className="p-3">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -252,7 +313,7 @@ function BlogCommentsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={busyId === row.user_id}
+                        disabled={busyUserId === row.user_id}
                         onClick={() => onUnblock(row)}
                       >
                         Unblock
@@ -265,6 +326,88 @@ function BlogCommentsPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={Boolean(hideTarget)} onOpenChange={(open) => !open && setHideTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Hide this comment?</DialogTitle>
+            <DialogDescription>
+              It stops showing on the public post immediately. You can unhide it later.
+            </DialogDescription>
+          </DialogHeader>
+          {hideTarget && (
+            <div className="space-y-3">
+              <p className="rounded-md border bg-muted/40 p-3 text-sm">{hideTarget.body}</p>
+              {hideTargetReplyCount > 0 && (
+                <p className="text-sm text-amber-600 dark:text-amber-500">
+                  This comment has {hideTargetReplyCount}{" "}
+                  {hideTargetReplyCount === 1 ? "reply" : "replies"}. Hiding it also removes{" "}
+                  {hideTargetReplyCount === 1 ? "that reply" : "those replies"} from the post — they
+                  stay marked visible, they just have nowhere left to show.
+                </p>
+              )}
+              <div>
+                <Label htmlFor="hide-reason">Reason (optional, for your own records)</Label>
+                <Textarea
+                  id="hide-reason"
+                  autoFocus
+                  value={hideReason}
+                  onChange={(e) => setHideReason(e.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  className="mt-1.5"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setHideTarget(null)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={busyCommentId === hideTarget?.id} onClick={confirmHide}>
+              {busyCommentId === hideTarget?.id ? "Hiding..." : "Hide comment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(blockTarget)} onOpenChange={(open) => !open && setBlockTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Block {blockTarget?.author_name} from commenting?</DialogTitle>
+            <DialogDescription>
+              This is the extreme option — it stops them commenting anywhere on the blog from now
+              on. It does not hide comments they've already posted (use "Hide" on this row for just
+              this one).
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="block-reason">Reason (optional, for your own records)</Label>
+            <Textarea
+              id="block-reason"
+              autoFocus
+              value={blockReason}
+              onChange={(e) => setBlockReason(e.target.value)}
+              maxLength={500}
+              rows={3}
+              className="mt-1.5"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setBlockTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={busyUserId === blockTarget?.user_id}
+              onClick={confirmBlock}
+            >
+              {busyUserId === blockTarget?.user_id ? "Blocking..." : "Block"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

@@ -3,11 +3,15 @@
 // request context (the `createServerFn` handlers die on "No Start context
 // found in AsyncLocalStorage" when called from the runner — see
 // waiver.functions.test.ts). Both take their admin client as a parameter for
-// exactly that reason.
+// exactly that reason. `countRepliesByParent` is plain, no client needed.
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { insertBlogComment, toggleCommentUpvoteRow } from "./blog-comments.functions";
+import {
+  countRepliesByParent,
+  insertBlogComment,
+  toggleCommentUpvoteRow,
+} from "./blog-comments.functions";
 
 type MaybeSingle<T> = { data: T | null; error: { message: string } | null };
 
@@ -200,5 +204,32 @@ describe("toggleCommentUpvoteRow", () => {
       { upvoted: false, count: 0 },
     );
     expect(calls).toEqual(["delete"]);
+  });
+});
+
+describe("countRepliesByParent", () => {
+  it("returns an empty map when there are no comments", () => {
+    expect(countRepliesByParent([])).toEqual(new Map());
+  });
+
+  it("ignores top-level comments (null parent_comment_id)", () => {
+    const counts = countRepliesByParent([
+      { id: "a", parent_comment_id: null },
+      { id: "b", parent_comment_id: null },
+    ]);
+    expect(counts.size).toBe(0);
+  });
+
+  it("counts replies per parent", () => {
+    const counts = countRepliesByParent([
+      { id: "top", parent_comment_id: null },
+      { id: "r1", parent_comment_id: "top" },
+      { id: "r2", parent_comment_id: "top" },
+      { id: "other-top", parent_comment_id: null },
+      { id: "r3", parent_comment_id: "other-top" },
+    ]);
+    expect(counts.get("top")).toBe(2);
+    expect(counts.get("other-top")).toBe(1);
+    expect(counts.has("r1")).toBe(false);
   });
 });

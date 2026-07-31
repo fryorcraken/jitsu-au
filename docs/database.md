@@ -573,19 +573,19 @@ RSVPs — and upvote a comment once (no downvote). Product spec:
 
 ### `blog_posts`
 
-| Column             | Type          | Null | Notes                                                                    |
-| ------------------ | ------------- | ---- | ------------------------------------------------------------------------ |
-| `id`               | `uuid` PK     | no   | Default `gen_random_uuid()`.                                             |
-| `slug`             | `text`        | no   | `UNIQUE`. Lowercase/hyphenated, 1–200 chars.                             |
-| `title`            | `text`        | no   | 1–200 chars.                                                             |
-| `excerpt`          | `text`        | yes  | ≤ 500 chars. Shown on the list page.                                     |
-| `body_md`          | `text`        | no   | 1–50,000 chars. Markdown; a `[[video:<url>]]` line embeds a video.       |
-| `cover_image_path` | `text`        | yes  | Object path in the `blog-media` Storage bucket.                          |
-| `status`           | `text`        | no   | `draft\|published`. Default `draft`.                                     |
-| `author_id`        | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The writing manager.     |
-| `published_at`     | `timestamptz` | yes  | Set when `status` moves to `published`; cleared if unpublished.          |
-| `created_at`       | `timestamptz` | no   | Default `now()`.                                                         |
-| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side (no update triggers exist in this schema). |
+| Column             | Type          | Null | Notes                                                                                                   |
+| ------------------ | ------------- | ---- | ------------------------------------------------------------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                            |
+| `slug`             | `text`        | no   | `UNIQUE`. Lowercase/hyphenated, 1–200 chars.                                                            |
+| `title`            | `text`        | no   | 1–200 chars.                                                                                            |
+| `excerpt`          | `text`        | yes  | ≤ 500 chars. Shown on the list page.                                                                    |
+| `body_md`          | `text`        | no   | 1–50,000 chars. Markdown; a `[[video:<url>]]` line embeds a video.                                      |
+| `cover_image_path` | `text`        | yes  | Object path in the `blog-media` Storage bucket.                                                         |
+| `status`           | `text`        | no   | `draft\|published`. Default `draft`.                                                                    |
+| `author_id`        | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The writing manager.                                    |
+| `published_at`     | `timestamptz` | yes  | Set the first time `status` moves to `published`; never changed again — including on a later unpublish. |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                                                                        |
+| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side (no update triggers exist in this schema).                                |
 
 Index on `(published_at DESC) WHERE status = 'published'` for the public list.
 

@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -20,10 +20,16 @@ function NewBlogPostPage() {
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const create = useServerFn(createBlogPost);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
+
+  function goBack() {
+    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+    navigate({ to: "/manager/blog" });
+  }
 
   async function onSave(value: BlogPostEditorValue) {
     setSaving(true);
@@ -51,8 +57,8 @@ function NewBlogPostPage() {
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-black">New post</h1>
-        <Button asChild variant="outline">
-          <Link to="/manager/blog">Back to posts</Link>
+        <Button variant="outline" onClick={goBack}>
+          Back to posts
         </Button>
       </div>
       <BlogPostEditor
@@ -67,6 +73,7 @@ function NewBlogPostPage() {
         }}
         saving={saving}
         onSave={onSave}
+        onDirtyChange={setDirty}
       />
     </section>
   );

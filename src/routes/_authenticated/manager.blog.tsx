@@ -4,6 +4,16 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { blogPostClass } from "@/lib/status-colours";
 import { formatDateTime } from "@/lib/dates";
 import { deleteBlogPost, listAllBlogPosts } from "@/lib/blog.functions";
@@ -28,6 +38,7 @@ function BlogPostsPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Row | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -42,7 +53,6 @@ function BlogPostsPage() {
   }, [isManager, fetchList]);
 
   async function onDelete(row: Row) {
-    if (!window.confirm(`Delete "${row.title}"? This also deletes its comments.`)) return;
     setDeletingId(row.id);
     try {
       await remove({ data: { id: row.id } });
@@ -52,6 +62,7 @@ function BlogPostsPage() {
       toast.error(e instanceof Error ? e.message : "Could not delete that post");
     } finally {
       setDeletingId(null);
+      setPendingDelete(null);
     }
   }
 
@@ -75,14 +86,24 @@ function BlogPostsPage() {
         <p className="text-sm text-muted-foreground">No posts yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-muted/50 text-left">
               <tr>
-                <th className="p-3">Title</th>
-                <th className="p-3">Status</th>
-                <th className="p-3">Published</th>
-                <th className="p-3">Updated</th>
-                <th className="p-3" />
+                <th scope="col" className="p-3">
+                  Title
+                </th>
+                <th scope="col" className="p-3">
+                  Status
+                </th>
+                <th scope="col" className="p-3">
+                  Published
+                </th>
+                <th scope="col" className="p-3">
+                  Updated
+                </th>
+                <th scope="col" className="p-3">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -104,12 +125,20 @@ function BlogPostsPage() {
                     {row.published_at ? formatDateTime(row.published_at) : "—"}
                   </td>
                   <td className="p-3 text-muted-foreground">{formatDateTime(row.updated_at)}</td>
-                  <td className="p-3 text-right">
+                  <td className="space-x-1 p-3 text-right">
+                    {row.status === "published" && (
+                      <Button asChild variant="ghost" size="sm">
+                        <Link to="/blog/$slug" params={{ slug: row.slug }} target="_blank">
+                          View
+                        </Link>
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                       disabled={deletingId === row.id}
-                      onClick={() => onDelete(row)}
+                      onClick={() => setPendingDelete(row)}
                     >
                       {deletingId === row.id ? "Deleting..." : "Delete"}
                     </Button>
@@ -120,6 +149,29 @@ function BlogPostsPage() {
           </table>
         </div>
       )}
+
+      <AlertDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{pendingDelete?.title}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This also deletes every comment on this post. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => pendingDelete && onDelete(pendingDelete)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

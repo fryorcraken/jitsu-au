@@ -96,14 +96,20 @@ convention as every other public form.
 composer (`/manager/blog/new`), an existing one opens for editing
 (`/manager/blog/:id`). The composer is a Markdown textarea with a small
 formatting toolbar (bold/italic/heading/list/link), an "Insert image" button
-(uploads to `blog-media`, inserts a Markdown image), an "Insert video" button
-(prompts for a link, inserts a `[[video:...]]` line), a separate cover-image
-uploader, a status picker (draft/published), and a live preview rendered the
-same way the public page renders it. Saving with no slug set derives one from
-the title (`slugify` in `src/lib/slug.ts`) and resolves a collision by
-appending `-2`, `-3`, and so on. `published_at` is stamped the first time a
-post goes live and cleared if it's taken back to draft, so re-publishing later
-doesn't re-date it.
+(uploads to `blog-media`, inserts a Markdown image), an "Insert video" dialog
+(YouTube links embed inline; anything else shows as a plain link), a separate
+cover-image uploader, a status picker (draft/published) that warns before
+saving a currently-published post back to draft, and a live preview rendered
+the same styled way the public page renders it. Saving with no slug set
+derives one from the title (`slugify` in `src/lib/slug.ts`, normalized
+on blur too) and resolves a collision by appending `-2`, `-3`, and so on.
+`published_at` is stamped the first time a post goes live and **never changes
+again** — not on a later edit, and not on an unpublish/republish round trip —
+so a post's publish date and its position in the public list (sorted by
+`published_at`) both stay stable regardless of how many times it's drafted
+and republished. The editor warns before an unpublish and guards against
+losing unsaved work (a confirm on leaving, and a browser close/refresh
+warning) the same way the waiver template editor does.
 
 ### A manager moderates
 

@@ -7,6 +7,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   blogPostSchema,
   blogPostSlugSchema,
+  type BlogPostStatus,
   deleteBlogPostSchema,
   getBlogPostForEditSchema,
   listBlogPostsSchema,
@@ -85,6 +86,23 @@ export async function resolvePostSlug(
 function coverImageUrl(supabase: SupabaseClient<Database>, path: string | null): string | null {
   if (!path) return null;
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+/**
+ * Resolve the `published_at` to save on an update: set the first time a post
+ * goes live, then kept forever — including when the post is taken back to
+ * draft. Clearing it on unpublish would re-date the post to "now" the next
+ * time it's republished, silently reordering it to the top of the public list
+ * and losing the original publish date. `status` alone already governs public
+ * visibility, so `published_at` is free to just mean "first went live",
+ * permanently. Exported for its test — plain, no server context needed.
+ */
+export function resolvePublishedAt(
+  existingPublishedAt: string | null,
+  newStatus: BlogPostStatus,
+  now: string,
+): string | null {
+  return existingPublishedAt ?? (newStatus === "published" ? now : null);
 }
 
 // ---- Public: published posts ----
@@ -211,11 +229,11 @@ export const updateBlogPost = createServerFn({ method: "POST" })
     if (existingErr) throw new Error(existingErr.message);
     if (!existing) throw new Error("That post no longer exists.");
     const slug = await resolvePostSlug(supabaseAdmin, data.title, data.slug, data.id);
-    // published_at is set the first time a post goes live, and cleared when it
-    // is taken back to draft — never rewritten on a later edit while it stays
-    // published, so the public list keeps sorting by when it first went live.
-    const publishedAt =
-      data.status === "published" ? (existing.published_at ?? new Date().toISOString()) : null;
+    const publishedAt = resolvePublishedAt(
+      existing.published_at,
+      data.status,
+      new Date().toISOString(),
+    );
     const { error } = await supabaseAdmin
       .from("blog_posts")
       .update({

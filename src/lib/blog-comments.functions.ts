@@ -39,6 +39,23 @@ async function requireManager(context: {
 // found in AsyncLocalStorage" when called from the test runner, so the rules
 // worth pinning live in plain functions that take their client as a parameter.
 
+/**
+ * Count replies per parent comment id, for surfacing "hiding this also
+ * removes N replies" warnings in the moderation UI (nesting is one level, so
+ * every reply's `parent_comment_id` is a top-level comment's id).
+ */
+export function countRepliesByParent(
+  comments: { id: string; parent_comment_id: string | null }[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const c of comments) {
+    if (c.parent_comment_id) {
+      counts.set(c.parent_comment_id, (counts.get(c.parent_comment_id) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
 export type InsertBlogCommentInput = {
   postId: string;
   userId: string;
