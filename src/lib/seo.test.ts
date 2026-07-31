@@ -451,11 +451,24 @@ describe("sitemap coverage of the route files", () => {
   });
 
   it("lists every indexable route and no noindex one", () => {
+    // Dynamic-segment routes ($slug etc.) have a real URL per row of data —
+    // not one enumerable from source text, so PUBLIC_PAGES can't hold a single
+    // literal entry for them. They're excluded here and covered instead by the
+    // "blog post pages" test below, which enforces what IS checkable: the
+    // route sets a canonical and isn't accidentally noindex.
     const expected = canonicalRoutes
-      .filter((r) => !r.noindex)
+      .filter((r) => !r.noindex && !r.path.includes("$"))
       .map((r) => r.path)
       .sort();
     expect(PUBLIC_PAGES.map((p) => p.path).sort()).toEqual(expected);
+  });
+
+  it("still requires a dynamic-segment public page to declare a canonical and stay indexable", () => {
+    const dynamic = canonicalRoutes.filter((r) => r.path.includes("$"));
+    // Guards against the scan itself silently finding nothing: today this is
+    // exactly /blog/$slug, the site's first dynamic public content route.
+    expect(dynamic.length).toBeGreaterThan(0);
+    for (const r of dynamic) expect(r.noindex).toBe(false);
   });
 
   it("matches each page's own canonical link", () => {

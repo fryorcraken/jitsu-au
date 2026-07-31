@@ -15,6 +15,8 @@
 // wears these classes is `@/components/site/StatusPill`.
 import type { VerificationLabel } from "./email-verification";
 import type {
+  BlogCommentStatus,
+  BlogPostStatus,
   CoverageSource,
   LifecycleStatus,
   MembershipStatus,
@@ -69,6 +71,19 @@ const COVERAGE: Record<CoverageSource, string> = {
   none: "bg-red-100 text-red-800",
 };
 
+// A blog post's authoring state, and a comment's moderation state. Separate
+// vocabularies (a draft is neutral, not a fault; a hidden comment is the one
+// that should read as acted-on, in red).
+const BLOG_POST: Record<BlogPostStatus, string> = {
+  draft: NEUTRAL_STATUS_CLASS,
+  published: "bg-green-100 text-green-800",
+};
+
+const BLOG_COMMENT: Record<BlogCommentStatus, string> = {
+  visible: "bg-green-100 text-green-800",
+  hidden: "bg-red-100 text-red-800",
+};
+
 /** A role assignment (`member`, `manager`). One colour covers every role. */
 export const ROLE_CLASS = "bg-indigo-100 text-indigo-800";
 
@@ -95,4 +110,14 @@ export function waiverClass(status: string): string {
 /** Colour for what covers a check-in (`trial` / `session` / `period` / `none`). */
 export function coverageClass(source: string): string {
   return COVERAGE[source as CoverageSource] ?? NEUTRAL_STATUS_CLASS;
+}
+
+/** Colour for a blog post's authoring state (`draft` / `published`). */
+export function blogPostClass(status: string): string {
+  return BLOG_POST[status as BlogPostStatus] ?? NEUTRAL_STATUS_CLASS;
+}
+
+/** Colour for a blog comment's moderation state (`visible` / `hidden`). */
+export function blogCommentClass(status: string): string {
+  return BLOG_COMMENT[status as BlogCommentStatus] ?? NEUTRAL_STATUS_CLASS;
 }

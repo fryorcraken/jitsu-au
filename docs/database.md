@@ -62,6 +62,9 @@ function on the service-role client, which bypasses both grants and RLS.
 | `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
 | `event_rsvps`            | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                  |
 | `calendar_feed_tokens`   | `authenticated` | `SELECT`  | a person reads their own feed-token row                                         |
+| `blog_posts`             | `anon`+`auth`   | `SELECT`  | `listPublishedBlogPosts`/`getBlogPostBySlug` — the public blog                  |
+| `blog_comments`          | `anon`+`auth`   | `SELECT`  | `listComments` — visible comments on a published post                           |
+| `blog_comment_upvotes`   | `authenticated` | `SELECT`  | a person reads their own upvotes, to show a comment as already upvoted          |
 
 Every other table grants the client roles **nothing**.
 
@@ -150,27 +153,28 @@ first waiver submission; filled in by manager approval. The funnel phase (lead
 / applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
 never stored.
 
-| Column                           | Type          | Null | Notes                                                                                                             |
-| -------------------------------- | ------------- | ---- | ----------------------------------------------------------------------------------------------------------------- |
-| `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                       |
-| `first_name`                     | `text`        | yes  |                                                                                                                   |
-| `middle_name`                    | `text`        | yes  |                                                                                                                   |
-| `last_name`                      | `text`        | yes  |                                                                                                                   |
-| `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`). |
-| `date_of_birth`                  | `date`        | yes  |                                                                                                                   |
-| `address`                        | `text`        | yes  |                                                                                                                   |
-| `phone`                          | `text`        | yes  |                                                                                                                   |
-| `uts_student_number`             | `text`        | yes  | Drives the student pricing rate.                                                                                  |
-| `emergency_contact_name`         | `text`        | yes  |                                                                                                                   |
-| `emergency_contact_relationship` | `text`        | yes  | How that contact is related. For a minor this person IS the guardian who signs.                                   |
-| `emergency_contact_phone`        | `text`        | yes  |                                                                                                                   |
-| `medical_notes`                  | `text`        | yes  | Details of anything declared on the health questions.                                                             |
-| `is_minor`                       | `boolean`     | no   | Default `false`.                                                                                                  |
-| `guardian_name`                  | `text`        | yes  |                                                                                                                   |
-| `guardian_relationship`          | `text`        | yes  |                                                                                                                   |
-| `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                  |
-| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                  |
-| `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                  |
+| Column                           | Type          | Null | Notes                                                                                                                                 |
+| -------------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                           |
+| `first_name`                     | `text`        | yes  |                                                                                                                                       |
+| `middle_name`                    | `text`        | yes  |                                                                                                                                       |
+| `last_name`                      | `text`        | yes  |                                                                                                                                       |
+| `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`).                     |
+| `display_name`                   | `text`        | yes  | 1–60 chars. What they've chosen to show on blog comments. NULL = derived (`commentDisplayName`): first/preferred name + last initial. |
+| `date_of_birth`                  | `date`        | yes  |                                                                                                                                       |
+| `address`                        | `text`        | yes  |                                                                                                                                       |
+| `phone`                          | `text`        | yes  |                                                                                                                                       |
+| `uts_student_number`             | `text`        | yes  | Drives the student pricing rate.                                                                                                      |
+| `emergency_contact_name`         | `text`        | yes  |                                                                                                                                       |
+| `emergency_contact_relationship` | `text`        | yes  | How that contact is related. For a minor this person IS the guardian who signs.                                                       |
+| `emergency_contact_phone`        | `text`        | yes  |                                                                                                                                       |
+| `medical_notes`                  | `text`        | yes  | Details of anything declared on the health questions.                                                                                 |
+| `is_minor`                       | `boolean`     | no   | Default `false`.                                                                                                                      |
+| `guardian_name`                  | `text`        | yes  |                                                                                                                                       |
+| `guardian_relationship`          | `text`        | yes  |                                                                                                                                       |
+| `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                      |
+| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                      |
+| `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                      |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
@@ -556,6 +560,121 @@ are defence in depth, already correct on the day someone adds a grant.
 the balance that was read. When it reaches zero the membership's status becomes
 `expired` and `closed_membership` records that this check-in did it, so undo
 reverses exactly what happened rather than guessing.
+
+---
+
+## Blog
+
+The public blog: posts written by managers only (finer-grained authoring
+permissions are a later step), read by anyone. Any signed-in person may
+comment or reply — membership status irrelevant, the same rule as calendar
+RSVPs — and upvote a comment once (no downvote). Product spec:
+**`docs/blog.md`**.
+
+### `blog_posts`
+
+| Column             | Type          | Null | Notes                                                                                                   |
+| ------------------ | ------------- | ---- | ------------------------------------------------------------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                            |
+| `slug`             | `text`        | no   | `UNIQUE`. Lowercase/hyphenated, 1–200 chars.                                                            |
+| `title`            | `text`        | no   | 1–200 chars.                                                                                            |
+| `excerpt`          | `text`        | yes  | ≤ 500 chars. Shown on the list page.                                                                    |
+| `body_md`          | `text`        | no   | 1–50,000 chars. Markdown; a `[[video:<url>]]` line embeds a video.                                      |
+| `cover_image_path` | `text`        | yes  | Object path in the `blog-media` Storage bucket.                                                         |
+| `status`           | `text`        | no   | `draft\|published`. Default `draft`.                                                                    |
+| `author_id`        | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The writing manager.                                    |
+| `published_at`     | `timestamptz` | yes  | Set the first time `status` moves to `published`; never changed again — including on a later unpublish. |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                                                                        |
+| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side (no update triggers exist in this schema).                                |
+
+Index on `(published_at DESC) WHERE status = 'published'` for the public list.
+
+**RLS:** anyone reads published posts; managers read all. Writes run through
+manager-only server functions on the service role (slug collisions, cover-image
+cleanup on delete); the manager write policies are defence in depth, same idiom
+as `event_rsvps`.
+
+### `blog_comments`
+
+| Column              | Type          | Null | Notes                                                               |
+| ------------------- | ------------- | ---- | ------------------------------------------------------------------- |
+| `id`                | `uuid` PK     | no   | Default `gen_random_uuid()`.                                        |
+| `post_id`           | `uuid`        | no   | `REFERENCES blog_posts(id) ON DELETE CASCADE`.                      |
+| `user_id`           | `uuid`        | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The commenter.       |
+| `parent_comment_id` | `uuid`        | yes  | `REFERENCES blog_comments(id) ON DELETE CASCADE`. NULL = top-level. |
+| `body`              | `text`        | no   | 1–2000 chars. Plain text, no Markdown.                              |
+| `status`            | `text`        | no   | `visible\|hidden`. Default `visible`.                               |
+| `hidden_by`         | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Moderating manager. |
+| `hidden_at`         | `timestamptz` | yes  |                                                                     |
+| `hidden_reason`     | `text`        | yes  |                                                                     |
+| `created_at`        | `timestamptz` | no   | Default `now()`.                                                    |
+| `updated_at`        | `timestamptz` | no   | Default `now()`; set app-side.                                      |
+
+Indexes on `(post_id, created_at)` and `(parent_comment_id)`.
+
+**Reply nesting is one level.** A reply's own `parent_comment_id` must be
+`NULL` — not something a `CHECK` constraint can express (it needs to read
+another row), so it's enforced by the server function that inserts a reply,
+the same way RSVP's "not to a cancelled event" rule is app-enforced rather
+than a constraint.
+
+**RLS:** anyone reads `visible` comments on a `published` post; a comment's
+author can always read their own (even hidden, so moderation isn't silent to
+them); managers read everything. Writes run through server functions
+(`postComment` checks the blocked list, that a reply's parent is top-level,
+and the honeypot; `setCommentVisibility` is manager-only) — no client write
+grant. The insert policy still checks `NOT public.is_commenter_blocked(auth.uid())`
+as defence in depth.
+
+### `blog_comment_upvotes`
+
+`(comment_id, user_id)` composite PK — one upvote per person per comment, no
+downvote, toggled by insert/delete. `comment_id → blog_comments(id) ON DELETE
+CASCADE`, `user_id → auth.users(id) ON DELETE CASCADE`, `created_at`.
+
+**RLS:** a person reads/inserts/deletes only their own row. Totals shown on a
+comment come from an aggregate query in the service-role comment-listing
+function, not from reading other people's rows, so there's no public grant on
+this table.
+
+### `blog_blocked_commenters`
+
+`user_id → auth.users(id) ON DELETE CASCADE` PK, `blocked_by → auth.users(id)
+ON DELETE SET NULL`, `blocked_at`, `reason`. Existence of a row = blocked from
+commenting anywhere on the blog — the extreme moderation action, separate from
+hiding a single comment. **RLS:** manager-only; no client grants, so blocking
+and unblocking (and the block check itself, via the `SECURITY DEFINER`
+`is_commenter_blocked()` helper below) all run through the service role or a
+function with a fixed search path.
+
+**`is_commenter_blocked(_user_id uuid) → boolean`** — `SECURITY DEFINER` SQL
+helper (`SET search_path = ''`), same shape as `has_role`/
+`has_active_paid_membership`: lets the comment-insert RLS policy check block
+status without granting `authenticated` a `SELECT` on
+`blog_blocked_commenters` — an ordinary commenter has no business reading who
+else is blocked. EXECUTE revoked from `PUBLIC`/`anon`, granted to
+`authenticated` (evaluated inside RLS as the querying role) + `service_role`.
+
+### Storage: `blog-media`
+
+A **public** bucket (unlike the private `waivers` bucket) for post images —
+cover photos and inline photos. Videos are never uploaded; a post embeds one by
+pasting a YouTube/Vimeo link. Object names are `<post id>/<filename>` (or
+`drafts/<filename>` for an image uploaded before a new post has an id).
+Migration `20260731120000_blog_storage.sql` owns the bucket's access model.
+
+| Operation                  | Who                                                                          |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| `SELECT`                   | no policy at all — the bucket itself is public, so reads bypass RLS entirely |
+| `INSERT`/`UPDATE`/`DELETE` | managers only                                                                |
+
+There is deliberately **no** `SELECT` policy: the bucket is public, so Storage
+already serves any object's bytes by URL with no RLS involved, and a broad
+"anyone can SELECT" policy would additionally let a client **list** the
+bucket's contents via the API — exactly the `public_bucket_allows_listing`
+advisor finding — which nothing in the app needs. The app always uploads
+through the service role (`uploadBlogImage`), so the manager write policies
+are defence in depth, same reasoning as the waiver PDF policies.
 
 ---
 

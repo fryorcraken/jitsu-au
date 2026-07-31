@@ -47,3 +47,14 @@ authenticated_security_definer_function_executable_public_event_is_invite_only
 # role, so `authenticated` must keep EXECUTE (anon is revoked). SECURITY DEFINER
 # so the check does not depend on the caller's own RLS over event_rsvps.
 authenticated_security_definer_function_executable_public_is_event_invitee
+
+# public.is_commenter_blocked(_user_id) is the blog comment-insert RLS policy's
+# "has a manager blocked this person" check (defence in depth — the app itself
+# also checks this in postComment before inserting). It is evaluated as the
+# querying role inside that policy, so `authenticated` must keep EXECUTE (anon
+# and PUBLIC are revoked in migration 20260731110000). SECURITY DEFINER so the
+# check does not depend on the caller's own RLS over blog_blocked_commenters,
+# which an ordinary commenter has no grant to read directly. It returns a single
+# boolean about the caller's own block status, so it leaks nothing. Revoking
+# EXECUTE would break the RLS policy's WITH CHECK for every commenter.
+authenticated_security_definer_function_executable_public_is_commenter_blocked
