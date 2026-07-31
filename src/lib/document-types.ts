@@ -8,7 +8,7 @@
 // > lacks hides schema drift from the compiler (see "Schema drift" in CLAUDE.md).
 // >
 // > They are here because the three tables do not exist live yet —
-// > `20260731120000_documents.sql` is committed but unapplied, and committing a
+// > `20260731140000_documents.sql` is committed but unapplied, and committing a
 // > migration does not apply it — so there is nothing for the generator to emit
 // > and no honest alternative until it is.
 // >

@@ -796,7 +796,7 @@ service role only.
 
 Versioned markdown pages members read and annotate, served at `/docs/<slug>`.
 The product spec is **`docs/documents.md`**. Added by
-`20260731120000_documents.sql`.
+`20260731140000_documents.sql`.
 
 ### `documents` — a document's identity
 

@@ -152,5 +152,5 @@ be indexable and missing from the sitemap.
 
 `src/lib/document-types.ts` holds **provisional hand-written row types**, which
 must be replaced with aliases into the generated
-`src/integrations/supabase/types.ts` once `20260731120000_documents.sql` has been
+`src/integrations/supabase/types.ts` once `20260731140000_documents.sql` has been
 applied and the types regenerated. That file says so at the top.
