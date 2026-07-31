@@ -37,6 +37,9 @@ function fakePicker(): { picker: GooglePickerNamespace; views: Recorded[] } {
     setMimeTypes(v: string) {
       return this.set("mimeTypes", v);
     }
+    setMode(v: string) {
+      return this.set("mode", v);
+    }
     setParent(v: string) {
       return this.set("parent", v);
     }
@@ -55,6 +58,7 @@ function fakePicker(): { picker: GooglePickerNamespace; views: Recorded[] } {
     views,
     picker: {
       ViewId: { FOLDERS: "folders" },
+      DocsViewMode: { LIST: "list", GRID: "grid" },
       DocsView: FakeDocsView,
       PickerBuilder: class {} as unknown as GooglePickerNamespace["PickerBuilder"],
       Action: { PICKED: "picked", CANCEL: "cancel" },
@@ -82,6 +86,9 @@ describe("buildFolderViews", () => {
       expect(view.mimeTypes).toBe(FOLDER_MIME_TYPE);
       expect(view.selectFolderEnabled).toBe(true);
       expect(view.includeFolders).toBe(true);
+      // `drive.file` grants no thumbnail access, so the default grid would be
+      // rows of blanks.
+      expect(view.mode).toBe("list");
     }
   });
 

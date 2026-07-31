@@ -18,6 +18,7 @@ export interface GooglePickerView {
   setSelectFolderEnabled: (enabled: boolean) => GooglePickerView;
   setIncludeFolders: (include: boolean) => GooglePickerView;
   setMimeTypes: (mimeTypes: string) => GooglePickerView;
+  setMode: (mode: string) => GooglePickerView;
   setParent: (parentId: string) => GooglePickerView;
   setEnableDrives: (enabled: boolean) => GooglePickerView;
   setOwnedByMe: (ownedByMe: boolean) => GooglePickerView;
@@ -37,6 +38,7 @@ interface GooglePickerBuilder {
 
 export interface GooglePickerNamespace {
   ViewId: { FOLDERS: string };
+  DocsViewMode: { LIST: string; GRID: string };
   DocsView: new (viewId: string) => GooglePickerView;
   PickerBuilder: new () => GooglePickerBuilder;
   Action: { PICKED: string; CANCEL: string };
@@ -135,15 +137,24 @@ export function appIdFromClientId(clientId: string): string | null {
  * folder in the account, so it browses as a tree the way Drive itself does.
  * "Shared drives" is the only view that can reach a team/shared drive
  * (`setEnableDrives`), and "Shared with me" covers a folder someone else owns
- * and shared directly.
+ * and shared directly. Google documents `setEnableDrives` as incompatible with
+ * both `setParent` and `setOwnedByMe`, which is why these are three separate
+ * views rather than one combined one.
+ *
+ * List mode, not the default thumbnail grid: under `drive.file` the app has no
+ * access to thumbnails, so the grid renders as rows of blanks.
  */
 export function buildFolderViews(picker: GooglePickerNamespace): GooglePickerView[] {
   const folderView = () =>
     new picker.DocsView(picker.ViewId.FOLDERS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(true)
-      .setMimeTypes(FOLDER_MIME_TYPE);
+      .setMimeTypes(FOLDER_MIME_TYPE)
+      .setMode(picker.DocsViewMode.LIST);
 
+  // `setLabel` is marked deprecated in Google's own typings but is still what
+  // names the tabs; if a future picker drops it, the fallback is the picker's
+  // own per-view default names, not a broken dialog.
   return [
     folderView().setParent("root").setLabel("My Drive"),
     folderView().setEnableDrives(true).setLabel("Shared drives"),
