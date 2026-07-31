@@ -30,13 +30,13 @@ BEGIN
   END LOOP;
 END $$;
 
--- Reads: the bucket is public, so anyone can already fetch an object's bytes
--- directly by URL regardless of this policy — this just allows the same read
--- through the authenticated API/RLS path too, for consistency.
-DROP POLICY IF EXISTS "Anyone can read blog media" ON storage.objects;
-CREATE POLICY "Anyone can read blog media" ON storage.objects
-  FOR SELECT USING (bucket_id = 'blog-media');
-
+-- Reads: no SELECT policy at all, on purpose. The bucket is public, so
+-- Storage already serves any object's bytes by URL with no RLS involved.
+-- A broad "anyone can SELECT" policy would additionally let a client LIST the
+-- bucket's contents via the REST/API path — enumerating every filed image —
+-- which is exactly the `public_bucket_allows_listing` advisor finding warns
+-- about, and nothing in the app needs directory listing.
+--
 -- Writes: managers only. The app always uploads through the service role
 -- (uploadBlogImage), so these are defence in depth, same reasoning as the
 -- waiver PDF write policies.

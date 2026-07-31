@@ -41,7 +41,7 @@ severities of moderation, not the same action.
 6. **Hiding a comment and blocking a person are different actions.** Hiding
    removes one comment from public view (the author can still see their own
    hidden comment, so moderation isn't silent to them). Blocking stops a
-   person from posting *any future* comment anywhere on the blog — it does
+   person from posting _any future_ comment anywhere on the blog — it does
    nothing to comments they already posted, which stay exactly as they were
    (hide those separately if needed).
 7. **A post's body is Markdown**, rendered the same way the waiver template
@@ -115,7 +115,7 @@ button.
 ## SEO
 
 `/blog` is a normal entry in `PUBLIC_PAGES` (`src/lib/seo.ts`), like any other
-marketing page. `/blog/:slug` is different: it's the site's first *dynamic*
+marketing page. `/blog/:slug` is different: it's the site's first _dynamic_
 public page, so there's no way to list every real post URL in a static array.
 Its `head()` sets a per-post canonical, title, description and `BlogPosting`
 JSON-LD from loader data, so each post is fully indexable — it's just not

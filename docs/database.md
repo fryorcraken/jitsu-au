@@ -663,14 +663,18 @@ pasting a YouTube/Vimeo link. Object names are `<post id>/<filename>` (or
 `drafts/<filename>` for an image uploaded before a new post has an id).
 Migration `20260731120000_blog_storage.sql` owns the bucket's access model.
 
-| Operation                  | Who                                                                  |
-| -------------------------- | -------------------------------------------------------------------- |
-| `SELECT`                   | anyone (the bucket itself is public, so this is belt-and-suspenders) |
-| `INSERT`/`UPDATE`/`DELETE` | managers only                                                        |
+| Operation                  | Who                                                                          |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| `SELECT`                   | no policy at all — the bucket itself is public, so reads bypass RLS entirely |
+| `INSERT`/`UPDATE`/`DELETE` | managers only                                                                |
 
-The app always uploads through the service role (`uploadBlogImage`), so the
-manager write policies are defence in depth, same reasoning as the waiver PDF
-policies.
+There is deliberately **no** `SELECT` policy: the bucket is public, so Storage
+already serves any object's bytes by URL with no RLS involved, and a broad
+"anyone can SELECT" policy would additionally let a client **list** the
+bucket's contents via the API — exactly the `public_bucket_allows_listing`
+advisor finding — which nothing in the app needs. The app always uploads
+through the service role (`uploadBlogImage`), so the manager write policies
+are defence in depth, same reasoning as the waiver PDF policies.
 
 ---
 
