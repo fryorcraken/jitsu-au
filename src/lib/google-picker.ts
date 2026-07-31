@@ -7,12 +7,14 @@
  * becomes reachable by the server-side upload too.
  */
 
+import { FOLDER_MIME_TYPE } from "./google-drive.constants";
+
 export interface PickedDriveFolder {
   id: string;
   name: string;
 }
 
-type PickerResponse = Record<string, unknown>;
+export type PickerResponse = Record<string, unknown>;
 
 export interface GooglePickerView {
   setSelectFolderEnabled: (enabled: boolean) => GooglePickerView;
@@ -31,7 +33,6 @@ interface GooglePickerBuilder {
   setOrigin: (origin: string) => GooglePickerBuilder;
   setTitle: (title: string) => GooglePickerBuilder;
   setAppId: (appId: string) => GooglePickerBuilder;
-  setSelectableMimeTypes: (mimeTypes: string) => GooglePickerBuilder;
   setCallback: (cb: (data: PickerResponse) => void) => GooglePickerBuilder;
   build: () => { setVisible: (visible: boolean) => void };
 }
@@ -70,8 +71,6 @@ declare global {
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const GAPI_SRC = "https://apis.google.com/js/api.js";
 const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-
-export const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -128,18 +127,26 @@ export function appIdFromClientId(clientId: string): string | null {
 /**
  * The three places a manager's waiver folder can live, each as its own tab.
  *
- * All of them are folders-only and folder-selectable: a bare
- * `DocsView(FOLDERS)` still lists the files inside a folder once you navigate
- * into one, and the picker will happily hand those back, which is why the
- * builder also pins `setSelectableMimeTypes`.
+ * Folders-only comes from the view itself: `DocsView(FOLDERS)` plus a folder
+ * mime filter means a file is never listed, so it can never be handed back.
+ * Deliberately NOT `PickerBuilder.setSelectableMimeTypes`: Google documents
+ * that as the filter on selectable *files* and says nothing about how it
+ * interacts with `setSelectFolderEnabled`, so if it excluded folders the
+ * Select button would be dead for everything. Listing no files is the same
+ * guarantee with no way to lock the manager out, and `resolvePickedFolder`
+ * rejects a non-folder id server-side regardless.
  *
  * "My Drive" starts at `root` rather than the default flat listing of every
  * folder in the account, so it browses as a tree the way Drive itself does.
- * "Shared drives" is the only view that can reach a team/shared drive
- * (`setEnableDrives`), and "Shared with me" covers a folder someone else owns
- * and shared directly. Google documents `setEnableDrives` as incompatible with
- * both `setParent` and `setOwnedByMe`, which is why these are three separate
- * views rather than one combined one.
+ * "Shared drives" is the only view that can reach a team/shared drive, and it
+ * omits the mime filter on purpose: the top level of that view lists the
+ * drives themselves, which aren't folder-mimetyped, and filtering them out
+ * would leave the tab empty with nothing to navigate into. "Shared with me"
+ * covers a folder someone else owns and shared directly.
+ *
+ * Google documents `setEnableDrives` as incompatible with both `setParent`
+ * and `setOwnedByMe` (the combination returns nothing), which is why these
+ * are three separate views rather than one combined one.
  *
  * List mode, not the default thumbnail grid: under `drive.file` the app has no
  * access to thumbnails, so the grid renders as rows of blanks.
@@ -149,17 +156,42 @@ export function buildFolderViews(picker: GooglePickerNamespace): GooglePickerVie
     new picker.DocsView(picker.ViewId.FOLDERS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(true)
-      .setMimeTypes(FOLDER_MIME_TYPE)
       .setMode(picker.DocsViewMode.LIST);
 
   // `setLabel` is marked deprecated in Google's own typings but is still what
   // names the tabs; if a future picker drops it, the fallback is the picker's
   // own per-view default names, not a broken dialog.
   return [
-    folderView().setParent("root").setLabel("My Drive"),
+    folderView().setMimeTypes(FOLDER_MIME_TYPE).setParent("root").setLabel("My Drive"),
     folderView().setEnableDrives(true).setLabel("Shared drives"),
-    folderView().setOwnedByMe(false).setLabel("Shared with me"),
+    folderView().setMimeTypes(FOLDER_MIME_TYPE).setOwnedByMe(false).setLabel("Shared with me"),
   ];
+}
+
+/**
+ * Reads one picker callback payload. Split out from `pickDriveFolder` because
+ * it is the only part of the callback with a decision in it, and the only part
+ * a test can reach without Google's globals: the picker fires this for
+ * intermediate states too, which must not be mistaken for a cancellation.
+ */
+export function readPickerResponse(
+  picker: GooglePickerNamespace,
+  data: PickerResponse,
+): { status: "picked"; folder: PickedDriveFolder | null } | { status: "cancelled" | "pending" } {
+  const action = data[picker.Response.ACTION];
+  if (action === picker.Action.CANCEL) return { status: "cancelled" };
+  if (action !== picker.Action.PICKED) return { status: "pending" };
+
+  const docs = data[picker.Response.DOCUMENTS] as Record<string, unknown>[] | undefined;
+  const doc = docs?.[0];
+  if (!doc) return { status: "picked", folder: null };
+  return {
+    status: "picked",
+    folder: {
+      id: String(doc[picker.Document.ID]),
+      name: String(doc[picker.Document.NAME]),
+    },
+  };
 }
 
 /**
@@ -187,10 +219,7 @@ export async function pickDriveFolder(clientId: string): Promise<PickedDriveFold
         // Restricts the picker's postMessage response channel to this page's
         // own origin, per Google's Picker integration guidance.
         .setOrigin(window.location.origin)
-        .setTitle("Choose a folder for signed waivers")
-        // Belt and braces with the per-view mime filter: this is what actually
-        // stops the picker's Select button from accepting a file.
-        .setSelectableMimeTypes(FOLDER_MIME_TYPE);
+        .setTitle("Choose a folder for signed waivers");
 
       const appId = appIdFromClientId(clientId);
       if (appId) builder.setAppId(appId);
@@ -199,23 +228,9 @@ export async function pickDriveFolder(clientId: string): Promise<PickedDriveFold
 
       const picker = builder
         .setCallback((data: PickerResponse) => {
-          const action = data[google.picker.Response.ACTION];
-          if (action === google.picker.Action.PICKED) {
-            const docs = data[google.picker.Response.DOCUMENTS] as
-              | Record<string, unknown>[]
-              | undefined;
-            const doc = docs?.[0];
-            if (!doc) {
-              finish(null);
-              return;
-            }
-            finish({
-              id: String(doc[google.picker.Document.ID]),
-              name: String(doc[google.picker.Document.NAME]),
-            });
-          } else if (action === google.picker.Action.CANCEL) {
-            finish(null);
-          }
+          const result = readPickerResponse(google.picker, data);
+          if (result.status === "picked") finish(result.folder);
+          else if (result.status === "cancelled") finish(null);
         })
         .build();
       picker.setVisible(true);

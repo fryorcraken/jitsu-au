@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { type DriveFolderSource, FOLDER_MIME_TYPE } from "@/lib/google-drive.constants";
 import { profileFullName } from "@/lib/validation";
 
 const GATEWAY_BASE_URL = "https://connector-gateway.lovable.dev";
@@ -119,6 +120,7 @@ export const setGoogleDriveFolder = createServerFn({ method: "POST" })
       ...conn.metadata,
       folderId,
       folderName: data.folderName,
+      folderSource: "name" satisfies DriveFolderSource,
     });
     return { ok: true as const, folderId, folderName: data.folderName };
   });
@@ -144,7 +146,7 @@ export async function resolvePickedFolder(
     );
   }
   const found = (await res.json()) as { id: string; name?: string; mimeType?: string };
-  if (found.mimeType !== "application/vnd.google-apps.folder") {
+  if (found.mimeType !== FOLDER_MIME_TYPE) {
     throw new Error("That isn't a folder.");
   }
   return { id: found.id, name: found.name ?? "Untitled folder" };
@@ -192,6 +194,7 @@ export const setGoogleDriveFolderFromPicker = createServerFn({ method: "POST" })
       ...conn.metadata,
       folderId: folder.id,
       folderName: folder.name,
+      folderSource: "picker" satisfies DriveFolderSource,
     });
     return { ok: true as const, folderId: folder.id, folderName: folder.name };
   });
@@ -232,13 +235,17 @@ async function ensureFolder(connectionAPIKey: string, folderName: string): Promi
   const { callAsAppUser } = await import("@/integrations/lovable/appUserConnector");
   const escapedName = folderName.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const q = encodeURIComponent(
-    `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    `name='${escapedName}' and mimeType='${FOLDER_MIME_TYPE}' and trashed=false`,
   );
+  // Deliberately the default (`user`) corpus, not `allDrives`: this is the
+  // typed-a-name path, and it creates in the manager's own Drive below. Search
+  // every shared drive too and which of two same-named folders wins would come
+  // down to whatever Drive happened to return first for `pageSize=1`.
   const search = await callAsAppUser({
     gatewayBaseUrl: GATEWAY_BASE_URL,
     connectionAPIKey,
     connectorId: CONNECTOR_ID,
-    path: `/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`,
+    path: `/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1&supportsAllDrives=true`,
   });
   if (!search.ok) throw new Error(`Drive folder search failed: ${await search.text()}`);
   const found = (await search.json()) as { files?: { id: string }[] };
@@ -254,13 +261,48 @@ async function ensureFolder(connectionAPIKey: string, folderName: string): Promi
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: folderName,
-        mimeType: "application/vnd.google-apps.folder",
+        mimeType: FOLDER_MIME_TYPE,
       }),
     },
   });
   if (!create.ok) throw new Error(`Drive folder create failed: ${await create.text()}`);
   const created = (await create.json()) as { id: string };
   return created.id;
+}
+
+/** Carries Drive's HTTP status so the caller can tell "folder is gone" from "Drive had a bad day". */
+export class DriveUploadError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "DriveUploadError";
+    this.status = status;
+  }
+}
+
+/**
+ * Whether a failed upload justifies re-resolving the configured folder NAME
+ * (which creates the folder if the search misses).
+ *
+ * This is deliberately narrow, because getting it wrong is invisible and
+ * expensive: recreating on any failure means one bad response can mint a fresh
+ * "UTS Jitsu Waivers" folder in the manager's My Drive and quietly redirect
+ * every future waiver into it, while the folder they actually chose (possibly
+ * in a shared drive the whole committee watches) stops receiving anything.
+ *
+ * So: only a 404, and only when the folder came from a typed name. A 403 is a
+ * permission problem on a folder that still exists, a 5xx is Drive's problem,
+ * and a picked folder cannot be recreated by name at all — its name is not
+ * where it lives. Those all surface to the manager instead.
+ *
+ * Connections saved before `folderSource` existed are treated as name-based,
+ * which is what they were: the picker path did not exist yet.
+ */
+export function shouldRecreateFolder(params: {
+  status: number | null;
+  folderSource: string | null | undefined;
+}): boolean {
+  return params.status === 404 && params.folderSource !== "picker";
 }
 
 async function uploadPdfToDrive(params: {
@@ -294,7 +336,12 @@ async function uploadPdfToDrive(params: {
       body,
     },
   });
-  if (!res.ok) throw new Error(`Drive upload failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) {
+    throw new DriveUploadError(
+      res.status,
+      `Drive upload failed (${res.status}): ${await res.text()}`,
+    );
+  }
   const out = (await res.json()) as { id: string; webViewLink?: string };
   return { id: out.id, webViewLink: out.webViewLink ?? null };
 }
@@ -349,7 +396,22 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
         pdf: pdfBytes,
       });
     } catch (e) {
-      // Folder may have been deleted; retry once, re-resolving the configured name.
+      const status = e instanceof DriveUploadError ? e.status : null;
+      const folderSource = conn.metadata.folderSource as string | undefined;
+      if (!shouldRecreateFolder({ status, folderSource })) {
+        console.error("[uploadWaiverToDrive] upload failed, not re-resolving the folder:", e);
+        if (status === 404) {
+          // A picked folder that Drive can no longer find. Recreating it by
+          // name would put waivers somewhere the manager never chose, so ask
+          // them to pick again instead.
+          throw new Error(
+            `The Drive folder "${folderName}" is no longer reachable. Pick it again on your account page.`,
+          );
+        }
+        throw e;
+      }
+      // The folder was resolved from a typed name and Drive says it's gone:
+      // re-resolve that name (creating it if need be) and retry once.
       folderId = await ensureFolder(conn.connectionAPIKey, folderName);
       await updateConnectionMetadata(context.userId, CONNECTOR_ID, {
         ...conn.metadata,
@@ -361,7 +423,7 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
         name,
         pdf: pdfBytes,
       });
-      console.error("[uploadWaiverToDrive] first attempt failed, retried:", e);
+      console.error("[uploadWaiverToDrive] folder was missing, recreated and retried:", e);
     }
 
     const uploadedAt = new Date().toISOString();

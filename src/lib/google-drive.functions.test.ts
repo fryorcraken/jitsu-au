@@ -6,7 +6,7 @@
 // different Google account than the one connected, or a non-folder file id)
 // must be rejected rather than silently saved.
 import { describe, expect, it } from "vitest";
-import { resolvePickedFolder } from "./google-drive.functions";
+import { resolvePickedFolder, shouldRecreateFolder } from "./google-drive.functions";
 
 function fakeResponse(init: { ok: boolean; body?: unknown }): Response {
   return {
@@ -60,5 +60,33 @@ describe("resolvePickedFolder", () => {
       });
 
     await expect(resolvePickedFolder(fetchFolder, "file-123")).rejects.toThrow(/isn't a folder/i);
+  });
+});
+
+// Re-resolving the folder name creates the folder when the search misses, so
+// every `true` here is a licence to silently move where a club's signed
+// waivers land. The rules are worth pinning individually.
+describe("shouldRecreateFolder", () => {
+  it("recreates a name-configured folder Drive says is gone", () => {
+    expect(shouldRecreateFolder({ status: 404, folderSource: "name" })).toBe(true);
+  });
+
+  it("treats a connection saved before folderSource existed as name-configured", () => {
+    expect(shouldRecreateFolder({ status: 404, folderSource: undefined })).toBe(true);
+    expect(shouldRecreateFolder({ status: 404, folderSource: null })).toBe(true);
+  });
+
+  it("never recreates a folder the manager picked", () => {
+    // Its name is not where it lives: recreating by name would land waivers in
+    // My Drive when they chose a shared drive.
+    expect(shouldRecreateFolder({ status: 404, folderSource: "picker" })).toBe(false);
+  });
+
+  it("leaves a folder that still exists alone", () => {
+    // 403 is a permission problem, 5xx is Drive's problem, and an error with no
+    // status at all says nothing about the folder.
+    for (const status of [403, 429, 500, 503, null]) {
+      expect(shouldRecreateFolder({ status, folderSource: "name" })).toBe(false);
+    }
   });
 });
