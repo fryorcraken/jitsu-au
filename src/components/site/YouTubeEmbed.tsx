@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { buildPlayerOptions, loadYouTubeIframeApi, type YouTubePlayer } from "@/lib/youtube-player";
 
 type YouTubeEmbedProps = {
   videoId: string;
@@ -7,6 +9,25 @@ type YouTubeEmbedProps = {
 };
 
 export function YouTubeEmbed({ videoId, title, className }: YouTubeEmbedProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let cancelled = false;
+    let player: YouTubePlayer | null = null;
+
+    void loadYouTubeIframeApi().then(() => {
+      if (cancelled || !window.YT) return;
+      player = new window.YT.Player(container, buildPlayerOptions(videoId, title));
+    });
+
+    return () => {
+      cancelled = true;
+      player?.destroy();
+    };
+  }, [videoId, title]);
+
   return (
     <div
       className={cn(
@@ -14,14 +35,7 @@ export function YouTubeEmbed({ videoId, title, className }: YouTubeEmbedProps) {
         className,
       )}
     >
-      <iframe
-        className="h-full w-full"
-        src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&cc_load_policy=0`}
-        title={title}
-        loading="lazy"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowFullScreen
-      />
+      <div ref={containerRef} className="h-full w-full" />
     </div>
   );
 }
