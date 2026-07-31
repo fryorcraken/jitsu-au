@@ -31,9 +31,13 @@ import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as WaiverRouteImport } from './routes/waiver'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
+import { Route as BlogIndexRouteImport } from './routes/blog/index'
+import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
 import { Route as DocsIndexRouteImport } from './routes/docs.index'
 import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
+import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenticated/manager.blog'
+import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_authenticated/manager.blog-comments'
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
 import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
@@ -46,6 +50,8 @@ import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authe
 import { Route as ApiCalendarTokenRouteImport } from './routes/api/calendar/$token'
 import { Route as ApiManagerAgentRouteImport } from './routes/api/manager/agent'
 import { Route as ApiVerifyEmailTokenRouteImport } from './routes/api/verify-email/$token'
+import { Route as AuthenticatedManagerBlogIdRouteImport } from './routes/_authenticated/manager.blog_.$id'
+import { Route as AuthenticatedManagerBlogNewRouteImport } from './routes/_authenticated/manager.blog_.new'
 import { Route as AuthenticatedManagerUsersUserIdRouteImport } from './routes/_authenticated/manager.users_.$userId'
 import { Route as AuthenticatedManagerWaiversUploadRouteImport } from './routes/_authenticated/manager.waivers_.upload'
 import { Route as LovableEmailAuthPreviewRouteImport } from './routes/lovable/email/auth/preview'
@@ -160,6 +166,16 @@ const AuthenticatedMembershipRoute = AuthenticatedMembershipRouteImport.update({
   path: '/membership',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const BlogIndexRoute = BlogIndexRouteImport.update({
+  id: '/blog/',
+  path: '/blog/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BlogSlugRoute = BlogSlugRouteImport.update({
+  id: '/blog/$slug',
+  path: '/blog/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocsIndexRoute = DocsIndexRouteImport.update({
   id: '/docs/',
   path: '/docs/',
@@ -174,6 +190,18 @@ const AuthenticatedManagerApiTokensRoute =
   AuthenticatedManagerApiTokensRouteImport.update({
     id: '/manager/api-tokens',
     path: '/manager/api-tokens',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerBlogRoute =
+  AuthenticatedManagerBlogRouteImport.update({
+    id: '/manager/blog',
+    path: '/manager/blog',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerBlogCommentsRoute =
+  AuthenticatedManagerBlogCommentsRouteImport.update({
+    id: '/manager/blog-comments',
+    path: '/manager/blog-comments',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedManagerCalendarRoute =
@@ -245,6 +273,18 @@ const ApiVerifyEmailTokenRoute = ApiVerifyEmailTokenRouteImport.update({
   path: '/api/verify-email/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedManagerBlogIdRoute =
+  AuthenticatedManagerBlogIdRouteImport.update({
+    id: '/manager/blog_/$id',
+    path: '/manager/blog/$id',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerBlogNewRoute =
+  AuthenticatedManagerBlogNewRouteImport.update({
+    id: '/manager/blog_/new',
+    path: '/manager/blog/new',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerUsersUserIdRoute =
   AuthenticatedManagerUsersUserIdRouteImport.update({
     id: '/manager/users_/$userId',
@@ -290,9 +330,13 @@ export interface FileRoutesByFullPath {
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/blog/': typeof BlogIndexRoute
   '/docs/': typeof DocsIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
+  '/manager/blog': typeof AuthenticatedManagerBlogRoute
+  '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
@@ -305,6 +349,8 @@ export interface FileRoutesByFullPath {
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
+  '/manager/blog/$id': typeof AuthenticatedManagerBlogIdRoute
+  '/manager/blog/new': typeof AuthenticatedManagerBlogNewRoute
   '/manager/users/$userId': typeof AuthenticatedManagerUsersUserIdRoute
   '/manager/waivers/upload': typeof AuthenticatedManagerWaiversUploadRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
@@ -332,9 +378,13 @@ export interface FileRoutesByTo {
   '/waiver': typeof WaiverRoute
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/blog': typeof BlogIndexRoute
   '/docs': typeof DocsIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
+  '/manager/blog': typeof AuthenticatedManagerBlogRoute
+  '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
@@ -347,6 +397,8 @@ export interface FileRoutesByTo {
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
+  '/manager/blog/$id': typeof AuthenticatedManagerBlogIdRoute
+  '/manager/blog/new': typeof AuthenticatedManagerBlogNewRoute
   '/manager/users/$userId': typeof AuthenticatedManagerUsersUserIdRoute
   '/manager/waivers/upload': typeof AuthenticatedManagerWaiversUploadRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
@@ -376,9 +428,13 @@ export interface FileRoutesById {
   '/waiver': typeof WaiverRoute
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/blog/': typeof BlogIndexRoute
   '/docs/': typeof DocsIndexRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
+  '/_authenticated/manager/blog': typeof AuthenticatedManagerBlogRoute
+  '/_authenticated/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
@@ -391,6 +447,8 @@ export interface FileRoutesById {
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
+  '/_authenticated/manager/blog_/$id': typeof AuthenticatedManagerBlogIdRoute
+  '/_authenticated/manager/blog_/new': typeof AuthenticatedManagerBlogNewRoute
   '/_authenticated/manager/users_/$userId': typeof AuthenticatedManagerUsersUserIdRoute
   '/_authenticated/manager/waivers_/upload': typeof AuthenticatedManagerWaiversUploadRoute
   '/lovable/email/auth/preview': typeof LovableEmailAuthPreviewRoute
@@ -420,9 +478,13 @@ export interface FileRouteTypes {
     | '/waiver'
     | '/account'
     | '/membership'
+    | '/blog/$slug'
     | '/docs/$slug'
+    | '/blog/'
     | '/docs/'
     | '/manager/api-tokens'
+    | '/manager/blog'
+    | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
     | '/manager/membership-plans'
@@ -435,6 +497,8 @@ export interface FileRouteTypes {
     | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/api/verify-email/$token'
+    | '/manager/blog/$id'
+    | '/manager/blog/new'
     | '/manager/users/$userId'
     | '/manager/waivers/upload'
     | '/lovable/email/auth/preview'
@@ -462,9 +526,13 @@ export interface FileRouteTypes {
     | '/waiver'
     | '/account'
     | '/membership'
+    | '/blog/$slug'
     | '/docs/$slug'
+    | '/blog'
     | '/docs'
     | '/manager/api-tokens'
+    | '/manager/blog'
+    | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
     | '/manager/membership-plans'
@@ -477,6 +545,8 @@ export interface FileRouteTypes {
     | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/api/verify-email/$token'
+    | '/manager/blog/$id'
+    | '/manager/blog/new'
     | '/manager/users/$userId'
     | '/manager/waivers/upload'
     | '/lovable/email/auth/preview'
@@ -505,9 +575,13 @@ export interface FileRouteTypes {
     | '/waiver'
     | '/_authenticated/account'
     | '/_authenticated/membership'
+    | '/blog/$slug'
     | '/docs/$slug'
+    | '/blog/'
     | '/docs/'
     | '/_authenticated/manager/api-tokens'
+    | '/_authenticated/manager/blog'
+    | '/_authenticated/manager/blog-comments'
     | '/_authenticated/manager/calendar'
     | '/_authenticated/manager/check-in'
     | '/_authenticated/manager/membership-plans'
@@ -520,6 +594,8 @@ export interface FileRouteTypes {
     | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/api/verify-email/$token'
+    | '/_authenticated/manager/blog_/$id'
+    | '/_authenticated/manager/blog_/new'
     | '/_authenticated/manager/users_/$userId'
     | '/_authenticated/manager/waivers_/upload'
     | '/lovable/email/auth/preview'
@@ -547,7 +623,9 @@ export interface RootRouteChildren {
   ThankYouRoute: typeof ThankYouRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
+  BlogSlugRoute: typeof BlogSlugRoute
   DocsSlugRoute: typeof DocsSlugRoute
+  BlogIndexRoute: typeof BlogIndexRoute
   DocsIndexRoute: typeof DocsIndexRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
@@ -712,6 +790,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMembershipRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/blog/': {
+      id: '/blog/'
+      path: '/blog'
+      fullPath: '/blog/'
+      preLoaderRoute: typeof BlogIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/blog/$slug': {
+      id: '/blog/$slug'
+      path: '/blog/$slug'
+      fullPath: '/blog/$slug'
+      preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/docs/': {
       id: '/docs/'
       path: '/docs'
@@ -731,6 +823,20 @@ declare module '@tanstack/react-router' {
       path: '/manager/api-tokens'
       fullPath: '/manager/api-tokens'
       preLoaderRoute: typeof AuthenticatedManagerApiTokensRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/blog': {
+      id: '/_authenticated/manager/blog'
+      path: '/manager/blog'
+      fullPath: '/manager/blog'
+      preLoaderRoute: typeof AuthenticatedManagerBlogRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/blog-comments': {
+      id: '/_authenticated/manager/blog-comments'
+      path: '/manager/blog-comments'
+      fullPath: '/manager/blog-comments'
+      preLoaderRoute: typeof AuthenticatedManagerBlogCommentsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/manager/calendar': {
@@ -817,6 +923,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiVerifyEmailTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/manager/blog_/$id': {
+      id: '/_authenticated/manager/blog_/$id'
+      path: '/manager/blog/$id'
+      fullPath: '/manager/blog/$id'
+      preLoaderRoute: typeof AuthenticatedManagerBlogIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/blog_/new': {
+      id: '/_authenticated/manager/blog_/new'
+      path: '/manager/blog/new'
+      fullPath: '/manager/blog/new'
+      preLoaderRoute: typeof AuthenticatedManagerBlogNewRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/users_/$userId': {
       id: '/_authenticated/manager/users_/$userId'
       path: '/manager/users/$userId'
@@ -852,6 +972,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
   AuthenticatedMembershipRoute: typeof AuthenticatedMembershipRoute
   AuthenticatedManagerApiTokensRoute: typeof AuthenticatedManagerApiTokensRoute
+  AuthenticatedManagerBlogRoute: typeof AuthenticatedManagerBlogRoute
+  AuthenticatedManagerBlogCommentsRoute: typeof AuthenticatedManagerBlogCommentsRoute
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
   AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
@@ -861,6 +983,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerUsersRoute: typeof AuthenticatedManagerUsersRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
   AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
+  AuthenticatedManagerBlogIdRoute: typeof AuthenticatedManagerBlogIdRoute
+  AuthenticatedManagerBlogNewRoute: typeof AuthenticatedManagerBlogNewRoute
   AuthenticatedManagerUsersUserIdRoute: typeof AuthenticatedManagerUsersUserIdRoute
   AuthenticatedManagerWaiversUploadRoute: typeof AuthenticatedManagerWaiversUploadRoute
 }
@@ -869,6 +993,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAccountRoute: AuthenticatedAccountRoute,
   AuthenticatedMembershipRoute: AuthenticatedMembershipRoute,
   AuthenticatedManagerApiTokensRoute: AuthenticatedManagerApiTokensRoute,
+  AuthenticatedManagerBlogRoute: AuthenticatedManagerBlogRoute,
+  AuthenticatedManagerBlogCommentsRoute: AuthenticatedManagerBlogCommentsRoute,
   AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
   AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
   AuthenticatedManagerMembershipPlansRoute:
@@ -881,6 +1007,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerWaiverTemplateRoute:
     AuthenticatedManagerWaiverTemplateRoute,
   AuthenticatedManagerWaiversRoute: AuthenticatedManagerWaiversRoute,
+  AuthenticatedManagerBlogIdRoute: AuthenticatedManagerBlogIdRoute,
+  AuthenticatedManagerBlogNewRoute: AuthenticatedManagerBlogNewRoute,
   AuthenticatedManagerUsersUserIdRoute: AuthenticatedManagerUsersUserIdRoute,
   AuthenticatedManagerWaiversUploadRoute:
     AuthenticatedManagerWaiversUploadRoute,
@@ -910,7 +1038,9 @@ const rootRouteChildren: RootRouteChildren = {
   ThankYouRoute: ThankYouRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
+  BlogSlugRoute: BlogSlugRoute,
   DocsSlugRoute: DocsSlugRoute,
+  BlogIndexRoute: BlogIndexRoute,
   DocsIndexRoute: DocsIndexRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,

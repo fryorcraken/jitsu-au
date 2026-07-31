@@ -15,6 +15,7 @@ const nav = [
   { to: "/first-class", label: "First class" },
   { to: "/pricing", label: "Pricing" },
   { to: "/faq", label: "FAQ" },
+  { to: "/blog", label: "Blog" },
   { to: "/contact", label: "Contact" },
 ] as const;
 
@@ -33,7 +34,7 @@ export function SiteHeader() {
             className="h-10 w-auto rounded bg-white p-1"
           />
         </Link>
-        <nav className="hidden items-center gap-6 md:flex">
+        <nav className="hidden items-center gap-5 lg:flex">
           {nav.map((n) => (
             <Link
               key={n.to}
@@ -46,7 +47,7 @@ export function SiteHeader() {
             </Link>
           ))}
         </nav>
-        <div className="hidden items-center gap-2 md:flex">
+        <div className="hidden items-center gap-2 lg:flex">
           {user ? (
             <Button asChild size="sm" variant="outline">
               <Link to="/account">
@@ -64,14 +65,14 @@ export function SiteHeader() {
           </Button>
         </div>
         <button
-          className="rounded-md p-2 md:hidden"
+          className="rounded-md p-2 lg:hidden"
           onClick={() => setOpen((v) => !v)}
           aria-label="Toggle menu"
         >
           {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
       </div>
-      <div className={cn("border-t md:hidden", open ? "block" : "hidden")}>
+      <div className={cn("border-t lg:hidden", open ? "block" : "hidden")}>
         <nav className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3">
           {nav.map((n) => (
             <Link

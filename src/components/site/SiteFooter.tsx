@@ -45,6 +45,11 @@ export function SiteFooter() {
                 FAQ
               </Link>
             </li>
+            <li>
+              <Link to="/blog" className="hover:text-foreground">
+                Blog
+              </Link>
+            </li>
           </ul>
         </div>
         <div>

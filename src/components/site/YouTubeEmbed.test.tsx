@@ -9,7 +9,7 @@ describe("YouTubeEmbed", () => {
     expect(iframe.tagName).toBe("IFRAME");
     expect(iframe).toHaveAttribute(
       "src",
-      "https://www.youtube-nocookie.com/embed/jm75EhP1zMQ?rel=0",
+      "https://www.youtube-nocookie.com/embed/jm75EhP1zMQ?rel=0&cc_load_policy=0",
     );
     expect(iframe).toHaveAttribute("loading", "lazy");
   });

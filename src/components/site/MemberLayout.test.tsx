@@ -34,6 +34,8 @@ const managerOnlyLinks = [
   /^users$/i,
   /signed waivers/i,
   /waiver template/i,
+  /blog posts/i,
+  /blog comments/i,
   /membership plans/i,
   /bank reconciliation/i,
   /club settings/i,
@@ -106,6 +108,14 @@ describe("MemberLayout", () => {
     expect(screen.getByRole("link", { name: /bank reconciliation/i })).toHaveAttribute(
       "href",
       "/manager/reconciliation",
+    );
+    expect(screen.getByRole("link", { name: /blog posts/i })).toHaveAttribute(
+      "href",
+      "/manager/blog",
+    );
+    expect(screen.getByRole("link", { name: /blog comments/i })).toHaveAttribute(
+      "href",
+      "/manager/blog-comments",
     );
     // Member links remain available to managers too.
     expect(screen.getByRole("link", { name: /account/i })).toBeInTheDocument();

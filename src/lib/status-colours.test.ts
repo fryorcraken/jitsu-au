@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   NEUTRAL_STATUS_CLASS,
+  blogCommentClass,
+  blogPostClass,
   coverageClass,
   lifecycleClass,
   membershipClass,
@@ -10,6 +12,8 @@ import {
   waiverClass,
 } from "./status-colours";
 import {
+  blogCommentStatuses,
+  blogPostStatuses,
   coverageSources,
   lifecycleStatuses,
   membershipStatuses,
@@ -81,6 +85,27 @@ describe("status colours", () => {
     // They are different things in different vocabularies; the shared module
     // must not quietly collapse them because they share a word.
     expect(membershipClass("pending")).not.toBe(waiverClass("pending"));
+  });
+
+  it("gives every blog post status a colour", () => {
+    for (const status of blogPostStatuses) {
+      expect(blogPostClass(status)).toMatch(/^bg-/);
+    }
+  });
+
+  it("gives every blog comment status a colour", () => {
+    for (const status of blogCommentStatuses) {
+      expect(blogCommentClass(status)).toMatch(/^bg-/);
+    }
+  });
+
+  it("flags a hidden comment in red", () => {
+    expect(blogCommentClass("hidden")).toContain("red");
+    expect(blogCommentClass("visible")).not.toContain("red");
+  });
+
+  it("does not treat a draft post as a fault", () => {
+    expect(blogPostClass("draft")).toBe(NEUTRAL_STATUS_CLASS);
   });
 });
 
