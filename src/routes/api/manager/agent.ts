@@ -166,8 +166,10 @@ async function authenticate(request: Request): Promise<string> {
 /** Shape any thrown value into a stable JSON error response. */
 function errorResponse(e: unknown): Response {
   if (e instanceof AgentError) {
+    // details first: `code` and `message` are the envelope's stable contract and
+    // must win, whatever a future call site happens to name a detail field.
     return json(
-      { ok: false, error: { code: e.code, message: e.message, ...(e.details ?? {}) } },
+      { ok: false, error: { ...(e.details ?? {}), code: e.code, message: e.message } },
       e.httpStatus,
     );
   }

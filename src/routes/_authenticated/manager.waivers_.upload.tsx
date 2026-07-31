@@ -137,10 +137,10 @@ function UploadPaperWaiverPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await file({ confirmDuplicate: false });
+    await fileWaiver({ confirmDuplicate: false });
   }
 
-  async function file({ confirmDuplicate }: { confirmDuplicate: boolean }) {
+  async function fileWaiver({ confirmDuplicate }: { confirmDuplicate: boolean }) {
     if (files.length === 0) {
       toast.error("Attach the scanned form first.");
       return;
@@ -544,7 +544,7 @@ function UploadPaperWaiverPage() {
                 type="button"
                 variant="outline"
                 disabled={saving}
-                onClick={() => void file({ confirmDuplicate: true })}
+                onClick={() => void fileWaiver({ confirmDuplicate: true })}
               >
                 {saving ? "Filing..." : "File it anyway"}
               </Button>
