@@ -61,10 +61,15 @@ an `id` you can pass to `edit_invoice`). A `lead` (registered interest only) has
 > **Session counts: read the right one.** `sessions_attended` is **lifetime**
 > attendance across every plan the person has ever held, so on a second plan it
 > includes classes from the first and cannot answer "how much of this trial is
-> left". Each invoice carries that: `sessions_allowed` (what the plan grants,
-> `null` for a plan measured in days rather than classes) and
+> left". Each invoice carries that: `sessions_allowed` (what the plan grants) and
 > `sessions_remaining` (what is left on that invoice). Never parse the allowance
 > out of a plan code like `trial_2_session` — the code is a label and can change.
+>
+> **`null` is not zero.** `sessions_allowed` is `null` only for a plan with no
+> session credits at all (a period plan). `sessions_remaining` is _also_ `null`
+> on a still-`pending` invoice for a session-credit plan, because activation is
+> what sets it — there it means "not started yet", not "none left". Read
+> `status`/`paid_at` alongside it before telling anyone they are out of classes.
 
 `roles` is empty for a member on a **free** plan, including the trial: the
 `member` role is granted on a _paid_ activation, so an active $0 invoice with
@@ -86,7 +91,8 @@ curl -s "$UTS_MANAGER_API_URL/api/manager/agent" \
 Flat list of invoices (membership payment records) with member name/email. The
 response's `total` is the full matching count regardless of `limit`, so you can
 tell a capped page from a complete one. Each invoice also carries
-`sessions_allowed` and `sessions_remaining` (see the note under `list_users`).
+`sessions_allowed` and `sessions_remaining`, including what `null` means on each
+(see the note under `list_users`).
 `params` (optional): `status` (`pending | active | expired | cancelled`), `limit`.
 
 ```bash

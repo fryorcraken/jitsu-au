@@ -32,16 +32,16 @@ export const AGENT_MANIFEST: {
 } = {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
-  // list. "2" adds the reconciled-invoice guard (edit_invoice), duplicate
-  // detection (file_waiver), the changed/previous echo on an edit, and the
-  // session-allowance fields on every invoice.
+  // list. Everything a caller gained since "1": the session-allowance fields on
+  // every invoice, the reconciled-invoice guard and changed/previous echo on
+  // edit_invoice, and duplicate detection on file_waiver.
   version: "2",
   actions: [
     {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended: LIFETIME check-ins across every plan they have held, so it does not tell you how much of the current plan is left). For that, read sessions_allowed and sessions_remaining on the invoice itself.",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining.",
       params: [
         {
           name: "status",
@@ -59,7 +59,7 @@ export const AGENT_MANIFEST: {
       name: "list_invoices",
       method: "POST",
       summary:
-        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed (the plan's class allowance, null for a time-based plan) and sessions_remaining (what is left on this invoice).",
+        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero).",
       params: [
         {
           name: "status",
@@ -403,11 +403,18 @@ export function projectInvoice(m: MembershipRow, plan?: MembershipPlanRow) {
     paid_at: m.paid_at,
     starts_at: m.starts_at,
     ends_at: m.ends_at,
-    // The session allowance, as numbers rather than something to parse out of a
-    // plan code: `sessions_allowed` is what this plan grants (null for a plan
-    // measured in days, not classes), `sessions_remaining` is what is left on
-    // THIS invoice. Both differ from a person's `sessions_attended`, which is
-    // lifetime attendance across every plan they have ever held.
+    // The plan's session allowance and this invoice's own remaining balance —
+    // set at activation (`activateMembershipRow`) and spent one-per-check-in
+    // (see `checkin.functions.ts`). Deliberately per-invoice, not lifetime:
+    // unlike `sessions_attended` on list_users (which counts all-time classes),
+    // this is scoped to what THIS plan grants, so it answers "how much of this
+    // trial/pack is left".
+    // sessions_allowed is null only when the plan carries no session credits
+    // (e.g. a period plan). sessions_remaining is ALSO null for a still-`pending`
+    // invoice on a session-credit plan (e.g. a paid `casual_session` awaiting
+    // bank transfer) — activation is what populates it, so null there means "not
+    // started yet", not "no allowance". Read status/paid_at alongside it rather
+    // than treating null as zero.
     sessions_allowed: plan?.session_credits ?? null,
     sessions_remaining: m.sessions_remaining,
     notes: m.notes,
