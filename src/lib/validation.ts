@@ -1357,8 +1357,10 @@ export const MAX_BLOG_IMAGE_BYTES = 8 * 1024 * 1024;
 
 /** Manager: upload an image for a post. Same base64-in-JSON convention as the
  * scanned-waiver upload (`scanFileSchema`). `post_id` is omitted while
- * composing a brand-new, not-yet-saved post (the image is filed under
- * `drafts/` and re-pathed once the post has an id). */
+ * composing a brand-new, not-yet-saved post — the image is filed under
+ * `drafts/` and stays there permanently (the path is just a storage key, not
+ * something shown to anyone, so there's no need to move it once the post has
+ * an id). */
 export const uploadBlogImageSchema = z
   .object({
     post_id: z.string().uuid().optional(),

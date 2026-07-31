@@ -39,8 +39,12 @@ severities of moderation, not the same action.
 5. **An upvote is once per person per comment, and there is no downvote.**
    Upvoting again removes it (a toggle), it doesn't add a second one.
 6. **Hiding a comment and blocking a person are different actions.** Hiding
-   removes one comment from public view (the author can still see their own
-   hidden comment, so moderation isn't silent to them). Blocking stops a
+   removes one comment from public view — today it simply disappears from the
+   post for everyone, including its own author; the `blog_comments` RLS policy
+   already permits an author to read their own row directly regardless of
+   status (`user_id = auth.uid()`, no status filter), but `listComments` (what
+   the blog page actually calls) doesn't yet use that to show a "hidden by a
+   moderator" state to the author — see Future features. Blocking stops a
    person from posting _any future_ comment anywhere on the blog — it does
    nothing to comments they already posted, which stay exactly as they were
    (hide those separately if needed).
@@ -127,6 +131,13 @@ which is a real 404, not a "soft 404" page a crawler could index.
 
 ## Future features (out of scope today)
 
+- **Showing an author their own hidden comment.** `listComments` filters
+  strictly to `status = 'visible'` for everyone, including the comment's own
+  author — a hidden comment just disappears, with no "hidden by a moderator"
+  state shown to them. The RLS policy needed for this already exists
+  (`blog_comments`'s "Authors can read their own comments"); wiring it up
+  needs `listComments` (currently a plain public read, no session) to
+  optionally resolve the caller's identity.
 - **Finer-grained authoring permissions** (e.g. a contributor who can draft
   but not publish) — today it's manager-or-nothing.
 - **Formatting or media in comments** — comments are plain text on purpose for
