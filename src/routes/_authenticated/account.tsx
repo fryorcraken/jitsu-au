@@ -441,8 +441,8 @@ function GoogleDriveCard() {
               </div>
               <p className="text-xs text-muted-foreground">
                 {savedFolderName
-                  ? `Waivers save to "${savedFolderName}" in your Drive. Browsing lets you pick any folder you have access to; typing a name will only find one this app made before (a folder you made yourself in Drive with the same name won't be found).`
-                  : "Browse to pick any folder you have access to, or type a name and we'll create it (a folder you made yourself in Drive with the same name won't be found by typing)."}
+                  ? `Waivers save to "${savedFolderName}". Browsing lets you pick any folder you have access to, including one in a shared drive; typing a name will only find one this app made before (a folder you made yourself in Drive with the same name won't be found).`
+                  : "Browse to pick any folder you have access to, including one in a shared drive, or type a name and we'll create it in your own Drive (a folder you made yourself with the same name won't be found by typing)."}
               </p>
             </form>
           </div>
