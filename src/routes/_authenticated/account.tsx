@@ -21,11 +21,13 @@ import {
   setGoogleDriveFolderFromPicker,
   startGoogleDriveConnect,
 } from "@/lib/google-drive.functions";
-import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
+import { getMyProfile, getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
 import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 import { requestMyEmailVerification } from "@/lib/email-verification.functions";
 import { isEmailVerified } from "@/lib/email-verification";
+import { updateMyDisplayName } from "@/lib/profile.functions";
+import { commentDisplayName } from "@/lib/validation";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({
@@ -120,6 +122,8 @@ function AccountPage() {
         </CardContent>
       </Card>
 
+      <DisplayNameCard />
+
       <WaiversCard />
 
       <CodeOfConductCard />
@@ -128,6 +132,79 @@ function AccountPage() {
 
       <ChangePasswordCard />
     </section>
+  );
+}
+
+/**
+ * The name shown on this person's blog comments. `getMyProfile` doubles as the
+ * source for the derived-name placeholder (`commentDisplayName`), so the field
+ * shows exactly what will be used if the manager clears it.
+ */
+function DisplayNameCard() {
+  const fetchProfile = useServerFn(getMyProfile);
+  const save = useServerFn(updateMyDisplayName);
+  const [profile, setProfile] = useState<Awaited<ReturnType<typeof getMyProfile>>>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetchProfile()
+      .then((p) => {
+        setProfile(p);
+        setDisplayName(p?.display_name ?? "");
+      })
+      .catch(() => setProfile(null))
+      .finally(() => setLoading(false));
+  }, [fetchProfile]);
+
+  const placeholder = profile ? commentDisplayName(profile) : "";
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const trimmed = displayName.trim();
+      await save({ data: { display_name: trimmed || null } });
+      toast.success(trimmed ? "Display name updated" : "Display name reset");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save your display name");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Display name</CardTitle>
+        <CardDescription>
+          Shown on your blog comments. Leave blank to use{" "}
+          {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : (
+          <form onSubmit={onSubmit} className="space-y-3">
+            <div>
+              <Label htmlFor="display-name">Display name</Label>
+              <Input
+                id="display-name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={60}
+                placeholder={placeholder}
+              />
+            </div>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Saving..." : "Save"}
+            </Button>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -441,8 +518,8 @@ function GoogleDriveCard() {
               </div>
               <p className="text-xs text-muted-foreground">
                 {savedFolderName
-                  ? `Waivers save to "${savedFolderName}" in your Drive. Browsing lets you pick any folder you have access to; typing a name will only find one this app made before (a folder you made yourself in Drive with the same name won't be found).`
-                  : "Browse to pick any folder you have access to, or type a name and we'll create it (a folder you made yourself in Drive with the same name won't be found by typing)."}
+                  ? `Waivers save to "${savedFolderName}". Browsing lets you pick any folder you have access to, including one in a shared drive; typing a name will only find one this app made before (a folder you made yourself in Drive with the same name won't be found).`
+                  : "Browse to pick any folder you have access to, including one in a shared drive, or type a name and we'll create it in your own Drive (a folder you made yourself with the same name won't be found by typing)."}
               </p>
             </form>
           </div>

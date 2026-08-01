@@ -65,3 +65,22 @@ calendar_events:authenticated:SELECT
 # exclusively through server functions, which enforce rules RLS cannot express.
 event_rsvps:authenticated:SELECT
 calendar_feed_tokens:authenticated:SELECT
+
+# The public blog. Published-post and visible-comment reads run in *server*
+# functions that build their own client from SUPABASE_PUBLISHABLE_KEY with no
+# user session (the same "public funnel" shape as waiver_templates above), so
+# PostgREST resolves them to `anon` and they need real grants. RLS narrows each
+# to `status = 'published'` / `status = 'visible'`. Writes (posts, comments,
+# upvotes, moderation) run exclusively through service-role server functions,
+# which enforce rules RLS cannot express (blocked-commenter checks, one-level
+# reply nesting, manager authorship) — no write grant is given.
+blog_posts:anon:SELECT
+blog_posts:authenticated:SELECT
+blog_comments:anon:SELECT
+blog_comments:authenticated:SELECT
+
+# A signed-in reader needs to know THEIR OWN upvotes, to show a comment's
+# upvote button as already pressed. Read via the caller-scoped client in a
+# requireSupabaseAuth server function; narrowed by "Users can read their own
+# upvotes" to auth.uid() = user_id.
+blog_comment_upvotes:authenticated:SELECT

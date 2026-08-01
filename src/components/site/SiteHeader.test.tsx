@@ -54,4 +54,15 @@ describe("SiteHeader", () => {
     expect(screen.queryByRole("link", { name: /^membership$/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/member login/i)).not.toBeInTheDocument();
   });
+
+  it("links to the public blog", () => {
+    mockUseAuth.mockReturnValue({ user: null });
+    render(<SiteHeader />);
+
+    const links = screen.getAllByRole("link", { name: /^blog$/i });
+    expect(links.length).toBeGreaterThanOrEqual(1);
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", "/blog");
+    }
+  });
 });

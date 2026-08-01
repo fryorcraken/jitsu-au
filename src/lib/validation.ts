@@ -70,6 +70,22 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * The name shown on a blog comment: the person's own override
+ * (`profiles.display_name`) if they set one, else derived as "first/preferred
+ * name + last initial" (e.g. "Jane L."). Never the full legal name pulled from
+ * waiver/profile data onto a public comment.
+ */
+export function commentDisplayName(p: PersonNameParts & { display_name?: string | null }): string {
+  const override = (p.display_name || "").trim();
+  if (override) return override;
+  const base = (p.preferred_name || "").trim() || (p.first_name || "").trim();
+  const lastInitial = (p.last_name || "").trim().charAt(0).toUpperCase();
+  if (base && lastInitial) return `${base} ${lastInitial}.`;
+  if (base) return base;
+  return "Member";
+}
+
 // ---- Health declaration (the application form's five safety questions) ----
 
 /**
@@ -1282,3 +1298,142 @@ export function parseMoneyToCents(value: string): number | null {
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 100);
 }
+
+// ---- Blog (see docs/blog.md) ----
+
+export const blogPostStatuses = ["draft", "published"] as const;
+export type BlogPostStatus = (typeof blogPostStatuses)[number];
+
+export const blogCommentStatuses = ["visible", "hidden"] as const;
+export type BlogCommentStatus = (typeof blogCommentStatuses)[number];
+
+const blogSlug = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Use lowercase letters, digits and hyphens only.");
+
+/**
+ * Manager: create or edit a post. `slug` is optional — when blank, the server
+ * derives one from the title (`slugify` in `src/lib/slug.ts`) and resolves any
+ * collision by appending `-2`, `-3`, etc.
+ */
+export const blogPostSchema = z.object({
+  id: z.string().uuid().optional(),
+  title: z.string().trim().min(1).max(200),
+  slug: blogSlug.optional().or(z.literal("")),
+  excerpt: z.string().trim().max(500).optional().or(z.literal("")),
+  body_md: z.string().trim().min(1).max(50000),
+  cover_image_path: z.string().trim().max(500).optional().or(z.literal("")),
+  status: z.enum(blogPostStatuses).default("draft"),
+});
+export type BlogPostInput = z.infer<typeof blogPostSchema>;
+
+/** Manager: fetch one post (any status) for editing. */
+export const getBlogPostForEditSchema = z.object({ id: z.string().uuid() });
+export type GetBlogPostForEditInput = z.infer<typeof getBlogPostForEditSchema>;
+
+/** Manager: delete a post. */
+export const deleteBlogPostSchema = z.object({ id: z.string().uuid() });
+export type DeleteBlogPostInput = z.infer<typeof deleteBlogPostSchema>;
+
+/** Public: fetch one published post by its slug. */
+export const blogPostSlugSchema = z.object({ slug: z.string().trim().min(1).max(200) });
+export type BlogPostSlugInput = z.infer<typeof blogPostSlugSchema>;
+
+/** Public: page through the published post list. */
+export const listBlogPostsSchema = z.object({ page: z.number().int().min(1).default(1) });
+export type ListBlogPostsInput = z.infer<typeof listBlogPostsSchema>;
+
+/** The `/blog` route's `?page=` search param. `catch(1)` rather than reject:
+ * a mistyped or stale page number should just show page one, not error. */
+export const blogListSearchSchema = z.object({
+  page: z.coerce.number().int().min(1).catch(1),
+});
+export type BlogListSearch = z.infer<typeof blogListSearchSchema>;
+
+/** Public: comments for one post. */
+export const listBlogCommentsSchema = z.object({ post_id: z.string().uuid() });
+export type ListBlogCommentsInput = z.infer<typeof listBlogCommentsSchema>;
+
+/** Manager: comments across the blog, optionally filtered to one post. */
+export const listCommentsForModerationSchema = z.object({
+  post_id: z.string().uuid().optional(),
+});
+export type ListCommentsForModerationInput = z.infer<typeof listCommentsForModerationSchema>;
+
+/** Image types a manager may upload for a post (cover or inline). Videos are
+ * never uploaded — a post embeds one by pasting a link (see blogCommentSchema
+ * sibling `[[video:<url>]]` convention in body_md, applied by the renderer). */
+export const blogImageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+export type BlogImageMimeType = (typeof blogImageMimeTypes)[number];
+
+/** How large a single blog image may be, decoded. */
+export const MAX_BLOG_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Manager: upload an image for a post. Same base64-in-JSON convention as the
+ * scanned-waiver upload (`scanFileSchema`). `post_id` is omitted while
+ * composing a brand-new, not-yet-saved post — the image is filed under
+ * `drafts/` and stays there permanently (the path is just a storage key, not
+ * something shown to anyone, so there's no need to move it once the post has
+ * an id). */
+export const uploadBlogImageSchema = z
+  .object({
+    post_id: z.string().uuid().optional(),
+    name: z.string().trim().min(1).max(255),
+    type: z.enum(blogImageMimeTypes),
+    /** Raw base64, no `data:` prefix. */
+    data: z.string().min(1),
+  })
+  .refine((d) => base64ByteLength(d.data) <= MAX_BLOG_IMAGE_BYTES, {
+    message: "That image is too large. Keep it under 8 MB.",
+    path: ["data"],
+  });
+export type UploadBlogImageInput = z.infer<typeof uploadBlogImageSchema>;
+
+// ---- Blog comments ----
+//
+// Any signed-in person may comment or reply — membership status irrelevant,
+// the same rule as calendar RSVPs — and upvote a comment once (no downvote).
+// Reply nesting is one level: a reply's own parent must be top-level, checked
+// server-side against the parent row (not expressible in this schema).
+
+export const blogCommentSchema = z.object({
+  post_id: z.string().uuid(),
+  parent_comment_id: z.string().uuid().optional(),
+  body: z.string().trim().min(1).max(2000),
+  hp: z.string().max(0).optional(), // honeypot — must stay empty
+});
+export type BlogCommentInput = z.infer<typeof blogCommentSchema>;
+
+/** Toggle (add if absent, remove if present) the caller's upvote on a comment. */
+export const toggleUpvoteSchema = z.object({ comment_id: z.string().uuid() });
+export type ToggleUpvoteInput = z.infer<typeof toggleUpvoteSchema>;
+
+/** Manager: hide or restore a comment. */
+export const setCommentVisibilitySchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(blogCommentStatuses),
+  reason: z.string().trim().max(500).optional().or(z.literal("")),
+});
+export type SetCommentVisibilityInput = z.infer<typeof setCommentVisibilitySchema>;
+
+/** Manager: block a person from commenting anywhere on the blog — the extreme
+ * moderation action, separate from hiding a single comment. */
+export const blockCommenterSchema = z.object({
+  user_id: z.string().uuid(),
+  reason: z.string().trim().max(500).optional().or(z.literal("")),
+});
+export type BlockCommenterInput = z.infer<typeof blockCommenterSchema>;
+
+export const unblockCommenterSchema = z.object({ user_id: z.string().uuid() });
+export type UnblockCommenterInput = z.infer<typeof unblockCommenterSchema>;
+
+// ---- Account: display name (shown on blog comments) ----
+
+/** `display_name: null` clears the override, reverting to the derived name. */
+export const updateDisplayNameSchema = z.object({
+  display_name: z.string().trim().min(1).max(60).nullable(),
+});
+export type UpdateDisplayNameInput = z.infer<typeof updateDisplayNameSchema>;

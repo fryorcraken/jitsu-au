@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   attachCheckInSchema,
+  blockCommenterSchema,
+  blogCommentSchema,
+  blogPostSchema,
   buildSignerMeta,
   cancelEventSchema,
   checkInSchema,
   checkInWarnings,
   codeOfConductAcceptSchema,
+  commentDisplayName,
   composeFullName,
   contactSchema,
   coverageSources,
@@ -32,6 +36,7 @@ import {
   setCurrentTemplateSchema,
   splitFullName,
   stopRepeatingSchema,
+  updateDisplayNameSchema,
   waiverApprovalSchema,
   waiverPrefillSearchSchema,
   greetingName,
@@ -110,6 +115,100 @@ describe("nameWithPreferred", () => {
     expect(
       nameWithPreferred({ first_name: null, last_name: "Lovelace", preferred_name: "Addy" }),
     ).toBe('"Addy" Lovelace');
+  });
+});
+
+describe("commentDisplayName", () => {
+  it("prefers the person's own override", () => {
+    expect(
+      commentDisplayName({
+        first_name: "Ada",
+        last_name: "Lovelace",
+        display_name: "The Countess",
+      }),
+    ).toBe("The Countess");
+  });
+
+  it("derives preferred name + last initial when no override is set", () => {
+    expect(
+      commentDisplayName({
+        first_name: "Ada",
+        preferred_name: "Addy",
+        last_name: "Lovelace",
+        display_name: null,
+      }),
+    ).toBe("Addy L.");
+  });
+
+  it("derives first name + last initial when there is no preferred name", () => {
+    expect(commentDisplayName({ first_name: "Ada", last_name: "Lovelace" })).toBe("Ada L.");
+  });
+
+  it("drops the last initial when there is no last name", () => {
+    expect(commentDisplayName({ first_name: "Ada" })).toBe("Ada");
+  });
+
+  it("falls back to Member when there is no name at all", () => {
+    expect(commentDisplayName({})).toBe("Member");
+  });
+
+  it("ignores a blank override", () => {
+    expect(
+      commentDisplayName({ first_name: "Ada", last_name: "Lovelace", display_name: "   " }),
+    ).toBe("Ada L.");
+  });
+});
+
+describe("blogPostSchema", () => {
+  it("accepts a minimal draft with no slug (server derives one)", () => {
+    const parsed = blogPostSchema.parse({ title: "Hello world", body_md: "Body text." });
+    expect(parsed.status).toBe("draft");
+    expect(parsed.slug).toBeUndefined();
+  });
+
+  it("rejects a slug with uppercase or spaces", () => {
+    expect(() =>
+      blogPostSchema.parse({ title: "Hello", body_md: "Body", slug: "Hello World" }),
+    ).toThrow();
+  });
+
+  it("accepts a well-formed slug", () => {
+    expect(
+      blogPostSchema.parse({ title: "Hello", body_md: "Body", slug: "hello-world" }).slug,
+    ).toBe("hello-world");
+  });
+});
+
+describe("blogCommentSchema", () => {
+  const postId = "11111111-1111-1111-1111-111111111111";
+
+  it("accepts a plain top-level comment", () => {
+    const parsed = blogCommentSchema.parse({ post_id: postId, body: "Great post!" });
+    expect(parsed.parent_comment_id).toBeUndefined();
+  });
+
+  it("rejects an empty body", () => {
+    expect(() => blogCommentSchema.parse({ post_id: postId, body: "" })).toThrow();
+  });
+
+  it("rejects a filled honeypot", () => {
+    expect(() =>
+      blogCommentSchema.parse({ post_id: postId, body: "Great post!", hp: "spam" }),
+    ).toThrow();
+  });
+});
+
+describe("blockCommenterSchema / updateDisplayNameSchema", () => {
+  it("requires a valid user id to block someone", () => {
+    expect(() => blockCommenterSchema.parse({ user_id: "not-a-uuid" })).toThrow();
+  });
+
+  it("allows clearing a display name override with null", () => {
+    expect(updateDisplayNameSchema.parse({ display_name: null }).display_name).toBeNull();
+  });
+
+  it("rejects a blank (non-null) display name", () => {
+    expect(() => updateDisplayNameSchema.parse({ display_name: "" })).toThrow();
   });
 });
 
