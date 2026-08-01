@@ -198,6 +198,14 @@ scripts/agent.sh file_waiver '{
 >   Filing (or later approving) a backlog out of chronological order can leave
 >   an older submission looking like the current one — flag this to the manager
 >   rather than approving on their behalf.
+> - **Send a `client_submission_id` on every call in a batch.** Mint one UUID per
+>   paper record and resend it unchanged on any retry of that record. It is what
+>   makes retrying safe: the same id always resolves to the same waiver, so a
+>   call whose reply you never saw (timeout, dropped connection) can simply be
+>   repeated. Without it, two retries racing each other both pass the duplicate
+>   check — neither can see a row the other has not committed yet — and you get
+>   the exact double-filing the check is meant to stop. A **new** id means a new
+>   waiver, so never reuse one across different records.
 > - **Filing the same paper twice is caught.** If the person already has a
 >   waiver signed on that `signed_on`, the call is refused with
 >   `409 duplicate_waiver` and the error's `existing` array lists the waivers it

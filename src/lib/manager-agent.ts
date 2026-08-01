@@ -53,6 +53,7 @@ export const AGENT_MANIFEST: {
         "edit_invoice: price_cents / payment_reference / payment_method on a PAID invoice are refused with 409 reconciled_invoice unless confirm_paid_edit is true. A call that used to succeed can now fail.",
         "edit_invoice: the result gained `changed` and `previous`.",
         "file_waiver: a second waiver for the same person and signed_on is refused with 409 duplicate_waiver unless confirm_duplicate is true. A call that used to succeed can now fail.",
+        "file_waiver: accepts client_submission_id, which makes a retry safe. Send one per record in any bulk import.",
         "file_waiver: a failed duplicate check is 503 duplicate_check_failed; nothing was filed and the call is safe to retry unchanged.",
         "list_users / list_invoices: every invoice gained sessions_allowed and sessions_remaining.",
       ],
@@ -132,7 +133,7 @@ export const AGENT_MANIFEST: {
       name: "file_waiver",
       method: "POST",
       summary:
-        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in `error.existing`, with `truncated: true` if there are more than 20); pass confirm_duplicate to file it anyway. If the duplicate check itself fails, you get 503 duplicate_check_failed and NOTHING was filed — retry it, do not reach for confirm_duplicate.",
+        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in `error.existing`, with `truncated: true` if there are more than 20); pass confirm_duplicate to file it anyway. If the duplicate check itself fails, you get 503 duplicate_check_failed and NOTHING was filed — retry it, do not reach for confirm_duplicate. To make retries safe, send client_submission_id.",
       params: [
         { name: "first_name", required: true, description: "As written on the form." },
         { name: "middle_name", required: false, description: "As written on the form." },
@@ -200,6 +201,12 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "Set true to file even though this person already has a waiver signed on this date. Default false. Only use it when the second document is real (a corrected re-scan) — not to push a retried import past the check.",
+        },
+        {
+          name: "client_submission_id",
+          required: false,
+          description:
+            "Your own UUID for this filing attempt, minted once per record and RESENT UNCHANGED on every retry of it. This is what makes retrying safe: the same id always resolves to the same waiver, so a call whose reply you never saw can be repeated without filing twice. The duplicate check alone cannot catch two retries racing each other; this can. Send one per record in any bulk import. A new id means a new waiver.",
         },
       ],
     },

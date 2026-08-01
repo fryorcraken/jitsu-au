@@ -681,6 +681,15 @@ export const paperWaiverUploadSchema = z
     // legitimate for a corrected re-scan, so this warns and confirms rather
     // than blocking — see filePaperWaiver / waiver-duplicates.ts.
     confirm_duplicate: z.boolean().optional().default(false),
+    // The caller's own id for this filing attempt, minted once per form/record
+    // and resent on every retry. The duplicate check above is a check-then-
+    // insert and cannot see an attempt that has not committed yet, so two
+    // in-flight retries of one import would both pass it. This is what actually
+    // makes a retry safe: `waivers.client_submission_id` carries a partial
+    // unique index (20260729020000), so the database refuses the second write
+    // and the loser adopts the winner's row. Same mechanism the online signing
+    // path uses. Optional: a caller that sends none just gets no retry safety.
+    client_submission_id: z.string().uuid().optional(),
   })
   .refine(
     (d) =>

@@ -112,7 +112,9 @@ describe("signStoredPdf", () => {
   });
 });
 
-type Result = { data: unknown; error: { message: string } | null };
+// `code` carries the Postgres SQLSTATE (e.g. 23505 unique_violation), which
+// filePaperWaiver branches on to adopt a raced client_submission_id row.
+type Result = { data: unknown; error: { message: string; code?: string } | null };
 const ok = (data: unknown): Result => ({ data, error: null });
 const fails = (message: string): Result => ({ data: null, error: { message } });
 
@@ -130,6 +132,20 @@ function fakeAdmin(opts: {
   createUser?: Result;
   /** Rows the same-person + same-signing-date duplicate probe finds. */
   duplicates?: Result;
+  /**
+   * An already-filed waiver carrying this call's client_submission_id. A null
+   * `pdf_path` means a previous attempt inserted the row but never stored its
+   * scan, which is a half-filed waiver, not a finished one.
+   */
+  priorSubmission?: {
+    id: string;
+    user_id: string;
+    pdf_path: string | null;
+    email?: string;
+    signed_at?: string;
+  } | null;
+  /** The row the unique index says won, looked up after a 23505 insert. */
+  racedSubmission?: { id: string; user_id: string; pdf_path: string | null } | null;
   insert?: Result;
   upload?: { error: { message: string } | null };
   delete?: { error: { message: string } | null };
@@ -193,10 +209,31 @@ function fakeAdmin(opts: {
           order: () => dupProbe,
           limit: () => Promise.resolve(opts.duplicates ?? ok([])),
         };
+        // The client_submission_id lookups (before any work, and again after a
+        // unique violation) both select "id, user_id" and end in maybeSingle.
+        // Which row comes back depends on whether the insert has run yet.
+        const submissionLookup = {
+          eq: () => submissionLookup,
+          maybeSingle: () => {
+            const row = calls.insert.length
+              ? (opts.racedSubmission ?? null)
+              : (opts.priorSubmission ?? null);
+            // The pre-work lookup also reads email/signed_at to prove the id
+            // belongs to THIS record. Default them to the fixture's own values
+            // so a test only sets them when it is checking the mismatch.
+            return Promise.resolve(
+              ok(
+                row
+                  ? { email: "ada@example.com", signed_at: "2020-01-15T00:00:00.000Z", ...row }
+                  : null,
+              ),
+            );
+          },
+        };
         return {
           select: (cols: string) => {
             calls.selects.push(cols);
-            return dupProbe;
+            return cols.startsWith("id, user_id") ? submissionLookup : dupProbe;
           },
           insert: (row: unknown) => {
             calls.insert.push(row);
@@ -576,6 +613,157 @@ describe("filePaperWaiver", () => {
     // Capped at 20, and the message must not report the cap as the total.
     expect(dup.existing).toHaveLength(20);
     expect(dup.message).toMatch(/at least 20 waivers/);
+  });
+
+  // The duplicate check is check-then-insert: it cannot see an attempt that has
+  // not committed yet, so two retries racing each other would both pass it.
+  // client_submission_id is what actually makes a retry safe.
+  describe("client_submission_id", () => {
+    const SUBMISSION = "99999999-9999-9999-9999-999999999999";
+    const withId = { ...validInput, client_submission_id: SUBMISSION };
+
+    it("returns the original waiver without redoing the work when one is fully filed", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        priorSubmission: {
+          id: "waiver-first",
+          user_id: EXISTING_USER,
+          pdf_path: "waiver-first.pdf",
+        },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
+
+      expect(result).toEqual({ id: "waiver-first", user_id: EXISTING_USER });
+      // The expensive work is skipped entirely: no PDF built, nothing inserted.
+      expect(buildScanPdf).not.toHaveBeenCalled();
+      expect(calls.insert).toHaveLength(0);
+      expect(calls.uploads).toHaveLength(0);
+    });
+
+    // The dangerous case. A row exists but its scan never stored, so reporting
+    // it as filed would hand back a waiver with no document — and a manager can
+    // approve that into somebody's ACTIVE insurance record without noticing.
+    it("finishes a half-filed row rather than reporting it as already filed", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        priorSubmission: { id: "waiver-half", user_id: EXISTING_USER, pdf_path: null },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
+
+      expect(result).toEqual({ id: "waiver-half", user_id: EXISTING_USER });
+      // No second waiver: it resumes the row it found...
+      expect(calls.insert).toHaveLength(0);
+      // ...and actually stores the scan against it, which is what was missing.
+      expect(calls.uploads[0].path).toBe("waiver-half.pdf");
+      expect(calls.updates[0]).toEqual({ pdf_path: "waiver-half.pdf" });
+    });
+
+    it("refuses an id already used for a different record instead of returning its waiver", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        // Same key, different person: a loop that minted one id per BATCH.
+        priorSubmission: {
+          id: "waiver-other",
+          user_id: EXISTING_USER,
+          pdf_path: "waiver-other.pdf",
+          email: "someone.else@example.com",
+        },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filePaperWaiver(admin as any, withId, MANAGER_ID),
+      ).rejects.toThrow(/already belongs to a different waiver/i);
+      expect(calls.insert).toHaveLength(0);
+    });
+
+    it("adopts the winner's row when two retries race past the lookup", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        // Lookup finds nothing (the other attempt had not committed yet), then
+        // the unique index rejects this insert.
+        insert: { data: null, error: { message: "duplicate key", code: "23505" } },
+        racedSubmission: {
+          id: "waiver-winner",
+          user_id: EXISTING_USER,
+          pdf_path: "waiver-winner.pdf",
+        },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
+
+      expect(result).toEqual({ id: "waiver-winner", user_id: EXISTING_USER });
+      // No second waiver, and no scan uploaded over the winner's.
+      expect(calls.uploads).toHaveLength(0);
+    });
+
+    // Losing the insert race to an attempt that is ITSELF still uploading. Both
+    // carry the same scan and write to the same path, so finishing the winner's
+    // row is safe — and stops this attempt returning success for a document
+    // that the winner might yet fail to store.
+    it("finishes the winner's row when the winner has not stored its scan yet", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        insert: { data: null, error: { message: "duplicate key", code: "23505" } },
+        racedSubmission: { id: "waiver-winner", user_id: EXISTING_USER, pdf_path: null },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
+
+      expect(result).toEqual({ id: "waiver-winner", user_id: EXISTING_USER });
+      expect(calls.uploads[0].path).toBe("waiver-winner.pdf");
+    });
+
+    // With a key, the row is claimed by it: deleting it would break the promise
+    // that a retry resolves to the same waiver, and could remove a row another
+    // in-flight attempt has already been told about.
+    it("keeps the row for a retry when the scan upload fails, rather than deleting it", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        upload: { error: { message: "storage down" } },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filePaperWaiver(admin as any, withId, MANAGER_ID),
+      ).rejects.toThrow(/same client_submission_id/);
+      expect(calls.deletes).toHaveLength(0);
+    });
+
+    it("still deletes the half-filed row when there is no key to resume from", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        upload: { error: { message: "storage down" } },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filePaperWaiver(admin as any, validInput, MANAGER_ID),
+      ).rejects.toThrow(/Nothing was filed/);
+      expect(calls.deletes).toEqual(["waiver-1"]);
+    });
+
+    it("carries the id onto the row so a later retry can find it", async () => {
+      const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await filePaperWaiver(admin as any, withId, MANAGER_ID);
+      expect((calls.insert[0] as Record<string, unknown>).client_submission_id).toBe(SUBMISSION);
+    });
+
+    it("files normally, with a null key, when the caller sends none", async () => {
+      const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await filePaperWaiver(admin as any, validInput, MANAGER_ID);
+      expect((calls.insert[0] as Record<string, unknown>).client_submission_id).toBeNull();
+    });
   });
 
   it("looks up the uploader's email for a real user id", async () => {

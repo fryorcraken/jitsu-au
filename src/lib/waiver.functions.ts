@@ -707,6 +707,20 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 // about a submission the caller made, and returns no personal data: whether it
 // landed, and a link to the copy. Safe to call repeatedly, and safe to call when
 // nothing landed at all.
+//
+// ⚠️ THIS ENDPOINT IS UNAUTHENTICATED, and the id is the only thing guarding a
+// signed link to the waiver PDF — health declaration included (see
+// newSubmissionId in submit-resilience.ts). That is sound for an id a signer's
+// own browser minted from a CSPRNG and never wrote down.
+//
+// It is NOT sound for a PAPER waiver. `file_waiver` on the manager agent API
+// lets its caller choose the id, so those values live in import scripts and
+// agent transcripts, and the obvious way to make a retry resend "the same" id
+// is to derive it from the record (uuidv5 of the email, say) — which would make
+// somebody else's scanned waiver readable by anyone who guesses the scheme.
+// Paper filings are therefore excluded here. Nothing is waiting on one: a
+// manager filed it, there is no browser mid-submit to reassure, so answering
+// costs nobody anything and not answering closes the hole.
 export const checkWaiverSubmission = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) =>
     z.object({ client_submission_id: z.string().uuid() }).parse(data),
@@ -718,11 +732,15 @@ export const checkWaiverSubmission = createServerFn({ method: "POST" })
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const { data: row, error } = await supabaseAdmin
         .from("waivers")
-        .select("id, pdf_path")
+        .select("id, pdf_path, signer_meta")
         .eq("client_submission_id", data.client_submission_id)
         .maybeSingle();
       if (error) throw new Error(error.message);
-      if (!row) return { found: false, waiver_id: null, pdf_url: null };
+      // Indistinguishable from "no such submission" on purpose: a caller probing
+      // ids must not learn that one exists but is off limits.
+      if (!row || isPaperWaiver(row.signer_meta)) {
+        return { found: false, waiver_id: null, pdf_url: null };
+      }
       return {
         found: true,
         waiver_id: row.id,
@@ -982,6 +1000,43 @@ export async function filePaperWaiver(
   const email = normalizeEmail(data.email);
   const signed_at = `${data.signed_on}T00:00:00.000Z`;
 
+  // Has this exact filing attempt already landed? Checked before any of the
+  // expensive work: a retry of a call whose reply was lost should not decode
+  // and re-render megabytes of scan just to find out. Same key, same row.
+  const submissionId = data.client_submission_id || null;
+  // Set when a previous attempt inserted the row but died before its scan was
+  // stored. The retry finishes that row rather than filing a second one.
+  let resumeWaiverId: string | null = null;
+  if (submissionId) {
+    const { data: already, error: lookupErr } = await admin
+      .from("waivers")
+      .select("id, user_id, pdf_path, email, signed_at")
+      .eq("client_submission_id", submissionId)
+      .maybeSingle();
+    // Not fatal: falling through re-does the work, and the unique index still
+    // stops a duplicate. Logged because the fallthrough is slower and can end in
+    // a confusing duplicate_waiver, so it should be findable.
+    if (lookupErr) console.error("[filePaperWaiver] submission lookup failed:", lookupErr);
+    if (already) {
+      // One id, one record. A loop that mints the key per BATCH rather than per
+      // record would otherwise hand back the first waiver's id for every record
+      // after it, each with a 200, and file none of them.
+      if (already.email !== email || already.signed_at !== signed_at) {
+        throw new Error(
+          "That client_submission_id already belongs to a different waiver. Mint a new id per record, and resend the same id only when retrying that record.",
+        );
+      }
+      // Only a row whose scan is stored is genuinely done. A row with no
+      // pdf_path is a half-filed waiver: reporting it as filed would let a
+      // manager approve a waiver with no document behind it, which for a paper
+      // record cannot be regenerated from anything.
+      if (already.pdf_path && already.user_id) {
+        return { id: already.id, user_id: already.user_id };
+      }
+      resumeWaiverId = already.id;
+    }
+  }
+
   const { buildScanPdf, decodeBase64 } = await import("./waiver-scan");
 
   // Build the PDF BEFORE creating anything: an unreadable scan is the likely
@@ -1028,7 +1083,8 @@ export async function filePaperWaiver(
   // arriving twice. Warn and let the caller confirm rather than blocking, since
   // a corrected re-scan of one signing date is legitimate. Checked here, not in
   // the agent API, so the manager's own upload form gets the same speed bump.
-  if (!data.confirm_duplicate && existingPersonId) {
+  // Skipped when resuming: that row IS this filing, not a duplicate of it.
+  if (!data.confirm_duplicate && existingPersonId && !resumeWaiverId) {
     // One over the cap, so a full page is recognisable as "there are more" and
     // the message can say so instead of reporting the cap as the total.
     const DUPLICATE_PROBE_CAP = 20;
@@ -1092,40 +1148,65 @@ export async function filePaperWaiver(
     }
   }
 
-  const { data: inserted, error: insErr } = await admin
-    .from("waivers")
-    .insert({
-      user_id: userId,
-      first_name: data.first_name,
-      middle_name: data.middle_name || null,
-      last_name: data.last_name,
-      preferred_name: data.preferred_name || null,
-      date_of_birth: data.date_of_birth,
-      address: data.address,
-      phone: data.phone,
-      email,
-      uts_student_number: data.uts_student_number?.trim() || null,
-      sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
-      emergency_contact_name: data.emergency_contact_name,
-      emergency_contact_relationship: data.emergency_contact_relationship || null,
-      emergency_contact_phone: data.emergency_contact_phone,
-      medical_notes: data.medical_notes || null,
-      is_minor: isMinor,
-      // As on the online form, a minor's emergency contact IS the guardian
-      // who signed, so the guardian columns come from that one block.
-      guardian_name: isMinor ? data.emergency_contact_name : null,
-      guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
-      signed_at,
-      template_version: data.template_version ?? null,
-      // No IP: nobody connected from anywhere to sign this.
-      signer_ip: null,
-      signer_meta,
-    })
-    .select("id")
-    .single();
-  if (insErr || !inserted) throw new Error(insErr?.message || "Could not save the waiver.");
+  // Resuming a half-filed row skips the insert entirely: the record is already
+  // there, only its scan is missing.
+  const { data: inserted, error: insErr } = resumeWaiverId
+    ? { data: { id: resumeWaiverId }, error: null }
+    : await admin
+        .from("waivers")
+        .insert({
+          client_submission_id: submissionId,
+          user_id: userId,
+          first_name: data.first_name,
+          middle_name: data.middle_name || null,
+          last_name: data.last_name,
+          preferred_name: data.preferred_name || null,
+          date_of_birth: data.date_of_birth,
+          address: data.address,
+          phone: data.phone,
+          email,
+          uts_student_number: data.uts_student_number?.trim() || null,
+          sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+          emergency_contact_name: data.emergency_contact_name,
+          emergency_contact_relationship: data.emergency_contact_relationship || null,
+          emergency_contact_phone: data.emergency_contact_phone,
+          medical_notes: data.medical_notes || null,
+          is_minor: isMinor,
+          // As on the online form, a minor's emergency contact IS the guardian
+          // who signed, so the guardian columns come from that one block.
+          guardian_name: isMinor ? data.emergency_contact_name : null,
+          guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
+          signed_at,
+          template_version: data.template_version ?? null,
+          // No IP: nobody connected from anywhere to sign this.
+          signer_ip: null,
+          signer_meta,
+        })
+        .select("id")
+        .single();
+  // Two retries of one filing were genuinely in flight at once, so the lookup
+  // at the top ran before the other had committed. The partial unique index is
+  // what actually stopped the duplicate. Adopt the winner's row rather than
+  // reporting a failure for a waiver that is on file — but only once its scan
+  // is stored. Adopting a row the winner is still uploading (or is about to
+  // roll back) would report a document that may never exist.
+  if (insErr?.code === UNIQUE_VIOLATION && submissionId) {
+    const { data: raced } = await admin
+      .from("waivers")
+      .select("id, user_id, pdf_path")
+      .eq("client_submission_id", submissionId)
+      .maybeSingle();
+    if (raced?.user_id && raced.pdf_path) return { id: raced.id, user_id: raced.user_id };
+    // The winner is mid-flight. Both attempts carry the same scan and write to
+    // the same path, so finishing its row is safe and idempotent rather than a
+    // race to be avoided.
+    if (raced?.id) resumeWaiverId = raced.id;
+  }
+  if (!resumeWaiverId && (insErr || !inserted)) {
+    throw new Error(insErr?.message || "Could not save the waiver.");
+  }
 
-  const waiverId = inserted.id;
+  const waiverId = resumeWaiverId ?? inserted!.id;
   const path = `${waiverId}.pdf`;
   const { error: upErr } = await admin.storage
     .from(BUCKET)
@@ -1133,11 +1214,19 @@ export async function filePaperWaiver(
   if (upErr) {
     // A paper waiver whose scan did not store is worth nothing: there is no
     // generated PDF to fall back on, and no screen anywhere to attach one to
-    // afterwards. Take the empty row back out so the manager can simply file
-    // it again, rather than leaving a waiver that looks real and has no
-    // document behind it. If even the cleanup fails, say so plainly instead
-    // of pointing at a repair path that does not exist.
+    // afterwards.
+    //
+    // With a submission id, the row is KEPT: it belongs to that key, a retry
+    // resumes it, and deleting it would both break that promise and risk
+    // removing a row another in-flight attempt has already been told about.
+    // Without one there is nothing to resume from, so the row still comes back
+    // out and the manager simply files it again.
     console.error("[filePaperWaiver] scan upload failed:", upErr);
+    if (submissionId) {
+      throw new Error(
+        "The scan could not be stored, so this waiver is not filed yet. Retry with the same client_submission_id to finish it.",
+      );
+    }
     const rowRemoved = await removeAbandonedWaiverRow(admin, waiverId);
     throw new Error(
       rowRemoved
@@ -1154,10 +1243,17 @@ export async function filePaperWaiver(
     // The scan IS durably stored at this point, but nothing points at it: an
     // approval here would promote a waiver with no retrievable document, found
     // out only later when a manager tries to open it (getWaiverPdfUrl throws
-    // "Waiver PDF not found"). Unwind the row exactly as the upload failure
-    // above does, and also remove the now-orphaned scan, so a retry starts
-    // clean instead of leaving either behind.
+    // "Waiver PDF not found").
+    //
+    // Keyed calls keep both halves and retry: the scan is already where the
+    // resume will look for it, so finishing is one update rather than a whole
+    // re-upload. Unkeyed calls unwind both, exactly as before.
     console.error("[filePaperWaiver] could not point the waiver at its scan:", pathErr);
+    if (submissionId) {
+      throw new Error(
+        "Could not finish filing this waiver, so it is not filed yet. Retry with the same client_submission_id to finish it.",
+      );
+    }
     const rowRemoved = await removeAbandonedWaiverRow(admin, waiverId);
     const { error: scanCleanupErr } = await admin.storage.from(BUCKET).remove([path]);
     if (scanCleanupErr) {

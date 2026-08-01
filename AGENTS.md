@@ -111,10 +111,11 @@ driven directly by the bundled skill.
       and offer "file it anyway". A thrown error would reach the form as a
       toast with the detail lost, which is what makes the guard useless to a
       human.
-    - The check is **check-then-insert, so it cannot stop two racing retries**
-      — neither sees a row the other has not committed. Closing that needs an
-      idempotency key on the filing itself; until then a bulk importer that
-      retries in flight can still double-file.
+    - The check is **check-then-insert and cannot stop two racing retries** —
+      neither sees a row the other has not committed. `client_submission_id` is
+      what makes a retry safe: same key, same waiver, enforced by the partial
+      unique index from `20260729020000`, exactly as the online signing path
+      uses it.
     - A failed probe is `503 duplicate_check_failed`, deliberately distinct
       from `file_waiver_failed` and deliberately silent about
       `confirm_duplicate` — offering that flag as the fix for an outage invites
