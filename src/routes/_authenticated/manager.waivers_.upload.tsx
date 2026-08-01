@@ -76,8 +76,16 @@ function UploadPaperWaiverPage() {
   // Set when the server recognised this as a waiver the person already has for
   // the same signing date. Filing is not blocked, it just stops for a look:
   // most of the time this is the same paper going in twice.
-  const [duplicates, setDuplicates] = useState<DuplicateWaiverRef[] | null>(null);
-
+  //
+  // Tagged with the email and date it was raised for. A mistyped `signed_on` is
+  // one likely reason a collision happened at all, so a manager who fixes the
+  // date and presses "File it anyway" would otherwise be confirming a warning
+  // about a date they no longer mean.
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    rows: DuplicateWaiverRef[];
+    email: string;
+    signedOn: string;
+  } | null>(null);
   const [signedOn, setSignedOn] = useState(todayLocal());
   const [templateVersion, setTemplateVersion] = useState("");
 
@@ -115,6 +123,13 @@ function UploadPaperWaiverPage() {
   const totalBytes = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
   const tooLarge = totalBytes > MAX_SCAN_BYTES;
   const isMinor = Boolean(dob && signedOn && isMinorOn(dob, signedOn));
+  // The warning only stands for the person and date it was raised about: edit
+  // either and it disappears, rather than sitting there inviting a confirmation
+  // of something that is no longer being filed.
+  const duplicates =
+    duplicateWarning && duplicateWarning.email === email && duplicateWarning.signedOn === signedOn
+      ? duplicateWarning.rows
+      : null;
 
   function addFiles(picked: FileList | null) {
     if (!picked?.length) return;
@@ -150,7 +165,7 @@ function UploadPaperWaiverPage() {
       return;
     }
     setSaving(true);
-    setDuplicates(null);
+    setDuplicateWarning(null);
     try {
       const scan = await Promise.all(
         files.map(async (file) => ({
@@ -182,7 +197,7 @@ function UploadPaperWaiverPage() {
         },
       });
       if (!res.filed) {
-        setDuplicates(res.duplicate);
+        setDuplicateWarning({ rows: res.duplicate, email, signedOn });
         return;
       }
       toast.success("Waiver filed. It is pending until you approve it.");

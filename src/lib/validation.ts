@@ -998,7 +998,10 @@ export const editInvoiceSchema = z
     payment_reference: z.string().trim().min(1).max(64).optional(),
     payment_method: z.enum(invoicePaymentMethods).optional(),
     status: z.enum(["pending", "cancelled", "expired"]).optional(),
-    confirm_paid_edit: z.boolean().optional(),
+    // `.default(false)` to match confirm_duplicate on paperWaiverUploadSchema:
+    // two structurally identical confirmation flags should not parse to
+    // different types (`boolean | undefined` vs `boolean`) for no reason.
+    confirm_paid_edit: z.boolean().optional().default(false),
   })
   .strict()
   .refine(

@@ -36,7 +36,7 @@ import {
   reconciledEditMessage,
   safeEqual,
 } from "@/lib/manager-agent";
-import { DuplicateWaiverError } from "@/lib/waiver-duplicates";
+import { DuplicateCheckFailedError, DuplicateWaiverError } from "@/lib/waiver-duplicates";
 import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
 import type {
   ClubUserEmail,
@@ -396,22 +396,36 @@ async function handleEditInvoice(params: unknown, actingAs: string) {
   const diff = diffInvoicePatch(existing, patch);
   const blocked = reconciledEditBlockers(existing, diff.changed, input.confirm_paid_edit);
   if (blocked.length) {
+    // `previous` is scoped to the blocked fields, not every field the call would
+    // have changed. The whole update is refused atomically, but echoing an
+    // unguarded field's old value here reads as "this was blocked too" — a
+    // caller pairing `previous` with `blocked` would draw the wrong conclusion.
+    const blockedPrevious = Object.fromEntries(blocked.map((f) => [f, diff.previous[f] ?? null]));
     throw new AgentError(
       409,
       "reconciled_invoice",
       reconciledEditMessage(blocked, existing.paid_at!),
-      { blocked, paid_at: existing.paid_at, previous: diff.previous },
+      { blocked, paid_at: existing.paid_at, previous: blockedPrevious },
     );
   }
 
-  const { data: updated, error: updErr } = await db
-    .from("memberships")
-    .update(patch)
-    .eq("id", input.id)
-    .select("*")
-    .single();
-  if (updErr || !updated)
-    throw new AgentError(500, "db_error", updErr?.message ?? "Update failed.");
+  // The guard above read `paid_at`; this writes. A reconciliation landing in
+  // between would otherwise let a guarded edit through against an invoice that
+  // became paid after the check. Matching on the value we read closes that:
+  // if it moved, the update hits no rows and we re-read rather than write.
+  // `.is` is only for NULL/TRUE/FALSE in PostgREST, so an unpaid invoice (the
+  // common case) matches on IS NULL and a paid one on equality.
+  let update = db.from("memberships").update(patch).eq("id", input.id);
+  update = existing.paid_at ? update.eq("paid_at", existing.paid_at) : update.is("paid_at", null);
+  const { data: updated, error: updErr } = await update.select("*").maybeSingle();
+  if (updErr) throw new AgentError(500, "db_error", updErr.message);
+  if (!updated) {
+    throw new AgentError(
+      409,
+      "invoice_changed",
+      "This invoice changed while the edit was being checked (most likely a payment was reconciled). Read it again and re-send the edit if it still applies.",
+    );
+  }
 
   // The one read here that must NOT throw: the update above has already
   // committed, so failing now would report a successful edit as an error and
@@ -470,7 +484,16 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
     // failure: it comes back as a 409 with the waivers it collided with, so the
     // caller can look at them and either stop or re-send with confirm_duplicate.
     if (e instanceof DuplicateWaiverError) {
-      throw new AgentError(409, "duplicate_waiver", e.message, { existing: e.existing });
+      throw new AgentError(409, "duplicate_waiver", e.message, {
+        existing: e.existing,
+        truncated: e.truncated,
+      });
+    }
+    // The probe failed, which is not a verdict on the waiver. 503, so a retry
+    // policy reads "try this again" rather than the "fix your input" that a 4xx
+    // implies — nothing was filed either way.
+    if (e instanceof DuplicateCheckFailedError) {
+      throw new AgentError(503, "duplicate_check_failed", e.message);
     }
     // filePaperWaiver throws plain Errors with member-facing text (the manager
     // web form renders `.message` directly); wrap so the agent gets the same

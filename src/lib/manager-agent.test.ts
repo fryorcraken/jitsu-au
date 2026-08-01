@@ -16,6 +16,7 @@ import {
   safeEqual,
 } from "./manager-agent";
 import { editInvoiceSchema, managerAgentActions, paperWaiverUploadSchema } from "./validation";
+import type { EditInvoiceInput } from "./validation";
 import type { MembershipPlanRow, MembershipRow } from "./membership-types";
 
 describe("safeEqual", () => {
@@ -209,6 +210,23 @@ describe("reconciledEditBlockers", () => {
     expect(msg).toMatch(/price_cents/);
     expect(msg).toMatch(/confirm_paid_edit/);
   });
+
+  // The guard keys off paid_at, so it only holds while paid_at is unreachable
+  // through this endpoint. If it ever became editable, a caller could null it,
+  // rewrite the price unguarded, and set it back — laundering the money record
+  // through exactly the API this guard protects. Pinned rather than assumed.
+  it("cannot be laundered: paid_at is not editable, so the guard cannot be switched off", () => {
+    const id = "11111111-1111-1111-1111-111111111111";
+    expect(editInvoiceSchema.safeParse({ id, paid_at: null }).success).toBe(false);
+    expect(editInvoiceSchema.safeParse({ id, paid_at: "2026-01-01T00:00:00Z" }).success).toBe(
+      false,
+    );
+    expect(INVOICE_EDITABLE_FIELDS).not.toContain("paid_at");
+    // And the patch builder would drop it even if a schema change let it in.
+    expect(
+      buildInvoicePatch({ price_cents: 1, paid_at: null } as Partial<EditInvoiceInput>),
+    ).toEqual({ price_cents: 1 });
+  });
 });
 
 describe("invoiceEditAudit", () => {
@@ -244,6 +262,25 @@ describe("invoiceEditAudit", () => {
       at: "2026-07-31T00:00:00.000Z",
     });
     expect(entry.reconciled).toBe(false);
+    expect(entry.overridden).toBe(false);
+  });
+
+  // A client that sets confirm_paid_edit defensively on every call, then edits
+  // only notes, has overridden nothing. Logging that as an override would put
+  // false "someone rewrote the money record" entries in the one log the club
+  // would use to reconstruct a books-versus-bank disagreement.
+  it("is not 'overridden' when the flag was set but no guarded field moved", () => {
+    const entry = invoiceEditAudit({
+      invoiceId: "inv-1",
+      actor: "manager-1",
+      paidAt: "2026-07-28T11:06:27.181+00:00",
+      confirmed: true,
+      diff: { changed: ["notes"], previous: { notes: null } },
+      patch: { notes: "cash on the night" },
+      at: "2026-07-31T00:00:00.000Z",
+    });
+    // The invoice IS reconciled, but this edit did not touch the money record.
+    expect(entry.reconciled).toBe(true);
     expect(entry.overridden).toBe(false);
   });
 });
@@ -332,6 +369,30 @@ describe("AGENT_MANIFEST", () => {
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
     expect(AGENT_MANIFEST.version).toBe("2");
+  });
+
+  // The changelog is only worth having if it cannot fall behind the version it
+  // describes. Bumping one without the other is the failure this catches.
+  it("documents the current version at the head of the changelog", () => {
+    expect(AGENT_MANIFEST.changes[0].version).toBe(AGENT_MANIFEST.version);
+    expect(AGENT_MANIFEST.changes[0].notes.length).toBeGreaterThan(0);
+  });
+
+  it("has no duplicate or empty changelog entries", () => {
+    const versions = AGENT_MANIFEST.changes.map((c) => c.version);
+    expect(new Set(versions).size).toBe(versions.length);
+    for (const entry of AGENT_MANIFEST.changes) {
+      expect(entry.notes.every((n) => n.trim().length > 0)).toBe(true);
+    }
+  });
+
+  it("tells a caching client which calls could newly start failing", () => {
+    // The two refusals introduced in "2" are the notes that matter most to a
+    // client holding a cached "1": they turn calls that used to succeed into
+    // errors. If either stops being announced, a batch job finds out the hard way.
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "2")!.notes.join(" ");
+    expect(notes).toMatch(/reconciled_invoice/);
+    expect(notes).toMatch(/duplicate_waiver/);
   });
 
   it("documents the confirmation flags the schemas actually accept", () => {

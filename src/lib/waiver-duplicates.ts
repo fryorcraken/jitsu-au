@@ -27,12 +27,16 @@ export type DuplicateWaiverRef = {
  * Names the existing rows so the caller can go and look at them rather than
  * guessing which of several near-identical waivers is meant.
  */
-export function duplicateWaiverMessage(existing: DuplicateWaiverRef[]): string {
+export function duplicateWaiverMessage(existing: DuplicateWaiverRef[], truncated = false): string {
   const count = existing.length;
   const date = existing[0]?.signed_on ?? "that date";
   const listed = existing.map((w) => `${w.id} (${w.approval_status})`).join(", ");
+  // "at least" when the probe hit its cap: reporting a capped count as the total
+  // would understate a mess at exactly the moment the caller most needs to know
+  // how big it is.
+  const howMany = `${truncated ? "at least " : ""}${count} waiver${count === 1 ? "" : "s"}`;
   return (
-    `This person already has ${count} waiver${count === 1 ? "" : "s"} signed on ${date}: ${listed}. ` +
+    `This person already has ${howMany} signed on ${date}: ${listed}. ` +
     "Filing this one would add another copy of the same paperwork. " +
     "If it is a corrected re-scan and you mean to keep both, send it again with confirm_duplicate set to true."
   );
@@ -46,11 +50,35 @@ export function duplicateWaiverMessage(existing: DuplicateWaiverRef[]): string {
  */
 export class DuplicateWaiverError extends Error {
   existing: DuplicateWaiverRef[];
+  /** True when more same-date waivers exist than the probe returned. */
+  truncated: boolean;
 
-  constructor(existing: DuplicateWaiverRef[]) {
-    super(duplicateWaiverMessage(existing));
+  constructor(existing: DuplicateWaiverRef[], truncated = false) {
+    super(duplicateWaiverMessage(existing, truncated));
     this.name = "DuplicateWaiverError";
     this.existing = existing;
+    this.truncated = truncated;
+  }
+}
+
+/**
+ * Thrown when the duplicate probe itself failed — a transient read error, not a
+ * verdict about the waiver. Kept distinct from every other filing failure
+ * because the right response differs: this one is "retry", where an unreadable
+ * scan is "fix the file".
+ *
+ * Deliberately says nothing about `confirm_duplicate`. That flag does skip the
+ * probe, but offering it as the remedy for an infrastructure error invites a
+ * retry policy to set it on any failure, which would disable the check for a
+ * genuine duplicate too. A caller who truly means to file unchecked can still
+ * pass it; it just is not advice this error gives.
+ */
+export class DuplicateCheckFailedError extends Error {
+  constructor() {
+    super(
+      "Could not check whether this waiver has already been filed, so nothing was filed. Try again.",
+    );
+    this.name = "DuplicateCheckFailedError";
   }
 }
 

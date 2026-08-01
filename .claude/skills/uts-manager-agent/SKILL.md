@@ -135,6 +135,11 @@ audit log with who made it and each field's old and new value.
 > are not guarded: a note claims nothing about money, and expiring or cancelling
 > a membership that ran its course is an ordinary lifecycle move.
 >
+> **The refusal is all-or-nothing.** An unguarded field sent in the same call
+> (say `notes` alongside `price_cents`) is not written either. `error.previous`
+> covers only the `blocked` fields, so it always lines up with `blocked` rather
+> than listing everything the call would have changed.
+>
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
 
@@ -196,12 +201,16 @@ scripts/agent.sh file_waiver '{
 > - **Filing the same paper twice is caught.** If the person already has a
 >   waiver signed on that `signed_on`, the call is refused with
 >   `409 duplicate_waiver` and the error's `existing` array lists the waivers it
->   collided with (`id`, `approval_status`, `signed_on`). **A retried or
->   duplicated import batch is the reason this exists — do not paper over it
->   with `confirm_duplicate`.** Stop, work out how many of the batch already
->   landed, and resume from there. Only set `"confirm_duplicate": true` when the
->   second document is real (a corrected re-scan of the same signing date), and
->   say so to the manager when you do.
+>   collided with (`id`, `approval_status`, `signed_on`), plus `truncated: true`
+>   if there are more than 20. **A retried or duplicated import batch is the
+>   reason this exists — do not paper over it with `confirm_duplicate`.** Stop,
+>   work out how many of the batch already landed, and resume from there. Only
+>   set `"confirm_duplicate": true` when the second document is real (a corrected
+>   re-scan of the same signing date), and say so to the manager when you do.
+> - **`503 duplicate_check_failed` means the check itself broke, not that the
+>   waiver is a duplicate.** Nothing was filed. Retry the call as-is. Do **not**
+>   reach for `confirm_duplicate` to get past it: that disables the check rather
+>   than fixing it, and would let a genuine duplicate through.
 
 ## Guidance
 
@@ -217,8 +226,13 @@ scripts/agent.sh file_waiver '{
   `file_waiver_failed` with a plain-English message.
 - Two error codes carry extra fields and both mean "stop and confirm", never
   "retry with the flag set": `reconciled_invoice` (409, with `blocked`,
-  `paid_at`, `previous`) and `duplicate_waiver` (409, with `existing`). Both
-  have an override, and both overrides are the manager's call, not yours.
-- The manifest's `version` tells generations apart. It is `"2"` as of the
-  reconciled-invoice guard, duplicate detection, the `changed`/`previous` echo
-  and the session-allowance fields.
+  `paid_at`, `previous`) and `duplicate_waiver` (409, with `existing`,
+  `truncated`). Both have an override, and both overrides are the manager's
+  call, not yours.
+- `duplicate_check_failed` (503) is the opposite: a transient failure, safe and
+  correct to retry unchanged. Nothing was filed. Retryable failures are 5xx;
+  a 4xx means the request itself needs to change before it will ever succeed.
+- The manifest's `version` tells generations apart (currently `"2"`), and its
+  `changes` array says what each version actually moved, newest first. If you
+  cached the manifest at the start of a long batch, read `changes` rather than
+  diffing prose — it calls out the calls that used to succeed and now refuse.

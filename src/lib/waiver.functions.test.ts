@@ -495,17 +495,87 @@ describe("filePaperWaiver", () => {
     expect(calls.insert).toHaveLength(1);
   });
 
-  it("fails closed if the duplicate check itself errors, naming the way past it", async () => {
+  // A transient probe failure is not a verdict on the waiver, so it gets its own
+  // error type rather than being folded in with an unreadable scan. It must NOT
+  // advertise confirm_duplicate as the remedy: a retry policy that applied that
+  // advice mechanically would disable the check for a real duplicate too.
+  it("fails closed with a distinct error if the duplicate check itself errors", async () => {
     const { admin, calls } = fakeAdmin({
       existingId: EXISTING_USER,
       duplicates: { data: null, error: { message: "connection reset" } },
     });
     const { filePaperWaiver } = await import("./waiver.functions");
+    const { DuplicateCheckFailedError } = await import("./waiver-duplicates");
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = await filePaperWaiver(admin as any, validInput, MANAGER_ID).catch((e) => e);
+    expect(err).toBeInstanceOf(DuplicateCheckFailedError);
+    expect((err as Error).message).not.toMatch(/confirm_duplicate/);
+    expect(calls.insert).toHaveLength(0);
+  });
+
+  // A refused filing must leave nothing behind. The external probe verified this
+  // for a validation failure; the duplicate probe added two new ways to refuse,
+  // and creating the person before them would strand a locked auth user and a
+  // profile for someone who has no waiver — afterwards indistinguishable from a
+  // real lead, and holding that email address for good.
+  // An address the club has never seen cannot have a same-date waiver, so the
+  // probe is not consulted for one. That is what stops a probe failure from
+  // stranding a locked auth user and a profile for somebody with no waiver —
+  // afterwards indistinguishable from a real lead, and holding that email for
+  // good. Proven by giving it a probe that WOULD fail and filing anyway.
+  it("never lets the duplicate probe strand a newly created person", async () => {
+    const { admin, calls } = fakeAdmin({
+      existingId: null,
+      duplicates: { data: null, error: { message: "connection reset" } },
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await filePaperWaiver(admin as any, validInput, MANAGER_ID);
+
+    expect(result.user_id).toBe(NEW_USER);
+    // The probe was skipped, not merely survived.
+    expect(calls.selects).not.toContain("id, approval_status, signed_at");
+  });
+
+  // The mirror: an address the club DOES know runs the probe, and it runs
+  // against the existing person, so a refusal creates nothing either way.
+  it("probes against the existing person, creating nobody when it refuses", async () => {
+    const { admin, calls } = fakeAdmin({
+      existingId: EXISTING_USER,
+      duplicates: ok([
+        { id: "w-1", approval_status: "pending", signed_at: "2020-01-15T00:00:00.000Z" },
+      ]),
+    });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { DuplicateWaiverError } = await import("./waiver-duplicates");
+
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       filePaperWaiver(admin as any, validInput, MANAGER_ID),
-    ).rejects.toThrow(/confirm_duplicate/);
-    expect(calls.insert).toHaveLength(0);
+    ).rejects.toBeInstanceOf(DuplicateWaiverError);
+    expect(calls.selects).toContain("id, approval_status, signed_at");
+    expect(calls.createUser).toHaveLength(0);
+    expect(calls.upsert).toHaveLength(0);
+  });
+
+  it("says 'at least' when there are more same-date waivers than the probe returns", async () => {
+    const many = Array.from({ length: 21 }, (_, i) => ({
+      id: `w-${i}`,
+      approval_status: "pending",
+      signed_at: "2020-01-15T00:00:00.000Z",
+    }));
+    const { admin } = fakeAdmin({ existingId: EXISTING_USER, duplicates: ok(many) });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { DuplicateWaiverError } = await import("./waiver-duplicates");
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = await filePaperWaiver(admin as any, validInput, MANAGER_ID).catch((e) => e);
+    const dup = err as InstanceType<typeof DuplicateWaiverError>;
+    expect(dup.truncated).toBe(true);
+    // Capped at 20, and the message must not report the cap as the total.
+    expect(dup.existing).toHaveLength(20);
+    expect(dup.message).toMatch(/at least 20 waivers/);
   });
 
   it("looks up the uploader's email for a real user id", async () => {

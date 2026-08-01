@@ -102,7 +102,23 @@ driven directly by the bundled skill.
     colliding rows come back in `error.existing`); `confirm_duplicate` files it
     anyway, for the corrected re-scan that is a genuine second document. The
     check lives in `filePaperWaiver`, so the manager's own upload form gets the
-    same speed bump (it renders a "file it anyway" step rather than a toast).
+    same speed bump.
+    - **The two surfaces present that one check differently on purpose, and
+      this is not an inconsistency to tidy up.** The HTTP API returns
+      `409 duplicate_waiver`, because a machine caller needs a distinct status
+      to branch on. `uploadPaperWaiver` instead returns a `filed: false` result
+      carrying the collision, so the screen can show the manager _what_ it hit
+      and offer "file it anyway". A thrown error would reach the form as a
+      toast with the detail lost, which is what makes the guard useless to a
+      human.
+    - The check is **check-then-insert, so it cannot stop two racing retries**
+      — neither sees a row the other has not committed. Closing that needs an
+      idempotency key on the filing itself; until then a bulk importer that
+      retries in flight can still double-file.
+    - A failed probe is `503 duplicate_check_failed`, deliberately distinct
+      from `file_waiver_failed` and deliberately silent about
+      `confirm_duplicate` — offering that flag as the fix for an outage invites
+      a retry policy to disable the guard wholesale.
 - **Agent glue:** `.claude/skills/uts-manager-agent/` — a skill (with a `curl`
   helper) that documents how to call the endpoint. An MCP wrapper is equally
   simple: one tool per manifest action, forwarding to this endpoint.
@@ -127,6 +143,13 @@ changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
 test so the bump is a deliberate edit, and the current value is `"2"`.
+
+**Add a `changes` entry in the same edit.** A version number alone says only
+that something moved; the client that most needs to know what is the one that
+read the manifest at the start of a long import and cannot re-read it mid-run.
+A test asserts the head of `changes` matches `version`, so the two cannot drift.
+Call out anything that turns a previously-succeeding call into an error — that
+is the note a caching client is actually reading for.
 
 ## Plans you show the user are product-level
 

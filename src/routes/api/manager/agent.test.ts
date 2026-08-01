@@ -61,7 +61,7 @@ function fakeAdminForListInvoices(rows: (typeof ROW)[], total: number) {
  * row, update it, then look its plan up to decorate the echo. Records the patch
  * so a test can assert nothing was written when the edit was refused.
  */
-function fakeAdminForEditInvoice(existing: Record<string, unknown> | null) {
+function fakeAdminForEditInvoice(existing: Record<string, unknown> | null, raced = false) {
   const updates: Record<string, unknown>[] = [];
   return {
     updates,
@@ -72,13 +72,17 @@ function fakeAdminForEditInvoice(existing: Record<string, unknown> | null) {
             select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(ok(existing)) }) }),
             update: (patch: Record<string, unknown>) => {
               updates.push(patch);
-              return {
-                eq: () => ({
-                  select: () => ({
-                    single: () => Promise.resolve(ok({ ...existing, ...patch })),
-                  }),
-                }),
+              // The update is guarded on the paid_at that was read, so the chain
+              // is .eq("id") then .eq/.is("paid_at") then .select().maybeSingle().
+              // `raced` models a concurrent write moving paid_at underneath us:
+              // the filter matches nothing and PostgREST returns null.
+              const chain = {
+                eq: () => chain,
+                is: () => chain,
+                select: () => chain,
+                maybeSingle: () => Promise.resolve(ok(raced ? null : { ...existing, ...patch })),
               };
+              return chain;
             },
           };
         }
@@ -102,6 +106,16 @@ vi.mock("@/integrations/supabase/client.server", () => ({
   get supabaseAdmin() {
     return currentAdmin;
   },
+}));
+
+// filePaperWaiver's own behaviour is covered in waiver.functions.test.ts. What
+// is mocked here is only the throw, so these tests pin the one thing the route
+// owns: which HTTP status and payload each failure becomes. That mapping is what
+// the skill tells agents to branch on — 503 retry, 409 stop and confirm — so a
+// silent collapse to 422 turns a transient outage into an abandoned record.
+const filePaperWaiverMock = vi.fn();
+vi.mock("@/lib/waiver.functions", () => ({
+  filePaperWaiver: (...args: unknown[]) => filePaperWaiverMock(...args),
 }));
 
 const BREAK_GLASS_KEY = "test-break-glass-key";
@@ -208,6 +222,25 @@ describe("manager agent route", () => {
       expect(fake.updates[0]).toEqual({ price_cents: 24500 });
     });
 
+    // The refusal is atomic, and `previous` must line up with `blocked` — a
+    // caller reading the two together would otherwise take the note's old value
+    // as part of what was refused.
+    it("refuses the whole call, echoing previous only for the blocked fields", async () => {
+      const fake = fakeAdminForEditInvoice({ ...PAID, notes: "old text" });
+      currentAdmin = fake.db;
+      const res = await post({
+        action: "edit_invoice",
+        params: { id: INVOICE_ID, price_cents: 500, notes: "typo" },
+      });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error.blocked).toEqual(["price_cents"]);
+      expect(body.error.previous).toEqual({ price_cents: 0 });
+      expect(body.error.previous).not.toHaveProperty("notes");
+      // Nothing written, including the unguarded field sent alongside.
+      expect(fake.updates).toHaveLength(0);
+    });
+
     it("still lets a manager fix a note, which claims nothing about money", async () => {
       const fake = fakeAdminForEditInvoice(PAID);
       currentAdmin = fake.db;
@@ -246,10 +279,99 @@ describe("manager agent route", () => {
     expect(body.result.previous).toEqual({ price_cents: 10000 });
   });
 
+  // The guard reads paid_at, then writes. A reconciliation landing in between
+  // would otherwise let a guarded edit through against an invoice that became
+  // paid after the check said it was not.
+  it("refuses the write if the invoice was reconciled between the check and the update", async () => {
+    const fake = fakeAdminForEditInvoice({ ...ROW, id: INVOICE_ID, paid_at: null }, true);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "edit_invoice",
+      params: { id: INVOICE_ID, price_cents: 24500 },
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("invoice_changed");
+    // Tells the caller to re-read rather than blindly retry into the same race.
+    expect(body.error.message).toMatch(/read it again/i);
+  });
+
   it("reports a missing invoice as not_found rather than a guard failure", async () => {
     currentAdmin = fakeAdminForEditInvoice(null).db;
     const res = await post({ action: "edit_invoice", params: { id: INVOICE_ID, notes: "x" } });
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe("not_found");
+  });
+
+  describe("file_waiver failure mapping", () => {
+    const params = {
+      first_name: "Ada",
+      last_name: "Lovelace",
+      date_of_birth: "1990-12-10",
+      address: "1 Broadway, Ultimo NSW",
+      phone: "0400000000",
+      email: "ada@example.com",
+      emergency_contact_name: "Charles Babbage",
+      emergency_contact_phone: "0400000001",
+      signed_on: "2020-01-15",
+      scan: [{ name: "w.pdf", type: "application/pdf", data: "aGlw" }],
+    };
+
+    beforeEach(() => {
+      currentAdmin = {};
+      filePaperWaiverMock.mockReset();
+    });
+
+    it("maps a duplicate to 409 with the colliding waivers, not a generic failure", async () => {
+      const { DuplicateWaiverError } = await import("@/lib/waiver-duplicates");
+      const rows = [{ id: "w-1", approval_status: "pending", signed_on: "2020-01-15" }];
+      filePaperWaiverMock.mockRejectedValue(new DuplicateWaiverError(rows));
+
+      const res = await post({ action: "file_waiver", params });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error.code).toBe("duplicate_waiver");
+      // The ids are the actionable part: without them a caller cannot go and
+      // look at what it collided with.
+      expect(body.error.existing).toEqual(rows);
+      expect(body.error.truncated).toBe(false);
+    });
+
+    it("passes truncation through so a caller is not told a capped count is the total", async () => {
+      const { DuplicateWaiverError } = await import("@/lib/waiver-duplicates");
+      const rows = [{ id: "w-1", approval_status: "pending", signed_on: "2020-01-15" }];
+      filePaperWaiverMock.mockRejectedValue(new DuplicateWaiverError(rows, true));
+
+      const body = await (await post({ action: "file_waiver", params })).json();
+      expect(body.error.truncated).toBe(true);
+    });
+
+    // 503, not 4xx: the request is fine and nothing was filed, so the agent
+    // should repeat it unchanged rather than treat the record as rejected.
+    it("maps a failed duplicate probe to a retryable 503, distinct from a bad scan", async () => {
+      const { DuplicateCheckFailedError } = await import("@/lib/waiver-duplicates");
+      filePaperWaiverMock.mockRejectedValue(new DuplicateCheckFailedError());
+
+      const res = await post({ action: "file_waiver", params });
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.error.code).toBe("duplicate_check_failed");
+      // Must not point the caller at the flag that would disable the check.
+      expect(body.error.message).not.toMatch(/confirm_duplicate/);
+    });
+
+    it("still maps an ordinary filing failure to 422", async () => {
+      filePaperWaiverMock.mockRejectedValue(new Error("scan[0] is not valid base64."));
+      const res = await post({ action: "file_waiver", params });
+      expect(res.status).toBe(422);
+      expect((await res.json()).error.code).toBe("file_waiver_failed");
+    });
+
+    it("returns the filed waiver on success", async () => {
+      filePaperWaiverMock.mockResolvedValue({ id: "w-9", user_id: "u-9" });
+      const res = await post({ action: "file_waiver", params });
+      expect(res.status).toBe(200);
+      expect((await res.json()).result).toEqual({ id: "w-9", user_id: "u-9" });
+    });
   });
 });

@@ -28,14 +28,37 @@ export type AgentActionSpec = {
 export const AGENT_MANIFEST: {
   service: string;
   version: string;
+  changes: { version: string; notes: string[] }[];
   actions: AgentActionSpec[];
 } = {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
-  // list. Everything a caller gained since "1": the session-allowance fields on
-  // every invoice, the reconciled-invoice guard and changed/previous echo on
-  // edit_invoice, and duplicate detection on file_waiver.
+  // list. See `changes` for what each version actually moved.
   version: "2",
+  // What changed in each version, newest first.
+  //
+  // A bare version number tells a client THAT something moved, never what — and
+  // the one client that most needs to know is the one that cached the manifest
+  // at the start of a long bulk import and cannot re-read it mid-run. Diffing
+  // whole manifest prose is not an answer.
+  //
+  // Deliberately a changelog and not a per-action `since` tag: every action here
+  // existed in "1", so `since` would read "1" on all four and say nothing. What
+  // moves between versions is the behaviour INSIDE an action — a new refusal, a
+  // new response field — which is what these notes name.
+  changes: [
+    {
+      version: "2",
+      notes: [
+        "edit_invoice: price_cents / payment_reference / payment_method on a PAID invoice are refused with 409 reconciled_invoice unless confirm_paid_edit is true. A call that used to succeed can now fail.",
+        "edit_invoice: the result gained `changed` and `previous`.",
+        "file_waiver: a second waiver for the same person and signed_on is refused with 409 duplicate_waiver unless confirm_duplicate is true. A call that used to succeed can now fail.",
+        "file_waiver: a failed duplicate check is 503 duplicate_check_failed; nothing was filed and the call is safe to retry unchanged.",
+        "list_users / list_invoices: every invoice gained sessions_allowed and sessions_remaining.",
+      ],
+    },
+    { version: "1", notes: ["First published action set."] },
+  ],
   actions: [
     {
       name: "list_users",
@@ -77,7 +100,7 @@ export const AGENT_MANIFEST: {
       name: "edit_invoice",
       method: "POST",
       summary:
-        "Correct an invoice's detail fields. Returns the updated invoice plus `changed` (the fields that actually moved) and `previous` (what they held before). Cannot set status to 'active' — activation grants the member role and emails the member, so it runs through bank reconciliation, not here. On an invoice that has been PAID (paid_at set), price_cents / payment_reference / payment_method describe money that already moved: they are refused with 409 reconciled_invoice unless confirm_paid_edit is true. Every edit is written to the server audit log (who, when, field, old -> new).",
+        "Correct an invoice's detail fields. Returns the updated invoice plus `changed` (the fields that actually moved) and `previous` (what they held before). Cannot set status to 'active' — activation grants the member role and emails the member, so it runs through bank reconciliation, not here. On an invoice that has been PAID (paid_at set), price_cents / payment_reference / payment_method describe money that already moved: they are refused with 409 reconciled_invoice unless confirm_paid_edit is true. A refusal is atomic — NOTHING is written, including any unguarded field sent in the same call — and the error's `previous` covers only the `blocked` fields. Every edit is written to the server audit log (who, when, field, old -> new).",
       params: [
         { name: "id", required: true, description: "Invoice (membership) UUID." },
         { name: "price_cents", required: false, description: "Amount owed, integer cents." },
@@ -109,7 +132,7 @@ export const AGENT_MANIFEST: {
       name: "file_waiver",
       method: "POST",
       summary:
-        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in the error); pass confirm_duplicate to file it anyway.",
+        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in `error.existing`, with `truncated: true` if there are more than 20); pass confirm_duplicate to file it anyway. If the duplicate check itself fails, you get 503 duplicate_check_failed and NOTHING was filed — retry it, do not reach for confirm_duplicate.",
       params: [
         { name: "first_name", required: true, description: "As written on the form." },
         { name: "middle_name", required: false, description: "As written on the form." },
@@ -273,8 +296,12 @@ export const INVOICE_EDITABLE_FIELDS = [
 /**
  * Turn a validated edit_invoice input into a DB patch containing only the fields
  * the caller actually supplied (so unspecified columns are never overwritten).
+ *
+ * Takes a Partial rather than a whole `EditInvoiceInput`: this reads the five
+ * editable fields and nothing else, so requiring `id` or the `confirm_paid_edit`
+ * flag in the signature would only be asking callers for values it ignores.
  */
-export function buildInvoicePatch(input: EditInvoiceInput): Partial<MembershipRow> {
+export function buildInvoicePatch(input: Partial<EditInvoiceInput>): Partial<MembershipRow> {
   const patch: Partial<MembershipRow> = {};
   if (input.price_cents !== undefined) patch.price_cents = input.price_cents;
   if (input.notes !== undefined) patch.notes = input.notes;
@@ -377,8 +404,15 @@ export function invoiceEditAudit(opts: {
     actor: opts.actor,
     at: opts.at,
     reconciled: Boolean(opts.paidAt),
-    // Only meaningful on a reconciled invoice: elsewhere the flag was a no-op.
-    overridden: Boolean(opts.paidAt) && opts.confirmed === true,
+    // True only when the flag actually let a guarded field through. A caller
+    // that sets confirm_paid_edit defensively on every call, then edits only
+    // notes, has overridden nothing — and logging that as an override would put
+    // false "someone rewrote the money record" entries in the very log the club
+    // would reach for to reconstruct a books-versus-bank disagreement.
+    overridden:
+      Boolean(opts.paidAt) &&
+      opts.confirmed === true &&
+      opts.diff.changed.some((f) => RECONCILED_GUARDED_FIELDS.includes(f)),
     changes: opts.diff.changed.map((field) => ({
       field,
       from: opts.diff.previous[field] ?? null,
