@@ -164,6 +164,90 @@ export const AGENT_MANIFEST: {
         },
       ],
     },
+    {
+      name: "list_documents",
+      method: "POST",
+      summary:
+        "List the club's documents (versioned markdown pages served at /docs/<slug>) with their live version, visibility and whether they are taking comments.",
+      params: [],
+    },
+    {
+      name: "get_document",
+      method: "POST",
+      summary:
+        "Read one document's full markdown. Returns the live version unless you name one. Read this before saving an edit: save_document replaces the whole body, so an edit built without reading first silently drops everything it did not include.",
+      params: [
+        { name: "slug", required: true, description: "The document's URL key, e.g. house-rules." },
+        {
+          name: "version",
+          required: false,
+          description: "Read a specific version instead of the live one.",
+        },
+      ],
+    },
+    {
+      name: "save_document",
+      method: "POST",
+      summary:
+        "Create or update a document. An unknown slug creates it; a known one adds a NEW version and publishes it — the body is replaced wholesale, never patched. Past versions are kept, and comments stay attached to the version they were written against, so readers whose comments predate this edit are shown that the wording moved on.",
+      params: [
+        {
+          name: "slug",
+          required: true,
+          description:
+            "URL key: lowercase letters, numbers and single hyphens (house-rules). A new slug creates a new document, so a typo makes a second one at a second URL.",
+        },
+        { name: "title", required: true, description: "Shown as the page heading." },
+        {
+          name: "body_md",
+          required: true,
+          description:
+            "The whole document as markdown, up to 200000 characters. This REPLACES the previous body.",
+        },
+        {
+          name: "visibility",
+          required: false,
+          description:
+            "public | members | managers. Omit to leave it as it is; a new document defaults to members. 'managers' is the one to use for a draft.",
+        },
+        {
+          name: "annotations_enabled",
+          required: false,
+          description:
+            "Whether readers may comment. Omit to leave it as it is; new documents accept comments.",
+        },
+        {
+          name: "change_note",
+          required: false,
+          description:
+            "What changed, in your own words. Shown to readers whose comments were written against an earlier version.",
+        },
+      ],
+    },
+    {
+      name: "list_document_annotations",
+      method: "POST",
+      summary:
+        "Read the SHARED comments on a document — what members said, in threads, with the passage each was about. Private notes are never returned: they are private from the club too, by design, so this is not a complete view of everything readers wrote.",
+      params: [
+        { name: "slug", required: true, description: "The document's URL key." },
+        {
+          name: "version",
+          required: false,
+          description: "Only comments written against this version.",
+        },
+        {
+          name: "include_resolved",
+          required: false,
+          description: "Include resolved threads. Default false.",
+        },
+        {
+          name: "limit",
+          required: false,
+          description: "Max comments to return (1-500, default 200).",
+        },
+      ],
+    },
   ],
 };
 

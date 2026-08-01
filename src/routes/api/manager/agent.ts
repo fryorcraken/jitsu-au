@@ -15,11 +15,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ZodError } from "zod";
 import {
   editInvoiceSchema,
+  getDocumentSchema,
   listAgentInvoicesSchema,
   listAgentUsersSchema,
+  listDocumentAnnotationsSchema,
   managerAgentActions,
   nameWithPreferred,
   paperWaiverUploadSchema,
+  saveDocumentSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -40,6 +43,14 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
+import {
+  loadDocument,
+  projectAnnotation,
+  projectDocument,
+  saveDocument,
+} from "@/lib/document-admin";
+import { asDocumentClient } from "@/lib/document-types";
+import type { DocumentAnnotationRow, DocumentRow } from "@/lib/document-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
@@ -427,6 +438,160 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
   }
 }
 
+/**
+ * Cap on documents returned by `list_documents`. Generous: a club with more
+ * pages than this has outgrown a flat list, and the handler warns rather than
+ * truncating in silence.
+ */
+const DOCUMENTS_LIMIT = 500;
+
+// ---- action: list_documents ----
+async function handleListDocuments() {
+  const db = asDocumentClient(await adminClient());
+
+  // Only the LIVE version of each document, not every version ever saved.
+  //
+  // Reading the whole `document_versions` table to pick out the current rows
+  // grows without bound (every save adds one) and would eventually be truncated
+  // by the server-side row cap — silently, and in the worst possible way: a
+  // document whose `is_current` row fell outside the window would be reported
+  // with `title: null, version: null`, a confident wrong answer of exactly the
+  // kind the comment in `handleListUsers` exists to prevent. `is_current` is a
+  // partial unique index, so this is one row per document by construction.
+  //
+  // The live version is the one flagged `is_current`, NOT the highest-numbered
+  // one. Those differ whenever a manager has rolled back to an earlier version,
+  // and reporting the newest as live would have an agent read version 9, edit
+  // it, and publish it over the version 4 the club deliberately went back to.
+  const [{ data: docs, error }, { data: versions, error: vErr }] = await Promise.all([
+    db.from("documents").select("*").order("slug").limit(DOCUMENTS_LIMIT),
+    db
+      .from("document_versions")
+      .select("document_id, title, version, created_at, change_note")
+      .eq("is_current", true)
+      .limit(DOCUMENTS_LIMIT),
+  ]);
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (vErr) throw new AgentError(500, "db_error", vErr.message);
+  if ((docs ?? []).length >= DOCUMENTS_LIMIT) {
+    console.warn(`[agent.list_documents] documents capped at ${DOCUMENTS_LIMIT}; list truncated`);
+  }
+
+  const liveByDoc = new Map((versions ?? []).map((v) => [v.document_id, v]));
+
+  // How many versions each document has, counted in the database rather than by
+  // reading the rows: "this page has been rewritten nine times" is context a
+  // manager wants before editing it, and it must not cost an unbounded read.
+  const countByDoc = new Map<string, number>();
+  await Promise.all(
+    ((docs ?? []) as DocumentRow[]).map(async (d) => {
+      const { count, error: cErr } = await db
+        .from("document_versions")
+        .select("*", { count: "exact", head: true })
+        .eq("document_id", d.id);
+      if (cErr) throw new AgentError(500, "db_error", cErr.message);
+      countByDoc.set(d.id, count ?? 0);
+    }),
+  );
+
+  const documents = ((docs ?? []) as DocumentRow[]).map((d) => {
+    const live = liveByDoc.get(d.id);
+    return {
+      slug: d.slug,
+      title: live?.title ?? null,
+      version: live?.version ?? null,
+      versions: countByDoc.get(d.id) ?? 0,
+      visibility: d.visibility,
+      annotations_enabled: d.annotations_enabled,
+      url: `/docs/${d.slug}`,
+      change_note: live?.change_note ?? null,
+      updated_at: live?.created_at ?? d.updated_at,
+    };
+  });
+  return { count: documents.length, documents };
+}
+
+// ---- action: get_document ----
+async function handleGetDocument(params: unknown) {
+  const input = getDocumentSchema.parse(params);
+  const db = asDocumentClient(await adminClient());
+  const loaded = await loadDocument(db, input.slug, input.version);
+  // A manager token sees every document, drafts included, so there is no
+  // visibility check here — unlike the public reader, which hides a missing
+  // document and a forbidden one behind the same words.
+  if (!loaded) throw new AgentError(404, "not_found", "No such document, or no such version.");
+  return { document: projectDocument(loaded) };
+}
+
+// ---- action: save_document ----
+async function handleSaveDocument(params: unknown, actingAs: string) {
+  const input = saveDocumentSchema.parse(params);
+  const db = asDocumentClient(await adminClient());
+  try {
+    const result = await saveDocument(db, input, actingAs);
+    return {
+      slug: result.slug,
+      version: result.version,
+      created: result.created,
+      url: `/docs/${result.slug}`,
+    };
+  } catch (e) {
+    // saveDocument throws plain Errors with manager-facing text (a promotion
+    // race, a failed insert). Wrap so the agent gets that message inside the
+    // endpoint's stable error envelope rather than a bare 500.
+    throw new AgentError(
+      422,
+      "save_document_failed",
+      e instanceof Error ? e.message : "Could not save the document.",
+    );
+  }
+}
+
+// ---- action: list_document_annotations ----
+async function handleListDocumentAnnotations(params: unknown) {
+  const input = listDocumentAnnotationsSchema.parse(params);
+  const db = asDocumentClient(await adminClient());
+
+  const { data: doc, error: docErr } = await db
+    .from("documents")
+    .select("id, slug")
+    .eq("slug", input.slug)
+    .maybeSingle();
+  if (docErr) throw new AgentError(500, "db_error", docErr.message);
+  if (!doc) throw new AgentError(404, "not_found", "No such document.");
+
+  let query = db
+    .from("document_annotations")
+    .select("*")
+    .eq("document_id", doc.id)
+    // SHARED only, and this is not an oversight to be fixed later: a private
+    // note is private from the club too (see the migration), which is what makes
+    // it usable for "things I want to remember". A manager reading feedback gets
+    // the conversation, never somebody's notebook.
+    .eq("visibility", "shared")
+    .order("created_at", { ascending: true });
+  if (input.version !== undefined) query = query.eq("document_version", input.version);
+  if (!input.include_resolved) query = query.is("resolved_at", null);
+
+  const { data: rows, error } = await query.limit(input.limit ?? 200);
+  if (error) throw new AgentError(500, "db_error", error.message);
+
+  const annotations = (rows ?? []) as DocumentAnnotationRow[];
+  const userIds = [...new Set(annotations.map((a) => a.user_id))];
+  const nameByUser = new Map<string, string>();
+  if (userIds.length) {
+    const { data: profiles, error: pErr } = await db
+      .from("profiles")
+      .select("user_id, first_name, middle_name, last_name, preferred_name")
+      .in("user_id", userIds);
+    if (pErr) throw new AgentError(500, "db_error", pErr.message);
+    for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
+  }
+
+  const projected = annotations.map((a) => projectAnnotation(a, nameByUser.get(a.user_id) ?? null));
+  return { count: projected.length, slug: doc.slug, annotations: projected };
+}
+
 async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
@@ -437,6 +602,14 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleEditInvoice(params);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
+    case "list_documents":
+      return handleListDocuments();
+    case "get_document":
+      return handleGetDocument(params);
+    case "save_document":
+      return handleSaveDocument(params, actingAs);
+    case "list_document_annotations":
+      return handleListDocumentAnnotations(params);
   }
 }
 

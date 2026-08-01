@@ -33,6 +33,8 @@ import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
 import { Route as BlogIndexRouteImport } from './routes/blog/index'
 import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
+import { Route as DocsIndexRouteImport } from './routes/docs.index'
+import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenticated/manager.blog'
 import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_authenticated/manager.blog-comments'
@@ -172,6 +174,16 @@ const BlogIndexRoute = BlogIndexRouteImport.update({
 const BlogSlugRoute = BlogSlugRouteImport.update({
   id: '/blog/$slug',
   path: '/blog/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsIndexRoute = DocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsSlugRoute = DocsSlugRouteImport.update({
+  id: '/docs/$slug',
+  path: '/docs/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedManagerApiTokensRoute =
@@ -319,7 +331,9 @@ export interface FileRoutesByFullPath {
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/blog/': typeof BlogIndexRoute
+  '/docs/': typeof DocsIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
@@ -365,7 +379,9 @@ export interface FileRoutesByTo {
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/blog': typeof BlogIndexRoute
+  '/docs': typeof DocsIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
@@ -413,7 +429,9 @@ export interface FileRoutesById {
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/blog/': typeof BlogIndexRoute
+  '/docs/': typeof DocsIndexRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/_authenticated/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
@@ -461,7 +479,9 @@ export interface FileRouteTypes {
     | '/account'
     | '/membership'
     | '/blog/$slug'
+    | '/docs/$slug'
     | '/blog/'
+    | '/docs/'
     | '/manager/api-tokens'
     | '/manager/blog'
     | '/manager/blog-comments'
@@ -507,7 +527,9 @@ export interface FileRouteTypes {
     | '/account'
     | '/membership'
     | '/blog/$slug'
+    | '/docs/$slug'
     | '/blog'
+    | '/docs'
     | '/manager/api-tokens'
     | '/manager/blog'
     | '/manager/blog-comments'
@@ -554,7 +576,9 @@ export interface FileRouteTypes {
     | '/_authenticated/account'
     | '/_authenticated/membership'
     | '/blog/$slug'
+    | '/docs/$slug'
     | '/blog/'
+    | '/docs/'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/blog'
     | '/_authenticated/manager/blog-comments'
@@ -600,7 +624,9 @@ export interface RootRouteChildren {
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
   BlogSlugRoute: typeof BlogSlugRoute
+  DocsSlugRoute: typeof DocsSlugRoute
   BlogIndexRoute: typeof BlogIndexRoute
+  DocsIndexRoute: typeof DocsIndexRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
   ApiVerifyEmailTokenRoute: typeof ApiVerifyEmailTokenRoute
@@ -776,6 +802,20 @@ declare module '@tanstack/react-router' {
       path: '/blog/$slug'
       fullPath: '/blog/$slug'
       preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/': {
+      id: '/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/$slug': {
+      id: '/docs/$slug'
+      path: '/docs/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof DocsSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/manager/api-tokens': {
@@ -999,7 +1039,9 @@ const rootRouteChildren: RootRouteChildren = {
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
   BlogSlugRoute: BlogSlugRoute,
+  DocsSlugRoute: DocsSlugRoute,
   BlogIndexRoute: BlogIndexRoute,
+  DocsIndexRoute: DocsIndexRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,
   ApiVerifyEmailTokenRoute: ApiVerifyEmailTokenRoute,
