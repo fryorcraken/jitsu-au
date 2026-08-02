@@ -62,12 +62,15 @@ severities of moderation, not the same action.
    account settings; when unset, the name shown is derived — first (or
    preferred) name plus last initial (`commentDisplayName` in
    `src/lib/validation.ts`), e.g. "Jane L." — never their full name pulled
-   from waiver data onto a public comment. Every person has a first name
-   (`profiles.first_name` is NOT NULL and non-blank), so the derived name is
-   always something; the bare word "Member" now only shows for an auth user
-   created outside the product with no name and no usable email, which is what
-   `ensure_profile` seeds as its last resort. The name is resolved live at read
-   time, so changing it later re-labels their past comments too (it isn't
+   from waiver data onto a public comment. Every person has a `profiles` row
+   with a non-blank `first_name` (NOT NULL, and `ensure_profile` seeds one for
+   an auth user created any other way), so the derived name is always
+   something. The bare word "Member" is what `ensure_profile` seeds when an
+   auth user arrives with no name on it at all — a dashboard-created or invited
+   account — and it stays until that person sets a display name. It is never
+   seeded from their email address: this name is public, and part of an email
+   address is not something they chose to publish. The name is resolved live at
+   read time, so changing it later re-labels their past comments too (it isn't
    frozen at post time, unlike a waiver's evidence fields).
 
 ## Flows
