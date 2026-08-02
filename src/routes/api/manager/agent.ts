@@ -39,7 +39,12 @@ import {
   reconciledEditMessage,
   safeEqual,
 } from "@/lib/manager-agent";
-import { DuplicateCheckFailedError, DuplicateWaiverError } from "@/lib/waiver-duplicates";
+import {
+  DuplicateCheckFailedError,
+  DuplicateWaiverError,
+  SubmissionIdConflictError,
+  WaiverFilingIncompleteError,
+} from "@/lib/waiver-duplicates";
 import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
 import type {
   ClubUserEmail,
@@ -530,8 +535,12 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
   const input = paperWaiverUploadSchema.parse(params);
   const db = await adminClient();
   try {
-    const { id, user_id } = await filePaperWaiver(db, input, actingAs);
-    return { id, user_id };
+    const { id, user_id, created } = await filePaperWaiver(db, input, actingAs);
+    // `created: false` means this call resolved to a waiver an earlier attempt
+    // had already filed. A bulk importer that silently replayed half its calls
+    // would otherwise look identical to a clean run, which makes reconciling
+    // against a stack of paper impossible.
+    return { id, user_id, created };
   } catch (e) {
     // A likely duplicate is a distinct, actionable outcome, not a generic
     // failure: it comes back as a 409 with the waivers it collided with, so the
@@ -547,6 +556,19 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
     // implies — nothing was filed either way.
     if (e instanceof DuplicateCheckFailedError) {
       throw new AgentError(503, "duplicate_check_failed", e.message, undefined, 5);
+    }
+    // 5xx, not the generic 422: the row is half-filed and ONLY a retry with the
+    // same id completes it. Landing this in a 4xx told a caller obeying the
+    // documented "4xx means change the request" rule to change the one thing it
+    // could — the id — which files a second waiver against the same paper and
+    // abandons the first, the exact failure this feature exists to prevent.
+    if (e instanceof WaiverFilingIncompleteError) {
+      throw new AgentError(503, "waiver_filing_incomplete", e.message, undefined, 5);
+    }
+    // The opposite: permanent, and no retry of this request will ever succeed.
+    // It must not share a code with the transient ones above.
+    if (e instanceof SubmissionIdConflictError) {
+      throw new AgentError(409, "submission_id_conflict", e.message);
     }
     // filePaperWaiver throws plain Errors with member-facing text (the manager
     // web form renders `.message` directly); wrap so the agent gets the same

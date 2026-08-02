@@ -18,22 +18,39 @@ get a **private calendar link** so it stays in sync in their own calendar app.
 
 ### Fields
 
-| Field          | Required?                   | Notes                                                                 |
-| -------------- | --------------------------- | --------------------------------------------------------------------- |
-| **Title**      | **Yes, the only one**       | "Beginner Gi", "Grading", "End of semester social".                   |
-| When           | Yes                         | A one-off start/end, or a weekday + time + length when it repeats.    |
-| Repeats        | Yes, defaults to _never_    | _Doesn't repeat_ or _Weekly_.                                         |
-| Instructor     | No                          | Blank is normal for socials and gradings.                             |
-| Location       | No                          | No default venue: an entry with nowhere booked yet shows no location. |
-| Description    | No                          | Free text.                                                            |
-| Who can see it | Yes, defaults to _Everyone_ | _Everyone_ or _Paid members only_. **Enforced.**                      |
-| Invite only    | No                          | A badge and nothing else (see below).                                 |
+| Field          | Required?                   | Notes                                                                          |
+| -------------- | --------------------------- | ------------------------------------------------------------------------------ |
+| **Title**      | **Yes, the only one**       | "Beginner Gi", "Grading", "End of semester social".                            |
+| When           | Yes                         | A one-off start/end, or a weekday + time + length when it repeats.             |
+| Repeats        | Yes, defaults to _never_    | _Doesn't repeat_ or _Weekly_.                                                  |
+| Instructor     | No                          | Blank is normal for socials and gradings.                                      |
+| Location       | No                          | Pre-filled with the club's gym; clearing it leaves the entry with no location. |
+| Description    | No                          | Free text.                                                                     |
+| Who can see it | Yes, defaults to _Everyone_ | _Everyone_ or _Paid members only_. **Enforced.**                               |
+| Invite only    | No                          | A badge and nothing else (see below).                                          |
 
 There is no event "kind" field. It drove a cosmetic badge and nothing else, and a
 mandatory free-text title says "Grading" better than a taxonomy that never quite
 fits. If grouping is ever genuinely needed (a filter, colour-coding), it should
 come back as a deliberate feature rather than a field everyone fills in on the way
 past.
+
+### What a new entry starts with
+
+The add form opens with the answers that are right most of the time, so a routine
+entry takes a title and a start time and nothing else:
+
+- **Ends** follows **Starts**: pick a start and the end fills in an hour later.
+  Correcting the start moves that end with it, so fixing 18:00 to 09:00 gives a
+  one-hour entry rather than a nine-hour one. Once the end has been **typed in**,
+  it is the manager's answer and is left alone; the only thing that overrides it
+  is a start that moves past it, which would make the entry backwards.
+- **Location** is pre-filled with the club's gym (ActivateFit Gym, UTS Building 4,
+  745 Harris St, Ultimo). Somewhere else, or nowhere booked yet: overwrite or
+  clear it.
+
+Both are only defaults on the add form. Editing an existing date shows what that
+date actually has, so an entry with no location keeps having none.
 
 ## Roles
 
@@ -50,10 +67,10 @@ past.
 
 ## Two settings that are easy to confuse
 
-| Setting                           | What it is                            | Effect                                                                                                                          |
-| --------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Who can see it** (`visibility`) | **Access.** `public` or `members`.    | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member.                           |
-| **Invite only** (`invite_only`)   | **Access, and a badge.**              | Enforced. Only people invited to that date (they have an RSVP row) and managers can see it. Everyone else never sees the entry. |
+| Setting                           | What it is                         | Effect                                                                                                                          |
+| --------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Who can see it** (`visibility`) | **Access.** `public` or `members`. | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member.                           |
+| **Invite only** (`invite_only`)   | **Access, and a badge.**           | Enforced. Only people invited to that date (they have an RSVP row) and managers can see it. Everyone else never sees the entry. |
 
 Invite only is enforced in the database, not just in the interface: the
 `calendar_events` read policies hide an invite-only date from the public feed and
@@ -65,7 +82,6 @@ An entry can be public and invite-only (only invitees see it), members-only and
 not invite-only, or any other combination. Both settings apply to repeating
 entries too, which is what the old two-form design made impossible: every date a
 repeat generated was forced to be public.
-
 
 ## Repeating: start and end dates
 

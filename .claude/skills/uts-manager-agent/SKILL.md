@@ -211,6 +211,37 @@ scripts/agent.sh file_waiver '{
 >   Filing (or later approving) a backlog out of chronological order can leave
 >   an older submission looking like the current one — flag this to the manager
 >   rather than approving on their behalf.
+> - **Send a `client_submission_id` on every call in a batch.** Mint one UUID per
+>   paper record and resend it unchanged on any retry of that record. It is what
+>   makes retrying safe: the same id always resolves to the same waiver, so a
+>   call whose reply you never saw (timeout, dropped connection) can simply be
+>   repeated. Without it, two retries racing each other both pass the duplicate
+>   check — neither can see a row the other has not committed yet — and you get
+>   the exact double-filing the check is meant to stop. A **new** id means a new
+>   waiver, so never reuse one across different records — an id already bound to
+>   a different record is refused with `409 submission_id_conflict`, which no
+>   retry will ever fix.
+> - **The id space is global, not per token.** Every `client_submission_id` you
+>   mint — including the club's own online waiver signing — draws from one
+>   namespace covering the whole `waivers` table, not one scoped to your
+>   import or your token. `file_waiver` only ever resolves an id back to another
+>   paper filing, so an accidental collision with someone's online signature is
+>   safe: you get `409 submission_id_conflict`, never their waiver. But two
+>   different bulk imports (yours and another manager's, run separately) share
+>   that same space, so an id derived deterministically from record data (e.g.
+>   a UUID from the person's email) can collide across imports in a way a
+>   random UUID cannot. Prefer minting a fresh random id per record unless you
+>   have a specific reason to derive one.
+> - **Sending an id means you own finishing that record.** Without one, a failed
+>   filing cleans up after itself and means "nothing happened, send it again".
+>   With one, the row is KEPT so your retry can resume it, and a
+>   `503 waiver_filing_incomplete` means a waiver exists with no document behind
+>   it. Retry until it succeeds. If you abandon it, a manager is left with a
+>   pending waiver they cannot approve.
+> - **The result's `created` tells a replay from a fresh filing.** `false` means
+>   this call resolved to a waiver an earlier attempt already filed. Count those
+>   separately when you report a batch, or a run that silently retried half its
+>   calls will look identical to a clean one.
 > - **Filing the same paper twice is caught.** If the person already has a
 >   waiver signed on that `signed_on`, the call is refused with
 >   `409 duplicate_waiver` and `error.details.existing` lists the waivers it
