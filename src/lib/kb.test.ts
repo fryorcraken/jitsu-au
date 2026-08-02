@@ -5,14 +5,14 @@ import {
   blockId,
   canAnnotate,
   canEditAnnotation,
-  canReadDocument,
+  canReadArticle,
   canResolveThread,
   groupThreads,
   normalizeBlockText,
   resolveAnchors,
   splitBlocks,
-} from "./documents";
-import type { Viewer } from "./documents";
+} from "./kb";
+import type { Viewer } from "./kb";
 
 const anon: Viewer = { userId: null, isManager: false };
 const member: Viewer = { userId: "u-member", isManager: false };
@@ -70,7 +70,7 @@ describe("splitBlocks", () => {
 
   // A `.trim()` on each chunk silently stripped the leading 4 spaces off an
   // indented code block, so it stopped being code and rendered as a paragraph:
-  // splitting the document changed what the document said.
+  // splitting the article changed what the article said.
   it("keeps the indentation of an indented code block", () => {
     const blocks = splitBlocks("Example:\n\n    const a = 1;\n    const b = 2;");
     expect(blocks).toHaveLength(2);
@@ -82,7 +82,7 @@ describe("splitBlocks", () => {
     expect(blocks[1].markdown.startsWith("  ```")).toBe(true);
   });
 
-  // An unclosed fence swallows the rest of the document into one block. That is
+  // An unclosed fence swallows the rest of the article into one block. That is
   // the honest reading of the source, but it makes everything below it a single
   // unannotatable slab, so pin it as known behaviour rather than a surprise.
   it("treats everything after an unclosed fence as one block", () => {
@@ -109,9 +109,9 @@ describe("resolveAnchors", () => {
     expect(res.orphaned).toEqual([]);
   });
 
-  it("files a null block_id as a document-level note", () => {
+  it("files a null block_id as an article-level note", () => {
     const a = { block_id: null, quote: null };
-    expect(resolveAnchors(blocks, [a]).document).toEqual([a]);
+    expect(resolveAnchors(blocks, [a]).article).toEqual([a]);
   });
 
   it("orphans an annotation whose passage was rewritten", () => {
@@ -161,34 +161,34 @@ describe("groupThreads", () => {
   });
 });
 
-describe("canReadDocument", () => {
-  it("lets anyone read a public document", () => {
-    expect(canReadDocument("public", anon)).toBe(true);
+describe("canReadArticle", () => {
+  it("lets anyone read a public article", () => {
+    expect(canReadArticle("public", anon)).toBe(true);
   });
 
-  it("requires a login for a members document", () => {
-    expect(canReadDocument("members", anon)).toBe(false);
-    expect(canReadDocument("members", member)).toBe(true);
+  it("requires a login for a members article", () => {
+    expect(canReadArticle("members", anon)).toBe(false);
+    expect(canReadArticle("members", member)).toBe(true);
   });
 
-  it("hides a managers-only document from members", () => {
-    expect(canReadDocument("managers", member)).toBe(false);
-    expect(canReadDocument("managers", manager)).toBe(true);
+  it("hides a managers-only article from members", () => {
+    expect(canReadArticle("managers", member)).toBe(false);
+    expect(canReadArticle("managers", manager)).toBe(true);
   });
 });
 
 describe("canAnnotate", () => {
-  it("refuses a signed-out reader even on a public document", () => {
+  it("refuses a signed-out reader even on a public article", () => {
     expect(canAnnotate({ visibility: "public", annotations_enabled: true }, anon)).toBe(false);
   });
 
-  it("refuses when the document has annotations turned off, managers included", () => {
+  it("refuses when the article has annotations turned off, managers included", () => {
     const doc = { visibility: "public", annotations_enabled: false } as const;
     expect(canAnnotate(doc, member)).toBe(false);
     expect(canAnnotate(doc, manager)).toBe(false);
   });
 
-  it("allows a signed-in member on a members document", () => {
+  it("allows a signed-in member on a members article", () => {
     expect(canAnnotate({ visibility: "members", annotations_enabled: true }, member)).toBe(true);
   });
 });
@@ -198,7 +198,7 @@ describe("canEditAnnotation", () => {
     expect(canEditAnnotation({ user_id: "u-member" }, member)).toBe(true);
   });
 
-  // Moderation is resolving and deleting the document, never rewriting somebody
+  // Moderation is resolving and deleting the article, never rewriting somebody
   // else's words.
   it("refuses a manager editing somebody else's annotation", () => {
     expect(canEditAnnotation({ user_id: "u-member" }, manager)).toBe(false);
@@ -242,7 +242,7 @@ describe("annotationReadFilter", () => {
     expect(orExpression).not.toContain("user_id.eq.shared");
   });
 
-  it("caps a document's annotation read", () => {
+  it("caps an article's annotation read", () => {
     expect(ANNOTATIONS_LIMIT).toBeGreaterThan(0);
   });
 });

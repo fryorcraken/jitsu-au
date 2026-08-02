@@ -5,11 +5,11 @@
 // pulling in server-only imports. Keep this file free of side effects and of any
 // server-only dependency (no supabase clients, no process.env reads).
 import { z } from "zod";
-// Domain constants for club documents. `documents.ts` is the same kind of
+// Domain constants for the knowledge base. `kb.ts` is the same kind of
 // module as this one (pure, no server imports), and owns the vocabulary its
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
-import { annotationVisibilities, documentVisibilities } from "./documents";
+import { annotationVisibilities, articleVisibilities } from "./kb";
 
 // ---- Pure helpers ----
 
@@ -1023,10 +1023,12 @@ export const managerAgentActions = [
   "list_invoices",
   "edit_invoice",
   "file_waiver",
-  "list_documents",
-  "get_document",
-  "save_document",
-  "list_document_annotations",
+  "list_kb_sections",
+  "save_kb_section",
+  "list_kb_articles",
+  "get_kb_article",
+  "save_kb_article",
+  "list_kb_comments",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -1341,21 +1343,22 @@ export function parseMoneyToCents(value: string): number | null {
   return Math.round(n * 100);
 }
 
-// ---- Club documents ----
+// ---- Knowledge base (see docs/knowledge-base.md) ----
 //
-// Versioned markdown pages people read at `/docs/<slug>` and annotate. The
-// domain rules (block anchoring, who may read/annotate) live in
-// `src/lib/documents.ts`; this file only validates what crosses the wire.
+// Versioned markdown pages people read at `/kb/<slug>` and annotate, grouped
+// into ordered sections. The domain rules (block anchoring, who may
+// read/annotate) live in `src/lib/kb.ts` and the ordering in `src/lib/kb-nav.ts`;
+// this file only validates what crosses the wire.
 
 /**
- * The URL key of a document, mirroring the `documents.slug` CHECK exactly.
+ * The URL key of an article, mirroring the `kb_articles.slug` CHECK exactly.
  *
- * Kept identical on purpose: `save_document` treats an unknown slug as "create
- * this document", so a slug the app accepts but the database rejects would turn
+ * Kept identical on purpose: `save_kb_article` treats an unknown slug as "create
+ * this article", so a slug the app accepts but the database rejects would turn
  * a manager's typo into a raw constraint-violation message instead of a clear
  * one, after the request had already been accepted.
  */
-export const documentSlugSchema = z
+export const kbSlugSchema = z
   .string()
   .trim()
   .min(1)
@@ -1366,86 +1369,168 @@ export const documentSlugSchema = z
   );
 
 /**
- * Manager: save a document. Creates the document if the slug is new, and always
- * writes a NEW version rather than editing text in place — same rule as the
- * waiver template, for the same reason: annotations name the version they were
- * written against, so rewriting a version underneath them would make that
- * reference a lie.
+ * A site-relative path a sidebar entry can point at, mirroring the
+ * `kb_articles.link_path` CHECK.
  *
- * `visibility` and `annotations_enabled` are optional because they belong to the
- * document, not the version: omitting them on an edit leaves the current setting
- * alone rather than silently resetting a members-only document to the default.
+ * Site-relative only, and the pattern is the security boundary rather than a
+ * tidiness rule: an absolute URL here would let a caller put any destination
+ * into the club's own navigation, and `//host` would turn `/kb/<slug>` into an
+ * open redirect. Both are rejected by requiring a single leading slash followed
+ * by an alphanumeric.
  */
-export const saveDocumentSchema = z.object({
-  slug: documentSlugSchema,
-  title: z.string().trim().min(1).max(200),
-  body_md: z.string().trim().min(1).max(200000),
-  visibility: z.enum(documentVisibilities).optional(),
-  annotations_enabled: z.boolean().optional(),
-  change_note: z.string().trim().max(500).optional().or(z.literal("")),
-  /**
-   * "I believe this slug is free." Set by anything creating a document, and
-   * refused server-side if the slug is taken.
-   *
-   * A known slug is a SAVE, not a create, so a caller that thinks it is creating
-   * would otherwise replace an existing document's live text and, because it
-   * sends a visibility, republish it to whoever that admits. The manager screen
-   * checks its own list first, but that list is a snapshot: somebody else can
-   * create the slug between the screen loading and the save. Only the database
-   * knows, so the check belongs here too.
-   */
-  expect_new: z.boolean().optional(),
-});
-export type SaveDocumentInput = z.infer<typeof saveDocumentSchema>;
+export const kbLinkPathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^\/[a-z0-9][a-z0-9/-]*$/, "Use a path on this site, e.g. /first-class.")
+  .refine((value) => !value.includes("//"), "Use a path on this site, e.g. /first-class.");
 
 /**
- * A reader opening a document. Deliberately has NO `version`: readers always get
+ * Manager: save an article. Creates it if the slug is new, and always writes a
+ * NEW version rather than editing text in place — same rule as the waiver
+ * template, for the same reason: annotations name the version they were written
+ * against, so rewriting a version underneath them would make that reference a lie.
+ *
+ * Every field except the slug is optional, and that is the whole contract: an
+ * omitted field is LEFT ALONE. It is what stops an agent asked to fix a typo
+ * from also moving the article to the top of the sidebar or publishing a
+ * managers-only draft by not mentioning `visibility`.
+ *
+ * The refinement below splits the two kinds of row this creates:
+ *
+ *   * An ARTICLE has `title` + `body_md` and gets a new version.
+ *   * A LINK ENTRY has `link_path` + `nav_title` and never gets a version. It is
+ *     a sidebar item pointing at a page elsewhere on the site, so text on it
+ *     would have nowhere to render.
+ */
+export const saveKbArticleSchema = z
+  .object({
+    slug: kbSlugSchema,
+    title: z.string().trim().min(1).max(200).optional(),
+    body_md: z.string().trim().min(1).max(200000).optional(),
+    visibility: z.enum(articleVisibilities).optional(),
+    annotations_enabled: z.boolean().optional(),
+    change_note: z.string().trim().max(500).optional().or(z.literal("")),
+    /** Slug of the section it belongs to. Empty string moves it out of every section. */
+    section: kbSlugSchema.optional().or(z.literal("")),
+    /** Lower sorts first within the section. */
+    position: z.number().int().min(0).max(100000).optional(),
+    /** Sidebar label, when it should be shorter than the title. */
+    nav_title: z.string().trim().min(1).max(100).optional().or(z.literal("")),
+    link_path: kbLinkPathSchema.optional(),
+    /**
+     * "I believe this slug is free." Set by anything creating an article, and
+     * refused server-side if the slug is taken.
+     *
+     * A known slug is a SAVE, not a create, so a caller that thinks it is
+     * creating would otherwise replace an existing article's live text and,
+     * because it sends a visibility, republish it to whoever that admits. The
+     * manager screen checks its own list first, but that list is a snapshot:
+     * somebody else can create the slug between the screen loading and the
+     * save. Only the database knows, so the check belongs here too.
+     */
+    expect_new: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.link_path) {
+      if (!value.nav_title) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["nav_title"],
+          message: "A link entry has no article text to take a name from, so it needs a nav_title.",
+        });
+      }
+      if (value.title || value.body_md) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["link_path"],
+          message:
+            "A link entry points at another page, so it cannot also have a title or body_md.",
+        });
+      }
+      return;
+    }
+    // Not a link entry, so it needs text — unless this is a pure metadata edit
+    // (moving an existing article between sections), which names neither.
+    if (Boolean(value.title) !== Boolean(value.body_md)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [value.title ? "body_md" : "title"],
+        message: "Saving new text needs both title and body_md: a version is written as a whole.",
+      });
+    }
+  });
+export type SaveKbArticleInput = z.infer<typeof saveKbArticleSchema>;
+
+/**
+ * Manager: create or rename a section, or move it in the sidebar.
+ *
+ * Same "unknown slug creates it" rule as an article, and the same
+ * omitted-means-unchanged rule, so reordering the knowledge base is one call per
+ * section rather than a read-modify-write of the whole structure.
+ */
+export const saveKbSectionSchema = z.object({
+  slug: kbSlugSchema,
+  title: z.string().trim().min(1).max(100).optional(),
+  position: z.number().int().min(0).max(100000).optional(),
+});
+export type SaveKbSectionInput = z.infer<typeof saveKbSectionSchema>;
+
+/** A reader searching the knowledge base from the top bar. */
+export const searchKnowledgeBaseSchema = z.object({
+  q: z.string().trim().min(2).max(100),
+});
+export type SearchKnowledgeBaseInput = z.infer<typeof searchKnowledgeBaseSchema>;
+
+/**
+ * A reader opening an article. Deliberately has NO `version`: readers always get
  * the live one.
  *
- * Letting a reader name a version would publish a document's whole drafting
+ * Letting a reader name a version would publish an article's whole drafting
  * history the moment it goes live. A managers-only draft's earlier versions
  * (internal figures, names, wording nobody agreed to publish) are readable by
- * anyone the CURRENT visibility admits, because visibility lives on the document
+ * anyone the CURRENT visibility admits, because visibility lives on the article
  * and not on each version. Version-by-version access needs a per-version record
  * of what it was published under, which this schema does not have — so the
  * public read does not offer it at all.
  */
-export const readDocumentSchema = z.object({ slug: documentSlugSchema });
-export type ReadDocumentInput = z.infer<typeof readDocumentSchema>;
+export const readKbArticleSchema = z.object({ slug: kbSlugSchema });
+export type ReadKbArticleInput = z.infer<typeof readKbArticleSchema>;
 
 /**
- * Manager: read one document, optionally a named version. Manager-only for the
+ * Manager: read one article, optionally a named version. Manager-only for the
  * reason above — a manager may read their own drafting history.
  */
-export const getDocumentSchema = z.object({
-  slug: documentSlugSchema,
+export const getKbArticleSchema = z.object({
+  slug: kbSlugSchema,
   version: z.number().int().positive().optional(),
 });
-export type GetDocumentInput = z.infer<typeof getDocumentSchema>;
+export type GetKbArticleInput = z.infer<typeof getKbArticleSchema>;
 
-/** Manager: list the annotations on a document, to read back what people said. */
-export const listDocumentAnnotationsSchema = z.object({
-  slug: documentSlugSchema,
+/** Manager: list the annotations on an article, to read back what people said. */
+export const listKbCommentsSchema = z.object({
+  slug: kbSlugSchema,
   /** Omit for every annotation; set to read one version's feedback in isolation. */
   version: z.number().int().positive().optional(),
   include_resolved: z.boolean().optional(),
   limit: z.number().int().min(1).max(500).optional(),
 });
-export type ListDocumentAnnotationsInput = z.infer<typeof listDocumentAnnotationsSchema>;
+export type ListKbCommentsInput = z.infer<typeof listKbCommentsSchema>;
 
 /**
  * Write an annotation.
  *
- * `document_version` is the version the reader had on screen. The server stores
+ * `article_version` is the version the reader had on screen. The server stores
  * it verbatim: unlike the waiver (which REFUSES a submission against a stale
  * version, because a signature is evidence of what was read), a comment on an
  * older wording is a perfectly good comment, and the reader is shown that the
  * text has moved on rather than having their words thrown away.
  */
 export const createAnnotationSchema = z.object({
-  slug: documentSlugSchema,
-  document_version: z.number().int().positive(),
-  /** Null/omitted anchors the annotation to the document as a whole. */
+  slug: kbSlugSchema,
+  article_version: z.number().int().positive(),
+  /** Null/omitted anchors the annotation to the article as a whole. */
   block_id: z.string().trim().max(100).optional().or(z.literal("")),
   /** The passage as it stood, so a later edit can be reported honestly. */
   quote: z.string().trim().max(2000).optional().or(z.literal("")),

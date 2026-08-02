@@ -110,6 +110,24 @@ function AccountPage() {
         </p>
       </div>
 
+      {/* First card on the page, and written for somebody who has not been yet.
+          Everything below it is admin you visit when something needs doing; this
+          is the one thing a new member should read before their first class. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Knowledge base</CardTitle>
+          <CardDescription>
+            How we train, how grading works, and what to expect. Start at the beginning and work
+            through it, or search for what you need.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild>
+            <Link to="/kb">Open the knowledge base</Link>
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Membership</CardTitle>

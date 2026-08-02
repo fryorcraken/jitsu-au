@@ -34,7 +34,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "2",
+  version: "3",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -47,6 +47,23 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "3",
+      // Every document action was renamed, so every call a cached client makes
+      // to one of them now 400s on an unknown action. There is no aliasing and
+      // no version pinning: this is the one bump where "re-read when convenient"
+      // is wrong advice.
+      breaking: true,
+      notes: [
+        "Club documents are now the knowledge base, served at /kb/<slug> rather than /docs/<slug>. The old paths are gone.",
+        "RENAMED, with no aliases: list_documents -> list_kb_articles, get_document -> get_kb_article, save_document -> save_kb_article, list_document_annotations -> list_kb_comments. Calling an old name is a 400 unknown_action.",
+        "Annotations report `article_version` where they used to report `document_version`.",
+        "New actions list_kb_sections and save_kb_section. Articles now live in ordered sections, and that order is what members read through.",
+        "save_kb_article: title and body_md are now OPTIONAL. Sending neither changes only the article's placement and writes NO new version; sending one without the other is refused. `version` in the result is null when no version was written.",
+        "save_kb_article: accepts section, position, nav_title and link_path. An unknown section slug is refused rather than dropping the article out of the sidebar.",
+        "save_kb_article: link_path makes the entry a sidebar LINK to another page on this site instead of an article. It needs a nav_title, refuses title/body_md, and an existing article that already has versions cannot be turned into one.",
+      ],
+    },
     {
       version: "2",
       // A bare counter cannot say "this one can break you". Both refusals below
@@ -222,19 +239,51 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
-      name: "list_documents",
+      name: "list_kb_sections",
       method: "POST",
       summary:
-        "List the club's documents (versioned markdown pages served at /docs/<slug>) with their live version, visibility and whether they are taking comments.",
+        "List the knowledge base's sections in sidebar order. Sections are the groups a member reads through (Start here, Belts and grading, ...), and their order plus each article's position IS the onboarding path: the sidebar, the index page and the previous/next links all come from it.",
       params: [],
     },
     {
-      name: "get_document",
+      name: "save_kb_section",
       method: "POST",
       summary:
-        "Read one document's full markdown. Returns the live version unless you name one. Read this before saving an edit: save_document replaces the whole body, so an edit built without reading first silently drops everything it did not include.",
+        "Create a section, rename it, or move it in the sidebar. An unknown slug creates it. An omitted field is left alone, so moving a section cannot rename it by accident.",
       params: [
-        { name: "slug", required: true, description: "The document's URL key, e.g. house-rules." },
+        {
+          name: "slug",
+          required: true,
+          description:
+            "URL key: lowercase letters, numbers and single hyphens (start-here). A new slug creates a new section.",
+        },
+        {
+          name: "title",
+          required: false,
+          description: "The heading members see. Required when creating a section.",
+        },
+        {
+          name: "position",
+          required: false,
+          description:
+            "Lower sorts first. The seeded sections use 10, 20, 30 so a new one can be slotted between two others without renumbering anything.",
+        },
+      ],
+    },
+    {
+      name: "list_kb_articles",
+      method: "POST",
+      summary:
+        "List the knowledge base's articles (versioned markdown pages served at /kb/<slug>) with their live version, section, position, visibility and whether they are taking comments. An entry with a link_path is not an article but a sidebar LINK to a page elsewhere on the site, and it has no versions.",
+      params: [],
+    },
+    {
+      name: "get_kb_article",
+      method: "POST",
+      summary:
+        "Read one article's full markdown. Returns the live version unless you name one. Read this before saving an edit: save_kb_article replaces the whole body, so an edit built without reading first silently drops everything it did not include.",
+      params: [
+        { name: "slug", required: true, description: "The article's URL key, e.g. our-history." },
         {
           name: "version",
           required: false,
@@ -243,35 +292,64 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
-      name: "save_document",
+      name: "save_kb_article",
       method: "POST",
       summary:
-        "Create or update a document. An unknown slug creates it; a known one adds a NEW version and publishes it — the body is replaced wholesale, never patched. Past versions are kept, and comments stay attached to the version they were written against, so readers whose comments predate this edit are shown that the wording moved on.",
+        "Create or update an article, or place it in the sidebar. Title + body_md write a NEW version and publish it — the body is replaced wholesale, never patched. Past versions are kept, and comments stay attached to the version they were written against, so readers whose comments predate this edit are shown that the wording moved on. Omit title and body_md to change only where the article sits, with no republish.",
       params: [
         {
           name: "slug",
           required: true,
           description:
-            "URL key: lowercase letters, numbers and single hyphens (house-rules). A new slug creates a new document, so a typo makes a second one at a second URL.",
+            "URL key: lowercase letters, numbers and single hyphens (our-history). A new slug creates a new article, so a typo makes a second one at a second URL.",
         },
-        { name: "title", required: true, description: "Shown as the page heading." },
+        {
+          name: "title",
+          required: false,
+          description:
+            "Shown as the page heading. Required with body_md when writing text; omit both to edit only the placement.",
+        },
         {
           name: "body_md",
-          required: true,
+          required: false,
           description:
-            "The whole document as markdown, up to 200000 characters. This REPLACES the previous body.",
+            "The whole article as markdown, up to 200000 characters. This REPLACES the previous body.",
+        },
+        {
+          name: "section",
+          required: false,
+          description:
+            "Slug of the section it belongs to. An unknown slug is refused rather than dropping the article out of the sidebar; send an empty string to move it into 'Everything else'. Omit to leave it where it is.",
+        },
+        {
+          name: "position",
+          required: false,
+          description:
+            "Lower sorts first within the section. This is the reading order a new member follows, so the first article of the first section is what 'start here' points at.",
+        },
+        {
+          name: "nav_title",
+          required: false,
+          description:
+            "A shorter label for the sidebar, when the title is long. Defaults to the title.",
+        },
+        {
+          name: "link_path",
+          required: false,
+          description:
+            "Makes this entry a LINK to a page elsewhere on this site (e.g. /first-class) instead of an article. Site-relative paths only, and it needs a nav_title since there is no article text to take a name from. Cannot be combined with title/body_md.",
         },
         {
           name: "visibility",
           required: false,
           description:
-            "public | members | managers. Omit to leave it as it is; a new document defaults to members. 'managers' is the one to use for a draft.",
+            "public | members | managers. Omit to leave it as it is; a new article defaults to members. 'managers' is the one to use for a draft.",
         },
         {
           name: "annotations_enabled",
           required: false,
           description:
-            "Whether readers may comment. Omit to leave it as it is; new documents accept comments.",
+            "Whether readers may comment. Omit to leave it as it is; new articles accept comments and link entries never do.",
         },
         {
           name: "change_note",
@@ -288,12 +366,12 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
-      name: "list_document_annotations",
+      name: "list_kb_comments",
       method: "POST",
       summary:
-        "Read the SHARED comments on a document — what members said, in threads, with the passage each was about. Private notes are never returned: they are private from the club too, by design, so this is not a complete view of everything readers wrote.",
+        "Read the SHARED comments on an article — what members said, in threads, with the passage each was about. Private notes are never returned: they are private from the club too, by design, so this is not a complete view of everything readers wrote.",
       params: [
-        { name: "slug", required: true, description: "The document's URL key." },
+        { name: "slug", required: true, description: "The article's URL key." },
         {
           name: "version",
           required: false,

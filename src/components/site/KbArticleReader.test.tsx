@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DocumentReader } from "./DocumentReader";
-import type { ReaderAnnotation, ReaderDocument, ReaderViewer } from "./DocumentReader";
-import { blockId } from "@/lib/documents";
+import { KbArticleReader } from "./KbArticleReader";
+import type { ReaderAnnotation, ReaderArticle, ReaderViewer } from "./KbArticleReader";
+import { blockId } from "@/lib/kb";
 
 const BODY = "# House rules\n\nWash your gi.\n\nClip your nails.";
 
-const document: ReaderDocument = {
+const article: ReaderArticle = {
   slug: "house-rules",
   title: "House rules",
   body_md: BODY,
@@ -31,7 +31,7 @@ function annotation(over: Partial<ReaderAnnotation> = {}): ReaderAnnotation {
     block_id: blockId("Wash your gi."),
     quote: "Wash your gi.",
     parent_id: null,
-    document_version: 3,
+    article_version: 3,
     author: "Sam",
     is_mine: false,
     can_edit: false,
@@ -46,15 +46,15 @@ function annotation(over: Partial<ReaderAnnotation> = {}): ReaderAnnotation {
 function renderReader(over: {
   annotations?: ReaderAnnotation[];
   viewer?: ReaderViewer;
-  document?: ReaderDocument;
+  article?: ReaderArticle;
   onCreate?: (input: unknown) => Promise<boolean>;
 }) {
   // The write callbacks report success; the component clears its inputs only
   // when they do. Default to success so the ordinary path is what is exercised.
   const onCreate = over.onCreate ?? vi.fn().mockResolvedValue(true);
   render(
-    <DocumentReader
-      document={over.document ?? document}
+    <KbArticleReader
+      article={over.article ?? article}
       annotations={over.annotations ?? []}
       viewer={over.viewer ?? canAnnotate}
       onCreate={onCreate as never}
@@ -66,8 +66,8 @@ function renderReader(over: {
   return { onCreate };
 }
 
-describe("DocumentReader", () => {
-  it("renders the document's markdown", () => {
+describe("KbArticleReader", () => {
+  it("renders the article's markdown", () => {
     renderReader({});
     expect(screen.getByRole("heading", { name: "House rules" })).toBeInTheDocument();
     expect(screen.getByText("Wash your gi.")).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe("DocumentReader", () => {
     expect(screen.queryByRole("button", { name: /Post comment/i })).not.toBeInTheDocument();
   });
 
-  it("says so when a document has stopped taking comments", () => {
+  it("says so when an article has stopped taking comments", () => {
     renderReader({
       viewer: { signed_in: true, user_id: "u-1", is_manager: false, can_annotate: false },
     });
@@ -171,7 +171,7 @@ describe("DocumentReader", () => {
     const user = userEvent.setup();
     const onCreate = vi.fn().mockResolvedValue(true);
     const longBlock = "x".repeat(5000);
-    renderReader({ document: { ...document, body_md: longBlock }, onCreate });
+    renderReader({ article: { ...article, body_md: longBlock }, onCreate });
 
     await user.click(screen.getAllByRole("button", { name: /Comment on this passage/i })[0]);
     await user.type(screen.getByPlaceholderText(/Start a comment thread/i), "Too long?");
@@ -209,7 +209,7 @@ describe("DocumentReader", () => {
   // there is no way to start a comment on a specific passage at all.
   it("offers a way to comment on every passage, not only ones already commented on", () => {
     renderReader({});
-    // Scoped to the document body: the composer in the rail has its own
+    // Scoped to the article body: the composer in the rail has its own
     // "Comment" toggle, which is not what this is about.
     const body = screen.getByRole("article");
     // Three blocks in the fixture, none of them annotated.

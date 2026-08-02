@@ -1,6 +1,6 @@
-// The reading + annotating surface for a club document.
+// The reading + annotating surface for a club article.
 //
-// The document is rendered one BLOCK at a time (`splitBlocks`) rather than as
+// The article is rendered one BLOCK at a time (`splitBlocks`) rather than as
 // one markdown blob, because a block is the unit an annotation hangs off: the
 // same split runs on the server when a comment is stored, so the anchor a reader
 // sees and the anchor that is saved are computed by the same code.
@@ -17,8 +17,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/dates";
-import { groupThreads, resolveAnchors, splitBlocks } from "@/lib/documents";
-import type { AnnotationVisibility } from "@/lib/documents";
+import { groupThreads, resolveAnchors, splitBlocks } from "@/lib/kb";
+import type { AnnotationVisibility } from "@/lib/kb";
+import { extractHeadings } from "@/lib/kb-nav";
+import { kbMarkdownComponents } from "@/lib/kb-markdown";
 
 /** One annotation, exactly as `listAnnotations` returns it. */
 export type ReaderAnnotation = {
@@ -28,7 +30,7 @@ export type ReaderAnnotation = {
   block_id: string | null;
   quote: string | null;
   parent_id: string | null;
-  document_version: number;
+  article_version: number;
   author: string | null;
   is_mine: boolean;
   can_edit: boolean;
@@ -38,7 +40,7 @@ export type ReaderAnnotation = {
   updated_at: string;
 };
 
-export type ReaderDocument = {
+export type ReaderArticle = {
   slug: string;
   title: string;
   body_md: string;
@@ -68,7 +70,7 @@ export type NewAnnotation = {
  * its error and resolves anyway throws away what the reader typed.
  */
 type Props = {
-  document: ReaderDocument;
+  article: ReaderArticle;
   annotations: ReaderAnnotation[];
   viewer: ReaderViewer;
   busy?: boolean;
@@ -78,8 +80,8 @@ type Props = {
   onResolve: (id: string, resolved: boolean) => Promise<void>;
 };
 
-export function DocumentReader({
-  document,
+export function KbArticleReader({
+  article,
   annotations,
   viewer,
   busy,
@@ -91,8 +93,19 @@ export function DocumentReader({
   const [selected, setSelected] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
 
-  const blocks = useMemo(() => splitBlocks(document.body_md), [document.body_md]);
+  const blocks = useMemo(() => splitBlocks(article.body_md), [article.body_md]);
   const resolved = useMemo(() => resolveAnchors(blocks, annotations), [blocks, annotations]);
+
+  // The "On this page" list links to a heading's own id, and the heading itself
+  // is rendered by `react-markdown` inside a block, where attaching an id would
+  // mean reaching into the rendered nodes. Hanging it on the block's wrapper
+  // instead lands the reader in the same place and keeps both sides deriving the
+  // id from `extractHeadings`, so the anchor and the link cannot disagree.
+  const headingIdByBlock = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const heading of extractHeadings(article.body_md)) map.set(heading.blockId, heading.id);
+    return map;
+  }, [article.body_md]);
 
   const visible = (list: ReaderAnnotation[]) =>
     showResolved ? list : list.filter((a) => !a.resolved_at);
@@ -101,7 +114,11 @@ export function DocumentReader({
   const selectedAnnotations = selected ? (resolved.anchored.get(selected) ?? []) : [];
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
+    // The comment rail waits for `xl`, not `lg`: the knowledge base shell puts
+    // its own sidebar on the left from `lg`, and three columns on a 1024px
+    // laptop leaves a reading column too narrow for a syllabus. Below `xl` the
+    // rail drops under the article, which is what it already did on a phone.
+    <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
       <article className="space-y-1">
         {blocks.map((block) => {
           const onBlock = visible(resolved.anchored.get(block.id) ?? []);
@@ -111,13 +128,14 @@ export function DocumentReader({
           return (
             <div
               key={block.id}
+              id={headingIdByBlock.get(block.id)}
               className={cn(
-                "group relative rounded-md border border-transparent px-3 py-1 transition-colors",
+                "group relative scroll-mt-24 rounded-md border border-transparent px-3 py-1 transition-colors",
                 isSelected ? "border-primary/40 bg-muted/60" : "hover:bg-muted/40",
               )}
             >
               {/* The wide-screen affordance: a gutter marker that appears on
-                  hover or keyboard focus. Hidden below `lg` because there is no
+                  hover or keyboard focus. Hidden below `xl` because there is no
                   gutter to put it in, which is why the small-screen control
                   below is NOT conditional on the block already having comments. */}
               <button
@@ -125,14 +143,12 @@ export function DocumentReader({
                 aria-label={`Comment on this passage${shared + notes ? `, ${shared + notes} existing` : ""}`}
                 aria-pressed={isSelected}
                 onClick={() => setSelected(isSelected ? null : block.id)}
-                className="absolute -left-1 top-2 -translate-x-full pr-2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 aria-pressed:opacity-100 max-lg:hidden"
+                className="absolute -left-1 top-2 -translate-x-full pr-2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 aria-pressed:opacity-100 max-xl:hidden"
               >
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
               </button>
 
-              <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:font-bold prose-headings:text-foreground prose-p:leading-relaxed prose-strong:text-foreground">
-                <ReactMarkdown>{block.markdown}</ReactMarkdown>
-              </div>
+              <ReactMarkdown components={kbMarkdownComponents}>{block.markdown}</ReactMarkdown>
 
               {/* Always rendered when there is anything to show OR the reader
                   could add something. Gating this on `shared + notes > 0` (as it
@@ -148,8 +164,8 @@ export function DocumentReader({
                   className={cn(
                     "mt-1 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground",
                     // With no comments yet the control is only worth the space
-                    // where it is the ONLY way in, i.e. below `lg`.
-                    shared === 0 && notes === 0 && "lg:hidden",
+                    // where it is the ONLY way in, i.e. below `xl`.
+                    shared === 0 && notes === 0 && "xl:hidden",
                   )}
                 >
                   {shared > 0 && (
@@ -177,7 +193,7 @@ export function DocumentReader({
         })}
       </article>
 
-      <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+      <aside className="space-y-4 xl:sticky xl:top-24 xl:self-start">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">
             {selectedBlock ? "This passage" : "Comments and notes"}
@@ -241,10 +257,10 @@ export function DocumentReader({
         ) : (
           <div className="space-y-4 rounded-lg border p-4">
             <p className="text-xs text-muted-foreground">
-              Pick a paragraph to comment on it, or leave a note about the document as a whole.
+              Pick a paragraph to comment on it, or leave a note about the article as a whole.
             </p>
             <ThreadList
-              annotations={visible(resolved.document)}
+              annotations={visible(resolved.article)}
               busy={busy}
               onUpdate={onUpdate}
               onDelete={onDelete}
@@ -308,7 +324,7 @@ function CannotAnnotate({ viewer }: { viewer: ReaderViewer }) {
   return (
     <p className="text-xs text-muted-foreground">
       {viewer.signed_in
-        ? "This document is not accepting comments."
+        ? "This article is not accepting comments."
         : "Sign in to leave a comment or a private note."}
     </p>
   );
@@ -486,7 +502,7 @@ function AnnotationCard({
         {/* Which wording this was written against. Only worth saying when it is
             not the version on screen, which the parent decides by passing the
             annotation through unchanged. */}
-        <span>v{annotation.document_version}</span>
+        <span>v{annotation.article_version}</span>
       </div>
 
       {editing ? (
@@ -645,7 +661,7 @@ function Composer({
 /**
  * The longest `quote` the server accepts (mirrors `createAnnotationSchema`).
  * A block can legitimately be much longer than this — a big table, a long code
- * sample, or the whole tail of a document whose fence was left unclosed — and
+ * sample, or the whole tail of an article whose fence was left unclosed — and
  * sending the block's full text made commenting on such a passage impossible,
  * failing with a raw validation message after the reader had written their
  * comment. The quote is only a fallback anchor and a display string, so

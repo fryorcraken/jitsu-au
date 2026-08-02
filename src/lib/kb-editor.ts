@@ -1,15 +1,15 @@
 // Decisions the manager's document editor makes, kept out of the component so
 // they are unit-testable — the same split `waiver-template-editor.ts` uses, for
 // the same reason. No React, no toasts, no server calls.
-import { visibilityReach } from "./documents";
-import type { DocumentVisibility } from "./documents";
+import { visibilityReach } from "./kb";
+import type { ArticleVisibility } from "./kb";
 import { slugify } from "./slug";
 
 /** What the editor holds right now, and what a stored version holds. */
 export type DocumentDraft = {
   title: string;
   body_md: string;
-  visibility: DocumentVisibility;
+  visibility: ArticleVisibility;
   annotations_enabled: boolean;
 };
 
@@ -38,7 +38,7 @@ export function isDocumentDirty(draft: DocumentDraft, stored: DocumentDraft | nu
 }
 
 /** What a manager is warned about before a save that changes who can read it. */
-export type VisibilityChange = { from: DocumentVisibility; to: DocumentVisibility } | null;
+export type VisibilityChange = { from: ArticleVisibility; to: ArticleVisibility } | null;
 
 /**
  * The visibility change a save would make, when it is one worth confirming.
@@ -50,8 +50,8 @@ export type VisibilityChange = { from: DocumentVisibility; to: DocumentVisibilit
  * was drafted, that is the one click nobody should make by accident.
  */
 export function wideningVisibility(
-  stored: DocumentVisibility | null,
-  next: DocumentVisibility,
+  stored: ArticleVisibility | null,
+  next: ArticleVisibility,
 ): VisibilityChange {
   if (!stored || stored === next) return null;
   return visibilityReach[next] > visibilityReach[stored] ? { from: stored, to: next } : null;

@@ -1,4 +1,4 @@
-// Pure, side-effect-free logic for club documents and their annotations.
+// Pure, side-effect-free logic for knowledge base articles and their annotations.
 //
 // Everything here runs identically in the browser (the reader renders blocks and
 // groups threads) and on the server (annotations are stored against a block id
@@ -9,47 +9,47 @@
 // No server imports, no Supabase, no React — see src/lib/validation.ts for the
 // same rule and the same reason.
 
-/** Who may read a document. */
-export const documentVisibilities = ["public", "members", "managers"] as const;
-export type DocumentVisibility = (typeof documentVisibilities)[number];
+/** Who may read an article. */
+export const articleVisibilities = ["public", "members", "managers"] as const;
+export type ArticleVisibility = (typeof articleVisibilities)[number];
 
 /**
  * How far a visibility reaches, so "wider" and "narrower" are one definition.
  *
- * Both the editor's confirm prompt and the order `saveDocument` writes in turn
+ * Both the editor's confirm prompt and the order `saveKbArticle` writes in turn
  * on this comparison, and they must agree: the prompt warns about widening, and
  * the save writes a NARROWING in a different order so a half-failed save cannot
  * leave new text live under the old, wider audience.
  */
-export const visibilityReach: Record<DocumentVisibility, number> = {
+export const visibilityReach: Record<ArticleVisibility, number> = {
   managers: 0,
   members: 1,
   public: 2,
 };
 
 /** The people a visibility admits, for a sentence a manager reads. */
-export const visibilityAudience: Record<DocumentVisibility, string> = {
+export const visibilityAudience: Record<ArticleVisibility, string> = {
   managers: "Managers",
   members: "Members",
   public: "Anyone, signed in or not",
 };
 
-/** A private note, or a comment thread everyone who can read the document sees. */
+/** A private note, or a comment thread everyone who can read the article sees. */
 export const annotationVisibilities = ["private", "shared"] as const;
 export type AnnotationVisibility = (typeof annotationVisibilities)[number];
 
-/** One addressable passage of a document. */
-export type DocumentBlock = {
+/** One addressable passage of an article. */
+export type ArticleBlock = {
   /** Content-derived anchor (see `blockId`). Stable across edits elsewhere. */
   id: string;
-  /** 0-based position in the rendered document. Presentation only, never an anchor. */
+  /** 0-based position in the rendered article. Presentation only, never an anchor. */
   index: number;
   /** The block's markdown, exactly as written. */
   markdown: string;
 };
 
 /**
- * The document text a block id is derived from, with insignificant differences
+ * The article text a block id is derived from, with insignificant differences
  * removed: leading/trailing space, and runs of whitespace (including the line
  * breaks inside a wrapped paragraph) collapsed to one space.
  *
@@ -119,7 +119,7 @@ export function blockId(text: string, ordinal = 0): string {
  * split has to land on boundaries where that is safe — which top-level blank
  * lines are, and mid-construct positions are not.
  */
-export function splitBlocks(markdown: string): DocumentBlock[] {
+export function splitBlocks(markdown: string): ArticleBlock[] {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const chunks: string[] = [];
   let current: string[] = [];
@@ -128,7 +128,7 @@ export function splitBlocks(markdown: string): DocumentBlock[] {
   // Drop blank lines from each end, but NEVER the indentation on the first line.
   // A plain `.trim()` here silently de-indents an indented code block ("    const
   // a = 1;" becomes "const a = 1;"), which stops being code and renders as a
-  // paragraph — the document's own text changed by the act of splitting it.
+  // paragraph — the article's own text changed by the act of splitting it.
   const flush = () => {
     const text = current
       .join("\n")
@@ -181,10 +181,10 @@ export type AnnotationAnchor = {
 export type AnchorResolution<A extends AnnotationAnchor> = {
   /** Block id -> the annotations on it, in the order given. */
   anchored: Map<string, A[]>;
-  /** `block_id === null`: notes about the document as a whole. */
-  document: A[];
+  /** `block_id === null`: notes about the article as a whole. */
+  article: A[];
   /**
-   * Written against a passage that is no longer in the document. Shown apart
+   * Written against a passage that is no longer in the article. Shown apart
    * rather than dropped: a comment on a clause that was deleted or rewritten is
    * usually the most interesting comment on the page.
    */
@@ -192,7 +192,7 @@ export type AnchorResolution<A extends AnnotationAnchor> = {
 };
 
 /**
- * Work out where each annotation belongs in the document as it stands now.
+ * Work out where each annotation belongs in the article as it stands now.
  *
  * Two passes, in this order:
  *
@@ -207,7 +207,7 @@ export type AnchorResolution<A extends AnnotationAnchor> = {
  * read is worse than admitting the passage is gone.
  */
 export function resolveAnchors<A extends AnnotationAnchor>(
-  blocks: DocumentBlock[],
+  blocks: ArticleBlock[],
   annotations: A[],
 ): AnchorResolution<A> {
   const blockIds = new Set(blocks.map((b) => b.id));
@@ -219,7 +219,7 @@ export function resolveAnchors<A extends AnnotationAnchor>(
   }
 
   const anchored = new Map<string, A[]>();
-  const document: A[] = [];
+  const article: A[] = [];
   const orphaned: A[] = [];
 
   const push = (id: string, annotation: A) => {
@@ -230,7 +230,7 @@ export function resolveAnchors<A extends AnnotationAnchor>(
 
   for (const annotation of annotations) {
     if (!annotation.block_id) {
-      document.push(annotation);
+      article.push(annotation);
       continue;
     }
     if (blockIds.has(annotation.block_id)) {
@@ -247,7 +247,7 @@ export function resolveAnchors<A extends AnnotationAnchor>(
     orphaned.push(annotation);
   }
 
-  return { anchored, document, orphaned };
+  return { anchored, article, orphaned };
 }
 
 /** A root annotation with its replies. */
@@ -262,7 +262,7 @@ type Threadable = { id: string; parent_id: string | null; created_at?: string | 
  * A reply whose parent is missing is promoted to a root rather than dropped.
  * The schema cascades replies when a parent is deleted, so this should not
  * happen — but a filtered read (a private parent, a page that fetched only part
- * of the document) could produce it, and silently swallowing somebody's comment
+ * of the article) could produce it, and silently swallowing somebody's comment
  * is the one outcome worth ruling out.
  */
 export function groupThreads<A extends Threadable>(annotations: A[]): Thread<A>[] {
@@ -292,9 +292,9 @@ export function groupThreads<A extends Threadable>(annotations: A[]): Thread<A>[
 export type Viewer = { userId: string | null; isManager: boolean };
 
 /**
- * How many annotations one read of a document returns. Documents are read in
+ * How many annotations one read of an article returns. Articles are read in
  * full, so this is a backstop against an unbounded payload rather than paging:
- * a document with more comments than this needs a real pager, and the handler
+ * an article with more comments than this needs a real pager, and the handler
  * says so in the log rather than silently truncating.
  */
 export const ANNOTATIONS_LIMIT = 1000;
@@ -328,12 +328,12 @@ export function annotationReadFilter(viewer: Viewer): AnnotationReadFilter {
 }
 
 /**
- * Whether this viewer may read a document at all.
+ * Whether this viewer may read an article at all.
  *
  * The server functions and the manager agent endpoint both call this rather than
  * writing the comparison out, so "who can see a draft" has exactly one answer.
  */
-export function canReadDocument(visibility: DocumentVisibility, viewer: Viewer): boolean {
+export function canReadArticle(visibility: ArticleVisibility, viewer: Viewer): boolean {
   if (viewer.isManager) return true;
   if (visibility === "public") return true;
   if (visibility === "members") return Boolean(viewer.userId);
@@ -342,23 +342,23 @@ export function canReadDocument(visibility: DocumentVisibility, viewer: Viewer):
 
 /**
  * Whether this viewer may annotate it. Stricter than reading on purpose: a
- * public document is readable signed-out, but every annotation belongs to a
+ * public article is readable signed-out, but every annotation belongs to a
  * person, so annotating always needs a login.
  */
 export function canAnnotate(
-  doc: { visibility: DocumentVisibility; annotations_enabled: boolean },
+  doc: { visibility: ArticleVisibility; annotations_enabled: boolean },
   viewer: Viewer,
 ): boolean {
   if (!viewer.userId) return false;
   if (!doc.annotations_enabled) return false;
-  return canReadDocument(doc.visibility, viewer);
+  return canReadArticle(doc.visibility, viewer);
 }
 
 /**
  * Editing and deleting are the AUTHOR's alone — managers included.
  *
  * A manager can moderate a thread (see `canResolveThread`) and can delete the
- * whole document, but rewriting the words attributed to somebody else is not
+ * whole article, but rewriting the words attributed to somebody else is not
  * moderation, and a comment feature people cannot trust that way is one they
  * stop using honestly.
  */

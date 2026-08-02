@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { isDocumentDirty, slugFromTitle, wideningVisibility } from "./document-editor";
-import type { DocumentDraft } from "./document-editor";
+import { isDocumentDirty, slugFromTitle, wideningVisibility } from "./kb-editor";
+import type { DocumentDraft } from "./kb-editor";
 
 const stored: DocumentDraft = {
   title: "House rules",

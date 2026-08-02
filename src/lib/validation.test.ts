@@ -14,9 +14,10 @@ import {
   contactSchema,
   coverageSources,
   createAnnotationSchema,
-  documentSlugSchema,
+  kbSlugSchema,
   resolveAnnotationSchema,
-  saveDocumentSchema,
+  saveKbArticleSchema,
+  saveKbSectionSchema,
   updateAnnotationSchema,
   undoCheckInSchema,
   createCalendarEntrySchema,
@@ -1442,7 +1443,7 @@ describe("paperWaiverUploadSchema", () => {
   });
 
   it("does not ask for a signature, ticks or health answers: they are on the scan", () => {
-    // The whole point of the scan being the signed document. If any of these
+    // The whole point of the scan being the signed article. If any of these
     // ever became required here, a manager would be retyping evidence.
     const parsed = paperWaiverUploadSchema.parse(validAdult);
     expect(parsed).not.toHaveProperty("signature_name");
@@ -1490,7 +1491,7 @@ describe("paperWaiverUploadSchema", () => {
 
   it("leaves the emergency contact relationship optional for an adult", () => {
     // Older paper forms did not ask for it. A manager must not have to invent
-    // one to file a real document.
+    // one to file a real article.
     expect(paperWaiverUploadSchema.safeParse(validAdult).success).toBe(true);
     expect(
       paperWaiverUploadSchema.safeParse({ ...validAdult, emergency_contact_relationship: "" })
@@ -1611,37 +1612,121 @@ describe("check-in schemas", () => {
   });
 });
 
-describe("club document schemas", () => {
-  const slug = "house-rules";
+describe("knowledge base placement and link entries", () => {
+  const slug = "your-first-session";
 
-  it("documentSlugSchema accepts kebab-case and rejects anything needing escaping", () => {
-    expect(documentSlugSchema.safeParse("house-rules").success).toBe(true);
-    expect(documentSlugSchema.safeParse("plan-2027").success).toBe(true);
-    for (const bad of ["House-Rules", "house rules", "house/rules", "-leading", "trailing-", ""]) {
-      expect(documentSlugSchema.safeParse(bad).success, bad).toBe(false);
+  it("accepts a link entry that names where it points and what to call it", () => {
+    const parsed = saveKbArticleSchema.parse({
+      slug,
+      link_path: "/first-class",
+      nav_title: "Your first session",
+      section: "start-here",
+      position: 10,
+    });
+    expect(parsed.link_path).toBe("/first-class");
+  });
+
+  // A link entry has no article text to take a name from, so an unnamed one
+  // would appear in the sidebar as a blank row.
+  it("refuses a link entry with no nav_title", () => {
+    const result = saveKbArticleSchema.safeParse({ slug, link_path: "/first-class" });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses a link entry that also carries article text", () => {
+    const result = saveKbArticleSchema.safeParse({
+      slug,
+      link_path: "/first-class",
+      nav_title: "Your first session",
+      title: "Your first session",
+      body_md: "Turn up early.",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  // The pattern is the security boundary, not a tidiness rule: an absolute URL
+  // would put any destination into the club's own sidebar, and `//host` would
+  // make /kb/<slug> an open redirect.
+  it("refuses anything that is not a path on this site", () => {
+    for (const link_path of [
+      "https://evil.example/phish",
+      "//evil.example/phish",
+      "/../etc",
+      "first-class",
+      "javascript:alert(1)",
+      "/a//b",
+    ]) {
+      const result = saveKbArticleSchema.safeParse({ slug, link_path, nav_title: "X" });
+      expect(result.success, link_path).toBe(false);
     }
   });
 
-  it("saveDocumentSchema leaves visibility and annotations alone when omitted", () => {
-    const parsed = saveDocumentSchema.parse({ slug, title: "House rules", body_md: "# Rules" });
+  // Moving an article between sections must not require republishing its text.
+  it("accepts a placement-only save with no title or body", () => {
+    const parsed = saveKbArticleSchema.parse({ slug: "our-history", section: "about-the-club" });
+    expect(parsed.title).toBeUndefined();
+    expect(parsed.body_md).toBeUndefined();
+  });
+
+  // A version is written as a whole, so half of one is a save that would
+  // publish a title with no body or a body with no heading.
+  it("refuses a title without a body, and a body without a title", () => {
+    expect(saveKbArticleSchema.safeParse({ slug: "our-history", title: "X" }).success).toBe(false);
+    expect(saveKbArticleSchema.safeParse({ slug: "our-history", body_md: "X" }).success).toBe(
+      false,
+    );
+  });
+
+  it("takes an empty section as a real value, distinct from omitting it", () => {
+    expect(saveKbArticleSchema.parse({ slug: "our-history", section: "" }).section).toBe("");
+    expect(saveKbArticleSchema.parse({ slug: "our-history" }).section).toBeUndefined();
+  });
+});
+
+describe("saveKbSectionSchema", () => {
+  it("takes a slug on its own, so a section can be moved without renaming it", () => {
+    expect(saveKbSectionSchema.parse({ slug: "belts", position: 30 })).toEqual({
+      slug: "belts",
+      position: 30,
+    });
+  });
+
+  it("rejects a slug the database would reject", () => {
+    expect(saveKbSectionSchema.safeParse({ slug: "Start Here" }).success).toBe(false);
+  });
+});
+
+describe("knowledge base schemas", () => {
+  const slug = "house-rules";
+
+  it("kbSlugSchema accepts kebab-case and rejects anything needing escaping", () => {
+    expect(kbSlugSchema.safeParse("house-rules").success).toBe(true);
+    expect(kbSlugSchema.safeParse("plan-2027").success).toBe(true);
+    for (const bad of ["House-Rules", "house rules", "house/rules", "-leading", "trailing-", ""]) {
+      expect(kbSlugSchema.safeParse(bad).success, bad).toBe(false);
+    }
+  });
+
+  it("saveKbArticleSchema leaves visibility and annotations alone when omitted", () => {
+    const parsed = saveKbArticleSchema.parse({ slug, title: "House rules", body_md: "# Rules" });
     // Not defaulted: an edit that does not mention visibility must not reset a
-    // members-only document to whatever the default happens to be.
+    // members-only article to whatever the default happens to be.
     expect(parsed.visibility).toBeUndefined();
     expect(parsed.annotations_enabled).toBeUndefined();
   });
 
-  it("saveDocumentSchema rejects an unknown visibility", () => {
+  it("saveKbArticleSchema rejects an unknown visibility", () => {
     const input = { slug, title: "T", body_md: "B", visibility: "everyone" };
-    expect(saveDocumentSchema.safeParse(input).success).toBe(false);
+    expect(saveKbArticleSchema.safeParse(input).success).toBe(false);
   });
 
-  it("saveDocumentSchema requires a title and body", () => {
-    expect(saveDocumentSchema.safeParse({ slug, title: "", body_md: "B" }).success).toBe(false);
-    expect(saveDocumentSchema.safeParse({ slug, title: "T", body_md: "   " }).success).toBe(false);
+  it("saveKbArticleSchema requires a title and body", () => {
+    expect(saveKbArticleSchema.safeParse({ slug, title: "", body_md: "B" }).success).toBe(false);
+    expect(saveKbArticleSchema.safeParse({ slug, title: "T", body_md: "   " }).success).toBe(false);
   });
 
   it("createAnnotationSchema requires a visibility and a body", () => {
-    const base = { slug, document_version: 1, body: "Worth clarifying." };
+    const base = { slug, article_version: 1, body: "Worth clarifying." };
     expect(createAnnotationSchema.safeParse({ ...base, visibility: "private" }).success).toBe(true);
     expect(createAnnotationSchema.safeParse({ ...base, visibility: "shared" }).success).toBe(true);
     expect(createAnnotationSchema.safeParse(base).success).toBe(false);
@@ -1650,12 +1735,12 @@ describe("club document schemas", () => {
     ).toBe(false);
   });
 
-  // The block anchor is optional: a note about the document as a whole has no
+  // The block anchor is optional: a note about the article as a whole has no
   // passage to hang off.
   it("createAnnotationSchema allows an annotation with no block anchor", () => {
     const parsed = createAnnotationSchema.parse({
       slug,
-      document_version: 2,
+      article_version: 2,
       visibility: "shared",
       body: "Reads well overall.",
     });
@@ -1665,7 +1750,7 @@ describe("club document schemas", () => {
   it("createAnnotationSchema keeps the honeypot empty", () => {
     const input = {
       slug,
-      document_version: 1,
+      article_version: 1,
       visibility: "shared" as const,
       body: "Spam",
       hp: "http://spam.example",
@@ -1675,7 +1760,7 @@ describe("club document schemas", () => {
 
   it("createAnnotationSchema requires a positive version, so an anchor is never versionless", () => {
     const base = { slug, visibility: "shared" as const, body: "b" };
-    expect(createAnnotationSchema.safeParse({ ...base, document_version: 0 }).success).toBe(false);
+    expect(createAnnotationSchema.safeParse({ ...base, article_version: 0 }).success).toBe(false);
     expect(createAnnotationSchema.safeParse(base).success).toBe(false);
   });
 

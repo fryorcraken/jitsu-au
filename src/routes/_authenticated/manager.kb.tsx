@@ -27,35 +27,35 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  getManagerDocument,
-  listDocumentVersions,
+  getManagerArticle,
+  listArticleVersions,
   listManagerAnnotations,
-  listManagerDocuments,
-  saveManagerDocument,
-  setCurrentDocumentVersion,
-} from "@/lib/documents.functions";
-import { documentVisibilities, visibilityAudience } from "@/lib/documents";
-import type { DocumentVisibility } from "@/lib/documents";
-import { isDocumentDirty, slugFromTitle, wideningVisibility } from "@/lib/document-editor";
+  listManagerArticles,
+  saveManagerArticle,
+  setCurrentArticleVersion,
+} from "@/lib/kb.functions";
+import { articleVisibilities, visibilityAudience } from "@/lib/kb";
+import type { ArticleVisibility } from "@/lib/kb";
+import { isDocumentDirty, slugFromTitle, wideningVisibility } from "@/lib/kb-editor";
 import { versionLabel } from "@/lib/waiver-template-editor";
 import { formatDate } from "@/lib/dates";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/_authenticated/manager/documents")({
+export const Route = createFileRoute("/_authenticated/manager/kb")({
   head: () => ({
     meta: [{ title: "Documents | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
   component: DocumentsManager,
 });
 
-type DocumentSummary = Awaited<ReturnType<typeof listManagerDocuments>>[number];
-type VersionRow = Awaited<ReturnType<typeof listDocumentVersions>>[number];
+type DocumentSummary = Awaited<ReturnType<typeof listManagerArticles>>[number];
+type VersionRow = Awaited<ReturnType<typeof listArticleVersions>>[number];
 type Feedback = Awaited<ReturnType<typeof listManagerAnnotations>>[number];
 
 // No em dashes: AGENTS.md bans them in user-facing copy, and that covers the
 // manager pages, not just the public site.
-const VISIBILITY_LABEL: Record<DocumentVisibility, string> = {
+const VISIBILITY_LABEL: Record<ArticleVisibility, string> = {
   public: "Public (anyone, signed in or not)",
   members: "Members (any signed-in person)",
   managers: "Managers only (drafts and internal notes)",
@@ -69,12 +69,12 @@ function DocumentsManager() {
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
 
-  const fetchDocuments = useServerFn(listManagerDocuments);
-  const fetchDocument = useServerFn(getManagerDocument);
-  const fetchVersions = useServerFn(listDocumentVersions);
+  const fetchDocuments = useServerFn(listManagerArticles);
+  const fetchDocument = useServerFn(getManagerArticle);
+  const fetchVersions = useServerFn(listArticleVersions);
   const fetchFeedback = useServerFn(listManagerAnnotations);
-  const save = useServerFn(saveManagerDocument);
-  const promote = useServerFn(setCurrentDocumentVersion);
+  const save = useServerFn(saveManagerArticle);
+  const promote = useServerFn(setCurrentArticleVersion);
 
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [versions, setVersions] = useState<VersionRow[]>([]);
@@ -84,14 +84,14 @@ function DocumentsManager() {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [visibility, setVisibility] = useState<DocumentVisibility>("members");
+  const [visibility, setVisibility] = useState<ArticleVisibility>("members");
   const [annotationsEnabled, setAnnotationsEnabled] = useState(true);
   const [changeNote, setChangeNote] = useState("");
   /** The version as stored, to compare the editor against. */
   const [stored, setStored] = useState<{
     title: string;
     body_md: string;
-    visibility: DocumentVisibility;
+    visibility: ArticleVisibility;
     annotations_enabled: boolean;
   } | null>(null);
 
@@ -123,7 +123,7 @@ function DocumentsManager() {
    * visibility in the select, and the next save published a managers-only draft
    * to members with nothing asked and nothing shown.
    */
-  const [baseVisibility, setBaseVisibility] = useState<DocumentVisibility | null>(null);
+  const [baseVisibility, setBaseVisibility] = useState<ArticleVisibility | null>(null);
 
   /**
    * What could not be loaded for the document on screen. Panels say so instead
@@ -331,7 +331,7 @@ function DocumentsManager() {
     // is a stale snapshot and somebody else took the key in the meantime.
     if (creating && documents.some((d) => d.slug === targetSlug)) {
       toast.error(
-        `A document already exists at /docs/${targetSlug}. Open it from the list to add a version.`,
+        `A document already exists at /kb/${targetSlug}. Open it from the list to add a version.`,
       );
       return;
     }
@@ -535,7 +535,7 @@ function DocumentsManager() {
                 className="mt-1.5 font-mono text-sm"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                The permanent address: /docs/{slug || proposedSlug || "house-rules"}. Lowercase
+                The permanent address: /kb/{slug || proposedSlug || "house-rules"}. Lowercase
                 letters, numbers and single hyphens. Leave it blank to use the title.
               </p>
             </div>
@@ -573,13 +573,13 @@ function DocumentsManager() {
               <Label htmlFor="visibility">Who can read it</Label>
               <Select
                 value={visibility}
-                onValueChange={(v) => setVisibility(v as DocumentVisibility)}
+                onValueChange={(v) => setVisibility(v as ArticleVisibility)}
               >
                 <SelectTrigger id="visibility" className="mt-1.5">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {documentVisibilities.map((v) => (
+                  {articleVisibilities.map((v) => (
                     <SelectItem key={v} value={v}>
                       {VISIBILITY_LABEL[v]}
                     </SelectItem>
@@ -653,7 +653,7 @@ function DocumentsManager() {
                       <span className="font-medium">{d.title ?? d.slug}</span>
                       <Badge variant="outline">{d.visibility}</Badge>
                     </span>
-                    <span className="font-mono text-xs text-muted-foreground">/docs/{d.slug}</span>
+                    <span className="font-mono text-xs text-muted-foreground">/kb/{d.slug}</span>
                     <span className="text-xs text-muted-foreground">
                       {d.version === null
                         ? "No published version"
@@ -772,7 +772,7 @@ function DocumentsManager() {
                         <span className="font-medium text-foreground">
                           {f.author ?? "Someone at the club"}
                         </span>
-                        <span>v{f.document_version}</span>
+                        <span>v{f.article_version}</span>
                         <span>{formatDate(f.created_at)}</span>
                         {f.parent_id && <Badge variant="outline">Reply</Badge>}
                       </div>
@@ -787,7 +787,7 @@ function DocumentsManager() {
                 )}
                 {slug && (
                   <Button asChild variant="outline" size="sm" className="w-full">
-                    <Link to="/docs/$slug" params={{ slug }}>
+                    <Link to="/kb/$slug" params={{ slug }}>
                       Open the document to reply
                     </Link>
                   </Button>
