@@ -62,7 +62,12 @@ severities of moderation, not the same action.
    account settings; when unset, the name shown is derived — first (or
    preferred) name plus last initial (`commentDisplayName` in
    `src/lib/validation.ts`), e.g. "Jane L." — never their full name pulled
-   from waiver data onto a public comment. The name is resolved live at read
+   from waiver data onto a public comment. With no name on file at all the
+   fallback is the bare word "Member". Every auth user has a `profiles` row
+   (the `ensure_profile` trigger on `auth.users` makes one), but that row
+   carries a name only for people whose names were seeded by waiver submission
+   or manager approval, so an account created straight from the dashboard sees
+   "Member" until it sets a display name. The name is resolved live at read
    time, so changing it later re-labels their past comments too (it isn't
    frozen at post time, unlike a waiver's evidence fields).
 

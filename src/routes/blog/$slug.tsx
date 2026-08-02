@@ -9,7 +9,6 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { BlogVideoBlock } from "@/components/site/BlogVideoBlock";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatDate } from "@/lib/dates";
 import { getBlogPostBySlug } from "@/lib/blog.functions";
 import {
@@ -183,32 +182,25 @@ function CommentRow({
 }) {
   const upvoted = myUpvotes.has(comment.id);
   return (
-    <div className="flex gap-3">
-      <Avatar className="h-8 w-8 shrink-0">
-        <AvatarFallback aria-hidden="true">
-          {comment.author_name.charAt(0).toUpperCase()}
-        </AvatarFallback>
-      </Avatar>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold">{comment.author_name}</span>
-          <span className="text-xs text-muted-foreground">{formatDate(comment.created_at)}</span>
-        </div>
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{comment.body}</p>
-        <div className="mt-2 flex items-center gap-3">
-          <UpvoteButton comment={comment} upvoted={upvoted} onUpvote={onUpvote} />
-          {onReply && (
-            <button
-              type="button"
-              onClick={onReply}
-              className="min-h-8 rounded px-1 text-xs text-muted-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              Reply
-            </button>
-          )}
-        </div>
-        {replyBox}
+    <div className="min-w-0">
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-semibold">{comment.author_name}</span>
+        <span className="text-xs text-muted-foreground">{formatDate(comment.created_at)}</span>
       </div>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm">{comment.body}</p>
+      <div className="mt-2 flex items-center gap-3">
+        <UpvoteButton comment={comment} upvoted={upvoted} onUpvote={onUpvote} />
+        {onReply && (
+          <button
+            type="button"
+            onClick={onReply}
+            className="min-h-8 rounded px-1 text-xs text-muted-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            Reply
+          </button>
+        )}
+      </div>
+      {replyBox}
     </div>
   );
 }
