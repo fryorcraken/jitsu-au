@@ -70,10 +70,14 @@ async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUs
   }));
 }
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      ...extraHeaders,
+    },
   });
 }
 
@@ -166,17 +170,31 @@ async function authenticate(request: Request): Promise<string> {
 /** Shape any thrown value into a stable JSON error response. */
 function errorResponse(e: unknown): Response {
   if (e instanceof AgentError) {
-    // details first: `code` and `message` are the envelope's stable contract and
-    // must win, whatever a future call site happens to name a detail field.
+    // `details` is NESTED, not spread. Flat-merging shared one namespace with
+    // the envelope: ordering code/message last resolved the collision by
+    // silently discarding a detail that happened to be named either, and it
+    // would have blocked the envelope from ever growing a reserved key. Under
+    // `error.details` the two can never argue, and `details.blocked` reads as
+    // belonging to `code: "reconciled_invoice"` in a way bare `error.blocked`
+    // does not.
     return json(
-      { ok: false, error: { ...(e.details ?? {}), code: e.code, message: e.message } },
+      {
+        ok: false,
+        version: AGENT_MANIFEST.version,
+        error: { code: e.code, message: e.message, ...(e.details && { details: e.details }) },
+      },
       e.httpStatus,
+      // A retry policy reads headers, not prose. Without this, "safe to retry"
+      // is a sentence only a human acts on, and the usual client default is an
+      // immediate retry — the least useful timing for a read that just failed.
+      e.retryAfterSeconds ? { "retry-after": String(e.retryAfterSeconds) } : {},
     );
   }
   if (e instanceof ZodError) {
     return json(
       {
         ok: false,
+        version: AGENT_MANIFEST.version,
         error: {
           code: "invalid_params",
           message: "Invalid parameters.",
@@ -188,7 +206,14 @@ function errorResponse(e: unknown): Response {
   }
   // Don't leak internal detail; log server-side for debugging.
   console.error("[manager-agent] unexpected error:", e);
-  return json({ ok: false, error: { code: "internal_error", message: "Internal error." } }, 500);
+  return json(
+    {
+      ok: false,
+      version: AGENT_MANIFEST.version,
+      error: { code: "internal_error", message: "Internal error." },
+    },
+    500,
+  );
 }
 
 // ---- action: list_users ----
@@ -409,21 +434,38 @@ async function handleEditInvoice(params: unknown, actingAs: string) {
     );
   }
 
-  // The guard above read `paid_at`; this writes. A reconciliation landing in
-  // between would otherwise let a guarded edit through against an invoice that
-  // became paid after the check. Matching on the value we read closes that:
-  // if it moved, the update hits no rows and we re-read rather than write.
-  // `.is` is only for NULL/TRUE/FALSE in PostgREST, so an unpaid invoice (the
-  // common case) matches on IS NULL and a paid one on equality.
+  // Compare-and-swap on everything this edit read, not just `paid_at`.
+  //
+  // Pinning `paid_at` alone stops a reconciliation slipping a guarded edit
+  // through, but leaves the audit trail wrong: `previous` and the log's `from`
+  // both come from the row read above, and nothing held the columns actually
+  // being written. Two overlapping edits — B sets notes to "cheque", A then
+  // writes "card" — would have A record `"cash" -> "card"`, a transition that
+  // never happened, with B's edit gone from the record entirely. In the club's
+  // only invoice edit history, a stale `from` is worse than no entry: it reads
+  // as evidence.
+  //
+  // `.is` is only for NULL/TRUE/FALSE in PostgREST, so a null before-value
+  // matches on IS NULL and anything else on equality.
   let update = db.from("memberships").update(patch).eq("id", input.id);
   update = existing.paid_at ? update.eq("paid_at", existing.paid_at) : update.is("paid_at", null);
+  for (const field of diff.changed) {
+    // Every editable column is a string, a number, or null (price_cents is the
+    // only non-string), so this narrowing is total rather than convenient.
+    const before = (diff.previous[field] ?? null) as string | number | null;
+    update = before === null ? update.is(field, null) : update.eq(field, before);
+  }
   const { data: updated, error: updErr } = await update.select("*").maybeSingle();
   if (updErr) throw new AgentError(500, "db_error", updErr.message);
   if (!updated) {
+    // One code for both "somebody wrote first" and "the row is gone": each means
+    // the caller's copy is stale and re-reading is the next step either way, and
+    // the re-read tells them which (a deleted invoice 404s). Guessing here would
+    // cost a query and could still be wrong.
     throw new AgentError(
       409,
       "invoice_changed",
-      "This invoice changed while the edit was being checked (most likely a payment was reconciled). Read it again and re-send the edit if it still applies.",
+      "This invoice changed under the edit (another edit, or a payment being reconciled), so nothing was written. Read it again and re-send if the edit still applies.",
     );
   }
 
@@ -493,7 +535,7 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
     // policy reads "try this again" rather than the "fix your input" that a 4xx
     // implies — nothing was filed either way.
     if (e instanceof DuplicateCheckFailedError) {
-      throw new AgentError(503, "duplicate_check_failed", e.message);
+      throw new AgentError(503, "duplicate_check_failed", e.message, undefined, 5);
     }
     // filePaperWaiver throws plain Errors with member-facing text (the manager
     // web form renders `.message` directly); wrap so the agent gets the same
@@ -545,7 +587,13 @@ export const Route = createFileRoute("/api/manager/agent")({
           const action = classified.action;
 
           const result = await dispatch(action as ManagerAgentAction, body?.params ?? {}, actingAs);
-          return json({ ok: true, action, result });
+          // The version travels on EVERY response, not just the manifest. A
+          // client that read the manifest at the start of a long import and
+          // cannot re-read it mid-run would otherwise meet "2" as an
+          // unexplained 409; now it can compare against its own copy per call
+          // and decide to stop and re-read. That is the client `changes` was
+          // written for, and until now the one it could not reach.
+          return json({ ok: true, version: AGENT_MANIFEST.version, action, result });
         } catch (e) {
           return errorResponse(e);
         }

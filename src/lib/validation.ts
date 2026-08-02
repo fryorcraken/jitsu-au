@@ -691,6 +691,14 @@ export const paperWaiverUploadSchema = z
     // path uses. Optional: a caller that sends none just gets no retry safety.
     client_submission_id: z.string().uuid().optional(),
   })
+  // Strict, matching editInvoiceSchema. Without it Zod silently STRIPS an
+  // unknown key, so `confirmDuplicate` or `confirm_duplicates` would vanish,
+  // default to false, and return the same 409 again — telling the caller to do
+  // the very thing they believe they just did, with nothing in the response
+  // saying the flag never arrived. An agent guessing a parameter name from
+  // prose is exactly who this endpoint serves, and an escape hatch that fails
+  // silently is not an escape hatch. Unknown keys are a loud 400 instead.
+  .strict()
   .refine(
     (d) =>
       !isMinorOn(d.date_of_birth, d.signed_on) || Boolean(d.emergency_contact_relationship?.trim()),
@@ -706,6 +714,22 @@ export const paperWaiverUploadSchema = z
   });
 
 export type PaperWaiverUploadInput = z.infer<typeof paperWaiverUploadSchema>;
+
+/**
+ * The `YYYY-MM-DD` after this one, as the exclusive upper bound of a one-day
+ * range. Used by the duplicate probe, which has to match every waiver signed on
+ * a date rather than only the midnight-UTC instant a paper filing writes.
+ *
+ * Parsed as UTC midnight explicitly (`T00:00:00Z`) so the arithmetic cannot pick
+ * up the server's own timezone: the whole point is a UTC day boundary, and a
+ * bare `new Date("2026-07-01")` is already UTC while `new Date(2026, 6, 1)` is
+ * not — a difference too easy to introduce later by accident.
+ */
+export function nextUtcDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 /**
  * Whether a signing date is in the future, and so cannot be what the paper says.

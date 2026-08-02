@@ -46,8 +46,13 @@ curl -s "$UTS_MANAGER_API_URL/api/manager/agent" \
 ## Actions
 
 All actions are `POST` with a body of `{ "action": "<name>", "params": { ... } }`.
-Responses are `{ "ok": true, "action", "result" }` or
-`{ "ok": false, "error": { "code", "message" } }`.
+Responses are `{ "ok": true, "version", "action", "result" }` or
+`{ "ok": false, "version", "error": { "code", "message", "details"? } }`.
+
+**`version` is on every response, not just the manifest.** Compare it against
+the manifest you read at the start of a run: if it has moved, stop and re-read
+rather than discovering the change as an unexplained refusal mid-import. Any
+error payload beyond `code`/`message` lives under `error.details`.
 
 ### `list_users` — list everyone in the funnel
 
@@ -129,16 +134,22 @@ audit log with who made it and each field's old and new value.
 > **A paid invoice's money fields are guarded.** Once an invoice has a `paid_at`,
 > its `price_cents`, `payment_reference` and `payment_method` are the club's
 > record of money that actually moved through the bank. Changing one is refused
-> with `409 reconciled_invoice`, and the error names the `blocked` fields and
-> their `previous` values. Re-send with `"confirm_paid_edit": true` if the
+> with `409 reconciled_invoice`, and `error.details` names the `blocked` fields
+> and their `previous` values. Re-send with `"confirm_paid_edit": true` if the
 > correction is genuinely right (a real data-entry mistake). `notes` and `status`
 > are not guarded: a note claims nothing about money, and expiring or cancelling
 > a membership that ran its course is an ordinary lifecycle move.
 >
 > **The refusal is all-or-nothing.** An unguarded field sent in the same call
-> (say `notes` alongside `price_cents`) is not written either. `error.previous`
-> covers only the `blocked` fields, so it always lines up with `blocked` rather
-> than listing everything the call would have changed.
+> (say `notes` alongside `price_cents`) is not written either.
+> `error.details.previous` covers only the `blocked` fields, so it always lines
+> up with `blocked` rather than listing everything the call would have changed.
+>
+> **`409 invoice_changed` means somebody else got there first.** The edit is
+> checked against the invoice as read, and refused if any field it would change
+> moved in between — so a `previous` you are shown is never stale. Re-read the
+> invoice and decide whether the edit still applies. Do not blind-retry: you
+> would be racing the same writer again.
 >
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
@@ -208,9 +219,11 @@ scripts/agent.sh file_waiver '{
 >   waiver, so never reuse one across different records.
 > - **Filing the same paper twice is caught.** If the person already has a
 >   waiver signed on that `signed_on`, the call is refused with
->   `409 duplicate_waiver` and the error's `existing` array lists the waivers it
->   collided with (`id`, `approval_status`, `signed_on`), plus `truncated: true`
->   if there are more than 20. **A retried or duplicated import batch is the
+>   `409 duplicate_waiver` and `error.details.existing` lists the waivers it
+>   collided with (`id`, `approval_status`, `signed_on`), plus
+>   `details.truncated` if there are more than 20. The check covers **any**
+>   waiver signed that day, including one signed online — not just other paper
+>   filings. **A retried or duplicated import batch is the
 >   reason this exists — do not paper over it with `confirm_duplicate`.** Stop,
 >   work out how many of the batch already landed, and resume from there. Only
 >   set `"confirm_duplicate": true` when the second document is real (a corrected
@@ -229,7 +242,10 @@ scripts/agent.sh file_waiver '{
   automatically, and that leaving everything pending (not approved) is what
   they want.
 - On `ok: false`, read `error.code`/`error.message`; `invalid_params` responses
-  include an `issues` array pointing at the offending field. `file_waiver`
+  include an `issues` array pointing at the offending field. **An unknown or
+  misspelled parameter is a 400, on every action** — a flag you typo'd is never
+  silently dropped, so a refusal you thought you confirmed past means the
+  confirmation genuinely was not accepted, not that it went missing. `file_waiver`
   failures (an unreadable scan, a storage hiccup) come back as
   `file_waiver_failed` with a plain-English message.
 - Two error codes carry extra fields and both mean "stop and confirm", never
@@ -238,9 +254,14 @@ scripts/agent.sh file_waiver '{
   `truncated`). Both have an override, and both overrides are the manager's
   call, not yours.
 - `duplicate_check_failed` (503) is the opposite: a transient failure, safe and
-  correct to retry unchanged. Nothing was filed. Retryable failures are 5xx;
+  correct to retry unchanged, and it carries a `Retry-After` header — obey it
+  rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
 - The manifest's `version` tells generations apart (currently `"2"`), and its
-  `changes` array says what each version actually moved, newest first. If you
+  `changes` array says what each version actually moved, newest first, with
+  `breaking: true` on any version that turns calls which used to succeed into
+  errors. **There is no way to pin an older version** — the contract is
+  latest-only, so `changes` tells you what moved rather than letting you opt
+  out of it. If you
   cached the manifest at the start of a long batch, read `changes` rather than
   diffing prose — it calls out the calls that used to succeed and now refuse.

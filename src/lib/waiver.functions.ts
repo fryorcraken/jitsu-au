@@ -14,6 +14,7 @@ import {
   isMinorOn,
   isPaperWaiver,
   nameWithPreferred,
+  nextUtcDay,
   normalizeEmail,
   paperWaiverUploadSchema,
   saveTemplateSchema,
@@ -1088,15 +1089,36 @@ export async function filePaperWaiver(
     // One over the cap, so a full page is recognisable as "there are more" and
     // the message can say so instead of reporting the cap as the total.
     const DUPLICATE_PROBE_CAP = 20;
+    // A RANGE over the day, not equality on midnight. Only a paper filing writes
+    // midnight UTC; an online submission stores the actual moment it was signed,
+    // so exact equality would have quietly compared paper against paper only —
+    // while the manifest, this docstring and the error message all promise "a
+    // waiver signed on this date". An online waiver and a paper form for the
+    // same day are exactly as approvable-in-the-wrong-order as two paper ones,
+    // and the migration case (filing paper for somebody who has since signed
+    // online) is a realistic way to reach it.
+    //
+    // "Same day" means same UTC day, matching how this function writes signed_at
+    // and how the waiver lists read it. The club is UTC+10/+11, so a signature
+    // given in the Sydney morning lands on the previous UTC day and will not
+    // collide with paper dated that morning. Known and accepted: widening to the
+    // club's own day would instead collide across two dates, which is worse.
     const { data: sameDate, error: dupErr } = await admin
       .from("waivers")
       .select("id, approval_status, signed_at")
       .eq("user_id", existingPersonId)
-      .eq("signed_at", signed_at)
+      .gte("signed_at", signed_at)
+      .lt("signed_at", `${nextUtcDay(data.signed_on)}T00:00:00.000Z`)
       .order("created_at", { ascending: true })
       .limit(DUPLICATE_PROBE_CAP + 1);
     // Fail closed: a duplicate slipping through silently is the thing being
     // fixed here, so an unanswerable question is not treated as a "no".
+    //
+    // ⚠️ The API maps this to a 503 documented as "nothing was filed, safe to
+    // retry unchanged", and an unattended retry policy acts on that. It is true
+    // only because this probe runs BEFORE resolvePersonId: moving person
+    // creation above it would strand a locked auth user and a profile on every
+    // retry, and no test asserting on the status code would notice.
     if (dupErr) {
       console.error("[filePaperWaiver] duplicate check failed:", dupErr);
       throw new DuplicateCheckFailedError();

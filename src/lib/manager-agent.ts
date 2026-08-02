@@ -28,7 +28,7 @@ export type AgentActionSpec = {
 export const AGENT_MANIFEST: {
   service: string;
   version: string;
-  changes: { version: string; notes: string[] }[];
+  changes: { version: string; breaking: boolean; notes: string[] }[];
   actions: AgentActionSpec[];
 } = {
   service: "uts-jitsu-manager-agent",
@@ -49,16 +49,25 @@ export const AGENT_MANIFEST: {
   changes: [
     {
       version: "2",
+      // A bare counter cannot say "this one can break you". Both refusals below
+      // turn calls that used to succeed into errors, sitting next to additions
+      // that harm nobody, and a client needs to tell "re-read when convenient"
+      // from "stop now" without parsing prose.
+      breaking: true,
       notes: [
         "edit_invoice: price_cents / payment_reference / payment_method on a PAID invoice are refused with 409 reconciled_invoice unless confirm_paid_edit is true. A call that used to succeed can now fail.",
         "edit_invoice: the result gained `changed` and `previous`.",
+        "edit_invoice: an edit is refused with 409 invoice_changed if the invoice moved between the read and the write, so a `previous` you are shown is never stale.",
+        "Every response now carries `version`, and error detail moved from the top of `error` into `error.details`.",
+        "file_waiver: the duplicate check now matches ANY waiver signed on that UTC day, including one signed online, not only another paper filing.",
+        "file_waiver: an unknown param is now a 400 rather than being silently dropped, so a misspelled confirm_duplicate cannot look like it was sent.",
         "file_waiver: a second waiver for the same person and signed_on is refused with 409 duplicate_waiver unless confirm_duplicate is true. A call that used to succeed can now fail.",
         "file_waiver: accepts client_submission_id, which makes a retry safe. Send one per record in any bulk import.",
         "file_waiver: a failed duplicate check is 503 duplicate_check_failed; nothing was filed and the call is safe to retry unchanged.",
         "list_users / list_invoices: every invoice gained sessions_allowed and sessions_remaining.",
       ],
     },
-    { version: "1", notes: ["First published action set."] },
+    { version: "1", breaking: false, notes: ["First published action set."] },
   ],
   actions: [
     {
@@ -133,7 +142,7 @@ export const AGENT_MANIFEST: {
       name: "file_waiver",
       method: "POST",
       summary:
-        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in `error.existing`, with `truncated: true` if there are more than 20); pass confirm_duplicate to file it anyway. If the duplicate check itself fails, you get 503 duplicate_check_failed and NOTHING was filed — retry it, do not reach for confirm_duplicate. To make retries safe, send client_submission_id.",
+        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in `error.details.existing`, with `details.truncated` true if there are more than 20); pass confirm_duplicate to file it anyway. If the duplicate check itself fails, you get 503 duplicate_check_failed with a Retry-After header and NOTHING was filed — retry it, do not reach for confirm_duplicate. To make retries safe, send client_submission_id.",
       params: [
         { name: "first_name", required: true, description: "As written on the form." },
         { name: "middle_name", required: false, description: "As written on the form." },
@@ -257,17 +266,21 @@ export class AgentError extends Error {
   code: string;
   httpStatus: number;
   details?: Record<string, unknown>;
+  /** Emitted as a `Retry-After` header, for failures a client should repeat. */
+  retryAfterSeconds?: number;
   constructor(
     httpStatus: number,
     code: string,
     message: string,
     details?: Record<string, unknown>,
+    retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "AgentError";
     this.code = code;
     this.httpStatus = httpStatus;
     this.details = details;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
