@@ -62,7 +62,6 @@ export const AGENT_MANIFEST: {
         "file_waiver: the duplicate check now matches ANY waiver signed on that UTC day, including one signed online, not only another paper filing.",
         "file_waiver: an unknown param is now a 400 rather than being silently dropped, so a misspelled confirm_duplicate cannot look like it was sent.",
         "file_waiver: a second waiver for the same person and signed_on is refused with 409 duplicate_waiver unless confirm_duplicate is true. A call that used to succeed can now fail.",
-
         "file_waiver: a failed duplicate check is 503 duplicate_check_failed; nothing was filed and the call is safe to retry unchanged.",
         "file_waiver: accepts client_submission_id, which makes a retry safe. Send one per record in any bulk import; the result's `created` says whether that call filed the waiver or replayed an earlier one.",
         "file_waiver: a half-filed waiver (scan not stored) is 503 waiver_filing_incomplete with Retry-After — the row is KEPT and only a retry with the same id completes it. An id bound to another record is 409 submission_id_conflict and will never succeed.",
