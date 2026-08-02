@@ -8,7 +8,7 @@
 // difference between this promotion and the waiver's is that every write must be
 // scoped to one document.
 import { describe, expect, it } from "vitest";
-import { promoteDocumentVersion, saveDocument } from "./document-admin";
+import { listSharedAnnotations, promoteDocumentVersion, saveDocument } from "./document-admin";
 import type { DocumentClient } from "./document-types";
 import type { SaveDocumentInput } from "./validation";
 
@@ -21,6 +21,7 @@ type Op = {
   patch?: Record<string, unknown>;
   values?: Record<string, unknown>;
   filters: [string, unknown][];
+  limit?: number;
 };
 
 function fakeClient(respond: (op: Op, calls: Op[]) => Result) {
@@ -33,8 +34,9 @@ function fakeClient(respond: (op: Op, calls: Op[]) => Result) {
     const builder: Record<string, unknown> = {
       eq: (col: string, val: unknown) => (op.filters.push([col, val]), builder),
       in: (col: string, val: unknown) => (op.filters.push([col, val]), builder),
+      is: (col: string, val: unknown) => (op.filters.push([col, val]), builder),
       order: () => builder,
-      limit: () => builder,
+      limit: (n: number) => ((op.limit = n), builder),
       select: () => builder,
       maybeSingle: () => settle(),
       single: () => settle(),
@@ -241,5 +243,64 @@ describe("saveDocument", () => {
     await saveDocument(db, baseInput, "manager-agent-env-key");
     expect(inserts(calls, "documents")[0].values).toMatchObject({ created_by: null });
     expect(inserts(calls, "document_versions")[0].values).toMatchObject({ created_by: null });
+  });
+});
+
+/**
+ * The privacy filter, which is the reason this function takes its client as a
+ * parameter at all.
+ *
+ * The fake client does not evaluate filters — it hands back whatever the test
+ * says — so what is asserted here is the QUERY: that every read of members'
+ * annotations carries `visibility = shared`. That is the whole guarantee. A
+ * manager screen or the agent API reading this without that filter would hand
+ * over private notes, and nothing downstream would catch it, because a private
+ * row looks exactly like a shared one once it has been returned.
+ */
+describe("listSharedAnnotations", () => {
+  const rows = [
+    { id: "a1", visibility: "shared", body: "Can we soften this?" },
+    { id: "a2", visibility: "shared", body: "Agreed." },
+  ];
+
+  it("asks only for shared annotations on the one document", async () => {
+    const { db, calls } = fakeClient(() => ok(rows));
+    const out = await listSharedAnnotations(db, "doc-1", { limit: 200 });
+    expect(out).toEqual(rows);
+    const [read] = calls;
+    expect(read.table).toBe("document_annotations");
+    expect(read.filters).toContainEqual(["visibility", "shared"]);
+    expect(read.filters).toContainEqual(["document_id", "doc-1"]);
+  });
+
+  // Belt and braces: no argument to this function can widen the read to
+  // private notes, so there is nothing a caller could pass to leak them.
+  it("keeps the shared filter when resolved threads are included", async () => {
+    const { db, calls } = fakeClient(() => ok(rows));
+    await listSharedAnnotations(db, "doc-1", { includeResolved: true, limit: 200 });
+    expect(calls[0].filters).toContainEqual(["visibility", "shared"]);
+    expect(calls[0].filters).not.toContainEqual(["resolved_at", null]);
+  });
+
+  it("hides resolved threads unless they are asked for", async () => {
+    const { db, calls } = fakeClient(() => ok(rows));
+    await listSharedAnnotations(db, "doc-1", { limit: 200 });
+    expect(calls[0].filters).toContainEqual(["resolved_at", null]);
+  });
+
+  it("passes the caller's cap through to the query", async () => {
+    const { db, calls } = fakeClient(() => ok(rows));
+    await listSharedAnnotations(db, "doc-1", { limit: 25 });
+    expect(calls[0].limit).toBe(25);
+  });
+
+  it("gives back an empty list rather than null when there is nothing", async () => {
+    const { db } = fakeClient(() => ok(null));
+    await expect(listSharedAnnotations(db, "doc-1", { limit: 200 })).resolves.toEqual([]);
+  });
+
+  it("surfaces a failed read instead of reporting no comments", async () => {
+    const { db } = fakeClient(() => ({ data: null, error: { message: "boom" } }));
+    await expect(listSharedAnnotations(db, "doc-1", { limit: 200 })).rejects.toThrow("boom");
   });
 });

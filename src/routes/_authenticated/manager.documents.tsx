@@ -7,7 +7,7 @@
 // feature actually has: several documents rather than one, a visibility setting,
 // and a feedback panel.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -53,11 +53,16 @@ type DocumentSummary = Awaited<ReturnType<typeof listManagerDocuments>>[number];
 type VersionRow = Awaited<ReturnType<typeof listDocumentVersions>>[number];
 type Feedback = Awaited<ReturnType<typeof listManagerAnnotations>>[number];
 
+// No em dashes: AGENTS.md bans them in user-facing copy, and that covers the
+// manager pages, not just the public site.
 const VISIBILITY_LABEL: Record<DocumentVisibility, string> = {
-  public: "Public — anyone, signed in or not",
-  members: "Members — any signed-in person",
-  managers: "Managers only — drafts and internal notes",
+  public: "Public (anyone, signed in or not)",
+  members: "Members (any signed-in person)",
+  managers: "Managers only (drafts and internal notes)",
 };
+
+/** Mirrors the `documents.slug` CHECK, so a bad key is caught before the server. */
+const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 function DocumentsManager() {
   const navigate = useNavigate();
@@ -90,9 +95,41 @@ function DocumentsManager() {
     annotations_enabled: boolean;
   } | null>(null);
 
+  /**
+   * An older version being read, shown in the preview panel instead of the
+   * editor's text.
+   *
+   * Kept OUT of the editor on purpose. Loading an old version into the textarea
+   * would make "Save as new version" the obvious next click, and that quietly
+   * publishes a copy of it under a new number, which is not the same thing as
+   * restoring it. Reading it here and restoring it from the version list keeps
+   * the two apart.
+   */
+  const [preview, setPreview] = useState<{
+    version: number;
+    title: string;
+    body_md: string;
+  } | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  /**
+   * Which request is allowed to write to state.
+   *
+   * Every load, save and publish takes a token before it starts and drops its
+   * results if a newer one has started since. Without this, a slow save landing
+   * after a fast document open writes the SAVED document's title, body and
+   * baseline over the one now on screen: `slug` says one document, the editor
+   * shows another, and the next save publishes the wrong text. The requests are
+   * several sequential round trips server-side, so the overtaking is ordinary,
+   * not a stress case.
+   */
+  const seq = useRef(0);
+  const claim = () => ++seq.current;
+  const stale = (token: number) => seq.current !== token;
 
   const dirty = isDocumentDirty(
     { title, body_md: body, visibility, annotations_enabled: annotationsEnabled },
@@ -122,34 +159,60 @@ function DocumentsManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchDocuments]);
 
-  async function openDocument(next: string) {
-    if (next === slug && !creating) return;
-    if ((dirty || creating) && !window.confirm("Discard your unsaved changes and open this?")) {
+  async function openDocument(next: string, opts: { force?: boolean } = {}) {
+    if (!opts.force && next === slug && !creating) return;
+    if (dirty && !window.confirm("Discard your unsaved changes and open this?")) {
       return;
     }
+    const token = claim();
+    setBusy(true);
     try {
-      const [doc, vs, fb] = await Promise.all([
+      // `allSettled`, not `all`: a document left with no published version makes
+      // the document read throw, and `all` would then discard the version list
+      // too — leaving the one screen that could repair it with nothing to show.
+      const [docRes, vsRes, fbRes] = await Promise.allSettled([
         fetchDocument({ data: { slug: next } }),
         fetchVersions({ data: { slug: next } }),
         fetchFeedback({ data: { slug: next } }),
       ]);
+      // A newer click won while these were in flight. Dropping the results is
+      // the whole point: applying them would leave `slug` pointing at one
+      // document and the editor showing another, and the next save would write
+      // this document's text into that one.
+      if (stale(token)) return;
+
       setCreating(false);
       setSlug(next);
-      setTitle(doc.title);
-      setBody(doc.body_md);
-      setVisibility(doc.visibility);
-      setAnnotationsEnabled(doc.annotations_enabled);
       setChangeNote("");
-      setStored({
-        title: doc.title,
-        body_md: doc.body_md,
-        visibility: doc.visibility,
-        annotations_enabled: doc.annotations_enabled,
-      });
-      setVersions(vs);
-      setFeedback(fb);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not open that document");
+      setPreview(null);
+      setVersions(vsRes.status === "fulfilled" ? vsRes.value : []);
+      setFeedback(fbRes.status === "fulfilled" ? fbRes.value : []);
+
+      if (docRes.status === "fulfilled") {
+        const doc = docRes.value;
+        setTitle(doc.title);
+        setBody(doc.body_md);
+        setVisibility(doc.visibility);
+        setAnnotationsEnabled(doc.annotations_enabled);
+        setStored({
+          title: doc.title,
+          body_md: doc.body_md,
+          visibility: doc.visibility,
+          annotations_enabled: doc.annotations_enabled,
+        });
+      } else {
+        // No published version. Show an empty editor over the real version list
+        // so the manager can publish one of them, and say why rather than
+        // leaving a blank screen.
+        setTitle("");
+        setBody("");
+        setStored(null);
+        toast.warning(
+          `"${next}" has no published version. Publish one from the version list, or write a new one.`,
+        );
+      }
+    } finally {
+      if (!stale(token)) setBusy(false);
     }
   }
 
@@ -165,12 +228,56 @@ function DocumentsManager() {
     setStored(null);
     setVersions([]);
     setFeedback([]);
+    setPreview(null);
+  }
+
+  /**
+   * Read an older version before deciding whether to restore it.
+   *
+   * Without this the Restore button is a blind click: the editor only ever holds
+   * the live version, so a manager undoing an edit has to publish a version they
+   * cannot see in order to find out what is in it, and members read it in the
+   * meantime.
+   */
+  async function onView(version: VersionRow) {
+    const token = claim();
+    setBusy(true);
+    try {
+      const doc = await fetchDocument({ data: { slug, version: version.version } });
+      if (stale(token)) return;
+      setPreview({ version: version.version, title: doc.title, body_md: doc.body_md });
+    } catch (e) {
+      if (!stale(token)) {
+        toast.error(e instanceof Error ? e.message : "Could not read that version");
+      }
+    } finally {
+      if (!stale(token)) setBusy(false);
+    }
   }
 
   async function onSave() {
     const targetSlug = (creating ? slug || slugFromTitle(title) : slug).trim();
     if (!targetSlug) {
       toast.error("Give the document a URL key, e.g. house-rules.");
+      return;
+    }
+    // Check the key here rather than letting the server reject it: a hand-typed
+    // "House Rules" would otherwise come back as a raw validation dump.
+    if (!SLUG_PATTERN.test(targetSlug) || targetSlug.length > 100) {
+      toast.error("A URL key can only use lowercase letters, numbers and single hyphens.");
+      return;
+    }
+
+    // Creating a document whose slug already exists is not a create — the
+    // server treats a known slug as "add a version to it". Left unchecked, a
+    // manager typing the title of an existing managers-only draft would replace
+    // its live text AND, because the form always sends a visibility, publish it
+    // to everyone. `stored` is null while creating, so the widening prompt below
+    // does not fire either. Refuse, and point at the list.
+    if (creating && documents.some((d) => d.slug === targetSlug)) {
+      toast.error(
+        `A document already exists at /docs/${targetSlug}. Open it from the list to add a version.`,
+      );
       return;
     }
 
@@ -187,6 +294,7 @@ function DocumentsManager() {
       return;
     }
 
+    const token = claim();
     setSaving(true);
     try {
       const res = await save({
@@ -208,6 +316,10 @@ function DocumentsManager() {
           ? `Created "${targetSlug}" and published version ${res.version}`
           : `Saved version ${res.version}, now live`,
       );
+      // The save landed either way, so it is reported. But if the manager has
+      // since opened a different document, writing this one's text back into the
+      // editor would put the screen out of step with itself.
+      if (stale(token)) return;
       setCreating(false);
       setSlug(targetSlug);
       setChangeNote("");
@@ -243,7 +355,7 @@ function DocumentsManager() {
     if (
       dirty &&
       !window.confirm(
-        `Your unsaved changes are not part of version ${version.version} and will not go live. Save them as a new version first, or continue to publish the stored version ${version.version}?`,
+        `Your unsaved changes will be discarded, and they are not part of version ${version.version} so they will not go live. Save them as a new version first, or continue to publish the stored version ${version.version} and lose them?`,
       )
     ) {
       return;
@@ -255,23 +367,40 @@ function DocumentsManager() {
     ) {
       return;
     }
+    const token = claim();
+    const target = slug;
     setPromoting(true);
     try {
       await promote({ data: { id: version.id } });
       toast.success(`Version ${version.version} is now live`);
-      const [vs, doc] = await Promise.all([
-        fetchVersions({ data: { slug } }),
-        fetchDocument({ data: { slug } }),
-      ]);
-      setVersions(vs);
-      setTitle(doc.title);
-      setBody(doc.body_md);
-      setStored({
-        title: doc.title,
-        body_md: doc.body_md,
-        visibility: doc.visibility,
-        annotations_enabled: doc.annotations_enabled,
-      });
+      // The publish has already committed. Reporting a failed REFRESH as a
+      // failed publish would tell the manager the club's live document is
+      // something it is not, so the refresh gets its own try. (`onSave` learned
+      // this first.)
+      try {
+        const [vs, doc, rows] = await Promise.all([
+          fetchVersions({ data: { slug: target } }),
+          fetchDocument({ data: { slug: target } }),
+          fetchDocuments(),
+        ]);
+        if (stale(token)) return;
+        setVersions(vs);
+        setDocuments(rows);
+        setChangeNote("");
+        setPreview(null);
+        setTitle(doc.title);
+        setBody(doc.body_md);
+        setVisibility(doc.visibility);
+        setAnnotationsEnabled(doc.annotations_enabled);
+        setStored({
+          title: doc.title,
+          body_md: doc.body_md,
+          visibility: doc.visibility,
+          annotations_enabled: doc.annotations_enabled,
+        });
+      } catch {
+        toast.warning("Published. The screen could not be refreshed, so reload to see it.");
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not change the live version");
     } finally {
@@ -295,7 +424,12 @@ function DocumentsManager() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button type="button" variant="outline" onClick={startNew}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving || promoting || busy}
+            onClick={startNew}
+          >
             <Plus className="mr-1.5 h-4 w-4" />
             New document
           </Button>
@@ -307,7 +441,12 @@ function DocumentsManager() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
         <div className="space-y-4">
-          {creating && (
+          {/* Also shown when there is no slug yet, not only in `creating` mode.
+              On an empty club the screen opens with `creating` false and no
+              slug, and without this the manager types a title and body, hits
+              Save, and is told to give it a URL key with no field to type one
+              into. */}
+          {(creating || !slug) && (
             <div>
               <Label htmlFor="slug">URL key</Label>
               <Input
@@ -397,9 +536,10 @@ function DocumentsManager() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Button onClick={onSave} disabled={saving || !title || !body}>
+            <Button onClick={onSave} disabled={saving || promoting || busy || !title || !body}>
               {saving ? "Saving..." : creating ? "Create and publish" : "Save as new version"}
             </Button>
+            {busy && <span className="text-xs text-muted-foreground">Loading...</span>}
             {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
           </div>
         </div>
@@ -419,9 +559,15 @@ function DocumentsManager() {
                   <button
                     key={d.slug}
                     type="button"
+                    // Disabled while a write is in flight. The request token
+                    // already makes a late result harmless, but letting the
+                    // manager switch documents mid-save invites them to watch
+                    // the screen change under a save they thought applied here.
+                    disabled={saving || promoting || busy}
                     onClick={() => void openDocument(d.slug)}
                     aria-current={d.slug === slug && !creating}
                     className={cn(
+                      "disabled:opacity-60",
                       "flex w-full flex-col gap-1 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted",
                       d.slug === slug && !creating && "border-primary bg-muted",
                     )}
@@ -463,19 +609,39 @@ function DocumentsManager() {
                         {v.change_note ? ` · ${v.change_note}` : ""}
                       </span>
                     </span>
-                    {v.is_current ? (
-                      <Badge>Live</Badge>
-                    ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        disabled={promoting}
-                        onClick={() => void onPromote(v)}
-                      >
-                        {versionLabel(v, liveVersion) === "Previous" ? "Restore" : "Publish"}
-                      </Button>
-                    )}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {v.is_current ? (
+                        <Badge>Live</Badge>
+                      ) : (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Read version ${v.version}`}
+                            disabled={promoting || saving || busy}
+                            onClick={() => void onView(v)}
+                          >
+                            Read
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            // Every one of these reads "Publish" or "Restore", so
+                            // without a label a screen reader announces a column of
+                            // identical buttons.
+                            aria-label={`${
+                              versionLabel(v, liveVersion) === "Previous" ? "Restore" : "Publish"
+                            } version ${v.version}`}
+                            disabled={promoting || saving || busy}
+                            onClick={() => void onPromote(v)}
+                          >
+                            {versionLabel(v, liveVersion) === "Previous" ? "Restore" : "Publish"}
+                          </Button>
+                        </>
+                      )}
+                    </span>
                   </div>
                 ))}
               </CardContent>
@@ -488,9 +654,12 @@ function DocumentsManager() {
                 <CardTitle className="text-base">Feedback</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
+                {/* Precise on purpose. Private notes ARE shown, to the person
+                    who wrote them. "Never shown anywhere" would have a manager
+                    repeat something untrue to a member who asked. */}
                 <p className="text-xs text-muted-foreground">
-                  Open comment threads members left. Private notes are never shown here, or anywhere
-                  else.
+                  Open comment threads members left. Private notes are never shown to the club, only
+                  to the person who wrote them.
                 </p>
                 {feedback.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No open comments.</p>
@@ -528,12 +697,29 @@ function DocumentsManager() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Preview</CardTitle>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">
+            {preview ? `Version ${preview.version}: ${preview.title}` : "Preview"}
+          </CardTitle>
+          {preview && (
+            <div className="flex items-center gap-2">
+              {/* Said plainly, because the panel now shows text that is NOT
+                  what members are reading, and nothing else on the page says
+                  so. */}
+              <span className="text-xs text-muted-foreground">
+                Not live. Members are reading version {liveVersion ?? "none"}.
+              </span>
+              <Button type="button" size="sm" variant="outline" onClick={() => setPreview(null)}>
+                Back to the editor
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:font-bold prose-headings:text-foreground prose-p:leading-relaxed prose-strong:text-foreground">
-            <ReactMarkdown>{body || "_Nothing to preview yet._"}</ReactMarkdown>
+            <ReactMarkdown>
+              {(preview ? preview.body_md : body) || "_Nothing to preview yet._"}
+            </ReactMarkdown>
           </div>
         </CardContent>
       </Card>

@@ -21,9 +21,17 @@ describe("isDocumentDirty", () => {
     expect(isDocumentDirty({ ...stored, annotations_enabled: false }, stored)).toBe(true);
   });
 
-  // Nothing is stored yet, so there is nothing to lose by switching away.
-  it("is clean when there is no stored version to compare against", () => {
-    expect(isDocumentDirty({ ...stored, title: "Anything" }, null)).toBe(false);
+  // While creating there is no stored version, but anything typed is still
+  // unsaved work. Returning false here let "New document" wipe a fully typed
+  // document with no prompt.
+  it("treats typed content with nothing stored as unsaved work", () => {
+    expect(isDocumentDirty({ ...stored, title: "Anything" }, null)).toBe(true);
+    expect(isDocumentDirty({ ...stored, title: "", body_md: "# Draft" }, null)).toBe(true);
+  });
+
+  it("is clean when nothing is stored and nothing has been typed", () => {
+    expect(isDocumentDirty({ ...stored, title: "", body_md: "" }, null)).toBe(false);
+    expect(isDocumentDirty({ ...stored, title: "   ", body_md: "  " }, null)).toBe(false);
   });
 });
 
@@ -60,6 +68,13 @@ describe("slugFromTitle", () => {
   it("collapses punctuation and trims stray hyphens", () => {
     expect(slugFromTitle("  What's the plan?!  ")).toBe("what-s-the-plan");
     expect(slugFromTitle("--Draft--")).toBe("draft");
+  });
+
+  // Built on `slugify`, which normalises accents. A hand-rolled ASCII filter
+  // turns "Café" into "caf-", which is legal but not the word.
+  it("keeps accented words readable", () => {
+    expect(slugFromTitle("Café etiquette")).toBe("cafe-etiquette");
+    expect(slugFromTitle("Après-training notes")).toBe("apres-training-notes");
   });
 
   // The CHECK caps the slug at 100 characters, and a trailing hyphen left by the

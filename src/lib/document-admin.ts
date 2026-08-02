@@ -270,6 +270,37 @@ export function projectDocument({ document, version }: LoadedDocument) {
   };
 }
 
+/**
+ * The SHARED annotations on a document, for a manager reading feedback back.
+ *
+ * Takes its client as a parameter so the privacy filter is unit-testable, which
+ * matters more here than anywhere else in the feature: the `.eq("visibility",
+ * "shared")` below is the single line stopping a manager from reading members'
+ * private notes, and inside a `createServerFn` handler no test can reach it.
+ *
+ * Shared only, and that is not an oversight to be fixed later. A private note is
+ * private from the club too (see the migration), which is what makes it usable
+ * for "things I want to remember about this policy". A manager gets the
+ * conversation, never somebody's notebook.
+ */
+export async function listSharedAnnotations(
+  db: DocumentClient,
+  documentId: string,
+  opts: { includeResolved?: boolean; limit: number },
+): Promise<DocumentAnnotationRow[]> {
+  let query = db
+    .from("document_annotations")
+    .select("*")
+    .eq("document_id", documentId)
+    .eq("visibility", "shared")
+    .order("created_at", { ascending: true });
+  if (!opts.includeResolved) query = query.is("resolved_at", null);
+
+  const { data, error } = await query.limit(opts.limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as DocumentAnnotationRow[];
+}
+
 /** An annotation as the manager API reports it. */
 export function projectAnnotation(row: DocumentAnnotationRow, authorName: string | null) {
   return {

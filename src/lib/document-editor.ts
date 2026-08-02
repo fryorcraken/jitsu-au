@@ -2,6 +2,7 @@
 // they are unit-testable — the same split `waiver-template-editor.ts` uses, for
 // the same reason. No React, no toasts, no server calls.
 import type { DocumentVisibility } from "./documents";
+import { slugify } from "./slug";
 
 /** What the editor holds right now, and what a stored version holds. */
 export type DocumentDraft = {
@@ -12,14 +13,21 @@ export type DocumentDraft = {
 };
 
 /**
- * Whether the editor holds changes a save would keep.
+ * Whether the editor holds work a save would keep, and navigating away would
+ * lose.
+ *
+ * With no `stored` version the editor is composing a NEW document, and anything
+ * typed into it is unsaved work. Returning false there (as this used to) meant
+ * the "Unsaved changes" hint never appeared while creating, and the guard on
+ * "New document" — which only consults this — silently wiped a fully typed
+ * document on a second click.
  *
  * `change_note` is deliberately NOT part of this: it describes a save rather
  * than being part of the document, so a note typed against an otherwise
  * unchanged body is not an edit worth warning about losing.
  */
 export function isDocumentDirty(draft: DocumentDraft, stored: DocumentDraft | null): boolean {
-  if (!stored) return false;
+  if (!stored) return Boolean(draft.title.trim() || draft.body_md.trim());
   return (
     draft.title !== stored.title ||
     draft.body_md !== stored.body_md ||
@@ -52,18 +60,20 @@ export function wideningVisibility(
 
 /**
  * A slug proposed from a title, so a manager creating a document does not have
- * to invent one. Mirrors the `documents.slug` CHECK: lowercase, digits, single
- * hyphens, no leading or trailing hyphen.
+ * to invent one. Satisfies the `documents.slug` CHECK: lowercase, digits,
+ * single hyphens, no leading or trailing hyphen, at most 100 characters.
+ *
+ * Built on the repo's existing `slugify` rather than a second implementation.
+ * That matters beyond tidiness: `slugify` normalises accents, so "Café
+ * etiquette" becomes `cafe-etiquette` instead of the `caf-etiquette` a
+ * hand-rolled ASCII filter produces.
  *
  * Returns "" when the title has nothing usable in it (all punctuation, or a
- * script this cannot transliterate), which the form treats as "you type it" —
- * better than proposing a slug like `--` that the database would reject.
+ * script this cannot transliterate), which the form treats as "you type it":
+ * better than proposing a slug the database would reject.
  */
 export function slugFromTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 100)
-    .replace(/-+$/g, "");
+  // Trim AFTER the length cap: slicing can land mid-word and leave a trailing
+  // hyphen, which the CHECK rejects outright.
+  return slugify(title).slice(0, 100).replace(/-+$/g, "");
 }

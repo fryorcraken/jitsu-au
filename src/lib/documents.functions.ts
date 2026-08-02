@@ -20,8 +20,7 @@ import {
   canResolveThread,
 } from "@/lib/documents";
 import type { AnnotationVisibility, Viewer } from "@/lib/documents";
-import { loadDocument, projectDocument } from "@/lib/document-admin";
-import { asDocumentClient } from "@/lib/document-types";
+import { listSharedAnnotations, loadDocument, projectDocument } from "@/lib/document-admin";
 import type { DocumentAnnotationRow, DocumentClient, DocumentRow } from "@/lib/document-types";
 import {
   createAnnotationSchema,
@@ -47,7 +46,7 @@ async function headerGetter(): Promise<(name: string) => string | undefined> {
 
 async function adminClient(): Promise<DocumentClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return asDocumentClient(supabaseAdmin);
+  return supabaseAdmin;
 }
 
 /**
@@ -61,23 +60,50 @@ async function adminClient(): Promise<DocumentClient> {
  * An expired or junk token resolves to the same signed-out viewer as no token
  * at all — the reader sees the public view rather than an error about a session
  * they cannot do anything about.
+ *
+ * `strict` changes what a FAILURE means, not what a valid answer is. Degrading
+ * to signed-out is right for a reader (they get the public view of a public
+ * page), and wrong for a manager screen: a momentary Supabase hiccup would
+ * demote a real manager to "not a manager", and the resulting `Forbidden` is
+ * indistinguishable from "you are not allowed", so the screen would tell them
+ * they have no documents. In strict mode a failed identity or role lookup is
+ * raised as itself.
  */
-async function resolveViewer(db: DocumentClient): Promise<Viewer> {
+async function resolveViewer(db: DocumentClient, opts: { strict?: boolean } = {}): Promise<Viewer> {
   const getHeader = await headerGetter();
   const bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
   if (!bearer) return { userId: null, isManager: false };
 
+  const unavailable = new Error(
+    "Could not confirm who you are just now. Reload the page and try again.",
+  );
+
+  let userId: string | null = null;
   try {
-    const { data } = await db.auth.getUser(bearer);
-    const userId = data.user?.id ?? null;
-    if (!userId) return { userId: null, isManager: false };
-    const { data: isManager } = await db.rpc("has_role", {
+    const { data, error } = await db.auth.getUser(bearer);
+    // An `error` here is ambiguous: an expired token and an unreachable auth
+    // service look the same. Signed-out is the safe read for a public page, and
+    // the wrong one for a manager screen — hence `strict`.
+    if (error && opts.strict) throw unavailable;
+    userId = data.user?.id ?? null;
+  } catch (e) {
+    if (opts.strict) throw e === unavailable ? e : unavailable;
+    return { userId: null, isManager: false };
+  }
+  if (!userId) return { userId: null, isManager: false };
+
+  try {
+    const { data: isManager, error } = await db.rpc("has_role", {
       _user_id: userId,
       _role: "manager",
     });
+    // A failed role lookup is not "not a manager". Under `strict` it must not be
+    // reported as one.
+    if (error && opts.strict) throw unavailable;
     return { userId, isManager: Boolean(isManager) };
-  } catch {
-    return { userId: null, isManager: false };
+  } catch (e) {
+    if (opts.strict) throw e === unavailable ? e : unavailable;
+    return { userId, isManager: false };
   }
 }
 
@@ -467,9 +493,23 @@ export const resolveAnnotation = createServerFn({ method: "POST" })
 // a courtesy, not a lock.
 // ---------------------------------------------------------------------------
 
-/** Fail unless the caller holds the manager role. */
+/**
+ * Cap on documents the manager list returns. A club with more pages than this
+ * has outgrown a flat sidebar; the handler warns rather than truncating in
+ * silence.
+ */
+const MANAGER_DOCUMENTS_LIMIT = 500;
+
+/**
+ * Fail unless the caller holds the manager role.
+ *
+ * Strict: on a manager screen, "we could not check" must not arrive as
+ * "Forbidden". The page suppresses `Forbidden` (a non-manager is being
+ * redirected anyway), so a swallowed lookup failure would leave a real manager
+ * staring at an empty documents list with no error to act on.
+ */
 async function requireManagerViewer(db: DocumentClient): Promise<Viewer> {
-  const viewer = await resolveViewer(db);
+  const viewer = await resolveViewer(db, { strict: true });
   if (!viewer.isManager) throw new Error("Forbidden");
   return viewer;
 }
@@ -490,28 +530,44 @@ export const listManagerDocuments = createServerFn({ method: "GET" }).handler(as
     .from("documents")
     .select("id, slug, visibility, annotations_enabled, created_at, updated_at")
     .order("slug")
-    .limit(500);
+    .limit(MANAGER_DOCUMENTS_LIMIT);
   if (error) throw new Error(error.message);
   const documents = (docs ?? []) as DocumentRow[];
+  if (documents.length >= MANAGER_DOCUMENTS_LIMIT) {
+    console.warn(
+      `[documents] manager list capped at ${MANAGER_DOCUMENTS_LIMIT}; some documents are not shown`,
+    );
+  }
   if (!documents.length) return [];
 
   const ids = documents.map((d) => d.id);
-  const [{ data: live, error: lErr }, { data: counts, error: cErr }] = await Promise.all([
-    db
-      .from("document_versions")
-      .select("document_id, title, version, created_at, change_note")
-      .in("document_id", ids)
-      .eq("is_current", true),
-    db.from("document_versions").select("document_id").in("document_id", ids).limit(5000),
-  ]);
+  const { data: live, error: lErr } = await db
+    .from("document_versions")
+    .select("document_id, title, version, created_at, change_note")
+    .in("document_id", ids)
+    .eq("is_current", true);
   if (lErr) throw new Error(lErr.message);
-  if (cErr) throw new Error(cErr.message);
 
+  // Count versions IN the database, one `head: true` count per document.
+  //
+  // Reading every version row just to length them in JS grows without bound —
+  // every save adds one — and would eventually be truncated by the server-side
+  // row cap. That truncation is silent and unordered, so a document would
+  // quietly report "Version 12 of 74" when it has 90: a confident wrong number,
+  // which is the failure `handleListUsers` in the agent endpoint exists to warn
+  // about. These counts transfer no rows.
   const liveByDoc = new Map((live ?? []).map((v) => [v.document_id, v]));
   const countByDoc = new Map<string, number>();
-  for (const row of counts ?? []) {
-    countByDoc.set(row.document_id, (countByDoc.get(row.document_id) ?? 0) + 1);
-  }
+  await Promise.all(
+    documents.map(async (d) => {
+      const { count, error: cErr } = await db
+        .from("document_versions")
+        .select("*", { count: "exact", head: true })
+        .eq("document_id", d.id);
+      if (cErr) throw new Error(cErr.message);
+      countByDoc.set(d.id, count ?? 0);
+    }),
+  );
 
   return documents.map((d) => {
     const current = liveByDoc.get(d.id);
@@ -622,19 +678,10 @@ export const listManagerAnnotations = createServerFn({ method: "POST" })
     if (docErr) throw new Error(docErr.message);
     if (!doc) throw new Error("No such document.");
 
-    let query = db
-      .from("document_annotations")
-      .select("*")
-      .eq("document_id", doc.id)
-      .eq("visibility", "shared")
-      .order("created_at", { ascending: true })
-      .limit(ANNOTATIONS_LIMIT);
-    if (!data.include_resolved) query = query.is("resolved_at", null);
-
-    const { data: rows, error } = await query;
-    if (error) throw new Error(error.message);
-
-    const annotations = (rows ?? []) as DocumentAnnotationRow[];
+    const annotations = await listSharedAnnotations(db, doc.id, {
+      includeResolved: data.include_resolved,
+      limit: ANNOTATIONS_LIMIT,
+    });
     const names = await authorNames(
       db,
       annotations.map((a) => a.user_id),

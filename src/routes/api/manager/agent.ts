@@ -49,7 +49,6 @@ import {
   projectDocument,
   saveDocument,
 } from "@/lib/document-admin";
-import { asDocumentClient } from "@/lib/document-types";
 import type { DocumentAnnotationRow, DocumentRow } from "@/lib/document-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
@@ -447,7 +446,7 @@ const DOCUMENTS_LIMIT = 500;
 
 // ---- action: list_documents ----
 async function handleListDocuments() {
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
 
   // Only the LIVE version of each document, not every version ever saved.
   //
@@ -514,7 +513,7 @@ async function handleListDocuments() {
 // ---- action: get_document ----
 async function handleGetDocument(params: unknown) {
   const input = getDocumentSchema.parse(params);
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
   const loaded = await loadDocument(db, input.slug, input.version);
   // A manager token sees every document, drafts included, so there is no
   // visibility check here — unlike the public reader, which hides a missing
@@ -526,7 +525,7 @@ async function handleGetDocument(params: unknown) {
 // ---- action: save_document ----
 async function handleSaveDocument(params: unknown, actingAs: string) {
   const input = saveDocumentSchema.parse(params);
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
   try {
     const result = await saveDocument(db, input, actingAs);
     return {
@@ -550,7 +549,7 @@ async function handleSaveDocument(params: unknown, actingAs: string) {
 // ---- action: list_document_annotations ----
 async function handleListDocumentAnnotations(params: unknown) {
   const input = listDocumentAnnotationsSchema.parse(params);
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
 
   const { data: doc, error: docErr } = await db
     .from("documents")
