@@ -905,7 +905,7 @@ export type Database = {
           emergency_contact_name: string | null
           emergency_contact_phone: string | null
           emergency_contact_relationship: string | null
-          first_name: string | null
+          first_name: string
           guardian_name: string | null
           guardian_relationship: string | null
           is_minor: boolean
@@ -927,7 +927,7 @@ export type Database = {
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
           emergency_contact_relationship?: string | null
-          first_name?: string | null
+          first_name: string
           guardian_name?: string | null
           guardian_relationship?: string | null
           is_minor?: boolean
@@ -949,7 +949,7 @@ export type Database = {
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
           emergency_contact_relationship?: string | null
-          first_name?: string | null
+          first_name?: string
           guardian_name?: string | null
           guardian_relationship?: string | null
           is_minor?: boolean
@@ -1231,7 +1231,6 @@ export type Database = {
         Args: { _user_id: string }
         Returns: undefined
       }
-      event_is_invite_only: { Args: { _event_id: string }; Returns: boolean }
       has_active_paid_membership: {
         Args: { _user_id: string }
         Returns: boolean
@@ -1241,11 +1240,6 @@ export type Database = {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
-        Returns: boolean
-      }
-      is_commenter_blocked: { Args: { _user_id: string }; Returns: boolean }
-      is_event_invitee: {
-        Args: { _event_id: string; _user_id: string }
         Returns: boolean
       }
       user_emails: {
