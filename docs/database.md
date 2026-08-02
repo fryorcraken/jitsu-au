@@ -57,7 +57,7 @@ function on the service-role client, which bypasses both grants and RLS.
 | `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                       |
 | `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                     |
 | `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                 |
-| `club_semesters`         | `anon`+`auth`   | `SELECT`  | `listSemesters` — the public pricing page and the member purchase flow          |
+| `club_semesters`         | `anon`+`auth`   | `SELECT`  | the public pricing page and the member purchase flow (follow-up PR)             |
 | `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
 | `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
 | `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
@@ -70,7 +70,7 @@ function on the service-role client, which bypasses both grants and RLS.
 Every other table grants the client roles **nothing**.
 
 > [!IMPORTANT]
-> The first four rows are **server** functions, not browser code. They run in
+> The first five rows are **server** functions, not browser code. They run in
 > `*.functions.ts` handlers but build their own client from
 > `SUPABASE_PUBLISHABLE_KEY` with no user session, so PostgREST resolves them to
 > `anon` and they need real grants. Grepping for imports of the shared browser
@@ -438,8 +438,11 @@ service-role only, through the manager screen and the manager agent API.
 plan's dates are computed: `rolling` (the default; `duration_days` days from
 activation — this is `insurance_yearly`, a genuine 12-months-from-payment
 membership) or `semester` (the dates come from the `club_semesters` row the
-member chose at purchase; `duration_days` is unused and stays `NULL`). This is
-the `semester` plan.
+member chose at purchase; `duration_days` becomes unused). This is the
+`semester` plan. Its `duration_days` is cleared to `NULL` once the code that
+reads `period_basis` is live, not in the same migration that adds the column —
+see the comment on the `UPDATE` in
+`20260802110000_club_semesters.sql`.
 **RLS:** anyone reads active plans; managers read all and write.
 
 ### `memberships` — enrollment/billing records

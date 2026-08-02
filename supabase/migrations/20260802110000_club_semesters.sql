@@ -48,20 +48,28 @@ CREATE TABLE public.club_semesters (
   -- their own even if a row's code says '2026-s1' while its year/half say
   -- 2027/2.
   CONSTRAINT club_semesters_code_matches_year_half
-    CHECK (code = year::text || '-s' || half::text)
+    CHECK (code = year::text || '-s' || half::text),
+  -- `starts_on`/`ends_on` are the only columns that determine what a member
+  -- actually gets; nothing else here guards them. Without this, a mistyped
+  -- year in the date picker (e.g. code '2026-s1' running Sept-Dec *2045*)
+  -- would sail through every other constraint on this table.
+  CONSTRAINT club_semesters_dates_in_year CHECK (
+    EXTRACT(YEAR FROM starts_on) = year AND EXTRACT(YEAR FROM ends_on) = year
+  )
 );
 
--- Two ACTIVE semesters can never overlap: an ambiguous "which semester is
--- running now" would silently break the purchase list (`sellableSemesters`),
--- which assumes at most one semester covers any given day. Scoped to
--- `is_active` (a partial exclusion constraint) rather than every row, so
--- retiring a wrongly-dated semester and adding its corrected replacement over
--- the same dates is not blocked by the mistake it is replacing. `daterange`
+-- Two semesters can never overlap: an ambiguous "which semester is running
+-- now" would silently break the purchase list (`sellableSemesters`), which
+-- assumes at most one semester covers any given day. Deliberately NOT scoped
+-- to `is_active` -- `UNIQUE(code)` and `UNIQUE(year, half)` already make
+-- "retire the wrong one, insert its correction" impossible (there is never a
+-- second row for the same year+half to overlap with), so a partial predicate
+-- here would buy nothing while opening a real trap: reactivating a semester
+-- would fail if anything else had since been given its date range. `daterange`
 -- carries its own built-in GiST operator class, so no extension is needed here.
 ALTER TABLE public.club_semesters
   ADD CONSTRAINT club_semesters_no_overlap
-  EXCLUDE USING gist (daterange(starts_on, ends_on, '[]') WITH &&)
-  WHERE (is_active);
+  EXCLUDE USING gist (daterange(starts_on, ends_on, '[]') WITH &&);
 
 -- ---------- Grants ----------
 -- Supabase's bootstrap grants ALL on every new table to anon and authenticated,
@@ -93,16 +101,28 @@ ALTER TABLE public.membership_plans
 
 -- The one plan this actually changes. `insurance_yearly` is left as 'rolling'
 -- (the default): a 12-month membership genuinely does run from whenever it was
--- paid, unlike a semester. `duration_days` is cleared so nothing can fall back
--- to the old 182-day computation once the code stops reading it for this plan.
+-- paid, unlike a semester.
+--
+-- `duration_days` deliberately stays at 182 here rather than being cleared to
+-- NULL in the same statement. This migration is additive-only and ships ahead
+-- of the code that reads `period_basis`; today `activateMembershipRow` still
+-- computes `ends_at` straight from `plan.duration_days` regardless of
+-- `period_basis`. Clearing it now would mean any semester membership
+-- activated in the window between this migration going live and the
+-- follow-up PR deploying gets `ends_at = NULL` -- which this app's `isLive`/
+-- `resolveCoverage` treat as "never expires", handing out a free membership
+-- forever. Per docs/database-changes.md's expand/contract split: clearing
+-- `duration_days` is the CONTRACT half, and it belongs in the follow-up PR's
+-- migration, applied only after the code that stops reading it for this plan
+-- is live.
 UPDATE public.membership_plans
-  SET period_basis = 'semester', duration_days = NULL
+  SET period_basis = 'semester'
   WHERE code = 'semester';
 
 -- ---------- memberships.semester_id ----------
--- Plain REFERENCES with no ON DELETE clause (restrict, the default): deleting
--- a semester that invoices point at must fail loudly, never orphan or cascade
--- into losing which semester someone paid for.
+-- Plain REFERENCES with no ON DELETE clause (NO ACTION, the default):
+-- deleting a semester that invoices point at must fail loudly, never orphan
+-- or cascade into losing which semester someone paid for.
 ALTER TABLE public.memberships
   ADD COLUMN IF NOT EXISTS semester_id UUID REFERENCES public.club_semesters(id);
 CREATE INDEX IF NOT EXISTS memberships_semester_id_idx ON public.memberships (semester_id);

@@ -27,13 +27,16 @@
 # before any intended GRANT, or it will show up here as seven unexpected
 # privileges per role.
 
-# The public funnel. These four run in *server* functions that build their own
+# The public funnel. These five run in *server* functions that build their own
 # client from SUPABASE_PUBLISHABLE_KEY with no user session, so PostgREST
 # resolves them to `anon` and they need real grants — they are not service-role
 # calls, despite running on the server. Grepping for the shared browser client
 # does not find them. RLS narrows each: the intake tables are insert-only (and
 # the handlers deliberately skip `.select()` so nothing can be read back), the
-# template read is `is_current = true`, the plans read is `is_active = true`.
+# template read is `is_current = true`, the plans/semesters read is
+# `is_active = true`. `club_semesters`'s reader (`listSemesters`) lands in the
+# follow-up PR; the grant ships ahead of it here so the migration stays
+# additive-only.
 interest_registrations:anon:INSERT
 interest_registrations:authenticated:INSERT
 contact_messages:anon:INSERT
