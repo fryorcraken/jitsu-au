@@ -63,6 +63,9 @@ export const AGENT_MANIFEST: {
         "file_waiver: an unknown param is now a 400 rather than being silently dropped, so a misspelled confirm_duplicate cannot look like it was sent.",
         "file_waiver: a second waiver for the same person and signed_on is refused with 409 duplicate_waiver unless confirm_duplicate is true. A call that used to succeed can now fail.",
         "file_waiver: a failed duplicate check is 503 duplicate_check_failed; nothing was filed and the call is safe to retry unchanged.",
+        "file_waiver: accepts client_submission_id, which makes a retry safe. Send one per record in any bulk import; the result's `created` says whether that call filed the waiver or replayed an earlier one.",
+        "file_waiver: a half-filed waiver (scan not stored) is 503 waiver_filing_incomplete with Retry-After — the row is KEPT and only a retry with the same id completes it. An id bound to another record is 409 submission_id_conflict and will never succeed.",
+        "file_waiver: client_submission_id draws from one namespace covering every waiver, paper and online, and every caller — not one scoped per token. It only ever resolves back to another paper filing, so a collision with an online signature is safe (409 submission_id_conflict), but two separate imports sharing the same id scheme can collide with each other. Prefer a random id per record.",
         "list_users / list_invoices: every invoice gained sessions_allowed and sessions_remaining.",
       ],
     },
@@ -141,7 +144,7 @@ export const AGENT_MANIFEST: {
       name: "file_waiver",
       method: "POST",
       summary:
-        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in `error.details.existing`, with `details.truncated` true if there are more than 20); pass confirm_duplicate to file it anyway. If the duplicate check itself fails, you get 503 duplicate_check_failed with a Retry-After header and NOTHING was filed — retry it, do not reach for confirm_duplicate.",
+        "File a waiver from a scanned paper form — for migrating records the club already holds on paper, or any waiver signed outside the site. Same params as the manager's paper-upload form. Attaches to the person with this email, or creates one. Lands PENDING: it does not approve, email anyone, or mark the email verified — a separate edit_invoice-style approval step is a manager's own call, not this endpoint's. A person's ACTIVE waiver is their most recently APPROVED one, not most recently signed, so approving a backlog out of chronological order changes who looks active. Refiling the same person + signed_on is refused with 409 duplicate_waiver (the existing waiver ids come back in `error.details.existing`, with `details.truncated` true if there are more than 20); pass confirm_duplicate to file it anyway. If the duplicate check itself fails, you get 503 duplicate_check_failed with a Retry-After header and NOTHING was filed — retry it, do not reach for confirm_duplicate. To make retries safe, send client_submission_id.",
       params: [
         { name: "first_name", required: true, description: "As written on the form." },
         { name: "middle_name", required: false, description: "As written on the form." },
@@ -209,6 +212,12 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "Set true to file even though this person already has a waiver signed on this date. Default false. Only use it when the second document is real (a corrected re-scan) — not to push a retried import past the check.",
+        },
+        {
+          name: "client_submission_id",
+          required: false,
+          description:
+            "Your own UUID for this filing attempt, minted once per record and RESENT UNCHANGED on every retry of it. This is what makes retrying safe: the same id always resolves to the same waiver, so a call whose reply you never saw can be repeated without filing twice. The duplicate check alone cannot catch two retries racing each other; this can. Send one per record in any bulk import. A new id means a new waiver, and an id already used for a different record is refused (409 submission_id_conflict). NOTE: sending an id means you own finishing that record — a filing that fails with 503 waiver_filing_incomplete leaves a waiver with no document, which only your retry completes.",
         },
       ],
     },
