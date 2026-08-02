@@ -678,7 +678,23 @@ export const paperWaiverUploadSchema = z
     // The scan itself: one PDF, a stack of photos, or any mix, merged in order
     // into the single PDF this waiver's record points at.
     scan: z.array(scanFileSchema).min(1).max(20),
+    // Not part of the waiver: the caller saying "I know this person already has
+    // a waiver signed on this date, file it anyway". Filing the same paperwork
+    // twice is the realistic accident in a bulk import (a retried batch, a
+    // manager unsure the upload went through), and a pile of identical pending
+    // waivers is a pile of chances to approve the wrong one. Refiling IS
+    // legitimate for a corrected re-scan, so this warns and confirms rather
+    // than blocking — see filePaperWaiver / waiver-duplicates.ts.
+    confirm_duplicate: z.boolean().optional().default(false),
   })
+  // Strict, matching editInvoiceSchema. Without it Zod silently STRIPS an
+  // unknown key, so `confirmDuplicate` or `confirm_duplicates` would vanish,
+  // default to false, and return the same 409 again — telling the caller to do
+  // the very thing they believe they just did, with nothing in the response
+  // saying the flag never arrived. An agent guessing a parameter name from
+  // prose is exactly who this endpoint serves, and an escape hatch that fails
+  // silently is not an escape hatch. Unknown keys are a loud 400 instead.
+  .strict()
   .refine(
     (d) =>
       !isMinorOn(d.date_of_birth, d.signed_on) || Boolean(d.emergency_contact_relationship?.trim()),
@@ -694,6 +710,22 @@ export const paperWaiverUploadSchema = z
   });
 
 export type PaperWaiverUploadInput = z.infer<typeof paperWaiverUploadSchema>;
+
+/**
+ * The `YYYY-MM-DD` after this one, as the exclusive upper bound of a one-day
+ * range. Used by the duplicate probe, which has to match every waiver signed on
+ * a date rather than only the midnight-UTC instant a paper filing writes.
+ *
+ * Parsed as UTC midnight explicitly (`T00:00:00Z`) so the arithmetic cannot pick
+ * up the server's own timezone: the whole point is a UTC day boundary, and a
+ * bare `new Date("2026-07-01")` is already UTC while `new Date(2026, 6, 1)` is
+ * not — a difference too easy to introduce later by accident.
+ */
+export function nextUtcDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 /**
  * Whether a signing date is in the future, and so cannot be what the paper says.
@@ -998,6 +1030,11 @@ export const invoicePaymentMethods = ["bank_transfer", "stripe", "manual"] as co
  * editable, and `status` deliberately EXCLUDES "active": activation grants the
  * member role and emails the member, so it must run through bank reconciliation
  * / setMembershipStatus, never a raw field edit here.
+ *
+ * `confirm_paid_edit` is not a field to write: it is the caller saying "yes, I
+ * mean to rewrite the money record on an invoice that has already been paid"
+ * (see RECONCILED_GUARDED_FIELDS in manager-agent.ts). It deliberately does not
+ * satisfy the at-least-one-field refine below.
  */
 export const editInvoiceSchema = z
   .object({
@@ -1010,6 +1047,10 @@ export const editInvoiceSchema = z
     payment_reference: z.string().trim().min(1).max(64).optional(),
     payment_method: z.enum(invoicePaymentMethods).optional(),
     status: z.enum(["pending", "cancelled", "expired"]).optional(),
+    // `.default(false)` to match confirm_duplicate on paperWaiverUploadSchema:
+    // two structurally identical confirmation flags should not parse to
+    // different types (`boolean | undefined` vs `boolean`) for no reason.
+    confirm_paid_edit: z.boolean().optional().default(false),
   })
   .strict()
   .refine(

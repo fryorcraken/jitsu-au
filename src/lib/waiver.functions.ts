@@ -14,6 +14,7 @@ import {
   isMinorOn,
   isPaperWaiver,
   nameWithPreferred,
+  nextUtcDay,
   normalizeEmail,
   paperWaiverUploadSchema,
   saveTemplateSchema,
@@ -28,6 +29,12 @@ import {
   parseTemplateAcks,
   resolveAcknowledgements,
 } from "@/lib/waiver-acknowledgements";
+import {
+  DuplicateCheckFailedError,
+  DuplicateWaiverError,
+  toDuplicateRefs,
+} from "@/lib/waiver-duplicates";
+import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 
 const BUCKET = "waivers";
@@ -949,6 +956,13 @@ export const listWaivers = createServerFn({ method: "GET" })
 //     screen waiting for their copy, and the managers are the ones filing it.
 //     The confirmation emails would be answering a question no one asked.
 //
+// What it DOES push back on: filing a waiver this person already has for the
+// same signing date. Signing repeatedly is allowed, but the same paper landing
+// twice is a bulk-import accident, and every extra pending copy is another
+// chance to approve the wrong one (the active waiver is the last APPROVED, not
+// the last signed). It throws DuplicateWaiverError; `confirm_duplicate` files
+// it anyway, for the corrected re-scan that is a genuine second document.
+//
 // The actual work is `filePaperWaiver`, a plain function rather than part of
 // this createServerFn: the manager agent HTTP API (src/routes/api/manager/agent.ts,
 // action `file_waiver`) authenticates by API token, not a Supabase session, so
@@ -966,9 +980,10 @@ export async function filePaperWaiver(
     throw new Error("The signing date is in the future. Check the date on the form.");
   }
 
-  const { buildScanPdf, decodeBase64 } = await import("./waiver-scan");
-
   const email = normalizeEmail(data.email);
+  const signed_at = `${data.signed_on}T00:00:00.000Z`;
+
+  const { buildScanPdf, decodeBase64 } = await import("./waiver-scan");
 
   // Build the PDF BEFORE creating anything: an unreadable scan is the likely
   // failure here, and it must not leave behind a waiver row with no document
@@ -998,8 +1013,72 @@ export async function filePaperWaiver(
     );
   }
 
-  // Same person resolution as an online submission: an existing email attaches
-  // to that person untouched, a new one becomes a locked applicant. Never
+  const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
+
+  // Who this waiver belongs to, if the club already knows the address. Looked up
+  // BEFORE the duplicate probe and deliberately without creating anyone: a
+  // filing that gets refused below must leave nothing behind, and creating the
+  // person first would strand a locked auth user and a profile for someone who
+  // has no waiver — indistinguishable afterwards from a real lead, and holding
+  // that email address permanently. A brand-new address has no waivers to
+  // collide with anyway, so the probe has nothing to do for it.
+  const { data: existingPersonId, error: personLookupErr } = await userIdByEmail(admin, email);
+  if (personLookupErr) throw new Error(personLookupErr.message);
+
+  // Same person, same signing date: almost certainly the same piece of paper
+  // arriving twice. Warn and let the caller confirm rather than blocking, since
+  // a corrected re-scan of one signing date is legitimate. Checked here, not in
+  // the agent API, so the manager's own upload form gets the same speed bump.
+  if (!data.confirm_duplicate && existingPersonId) {
+    // One over the cap, so a full page is recognisable as "there are more" and
+    // the message can say so instead of reporting the cap as the total.
+    const DUPLICATE_PROBE_CAP = 20;
+    // A RANGE over the day, not equality on midnight. Only a paper filing writes
+    // midnight UTC; an online submission stores the actual moment it was signed,
+    // so exact equality would have quietly compared paper against paper only —
+    // while the manifest, this docstring and the error message all promise "a
+    // waiver signed on this date". An online waiver and a paper form for the
+    // same day are exactly as approvable-in-the-wrong-order as two paper ones,
+    // and the migration case (filing paper for somebody who has since signed
+    // online) is a realistic way to reach it.
+    //
+    // "Same day" means same UTC day, matching how this function writes signed_at
+    // and how the waiver lists read it. The club is UTC+10/+11, so a signature
+    // given in the Sydney morning lands on the previous UTC day and will not
+    // collide with paper dated that morning. Known and accepted: widening to the
+    // club's own day would instead collide across two dates, which is worse.
+    const { data: sameDate, error: dupErr } = await admin
+      .from("waivers")
+      .select("id, approval_status, signed_at")
+      .eq("user_id", existingPersonId)
+      .gte("signed_at", signed_at)
+      .lt("signed_at", `${nextUtcDay(data.signed_on)}T00:00:00.000Z`)
+      .order("created_at", { ascending: true })
+      .limit(DUPLICATE_PROBE_CAP + 1);
+    // Fail closed: a duplicate slipping through silently is the thing being
+    // fixed here, so an unanswerable question is not treated as a "no".
+    //
+    // ⚠️ The API maps this to a 503 documented as "nothing was filed, safe to
+    // retry unchanged", and an unattended retry policy acts on that. It is true
+    // only because this probe runs BEFORE resolvePersonId: moving person
+    // creation above it would strand a locked auth user and a profile on every
+    // retry, and no test asserting on the status code would notice.
+    if (dupErr) {
+      console.error("[filePaperWaiver] duplicate check failed:", dupErr);
+      throw new DuplicateCheckFailedError();
+    }
+    if (sameDate?.length) {
+      const truncated = sameDate.length > DUPLICATE_PROBE_CAP;
+      throw new DuplicateWaiverError(
+        toDuplicateRefs(sameDate.slice(0, DUPLICATE_PROBE_CAP)),
+        truncated,
+      );
+    }
+  }
+
+  // Nothing can refuse this filing from here on, so it is now safe to create the
+  // person if the club has never seen this address. An existing address resolves
+  // to that person untouched; a new one becomes a locked applicant. Never
   // verified by this route — a manager holding a piece of paper is not proof
   // that anyone can read the mailbox written on it.
   const userId = await resolvePersonId(admin, {
@@ -1013,13 +1092,6 @@ export async function filePaperWaiver(
       phone: data.phone || null,
     },
   });
-
-  const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
-  // The date written on the form, not the moment it was filed: this is what
-  // the club's records show as the signing date, and what the lists order by.
-  // Midnight UTC keeps the club's own timezone (UTC+10/+11) reading back the
-  // same calendar date.
-  const signed_at = `${data.signed_on}T00:00:00.000Z`;
 
   // Who filed it, when, and from what. This is the paper equivalent of the IP
   // and browser context an online submission carries: the provenance of the
@@ -1075,7 +1147,8 @@ export async function filePaperWaiver(
     .single();
   if (insErr || !inserted) throw new Error(insErr?.message || "Could not save the waiver.");
 
-  const path = `${inserted.id}.pdf`;
+  const waiverId = inserted.id;
+  const path = `${waiverId}.pdf`;
   const { error: upErr } = await admin.storage
     .from(BUCKET)
     .upload(path, pdf, { contentType: "application/pdf", upsert: true });
@@ -1087,7 +1160,7 @@ export async function filePaperWaiver(
     // document behind it. If even the cleanup fails, say so plainly instead
     // of pointing at a repair path that does not exist.
     console.error("[filePaperWaiver] scan upload failed:", upErr);
-    const rowRemoved = await removeAbandonedWaiverRow(admin, inserted.id);
+    const rowRemoved = await removeAbandonedWaiverRow(admin, waiverId);
     throw new Error(
       rowRemoved
         ? "The scan could not be stored. Nothing was filed, so please try again."
@@ -1098,7 +1171,7 @@ export async function filePaperWaiver(
   const { error: pathErr } = await admin
     .from("waivers")
     .update({ pdf_path: path })
-    .eq("id", inserted.id);
+    .eq("id", waiverId);
   if (pathErr) {
     // The scan IS durably stored at this point, but nothing points at it: an
     // approval here would promote a waiver with no retrievable document, found
@@ -1107,7 +1180,7 @@ export async function filePaperWaiver(
     // above does, and also remove the now-orphaned scan, so a retry starts
     // clean instead of leaving either behind.
     console.error("[filePaperWaiver] could not point the waiver at its scan:", pathErr);
-    const rowRemoved = await removeAbandonedWaiverRow(admin, inserted.id);
+    const rowRemoved = await removeAbandonedWaiverRow(admin, waiverId);
     const { error: scanCleanupErr } = await admin.storage.from(BUCKET).remove([path]);
     if (scanCleanupErr) {
       console.error("[filePaperWaiver] could not remove the orphaned scan:", scanCleanupErr);
@@ -1119,7 +1192,7 @@ export async function filePaperWaiver(
     );
   }
 
-  return { id: inserted.id, user_id: userId };
+  return { id: waiverId, user_id: userId };
 }
 
 /**
@@ -1144,14 +1217,32 @@ async function removeAbandonedWaiverRow(
 }
 
 // ---- Manager: upload a scanned paper waiver, from the web form ----
+/**
+ * A likely duplicate is not an error the form should throw away: the manager
+ * needs to see WHAT it collided with and then decide. So it comes back as a
+ * successful call with `filed: false` and the existing rows, and the screen
+ * offers to file it anyway (which re-sends with `confirm_duplicate: true`).
+ * Every other failure still throws, and the form toasts the message.
+ */
+export type UploadPaperWaiverResult =
+  | { ok: true; filed: true; id: string; user_id: string }
+  | { ok: true; filed: false; duplicate: DuplicateWaiverRef[] };
+
 export const uploadPaperWaiver = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => paperWaiverUploadSchema.parse(d))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<UploadPaperWaiverResult> => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { id, user_id } = await filePaperWaiver(supabaseAdmin, data, context.userId);
-    return { ok: true as const, id, user_id };
+    try {
+      const { id, user_id } = await filePaperWaiver(supabaseAdmin, data, context.userId);
+      return { ok: true as const, filed: true as const, id, user_id };
+    } catch (e) {
+      if (e instanceof DuplicateWaiverError) {
+        return { ok: true as const, filed: false as const, duplicate: e.existing };
+      }
+      throw e;
+    }
   });
 
 // ---- Manager: approve / unapprove a waiver submission ----
