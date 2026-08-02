@@ -69,7 +69,14 @@ function KnowledgeBaseIndex() {
                   "flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-muted/60";
                 const label = (
                   <>
-                    <span className="font-medium">{entry.title}</span>
+                    <span className="font-medium">
+                      {entry.title}
+                      {entry.visibility === "managers" && (
+                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          Draft
+                        </span>
+                      )}
+                    </span>
                     {entry.link_path ? (
                       <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                         On the main site

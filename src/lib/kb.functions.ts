@@ -248,6 +248,7 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
           link_path: a.link_path,
           section_slug: a.section_id ? (sectionIdToSlug.get(a.section_id) ?? null) : null,
           position: a.position,
+          visibility: a.visibility,
           version: null as number | null,
           updated_at: a.updated_at,
         };
@@ -262,6 +263,11 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
         link_path: null,
         section_slug: a.section_id ? (sectionIdToSlug.get(a.section_id) ?? null) : null,
         position: a.position,
+        // Carried so a manager can tell a draft from a published page while
+        // browsing, without opening each one. Only `managers` is ever surfaced:
+        // a member sees nothing but articles they can read, so a "Members"
+        // badge on every row would be noise.
+        visibility: a.visibility,
         version: live.version,
         updated_at: live.created_at,
       };

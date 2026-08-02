@@ -200,3 +200,17 @@ describe("extractHeadings", () => {
     expect(extractHeadings("Just a paragraph.\n\nAnd another.")).toEqual([]);
   });
 });
+
+describe("buildKbNav visibility", () => {
+  // Only a manager is ever handed a managers-only entry by the server, so this
+  // is the signal that lets them tell a draft from a published page while
+  // browsing rather than by opening each one.
+  it("carries an entry's visibility through to the sidebar", () => {
+    const nav = buildKbNav(sections, [
+      entry({ slug: "draft-policy", visibility: "managers" }),
+      entry({ slug: "published", visibility: "members" }),
+    ]);
+    const byId = Object.fromEntries(nav[0].entries.map((e) => [e.slug, e.visibility]));
+    expect(byId).toEqual({ "draft-policy": "managers", published: "members" });
+  });
+});

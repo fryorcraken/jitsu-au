@@ -28,6 +28,8 @@ export type KbEntryInput = {
   /** Null when the article is in no section. */
   section_slug: string | null;
   position: number;
+  /** Only `managers` is ever shown, as a draft marker. */
+  visibility?: string;
 };
 
 export type KbNavEntry = KbEntryInput & {

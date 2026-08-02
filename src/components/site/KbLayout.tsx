@@ -153,6 +153,14 @@ function KbNavList({ nav }: { nav: KbNavSection[] }) {
                       aria-current={active ? "page" : undefined}
                     >
                       {entry.title}
+                      {/* Only a manager ever sees a managers-only entry, so
+                          this marker is for them: which of these is still a
+                          draft, without opening each one. */}
+                      {entry.visibility === "managers" && (
+                        <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          Draft
+                        </span>
+                      )}
                     </Link>
                   )}
                 </li>
