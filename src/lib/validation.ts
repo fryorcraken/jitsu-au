@@ -76,10 +76,12 @@ export function normalizeEmail(email: string): string {
 }
 
 /**
- * The name shown on a blog comment: the person's own override
+ * The name shown on a public/member-facing comment (blog comments, and
+ * document annotations' shared comments): the person's own override
  * (`profiles.display_name`) if they set one, else derived as "first/preferred
  * name + last initial" (e.g. "Jane L."). Never the full legal name pulled from
- * waiver/profile data onto a public comment.
+ * waiver/profile data onto a comment that other members — or, for a public
+ * document, anyone — can read.
  */
 export function commentDisplayName(p: PersonNameParts & { display_name?: string | null }): string {
   const override = (p.display_name || "").trim();

@@ -24,9 +24,9 @@ import { loadDocument, projectDocument } from "@/lib/document-admin";
 import { asDocumentClient } from "@/lib/document-types";
 import type { DocumentAnnotationRow, DocumentClient, DocumentRow } from "@/lib/document-types";
 import {
+  commentDisplayName,
   createAnnotationSchema,
   deleteAnnotationSchema,
-  greetingName,
   readDocumentSchema,
   resolveAnnotationSchema,
   updateAnnotationSchema,
@@ -175,8 +175,19 @@ async function requireReadableDocument(db: DocumentClient, slug: string, viewer:
   return loaded;
 }
 
-/** Display names for a set of authors, so comments are not signed with UUIDs. */
-async function authorNames(
+/**
+ * Display names for a set of authors, so comments are not signed with UUIDs.
+ *
+ * Uses `commentDisplayName` (the same public/member-facing name policy as
+ * blog comments) rather than the legal name: a shared comment can be as
+ * visible as a blog comment (readable by every member, or by anyone on a
+ * `public` document), so it's signed with the member's chosen display name,
+ * else "preferred/first name + last initial" — enough to tell two "Ada"s
+ * apart without publishing a full legal name. The manager agent API's
+ * `list_document_annotations` shows the full legal name instead, since a
+ * manager needs to identify who wrote a comment for moderation.
+ */
+export async function authorNames(
   db: DocumentClient,
   userIds: string[],
 ): Promise<Map<string, string | null>> {
@@ -184,7 +195,7 @@ async function authorNames(
   if (!unique.length) return new Map();
   const { data, error } = await db
     .from("profiles")
-    .select("user_id, first_name, middle_name, last_name, preferred_name")
+    .select("user_id, first_name, middle_name, last_name, preferred_name, display_name")
     .in("user_id", unique);
   // A failed name lookup must not take the whole thread down: comments still
   // read fine signed "Someone at the club", and the alternative is a page that
@@ -193,7 +204,7 @@ async function authorNames(
     console.error("[documents] author name lookup failed:", error);
     return new Map();
   }
-  return new Map((data ?? []).map((p) => [p.user_id, greetingName(p) || null]));
+  return new Map((data ?? []).map((p) => [p.user_id, commentDisplayName(p) || null]));
 }
 
 /**
