@@ -18,6 +18,7 @@ import {
   canEditAnnotation,
   canReadArticle,
   canResolveThread,
+  clampReadVersion,
   likePattern,
   matchArticleText,
 } from "@/lib/kb";
@@ -34,6 +35,7 @@ import {
   commentDisplayName,
   createAnnotationSchema,
   deleteAnnotationSchema,
+  deleteKbSectionSchema,
   getKbArticleSchema,
   kbSlugSchema,
   markKbArticleReadSchema,
@@ -353,18 +355,24 @@ export const markKbArticleRead = createServerFn({ method: "POST" })
     const viewer = await resolveViewer(db);
     if (!viewer.userId) return { recorded: false as const };
 
-    const row = await loadKbArticleRow(db, data.slug);
-    // A link entry has no page here, so there is nothing to have read. Counting
-    // one would also make 100% unreachable, since the reader can never come back
-    // and tick it off.
-    if (!row || row.link_path) return { recorded: false as const };
-    if (!canReadArticle(row.visibility, viewer)) return { recorded: false as const };
+    // `loadKbArticle` (not `loadKbArticleRow`) on purpose: a link entry has no
+    // version row, so it returns null for one without a separate check, which
+    // is right — there is no page here to have read, and counting one would
+    // make 100% unreachable, since the reader can never come back and tick it
+    // off. It is also where the LIVE version number comes from, next.
+    const loaded = await loadKbArticle(db, data.slug);
+    if (!loaded) return { recorded: false as const };
+    if (!canReadArticle(loaded.article.visibility, viewer)) return { recorded: false as const };
+
+    // The schema only checks `version > 0`; see `clampReadVersion` for what a
+    // value above the live one would otherwise do.
+    const version = clampReadVersion(data.version, loaded.version.version);
 
     const { error } = await db.from("kb_article_reads").upsert(
       {
         user_id: viewer.userId,
-        article_id: row.id,
-        version: data.version,
+        article_id: loaded.article.id,
+        version,
         read_at: new Date().toISOString(),
       },
       { onConflict: "user_id,article_id" },
@@ -376,7 +384,7 @@ export const markKbArticleRead = createServerFn({ method: "POST" })
       console.warn(`[kb] could not record a read of "${data.slug}":`, error.message);
       return { recorded: false as const };
     }
-    return { recorded: true as const, version: data.version };
+    return { recorded: true as const, version };
   });
 
 /**
@@ -986,7 +994,7 @@ export const saveManagerSection = createServerFn({ method: "POST" })
  * many moved.
  */
 export const deleteManagerSection = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ slug: kbSlugSchema }).parse(d))
+  .inputValidator((d: unknown) => deleteKbSectionSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);

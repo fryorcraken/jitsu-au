@@ -22,6 +22,19 @@
 -- merging the branch that carries both satisfies each: nothing writes 'public'
 -- from the moment that code deploys, and the UPDATE below has already moved the
 -- rows that had it.
+--
+-- TYPES.TS. `kb_article_reads` is hand-added to `integrations/supabase/types.ts`
+-- ahead of this file being applied, which is NOT the sanctioned exception in
+-- CLAUDE.md ("Schema drift") — that exception is for a column added to a table
+-- the generator already knows about, verified live, not a whole table that does
+-- not exist yet. It is done anyway, here, because there is no other way to get
+-- a green typecheck on code that reads a table this migration has not created.
+-- The obligation that comes with it: apply this file and ask Lovable to
+-- regenerate `types.ts` in the SAME change that merges the code depending on
+-- it, so the hand-added block is replaced by the real one rather than surviving
+-- to drift from whatever the generator would have produced.
+-- `schema-contract.test.ts`'s `_KbArticleReadColumns` pins the shape that hand-add
+-- asserted, so a real regeneration that lands with a different one fails there.
 
 -- ---------- 1. No more `public` articles ----------
 -- The two seeded link entries (/first-class, /faq) are the rows this actually

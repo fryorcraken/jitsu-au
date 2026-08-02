@@ -429,3 +429,20 @@ export function canResolveThread(
   if (viewer.isManager) return true;
   return canEditAnnotation(annotation, viewer);
 }
+
+/**
+ * The version a "mark read" write should record, given what the reader
+ * claims and what is actually live.
+ *
+ * The client sends the version it had open, and `markKbArticleRead`'s schema
+ * only checks it is a positive integer — everything above that is trust. A
+ * claim ABOVE the live version cannot be true (nobody has read a version that
+ * does not exist yet) and is clamped down, because recording it verbatim would
+ * make `readState` unable to ever report "updated" for this reader on this
+ * article again, however many times it is rewritten. A claim at or below the
+ * live version is left alone: reading an older wording, after it moved on
+ * while the tab was open, is the ordinary case this table exists to record.
+ */
+export function clampReadVersion(claimed: number, live: number): number {
+  return Math.min(claimed, live);
+}

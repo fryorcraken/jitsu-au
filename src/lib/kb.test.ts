@@ -7,6 +7,7 @@ import {
   canEditAnnotation,
   canReadArticle,
   canResolveThread,
+  clampReadVersion,
   groupThreads,
   likePattern,
   matchArticleText,
@@ -330,5 +331,19 @@ describe("matchArticleText", () => {
   // here rather than shown as a hit with nothing in it.
   it("returns null when the term is not really there", () => {
     expect(matchArticleText("Gradings run twice a year.", "belt*system")).toBeNull();
+  });
+});
+
+describe("clampReadVersion", () => {
+  it("keeps a claim at or below the live version untouched", () => {
+    expect(clampReadVersion(2, 5)).toBe(2);
+    expect(clampReadVersion(5, 5)).toBe(5);
+  });
+
+  // A version above anything that exists cannot have been read. Recording it
+  // verbatim would make `readState` unable to ever report "updated" for this
+  // article again, however many times it is rewritten afterwards.
+  it("clamps a claim above the live version down to it", () => {
+    expect(clampReadVersion(999, 5)).toBe(5);
   });
 });

@@ -68,6 +68,30 @@ describe("remarkKbTables", () => {
     expect(screen.getByRole("cell", { name: "left | right" })).toBeInTheDocument();
   });
 
+  // Inside a blockquote or a list, every line after the first carries a
+  // continuation marker (`> `, or the list's indent) that sits in the raw
+  // source between the lines but never reaches the parsed text node's own
+  // value. That desyncs `escapedIndexes` for the WHOLE node, which makes an
+  // escaped pipe on any line but the first read as a real column break —
+  // splitting a cell in two rather than keeping it as one piece of text.
+  it("keeps a cell whole when its escaped pipe is on a continuation line of a block quote", () => {
+    renderMarkdown("> | Move | Notes |\n> | --- | --- |\n> | Sweep | left \\| right |");
+    expect(screen.getAllByRole("cell")).toHaveLength(2);
+    expect(screen.getByRole("cell", { name: "left | right" })).toBeInTheDocument();
+  });
+
+  // The over-split this produces used to be silently dropped by the same
+  // logic that trims a genuinely too-long row (GFM drops excess columns). The
+  // difference matters: THAT excess is the manager's own mistake; this one is
+  // this parser inventing a column boundary that was never there, and erasing
+  // it would erase words nobody asked to remove.
+  it("keeps every word when an unresolved escape splits a cell into extra columns", () => {
+    renderMarkdown("> | A | B |\n> | --- | --- |\n> | x \\| y | z |");
+    const cells = screen.getAllByRole("cell");
+    expect(cells).toHaveLength(2);
+    expect(cells.map((c) => c.textContent)).toEqual(["x", "y | z"]);
+  });
+
   it("leaves ordinary prose that happens to contain a pipe alone", () => {
     renderMarkdown("Press ctrl | to continue.\n\nAnd then stop.");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
@@ -83,6 +107,15 @@ describe("remarkKbTables", () => {
 
   it("refuses a delimiter row with the wrong number of columns", () => {
     renderMarkdown("| Belt | Time |\n| --- |\n| White | 0 |");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  // `` `---` `` is inline CODE, not three dashes: `cellText` used to read any
+  // node with a `.value` (which `inlineCode` has) as if it were plain text, so
+  // this line passed as a valid delimiter row and the real header above it was
+  // swallowed as part of one.
+  it("does not accept an inline code span as a delimiter marker", () => {
+    renderMarkdown("| Belt | Time |\n| `---` | --- |\n| White | 0 |");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 

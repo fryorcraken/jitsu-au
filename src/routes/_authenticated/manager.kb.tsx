@@ -279,7 +279,15 @@ function KnowledgeBaseManager() {
         setArticles(rows);
         setSections(sectionRows);
         const firstArticle = rows.find((r) => !r.link_path) ?? rows[0];
-        if (firstArticle) void openDocument(firstArticle.slug);
+        // Passed explicitly rather than left to the `articles` state this sets
+        // above: this effect runs once, with an `openDocument` closure fixed to
+        // the render where the effect was created, whose `articles` was still
+        // `[]`. `setArticles` schedules a re-render, it does not reach back into
+        // that closure — so an autoload reading `articles` off the closure
+        // always found nothing, and every field `applyPlacement` sets from it
+        // (section, position, sidebar label) silently reset to blank the moment
+        // this article was next saved.
+        if (firstArticle) void openDocument(firstArticle.slug, { articles: rows });
       })
       .catch((e) => {
         // A non-manager is redirected by the effect above; anything else is
@@ -301,7 +309,10 @@ function KnowledgeBaseManager() {
     setKind(summary?.link_path ? "link" : "article");
   }
 
-  async function openDocument(next: string, opts: { force?: boolean } = {}) {
+  async function openDocument(
+    next: string,
+    opts: { force?: boolean; articles?: ArticleSummary[] } = {},
+  ) {
     // Clicking the article already open is a no-op, UNLESS its last load
     // failed: then the click is a retry, and swallowing it leaves the only
     // way out of that state a page reload.
@@ -311,7 +322,12 @@ function KnowledgeBaseManager() {
       return;
     }
 
-    const summary = articles.find((d) => d.slug === next);
+    // `opts.articles` overrides the state for the one caller (the mount
+    // effect) that cannot trust its own closure's `articles` to be current —
+    // see the comment there. Every other caller is a click handler created on
+    // the render that is on screen, where the state has already settled.
+    const list = opts.articles ?? articles;
+    const summary = list.find((d) => d.slug === next);
     // A LINK ENTRY has no version, no comments and nothing to render, so the
     // three reads below would all come back empty and the article read would
     // report "no published version" — which is true of every link entry and
@@ -374,7 +390,7 @@ function KnowledgeBaseManager() {
         feedback: fbRes.status === "rejected",
       });
 
-      const placement = articles.find((d) => d.slug === next);
+      const placement = list.find((d) => d.slug === next);
       setKind("article");
       applyPlacement(placement);
 

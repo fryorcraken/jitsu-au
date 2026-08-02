@@ -283,6 +283,18 @@ export type _KbAnnotationColumns = RequireColumns<
 >;
 
 /**
+ * Reading progress. Committed alongside `20260802160000_kb_members_only_and_
+ * reading_progress.sql`, which hand-added this table's block to `types.ts`
+ * (the migration is not applied yet, so the generator has never seen it) — see
+ * that migration's own header. This pins the shape that hand-add asserted, so
+ * a real regeneration that lands with a different one is caught here.
+ */
+export type _KbArticleReadColumns = RequireColumns<
+  Tables["kb_article_reads"]["Row"],
+  "user_id" | "article_id" | "version" | "read_at"
+>;
+
+/**
  * The flag the "exactly one live version per article" partial unique index is
  * built on. A nullable widening would mean the NOT NULL was dropped live, and a
  * NULL here reads as "not current" to every query while satisfying the index,
