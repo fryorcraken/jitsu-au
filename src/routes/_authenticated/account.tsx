@@ -154,9 +154,10 @@ function AccountPage() {
 }
 
 /**
- * The name shown on this person's blog comments. `getMyProfile` doubles as the
- * source for the derived-name placeholder (`commentDisplayName`), so the field
- * shows exactly what will be used if the manager clears it.
+ * The name shown on this person's blog and document comments. `getMyProfile`
+ * doubles as the source for the derived-name placeholder
+ * (`commentDisplayName`), so the field shows exactly what will be used if the
+ * manager clears it.
  */
 function DisplayNameCard() {
   const fetchProfile = useServerFn(getMyProfile);
@@ -197,7 +198,7 @@ function DisplayNameCard() {
       <CardHeader>
         <CardTitle>Display name</CardTitle>
         <CardDescription>
-          Shown on your blog comments. Leave blank to use{" "}
+          Shown on your blog and document comments. Leave blank to use{" "}
           {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
         </CardDescription>
       </CardHeader>

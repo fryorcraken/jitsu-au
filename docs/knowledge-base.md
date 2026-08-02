@@ -173,6 +173,19 @@ whole.
 | Delete a shared comment   | yes    | yes     | no          |
 | Resolve/reopen a thread   | yes    | yes     | no          |
 
+### The name a comment is signed with
+
+A shared comment can be as visible as a blog comment (every member who can read
+the article, or on a `public` article, anyone), so on the member-facing page it
+is signed with the same privacy-conscious name: the commenter's own
+`display_name` override, else "preferred/first name + last initial"
+(`commentDisplayName` in `src/lib/validation.ts`), never the full legal name.
+
+Both manager-facing views of the same feedback, the "Feedback" panel on
+`/manager/kb` and the agent API's `list_kb_comments`, show the full legal name
+instead, since a manager needs to identify who wrote a comment for moderation.
+That difference from the member-facing view is deliberate.
+
 A manager can moderate (resolve a thread, delete an abusive comment) but can
 never **rewrite** words attributed to somebody else. A comment feature people
 cannot trust that way is one they stop using honestly.
