@@ -23,11 +23,12 @@ import type { AnnotationVisibility, Viewer } from "@/lib/documents";
 import { listSharedAnnotations, loadDocument, projectDocument } from "@/lib/document-admin";
 import type { DocumentAnnotationRow, DocumentClient, DocumentRow } from "@/lib/document-types";
 import {
+  commentDisplayName,
   createAnnotationSchema,
   deleteAnnotationSchema,
   documentSlugSchema,
   getDocumentSchema,
-  greetingName,
+  nameWithPreferred,
   readDocumentSchema,
   resolveAnnotationSchema,
   saveDocumentSchema,
@@ -213,8 +214,47 @@ async function requireReadableDocument(db: DocumentClient, slug: string, viewer:
   return loaded;
 }
 
-/** Display names for a set of authors, so comments are not signed with UUIDs. */
-async function authorNames(
+/**
+ * Display names for a set of authors, so member-facing comments are not
+ * signed with UUIDs.
+ *
+ * Uses `commentDisplayName` (the same public/member-facing name policy as
+ * blog comments) rather than the legal name: a shared comment can be as
+ * visible as a blog comment (readable by every member, or by anyone on a
+ * `public` document), so it's signed with the member's chosen display name,
+ * else "preferred/first name + last initial" — enough to tell two "Ada"s
+ * apart without publishing a full legal name. Manager-facing views use
+ * `managerAuthorNames` instead.
+ */
+export async function authorNames(
+  db: DocumentClient,
+  userIds: string[],
+): Promise<Map<string, string | null>> {
+  const unique = [...new Set(userIds)];
+  if (!unique.length) return new Map();
+  const { data, error } = await db
+    .from("profiles")
+    .select("user_id, first_name, last_name, preferred_name, display_name")
+    .in("user_id", unique);
+  // A failed name lookup must not take the whole thread down: comments still
+  // read fine signed "Someone at the club", and the alternative is a page that
+  // shows nothing at all because one join failed.
+  if (error) {
+    console.error("[documents] author name lookup failed:", error);
+    return new Map();
+  }
+  return new Map((data ?? []).map((p) => [p.user_id, commentDisplayName(p)]));
+}
+
+/**
+ * Display names for a set of authors, for a MANAGER-facing list — the full
+ * legal name (`nameWithPreferred`), the same convention the manager agent
+ * API's `list_document_annotations` and every other manager screen (check-in,
+ * membership, club-users, waivers, calendar) already use: a manager needs to
+ * identify who wrote a comment for moderation. Not `authorNames`, which is
+ * member-facing and deliberately withholds the legal name.
+ */
+export async function managerAuthorNames(
   db: DocumentClient,
   userIds: string[],
 ): Promise<Map<string, string | null>> {
@@ -224,14 +264,11 @@ async function authorNames(
     .from("profiles")
     .select("user_id, first_name, middle_name, last_name, preferred_name")
     .in("user_id", unique);
-  // A failed name lookup must not take the whole thread down: comments still
-  // read fine signed "Someone at the club", and the alternative is a page that
-  // shows nothing at all because one join failed.
   if (error) {
-    console.error("[documents] author name lookup failed:", error);
+    console.error("[documents] manager author name lookup failed:", error);
     return new Map();
   }
-  return new Map((data ?? []).map((p) => [p.user_id, greetingName(p) || null]));
+  return new Map((data ?? []).map((p) => [p.user_id, nameWithPreferred(p) || null]));
 }
 
 /**
@@ -691,7 +728,7 @@ export const listManagerAnnotations = createServerFn({ method: "POST" })
       includeResolved: data.include_resolved,
       limit: ANNOTATIONS_LIMIT,
     });
-    const names = await authorNames(
+    const names = await managerAuthorNames(
       db,
       annotations.map((a) => a.user_id),
     );

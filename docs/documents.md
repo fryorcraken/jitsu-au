@@ -52,6 +52,17 @@ public box.
 Either can hang off a **passage** (pick a paragraph) or off the **document as a
 whole**.
 
+A shared comment can be as visible as a blog comment (every member who can
+read the document, or on a `public` document, anyone), so on the member-facing
+document it's signed with the same privacy-conscious name: the commenter's own
+`display_name` override, else "preferred/first name + last initial"
+(`commentDisplayName` in `src/lib/validation.ts`), never the full legal name.
+Both manager-facing views of the same feedback — the "Feedback" panel on
+`/manager/documents` and the agent API's `list_document_annotations` — show
+the full legal name instead, since a manager needs to identify who wrote a
+comment for moderation. That difference from the member-facing view is
+deliberate.
+
 ### Who can do what
 
 | Action                    | Author | Manager | Anyone else |

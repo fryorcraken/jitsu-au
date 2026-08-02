@@ -212,28 +212,28 @@ first waiver submission; filled in by manager approval. The funnel phase (lead
 / applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
 never stored.
 
-| Column                           | Type          | Null | Notes                                                                                                                                 |
-| -------------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                           |
-| `first_name`                     | `text`        | no   | Non-blank (`profiles_first_name_not_blank`). Every person has a name to show; `ensure_profile` seeds one when the auth user arrives.  |
-| `middle_name`                    | `text`        | yes  |                                                                                                                                       |
-| `last_name`                      | `text`        | yes  |                                                                                                                                       |
-| `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`).                     |
-| `display_name`                   | `text`        | yes  | 1–60 chars. What they've chosen to show on blog comments. NULL = derived (`commentDisplayName`): first/preferred name + last initial. |
-| `date_of_birth`                  | `date`        | yes  |                                                                                                                                       |
-| `address`                        | `text`        | yes  |                                                                                                                                       |
-| `phone`                          | `text`        | yes  |                                                                                                                                       |
-| `uts_student_number`             | `text`        | yes  | Drives the student pricing rate.                                                                                                      |
-| `emergency_contact_name`         | `text`        | yes  |                                                                                                                                       |
-| `emergency_contact_relationship` | `text`        | yes  | How that contact is related. For a minor this person IS the guardian who signs.                                                       |
-| `emergency_contact_phone`        | `text`        | yes  |                                                                                                                                       |
-| `medical_notes`                  | `text`        | yes  | Details of anything declared on the health questions.                                                                                 |
-| `is_minor`                       | `boolean`     | no   | Default `false`.                                                                                                                      |
-| `guardian_name`                  | `text`        | yes  |                                                                                                                                       |
-| `guardian_relationship`          | `text`        | yes  |                                                                                                                                       |
-| `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                      |
-| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                      |
-| `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                      |
+| Column                           | Type          | Null | Notes                                                                                                                                              |
+| -------------------------------- | ------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                                        |
+| `first_name`                     | `text`        | no   | Non-blank (`profiles_first_name_not_blank`). Every person has a name to show; `ensure_profile` seeds one when the auth user arrives.               |
+| `middle_name`                    | `text`        | yes  |                                                                                                                                                    |
+| `last_name`                      | `text`        | yes  |                                                                                                                                                    |
+| `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`).                                  |
+| `display_name`                   | `text`        | yes  | 1–60 chars. What they've chosen to show on blog and document comments. NULL = derived (`commentDisplayName`): first/preferred name + last initial. |
+| `date_of_birth`                  | `date`        | yes  |                                                                                                                                                    |
+| `address`                        | `text`        | yes  |                                                                                                                                                    |
+| `phone`                          | `text`        | yes  |                                                                                                                                                    |
+| `uts_student_number`             | `text`        | yes  | Drives the student pricing rate.                                                                                                                   |
+| `emergency_contact_name`         | `text`        | yes  |                                                                                                                                                    |
+| `emergency_contact_relationship` | `text`        | yes  | How that contact is related. For a minor this person IS the guardian who signs.                                                                    |
+| `emergency_contact_phone`        | `text`        | yes  |                                                                                                                                                    |
+| `medical_notes`                  | `text`        | yes  | Details of anything declared on the health questions.                                                                                              |
+| `is_minor`                       | `boolean`     | no   | Default `false`.                                                                                                                                   |
+| `guardian_name`                  | `text`        | yes  |                                                                                                                                                    |
+| `guardian_relationship`          | `text`        | yes  |                                                                                                                                                    |
+| `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                                   |
+| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
+| `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
