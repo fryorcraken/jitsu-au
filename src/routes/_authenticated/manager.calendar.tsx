@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
-import { CLUB_TIME_ZONE, WEEKDAY_LABELS, zonedWallTimeToUtc } from "@/lib/calendar";
+import {
+  CLUB_TIME_ZONE,
+  DEFAULT_EVENT_LOCATION,
+  WEEKDAY_LABELS,
+  defaultEndForStart,
+  zonedWallTimeToUtc,
+} from "@/lib/calendar";
 import {
   cancelEvent,
   createCalendarEntry,
@@ -95,7 +101,7 @@ const emptyEntry = {
   openEnded: true,
   // Shared, all optional except the title.
   instructor_name: "",
-  location: "",
+  location: DEFAULT_EVENT_LOCATION,
   description: "",
   visibility: "public" as "public" | "members",
   invite_only: false,
@@ -121,6 +127,10 @@ function ManagerCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ ...emptyEntry });
+  // Whether "Ends" holds the manager's own answer rather than the one derived
+  // from "Starts". Kept out of `form` because it describes the editing session,
+  // not the entry being created.
+  const [endEdited, setEndEdited] = useState(false);
 
   // Which event is open for editing, and the draft for it.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -204,6 +214,7 @@ function ManagerCalendarPage() {
           : "Added to the calendar.",
       );
       setForm({ ...emptyEntry });
+      setEndEdited(false);
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not add it to the calendar");
@@ -401,7 +412,15 @@ function ManagerCalendarPage() {
                 <Input
                   type="datetime-local"
                   value={form.starts_at}
-                  onChange={(e) => setForm({ ...form, starts_at: e.target.value })}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      starts_at: e.target.value,
+                      // Picking a start fills in an end an hour later, so the
+                      // common case needs one date picker, not two.
+                      ends_at: defaultEndForStart(e.target.value, prev.ends_at, endEdited),
+                    }))
+                  }
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium">
@@ -409,7 +428,10 @@ function ManagerCalendarPage() {
                 <Input
                   type="datetime-local"
                   value={form.ends_at}
-                  onChange={(e) => setForm({ ...form, ends_at: e.target.value })}
+                  onChange={(e) => {
+                    setEndEdited(true);
+                    setForm((prev) => ({ ...prev, ends_at: e.target.value }));
+                  }}
                 />
               </label>
             </>
@@ -488,7 +510,6 @@ function ManagerCalendarPage() {
             <Input
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
-              placeholder="UTS Ultimo"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium sm:col-span-2">

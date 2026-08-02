@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -87,8 +87,28 @@ function EditBlogPostPage() {
     }
   }
 
+  // Stable object identity: BlogPostEditor re-seeds its fields whenever this
+  // reference changes, so a fresh literal here on every render would wipe
+  // out every keystroke as soon as `onDirtyChange` causes this page to
+  // re-render (see BlogPostEditor's re-seed effect). Keying on `post` keeps
+  // the reference stable across those renders, only changing on a genuine
+  // new baseline (initial fetch, or after a successful save).
+  const initial = useMemo<BlogPostEditorValue | null>(
+    () =>
+      post && {
+        title: post.title,
+        slug: post.slug,
+        excerpt: post.excerpt ?? "",
+        body_md: post.body_md,
+        cover_image_path: post.cover_image_path ?? "",
+        cover_image_url: post.cover_image_url,
+        status: post.status === "published" ? "published" : "draft",
+      },
+    [post],
+  );
+
   if (loading) return <div className="p-8">Loading...</div>;
-  if (!post) return null;
+  if (!post || !initial) return null;
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
@@ -100,15 +120,7 @@ function EditBlogPostPage() {
       </div>
       <BlogPostEditor
         postId={post.id}
-        initial={{
-          title: post.title,
-          slug: post.slug,
-          excerpt: post.excerpt ?? "",
-          body_md: post.body_md,
-          cover_image_path: post.cover_image_path ?? "",
-          cover_image_url: post.cover_image_url,
-          status: post.status === "published" ? "published" : "draft",
-        }}
+        initial={initial}
         saving={saving}
         onSave={onSave}
         onDirtyChange={setDirty}

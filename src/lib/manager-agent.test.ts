@@ -6,11 +6,17 @@ import {
   bearerToken,
   buildInvoicePatch,
   classifyAction,
+  diffInvoicePatch,
   INVOICE_EDITABLE_FIELDS,
+  invoiceEditAudit,
   projectInvoice,
+  RECONCILED_GUARDED_FIELDS,
+  reconciledEditBlockers,
+  reconciledEditMessage,
   safeEqual,
 } from "./manager-agent";
 import { editInvoiceSchema, managerAgentActions, paperWaiverUploadSchema } from "./validation";
+import type { EditInvoiceInput } from "./validation";
 import type { MembershipPlanRow, MembershipRow } from "./membership-types";
 
 describe("safeEqual", () => {
@@ -77,6 +83,18 @@ describe("editInvoiceSchema", () => {
     expect(result.success).toBe(false);
     expect(result.success ? "" : result.error.issues[0].message).toMatch(/price/);
   });
+
+  it("takes confirm_paid_edit without treating it as a field to write", () => {
+    expect(
+      editInvoiceSchema.parse({ id, price_cents: 100, confirm_paid_edit: true }),
+    ).toMatchObject({ confirm_paid_edit: true });
+    // On its own it edits nothing, so it must not satisfy the at-least-one rule.
+    expect(() => editInvoiceSchema.parse({ id, confirm_paid_edit: true })).toThrow(/at least one/i);
+    // And it is never written to the row.
+    expect(
+      buildInvoicePatch(editInvoiceSchema.parse({ id, notes: "x", confirm_paid_edit: true })),
+    ).toEqual({ notes: "x" });
+  });
 });
 
 describe("classifyAction", () => {
@@ -133,6 +151,137 @@ describe("buildInvoicePatch", () => {
     for (const key of Object.keys(patch)) {
       expect(INVOICE_EDITABLE_FIELDS).toContain(key);
     }
+  });
+});
+
+describe("diffInvoicePatch", () => {
+  it("reports only the fields whose value actually moves", () => {
+    const existing = { price_cents: 0, notes: null, status: "active" };
+    const diff = diffInvoicePatch(existing, { price_cents: 24500, status: "active" });
+    // status was submitted with the value it already held: not an edit.
+    expect(diff.changed).toEqual(["price_cents"]);
+    expect(diff.previous).toEqual({ price_cents: 0 });
+  });
+
+  it("is empty for an edit that changes nothing", () => {
+    const existing = { notes: "called member", price_cents: 100 };
+    expect(diffInvoicePatch(existing, { notes: "called member" })).toEqual({
+      changed: [],
+      previous: {},
+    });
+  });
+
+  it("counts clearing a note as a change and remembers what it held", () => {
+    const diff = diffInvoicePatch({ notes: "typo" }, { notes: null });
+    expect(diff.changed).toEqual(["notes"]);
+    expect(diff.previous).toEqual({ notes: "typo" });
+    // A null note cleared again is still a no-op.
+    expect(diffInvoicePatch({ notes: null }, { notes: null }).changed).toEqual([]);
+  });
+});
+
+describe("reconciledEditBlockers", () => {
+  const paid = { paid_at: "2026-07-28T11:06:27.181+00:00" };
+  const unpaid = { paid_at: null };
+
+  it("blocks the money fields on an invoice that has been paid", () => {
+    expect(reconciledEditBlockers(paid, ["price_cents"], undefined)).toEqual(["price_cents"]);
+    expect(reconciledEditBlockers(paid, ["payment_reference"], undefined)).toEqual([
+      "payment_reference",
+    ]);
+    expect(reconciledEditBlockers(paid, ["payment_method"], undefined)).toEqual(["payment_method"]);
+  });
+
+  it("leaves notes and status alone: neither is a claim about money that moved", () => {
+    expect(reconciledEditBlockers(paid, ["notes", "status"], undefined)).toEqual([]);
+    // Expiring a membership that ran its course is an ordinary lifecycle move,
+    // and the one status with consequences ("active") is refused by the schema.
+    expect(RECONCILED_GUARDED_FIELDS).not.toContain("status");
+    expect(RECONCILED_GUARDED_FIELDS).not.toContain("notes");
+  });
+
+  it("does not block anything on an unpaid invoice, or when the caller confirms", () => {
+    expect(reconciledEditBlockers(unpaid, ["price_cents"], undefined)).toEqual([]);
+    expect(reconciledEditBlockers(paid, ["price_cents"], true)).toEqual([]);
+  });
+
+  it("names the fields and the way past it in the message", () => {
+    const msg = reconciledEditMessage(["price_cents"], "2026-07-28T11:06:27.181+00:00");
+    expect(msg).toMatch(/price_cents/);
+    expect(msg).toMatch(/confirm_paid_edit/);
+  });
+
+  // The guard keys off paid_at, so it only holds while paid_at is unreachable
+  // through this endpoint. If it ever became editable, a caller could null it,
+  // rewrite the price unguarded, and set it back — laundering the money record
+  // through exactly the API this guard protects. Pinned rather than assumed.
+  it("cannot be laundered: paid_at is not editable, so the guard cannot be switched off", () => {
+    const id = "11111111-1111-1111-1111-111111111111";
+    expect(editInvoiceSchema.safeParse({ id, paid_at: null }).success).toBe(false);
+    expect(editInvoiceSchema.safeParse({ id, paid_at: "2026-01-01T00:00:00Z" }).success).toBe(
+      false,
+    );
+    expect(INVOICE_EDITABLE_FIELDS).not.toContain("paid_at");
+    // And the patch builder would drop it even if a schema change let it in.
+    expect(
+      buildInvoicePatch({ price_cents: 1, paid_at: null } as Partial<EditInvoiceInput>),
+    ).toEqual({ price_cents: 1 });
+  });
+});
+
+describe("invoiceEditAudit", () => {
+  it("records who changed what, from what, to what", () => {
+    const entry = invoiceEditAudit({
+      invoiceId: "inv-1",
+      actor: "manager-1",
+      paidAt: "2026-07-28T11:06:27.181+00:00",
+      confirmed: true,
+      diff: { changed: ["price_cents"], previous: { price_cents: 0 } },
+      patch: { price_cents: 24500 },
+      at: "2026-07-31T00:00:00.000Z",
+    });
+    expect(entry).toEqual({
+      event: "invoice_edited",
+      invoice_id: "inv-1",
+      actor: "manager-1",
+      at: "2026-07-31T00:00:00.000Z",
+      reconciled: true,
+      overridden: true,
+      changes: [{ field: "price_cents", from: 0, to: 24500 }],
+    });
+  });
+
+  it("is not 'overridden' when there was nothing to override", () => {
+    const entry = invoiceEditAudit({
+      invoiceId: "inv-1",
+      actor: "manager-1",
+      paidAt: null,
+      confirmed: true,
+      diff: { changed: ["notes"], previous: { notes: null } },
+      patch: { notes: "chased" },
+      at: "2026-07-31T00:00:00.000Z",
+    });
+    expect(entry.reconciled).toBe(false);
+    expect(entry.overridden).toBe(false);
+  });
+
+  // A client that sets confirm_paid_edit defensively on every call, then edits
+  // only notes, has overridden nothing. Logging that as an override would put
+  // false "someone rewrote the money record" entries in the one log the club
+  // would use to reconstruct a books-versus-bank disagreement.
+  it("is not 'overridden' when the flag was set but no guarded field moved", () => {
+    const entry = invoiceEditAudit({
+      invoiceId: "inv-1",
+      actor: "manager-1",
+      paidAt: "2026-07-28T11:06:27.181+00:00",
+      confirmed: true,
+      diff: { changed: ["notes"], previous: { notes: null } },
+      patch: { notes: "cash on the night" },
+      at: "2026-07-31T00:00:00.000Z",
+    });
+    // The invoice IS reconciled, but this edit did not touch the money record.
+    expect(entry.reconciled).toBe(true);
+    expect(entry.overridden).toBe(false);
   });
 });
 
@@ -214,6 +363,47 @@ describe("AGENT_MANIFEST", () => {
   it("documents exactly the actions the endpoint dispatches", () => {
     const names = AGENT_MANIFEST.actions.map((a) => a.name).sort();
     expect(names).toEqual([...managerAgentActions].sort());
+  });
+
+  // Round 2 of the dev probes noted that the manifest still said "1" after the
+  // behaviour changed, leaving a client no way to tell the generations apart.
+  it("advertises a version a client can branch on", () => {
+    expect(AGENT_MANIFEST.version).toBe("2");
+  });
+
+  // The changelog is only worth having if it cannot fall behind the version it
+  // describes. Bumping one without the other is the failure this catches.
+  it("documents the current version at the head of the changelog", () => {
+    expect(AGENT_MANIFEST.changes[0].version).toBe(AGENT_MANIFEST.version);
+    expect(AGENT_MANIFEST.changes[0].notes.length).toBeGreaterThan(0);
+  });
+
+  it("has no duplicate or empty changelog entries", () => {
+    const versions = AGENT_MANIFEST.changes.map((c) => c.version);
+    expect(new Set(versions).size).toBe(versions.length);
+    for (const entry of AGENT_MANIFEST.changes) {
+      expect(entry.notes.every((n) => n.trim().length > 0)).toBe(true);
+    }
+  });
+
+  it("tells a caching client which calls could newly start failing", () => {
+    // The two refusals introduced in "2" are the notes that matter most to a
+    // client holding a cached "1": they turn calls that used to succeed into
+    // errors. If either stops being announced, a batch job finds out the hard way.
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "2")!.notes.join(" ");
+    expect(notes).toMatch(/reconciled_invoice/);
+    expect(notes).toMatch(/duplicate_waiver/);
+  });
+
+  it("documents the confirmation flags the schemas actually accept", () => {
+    const edit = AGENT_MANIFEST.actions.find((a) => a.name === "edit_invoice")!;
+    expect(edit.params.map((p) => p.name)).toContain("confirm_paid_edit");
+    const file = AGENT_MANIFEST.actions.find((a) => a.name === "file_waiver")!;
+    expect(file.params.map((p) => p.name)).toContain("confirm_duplicate");
+    const id = "11111111-1111-1111-1111-111111111111";
+    expect(editInvoiceSchema.safeParse({ id, notes: "x", confirm_paid_edit: true }).success).toBe(
+      true,
+    );
   });
 
   it("marks the invoice id as the only required edit param", () => {

@@ -105,6 +105,65 @@ migration, generated types, tests and a product spec (`docs/check-in.md`). See
 the `## Check-ins` section below for what changed from that recorded design and
 why.
 
+## RLS-only helpers live in `private`
+
+The way out of the first trap above is a `SECURITY DEFINER` helper: the policy
+calls a function that runs as its owner, so it can read a table the caller has no
+grant on. The cost is that the caller needs `EXECUTE` on that function, and a
+policy expression is evaluated as the **querying** role — so an anon-readable
+table's policy means granting `EXECUTE` to `anon`.
+
+Everything in `public` is routable. That grant therefore also lets anyone with
+the publishable key call the helper directly as
+`POST /rest/v1/rpc/<name>`, with arguments of their choosing, which is what
+Supabase advisors 0028/0029 (`*_security_definer_function_executable`) report.
+
+So the schema a helper lives in follows from who calls it:
+
+| Helper                                                             | Schema    | Why                                                                            |
+| ------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------ |
+| `has_role`, `has_active_paid_membership`, the `user_emails` family | `public`  | the app calls them over PostgREST (`.rpc(...)`), so they have to stay routable |
+| `event_is_invite_only`, `is_event_invitee`, `is_commenter_blocked` | `private` | only an RLS policy ever calls them, so nothing needs them routable             |
+
+PostgREST routes `/rest/v1/rpc/*` only to the schemas in its `db-schemas` list
+(`public, graphql_public`), so a function in `private` is unreachable from the
+API while RLS can still call it. `anon`/`authenticated` hold `USAGE` on the
+schema (a prerequisite for `EXECUTE`, and nothing on its own) plus `EXECUTE` on
+the individual helpers. Migration `20260802000000_private_rls_helpers.sql`
+created the schema and moved the three helpers into it.
+
+> [!IMPORTANT]
+> **`private` is an API boundary, not a privilege boundary.** `anon` keeps
+> `USAGE` on the schema and `EXECUTE` on `event_is_invite_only` — it has to, or
+> the anon read policy fails. What stops the outside world calling it is only
+> that `private` is absent from **Settings → API → Exposed schemas**. Add it
+> there and all three helpers are routable again, with no migration to review
+> and nothing for CI or the advisors to report (both lints scan the exposed
+> schemas only). So: never add `private` to that list, and check it is still
+> `public, graphql_public` when verifying a migration that touches this schema.
+
+**No tables belong in `private`, only helper functions.** Supabase's bootstrap
+`ALTER DEFAULT PRIVILEGES` is scoped to `public`, so objects created in `private`
+do not arrive pre-granted the way a new `public` table does — but a table hidden
+from PostgREST is a table whose access rules stop being reviewable, which is the
+opposite of what this schema is for.
+
+> [!WARNING]
+> **Every helper added to `private` needs its own explicit
+> `REVOKE ALL ON FUNCTION ... FROM PUBLIC`, and nothing will remind you.**
+> Postgres grants `EXECUTE` to `PUBLIC` on every new function. Unlike the table
+> case there is no default-privileges fix:
+> `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` is
+> accepted silently and does nothing, because the built-in `PUBLIC` grant is an
+> implicit NULL ACL with no stored entry to revoke from. And the advisors scan
+> only the exposed schemas, so a `private` helper that forgets the `REVOKE` is
+> world-executable with no finding and no CI failure. The `REVOKE` line under
+> each function in `20260802000000` is the entire guard.
+
+When a helper's only caller is a policy, move it here rather than adding a line
+to `supabase/lint/advisors-allowlist.txt`; acknowledge a finding only when the
+function has a real PostgREST caller.
+
 ## People and waivers: the shape
 
 A person = an **auth user** (their email lives on `auth.users`, the ONLY email
@@ -156,7 +215,7 @@ never stored.
 | Column                           | Type          | Null | Notes                                                                                                                                 |
 | -------------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                           |
-| `first_name`                     | `text`        | yes  |                                                                                                                                       |
+| `first_name`                     | `text`        | no   | Non-blank (`profiles_first_name_not_blank`). Every person has a name to show; `ensure_profile` seeds one when the auth user arrives.  |
 | `middle_name`                    | `text`        | yes  |                                                                                                                                       |
 | `last_name`                      | `text`        | yes  |                                                                                                                                       |
 | `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`).                     |
@@ -191,9 +250,17 @@ inside the waiver PDF), and no `full_name`.
   lifts the ban, sends a sign-in email, and assigns the free trial
   (`assignTrialMembership`, one per person ever, activation email suppressed).
 - `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
-  revoked from PUBLIC/anon/authenticated): inserts the empty profile row for
-  every new auth user, however created. Pure id attachment — no email matching,
-  so nothing can be claimed by typing someone else's address.
+  revoked from PUBLIC/anon/authenticated): inserts the profile row for every new
+  auth user, however created. Pure id attachment — no email matching, so nothing
+  can be claimed by typing someone else's address. It seeds `first_name` (which
+  is NOT NULL) from the auth user's metadata, else the literal `Member`; the
+  waiver path overwrites that with the submitted name in the same request, so
+  the seed only survives for an auth user created outside the product
+  (dashboard, invite). The fallback exists so a missing name can never abort the
+  `auth.users` insert, and it is deliberately not the email's local part —
+  `first_name` is shown publicly on blog comments and greets people in email.
+  The trigger only fires on INSERT, so auth users predating it had no row at
+  all until `20260802093000` backfilled them.
 
 **RLS:** owner reads/updates own row (`auth.uid() = user_id`); managers
 read/update all; no public insert path.
@@ -393,7 +460,7 @@ members-only entries and get them in their personal calendar feed. See
 `docs/calendar.md` for the product flows.
 
 **`has_active_paid_membership(_user_id uuid) → boolean`** — SECURITY DEFINER SQL
-helper (`SET search_path = public`) used by the events RLS policy: true when the
+helper (`SET search_path = ''`) used by the events RLS policy: true when the
 person has an `active` membership whose plan `kind <> 'trial'` and whose
 `price_cents > 0`, mirroring `deriveLifecycleStatus`. EXECUTE is revoked from
 PUBLIC/anon and granted to `authenticated` (it is evaluated inside RLS as the
@@ -406,24 +473,24 @@ A calendar entry that repeats weekly. It is a template, not a thing members see:
 the public surface is the dated `calendar_events` generated from it, which copy
 its details including `visibility` and `invite_only`.
 
-| Column             | Type          | Null | Notes                                                                  |
-| ------------------ | ------------- | ---- | ---------------------------------------------------------------------- |
-| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                           |
-| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".                          |
-| `description`      | `text`        | yes  |                                                                        |
-| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                |
-| `location`         | `text`        | yes  | No default — the club picks it, or leaves it blank.                    |
-| `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date. |
-| `invite_only`      | `boolean`     | no   | Default `false`. Display badge only. Copied onto every generated date. |
-| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                              |
-| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                  |
-| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                           |
-| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.                      |
-| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`.                   |
-| `is_active`        | `boolean`     | no   | Default `true`.                                                        |
-| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                        |
-| `created_at`       | `timestamptz` | no   | Default `now()`.                                                       |
-| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                                         |
+| Column             | Type          | Null | Notes                                                                        |
+| ------------------ | ------------- | ---- | ---------------------------------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                 |
+| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".                                |
+| `description`      | `text`        | yes  |                                                                              |
+| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                      |
+| `location`         | `text`        | yes  | No column default. The add form pre-fills the club's gym; it can be cleared. |
+| `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date.       |
+| `invite_only`      | `boolean`     | no   | Default `false`. Access, and a badge. Copied onto every generated date.      |
+| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                                    |
+| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                        |
+| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                                 |
+| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.                            |
+| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`.                         |
+| `is_active`        | `boolean`     | no   | Default `true`.                                                              |
+| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                              |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                                             |
+| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                                               |
 
 **Grants:** none for `anon`/`authenticated` — this table is reached only through
 the service role. **RLS:** manager-only (read and write). Deliberately **not**
@@ -443,22 +510,39 @@ on the calendar — cancel those individually.
 | `title`           | `text`        | no   |                                                                                 |
 | `description`     | `text`        | yes  |                                                                                 |
 | `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                     |
-| `location`        | `text`        | yes  | No default — the club picks it, or leaves it blank.                             |
+| `location`        | `text`        | yes  | No column default. The add form pre-fills the club's gym; it can be cleared.    |
 | `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                     |
 | `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
 | `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |
 | `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only. |
-| `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.          |
+| `invite_only`     | `boolean`     | no   | **ACCESS, and a badge.** Default `false`. Only invitees and managers see it.    |
 | `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                 |
 | `created_at`      | `timestamptz` | no   | Default `now()`.                                                                |
 | `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                  |
 
 Partial unique index on `(series_id, starts_at) WHERE series_id IS NOT NULL`
 keeps date generation idempotent. **RLS:** everyone (incl. anon) reads
-`visibility = 'public'`; a second policy adds `members` events for callers where
-`has_active_paid_membership(auth.uid())` or `has_role(auth.uid(),'manager')` —
-policies are OR'd, so a paid member sees both sets. Cancelled events stay
-readable so the cancellation shows. Managers insert/update/delete.
+`visibility = 'public'` that is not invite-only; a second policy adds `members`
+events for callers where `has_active_paid_membership(auth.uid())` or
+`has_role(auth.uid(),'manager')`, and lets a non-manager through an invite-only
+date only when they have an RSVP row for it — policies are OR'd, so a paid member
+sees both sets. Cancelled events stay readable so the cancellation shows.
+Managers insert/update/delete.
+
+Those policies call two helpers that live in the **`private`** schema, not
+`public` (see "RLS-only helpers live in `private`" above):
+
+**`private.event_is_invite_only(_event_id uuid) → boolean`** — SECURITY DEFINER
+(`SET search_path = ''`): is this date invite-only, on its own row or inherited
+from its series? It is SECURITY DEFINER because the policy has to read
+`calendar_series`, which no client role may read directly. `anon` and
+`authenticated` hold EXECUTE, since both read policies call it.
+
+**`private.is_event_invitee(_event_id uuid, _user_id uuid) → boolean`** —
+SECURITY DEFINER (`SET search_path = ''`): does an `event_rsvps` row exist for
+this person and date? That is what unlocks an invite-only date for its invitees,
+and it is SECURITY DEFINER so the check does not depend on the caller's own RLS
+over `event_rsvps`. `authenticated` holds EXECUTE; `anon` does not.
 
 ### `event_rsvps` — who's coming
 
@@ -623,8 +707,8 @@ author can always read their own (even hidden, so moderation isn't silent to
 them); managers read everything. Writes run through server functions
 (`postComment` checks the blocked list, that a reply's parent is top-level,
 and the honeypot; `setCommentVisibility` is manager-only) — no client write
-grant. The insert policy still checks `NOT public.is_commenter_blocked(auth.uid())`
-as defence in depth.
+grant. The insert policy still checks
+`NOT private.is_commenter_blocked(auth.uid())` as defence in depth.
 
 ### `blog_comment_upvotes`
 
@@ -647,13 +731,16 @@ and unblocking (and the block check itself, via the `SECURITY DEFINER`
 `is_commenter_blocked()` helper below) all run through the service role or a
 function with a fixed search path.
 
-**`is_commenter_blocked(_user_id uuid) → boolean`** — `SECURITY DEFINER` SQL
-helper (`SET search_path = ''`), same shape as `has_role`/
+**`private.is_commenter_blocked(_user_id uuid) → boolean`** — `SECURITY DEFINER`
+SQL helper (`SET search_path = ''`), same shape as `has_role`/
 `has_active_paid_membership`: lets the comment-insert RLS policy check block
 status without granting `authenticated` a `SELECT` on
 `blog_blocked_commenters` — an ordinary commenter has no business reading who
-else is blocked. EXECUTE revoked from `PUBLIC`/`anon`, granted to
-`authenticated` (evaluated inside RLS as the querying role) + `service_role`.
+else is blocked. `authenticated` holds EXECUTE (the policy is evaluated as the
+querying role); `anon` does not. It lives in the `private` schema, not `public`,
+because no app code calls it by RPC — the block check in `postComment` reads
+`blog_blocked_commenters` directly on the service role. See "RLS-only helpers
+live in `private`" above.
 
 ### Storage: `blog-media`
 
@@ -927,7 +1014,8 @@ created **locked** (banned, no credentials) by waiver submission; approval
 lifts the ban. There is no self-serve sign-up. Two triggers fire:
 
 - `handle_new_user_role` — grants `manager` to a confirmed whitelisted address.
-- `ensure_profile` — inserts the empty `profiles` row for every new auth user.
+- `ensure_profile` — inserts the `profiles` row for every new auth user, with a
+  seeded `first_name` (the auth user's metadata name, else `Member`).
   EXECUTE is revoked from the public RPC surface.
 
 `profiles.user_id`, `waivers.user_id`, `memberships.user_id`,

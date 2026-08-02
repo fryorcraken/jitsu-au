@@ -32,9 +32,19 @@ import {
   bearerToken,
   buildInvoicePatch,
   classifyAction,
+  diffInvoicePatch,
+  invoiceEditAudit,
   projectInvoice,
+  reconciledEditBlockers,
+  reconciledEditMessage,
   safeEqual,
 } from "@/lib/manager-agent";
+import {
+  DuplicateCheckFailedError,
+  DuplicateWaiverError,
+  SubmissionIdConflictError,
+  WaiverFilingIncompleteError,
+} from "@/lib/waiver-duplicates";
 import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
 import type {
   ClubUserEmail,
@@ -76,10 +86,14 @@ async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUs
   }));
 }
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      ...extraHeaders,
+    },
   });
 }
 
@@ -172,12 +186,31 @@ async function authenticate(request: Request): Promise<string> {
 /** Shape any thrown value into a stable JSON error response. */
 function errorResponse(e: unknown): Response {
   if (e instanceof AgentError) {
-    return json({ ok: false, error: { code: e.code, message: e.message } }, e.httpStatus);
+    // `details` is NESTED, not spread. Flat-merging shared one namespace with
+    // the envelope: ordering code/message last resolved the collision by
+    // silently discarding a detail that happened to be named either, and it
+    // would have blocked the envelope from ever growing a reserved key. Under
+    // `error.details` the two can never argue, and `details.blocked` reads as
+    // belonging to `code: "reconciled_invoice"` in a way bare `error.blocked`
+    // does not.
+    return json(
+      {
+        ok: false,
+        version: AGENT_MANIFEST.version,
+        error: { code: e.code, message: e.message, ...(e.details && { details: e.details }) },
+      },
+      e.httpStatus,
+      // A retry policy reads headers, not prose. Without this, "safe to retry"
+      // is a sentence only a human acts on, and the usual client default is an
+      // immediate retry — the least useful timing for a read that just failed.
+      e.retryAfterSeconds ? { "retry-after": String(e.retryAfterSeconds) } : {},
+    );
   }
   if (e instanceof ZodError) {
     return json(
       {
         ok: false,
+        version: AGENT_MANIFEST.version,
         error: {
           code: "invalid_params",
           message: "Invalid parameters.",
@@ -189,7 +222,14 @@ function errorResponse(e: unknown): Response {
   }
   // Don't leak internal detail; log server-side for debugging.
   console.error("[manager-agent] unexpected error:", e);
-  return json({ ok: false, error: { code: "internal_error", message: "Internal error." } }, 500);
+  return json(
+    {
+      ok: false,
+      version: AGENT_MANIFEST.version,
+      error: { code: "internal_error", message: "Internal error." },
+    },
+    500,
+  );
 }
 
 // ---- action: list_users ----
@@ -378,7 +418,7 @@ async function handleListInvoices(params: unknown) {
 }
 
 // ---- action: edit_invoice ----
-async function handleEditInvoice(params: unknown) {
+async function handleEditInvoice(params: unknown, actingAs: string) {
   const input = editInvoiceSchema.parse(params);
   const db = await adminClient();
 
@@ -391,14 +431,59 @@ async function handleEditInvoice(params: unknown) {
   if (!existing) throw new AgentError(404, "not_found", "Invoice not found.");
 
   const patch = buildInvoicePatch(input);
-  const { data: updated, error: updErr } = await db
-    .from("memberships")
-    .update(patch)
-    .eq("id", input.id)
-    .select("*")
-    .single();
-  if (updErr || !updated)
-    throw new AgentError(500, "db_error", updErr?.message ?? "Update failed.");
+  // What this edit would actually move, measured against the row as it stands.
+  // Submitting a field with the value it already has is not an edit: it neither
+  // trips the guard below nor gets recorded as a change that happened.
+  const diff = diffInvoicePatch(existing, patch);
+  const blocked = reconciledEditBlockers(existing, diff.changed, input.confirm_paid_edit);
+  if (blocked.length) {
+    // `previous` is scoped to the blocked fields, not every field the call would
+    // have changed. The whole update is refused atomically, but echoing an
+    // unguarded field's old value here reads as "this was blocked too" — a
+    // caller pairing `previous` with `blocked` would draw the wrong conclusion.
+    const blockedPrevious = Object.fromEntries(blocked.map((f) => [f, diff.previous[f] ?? null]));
+    throw new AgentError(
+      409,
+      "reconciled_invoice",
+      reconciledEditMessage(blocked, existing.paid_at!),
+      { blocked, paid_at: existing.paid_at, previous: blockedPrevious },
+    );
+  }
+
+  // Compare-and-swap on everything this edit read, not just `paid_at`.
+  //
+  // Pinning `paid_at` alone stops a reconciliation slipping a guarded edit
+  // through, but leaves the audit trail wrong: `previous` and the log's `from`
+  // both come from the row read above, and nothing held the columns actually
+  // being written. Two overlapping edits — B sets notes to "cheque", A then
+  // writes "card" — would have A record `"cash" -> "card"`, a transition that
+  // never happened, with B's edit gone from the record entirely. In the club's
+  // only invoice edit history, a stale `from` is worse than no entry: it reads
+  // as evidence.
+  //
+  // `.is` is only for NULL/TRUE/FALSE in PostgREST, so a null before-value
+  // matches on IS NULL and anything else on equality.
+  let update = db.from("memberships").update(patch).eq("id", input.id);
+  update = existing.paid_at ? update.eq("paid_at", existing.paid_at) : update.is("paid_at", null);
+  for (const field of diff.changed) {
+    // Every editable column is a string, a number, or null (price_cents is the
+    // only non-string), so this narrowing is total rather than convenient.
+    const before = (diff.previous[field] ?? null) as string | number | null;
+    update = before === null ? update.is(field, null) : update.eq(field, before);
+  }
+  const { data: updated, error: updErr } = await update.select("*").maybeSingle();
+  if (updErr) throw new AgentError(500, "db_error", updErr.message);
+  if (!updated) {
+    // One code for both "somebody wrote first" and "the row is gone": each means
+    // the caller's copy is stale and re-reading is the next step either way, and
+    // the re-read tells them which (a deleted invoice 404s). Guessing here would
+    // cost a query and could still be wrong.
+    throw new AgentError(
+      409,
+      "invoice_changed",
+      "This invoice changed under the edit (another edit, or a payment being reconciled), so nothing was written. Read it again and re-send if the edit still applies.",
+    );
+  }
 
   // The one read here that must NOT throw: the update above has already
   // committed, so failing now would report a successful edit as an error and
@@ -411,11 +496,37 @@ async function handleEditInvoice(params: unknown) {
     .maybeSingle();
   if (planErr) console.error("[agent.edit_invoice] plan lookup failed after update:", planErr);
 
+  // The audit trail. There is no audit table, so the server log is where an
+  // invoice's edit history lives: without it, a disagreement between the books
+  // and the bank cannot be traced back to who changed what. console.info, not
+  // console.error — this is a normal event, and it must be findable as one.
+  if (diff.changed.length) {
+    console.info(
+      "[agent.edit_invoice] audit",
+      JSON.stringify(
+        invoiceEditAudit({
+          invoiceId: input.id,
+          actor: actingAs,
+          paidAt: existing.paid_at,
+          confirmed: input.confirm_paid_edit,
+          diff,
+          patch,
+          at: new Date().toISOString(),
+        }),
+      ),
+    );
+  }
+
   return {
     invoice: projectInvoice(
       updated as MembershipRow,
       (plan ?? undefined) as MembershipPlanRow | undefined,
     ),
+    // What moved, and what it held before. An edit that changed nothing comes
+    // back with an empty `changed`, so a caller can tell a real correction from
+    // a no-op instead of reading a 200 as proof something happened.
+    changed: diff.changed,
+    previous: diff.previous,
   };
 }
 
@@ -424,9 +535,41 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
   const input = paperWaiverUploadSchema.parse(params);
   const db = await adminClient();
   try {
-    const { id, user_id } = await filePaperWaiver(db, input, actingAs);
-    return { id, user_id };
+    const { id, user_id, created } = await filePaperWaiver(db, input, actingAs);
+    // `created: false` means this call resolved to a waiver an earlier attempt
+    // had already filed. A bulk importer that silently replayed half its calls
+    // would otherwise look identical to a clean run, which makes reconciling
+    // against a stack of paper impossible.
+    return { id, user_id, created };
   } catch (e) {
+    // A likely duplicate is a distinct, actionable outcome, not a generic
+    // failure: it comes back as a 409 with the waivers it collided with, so the
+    // caller can look at them and either stop or re-send with confirm_duplicate.
+    if (e instanceof DuplicateWaiverError) {
+      throw new AgentError(409, "duplicate_waiver", e.message, {
+        existing: e.existing,
+        truncated: e.truncated,
+      });
+    }
+    // The probe failed, which is not a verdict on the waiver. 503, so a retry
+    // policy reads "try this again" rather than the "fix your input" that a 4xx
+    // implies — nothing was filed either way.
+    if (e instanceof DuplicateCheckFailedError) {
+      throw new AgentError(503, "duplicate_check_failed", e.message, undefined, 5);
+    }
+    // 5xx, not the generic 422: the row is half-filed and ONLY a retry with the
+    // same id completes it. Landing this in a 4xx told a caller obeying the
+    // documented "4xx means change the request" rule to change the one thing it
+    // could — the id — which files a second waiver against the same paper and
+    // abandons the first, the exact failure this feature exists to prevent.
+    if (e instanceof WaiverFilingIncompleteError) {
+      throw new AgentError(503, "waiver_filing_incomplete", e.message, undefined, 5);
+    }
+    // The opposite: permanent, and no retry of this request will ever succeed.
+    // It must not share a code with the transient ones above.
+    if (e instanceof SubmissionIdConflictError) {
+      throw new AgentError(409, "submission_id_conflict", e.message);
+    }
     // filePaperWaiver throws plain Errors with member-facing text (the manager
     // web form renders `.message` directly); wrap so the agent gets the same
     // message inside the endpoint's stable error envelope instead of a bare 500.
@@ -596,7 +739,7 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
     case "list_invoices":
       return handleListInvoices(params);
     case "edit_invoice":
-      return handleEditInvoice(params);
+      return handleEditInvoice(params, actingAs);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
     case "list_documents":
@@ -636,7 +779,13 @@ export const Route = createFileRoute("/api/manager/agent")({
           const action = classified.action;
 
           const result = await dispatch(action as ManagerAgentAction, body?.params ?? {}, actingAs);
-          return json({ ok: true, action, result });
+          // The version travels on EVERY response, not just the manifest. A
+          // client that read the manifest at the start of a long import and
+          // cannot re-read it mid-run would otherwise meet "2" as an
+          // unexplained 409; now it can compare against its own copy per call
+          // and decide to stop and re-read. That is the client `changes` was
+          // written for, and until now the one it could not reach.
+          return json({ ok: true, version: AGENT_MANIFEST.version, action, result });
         } catch (e) {
           return errorResponse(e);
         }

@@ -92,7 +92,7 @@ people in to a class that did not run.
    not a convention.
 3. **One check-in per person per class**, enforced by a unique constraint. That
    constraint is also half the concurrency guard: two managers tapping the same
-   name race there and exactly one wins. It only guards *creating* a check-in,
+   name race there and exactly one wins. It only guards _creating_ a check-in,
    though, so **attaching** cover claims the existing row instead, and a manager
    who loses that race has the credit handed straight back rather than spent.
 4. **The row is written before the credit moves.** If anything fails in between,

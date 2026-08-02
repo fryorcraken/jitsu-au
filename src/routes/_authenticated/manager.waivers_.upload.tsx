@@ -11,6 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MAX_SCAN_BYTES, isMinorOn, scanMimeTypes } from "@/lib/validation";
 import { getCurrentWaiverTemplate, uploadPaperWaiver } from "@/lib/waiver.functions";
+import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
+import { newSubmissionId } from "@/lib/submit-resilience";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/waivers_/upload")({
@@ -72,6 +74,25 @@ function UploadPaperWaiverPage() {
 
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
+  // Set when the server recognised this as a waiver the person already has for
+  // the same signing date. Filing is not blocked, it just stops for a look:
+  // most of the time this is the same paper going in twice.
+  //
+  // Tagged with the email and date it was raised for. A mistyped `signed_on` is
+  // one likely reason a collision happened at all, so a manager who fixes the
+  // date and presses "File it anyway" would otherwise be confirming a warning
+  // about a date they no longer mean.
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    rows: DuplicateWaiverRef[];
+    email: string;
+    signedOn: string;
+  } | null>(null);
+  // One id for this form fill, so a resend of the SAME scan resolves to the one
+  // waiver instead of a second copy. A 10 MB upload that times out in the
+  // browser has still very often reached the server; without this, pressing the
+  // button again after that files the paper twice. The page navigates away on
+  // success, so one id per mount is one id per record.
+  const [submissionId] = useState(newSubmissionId);
 
   const [signedOn, setSignedOn] = useState(todayLocal());
   const [templateVersion, setTemplateVersion] = useState("");
@@ -110,6 +131,13 @@ function UploadPaperWaiverPage() {
   const totalBytes = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
   const tooLarge = totalBytes > MAX_SCAN_BYTES;
   const isMinor = Boolean(dob && signedOn && isMinorOn(dob, signedOn));
+  // The warning only stands for the person and date it was raised about: edit
+  // either and it disappears, rather than sitting there inviting a confirmation
+  // of something that is no longer being filed.
+  const duplicates =
+    duplicateWarning && duplicateWarning.email === email && duplicateWarning.signedOn === signedOn
+      ? duplicateWarning.rows
+      : null;
 
   function addFiles(picked: FileList | null) {
     if (!picked?.length) return;
@@ -132,6 +160,10 @@ function UploadPaperWaiverPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    await fileWaiver({ confirmDuplicate: false });
+  }
+
+  async function fileWaiver({ confirmDuplicate }: { confirmDuplicate: boolean }) {
     if (files.length === 0) {
       toast.error("Attach the scanned form first.");
       return;
@@ -141,6 +173,7 @@ function UploadPaperWaiverPage() {
       return;
     }
     setSaving(true);
+    setDuplicateWarning(null);
     try {
       const scan = await Promise.all(
         files.map(async (file) => ({
@@ -168,8 +201,14 @@ function UploadPaperWaiverPage() {
           signed_on: signedOn,
           template_version: templateVersion.trim() ? Number(templateVersion) : null,
           scan,
+          confirm_duplicate: confirmDuplicate,
+          client_submission_id: submissionId,
         },
       });
+      if (!res.filed) {
+        setDuplicateWarning({ rows: res.duplicate, email, signedOn });
+        return;
+      }
       toast.success("Waiver filed. It is pending until you approve it.");
       navigate({ to: "/manager/users/$userId", params: { userId: res.user_id } });
     } catch (err) {
@@ -504,6 +543,41 @@ function UploadPaperWaiverPage() {
             </p>
           </div>
         </Section>
+
+        {duplicates && (
+          <div className="space-y-3 rounded-md border border-amber-500/50 bg-amber-500/10 p-4 text-sm">
+            <p className="font-semibold">This person already has this waiver on file.</p>
+            <p className="text-muted-foreground">
+              {duplicates.length === 1 ? "A waiver" : `${duplicates.length} waivers`} signed on{" "}
+              {duplicates[0].signed_on} {duplicates.length === 1 ? "is" : "are"} already filed for
+              them. Filing this one adds another copy, and each copy is another one somebody could
+              approve by mistake.
+            </p>
+            <ul className="space-y-1 font-mono text-xs text-muted-foreground">
+              {duplicates.map((w) => (
+                <li key={w.id}>
+                  {w.id} ({w.approval_status})
+                </li>
+              ))}
+            </ul>
+            <p className="text-muted-foreground">
+              File it anyway only if this really is a second document, such as a corrected re-scan.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => void fileWaiver({ confirmDuplicate: true })}
+              >
+                {saving ? "Filing..." : "File it anyway"}
+              </Button>
+              <Button asChild type="button" variant="ghost">
+                <Link to="/manager/waivers">Go to the waiver list</Link>
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" disabled={saving || tooLarge}>
