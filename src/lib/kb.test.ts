@@ -5,14 +5,16 @@ import {
   blockId,
   canAnnotate,
   canEditAnnotation,
-  canReadDocument,
+  canReadArticle,
   canResolveThread,
   groupThreads,
+  likePattern,
+  matchArticleText,
   normalizeBlockText,
   resolveAnchors,
   splitBlocks,
-} from "./documents";
-import type { Viewer } from "./documents";
+} from "./kb";
+import type { Viewer } from "./kb";
 
 const anon: Viewer = { userId: null, isManager: false };
 const member: Viewer = { userId: "u-member", isManager: false };
@@ -70,7 +72,7 @@ describe("splitBlocks", () => {
 
   // A `.trim()` on each chunk silently stripped the leading 4 spaces off an
   // indented code block, so it stopped being code and rendered as a paragraph:
-  // splitting the document changed what the document said.
+  // splitting the article changed what the article said.
   it("keeps the indentation of an indented code block", () => {
     const blocks = splitBlocks("Example:\n\n    const a = 1;\n    const b = 2;");
     expect(blocks).toHaveLength(2);
@@ -82,7 +84,7 @@ describe("splitBlocks", () => {
     expect(blocks[1].markdown.startsWith("  ```")).toBe(true);
   });
 
-  // An unclosed fence swallows the rest of the document into one block. That is
+  // An unclosed fence swallows the rest of the article into one block. That is
   // the honest reading of the source, but it makes everything below it a single
   // unannotatable slab, so pin it as known behaviour rather than a surprise.
   it("treats everything after an unclosed fence as one block", () => {
@@ -109,9 +111,9 @@ describe("resolveAnchors", () => {
     expect(res.orphaned).toEqual([]);
   });
 
-  it("files a null block_id as a document-level note", () => {
+  it("files a null block_id as an article-level note", () => {
     const a = { block_id: null, quote: null };
-    expect(resolveAnchors(blocks, [a]).document).toEqual([a]);
+    expect(resolveAnchors(blocks, [a]).article).toEqual([a]);
   });
 
   it("orphans an annotation whose passage was rewritten", () => {
@@ -161,34 +163,34 @@ describe("groupThreads", () => {
   });
 });
 
-describe("canReadDocument", () => {
-  it("lets anyone read a public document", () => {
-    expect(canReadDocument("public", anon)).toBe(true);
+describe("canReadArticle", () => {
+  it("lets anyone read a public article", () => {
+    expect(canReadArticle("public", anon)).toBe(true);
   });
 
-  it("requires a login for a members document", () => {
-    expect(canReadDocument("members", anon)).toBe(false);
-    expect(canReadDocument("members", member)).toBe(true);
+  it("requires a login for a members article", () => {
+    expect(canReadArticle("members", anon)).toBe(false);
+    expect(canReadArticle("members", member)).toBe(true);
   });
 
-  it("hides a managers-only document from members", () => {
-    expect(canReadDocument("managers", member)).toBe(false);
-    expect(canReadDocument("managers", manager)).toBe(true);
+  it("hides a managers-only article from members", () => {
+    expect(canReadArticle("managers", member)).toBe(false);
+    expect(canReadArticle("managers", manager)).toBe(true);
   });
 });
 
 describe("canAnnotate", () => {
-  it("refuses a signed-out reader even on a public document", () => {
+  it("refuses a signed-out reader even on a public article", () => {
     expect(canAnnotate({ visibility: "public", annotations_enabled: true }, anon)).toBe(false);
   });
 
-  it("refuses when the document has annotations turned off, managers included", () => {
+  it("refuses when the article has annotations turned off, managers included", () => {
     const doc = { visibility: "public", annotations_enabled: false } as const;
     expect(canAnnotate(doc, member)).toBe(false);
     expect(canAnnotate(doc, manager)).toBe(false);
   });
 
-  it("allows a signed-in member on a members document", () => {
+  it("allows a signed-in member on a members article", () => {
     expect(canAnnotate({ visibility: "members", annotations_enabled: true }, member)).toBe(true);
   });
 });
@@ -198,7 +200,7 @@ describe("canEditAnnotation", () => {
     expect(canEditAnnotation({ user_id: "u-member" }, member)).toBe(true);
   });
 
-  // Moderation is resolving and deleting the document, never rewriting somebody
+  // Moderation is resolving and deleting the article, never rewriting somebody
   // else's words.
   it("refuses a manager editing somebody else's annotation", () => {
     expect(canEditAnnotation({ user_id: "u-member" }, manager)).toBe(false);
@@ -242,7 +244,7 @@ describe("annotationReadFilter", () => {
     expect(orExpression).not.toContain("user_id.eq.shared");
   });
 
-  it("caps a document's annotation read", () => {
+  it("caps an article's annotation read", () => {
     expect(ANNOTATIONS_LIMIT).toBeGreaterThan(0);
   });
 });
@@ -259,5 +261,64 @@ describe("canResolveThread", () => {
   // A private note is not a conversation, so there is nothing to resolve.
   it("refuses to resolve a private note, even for a manager", () => {
     expect(canResolveThread({ user_id: "u-member", visibility: "private" }, manager)).toBe(false);
+  });
+});
+
+// Search: the two halves that decide what the database is asked for and what
+// survives the answer. Both are pure, and between them they are the whole
+// correctness argument for pre-filtering in SQL and re-checking here.
+describe("likePattern", () => {
+  it("wraps the term so it matches anywhere in the text", () => {
+    expect(likePattern("grading")).toBe("%grading%");
+  });
+
+  // Without this, searching for "50%" asks the database for every article
+  // containing "50" and the reader is shown a page of noise.
+  it("treats a percent sign the reader typed as text, not a wildcard", () => {
+    expect(likePattern("50%")).toBe("%50\\%%");
+  });
+
+  it("escapes the single-character wildcard too", () => {
+    expect(likePattern("gi_bag")).toBe("%gi\\_bag%");
+  });
+
+  it("escapes a backslash before it can escape something else", () => {
+    expect(likePattern("a\\b")).toBe("%a\\\\b%");
+  });
+});
+
+describe("matchArticleText", () => {
+  it("returns a window around the hit", () => {
+    expect(matchArticleText("Gradings run twice a year.", "twice")).toBe(
+      "Gradings run twice a year.",
+    );
+  });
+
+  it("finds the term whatever case it was written in", () => {
+    expect(matchArticleText("Wash your GI before class.", "gi")).not.toBeNull();
+  });
+
+  it("marks both ends when the article continues past the window", () => {
+    const body = `${"x".repeat(200)} needle ${"y".repeat(200)}`;
+    const snippet = matchArticleText(body, "needle");
+    expect(snippet?.startsWith("…")).toBe(true);
+    expect(snippet?.endsWith("…")).toBe(true);
+    expect(snippet).toContain("needle");
+  });
+
+  it("keeps the whole term visible, not just its first character", () => {
+    const body = `${"x".repeat(200)}${"long-search-term"}${"y".repeat(200)}`;
+    expect(matchArticleText(body, "long-search-term")).toContain("long-search-term");
+  });
+
+  it("collapses the line breaks inside the window", () => {
+    expect(matchArticleText("Belts\n\nand    grading", "and")).toBe("Belts and grading");
+  });
+
+  // This is what makes the database pre-filter safe to widen: a row matched by
+  // a `*` the reader typed, which PostgREST turns into a wildcard, is dropped
+  // here rather than shown as a hit with nothing in it.
+  it("returns null when the term is not really there", () => {
+    expect(matchArticleText("Gradings run twice a year.", "belt*system")).toBeNull();
   });
 });

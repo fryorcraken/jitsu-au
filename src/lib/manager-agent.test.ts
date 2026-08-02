@@ -9,6 +9,7 @@ import {
   diffInvoicePatch,
   INVOICE_EDITABLE_FIELDS,
   invoiceEditAudit,
+  projectAgentKbArticle,
   projectInvoice,
   RECONCILED_GUARDED_FIELDS,
   reconciledEditBlockers,
@@ -368,7 +369,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("2");
+    expect(AGENT_MANIFEST.version).toBe("3");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -468,5 +469,74 @@ describe("AgentError", () => {
     expect(e.httpStatus).toBe(401);
     expect(e.code).toBe("unauthorized");
     expect(e).toBeInstanceOf(Error);
+  });
+});
+
+describe("projectAgentKbArticle", () => {
+  const article = {
+    slug: "our-history",
+    nav_title: null as string | null,
+    link_path: null as string | null,
+    section_id: "sec-1",
+    position: 20,
+    visibility: "members",
+    annotations_enabled: true,
+    updated_at: "2026-07-01T00:00:00Z",
+  };
+  const live = {
+    title: "Our history, 2004 to today",
+    version: 3,
+    created_at: "2026-07-20T00:00:00Z",
+    change_note: "Added the founding years",
+  };
+
+  it("reports the live version's heading, not the sidebar label", () => {
+    // The bug this pins: falling back to `nav_title` first made an article's
+    // real heading unobtainable from the list, so an agent that built a
+    // save_kb_article from what it read renamed the heading to the nav label.
+    const row = projectAgentKbArticle({ ...article, nav_title: "Our history" }, live, "about", 3);
+    expect(row.title).toBe("Our history, 2004 to today");
+    expect(row.nav_title).toBe("Our history");
+  });
+
+  it("falls back to nothing rather than the label when there is no live version", () => {
+    expect(projectAgentKbArticle(article, undefined, "about", 0).title).toBeNull();
+  });
+
+  // A link entry has no version, so its label IS its title, and the null
+  // version is what tells an agent it cannot be given text.
+  it("names a link entry by its label and points its url at the destination", () => {
+    const row = projectAgentKbArticle(
+      { ...article, slug: "common-questions", nav_title: "Common questions", link_path: "/faq" },
+      undefined,
+      "start-here",
+      0,
+    );
+    expect(row).toMatchObject({
+      title: "Common questions",
+      link_path: "/faq",
+      version: null,
+      url: "/faq",
+    });
+  });
+
+  it("gives an article a /kb url and reports where it sits", () => {
+    const row = projectAgentKbArticle(article, live, "about-the-club", 3);
+    expect(row).toMatchObject({
+      url: "/kb/our-history",
+      section: "about-the-club",
+      position: 20,
+      version: 3,
+      versions: 3,
+      updated_at: "2026-07-20T00:00:00Z",
+    });
+  });
+
+  // An article the club has not filed has no section, and the list must say so
+  // rather than inventing one.
+  it("reports a null section for an unfiled article", () => {
+    expect(
+      projectAgentKbArticle({ ...article, section_id: null }, live, null, 1).section,
+    ).toBeNull();
   });
 });

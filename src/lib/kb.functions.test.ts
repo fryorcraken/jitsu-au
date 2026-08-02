@@ -1,12 +1,12 @@
-// `authorNames` / `managerAuthorNames` are the pieces of documents.functions.ts
+// `authorNames` / `managerAuthorNames` are the pieces of kb.functions.ts
 // reachable from a unit test without a Start request context (the
 // `createServerFn` handlers die on "No Start context found in
 // AsyncLocalStorage" when called from the runner — see
 // blog-comments.functions.test.ts / waiver.functions.test.ts). They take
 // their db client as a parameter for exactly that reason.
 import { describe, expect, it } from "vitest";
-import type { DocumentClient } from "@/lib/document-types";
-import { authorNames, managerAuthorNames } from "./documents.functions";
+import type { KbClient } from "@/lib/kb-types";
+import { authorNames, managerAuthorNames } from "./kb.functions";
 
 type ProfileRow = {
   user_id: string;
@@ -44,7 +44,7 @@ function fakeDb(profiles: ProfileRow[], opts: { error?: { message: string } } = 
       };
     },
   };
-  return db as unknown as DocumentClient;
+  return db as unknown as KbClient;
 }
 
 const ADA = "11111111-1111-1111-1111-111111111111";
@@ -97,7 +97,7 @@ describe("authorNames (member-facing)", () => {
           return { in: () => Promise.resolve({ data: [], error: null }) };
         },
       }),
-    } as unknown as DocumentClient;
+    } as unknown as KbClient;
     await authorNames(db, [ADA]);
     expect(requestedColumns).not.toMatch(/middle_name/);
   });

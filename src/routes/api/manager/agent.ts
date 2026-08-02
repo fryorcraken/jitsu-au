@@ -15,14 +15,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ZodError } from "zod";
 import {
   editInvoiceSchema,
-  getDocumentSchema,
+  getKbArticleSchema,
   listAgentInvoicesSchema,
   listAgentUsersSchema,
-  listDocumentAnnotationsSchema,
+  listKbCommentsSchema,
   managerAgentActions,
   nameWithPreferred,
   paperWaiverUploadSchema,
-  saveDocumentSchema,
+  saveKbArticleSchema,
+  saveKbSectionSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -34,6 +35,7 @@ import {
   classifyAction,
   diffInvoicePatch,
   invoiceEditAudit,
+  projectAgentKbArticle,
   projectInvoice,
   reconciledEditBlockers,
   reconciledEditMessage,
@@ -54,13 +56,15 @@ import type {
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import {
+  listKbSections,
   listSharedAnnotations,
-  loadDocument,
+  loadKbArticle,
   projectAnnotation,
-  projectDocument,
-  saveDocument,
-} from "@/lib/document-admin";
-import type { DocumentAnnotationRow, DocumentRow } from "@/lib/document-types";
+  projectArticle,
+  saveKbArticle,
+  saveKbSection,
+} from "@/lib/kb-admin";
+import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
@@ -582,132 +586,157 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
 }
 
 /**
- * Cap on documents returned by `list_documents`. Generous: a club with more
+ * Cap on articles returned by `list_kb_articles`. Generous: a club with more
  * pages than this has outgrown a flat list, and the handler warns rather than
  * truncating in silence.
  */
-const DOCUMENTS_LIMIT = 500;
+const ARTICLES_LIMIT = 500;
 
-// ---- action: list_documents ----
-async function handleListDocuments() {
+// ---- action: list_kb_sections ----
+async function handleListKbSections() {
+  const db = await adminClient();
+  const sections = await listKbSections(db);
+  return {
+    count: sections.length,
+    sections: sections.map((s) => ({ slug: s.slug, title: s.title, position: s.position })),
+  };
+}
+
+// ---- action: save_kb_section ----
+async function handleSaveKbSection(params: unknown) {
+  const input = saveKbSectionSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await saveKbSection(db, input);
+  } catch (e) {
+    throw new AgentError(
+      422,
+      "save_kb_section_failed",
+      e instanceof Error ? e.message : "Could not save the section.",
+    );
+  }
+}
+
+// ---- action: list_kb_articles ----
+async function handleListKbArticles() {
   const db = await adminClient();
 
-  // Only the LIVE version of each document, not every version ever saved.
+  // Only the LIVE version of each article, not every version ever saved.
   //
-  // Reading the whole `document_versions` table to pick out the current rows
+  // Reading the whole `kb_article_versions` table to pick out the current rows
   // grows without bound (every save adds one) and would eventually be truncated
   // by the server-side row cap — silently, and in the worst possible way: a
-  // document whose `is_current` row fell outside the window would be reported
+  // article whose `is_current` row fell outside the window would be reported
   // with `title: null, version: null`, a confident wrong answer of exactly the
   // kind the comment in `handleListUsers` exists to prevent. `is_current` is a
-  // partial unique index, so this is one row per document by construction.
+  // partial unique index, so this is one row per article by construction.
   //
   // The live version is the one flagged `is_current`, NOT the highest-numbered
   // one. Those differ whenever a manager has rolled back to an earlier version,
   // and reporting the newest as live would have an agent read version 9, edit
   // it, and publish it over the version 4 the club deliberately went back to.
-  const [{ data: docs, error }, { data: versions, error: vErr }] = await Promise.all([
-    db.from("documents").select("*").order("slug").limit(DOCUMENTS_LIMIT),
+  const [{ data: docs, error }, { data: versions, error: vErr }, sections] = await Promise.all([
+    db.from("kb_articles").select("*").order("slug").limit(ARTICLES_LIMIT),
     db
-      .from("document_versions")
-      .select("document_id, title, version, created_at, change_note")
+      .from("kb_article_versions")
+      .select("article_id, title, version, created_at, change_note")
       .eq("is_current", true)
-      .limit(DOCUMENTS_LIMIT),
+      .limit(ARTICLES_LIMIT),
+    listKbSections(db),
   ]);
   if (error) throw new AgentError(500, "db_error", error.message);
   if (vErr) throw new AgentError(500, "db_error", vErr.message);
-  if ((docs ?? []).length >= DOCUMENTS_LIMIT) {
-    console.warn(`[agent.list_documents] documents capped at ${DOCUMENTS_LIMIT}; list truncated`);
+
+  // Articles report their section by SLUG, never by id: the slug is what
+  // `save_kb_article` takes back, so an agent can move an article using exactly
+  // what it just read.
+  const sectionSlugById = new Map(sections.map((s) => [s.id, s.slug]));
+  if ((docs ?? []).length >= ARTICLES_LIMIT) {
+    console.warn(`[agent.list_kb_articles] articles capped at ${ARTICLES_LIMIT}; list truncated`);
   }
 
-  const liveByDoc = new Map((versions ?? []).map((v) => [v.document_id, v]));
+  const liveByDoc = new Map((versions ?? []).map((v) => [v.article_id, v]));
 
-  // How many versions each document has, counted in the database rather than by
+  // How many versions each article has, counted in the database rather than by
   // reading the rows: "this page has been rewritten nine times" is context a
   // manager wants before editing it, and it must not cost an unbounded read.
   const countByDoc = new Map<string, number>();
   await Promise.all(
-    ((docs ?? []) as DocumentRow[]).map(async (d) => {
+    ((docs ?? []) as KbArticleRow[]).map(async (d) => {
       const { count, error: cErr } = await db
-        .from("document_versions")
+        .from("kb_article_versions")
         .select("*", { count: "exact", head: true })
-        .eq("document_id", d.id);
+        .eq("article_id", d.id);
       if (cErr) throw new AgentError(500, "db_error", cErr.message);
       countByDoc.set(d.id, count ?? 0);
     }),
   );
 
-  const documents = ((docs ?? []) as DocumentRow[]).map((d) => {
-    const live = liveByDoc.get(d.id);
-    return {
-      slug: d.slug,
-      title: live?.title ?? null,
-      version: live?.version ?? null,
-      versions: countByDoc.get(d.id) ?? 0,
-      visibility: d.visibility,
-      annotations_enabled: d.annotations_enabled,
-      url: `/docs/${d.slug}`,
-      change_note: live?.change_note ?? null,
-      updated_at: live?.created_at ?? d.updated_at,
-    };
-  });
-  return { count: documents.length, documents };
+  const articles = ((docs ?? []) as KbArticleRow[]).map((d) =>
+    projectAgentKbArticle(
+      d,
+      liveByDoc.get(d.id),
+      d.section_id ? (sectionSlugById.get(d.section_id) ?? null) : null,
+      countByDoc.get(d.id) ?? 0,
+    ),
+  );
+  return { count: articles.length, articles };
 }
 
-// ---- action: get_document ----
-async function handleGetDocument(params: unknown) {
-  const input = getDocumentSchema.parse(params);
+// ---- action: get_kb_article ----
+async function handleGetKbArticle(params: unknown) {
+  const input = getKbArticleSchema.parse(params);
   const db = await adminClient();
-  const loaded = await loadDocument(db, input.slug, input.version);
-  // A manager token sees every document, drafts included, so there is no
+  const loaded = await loadKbArticle(db, input.slug, input.version);
+  // A manager token sees every article, drafts included, so there is no
   // visibility check here — unlike the public reader, which hides a missing
-  // document and a forbidden one behind the same words.
-  if (!loaded) throw new AgentError(404, "not_found", "No such document, or no such version.");
-  return { document: projectDocument(loaded) };
+  // article and a forbidden one behind the same words.
+  if (!loaded) throw new AgentError(404, "not_found", "No such article, or no such version.");
+  return { article: projectArticle(loaded) };
 }
 
-// ---- action: save_document ----
-async function handleSaveDocument(params: unknown, actingAs: string) {
-  const input = saveDocumentSchema.parse(params);
+// ---- action: save_kb_article ----
+async function handleSaveKbArticle(params: unknown, actingAs: string) {
+  const input = saveKbArticleSchema.parse(params);
   const db = await adminClient();
   try {
-    const result = await saveDocument(db, input, actingAs);
+    const result = await saveKbArticle(db, input, actingAs);
     return {
       slug: result.slug,
       version: result.version,
       created: result.created,
-      url: `/docs/${result.slug}`,
+      url: `/kb/${result.slug}`,
     };
   } catch (e) {
-    // saveDocument throws plain Errors with manager-facing text (a promotion
+    // saveKbArticle throws plain Errors with manager-facing text (a promotion
     // race, a failed insert). Wrap so the agent gets that message inside the
     // endpoint's stable error envelope rather than a bare 500.
     throw new AgentError(
       422,
-      "save_document_failed",
-      e instanceof Error ? e.message : "Could not save the document.",
+      "save_kb_article_failed",
+      e instanceof Error ? e.message : "Could not save the article.",
     );
   }
 }
 
-// ---- action: list_document_annotations ----
-async function handleListDocumentAnnotations(params: unknown) {
-  const input = listDocumentAnnotationsSchema.parse(params);
+// ---- action: list_kb_comments ----
+async function handleListKbComments(params: unknown) {
+  const input = listKbCommentsSchema.parse(params);
   const db = await adminClient();
 
   const { data: doc, error: docErr } = await db
-    .from("documents")
+    .from("kb_articles")
     .select("id, slug")
     .eq("slug", input.slug)
     .maybeSingle();
   if (docErr) throw new AgentError(500, "db_error", docErr.message);
-  if (!doc) throw new AgentError(404, "not_found", "No such document.");
+  if (!doc) throw new AgentError(404, "not_found", "No such article.");
 
   // Through `listSharedAnnotations`, not a second query of its own. The
   // `visibility = 'shared'` filter is the single line keeping members' private
   // notes away from the club, and a copy of it here is a copy that can be
   // edited without the test noticing.
-  let annotations: DocumentAnnotationRow[];
+  let annotations: KbAnnotationRow[];
   try {
     annotations = await listSharedAnnotations(db, doc.id, {
       includeResolved: input.include_resolved,
@@ -742,14 +771,18 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleEditInvoice(params, actingAs);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
-    case "list_documents":
-      return handleListDocuments();
-    case "get_document":
-      return handleGetDocument(params);
-    case "save_document":
-      return handleSaveDocument(params, actingAs);
-    case "list_document_annotations":
-      return handleListDocumentAnnotations(params);
+    case "list_kb_sections":
+      return handleListKbSections();
+    case "save_kb_section":
+      return handleSaveKbSection(params);
+    case "list_kb_articles":
+      return handleListKbArticles();
+    case "get_kb_article":
+      return handleGetKbArticle(params);
+    case "save_kb_article":
+      return handleSaveKbArticle(params, actingAs);
+    case "list_kb_comments":
+      return handleListKbComments(params);
   }
 }
 

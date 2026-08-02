@@ -50,6 +50,11 @@ export function SiteFooter() {
                 Blog
               </Link>
             </li>
+            <li>
+              <Link to="/kb" className="hover:text-foreground">
+                Knowledge base
+              </Link>
+            </li>
           </ul>
         </div>
         <div>

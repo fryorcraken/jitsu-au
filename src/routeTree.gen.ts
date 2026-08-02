@@ -21,6 +21,7 @@ import { Route as ContactRouteImport } from './routes/contact'
 import { Route as FaqRouteImport } from './routes/faq'
 import { Route as FirstClassRouteImport } from './routes/first-class'
 import { Route as InstructorsRouteImport } from './routes/instructors'
+import { Route as KbRouteRouteImport } from './routes/kb/route'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as RegisterInterestRouteImport } from './routes/register-interest'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
@@ -33,14 +34,14 @@ import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
 import { Route as BlogIndexRouteImport } from './routes/blog/index'
 import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
-import { Route as DocsIndexRouteImport } from './routes/docs.index'
-import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
+import { Route as KbIndexRouteImport } from './routes/kb/index'
+import { Route as KbSlugRouteImport } from './routes/kb/$slug'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenticated/manager.blog'
 import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_authenticated/manager.blog-comments'
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
 import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
-import { Route as AuthenticatedManagerDocumentsRouteImport } from './routes/_authenticated/manager.documents'
+import { Route as AuthenticatedManagerKbRouteImport } from './routes/_authenticated/manager.kb'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
@@ -117,6 +118,11 @@ const InstructorsRoute = InstructorsRouteImport.update({
   path: '/instructors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const KbRouteRoute = KbRouteRouteImport.update({
+  id: '/kb',
+  path: '/kb',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PricingRoute = PricingRouteImport.update({
   id: '/pricing',
   path: '/pricing',
@@ -177,15 +183,15 @@ const BlogSlugRoute = BlogSlugRouteImport.update({
   path: '/blog/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DocsIndexRoute = DocsIndexRouteImport.update({
-  id: '/docs/',
-  path: '/docs/',
-  getParentRoute: () => rootRouteImport,
+const KbIndexRoute = KbIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => KbRouteRoute,
 } as any)
-const DocsSlugRoute = DocsSlugRouteImport.update({
-  id: '/docs/$slug',
-  path: '/docs/$slug',
-  getParentRoute: () => rootRouteImport,
+const KbSlugRoute = KbSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => KbRouteRoute,
 } as any)
 const AuthenticatedManagerApiTokensRoute =
   AuthenticatedManagerApiTokensRouteImport.update({
@@ -217,12 +223,11 @@ const AuthenticatedManagerCheckInRoute =
     path: '/manager/check-in',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedManagerDocumentsRoute =
-  AuthenticatedManagerDocumentsRouteImport.update({
-    id: '/manager/documents',
-    path: '/manager/documents',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
+const AuthenticatedManagerKbRoute = AuthenticatedManagerKbRouteImport.update({
+  id: '/manager/kb',
+  path: '/manager/kb',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedManagerMembershipPlansRoute =
   AuthenticatedManagerMembershipPlansRouteImport.update({
     id: '/manager/membership-plans',
@@ -317,6 +322,7 @@ const LovableEmailAuthWebhookRoute = LovableEmailAuthWebhookRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/kb': typeof KbRouteRouteWithChildren
   '/about': typeof AboutRoute
   '/app': typeof AppRoute
   '/auth': typeof AuthRoute
@@ -338,15 +344,15 @@ export interface FileRoutesByFullPath {
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/blog/$slug': typeof BlogSlugRoute
-  '/docs/$slug': typeof DocsSlugRoute
+  '/kb/$slug': typeof KbSlugRoute
   '/blog/': typeof BlogIndexRoute
-  '/docs/': typeof DocsIndexRoute
+  '/kb/': typeof KbIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
-  '/manager/documents': typeof AuthenticatedManagerDocumentsRoute
+  '/manager/kb': typeof AuthenticatedManagerKbRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -387,15 +393,15 @@ export interface FileRoutesByTo {
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/blog/$slug': typeof BlogSlugRoute
-  '/docs/$slug': typeof DocsSlugRoute
+  '/kb/$slug': typeof KbSlugRoute
   '/blog': typeof BlogIndexRoute
-  '/docs': typeof DocsIndexRoute
+  '/kb': typeof KbIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
-  '/manager/documents': typeof AuthenticatedManagerDocumentsRoute
+  '/manager/kb': typeof AuthenticatedManagerKbRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -417,6 +423,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/kb': typeof KbRouteRouteWithChildren
   '/about': typeof AboutRoute
   '/app': typeof AppRoute
   '/auth': typeof AuthRoute
@@ -438,15 +445,15 @@ export interface FileRoutesById {
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
   '/blog/$slug': typeof BlogSlugRoute
-  '/docs/$slug': typeof DocsSlugRoute
+  '/kb/$slug': typeof KbSlugRoute
   '/blog/': typeof BlogIndexRoute
-  '/docs/': typeof DocsIndexRoute
+  '/kb/': typeof KbIndexRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/_authenticated/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
-  '/_authenticated/manager/documents': typeof AuthenticatedManagerDocumentsRoute
+  '/_authenticated/manager/kb': typeof AuthenticatedManagerKbRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -468,6 +475,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/kb'
     | '/about'
     | '/app'
     | '/auth'
@@ -489,15 +497,15 @@ export interface FileRouteTypes {
     | '/account'
     | '/membership'
     | '/blog/$slug'
-    | '/docs/$slug'
+    | '/kb/$slug'
     | '/blog/'
-    | '/docs/'
+    | '/kb/'
     | '/manager/api-tokens'
     | '/manager/blog'
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
-    | '/manager/documents'
+    | '/manager/kb'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -538,15 +546,15 @@ export interface FileRouteTypes {
     | '/account'
     | '/membership'
     | '/blog/$slug'
-    | '/docs/$slug'
+    | '/kb/$slug'
     | '/blog'
-    | '/docs'
+    | '/kb'
     | '/manager/api-tokens'
     | '/manager/blog'
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
-    | '/manager/documents'
+    | '/manager/kb'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -567,6 +575,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/kb'
     | '/about'
     | '/app'
     | '/auth'
@@ -588,15 +597,15 @@ export interface FileRouteTypes {
     | '/_authenticated/account'
     | '/_authenticated/membership'
     | '/blog/$slug'
-    | '/docs/$slug'
+    | '/kb/$slug'
     | '/blog/'
-    | '/docs/'
+    | '/kb/'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/blog'
     | '/_authenticated/manager/blog-comments'
     | '/_authenticated/manager/calendar'
     | '/_authenticated/manager/check-in'
-    | '/_authenticated/manager/documents'
+    | '/_authenticated/manager/kb'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
@@ -618,6 +627,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  KbRouteRoute: typeof KbRouteRouteWithChildren
   AboutRoute: typeof AboutRoute
   AppRoute: typeof AppRoute
   AuthRoute: typeof AuthRoute
@@ -637,9 +647,7 @@ export interface RootRouteChildren {
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
   BlogSlugRoute: typeof BlogSlugRoute
-  DocsSlugRoute: typeof DocsSlugRoute
   BlogIndexRoute: typeof BlogIndexRoute
-  DocsIndexRoute: typeof DocsIndexRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
   ApiVerifyEmailTokenRoute: typeof ApiVerifyEmailTokenRoute
@@ -733,6 +741,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InstructorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/kb': {
+      id: '/kb'
+      path: '/kb'
+      fullPath: '/kb'
+      preLoaderRoute: typeof KbRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pricing': {
       id: '/pricing'
       path: '/pricing'
@@ -817,19 +832,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BlogSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/docs/': {
-      id: '/docs/'
-      path: '/docs'
-      fullPath: '/docs/'
-      preLoaderRoute: typeof DocsIndexRouteImport
-      parentRoute: typeof rootRouteImport
+    '/kb/': {
+      id: '/kb/'
+      path: '/'
+      fullPath: '/kb/'
+      preLoaderRoute: typeof KbIndexRouteImport
+      parentRoute: typeof KbRouteRoute
     }
-    '/docs/$slug': {
-      id: '/docs/$slug'
-      path: '/docs/$slug'
-      fullPath: '/docs/$slug'
-      preLoaderRoute: typeof DocsSlugRouteImport
-      parentRoute: typeof rootRouteImport
+    '/kb/$slug': {
+      id: '/kb/$slug'
+      path: '/$slug'
+      fullPath: '/kb/$slug'
+      preLoaderRoute: typeof KbSlugRouteImport
+      parentRoute: typeof KbRouteRoute
     }
     '/_authenticated/manager/api-tokens': {
       id: '/_authenticated/manager/api-tokens'
@@ -866,11 +881,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/manager/documents': {
-      id: '/_authenticated/manager/documents'
-      path: '/manager/documents'
-      fullPath: '/manager/documents'
-      preLoaderRoute: typeof AuthenticatedManagerDocumentsRouteImport
+    '/_authenticated/manager/kb': {
+      id: '/_authenticated/manager/kb'
+      path: '/manager/kb'
+      fullPath: '/manager/kb'
+      preLoaderRoute: typeof AuthenticatedManagerKbRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/manager/membership-plans': {
@@ -996,7 +1011,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerBlogCommentsRoute: typeof AuthenticatedManagerBlogCommentsRoute
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
   AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
-  AuthenticatedManagerDocumentsRoute: typeof AuthenticatedManagerDocumentsRoute
+  AuthenticatedManagerKbRoute: typeof AuthenticatedManagerKbRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
@@ -1018,7 +1033,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerBlogCommentsRoute: AuthenticatedManagerBlogCommentsRoute,
   AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
   AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
-  AuthenticatedManagerDocumentsRoute: AuthenticatedManagerDocumentsRoute,
+  AuthenticatedManagerKbRoute: AuthenticatedManagerKbRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,
@@ -1039,9 +1054,23 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface KbRouteRouteChildren {
+  KbSlugRoute: typeof KbSlugRoute
+  KbIndexRoute: typeof KbIndexRoute
+}
+
+const KbRouteRouteChildren: KbRouteRouteChildren = {
+  KbSlugRoute: KbSlugRoute,
+  KbIndexRoute: KbIndexRoute,
+}
+
+const KbRouteRouteWithChildren =
+  KbRouteRoute._addFileChildren(KbRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  KbRouteRoute: KbRouteRouteWithChildren,
   AboutRoute: AboutRoute,
   AppRoute: AppRoute,
   AuthRoute: AuthRoute,
@@ -1061,9 +1090,7 @@ const rootRouteChildren: RootRouteChildren = {
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
   BlogSlugRoute: BlogSlugRoute,
-  DocsSlugRoute: DocsSlugRoute,
   BlogIndexRoute: BlogIndexRoute,
-  DocsIndexRoute: DocsIndexRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,
   ApiVerifyEmailTokenRoute: ApiVerifyEmailTokenRoute,

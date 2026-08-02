@@ -1,37 +1,37 @@
 import { describe, it, expect } from "vitest";
-import { isDocumentDirty, slugFromTitle, wideningVisibility } from "./document-editor";
-import type { DocumentDraft } from "./document-editor";
+import { isArticleDirty, slugFromTitle, wideningVisibility } from "./kb-editor";
+import type { ArticleDraft } from "./kb-editor";
 
-const stored: DocumentDraft = {
+const stored: ArticleDraft = {
   title: "House rules",
   body_md: "# Rules",
   visibility: "members",
   annotations_enabled: true,
 };
 
-describe("isDocumentDirty", () => {
+describe("isArticleDirty", () => {
   it("is clean against an identical draft", () => {
-    expect(isDocumentDirty({ ...stored }, stored)).toBe(false);
+    expect(isArticleDirty({ ...stored }, stored)).toBe(false);
   });
 
   it("notices every field a save would keep", () => {
-    expect(isDocumentDirty({ ...stored, title: "Rules" }, stored)).toBe(true);
-    expect(isDocumentDirty({ ...stored, body_md: "# Other" }, stored)).toBe(true);
-    expect(isDocumentDirty({ ...stored, visibility: "public" }, stored)).toBe(true);
-    expect(isDocumentDirty({ ...stored, annotations_enabled: false }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, title: "Rules" }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, body_md: "# Other" }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, visibility: "public" }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, annotations_enabled: false }, stored)).toBe(true);
   });
 
   // While creating there is no stored version, but anything typed is still
-  // unsaved work. Returning false here let "New document" wipe a fully typed
-  // document with no prompt.
+  // unsaved work. Returning false here let "New article" wipe a fully typed
+  // article with no prompt.
   it("treats typed content with nothing stored as unsaved work", () => {
-    expect(isDocumentDirty({ ...stored, title: "Anything" }, null)).toBe(true);
-    expect(isDocumentDirty({ ...stored, title: "", body_md: "# Draft" }, null)).toBe(true);
+    expect(isArticleDirty({ ...stored, title: "Anything" }, null)).toBe(true);
+    expect(isArticleDirty({ ...stored, title: "", body_md: "# Draft" }, null)).toBe(true);
   });
 
   it("is clean when nothing is stored and nothing has been typed", () => {
-    expect(isDocumentDirty({ ...stored, title: "", body_md: "" }, null)).toBe(false);
-    expect(isDocumentDirty({ ...stored, title: "   ", body_md: "  " }, null)).toBe(false);
+    expect(isArticleDirty({ ...stored, title: "", body_md: "" }, null)).toBe(false);
+    expect(isArticleDirty({ ...stored, title: "   ", body_md: "  " }, null)).toBe(false);
   });
 });
 
@@ -47,13 +47,13 @@ describe("wideningVisibility", () => {
     expect(wideningVisibility("managers", "public")).toEqual({ from: "managers", to: "public" });
   });
 
-  // Taking a document away from people is recoverable and unsurprising.
+  // Taking an article away from people is recoverable and unsurprising.
   it("does not flag a narrowing change", () => {
     expect(wideningVisibility("public", "members")).toBeNull();
     expect(wideningVisibility("members", "managers")).toBeNull();
   });
 
-  it("does not flag an unchanged visibility, or a brand-new document", () => {
+  it("does not flag an unchanged visibility, or a brand-new article", () => {
     expect(wideningVisibility("members", "members")).toBeNull();
     expect(wideningVisibility(null, "public")).toBeNull();
   });

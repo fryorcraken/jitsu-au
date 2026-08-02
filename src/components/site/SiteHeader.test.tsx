@@ -55,6 +55,19 @@ describe("SiteHeader", () => {
     expect(screen.queryByText(/member login/i)).not.toBeInTheDocument();
   });
 
+  // The knowledge base is unreachable without this: nothing else on the public
+  // site links to it.
+  it("links to the knowledge base for signed-out visitors too", () => {
+    mockUseAuth.mockReturnValue({ user: null });
+    render(<SiteHeader />);
+
+    const links = screen.getAllByRole("link", { name: /^knowledge base$/i });
+    expect(links.length).toBeGreaterThanOrEqual(1);
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", "/kb");
+    }
+  });
+
   it("links to the public blog", () => {
     mockUseAuth.mockReturnValue({ user: null });
     render(<SiteHeader />);

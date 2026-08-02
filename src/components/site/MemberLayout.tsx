@@ -41,6 +41,9 @@ import {
 type NavItem = { to: string; label: string; icon: typeof User };
 
 const memberNav: NavItem[] = [
+  // First: what a new member is meant to read before anything else. The rest of
+  // this group is admin they only visit when something needs doing.
+  { to: "/kb", label: "Knowledge base", icon: BookOpen },
   { to: "/account", label: "Account", icon: User },
   { to: "/membership", label: "Membership", icon: CreditCard },
 ];
@@ -53,7 +56,9 @@ const managerNav: NavItem[] = [
   { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
   { to: "/manager/waivers", label: "Signed waivers", icon: FileText },
   { to: "/manager/waiver-template", label: "Waiver template", icon: FileText },
-  { to: "/manager/documents", label: "Documents", icon: BookOpen },
+  // "editor" in the label because the member group above already has a
+  // "Knowledge base" entry pointing at the reader. Same content, two jobs.
+  { to: "/manager/kb", label: "Knowledge base editor", icon: BookOpen },
   { to: "/manager/blog", label: "Blog posts", icon: Newspaper },
   { to: "/manager/blog-comments", label: "Blog comments", icon: MessageSquare },
   { to: "/manager/calendar", label: "Calendar", icon: CalendarDays },

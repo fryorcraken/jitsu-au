@@ -2,13 +2,14 @@
 name: uts-manager-agent
 description: >-
   Perform UTS Jitsu manager actions (list members and their status, edit an
-  invoice's details, file a scanned paper waiver, publish and update the club's
-  documents and read members' comments on them) against the live site via its
+  invoice's details, file a scanned paper waiver, publish and reorder the club's
+  knowledge base and read members' comments on it) against the live site via its
   manager agent HTTP API. Use when a club manager asks an agent to look up
   members/invoices, correct invoice details (price, payment reference, notes,
-  status), migrate/bulk-file waivers the club holds on paper, or edit a club
-  document at /docs/<slug> and review the feedback left on it. Requires the
-  UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
+  status), migrate/bulk-file waivers the club holds on paper, or edit a
+  knowledge base article at /kb/<slug>, change the order members read them in,
+  and review the feedback left on them. Requires the UTS_MANAGER_API_URL and
+  UTS_MANAGER_API_KEY environment variables.
 ---
 
 # UTS Jitsu — manager agent
@@ -258,63 +259,116 @@ scripts/agent.sh file_waiver '{
 >   reach for `confirm_duplicate` to get past it: that disables the check rather
 >   than fixing it, and would let a genuine duplicate through.
 
-### `list_documents` — the club's documents
+### The knowledge base
 
-Versioned markdown pages served at `/docs/<slug>` that members read and comment
-on. Returns each document's `slug`, live `title` and `version`, how many
-`versions` it has, its `visibility` (`public | members | managers`), and whether
-it is still `annotations_enabled`.
+Versioned markdown pages served at `/kb/<slug>` that members read and comment on,
+grouped into ordered **sections**. The order matters more than it looks: the
+sidebar, the index page and the previous/next links all come from it, so it is
+literally the path a new member reads through. Get it right before worrying
+about wording.
+
+### `list_kb_sections` — the groups, in order
 
 ```bash
-scripts/agent.sh list_documents '{}'
+scripts/agent.sh list_kb_sections '{}'
 ```
 
-### `get_document` — read one document's markdown
+### `save_kb_section` — add a group, rename it, or move it
+
+An unknown `slug` creates it. An omitted field is left alone.
+
+```bash
+scripts/agent.sh save_kb_section '{"slug":"belts-and-grading","title":"Belts and grading","position":20}'
+```
+
+> [!TIP]
+> Positions are seeded as 10, 20, 30 so you can slot a new section between two
+> others without renumbering anything. Keep that habit.
+
+### `list_kb_articles` — everything in the knowledge base
+
+Returns each entry's `slug`, live `title` and `version`, how many `versions` it
+has, its `section` and `position`, `visibility` (`public | members | managers`),
+and whether it is still `annotations_enabled`.
+
+An entry with a `link_path` is **not an article**: it is a sidebar link to a page
+elsewhere on the site (`/first-class`, `/faq`), it has no versions, and its
+`version` comes back null.
+
+```bash
+scripts/agent.sh list_kb_articles '{}'
+```
+
+### `get_kb_article` — read one article's markdown
 
 Returns the live version unless you pass `version`.
 
 ```bash
-scripts/agent.sh get_document '{"slug":"house-rules"}'
+scripts/agent.sh get_kb_article '{"slug":"our-history"}'
 ```
 
-### `save_document` — create or update a document
+### `save_kb_article` — write, or place in the sidebar
 
-An unknown `slug` creates the document; a known one adds a **new version** and
-publishes it. Past versions are kept, and comments stay attached to the version
-they were written against.
+`title` + `body_md` write a **new version** and publish it. Past versions are
+kept, and comments stay attached to the version they were written against.
 
 ```bash
-scripts/agent.sh save_document '{
-  "slug":"house-rules",
-  "title":"House rules",
-  "body_md":"# House rules\n\nWash your gi.\n",
-  "change_note":"Added the hygiene section"
+scripts/agent.sh save_kb_article '{
+  "slug":"our-history",
+  "title":"Our history",
+  "body_md":"# Our history\n\nThe club started in 2004.\n",
+  "section":"about-the-club",
+  "position":10,
+  "change_note":"Added the founding years"
+}'
+```
+
+Send neither `title` nor `body_md` to change only where an article sits. No new
+version is written, so members are not shown "updated today" for a move:
+
+```bash
+scripts/agent.sh save_kb_article '{"slug":"our-history","section":"about-the-club","position":20}'
+```
+
+A **link entry** points at a page elsewhere on the site instead of holding text:
+
+```bash
+scripts/agent.sh save_kb_article '{
+  "slug":"common-questions",
+  "link_path":"/faq",
+  "nav_title":"Common questions",
+  "section":"start-here",
+  "position":40
 }'
 ```
 
 > [!IMPORTANT]
 >
-> - **`body_md` REPLACES the whole document.** It is not a patch. Always
->   `get_document` first and edit the text you get back, or everything you did
+> - **`body_md` REPLACES the whole article.** It is not a patch. Always
+>   `get_kb_article` first and edit the text you get back, or everything you did
 >   not include is dropped from the new version.
-> - **A new slug silently creates a second document** at a second URL. Check
->   `list_documents` before saving if you are not certain of the spelling, and
+> - **A new slug silently creates a second article** at a second URL. Check
+>   `list_kb_articles` before saving if you are not certain of the spelling, and
 >   pass `"expect_new": true` when you mean to create one. The save is then
 >   refused if the slug is already taken, rather than adding a version to an
->   existing document and patching its visibility to whatever you sent.
+>   existing article and patching its visibility to whatever you sent.
 > - **Omit `visibility` unless you mean to change it.** Omitting leaves it as it
 >   is; passing `public` on what was a managers-only draft publishes it to the
->   world. New documents default to `members`.
+>   world. New articles default to `members`.
+> - **`link_path` takes site-relative paths only** (`/faq`, not
+>   `https://...`), needs a `nav_title`, and cannot be combined with
+>   `title`/`body_md`. An article that already has versions cannot be turned
+>   into a link.
 
-### `list_document_annotations` — read what members said
+### `list_kb_comments` — read what members said
 
-Returns the **shared** comment threads on a document (`parent_id` links a reply
+Returns the **shared** comment threads on an article (`parent_id` links a reply
 to its thread), each with the `quote` it was written about and the
-`document_version` it was written against. Resolved threads are excluded unless
+`article_version` it was written against. Resolved threads are excluded unless
 you pass `include_resolved: true`.
 
 ```bash
-scripts/agent.sh list_document_annotations '{"slug":"house-rules"}'
+scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
 ```
 
 > [!NOTE]
@@ -327,10 +381,14 @@ scripts/agent.sh list_document_annotations '{"slug":"house-rules"}'
 
 - Confirm the target invoice with the manager (member name + amount) before an
   `edit_invoice` — it writes to live records.
-- Before a `save_document`, read the current version back with `get_document`
-  and show the manager what you are changing. A save publishes immediately:
-  there is no draft state on an existing document, and members see the new
-  wording on their next page load.
+- Before a `save_kb_article` that carries text, read the current version back
+  with `get_kb_article` and show the manager what you are changing. A save
+  publishes immediately: there is no draft state on an existing article, and
+  members see the new wording on their next page load.
+- When a manager asks for a new article, ask where it goes in the reading order
+  before writing it. An article with no `section` lands in "Everything else" at
+  the bottom of the sidebar, which is visible but almost certainly not what they
+  meant.
 - Before a `file_waiver` batch, confirm scope with the manager: how many
   records, whether any should be flagged for review rather than filed
   automatically, and that leaving everything pending (not approved) is what

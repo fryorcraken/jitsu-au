@@ -879,67 +879,107 @@ service role only.
 
 ---
 
-## Club documents
+## Knowledge base
 
-Versioned markdown pages members read and annotate, served at `/docs/<slug>`.
-The product spec is **`docs/documents.md`**. Added by
-`20260731140000_documents.sql`.
+Versioned markdown pages members read and annotate, served at `/kb/<slug>`,
+grouped into ordered sections. The product spec is **`docs/knowledge-base.md`**.
+Added by `20260731140000_documents.sql` and renamed/extended by
+`20260802100000_knowledge_base.sql`.
 
-### `documents` — a document's identity
+### `kb_sections` — the groups, and the reading order
+
+`id` PK, `slug` (**unique**, lowercase kebab-case), `title`, `position` (lower
+sorts first), `created_at`, `updated_at`.
+
+A section holds no text and no secrets: it is a heading and a number. What makes
+it load-bearing is that `(section.position, article.position)` is the **only**
+source of the sidebar order, the index page and the previous/next links, so it
+is the path a new member reads through. Seeded as 10/20/30 so a section can be
+slotted between two others without renumbering.
+
+### `kb_articles` — an article's identity, and where it sits
 
 `id` PK, `slug` (**unique**, CHECK'd to lowercase kebab-case so it never needs
 escaping in a URL), `visibility` (`public | members | managers`, default
-`members`), `annotations_enabled` (default true), `created_at`, `updated_at`,
-`created_by → auth.users(id) ON DELETE SET NULL`.
+`members`), `annotations_enabled` (default true), `section_id → kb_sections(id)
+ON DELETE SET NULL`, `position`, `nav_title`, `link_path`, `created_at`,
+`updated_at`, `created_by → auth.users(id) ON DELETE SET NULL`. Index on
+`(section_id, position)`.
 
 Nothing here is rewritten when the text changes: a slug is a permanent URL, and
 the text lives on the versions below. `visibility` is the only read gate, and it
-is enforced **in the server functions** (`canReadDocument` in
-`src/lib/documents.ts`), not by RLS — see the RLS note at the end of this section.
+is enforced **in the server functions** (`canReadArticle` in `src/lib/kb.ts`),
+not by RLS — see the RLS note at the end of this section.
 
-### `document_versions` — the text, one row per save
+Two columns are easy to miss:
 
-`id` PK, `document_id → documents(id) ON DELETE CASCADE`, `version` (**per
-document**, starting at 1), `title`, `body_md` (up to 200k), `change_note`,
-`is_current`, `created_at`, `created_by`. `UNIQUE (document_id, version)`, plus a
-**partial unique index** `document_versions_one_current_per_document` on
-`(document_id) WHERE is_current` — exactly one live version per document.
+- **`link_path` makes the row a LINK ENTRY, not an article.** It is a sidebar
+  item pointing at a page elsewhere on this site (`/first-class`, `/faq`), so it
+  has no versions, renders no reader page, and takes no comments. It exists so
+  the knowledge base can put the club's existing public pages in the reading
+  order rather than re-telling them. A CHECK confines it to site-relative paths
+  (one leading slash, then alphanumeric, and no `//`), which is what stops it
+  becoming an open redirect or an arbitrary destination in the club's own nav.
+- **`nav_title` is the sidebar label**, falling back to the live version's
+  title. `kb_articles_link_entry_is_named` requires one on a link entry, which
+  has no version to borrow a title from.
+
+`ON DELETE SET NULL` on `section_id` is deliberate: deleting a section is a
+tidy-up of the navigation and must never take the club's articles with it. They
+fall into the "Everything else" group instead, which is visible and recoverable.
+
+**The other half of "a link entry has no body" is enforced in code, not here.**
+A CHECK cannot see another table, so `saveKbArticle` is what refuses to give a
+link entry text, and refuses to turn an article that already has versions into a
+link. Same precedent as one-level-deep replies below.
+
+### `kb_article_versions` — the text, one row per save
+
+`id` PK, `article_id → kb_articles(id) ON DELETE CASCADE`, `version` (**per
+article**, starting at 1), `title`, `body_md` (up to 200k), `change_note`,
+`is_current`, `created_at`, `created_by`. `UNIQUE (article_id, version)`, plus a
+**partial unique index** `kb_article_versions_one_current_per_article` on
+`(article_id) WHERE is_current` — exactly one live version per article.
 
 Saving always writes a NEW row and promotes it, exactly like `waiver_templates`,
 so history is intact and an annotation can name the wording it was written
 against. The partial index makes promotion necessarily demote-then-promote;
-`promoteDocumentVersion` (`src/lib/document-admin.ts`) orders those two writes so
-a failure leaves the previous version live rather than leaving the document with
+`promoteArticleVersion` (`src/lib/kb-admin.ts`) orders those two writes so a
+failure leaves the previous version live rather than leaving the article with
 none — and, unlike the waiver's global equivalent, **every write is scoped to one
-`document_id`**, since an unscoped clear would unpublish every other document.
+`article_id`**, since an unscoped clear would unpublish every other article.
 
-### `document_annotations` — private notes and shared comment threads
+A save that carries neither `title` nor `body_md` writes no version at all. That
+is how "move this article into Start here" is a placement change rather than a
+republish that would show every reader "updated today".
 
-`id` PK, `document_id → documents(id) ON DELETE CASCADE`, `document_version`
+### `kb_annotations` — private notes and shared comment threads
+
+`id` PK, `article_id → kb_articles(id) ON DELETE CASCADE`, `article_version`
 (a plain integer, like `waivers.template_version` — not a FK), `user_id →
 profiles(user_id) ON DELETE CASCADE` (**not null**: there is no anonymous
 commenting), `block_id`, `quote`, `visibility` (`private | shared`), `parent_id →
-document_annotations(id) ON DELETE CASCADE`, `body`, `resolved_at`,
-`resolved_by`, `created_at`, `updated_at`. Indexes on `(document_id,
-created_at)`, `(user_id, created_at DESC)`, and a partial one on `parent_id`.
+kb_annotations(id) ON DELETE CASCADE`, `body`, `resolved_at`, `resolved_by`,
+`created_at`, `updated_at`. Indexes on `(article_id, created_at)`, `(user_id,
+created_at DESC)`, and a partial one on `parent_id`.
 
 Three things about the shape:
 
 - **Anchoring is content-derived, not positional.** `block_id` is a hash of the
-  block's own text (`blockId` in `src/lib/documents.ts`), so inserting a
-  paragraph does not move every annotation below it onto the wrong passage.
-  `quote` is the fallback anchor and the honesty mechanism: when neither
-  matches, the annotation is reported as being about wording that has since
-  changed rather than silently re-pointed.
+  block's own text (`blockId` in `src/lib/kb.ts`), so inserting a paragraph does
+  not move every annotation below it onto the wrong passage. `quote` is the
+  fallback anchor and the honesty mechanism: when neither matches, the
+  annotation is reported as being about wording that has since changed rather
+  than silently re-pointed.
 - **`visibility` is the whole privacy model.** A `private` note is readable only
   by its author — **managers included**. That is deliberate and is what makes a
-  private note usable; `list_document_annotations` on the manager agent API
-  returns shared threads only.
+  private note usable; `list_kb_comments` on the manager agent API returns
+  shared threads only.
 - **Threads are one level deep.** The CHECK
-  `document_annotations_private_has_no_parent` catches the half a constraint can
-  see (a private row with a parent); `createAnnotation` enforces the rest (no
-  replying to a private note, no replies to replies, and no private reply),
-  since a CHECK cannot read the parent row.
+  `kb_annotations_private_has_no_parent` catches the half a constraint can see (a
+  private row with a parent); `createAnnotation` enforces the rest (no replying
+  to a private note, no replies to replies, and no private reply), since a CHECK
+  cannot read the parent row.
 - **Deleting a profile deletes other people's replies.** `user_id` and
   `parent_id` both cascade, so removing one person takes their thread roots and,
   with them, everybody else's replies to those threads. The `parent_id` cascade
@@ -947,13 +987,13 @@ Three things about the shape:
   second-order effect is the price, and unlike the in-app delete there is no
   warning in front of it. Worth knowing before deleting a profile.
 
-**Readers never choose a version.** `visibility` lives on the document, not on
-each version, so serving an arbitrary version to a reader would publish a
-document's whole drafting history the moment it goes live. The public read
-(`readDocumentSchema`) has no `version` parameter at all; only the manager agent
+**Readers never choose a version.** `visibility` lives on the article, not on
+each version, so serving an arbitrary version to a reader would publish an
+article's whole drafting history the moment it goes live. The public read
+(`readKbArticleSchema`) has no `version` parameter at all; only the manager agent
 API can name one.
 
-**RLS:** enabled on all three, with owner/manager read policies as **defence in
+**RLS:** enabled on all four, with owner/manager read policies as **defence in
 depth only** — there are no client grants (`REVOKE ALL` from anon/authenticated),
 so nothing here is reachable from a browser and `client-grants-expected.txt`
 needs no entry. Every read and write runs through a server function on the
