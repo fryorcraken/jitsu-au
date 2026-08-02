@@ -543,7 +543,9 @@ Once a change is pushed to its feature branch, always:
 1. **Open a pull request** for the branch (targeting `main`), using any repo PR
    template if present. Do this without waiting to be asked.
 2. **Watch CI** on the PR (`subscribe_pr_activity`), and drive it green: on a
-   failure, diagnose and push the fix; keep going until CI passes.
+   failure, diagnose and push the fix; keep going until CI passes. CI usually
+   finishes in under 5 minutes — when polling or scheduling a check-in for it,
+   use that as the wait, not a longer default.
 3. **Run a code review** of the PR's diff (the `/review` workflow) and address
    or surface anything it raises.
 
@@ -555,7 +557,9 @@ stopping to ask first. This is the one case where merging is implied rather
 than left to a human click.
 
 1. **Ensure CI is green** on the PR. If anything is red, diagnose and push a
-   fix, then wait for CI to re-run before moving on.
+   fix, then wait for CI to re-run before moving on. CI usually finishes in
+   under 5 minutes, so that's the wait/check-in interval to use — no need for
+   a longer poll.
 2. **Apply the database migration.** If the PR carries a migration that hasn't
    gone live yet, follow `docs/database-changes.md`'s apply gate: apply it to
    the live database and record it in the migration ledger.
