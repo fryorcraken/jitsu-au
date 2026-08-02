@@ -153,6 +153,8 @@ function fakeAdmin(opts: {
     signer_meta?: { source: string };
   } | null;
   insert?: Result;
+  /** The row a resume-write (`.update(...).select("id").single()`) resolves to. */
+  resumeUpdate?: Result;
   upload?: { error: { message: string } | null };
   delete?: { error: { message: string } | null };
   pdfPathUpdate?: { error: { message: string } | null };
@@ -160,6 +162,7 @@ function fakeAdmin(opts: {
   getUserByIdEmail?: string | null;
 }) {
   const inserted = opts.insert ?? ok({ id: "waiver-1" });
+  const resumeUpdate = opts.resumeUpdate ?? ok({ id: "resumed" });
   const upload = opts.upload ?? { error: null };
   const del = opts.delete ?? { error: null };
   const pdfPathUpdate = opts.pdfPathUpdate ?? { error: null };
@@ -220,7 +223,7 @@ function fakeAdmin(opts: {
           limit: () => Promise.resolve(opts.duplicates ?? ok([])),
         };
         // The client_submission_id lookups (before any work, and again after a
-        // unique violation) both select "id, user_id" and end in maybeSingle.
+        // unique violation) both end in maybeSingle, on different column lists.
         // Which row comes back depends on whether the insert has run yet.
         const submissionLookup = {
           eq: () => submissionLookup,
@@ -255,7 +258,9 @@ function fakeAdmin(opts: {
         return {
           select: (cols: string) => {
             calls.selects.push(cols);
-            return cols.startsWith("id, user_id") ? submissionLookup : dupProbe;
+            // Only the duplicate probe has its own distinct column list; every
+            // other select in this module is a client_submission_id lookup.
+            return cols.startsWith("id, approval_status") ? dupProbe : submissionLookup;
           },
           insert: (row: unknown) => {
             calls.insert.push(row);
@@ -263,7 +268,22 @@ function fakeAdmin(opts: {
           },
           update: (patch: unknown) => {
             calls.updates.push(patch);
-            return { eq: () => Promise.resolve(pdfPathUpdate) };
+            // Two distinct update chains land here: the plain `.update(...).eq(...)`
+            // used for the final pdf_path-only write (awaited directly, so `eq`
+            // must itself be thenable), and the resume-write
+            // `.update(...).eq(...).select("id").single()` used to refresh a
+            // matched row with this call's own data.
+            return {
+              eq: () => {
+                const plain = Promise.resolve(pdfPathUpdate);
+                return {
+                  then: (onFulfilled: unknown, onRejected: unknown) =>
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    plain.then(onFulfilled as any, onRejected as any),
+                  select: () => ({ single: () => Promise.resolve(resumeUpdate) }),
+                };
+              },
+            };
           },
           delete: () => ({
             eq: (_col: string, id: string) => {
@@ -644,7 +664,12 @@ describe("filePaperWaiver", () => {
     const SUBMISSION = "99999999-9999-9999-9999-999999999999";
     const withId = { ...validInput, client_submission_id: SUBMISSION };
 
-    it("returns the original waiver without redoing the work when one is fully filed", async () => {
+    // A matched row is refreshed with THIS call's data, not treated as a pure
+    // no-op — see the two tests below for why: a keyed retry is not always a
+    // byte-identical bulk-import replay, and a silent no-op on a "complete"
+    // match would report success without ever saving a correction a human
+    // made before retrying.
+    it("resolves to the matched waiver, updated, when one is already fully filed", async () => {
       const { admin, calls } = fakeAdmin({
         existingId: EXISTING_USER,
         priorSubmission: {
@@ -659,10 +684,59 @@ describe("filePaperWaiver", () => {
 
       // A replay: this call did not create it.
       expect(result).toEqual({ id: "waiver-first", user_id: EXISTING_USER, created: false });
-      // The expensive work is skipped entirely: no PDF built, nothing inserted.
-      expect(buildScanPdf).not.toHaveBeenCalled();
+      // No SECOND waiver, but the match is written to (update), not skipped.
       expect(calls.insert).toHaveLength(0);
-      expect(calls.uploads).toHaveLength(0);
+      expect(calls.updates.length).toBeGreaterThan(0);
+    });
+
+    // The regression this whole block exists to prevent: a manager whose first
+    // attempt half-filed (or even fully filed, if only the success reply was
+    // lost) can fix a typo before retrying. Treating a matched row as read-only
+    // past its first write would silently keep the OLD value and report success.
+    it("writes this call's own field values onto a matched row, not just the scan path", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        priorSubmission: { id: "waiver-half", user_id: EXISTING_USER, pdf_path: null },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      const corrected = { ...withId, phone: "0400009999" };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await filePaperWaiver(admin as any, corrected, MANAGER_ID);
+
+      const resumeWrite = calls.updates[0] as Record<string, unknown>;
+      expect(resumeWrite.phone).toBe("0400009999");
+    });
+
+    it("refreshes a fully-filed row's fields too, not just returning the old copy", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        priorSubmission: {
+          id: "waiver-first",
+          user_id: EXISTING_USER,
+          pdf_path: "waiver-first.pdf",
+        },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      const corrected = { ...withId, phone: "0400009999" };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await filePaperWaiver(admin as any, corrected, MANAGER_ID);
+
+      expect(result).toEqual({ id: "waiver-first", user_id: EXISTING_USER, created: false });
+      const resumeWrite = calls.updates[0] as Record<string, unknown>;
+      expect(resumeWrite.phone).toBe("0400009999");
+    });
+
+    it("surfaces a failure writing a matched row, rather than treating it as saved", async () => {
+      const { admin } = fakeAdmin({
+        existingId: EXISTING_USER,
+        priorSubmission: { id: "waiver-half", user_id: EXISTING_USER, pdf_path: null },
+        resumeUpdate: fails("statement timeout"),
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filePaperWaiver(admin as any, withId, MANAGER_ID),
+      ).rejects.toThrow(/statement timeout/);
     });
 
     // The dangerous case. A row exists but its scan never stored, so reporting
@@ -682,7 +756,10 @@ describe("filePaperWaiver", () => {
       expect(calls.insert).toHaveLength(0);
       // ...and actually stores the scan against it, which is what was missing.
       expect(calls.uploads[0].path).toBe("waiver-half.pdf");
-      expect(calls.updates[0]).toEqual({ pdf_path: "waiver-half.pdf" });
+      // Two writes: the resume-write refreshing the row's fields, then the
+      // pdf_path-only write once the scan is stored.
+      expect(calls.updates).toHaveLength(2);
+      expect(calls.updates[1]).toEqual({ pdf_path: "waiver-half.pdf" });
     });
 
     // The lookup reads signed_at back from Postgres, which renders TIMESTAMPTZ

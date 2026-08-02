@@ -1013,7 +1013,7 @@ export async function filePaperWaiver(
   if (submissionId) {
     const { data: already, error: lookupErr } = await admin
       .from("waivers")
-      .select("id, user_id, pdf_path, email, signed_at, signer_meta")
+      .select("id, email, signed_at, signer_meta")
       .eq("client_submission_id", submissionId)
       .maybeSingle();
     // Not fatal: falling through re-does the work, and the unique index still
@@ -1043,17 +1043,15 @@ export async function filePaperWaiver(
       if (already.email !== email || already.signed_at.slice(0, 10) !== data.signed_on) {
         throw new SubmissionIdConflictError();
       }
-      // Only a row whose scan is stored is genuinely done. A row with no
-      // pdf_path is a half-filed waiver: reporting it as filed would let a
-      // manager approve a waiver with no document behind it, which for a paper
-      // record cannot be regenerated from anything.
-      if (already.pdf_path && already.user_id) {
-        // A REPLAY, not a new filing. Without saying so, an import that
-        // silently retried half its calls looks identical to a clean run, and
-        // "how many did I actually file" is unanswerable against a stack of
-        // paper. Same reason edit_invoice reports `changed`.
-        return { id: already.id, user_id: already.user_id, created: false };
-      }
+      // Resume this row rather than filing a new one — whether its scan is
+      // still missing, or the row is already fully filed and this is a replay.
+      // Deliberately NOT an early return for the complete case: a keyed retry
+      // is not always a byte-identical bulk-import replay. A manager retrying
+      // from the same page can have corrected a field since the first attempt,
+      // and treating a complete match as a no-op would report success without
+      // ever saving that correction. The write step below always overwrites
+      // the row with THIS call's data, so a matched row — complete or not —
+      // ends up holding whatever was just submitted.
       resumeWaiverId = already.id;
     }
   }
@@ -1190,69 +1188,85 @@ export async function filePaperWaiver(
     }
   }
 
-  // Resuming a half-filed row skips the insert entirely: the record is already
-  // there, only its scan is missing.
-  const { data: inserted, error: insErr } = resumeWaiverId
-    ? { data: { id: resumeWaiverId }, error: null }
-    : await admin
-        .from("waivers")
-        .insert({
-          client_submission_id: submissionId,
-          user_id: userId,
-          first_name: data.first_name,
-          middle_name: data.middle_name || null,
-          last_name: data.last_name,
-          preferred_name: data.preferred_name || null,
-          date_of_birth: data.date_of_birth,
-          address: data.address,
-          phone: data.phone,
-          email,
-          uts_student_number: data.uts_student_number?.trim() || null,
-          sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
-          emergency_contact_name: data.emergency_contact_name,
-          emergency_contact_relationship: data.emergency_contact_relationship || null,
-          emergency_contact_phone: data.emergency_contact_phone,
-          medical_notes: data.medical_notes || null,
-          is_minor: isMinor,
-          // As on the online form, a minor's emergency contact IS the guardian
-          // who signed, so the guardian columns come from that one block.
-          guardian_name: isMinor ? data.emergency_contact_name : null,
-          guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
-          signed_at,
-          template_version: data.template_version ?? null,
-          // No IP: nobody connected from anywhere to sign this.
-          signer_ip: null,
-          signer_meta,
-        })
-        .select("id")
-        .single();
-  // Two retries of one filing were genuinely in flight at once, so the lookup
-  // at the top ran before the other had committed. The partial unique index is
-  // what actually stopped the duplicate. Adopt the winner's row rather than
-  // reporting a failure for a waiver that is on file — but only once its scan
-  // is stored. Adopting a row the winner is still uploading (or is about to
-  // roll back) would report a document that may never exist.
-  if (insErr?.code === UNIQUE_VIOLATION && submissionId) {
-    const { data: raced } = await admin
-      .from("waivers")
-      .select("id, user_id, pdf_path, signer_meta")
-      .eq("client_submission_id", submissionId)
-      .maybeSingle();
-    // Same scoping as the lookup above: never adopt a non-paper row.
-    if (raced && !isPaperWaiver(raced.signer_meta)) throw new SubmissionIdConflictError();
-    if (raced?.user_id && raced.pdf_path) {
-      return { id: raced.id, user_id: raced.user_id, created: false };
+  // Every field just submitted, written onto the row whether this is a fresh
+  // filing or a resend of an id that matched one above. Using the SAME object
+  // for an insert and a resume-update means a resumed row always ends up
+  // holding THIS call's data, never a possibly-stale copy from an earlier
+  // attempt.
+  const waiverRow = {
+    client_submission_id: submissionId,
+    user_id: userId,
+    first_name: data.first_name,
+    middle_name: data.middle_name || null,
+    last_name: data.last_name,
+    preferred_name: data.preferred_name || null,
+    date_of_birth: data.date_of_birth,
+    address: data.address,
+    phone: data.phone,
+    email,
+    uts_student_number: data.uts_student_number?.trim() || null,
+    sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+    emergency_contact_name: data.emergency_contact_name,
+    emergency_contact_relationship: data.emergency_contact_relationship || null,
+    emergency_contact_phone: data.emergency_contact_phone,
+    medical_notes: data.medical_notes || null,
+    is_minor: isMinor,
+    // As on the online form, a minor's emergency contact IS the guardian
+    // who signed, so the guardian columns come from that one block.
+    guardian_name: isMinor ? data.emergency_contact_name : null,
+    guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
+    signed_at,
+    template_version: data.template_version ?? null,
+    // No IP: nobody connected from anywhere to sign this.
+    signer_ip: null,
+    signer_meta,
+  };
+
+  // Captured before anything below can reassign resumeWaiverId (the raced-adopt
+  // branch does, on a fresh insert's unique violation), so this always reflects
+  // whether the row we're about to write was found by the lookup above.
+  const isResumeAttempt = Boolean(resumeWaiverId);
+  const { data: written, error: writeErr } = resumeWaiverId
+    ? await admin.from("waivers").update(waiverRow).eq("id", resumeWaiverId).select("id").single()
+    : await admin.from("waivers").insert(waiverRow).select("id").single();
+
+  if (isResumeAttempt) {
+    // A real write now (not the no-op it used to be), so it can genuinely fail
+    // — a DB hiccup here must surface, not be swallowed by the `!resumeWaiverId`
+    // check below, which is written for the insert branch and would otherwise
+    // treat this as success because resumeWaiverId is already set.
+    if (writeErr || !written) {
+      throw new Error(writeErr?.message || "Could not save the waiver.");
     }
-    // The winner is mid-flight. Both attempts carry the same scan and write to
-    // the same path, so finishing its row is safe and idempotent rather than a
-    // race to be avoided.
-    if (raced?.id) resumeWaiverId = raced.id;
-  }
-  if (!resumeWaiverId && (insErr || !inserted)) {
-    throw new Error(insErr?.message || "Could not save the waiver.");
+  } else {
+    // Two retries of one filing were genuinely in flight at once, so the lookup
+    // at the top ran before the other had committed. The partial unique index is
+    // what actually stopped the duplicate. Adopt the winner's row rather than
+    // reporting a failure for a waiver that is on file — but only once its scan
+    // is stored. Adopting a row the winner is still uploading (or is about to
+    // roll back) would report a document that may never exist.
+    if (writeErr?.code === UNIQUE_VIOLATION && submissionId) {
+      const { data: raced } = await admin
+        .from("waivers")
+        .select("id, user_id, pdf_path, signer_meta")
+        .eq("client_submission_id", submissionId)
+        .maybeSingle();
+      // Same scoping as the lookup above: never adopt a non-paper row.
+      if (raced && !isPaperWaiver(raced.signer_meta)) throw new SubmissionIdConflictError();
+      if (raced?.user_id && raced.pdf_path) {
+        return { id: raced.id, user_id: raced.user_id, created: false };
+      }
+      // The winner is mid-flight. Both attempts carry the same scan and write to
+      // the same path, so finishing its row is safe and idempotent rather than a
+      // race to be avoided.
+      if (raced?.id) resumeWaiverId = raced.id;
+    }
+    if (!resumeWaiverId && (writeErr || !written)) {
+      throw new Error(writeErr?.message || "Could not save the waiver.");
+    }
   }
 
-  const waiverId = resumeWaiverId ?? inserted!.id;
+  const waiverId = resumeWaiverId ?? written!.id;
   const path = `${waiverId}.pdf`;
   const { error: upErr } = await admin.storage
     .from(BUCKET)
