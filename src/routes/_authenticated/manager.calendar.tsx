@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
-import { CLUB_TIME_ZONE, WEEKDAY_LABELS, zonedWallTimeToUtc } from "@/lib/calendar";
+import {
+  CLUB_TIME_ZONE,
+  DEFAULT_EVENT_LOCATION,
+  WEEKDAY_LABELS,
+  defaultEndForStart,
+  zonedWallTimeToUtc,
+} from "@/lib/calendar";
 import {
   cancelEvent,
   createCalendarEntry,
@@ -95,7 +101,7 @@ const emptyEntry = {
   openEnded: true,
   // Shared, all optional except the title.
   instructor_name: "",
-  location: "",
+  location: DEFAULT_EVENT_LOCATION,
   description: "",
   visibility: "public" as "public" | "members",
   invite_only: false,
@@ -401,7 +407,15 @@ function ManagerCalendarPage() {
                 <Input
                   type="datetime-local"
                   value={form.starts_at}
-                  onChange={(e) => setForm({ ...form, starts_at: e.target.value })}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      starts_at: e.target.value,
+                      // Picking a start fills in an end an hour later on the same
+                      // day, so the common case needs one date picker, not two.
+                      ends_at: defaultEndForStart(e.target.value, form.ends_at),
+                    })
+                  }
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium">

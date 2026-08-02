@@ -108,6 +108,42 @@ export function addMinutes(d: Date, minutes: number): Date {
   return new Date(d.getTime() + minutes * 60000);
 }
 
+/** How long a one-off entry runs unless the manager says otherwise. */
+export const DEFAULT_EVENT_DURATION_MINUTES = 60;
+
+/** Where the club trains, pre-filled on a new calendar entry. */
+export const DEFAULT_EVENT_LOCATION = "ActivateFit Gym, UTS Building 4, 745 Harris St, Ultimo";
+
+/**
+ * Read a `datetime-local` value ("YYYY-MM-DDTHH:MM", seconds optional) as plain
+ * wall-clock fields. Anchored to UTC so the arithmetic below stays wall-clock:
+ * these strings are what the manager sees in the picker, and the club timezone
+ * is only applied later, on submit.
+ */
+function parseLocalDateTime(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!m) return null;
+  const [, y, mo, d, hh, mm] = m;
+  return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm)));
+}
+
+function formatLocalDateTime(d: Date): string {
+  return d.toISOString().slice(0, 16);
+}
+
+/**
+ * The "Ends" a manager should see once they have picked a "Starts": the same
+ * day, an hour later. An end they chose themselves is kept, unless moving the
+ * start left it at or before the start, which the form would reject anyway.
+ */
+export function defaultEndForStart(startLocal: string, currentEndLocal: string): string {
+  const start = parseLocalDateTime(startLocal);
+  if (!start) return currentEndLocal;
+  const currentEnd = parseLocalDateTime(currentEndLocal);
+  if (currentEnd && currentEnd.getTime() > start.getTime()) return currentEndLocal;
+  return formatLocalDateTime(addMinutes(start, DEFAULT_EVENT_DURATION_MINUTES));
+}
+
 export type SeriesSpec = {
   weekday: number;
   start_time: string; // "HH:MM" local

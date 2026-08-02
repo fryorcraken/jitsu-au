@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_EVENT_LOCATION,
   addMinutes,
   clubLocalDate,
+  defaultEndForStart,
   diffOccurrences,
   generateOccurrences,
   tzOffsetMinutes,
@@ -178,5 +180,44 @@ describe("diffOccurrences", () => {
 
   it("is a no-op when every occurrence is already present (repeat generation)", () => {
     expect(diffOccurrences(occ, occ)).toEqual([]);
+  });
+});
+
+describe("defaultEndForStart", () => {
+  it("fills an empty end with the same day, an hour later", () => {
+    expect(defaultEndForStart("2026-08-10T18:00", "")).toBe("2026-08-10T19:00");
+  });
+
+  it("keeps an end the manager chose themselves", () => {
+    expect(defaultEndForStart("2026-08-10T18:00", "2026-08-10T20:30")).toBe("2026-08-10T20:30");
+  });
+
+  it("re-derives an end that the new start has overtaken", () => {
+    // Moving the start to a later day must not leave an end behind it, which
+    // the form would reject.
+    expect(defaultEndForStart("2026-08-11T18:00", "2026-08-10T19:00")).toBe("2026-08-11T19:00");
+    // Same instant counts as overtaken: an event has to have some length.
+    expect(defaultEndForStart("2026-08-10T18:00", "2026-08-10T18:00")).toBe("2026-08-10T19:00");
+  });
+
+  it("rolls over midnight rather than inventing a same-day end", () => {
+    expect(defaultEndForStart("2026-08-10T23:30", "")).toBe("2026-08-11T00:30");
+  });
+
+  it("leaves the end alone until a start is picked", () => {
+    expect(defaultEndForStart("", "2026-08-10T19:00")).toBe("2026-08-10T19:00");
+    expect(defaultEndForStart("", "")).toBe("");
+    // A half-typed date (the picker emits partial values while editing).
+    expect(defaultEndForStart("2026-08", "2026-08-10T19:00")).toBe("2026-08-10T19:00");
+  });
+
+  it("tolerates a value that carries seconds", () => {
+    expect(defaultEndForStart("2026-08-10T18:00:00", "")).toBe("2026-08-10T19:00");
+  });
+});
+
+describe("DEFAULT_EVENT_LOCATION", () => {
+  it("is the gym the club trains at", () => {
+    expect(DEFAULT_EVENT_LOCATION).toBe("ActivateFit Gym, UTS Building 4, 745 Harris St, Ultimo");
   });
 });
