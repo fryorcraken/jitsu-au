@@ -26,9 +26,12 @@ import type { DocumentAnnotationRow, DocumentClient, DocumentRow } from "@/lib/d
 import {
   createAnnotationSchema,
   deleteAnnotationSchema,
+  documentSlugSchema,
+  getDocumentSchema,
   greetingName,
   readDocumentSchema,
   resolveAnnotationSchema,
+  saveDocumentSchema,
   updateAnnotationSchema,
 } from "@/lib/validation";
 
@@ -449,4 +452,208 @@ export const resolveAnnotation = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true as const, resolved: data.resolved };
+  });
+
+// ---------------------------------------------------------------------------
+// Manager screens (`/manager/documents`)
+//
+// The same operations the manager agent API exposes, reached from the site
+// instead of a bearer token. Both drive `document-admin.ts`, so "save" means one
+// thing however it was asked for — a second implementation behind the web UI is
+// how the two quietly stop agreeing.
+//
+// Each of these gates on `isManager` itself. The `_authenticated` route group
+// only proves somebody is signed in, and the client-side redirect on the page is
+// a courtesy, not a lock.
+// ---------------------------------------------------------------------------
+
+/** Fail unless the caller holds the manager role. */
+async function requireManagerViewer(db: DocumentClient): Promise<Viewer> {
+  const viewer = await resolveViewer(db);
+  if (!viewer.isManager) throw new Error("Forbidden");
+  return viewer;
+}
+
+/**
+ * Every document, for the manager list — drafts included.
+ *
+ * Unlike `listDocuments`, this does NOT filter by visibility: a manager is the
+ * audience for the managers-only drafts. It also reports documents with no
+ * published version, which the member-facing list skips, because that state is
+ * exactly what a manager needs to see and fix.
+ */
+export const listManagerDocuments = createServerFn({ method: "GET" }).handler(async () => {
+  const db = await adminClient();
+  await requireManagerViewer(db);
+
+  const { data: docs, error } = await db
+    .from("documents")
+    .select("id, slug, visibility, annotations_enabled, created_at, updated_at")
+    .order("slug")
+    .limit(500);
+  if (error) throw new Error(error.message);
+  const documents = (docs ?? []) as DocumentRow[];
+  if (!documents.length) return [];
+
+  const ids = documents.map((d) => d.id);
+  const [{ data: live, error: lErr }, { data: counts, error: cErr }] = await Promise.all([
+    db
+      .from("document_versions")
+      .select("document_id, title, version, created_at, change_note")
+      .in("document_id", ids)
+      .eq("is_current", true),
+    db.from("document_versions").select("document_id").in("document_id", ids).limit(5000),
+  ]);
+  if (lErr) throw new Error(lErr.message);
+  if (cErr) throw new Error(cErr.message);
+
+  const liveByDoc = new Map((live ?? []).map((v) => [v.document_id, v]));
+  const countByDoc = new Map<string, number>();
+  for (const row of counts ?? []) {
+    countByDoc.set(row.document_id, (countByDoc.get(row.document_id) ?? 0) + 1);
+  }
+
+  return documents.map((d) => {
+    const current = liveByDoc.get(d.id);
+    return {
+      slug: d.slug,
+      // Null when a save half-failed and left the document with no live
+      // version. Surfaced rather than hidden — the manager is who fixes it.
+      title: current?.title ?? null,
+      version: current?.version ?? null,
+      versions: countByDoc.get(d.id) ?? 0,
+      visibility: d.visibility,
+      annotations_enabled: d.annotations_enabled,
+      change_note: current?.change_note ?? null,
+      updated_at: current?.created_at ?? d.updated_at,
+    };
+  });
+});
+
+/** One document for the editor: the live version, or a named one. Managers only. */
+export const getManagerDocument = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => getDocumentSchema.parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+    const loaded = await loadDocument(db, data.slug, data.version);
+    if (!loaded) throw new Error("No such document, or no such version.");
+    return projectDocument(loaded);
+  });
+
+/** Every version of a document, newest first. Managers only. */
+export const listDocumentVersions = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ slug: documentSlugSchema }).parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+
+    const { data: doc, error: docErr } = await db
+      .from("documents")
+      .select("id")
+      .eq("slug", data.slug)
+      .maybeSingle();
+    if (docErr) throw new Error(docErr.message);
+    if (!doc) throw new Error("No such document.");
+
+    const { data: rows, error } = await db
+      .from("document_versions")
+      .select("id, version, title, change_note, is_current, created_at")
+      .eq("document_id", doc.id)
+      .order("version", { ascending: false })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });
+
+/**
+ * Save a document from the editor: creates it if the slug is new, otherwise adds
+ * a version and publishes it. Straight through to the same `saveDocument` the
+ * agent API calls.
+ */
+export const saveManagerDocument = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => saveDocumentSchema.parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    const viewer = await requireManagerViewer(db);
+    const { saveDocument } = await import("@/lib/document-admin");
+    return saveDocument(db, data, viewer.userId);
+  });
+
+/**
+ * Publish an existing version — the rollback path.
+ *
+ * Separate from saving because it publishes a version that already exists rather
+ * than writing a new one, which is how a manager undoes an edit without
+ * retyping the version they want back.
+ */
+export const setCurrentDocumentVersion = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+    const { promoteDocumentVersion } = await import("@/lib/document-admin");
+    const { version } = await promoteDocumentVersion(db, data.id);
+    return { ok: true as const, version };
+  });
+
+/**
+ * The SHARED feedback on a document, for the manager reading it back.
+ *
+ * Shared only, and that is not an oversight to be fixed later: a private note is
+ * private from the club too (see the migration), which is what makes it usable
+ * for "things I want to remember". A manager gets the conversation, never
+ * somebody's notebook — the same rule `list_document_annotations` follows on the
+ * agent API.
+ */
+export const listManagerAnnotations = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z.object({ slug: documentSlugSchema, include_resolved: z.boolean().optional() }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    const viewer = await requireManagerViewer(db);
+
+    const { data: doc, error: docErr } = await db
+      .from("documents")
+      .select("id")
+      .eq("slug", data.slug)
+      .maybeSingle();
+    if (docErr) throw new Error(docErr.message);
+    if (!doc) throw new Error("No such document.");
+
+    let query = db
+      .from("document_annotations")
+      .select("*")
+      .eq("document_id", doc.id)
+      .eq("visibility", "shared")
+      .order("created_at", { ascending: true })
+      .limit(ANNOTATIONS_LIMIT);
+    if (!data.include_resolved) query = query.is("resolved_at", null);
+
+    const { data: rows, error } = await query;
+    if (error) throw new Error(error.message);
+
+    const annotations = (rows ?? []) as DocumentAnnotationRow[];
+    const names = await authorNames(
+      db,
+      annotations.map((a) => a.user_id),
+    );
+
+    return annotations.map((a) => ({
+      id: a.id,
+      body: a.body,
+      visibility: a.visibility,
+      block_id: a.block_id,
+      quote: a.quote,
+      parent_id: a.parent_id,
+      document_version: a.document_version,
+      author: names.get(a.user_id) ?? null,
+      is_mine: a.user_id === viewer.userId,
+      can_edit: canEditAnnotation(a, viewer),
+      can_resolve: canResolveThread(a, viewer),
+      resolved_at: a.resolved_at,
+      created_at: a.created_at,
+      updated_at: a.updated_at,
+    }));
   });
