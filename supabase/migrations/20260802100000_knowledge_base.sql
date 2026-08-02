@@ -171,8 +171,21 @@ ALTER TABLE public.kb_articles
   -- Site-relative paths ONLY. An arbitrary URL here would put whatever a caller
   -- liked into the club's own navigation, and turn /kb/<slug> into an open
   -- redirect; the pattern forbids `//host`, a scheme, and a bare word.
+  --
+  -- It also forbids /kb itself. `/kb/<slug>` for a link entry full-navigates to
+  -- `link_path`, so an entry pointing back into the knowledge base is a redirect
+  -- loop with no way out: the tab hangs and only a manager editing the row
+  -- through the API can recover it. Ordering an article next to another one is
+  -- what `section` and `position` are for.
   ADD COLUMN link_path TEXT
-    CHECK (link_path IS NULL OR (link_path ~ '^/[a-z0-9][a-z0-9/-]*$' AND link_path !~ '//')),
+    CHECK (
+      link_path IS NULL
+      OR (
+        link_path ~ '^/[a-z0-9][a-z0-9/-]*$'
+        AND link_path !~ '//'
+        AND link_path !~ '^/kb($|/)'
+      )
+    ),
   -- A link entry has no version to borrow a title from, so it must carry its own.
   ADD CONSTRAINT kb_articles_link_entry_is_named
     CHECK (link_path IS NULL OR nav_title IS NOT NULL);

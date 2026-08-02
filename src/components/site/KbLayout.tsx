@@ -29,7 +29,7 @@ import { searchKnowledgeBase } from "@/lib/kb.functions";
 
 export function KbLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const { nav } = useKbNav();
+  const { nav, loading } = useKbNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
@@ -52,7 +52,7 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
             <SheetContent side="left" className="w-[85vw] max-w-xs overflow-y-auto p-0">
               <SheetTitle className="border-b px-4 py-4 text-base">Knowledge base</SheetTitle>
               <div className="p-4">
-                <KbNavList nav={nav} />
+                <KbNavList nav={nav} loading={loading} />
               </div>
             </SheetContent>
           </Sheet>
@@ -70,6 +70,12 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
 
           <div className="ml-auto flex items-center gap-2">
             <KbSearch />
+            <Button asChild size="sm" variant="ghost" className="max-md:hidden">
+              <Link to="/">
+                <ArrowLeft className="mr-1 h-4 w-4" />
+                Back to the club site
+              </Link>
+            </Button>
             {user ? (
               <Button asChild size="sm" variant="ghost" className="max-sm:px-2">
                 <Link to="/account">
@@ -89,15 +95,18 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
       <div className="mx-auto flex w-full max-w-7xl flex-1 gap-8 px-4 py-8">
         <aside className="hidden w-60 shrink-0 lg:block">
           <div className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
-            <KbNavList nav={nav} />
+            <KbNavList nav={nav} loading={loading} />
           </div>
         </aside>
         <main className="min-w-0 flex-1">{children}</main>
       </div>
 
+      {/* The same link is repeated here for the narrow screens where the top
+          bar hides it for space, and it is the one place a reader who has just
+          finished an article is already looking. */}
       <footer className="border-t">
         <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <Link to="/" className="inline-flex items-center gap-1.5 hover:text-foreground">
+          <Link to="/" className="inline-flex items-center gap-1.5 hover:text-foreground md:hidden">
             <ArrowLeft className="h-4 w-4" />
             Back to the club site
           </Link>
@@ -109,8 +118,14 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
 }
 
 /** The sidebar itself, shared by the desktop rail and the phone drawer. */
-function KbNavList({ nav }: { nav: KbNavSection[] }) {
+function KbNavList({ nav, loading }: { nav: KbNavSection[]; loading: boolean }) {
   const location = useLocation();
+
+  // "There is nothing here" and "this has not arrived yet" are different
+  // answers, and the sidebar used to give the first one for both. On a cold
+  // load that flashed an empty-knowledge-base message next to a fully rendered
+  // article, and on a failed nav fetch it stayed there.
+  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>;
 
   if (!nav.length) {
     return (

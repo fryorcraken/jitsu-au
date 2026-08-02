@@ -29,7 +29,8 @@ an explicit order, and a shell of its own are what fixed that.
 Everything under `/kb` renders inside `KbLayout`, not `SiteLayout`. The ten-item
 marketing nav and the marketing footer are gone while you are in there; the top
 bar carries the logo, the words "Knowledge base", search, your account, and one
-link back to the club site.
+link back to the club site. That last one moves into the minimal footer on a
+narrow screen, where the top bar has no room for it.
 
 That is a deliberate trade, not an oversight. Reading the syllabus is not the
 moment to be sold a trial class, and a sidebar bolted underneath a full site
@@ -79,9 +80,15 @@ Three consequences worth knowing:
 - A link entry has **no text stored here**, so it has no versions and takes no
   comments. There is nothing on this site to anchor a comment to.
 - It needs a `nav_title`, since there is no article title to fall back on.
-- `link_path` accepts **site-relative paths only**. That is a security boundary,
-  not tidiness: an absolute URL would let a caller put any destination into the
-  club's own navigation, and `//host` would make `/kb/<slug>` an open redirect.
+- `link_path` accepts **site-relative paths only**, and never `/kb` itself. That
+  is a security boundary, not tidiness: an absolute URL would let a caller put
+  any destination into the club's own navigation, `//host` would make
+  `/kb/<slug>` an open redirect, and a link entry aimed back into the knowledge
+  base is a redirect loop that hangs the tab with no in-app way out.
+- Turning a link entry back into an article means sending `link_path: ""`
+  **together with** `title` and `body_md`. Clearing it on its own is refused: a
+  row with neither a link nor a version is invisible in the sidebar, so the entry
+  would vanish until somebody remembered to write it.
 
 `/kb/<slug>` for a link entry bounces to the destination. The sidebar already
 points straight at it, so that path only fires for a URL somebody saved before
@@ -102,6 +109,13 @@ the entry became a link.
 - The comment rail sits on the right from `xl` and drops under the article below
   that, because the sidebar already owns the left from `lg` and three columns on
   a 1024px laptop leaves a reading column too narrow for a syllabus.
+
+> [!IMPORTANT]
+> **Markdown tables do not render yet.** The renderer is CommonMark-only, which
+> has no tables, so `| Belt | Time |` comes out as a paragraph of pipe
+> characters. Nothing warns when you save one. Write the syllabus as headings
+> and lists until `remark-gfm` is added, which needs a dependency change
+> (see the note at the top of `src/lib/kb-markdown.tsx`).
 
 ## Who sees what
 

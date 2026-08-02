@@ -558,3 +558,38 @@ describe("listSharedAnnotations", () => {
     await expect(listSharedAnnotations(db, "doc-1", { limit: 200 })).rejects.toThrow("boom");
   });
 });
+
+describe("saveKbArticle link entry transitions", () => {
+  const linkRow = { id: "doc-1", slug: "common-questions", link_path: "/faq" };
+
+  it("turns a link entry back into an article when the text comes with it", async () => {
+    const { db, calls } = saveHarness({ existing: linkRow, maxVersion: 0 });
+    const res = await saveKbArticle(
+      db,
+      { slug: "common-questions", link_path: "", title: "Common questions", body_md: "Ask us." },
+      null,
+    );
+    expect(res).toMatchObject({ version: 1, created: false });
+    // The column takes NULL, not the empty string its CHECK would reject.
+    const patch = calls.find((c) => c.table === "kb_articles" && c.verb === "update")?.patch ?? {};
+    expect(patch).toMatchObject({ link_path: null });
+  });
+
+  it("still refuses text that leaves the link in place", async () => {
+    const { db, calls } = saveHarness({ existing: linkRow, maxVersion: 0 });
+    await expect(
+      saveKbArticle(db, { ...baseInput, slug: "common-questions" }, null),
+    ).rejects.toThrow(/link_path: "" together with title and body_md/);
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  // The DB constraint catches this, but as a raw `violates check constraint`
+  // string that tells a manager nothing about what to do.
+  it("explains why a link entry cannot have its name cleared", async () => {
+    const { db, calls } = saveHarness({ existing: linkRow, maxVersion: 0 });
+    await expect(
+      saveKbArticle(db, { slug: "common-questions", nav_title: "" }, null),
+    ).rejects.toThrow(/a link needs a name to show in the sidebar/);
+    expect(writes(calls)).toHaveLength(0);
+  });
+});

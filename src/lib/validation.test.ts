@@ -1661,6 +1661,39 @@ describe("knowledge base placement and link entries", () => {
     }
   });
 
+  // A link entry aimed back into the knowledge base is a redirect loop with no
+  // way out: /kb/<slug> full-navigates to link_path, so the tab just hangs.
+  it("refuses a link entry that points back into the knowledge base", () => {
+    for (const link_path of ["/kb", "/kb/", "/kb/our-history"]) {
+      const result = saveKbArticleSchema.safeParse({ slug, link_path, nav_title: "X" });
+      expect(result.success, link_path).toBe(false);
+    }
+    // A path that merely starts with the same letters is still fine.
+    expect(saveKbArticleSchema.safeParse({ slug, link_path: "/kbo", nav_title: "X" }).success).toBe(
+      true,
+    );
+  });
+
+  // The refusal message for text-on-a-link told callers to clear link_path, and
+  // the schema had no way to express that, so the advice was impossible to take.
+  it("lets a link entry be turned back into an article, text and all", () => {
+    expect(
+      saveKbArticleSchema.safeParse({
+        slug,
+        link_path: "",
+        title: "Your first session",
+        body_md: "Turn up ten minutes early.",
+      }).success,
+    ).toBe(true);
+  });
+
+  // Clearing it alone would leave a row with neither a link nor a version,
+  // which is invisible in the sidebar.
+  it("refuses to clear link_path without the article text to replace it", () => {
+    expect(saveKbArticleSchema.safeParse({ slug, link_path: "" }).success).toBe(false);
+    expect(saveKbArticleSchema.safeParse({ slug, link_path: "", title: "X" }).success).toBe(false);
+  });
+
   // Moving an article between sections must not require republishing its text.
   it("accepts a placement-only save with no title or body", () => {
     const parsed = saveKbArticleSchema.parse({ slug: "our-history", section: "about-the-club" });

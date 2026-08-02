@@ -88,8 +88,24 @@ export const kbMarkdownComponents: Components = {
       className="my-6 h-auto w-full rounded-xl"
     />
   ),
-  // Tables carry the syllabus. Wrapped in its own scroller so a wide grading
-  // table never makes the whole page scroll sideways on a phone.
+  // > [!IMPORTANT]
+  // > **These three do nothing today.** `react-markdown` is CommonMark-only
+  // > unless it is given `remark-gfm`, and that package is not a dependency of
+  // > this repo, so a markdown table in an article renders as a paragraph of
+  // > pipe characters. They are kept because the styling is right and the fix is
+  // > one plugin, not because they are live.
+  // >
+  // > Adding `remark-gfm` means adding a dependency, which per CLAUDE.md means
+  // > editing `package.json` and letting LOVABLE re-resolve `bun.lock` — a
+  // > lockfile this side produces cannot be committed, and CI installs Lovable's
+  // > exact locked versions, so importing a package it has not resolved fails
+  // > the build. That is why it is a separate change and not this one.
+  // >
+  // > Until then `docs/knowledge-base.md` tells managers to write the syllabus
+  // > as headings and lists rather than a table.
+  //
+  // The scroller is the part that matters when they do become live: a wide
+  // grading table must never make the whole page scroll sideways on a phone.
   table: ({ children }) => (
     <div className="my-6 overflow-x-auto">
       <table className="w-full border-collapse text-sm">{children}</table>

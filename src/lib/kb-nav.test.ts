@@ -196,6 +196,17 @@ describe("extractHeadings", () => {
     expect(headings.map((h) => h.id)).toEqual(["grading", "grading-2", "grading-3"]);
   });
 
+  // A per-base counter collides with a number the author wrote themselves:
+  // "Grading", "Grading 2", "Grading" used to mint `grading-2` twice, which put
+  // two contents links on the same anchor and two elements on the same id.
+  it("does not collide with a heading that already ends in a number", () => {
+    const ids = extractHeadings("# Grading\n\na\n\n# Grading 2\n\nb\n\n# Grading\n\nc").map(
+      (h) => h.id,
+    );
+    expect(ids).toEqual(["grading", "grading-2", "grading-3"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it("finds nothing in an article that is all prose", () => {
     expect(extractHeadings("Just a paragraph.\n\nAnd another.")).toEqual([]);
   });

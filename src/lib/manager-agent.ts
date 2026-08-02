@@ -11,6 +11,62 @@ import { formatCents } from "@/lib/validation";
 import type { EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 
+/** The columns `list_kb_articles` projects from. */
+export type AgentKbArticle = {
+  slug: string;
+  nav_title: string | null;
+  link_path: string | null;
+  section_id: string | null;
+  position: number;
+  visibility: string;
+  annotations_enabled: boolean;
+  updated_at: string;
+};
+
+/** The live version of an article, when it has one. */
+export type AgentKbVersion = {
+  title: string;
+  version: number;
+  created_at: string;
+  change_note: string | null;
+};
+
+/**
+ * One row of `list_kb_articles`.
+ *
+ * `title` is always the LIVE VERSION's heading, never the sidebar label. That
+ * distinction is the whole reason this is a function with a test: falling back
+ * to `nav_title` makes an article's real heading unobtainable from the list, and
+ * an agent that reads the list and builds a `save_kb_article` from what it read
+ * would silently rename the heading to the sidebar label.
+ *
+ * A LINK ENTRY has no version, so there the label IS the title, and the null
+ * `version` is what tells an agent it is looking at a signpost rather than a
+ * page whose text it can edit.
+ */
+export function projectAgentKbArticle(
+  article: AgentKbArticle,
+  live: AgentKbVersion | undefined,
+  sectionSlug: string | null,
+  versions: number,
+) {
+  return {
+    slug: article.slug,
+    title: article.link_path ? article.nav_title : (live?.title ?? null),
+    nav_title: article.nav_title,
+    link_path: article.link_path,
+    version: live?.version ?? null,
+    versions,
+    section: sectionSlug,
+    position: article.position,
+    visibility: article.visibility,
+    annotations_enabled: article.annotations_enabled,
+    url: article.link_path ?? `/kb/${article.slug}`,
+    change_note: live?.change_note ?? null,
+    updated_at: live?.created_at ?? article.updated_at,
+  };
+}
+
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
 export type AgentActionSpec = {
   name: string;

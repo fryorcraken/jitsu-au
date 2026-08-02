@@ -227,9 +227,22 @@ export async function saveKbArticle(
   // where the two halves arrive in separate saves. A CHECK cannot see across
   // tables, so this is where the rule lives — the same reason one-level-deep
   // replies are enforced in `createAnnotation` rather than in the schema.
-  if (article?.link_path && writingText) {
+  // Text on a link entry is only allowed when the same call is turning it back
+  // into an article, which is what `link_path: ""` says. The schema already
+  // requires the text to travel with that, so this is the case where a caller
+  // sent text and left the link in place.
+  if (article?.link_path && writingText && input.link_path !== "") {
     throw new Error(
-      `"${input.slug}" is a link to ${article.link_path}, not an article, so it cannot be given text. Clear link_path first, or use a different slug.`,
+      `"${input.slug}" is a link to ${article.link_path}, not an article. Send link_path: "" together with title and body_md to turn it into one, or use a different slug.`,
+    );
+  }
+
+  // A link entry has no version to borrow a name from, so clearing its label
+  // would leave a blank row in the sidebar. The DB constraint catches this, but
+  // as a raw `violates check constraint` string that tells a manager nothing.
+  if (article?.link_path && input.nav_title === "" && input.link_path !== "") {
+    throw new Error(
+      `"${input.slug}" is a link, and a link needs a name to show in the sidebar, so nav_title cannot be cleared.`,
     );
   }
   if (input.link_path && article && !article.link_path) {
@@ -266,7 +279,7 @@ export async function saveKbArticle(
         section_id: sectionId ?? null,
         position: input.position ?? 0,
         nav_title: input.nav_title || null,
-        link_path: input.link_path ?? null,
+        link_path: input.link_path || null,
         created_by: createdBy,
       })
       .select("*")
@@ -403,7 +416,8 @@ export async function saveKbArticle(
     if (sectionId !== undefined) patch.section_id = sectionId;
     if (input.position !== undefined) patch.position = input.position;
     if (input.nav_title !== undefined) patch.nav_title = input.nav_title || null;
-    if (input.link_path !== undefined) patch.link_path = input.link_path;
+    // `""` is a clear, and the column's CHECK only accepts a real path or NULL.
+    if (input.link_path !== undefined) patch.link_path = input.link_path || null;
 
     if (Object.keys(patch).length) {
       patch.updated_at = new Date().toISOString();

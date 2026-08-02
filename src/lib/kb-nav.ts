@@ -221,21 +221,23 @@ function stripInlineMarkdown(text: string): string {
  * two different belts still gives two working links.
  */
 export function extractHeadings(markdown: string): KbHeading[] {
-  const used = new Map<string, number>();
+  // Uniqueness is checked against every id ALREADY EMITTED, not against a
+  // per-base counter. A counter alone collides with a heading that ends in a
+  // number the author wrote: "Grading", "Grading 2", "Grading" would mint
+  // `grading`, `grading-2`, and `grading-2` again, which puts two links in the
+  // contents list pointing at the same place and two elements in the document
+  // sharing an id.
+  const used = new Set<string>();
   const headings: KbHeading[] = [];
 
   for (const block of splitBlocks(markdown)) {
     const heading = parseHeading(block.markdown);
     if (!heading) continue;
     const base = headingSlug(heading.text);
-    const seen = used.get(base) ?? 0;
-    used.set(base, seen + 1);
-    headings.push({
-      depth: heading.depth,
-      text: heading.text,
-      id: seen === 0 ? base : `${base}-${seen + 1}`,
-      blockId: block.id,
-    });
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+    used.add(id);
+    headings.push({ depth: heading.depth, text: heading.text, id, blockId: block.id });
   }
   return headings;
 }

@@ -1384,7 +1384,16 @@ export const kbLinkPathSchema = z
   .min(1)
   .max(200)
   .regex(/^\/[a-z0-9][a-z0-9/-]*$/, "Use a path on this site, e.g. /first-class.")
-  .refine((value) => !value.includes("//"), "Use a path on this site, e.g. /first-class.");
+  .refine((value) => !value.includes("//"), "Use a path on this site, e.g. /first-class.")
+  // A link entry pointing back into the knowledge base is a redirect loop with
+  // no way out: `/kb/<slug>` full-navigates to `link_path`, so an entry aimed at
+  // itself (or a pair aimed at each other) hangs the tab, and no in-app control
+  // can recover it. Ordering an article next to another one is what `section`
+  // and `position` are for.
+  .refine(
+    (value) => !/^\/kb($|\/)/.test(value),
+    "A link entry cannot point back into the knowledge base. Use section and position to order articles.",
+  );
 
 /**
  * Manager: save an article. Creates it if the slug is new, and always writes a
@@ -1418,7 +1427,8 @@ export const saveKbArticleSchema = z
     position: z.number().int().min(0).max(100000).optional(),
     /** Sidebar label, when it should be shorter than the title. */
     nav_title: z.string().trim().min(1).max(100).optional().or(z.literal("")),
-    link_path: kbLinkPathSchema.optional(),
+    /** An empty string turns a link entry back into an article. */
+    link_path: kbLinkPathSchema.optional().or(z.literal("")),
     /**
      * "I believe this slug is free." Set by anything creating an article, and
      * refused server-side if the slug is taken.
@@ -1433,6 +1443,21 @@ export const saveKbArticleSchema = z
     expect_new: z.boolean().optional(),
   })
   .superRefine((value, ctx) => {
+    // Turning a link entry back into an article. It must arrive with the text
+    // in the same call: a row with neither a link nor a version is invisible in
+    // the sidebar, so clearing one on its own would make the entry vanish until
+    // somebody remembered to write it.
+    if (value.link_path === "") {
+      if (!value.title || !value.body_md) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["link_path"],
+          message:
+            "Clearing link_path turns this into an article, so send title and body_md in the same call.",
+        });
+      }
+      return;
+    }
     if (value.link_path) {
       if (!value.nav_title) {
         ctx.addIssue({

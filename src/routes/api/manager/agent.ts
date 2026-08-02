@@ -35,6 +35,7 @@ import {
   classifyAction,
   diffInvoicePatch,
   invoiceEditAudit,
+  projectAgentKbArticle,
   projectInvoice,
   reconciledEditBlockers,
   reconciledEditMessage,
@@ -672,27 +673,14 @@ async function handleListKbArticles() {
     }),
   );
 
-  const articles = ((docs ?? []) as KbArticleRow[]).map((d) => {
-    const live = liveByDoc.get(d.id);
-    return {
-      slug: d.slug,
-      // A link entry has no version to take a title from, so it reports its own
-      // nav label and a null version. That is the shape that tells an agent it
-      // is looking at a signpost rather than a page it can edit the text of.
-      title: d.nav_title ?? live?.title ?? null,
-      nav_title: d.nav_title,
-      link_path: d.link_path,
-      version: live?.version ?? null,
-      versions: countByDoc.get(d.id) ?? 0,
-      section: d.section_id ? (sectionSlugById.get(d.section_id) ?? null) : null,
-      position: d.position,
-      visibility: d.visibility,
-      annotations_enabled: d.annotations_enabled,
-      url: d.link_path ?? `/kb/${d.slug}`,
-      change_note: live?.change_note ?? null,
-      updated_at: live?.created_at ?? d.updated_at,
-    };
-  });
+  const articles = ((docs ?? []) as KbArticleRow[]).map((d) =>
+    projectAgentKbArticle(
+      d,
+      liveByDoc.get(d.id),
+      d.section_id ? (sectionSlugById.get(d.section_id) ?? null) : null,
+      countByDoc.get(d.id) ?? 0,
+    ),
+  );
   return { count: articles.length, articles };
 }
 
