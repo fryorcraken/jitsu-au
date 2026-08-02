@@ -123,14 +123,14 @@ So the schema a helper lives in follows from who calls it:
 | Helper                                                             | Schema    | Why                                                                            |
 | ------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------ |
 | `has_role`, `has_active_paid_membership`, the `user_emails` family | `public`  | the app calls them over PostgREST (`.rpc(...)`), so they have to stay routable |
-| `event_is_invite_only`, `is_event_invitee`                         | `private` | only an RLS policy ever calls them, so nothing needs them routable             |
+| `event_is_invite_only`, `is_event_invitee`, `is_commenter_blocked` | `private` | only an RLS policy ever calls them, so nothing needs them routable             |
 
 PostgREST routes `/rest/v1/rpc/*` only to the schemas in its `db-schemas` list
 (`public, graphql_public`), so a function in `private` is unreachable from the
 API while RLS can still call it. `anon`/`authenticated` hold `USAGE` on the
 schema (a prerequisite for `EXECUTE`, and nothing on its own) plus `EXECUTE` on
 the individual helpers. Migration `20260802000000_private_rls_helpers.sql`
-created the schema and moved the two calendar helpers into it.
+created the schema and moved the three helpers into it.
 
 **No tables belong in `private`, only helper functions.** Supabase's bootstrap
 `ALTER DEFAULT PRIVILEGES` is scoped to `public`, so objects created in `private`
@@ -677,8 +677,8 @@ author can always read their own (even hidden, so moderation isn't silent to
 them); managers read everything. Writes run through server functions
 (`postComment` checks the blocked list, that a reply's parent is top-level,
 and the honeypot; `setCommentVisibility` is manager-only) — no client write
-grant. The insert policy still checks `NOT public.is_commenter_blocked(auth.uid())`
-as defence in depth.
+grant. The insert policy still checks
+`NOT private.is_commenter_blocked(auth.uid())` as defence in depth.
 
 ### `blog_comment_upvotes`
 
@@ -701,13 +701,16 @@ and unblocking (and the block check itself, via the `SECURITY DEFINER`
 `is_commenter_blocked()` helper below) all run through the service role or a
 function with a fixed search path.
 
-**`is_commenter_blocked(_user_id uuid) → boolean`** — `SECURITY DEFINER` SQL
-helper (`SET search_path = ''`), same shape as `has_role`/
+**`private.is_commenter_blocked(_user_id uuid) → boolean`** — `SECURITY DEFINER`
+SQL helper (`SET search_path = ''`), same shape as `has_role`/
 `has_active_paid_membership`: lets the comment-insert RLS policy check block
 status without granting `authenticated` a `SELECT` on
 `blog_blocked_commenters` — an ordinary commenter has no business reading who
-else is blocked. EXECUTE revoked from `PUBLIC`/`anon`, granted to
-`authenticated` (evaluated inside RLS as the querying role) + `service_role`.
+else is blocked. `authenticated` holds EXECUTE (the policy is evaluated as the
+querying role); `anon` does not. It lives in the `private` schema, not `public`,
+because no app code calls it by RPC — the block check in `postComment` reads
+`blog_blocked_commenters` directly on the service role. See "RLS-only helpers
+live in `private`" above.
 
 ### Storage: `blog-media`
 

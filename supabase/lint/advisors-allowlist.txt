@@ -30,21 +30,11 @@ authenticated_security_definer_function_executable_public_has_role
 # visibility, so this exposure is intentional and accepted.
 authenticated_security_definer_function_executable_public_has_active_paid_membership
 
-# NOT LISTED: the two calendar helpers, event_is_invite_only and
-# is_event_invitee. They were acknowledged here until 20260802000000 moved them
-# to the `private` schema, which PostgREST does not route, so they are no longer
-# in the exposed API surface the advisors scan and no longer need an entry. They
-# are the template for any future RLS-only helper: if nothing calls it by RPC,
-# put it in `private` and fix the finding instead of acknowledging it. A helper
-# earns a line here only when the app genuinely calls it over PostgREST.
-
-# public.is_commenter_blocked(_user_id) is the blog comment-insert RLS policy's
-# "has a manager blocked this person" check (defence in depth — the app itself
-# also checks this in postComment before inserting). It is evaluated as the
-# querying role inside that policy, so `authenticated` must keep EXECUTE (anon
-# and PUBLIC are revoked in migration 20260731110000). SECURITY DEFINER so the
-# check does not depend on the caller's own RLS over blog_blocked_commenters,
-# which an ordinary commenter has no grant to read directly. It returns a single
-# boolean about the caller's own block status, so it leaks nothing. Revoking
-# EXECUTE would break the RLS policy's WITH CHECK for every commenter.
-authenticated_security_definer_function_executable_public_is_commenter_blocked
+# NOT LISTED: event_is_invite_only, is_event_invitee and is_commenter_blocked.
+# All three were acknowledged here until 20260802000000 moved them to the
+# `private` schema, which PostgREST does not route, so they are no longer in the
+# exposed API surface the advisors scan and no longer need an entry. They are the
+# template for any future RLS-only helper: if nothing calls it by RPC, put it in
+# `private` and fix the finding instead of acknowledging it. A helper earns a
+# line here only when the app genuinely calls it over PostgREST — which is what
+# separates the two entries above from the three that left.

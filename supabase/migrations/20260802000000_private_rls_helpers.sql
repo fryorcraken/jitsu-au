@@ -1,4 +1,4 @@
--- Move the calendar's RLS-only helpers out of the PostgREST-exposed API schema.
+-- Move the RLS-only helpers out of the PostgREST-exposed API schema.
 --
 -- Supabase advisor 0028 (anon_security_definer_function_executable) flags
 -- `public.event_is_invite_only(uuid)`: `anon` holds EXECUTE on it (granted in
@@ -21,6 +21,12 @@
 -- PostgREST only routes `/rest/v1/rpc/*` to the schemas in its `db-schemas`
 -- list (`public, graphql_public`), so a function in `private` is unreachable
 -- from the API while RLS can still call it.
+--
+-- `is_commenter_blocked(uuid)` moves for the same reason. It is a third 0029
+-- entry, and the blog reads `blog_blocked_commenters` directly on the service
+-- role rather than through the helper, so it too has no PostgREST caller.
+-- Leaving it in `public` while the other two move would keep a live advisor
+-- finding acknowledged that the rule below says is fixable.
 --
 -- This is not a general escape hatch for the advisor. `has_role`,
 -- `has_active_paid_membership` and the `user_emails` family stay in `public`
@@ -80,6 +86,20 @@ $$;
 REVOKE ALL ON FUNCTION private.is_event_invitee(uuid, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION private.is_event_invitee(uuid, uuid) TO authenticated;
 
+-- Has a manager blocked this person from commenting on the blog?
+CREATE OR REPLACE FUNCTION private.is_commenter_blocked(_user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.blog_blocked_commenters WHERE user_id = _user_id)
+$$;
+
+REVOKE ALL ON FUNCTION private.is_commenter_blocked(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION private.is_commenter_blocked(uuid) TO authenticated;
+
 -- ---------- repoint the policies ----------
 -- Identical predicates to 20260730113925; only the schema qualifier changes.
 -- These have to be recreated BEFORE the old functions are dropped, because a
@@ -112,6 +132,15 @@ USING (
   )
 );
 
+-- Same predicate as 20260731110000, private.* instead of public.*.
+DROP POLICY IF EXISTS "Signed-in non-blocked users can comment" ON public.blog_comments;
+CREATE POLICY "Signed-in non-blocked users can comment"
+ON public.blog_comments
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id AND NOT private.is_commenter_blocked(auth.uid()));
+
 -- ---------- retire the exposed copies ----------
 DROP FUNCTION IF EXISTS public.event_is_invite_only(uuid);
 DROP FUNCTION IF EXISTS public.is_event_invitee(uuid, uuid);
+DROP FUNCTION IF EXISTS public.is_commenter_blocked(uuid);
