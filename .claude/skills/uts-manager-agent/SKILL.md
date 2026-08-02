@@ -298,7 +298,10 @@ scripts/agent.sh save_document '{
 >   `get_document` first and edit the text you get back, or everything you did
 >   not include is dropped from the new version.
 > - **A new slug silently creates a second document** at a second URL. Check
->   `list_documents` before saving if you are not certain of the spelling.
+>   `list_documents` before saving if you are not certain of the spelling, and
+>   pass `"expect_new": true` when you mean to create one. The save is then
+>   refused if the slug is already taken, rather than adding a version to an
+>   existing document and patching its visibility to whatever you sent.
 > - **Omit `visibility` unless you mean to change it.** Omitting leaves it as it
 >   is; passing `public` on what was a managers-only draft publishes it to the
 >   world. New documents default to `members`.

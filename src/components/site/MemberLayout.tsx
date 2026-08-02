@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  BookOpen,
   CalendarDays,
   ChevronLeft,
   ClipboardCheck,
@@ -52,6 +53,7 @@ const managerNav: NavItem[] = [
   { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
   { to: "/manager/waivers", label: "Signed waivers", icon: FileText },
   { to: "/manager/waiver-template", label: "Waiver template", icon: FileText },
+  { to: "/manager/documents", label: "Documents", icon: BookOpen },
   { to: "/manager/blog", label: "Blog posts", icon: Newspaper },
   { to: "/manager/blog-comments", label: "Blog comments", icon: MessageSquare },
   { to: "/manager/calendar", label: "Calendar", icon: CalendarDays },

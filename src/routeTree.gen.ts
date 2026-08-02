@@ -40,6 +40,7 @@ import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenti
 import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_authenticated/manager.blog-comments'
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
 import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
+import { Route as AuthenticatedManagerDocumentsRouteImport } from './routes/_authenticated/manager.documents'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
@@ -216,6 +217,12 @@ const AuthenticatedManagerCheckInRoute =
     path: '/manager/check-in',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerDocumentsRoute =
+  AuthenticatedManagerDocumentsRouteImport.update({
+    id: '/manager/documents',
+    path: '/manager/documents',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerMembershipPlansRoute =
   AuthenticatedManagerMembershipPlansRouteImport.update({
     id: '/manager/membership-plans',
@@ -339,6 +346,7 @@ export interface FileRoutesByFullPath {
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/manager/documents': typeof AuthenticatedManagerDocumentsRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -387,6 +395,7 @@ export interface FileRoutesByTo {
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/manager/documents': typeof AuthenticatedManagerDocumentsRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -437,6 +446,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/_authenticated/manager/documents': typeof AuthenticatedManagerDocumentsRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
@@ -487,6 +497,7 @@ export interface FileRouteTypes {
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
+    | '/manager/documents'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -535,6 +546,7 @@ export interface FileRouteTypes {
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
+    | '/manager/documents'
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
@@ -584,6 +596,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/blog-comments'
     | '/_authenticated/manager/calendar'
     | '/_authenticated/manager/check-in'
+    | '/_authenticated/manager/documents'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
@@ -853,6 +866,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/documents': {
+      id: '/_authenticated/manager/documents'
+      path: '/manager/documents'
+      fullPath: '/manager/documents'
+      preLoaderRoute: typeof AuthenticatedManagerDocumentsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/membership-plans': {
       id: '/_authenticated/manager/membership-plans'
       path: '/manager/membership-plans'
@@ -976,6 +996,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerBlogCommentsRoute: typeof AuthenticatedManagerBlogCommentsRoute
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
   AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
+  AuthenticatedManagerDocumentsRoute: typeof AuthenticatedManagerDocumentsRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
@@ -997,6 +1018,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerBlogCommentsRoute: AuthenticatedManagerBlogCommentsRoute,
   AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
   AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
+  AuthenticatedManagerDocumentsRoute: AuthenticatedManagerDocumentsRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,

@@ -1385,6 +1385,18 @@ export const saveDocumentSchema = z.object({
   visibility: z.enum(documentVisibilities).optional(),
   annotations_enabled: z.boolean().optional(),
   change_note: z.string().trim().max(500).optional().or(z.literal("")),
+  /**
+   * "I believe this slug is free." Set by anything creating a document, and
+   * refused server-side if the slug is taken.
+   *
+   * A known slug is a SAVE, not a create, so a caller that thinks it is creating
+   * would otherwise replace an existing document's live text and, because it
+   * sends a visibility, republish it to whoever that admits. The manager screen
+   * checks its own list first, but that list is a snapshot: somebody else can
+   * create the slug between the screen loading and the save. Only the database
+   * knows, so the check belongs here too.
+   */
+  expect_new: z.boolean().optional(),
 });
 export type SaveDocumentInput = z.infer<typeof saveDocumentSchema>;
 

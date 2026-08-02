@@ -1,109 +1,40 @@
 // Row/client types for club documents.
 //
-// > [!IMPORTANT]
-// > These row shapes are **provisional and hand-written**, which every other
-// > `*-types.ts` module in this repo has stopped doing on purpose: the generated
-// > `integrations/supabase/types.ts` is the only artifact derived from the LIVE
-// > database, and a hand-written row that claims a column the live database
-// > lacks hides schema drift from the compiler (see "Schema drift" in CLAUDE.md).
-// >
-// > They are here because the three tables do not exist live yet —
-// > `20260731140000_documents.sql` is committed but unapplied, and committing a
-// > migration does not apply it — so there is nothing for the generator to emit
-// > and no honest alternative until it is.
-// >
-// > **When that migration has been applied and `types.ts` regenerated, delete
-// > the shapes below and alias the generated ones**, exactly as
-// > `membership-types.ts` and `profile-types.ts` record having done:
-// >
-// > ```ts
-// > type Tables = Database["public"]["Tables"];
-// > export type DocumentRow = Tables["documents"]["Row"];
-// > ```
-// >
-// > Until then these are transcribed from that migration by hand and are only as
-// > correct as this comment's author was.
+// These alias the GENERATED `integrations/supabase/types.ts`, which is derived
+// from the live database, so a column that is renamed or dropped there fails the
+// typecheck here rather than drifting quietly (see "Schema drift" in CLAUDE.md).
+// They were hand-written while `20260731140000_documents.sql` was committed but
+// unapplied; that migration is applied and the types regenerated, so the
+// hand-written shapes are gone.
+//
+// The one narrowing: `visibility` is a text column with a CHECK, not an enum, so
+// the generator can only say `string`. The app's own unions are the real values,
+// and every read is filtered or compared against them, so they are asserted here
+// in ONE place instead of being cast at each call site.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { AnnotationVisibility, DocumentVisibility } from "@/lib/documents";
 
+type Tables = Database["public"]["Tables"];
+
 /** A document's identity: its URL key and who may read it. */
-export type DocumentRow = {
-  id: string;
-  slug: string;
+export type DocumentRow = Omit<Tables["documents"]["Row"], "visibility"> & {
   visibility: DocumentVisibility;
-  annotations_enabled: boolean;
-  created_at: string;
-  updated_at: string;
-  created_by: string | null;
 };
 
 /** One saved version of a document's text. */
-export type DocumentVersionRow = {
-  id: string;
-  document_id: string;
-  version: number;
-  title: string;
-  body_md: string;
-  change_note: string | null;
-  is_current: boolean;
-  created_at: string;
-  created_by: string | null;
-};
+export type DocumentVersionRow = Tables["document_versions"]["Row"];
 
 /** A private note or a shared comment, anchored to a block of a version. */
-export type DocumentAnnotationRow = {
-  id: string;
-  document_id: string;
-  document_version: number;
-  user_id: string;
-  block_id: string | null;
-  quote: string | null;
+export type DocumentAnnotationRow = Omit<Tables["document_annotations"]["Row"], "visibility"> & {
   visibility: AnnotationVisibility;
-  parent_id: string | null;
-  body: string;
-  resolved_at: string | null;
-  resolved_by: string | null;
-  created_at: string;
-  updated_at: string;
 };
-
-type TableDef<Row> = {
-  Row: Row;
-  Insert: Partial<Row>;
-  Update: Partial<Row>;
-  Relationships: [];
-};
-
-type PublicSchema = Database["public"];
 
 /**
- * The generated database, widened with the three document tables.
+ * The client the document code takes.
  *
- * Additive only: every existing table keeps its generated definition, so this
- * cannot mask drift anywhere except in the tables it adds — which is the point,
- * and which stops mattering the moment they are generated for real.
+ * A plain generated client — the document tables are in `types.ts` now, so
+ * nothing has to be widened. Named rather than inlined so the handlers and the
+ * test harness keep referring to one thing.
  */
-export type DocumentsDatabase = {
-  public: Omit<PublicSchema, "Tables"> & {
-    Tables: PublicSchema["Tables"] & {
-      documents: TableDef<DocumentRow>;
-      document_versions: TableDef<DocumentVersionRow>;
-      document_annotations: TableDef<DocumentAnnotationRow>;
-    };
-  };
-};
-
-export type DocumentClient = SupabaseClient<DocumentsDatabase>;
-
-/**
- * View the service-role client as one that knows about the document tables.
- *
- * A cast, not a conversion: it is the same client either way. This exists so the
- * cast happens in ONE place with this comment attached to it, rather than being
- * sprinkled through the handlers where a reader would have to guess whether it
- * was load-bearing.
- */
-export function asDocumentClient(client: SupabaseClient<Database>): DocumentClient {
-  return client as unknown as DocumentClient;
-}
+export type DocumentClient = SupabaseClient<Database>;

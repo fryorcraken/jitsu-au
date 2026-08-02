@@ -117,6 +117,12 @@ describe("MemberLayout", () => {
       "href",
       "/manager/blog-comments",
     );
+    // The documents editor. Without a nav entry a manager has no way to reach
+    // it at all, which is exactly how it shipped API-only the first time.
+    expect(screen.getByRole("link", { name: /^documents$/i })).toHaveAttribute(
+      "href",
+      "/manager/documents",
+    );
     // Member links remain available to managers too.
     expect(screen.getByRole("link", { name: /account/i })).toBeInTheDocument();
   });

@@ -279,6 +279,12 @@ export const AGENT_MANIFEST: {
           description:
             "What changed, in your own words. Shown to readers whose comments were written against an earlier version.",
         },
+        {
+          name: "expect_new",
+          required: false,
+          description:
+            "Set true when you believe the slug is free. The save is refused if it is not, instead of quietly adding a version to somebody else's document and patching its visibility to yours. Use it whenever you are creating rather than editing.",
+        },
       ],
     },
     {
