@@ -75,8 +75,17 @@ export function entryHref(entry: { slug: string; link_path: string | null }): st
  *
  * An entry naming a section that does not exist is treated as unsectioned rather
  * than dropped, for the same reason the catch-all group exists at all.
+ *
+ * `keepEmpty` is for the MANAGER screen only. A section with nothing in it is
+ * noise to a member, so the reader drops it — but the manager who has just
+ * created one needs to see it in order to put anything in it, and a "New
+ * section" button whose result does not appear is one they will press twice.
  */
-export function buildKbNav(sections: KbSectionInput[], entries: KbEntryInput[]): KbNavSection[] {
+export function buildKbNav(
+  sections: KbSectionInput[],
+  entries: KbEntryInput[],
+  opts: { keepEmpty?: boolean } = {},
+): KbNavSection[] {
   const known = new Map(sections.map((s) => [s.slug, s]));
 
   const ordered = [...sections].sort(
@@ -108,7 +117,7 @@ export function buildKbNav(sections: KbSectionInput[], entries: KbEntryInput[]):
     }))
     // An empty section is a heading with nothing under it. A manager who has
     // created one but not filled it yet should not have it shown to members.
-    .filter((section) => section.entries.length > 0);
+    .filter((section) => opts.keepEmpty || section.entries.length > 0);
 
   const loose = bySection.get(null);
   if (loose?.length) {

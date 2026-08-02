@@ -244,14 +244,28 @@ function KnowledgeBaseManager() {
           position: a.position,
           visibility: a.visibility,
         })),
+        // Empty sections stay visible HERE and nowhere else: this is the screen
+        // that fills them, and one that vanished the moment it was created
+        // would be a button with no result.
+        { keepEmpty: true },
       ),
     [sections, articles],
   );
 
   /** Everything already filed in a section, for working out where a new entry goes. */
-  const siblingsOf = (sectionSlug: string) =>
+  /**
+   * Everything already filed in a section, for working out where a new entry
+   * goes.
+   *
+   * `exclude` leaves an entry out, and which entry that is matters: an article
+   * being MOVED must not count its own position among its new neighbours, but
+   * an article being CREATED has no position yet and must not knock the open
+   * article out of the count — that would propose a position already taken and
+   * leave the two tied, resolved by whichever title sorts first.
+   */
+  const siblingsOf = (sectionSlug: string, exclude?: string) =>
     articles
-      .filter((a) => (a.section || "") === sectionSlug && a.slug !== slug)
+      .filter((a) => (a.section || "") === sectionSlug && a.slug !== exclude)
       .map((a) => ({ slug: a.slug, position: a.position }));
 
   useEffect(() => {
@@ -454,7 +468,7 @@ function KnowledgeBaseManager() {
   function onSectionChange(value: string) {
     const nextSection = value === NO_SECTION ? "" : value;
     setSection(nextSection);
-    setPosition(nextPosition(siblingsOf(nextSection)));
+    setPosition(nextPosition(siblingsOf(nextSection, creating ? undefined : slug)));
   }
 
   /**
@@ -1217,6 +1231,13 @@ function KnowledgeBaseManager() {
                         </>
                       )}
                     </div>
+
+                    {group.entries.length === 0 && (
+                      <p className="px-2.5 text-xs text-muted-foreground">
+                        Empty, so members do not see it. File something into it with the section
+                        picker on the left.
+                      </p>
+                    )}
 
                     {group.entries.map((entry, index) => {
                       const row = articles.find((a) => a.slug === entry.slug);

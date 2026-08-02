@@ -228,6 +228,29 @@ describe("buildKbNav visibility", () => {
   });
 });
 
+describe("buildKbNav keepEmpty", () => {
+  // A heading with nothing under it tells a member nothing, so the reader drops
+  // it. The manager screen is the one that has to show it: a "New section"
+  // button whose result does not appear is one they press twice.
+  it("hides an empty section from readers and keeps it for managers", () => {
+    const entries = [entry({ slug: "first-belt" })];
+    expect(buildKbNav(sections, entries).map((s) => s.slug)).toEqual(["start-here"]);
+    expect(buildKbNav(sections, entries, { keepEmpty: true }).map((s) => s.slug)).toEqual([
+      "start-here",
+      "belts",
+    ]);
+  });
+
+  it("keeps an empty section in its own position, not at the end", () => {
+    const nav = buildKbNav(
+      [...sections, { slug: "intro", title: "Intro", position: 5 }],
+      [entry({ slug: "first-belt" })],
+      { keepEmpty: true },
+    );
+    expect(nav.map((s) => s.slug)).toEqual(["intro", "start-here", "belts"]);
+  });
+});
+
 describe("reading progress", () => {
   /** An article the reader has read at `read`, live at `live`. */
   const read = (slug: string, live: number, readVersion: number | null) =>
