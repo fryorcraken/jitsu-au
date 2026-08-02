@@ -17,10 +17,18 @@ import type { KbNavSection } from "@/lib/kb-nav";
 import { listKnowledgeBase } from "@/lib/kb.functions";
 
 export function useKbNav(): { nav: KbNavSection[]; loading: boolean } {
-  const { loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const fetchNav = useServerFn(listKnowledgeBase);
   const query = useQuery({
-    queryKey: ["kb-nav"],
+    // Keyed by WHO it was fetched for. `__root.tsx` deliberately does not
+    // invalidate the query cache on SIGNED_OUT, which was safe while every
+    // screen holding privileged data lived under `_authenticated` and navigated
+    // away. `/kb` is public, so a manager who signs out from the header stays on
+    // the page with the observer mounted, and a bare `["kb-nav"]` would keep
+    // listing every managers-only draft's title until something forced a
+    // refetch. The reads themselves are gated server-side; this stops the
+    // titles lingering on screen.
+    queryKey: ["kb-nav", user?.id ?? null],
     queryFn: () => fetchNav(),
     // The server resolves the reader from the request's bearer token, so asking
     // before auth has settled returns the signed-out view of the knowledge base

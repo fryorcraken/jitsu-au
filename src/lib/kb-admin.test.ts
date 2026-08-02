@@ -570,9 +570,37 @@ describe("saveKbArticle link entry transitions", () => {
       null,
     );
     expect(res).toMatchObject({ version: 1, created: false });
-    // The column takes NULL, not the empty string its CHECK would reject.
-    const patch = calls.find((c) => c.table === "kb_articles" && c.verb === "update")?.patch ?? {};
-    expect(patch).toMatchObject({ link_path: null });
+    // EVERY settings write, not just the first. `find` would have passed while a
+    // second write carried the empty string, which is what shipped once: the
+    // column's CHECK rejects "", so the save threw after the text was already
+    // published and told the caller it had failed.
+    const patches = calls
+      .filter((c) => c.table === "kb_articles" && c.verb === "update")
+      .map((c) => c.patch);
+    expect(patches).toHaveLength(1);
+    for (const patch of patches) expect(patch).toMatchObject({ link_path: null });
+  });
+
+  // The settings patch is one write with one ordering rule. Two of them was a
+  // rebase leaving both the old inline block and the new closure in place, and
+  // no assertion noticed because they all read the FIRST update.
+  it("writes the article's settings exactly once", async () => {
+    for (const input of [
+      { slug: "house-rules", section: "start-here", position: 30 },
+      { ...baseInput, visibility: "public" as const },
+      { ...baseInput, visibility: "managers" as const },
+    ]) {
+      const { db, calls } = saveHarness({
+        existing: { id: "doc-1", slug: "house-rules", visibility: "members" },
+        maxVersion: 2,
+        sections: ["start-here"],
+      });
+      await saveKbArticle(db, input, null);
+      expect(
+        calls.filter((c) => c.table === "kb_articles" && c.verb === "update"),
+        JSON.stringify(input),
+      ).toHaveLength(1);
+    }
   });
 
   it("still refuses text that leaves the link in place", async () => {

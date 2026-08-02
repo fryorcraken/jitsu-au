@@ -195,7 +195,7 @@ function KbNavList({ nav, loading }: { nav: KbNavSection[]; loading: boolean }) 
  * collapses to an icon on a phone so the top bar keeps room for the logo.
  */
 function KbSearch() {
-  const { loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -219,7 +219,9 @@ function KbSearch() {
   }, [open]);
 
   const query = useQuery({
-    queryKey: ["kb-search", debounced],
+    // Keyed by reader for the same reason as ["kb-nav"]: a manager's hits can
+    // include managers-only drafts.
+    queryKey: ["kb-search", user?.id ?? null, debounced],
     queryFn: () => runSearch({ data: { q: debounced } }),
     enabled: !authLoading && debounced.length >= 2,
   });

@@ -1,10 +1,10 @@
-// Manager screen for club documents: pick one, edit it, publish it, and read
+// Manager screen for club articles: pick one, edit it, publish it, and read
 // the feedback members left on it.
 //
 // Deliberately the same shape as `/manager/waiver-template` — versions listed
 // down the side, "Save as new version" writing a new one, a preview underneath —
 // so a manager learns one editor and not two. The differences are the ones the
-// feature actually has: several documents rather than one, a visibility setting,
+// feature actually has: several articles rather than one, a visibility setting,
 // and a feedback panel.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -36,7 +36,7 @@ import {
 } from "@/lib/kb.functions";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
 import type { ArticleVisibility } from "@/lib/kb";
-import { isDocumentDirty, slugFromTitle, wideningVisibility } from "@/lib/kb-editor";
+import { isArticleDirty, slugFromTitle, wideningVisibility } from "@/lib/kb-editor";
 import { versionLabel } from "@/lib/waiver-template-editor";
 import { formatDate } from "@/lib/dates";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -44,12 +44,12 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/manager/kb")({
   head: () => ({
-    meta: [{ title: "Documents | UTS Jitsu" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Knowledge base editor | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
-  component: DocumentsManager,
+  component: KnowledgeBaseManager,
 });
 
-type DocumentSummary = Awaited<ReturnType<typeof listManagerArticles>>[number];
+type ArticleSummary = Awaited<ReturnType<typeof listManagerArticles>>[number];
 type VersionRow = Awaited<ReturnType<typeof listArticleVersions>>[number];
 type Feedback = Awaited<ReturnType<typeof listManagerAnnotations>>[number];
 
@@ -61,22 +61,22 @@ const VISIBILITY_LABEL: Record<ArticleVisibility, string> = {
   managers: "Managers only (drafts and internal notes)",
 };
 
-/** Mirrors the `documents.slug` CHECK, so a bad key is caught before the server. */
+/** Mirrors the `articles.slug` CHECK, so a bad key is caught before the server. */
 const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-function DocumentsManager() {
+function KnowledgeBaseManager() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
 
-  const fetchDocuments = useServerFn(listManagerArticles);
+  const fetchArticles = useServerFn(listManagerArticles);
   const fetchDocument = useServerFn(getManagerArticle);
   const fetchVersions = useServerFn(listArticleVersions);
   const fetchFeedback = useServerFn(listManagerAnnotations);
   const save = useServerFn(saveManagerArticle);
   const promote = useServerFn(setCurrentArticleVersion);
 
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [articles, setArticles] = useState<ArticleSummary[]>([]);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
 
@@ -112,28 +112,30 @@ function DocumentsManager() {
   } | null>(null);
 
   /**
-   * The visibility this document is stored with, which is NOT the same thing as
+   * The visibility this article is stored with, which is NOT the same thing as
    * `stored?.visibility`.
    *
    * `stored` is the loaded VERSION, and it is null whenever that load failed.
-   * Visibility lives on the document, so it is still known then (the sidebar
+   * Visibility lives on the article, so it is still known then (the sidebar
    * list carries it), and it has to be: `wideningVisibility` consults this, and
    * a null baseline silently skips the prompt. Reading them off the same object
-   * meant a document whose version failed to load kept the PREVIOUS document's
+   * meant an article whose version failed to load kept the PREVIOUS article's
    * visibility in the select, and the next save published a managers-only draft
    * to members with nothing asked and nothing shown.
    */
   const [baseVisibility, setBaseVisibility] = useState<ArticleVisibility | null>(null);
 
   /**
-   * What could not be loaded for the document on screen. Panels say so instead
+   * What could not be loaded for the article on screen. Panels say so instead
    * of rendering an empty list, which reads as "there is nothing here" — a
    * confident wrong answer on the panel a manager uses to decide whether members'
    * feedback has been dealt with.
    */
-  const [failed, setFailed] = useState<{ document: boolean; versions: boolean; feedback: boolean }>(
-    { document: false, versions: false, feedback: false },
-  );
+  const [failed, setFailed] = useState<{ article: boolean; versions: boolean; feedback: boolean }>({
+    article: false,
+    versions: false,
+    feedback: false,
+  });
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -145,8 +147,8 @@ function DocumentsManager() {
    *
    * Every load, save and publish takes a token before it starts and drops its
    * results if a newer one has started since. Without this, a slow save landing
-   * after a fast document open writes the SAVED document's title, body and
-   * baseline over the one now on screen: `slug` says one document, the editor
+   * after a fast article open writes the SAVED article's title, body and
+   * baseline over the one now on screen: `slug` says one article, the editor
    * shows another, and the next save publishes the wrong text. The requests are
    * several sequential round trips server-side, so the overtaking is ordinary,
    * not a stress case.
@@ -155,7 +157,7 @@ function DocumentsManager() {
   const claim = () => ++seq.current;
   const stale = (token: number) => seq.current !== token;
 
-  const dirty = isDocumentDirty(
+  const dirty = isArticleDirty(
     { title, body_md: body, visibility, annotations_enabled: annotationsEnabled },
     stored,
   );
@@ -165,29 +167,29 @@ function DocumentsManager() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  /** Load the list, and open the first document so the screen is never empty. */
+  /** Load the list, and open the first article so the screen is never empty. */
   useEffect(() => {
-    fetchDocuments()
+    fetchArticles()
       .then((rows) => {
-        setDocuments(rows);
+        setArticles(rows);
         if (rows[0]) void openDocument(rows[0].slug);
       })
       .catch((e) => {
         // A non-manager is redirected by the effect above; anything else is
         // worth saying out loud rather than leaving a blank screen.
         if (!(e instanceof Error) || !e.message.includes("Forbidden")) {
-          toast.error(e instanceof Error ? e.message : "Could not load documents");
+          toast.error(e instanceof Error ? e.message : "Could not load articles");
         }
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchDocuments]);
+  }, [fetchArticles]);
 
   async function openDocument(next: string, opts: { force?: boolean } = {}) {
-    // Clicking the document already open is a no-op, UNLESS its last load
+    // Clicking the article already open is a no-op, UNLESS its last load
     // failed: then the click is a retry, and swallowing it leaves the only
     // way out of that state a page reload.
-    const retrying = next === slug && !creating && (failed.document || failed.versions);
+    const retrying = next === slug && !creating && (failed.article || failed.versions);
     if (!opts.force && !retrying && next === slug && !creating) return;
     if (dirty && !window.confirm("Discard your unsaved changes and open this?")) {
       return;
@@ -195,8 +197,8 @@ function DocumentsManager() {
     const token = claim();
     setBusy(true);
     try {
-      // `allSettled`, not `all`: a document left with no published version makes
-      // the document read throw, and `all` would then discard the version list
+      // `allSettled`, not `all`: an article left with no published version makes
+      // the article read throw, and `all` would then discard the version list
       // too — leaving the one screen that could repair it with nothing to show.
       const [docRes, vsRes, fbRes] = await Promise.allSettled([
         fetchDocument({ data: { slug: next } }),
@@ -205,8 +207,8 @@ function DocumentsManager() {
       ]);
       // A newer click won while these were in flight. Dropping the results is
       // the whole point: applying them would leave `slug` pointing at one
-      // document and the editor showing another, and the next save would write
-      // this document's text into that one.
+      // article and the editor showing another, and the next save would write
+      // this article's text into that one.
       if (stale(token)) return;
 
       setCreating(false);
@@ -216,7 +218,7 @@ function DocumentsManager() {
       setVersions(vsRes.status === "fulfilled" ? vsRes.value : []);
       setFeedback(fbRes.status === "fulfilled" ? fbRes.value : []);
       setFailed({
-        document: docRes.status === "rejected",
+        article: docRes.status === "rejected",
         versions: vsRes.status === "rejected",
         feedback: fbRes.status === "rejected",
       });
@@ -240,13 +242,13 @@ function DocumentsManager() {
         //
         // Visibility comes from the SIDEBAR row, not from the failed read, and
         // never from whatever was on screen a moment ago. Leaving the previous
-        // document's setting here is how a managers-only draft got republished
+        // article's setting here is how a managers-only draft got republished
         // to members by a manager who did exactly what the toast told them to.
-        const summary = documents.find((d) => d.slug === next);
+        const summary = articles.find((d) => d.slug === next);
         setTitle("");
         setBody("");
         setStored(null);
-        // Nothing is known about this document's settings, so refuse to guess.
+        // Nothing is known about this article's settings, so refuse to guess.
         // A null baseline makes `onSave` stop rather than send one.
         setBaseVisibility(summary?.visibility ?? null);
         if (summary) {
@@ -255,10 +257,10 @@ function DocumentsManager() {
         }
         // The reason matters: "no published version" invites the manager to
         // write one, and saying it about a transient failure invites them to
-        // retype a document that is perfectly fine.
+        // retype an article that is perfectly fine.
         const why = docRes.reason;
         toast.warning(
-          why instanceof Error && !/no such document/i.test(why.message)
+          why instanceof Error && !/no such article/i.test(why.message)
             ? `"${next}" could not be opened: ${why.message}`
             : `"${next}" has no published version. Publish one from the version list, or write a new one.`,
         );
@@ -269,7 +271,7 @@ function DocumentsManager() {
   }
 
   function startNew() {
-    if (dirty && !window.confirm("Discard your unsaved changes and start a new document?")) return;
+    if (dirty && !window.confirm("Discard your unsaved changes and start a new article?")) return;
     setCreating(true);
     setSlug("");
     setTitle("");
@@ -282,7 +284,7 @@ function DocumentsManager() {
     setVersions([]);
     setFeedback([]);
     setPreview(null);
-    setFailed({ document: false, versions: false, feedback: false });
+    setFailed({ article: false, versions: false, feedback: false });
   }
 
   /**
@@ -312,7 +314,7 @@ function DocumentsManager() {
   async function onSave() {
     const targetSlug = (creating ? slug || slugFromTitle(title) : slug).trim();
     if (!targetSlug) {
-      toast.error("Give the document a URL key, e.g. house-rules.");
+      toast.error("Give the article a URL key, e.g. house-rules.");
       return;
     }
     // Check the key here rather than letting the server reject it: a hand-typed
@@ -322,24 +324,24 @@ function DocumentsManager() {
       return;
     }
 
-    // Creating a document whose slug already exists is not a create — the
+    // Creating an article whose slug already exists is not a create — the
     // server treats a known slug as "add a version to it". Left unchecked, a
     // manager typing the title of an existing managers-only draft would replace
     // its live text AND, because the form always sends a visibility, publish it
     // to everyone. Refuse here for a message that points at the list; the save
     // also carries `expect_new`, so the database refuses it too when this list
     // is a stale snapshot and somebody else took the key in the meantime.
-    if (creating && documents.some((d) => d.slug === targetSlug)) {
+    if (creating && articles.some((d) => d.slug === targetSlug)) {
       toast.error(
-        `A document already exists at /kb/${targetSlug}. Open it from the list to add a version.`,
+        `An article already exists at /kb/${targetSlug}. Open it from the list to add a version.`,
       );
       return;
     }
 
-    // Saving an existing document whose settings never loaded would send a
+    // Saving an existing article whose settings never loaded would send a
     // visibility that was never read off it. Stop instead of guessing: the
     // widening prompt below cannot fire without a baseline, so this would be the
-    // one save that changes who can read a document with nothing asked.
+    // one save that changes who can read an article with nothing asked.
     if (!creating && baseVisibility === null) {
       toast.error(
         `Who can read "${targetSlug}" is not known yet, so saving could change it. Open it again from the list first.`,
@@ -384,14 +386,14 @@ function DocumentsManager() {
           : `Saved version ${res.version}, now live`,
       );
       // The save landed either way, so it is reported. But if the manager has
-      // since opened a different document, writing this one's text back into the
+      // since opened a different article, writing this one's text back into the
       // editor would put the screen out of step with itself.
       if (stale(token)) return;
       setCreating(false);
       setSlug(targetSlug);
       setChangeNote("");
       setBaseVisibility(visibility);
-      setFailed({ document: false, versions: false, feedback: false });
+      setFailed({ article: false, versions: false, feedback: false });
       setStored({
         title,
         body_md: body,
@@ -400,11 +402,11 @@ function DocumentsManager() {
       });
       try {
         const [rows, vs] = await Promise.all([
-          fetchDocuments(),
+          fetchArticles(),
           fetchVersions({ data: { slug: targetSlug } }),
         ]);
         if (stale(token)) return;
-        setDocuments(rows);
+        setArticles(rows);
         setVersions(vs);
       } catch {
         toast.warning("Saved. The version list could not be refreshed, so reload to see it.");
@@ -447,18 +449,18 @@ function DocumentsManager() {
       await promote({ data: { id: version.id } });
       toast.success(`Version ${version.version} is now live`);
       // The publish has already committed. Reporting a failed REFRESH as a
-      // failed publish would tell the manager the club's live document is
+      // failed publish would tell the manager the club's live article is
       // something it is not, so the refresh gets its own try. (`onSave` learned
       // this first.)
       try {
         const [vs, doc, rows] = await Promise.all([
           fetchVersions({ data: { slug: target } }),
           fetchDocument({ data: { slug: target } }),
-          fetchDocuments(),
+          fetchArticles(),
         ]);
         if (stale(token)) return;
         setVersions(vs);
-        setDocuments(rows);
+        setArticles(rows);
         setChangeNote("");
         setPreview(null);
         setTitle(doc.title);
@@ -466,7 +468,7 @@ function DocumentsManager() {
         setVisibility(doc.visibility);
         setAnnotationsEnabled(doc.annotations_enabled);
         setBaseVisibility(doc.visibility);
-        setFailed({ document: false, versions: false, feedback: false });
+        setFailed({ article: false, versions: false, feedback: false });
         setStored({
           title: doc.title,
           body_md: doc.body_md,
@@ -493,9 +495,9 @@ function DocumentsManager() {
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-black">Documents</h1>
+          <h1 className="text-3xl font-black">Knowledge base</h1>
           <p className="text-sm text-muted-foreground">
-            Pages members read and comment on at /docs. Saving creates a new version and publishes
+            Articles members read and comment on at /kb. Saving creates a new version and publishes
             it. Past versions stay, and comments stay attached to the version they were written
             against.
           </p>
@@ -508,7 +510,7 @@ function DocumentsManager() {
             onClick={startNew}
           >
             <Plus className="mr-1.5 h-4 w-4" />
-            New document
+            New article
           </Button>
           <Button asChild variant="outline">
             <Link to="/account">Back to account</Link>
@@ -624,21 +626,21 @@ function DocumentsManager() {
         <aside className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Documents</CardTitle>
+              <CardTitle className="text-base">Articles</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {documents.length === 0 ? (
+              {articles.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  No documents yet. Create the first one.
+                  No articles yet. Create the first one.
                 </p>
               ) : (
-                documents.map((d) => (
+                articles.map((d) => (
                   <button
                     key={d.slug}
                     type="button"
                     // Disabled while a write is in flight. The request token
                     // already makes a late result harmless, but letting the
-                    // manager switch documents mid-save invites them to watch
+                    // manager switch articles mid-save invites them to watch
                     // the screen change under a save they thought applied here.
                     disabled={saving || promoting || busy}
                     onClick={() => void openDocument(d.slug)}
@@ -672,10 +674,10 @@ function DocumentsManager() {
               </CardHeader>
               <CardContent>
                 {/* Not "no versions". An empty list here would say this
-                    document has no history, which is a confident wrong answer
+                    article has no history, which is a confident wrong answer
                     about the one panel that can undo an edit. */}
                 <p className="text-sm text-muted-foreground">
-                  The version list could not be loaded. Click this document in the list above to try
+                  The version list could not be loaded. Click this article in the list above to try
                   again.
                 </p>
               </CardContent>
@@ -761,7 +763,7 @@ function DocumentsManager() {
                   // been dealt with.
                   <p className="text-sm text-muted-foreground">
                     The comments could not be loaded, so this is not the full picture. Click this
-                    document in the list above to try again.
+                    article in the list above to try again.
                   </p>
                 ) : feedback.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No open comments.</p>
@@ -788,7 +790,7 @@ function DocumentsManager() {
                 {slug && (
                   <Button asChild variant="outline" size="sm" className="w-full">
                     <Link to="/kb/$slug" params={{ slug }}>
-                      Open the document to reply
+                      Open the article to reply
                     </Link>
                   </Button>
                 )}

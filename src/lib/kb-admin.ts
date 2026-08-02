@@ -305,7 +305,8 @@ export async function saveKbArticle(
   if (sectionId !== undefined) patch.section_id = sectionId;
   if (input.position !== undefined) patch.position = input.position;
   if (input.nav_title !== undefined) patch.nav_title = input.nav_title || null;
-  if (input.link_path !== undefined) patch.link_path = input.link_path;
+  // `""` is a clear, and the column's CHECK accepts only a real path or NULL.
+  if (input.link_path !== undefined) patch.link_path = input.link_path || null;
 
   const patchSettings = async (textIsLive: boolean) => {
     const { data: updated, error: updErr } = await db
@@ -397,39 +398,6 @@ export async function saveKbArticle(
 
     await promoteArticleVersion(db, createdVersion.id);
     versionNumber = createdVersion.version;
-  }
-
-  // The article's own settings are written LAST, and only when supplied.
-  //
-  // Ordering matters more than it looks: `visibility` lives here, so patching it
-  // first meant a save whose version insert then failed had already published a
-  // managers-only draft to whoever the new visibility admits — while returning
-  // an error that said the save had not happened. Doing it after means a failure
-  // leaves the new text live under the OLD visibility, which is the safe
-  // direction to fail.
-  if (!created) {
-    const patch: Partial<KbArticleRow> = {};
-    if (input.visibility !== undefined) patch.visibility = input.visibility;
-    if (input.annotations_enabled !== undefined) {
-      patch.annotations_enabled = input.annotations_enabled;
-    }
-    if (sectionId !== undefined) patch.section_id = sectionId;
-    if (input.position !== undefined) patch.position = input.position;
-    if (input.nav_title !== undefined) patch.nav_title = input.nav_title || null;
-    // `""` is a clear, and the column's CHECK only accepts a real path or NULL.
-    if (input.link_path !== undefined) patch.link_path = input.link_path || null;
-
-    if (Object.keys(patch).length) {
-      patch.updated_at = new Date().toISOString();
-      const { data: updated, error: updErr } = await db
-        .from("kb_articles")
-        .update(patch)
-        .eq("id", article.id)
-        .select("*")
-        .single();
-      if (updErr || !updated) throw new Error(updErr?.message ?? "Could not update the article.");
-      article = updated as KbArticleRow;
-    }
   }
 
   if (hasSettings && !narrowing) await patchSettings(writingText);

@@ -136,6 +136,12 @@ type KbArticleListRow = Pick<
   "id" | "slug" | "visibility" | "annotations_enabled" | "updated_at"
 >;
 
+/** What search selects: enough to label a hit and decide where it goes. */
+type KbSearchArticleRow = Pick<
+  KbArticleRow,
+  "id" | "slug" | "visibility" | "nav_title" | "link_path"
+>;
+
 /** What the reader's nav query selects, which also needs the placement. */
 type KbNavArticleRow = KbArticleListRow &
   Pick<KbArticleRow, "section_id" | "position" | "nav_title" | "link_path">;
@@ -302,7 +308,7 @@ export const searchKnowledgeBase = createServerFn({ method: "POST" })
       .select("id, slug, visibility, nav_title, link_path");
     if (error) throw new Error(error.message);
 
-    const readable = ((articles ?? []) as KbArticleRow[]).filter((a) =>
+    const readable = ((articles ?? []) as KbSearchArticleRow[]).filter((a) =>
       canReadArticle(a.visibility, viewer),
     );
     if (!readable.length) return [];
@@ -347,6 +353,7 @@ export const searchKnowledgeBase = createServerFn({ method: "POST" })
     if (titleHits.error) throw new Error(titleHits.error.message);
     if (bodyHits.error) throw new Error(bodyHits.error.message);
 
+    const needle = data.q.toLowerCase();
     const byId = new Map(readable.map((a) => [a.id, a]));
     const results: {
       slug: string;
@@ -356,7 +363,7 @@ export const searchKnowledgeBase = createServerFn({ method: "POST" })
     }[] = [];
     const seen = new Set<string>();
 
-    const label = (article: KbArticleRow, versionTitle?: string) =>
+    const label = (article: KbSearchArticleRow, versionTitle?: string) =>
       article.nav_title ?? versionTitle ?? article.slug;
 
     // Title matches first: an article whose heading is what you typed is the
@@ -364,6 +371,12 @@ export const searchKnowledgeBase = createServerFn({ method: "POST" })
     for (const hit of titleHits.data ?? []) {
       const article = byId.get(hit.article_id);
       if (!article || seen.has(article.id)) continue;
+      // Re-checked against the literal term, exactly as the body loop does.
+      // `likePattern` leaves `*` unescaped because PostgREST cannot quote it,
+      // and that is only safe while every row it returns is verified here; a
+      // title loop that skipped the check made "belt*grading" match an article
+      // containing neither word next to the other.
+      if (!hit.title.toLowerCase().includes(needle)) continue;
       seen.add(article.id);
       results.push({
         slug: article.slug,
@@ -391,7 +404,6 @@ export const searchKnowledgeBase = createServerFn({ method: "POST" })
 
     // Link entries hold no text here, so they match on their label alone. There
     // are a handful of them and they carry no body, so this costs nothing.
-    const needle = data.q.toLowerCase();
     for (const article of readable) {
       if (!article.link_path || seen.has(article.id)) continue;
       const title = label(article);
@@ -694,7 +706,7 @@ export const resolveAnnotation = createServerFn({ method: "POST" })
 // Manager screens (`/manager/kb`)
 //
 // The same operations the manager agent API exposes, reached from the site
-// instead of a bearer token. Both drive `article-admin.ts`, so "save" means one
+// instead of a bearer token. Both drive `kb-admin.ts`, so "save" means one
 // thing however it was asked for — a second implementation behind the web UI is
 // how the two quietly stop agreeing.
 //

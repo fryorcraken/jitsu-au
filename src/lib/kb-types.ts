@@ -26,6 +26,13 @@
 // > ```ts
 // > export type KbArticleRow = Tables["kb_articles"]["Row"];
 // > ```
+// >
+// > **`src/integrations/supabase/schema-contract.test.ts` moves in the same
+// > change.** It pins `Tables["documents"]`, `Tables["document_versions"]` and
+// > `Tables["document_annotations"]`; regeneration removes those three keys, so
+// > the contract test stops compiling and `main` goes red — the exact failure
+// > CLAUDE.md records from 2026-07-29. Repoint it at the new names and add pins
+// > for `kb_sections` and the four new columns, which have none today.
 //
 // The one narrowing that survives either way: `visibility` is a text column with
 // a CHECK, not an enum, so the generator can only say `string`. The app's own
