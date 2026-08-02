@@ -496,6 +496,150 @@ export type Database = {
         }
         Relationships: []
       }
+      document_annotations: {
+        Row: {
+          block_id: string | null
+          body: string
+          created_at: string
+          document_id: string
+          document_version: number
+          id: string
+          parent_id: string | null
+          quote: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          updated_at: string
+          user_id: string
+          visibility: string
+        }
+        Insert: {
+          block_id?: string | null
+          body: string
+          created_at?: string
+          document_id: string
+          document_version: number
+          id?: string
+          parent_id?: string | null
+          quote?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          updated_at?: string
+          user_id: string
+          visibility: string
+        }
+        Update: {
+          block_id?: string | null
+          body?: string
+          created_at?: string
+          document_id?: string
+          document_version?: number
+          id?: string
+          parent_id?: string | null
+          quote?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          updated_at?: string
+          user_id?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_annotations_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_annotations_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "document_annotations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_annotations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      document_versions: {
+        Row: {
+          body_md: string
+          change_note: string | null
+          created_at: string
+          created_by: string | null
+          document_id: string
+          id: string
+          is_current: boolean
+          title: string
+          version: number
+        }
+        Insert: {
+          body_md: string
+          change_note?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_id: string
+          id?: string
+          is_current?: boolean
+          title: string
+          version: number
+        }
+        Update: {
+          body_md?: string
+          change_note?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_id?: string
+          id?: string
+          is_current?: boolean
+          title?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_versions_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          annotations_enabled: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          slug: string
+          updated_at: string
+          visibility: string
+        }
+        Insert: {
+          annotations_enabled?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          slug: string
+          updated_at?: string
+          visibility?: string
+        }
+        Update: {
+          annotations_enabled?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          slug?: string
+          updated_at?: string
+          visibility?: string
+        }
+        Relationships: []
+      }
       email_verification_tokens: {
         Row: {
           created_at: string
@@ -1099,10 +1243,7 @@ export type Database = {
         }
         Returns: boolean
       }
-      is_commenter_blocked: {
-        Args: { _user_id: string }
-        Returns: boolean
-      }
+      is_commenter_blocked: { Args: { _user_id: string }; Returns: boolean }
       is_event_invitee: {
         Args: { _event_id: string; _user_id: string }
         Returns: boolean

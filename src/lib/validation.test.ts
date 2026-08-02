@@ -13,6 +13,11 @@ import {
   composeFullName,
   contactSchema,
   coverageSources,
+  createAnnotationSchema,
+  documentSlugSchema,
+  resolveAnnotationSchema,
+  saveDocumentSchema,
+  updateAnnotationSchema,
   undoCheckInSchema,
   createCalendarEntrySchema,
   rsvpSchema,
@@ -1603,5 +1608,91 @@ describe("check-in schemas", () => {
       "payment_pending",
       "coverage_race",
     ]);
+  });
+});
+
+describe("club document schemas", () => {
+  const slug = "house-rules";
+
+  it("documentSlugSchema accepts kebab-case and rejects anything needing escaping", () => {
+    expect(documentSlugSchema.safeParse("house-rules").success).toBe(true);
+    expect(documentSlugSchema.safeParse("plan-2027").success).toBe(true);
+    for (const bad of ["House-Rules", "house rules", "house/rules", "-leading", "trailing-", ""]) {
+      expect(documentSlugSchema.safeParse(bad).success, bad).toBe(false);
+    }
+  });
+
+  it("saveDocumentSchema leaves visibility and annotations alone when omitted", () => {
+    const parsed = saveDocumentSchema.parse({ slug, title: "House rules", body_md: "# Rules" });
+    // Not defaulted: an edit that does not mention visibility must not reset a
+    // members-only document to whatever the default happens to be.
+    expect(parsed.visibility).toBeUndefined();
+    expect(parsed.annotations_enabled).toBeUndefined();
+  });
+
+  it("saveDocumentSchema rejects an unknown visibility", () => {
+    const input = { slug, title: "T", body_md: "B", visibility: "everyone" };
+    expect(saveDocumentSchema.safeParse(input).success).toBe(false);
+  });
+
+  it("saveDocumentSchema requires a title and body", () => {
+    expect(saveDocumentSchema.safeParse({ slug, title: "", body_md: "B" }).success).toBe(false);
+    expect(saveDocumentSchema.safeParse({ slug, title: "T", body_md: "   " }).success).toBe(false);
+  });
+
+  it("createAnnotationSchema requires a visibility and a body", () => {
+    const base = { slug, document_version: 1, body: "Worth clarifying." };
+    expect(createAnnotationSchema.safeParse({ ...base, visibility: "private" }).success).toBe(true);
+    expect(createAnnotationSchema.safeParse({ ...base, visibility: "shared" }).success).toBe(true);
+    expect(createAnnotationSchema.safeParse(base).success).toBe(false);
+    expect(
+      createAnnotationSchema.safeParse({ ...base, body: "", visibility: "shared" }).success,
+    ).toBe(false);
+  });
+
+  // The block anchor is optional: a note about the document as a whole has no
+  // passage to hang off.
+  it("createAnnotationSchema allows an annotation with no block anchor", () => {
+    const parsed = createAnnotationSchema.parse({
+      slug,
+      document_version: 2,
+      visibility: "shared",
+      body: "Reads well overall.",
+    });
+    expect(parsed.block_id).toBeUndefined();
+  });
+
+  it("createAnnotationSchema keeps the honeypot empty", () => {
+    const input = {
+      slug,
+      document_version: 1,
+      visibility: "shared" as const,
+      body: "Spam",
+      hp: "http://spam.example",
+    };
+    expect(createAnnotationSchema.safeParse(input).success).toBe(false);
+  });
+
+  it("createAnnotationSchema requires a positive version, so an anchor is never versionless", () => {
+    const base = { slug, visibility: "shared" as const, body: "b" };
+    expect(createAnnotationSchema.safeParse({ ...base, document_version: 0 }).success).toBe(false);
+    expect(createAnnotationSchema.safeParse(base).success).toBe(false);
+  });
+
+  it("updateAnnotationSchema changes the text and nothing else", () => {
+    const parsed = updateAnnotationSchema.parse({
+      id: crypto.randomUUID(),
+      body: "Edited.",
+      visibility: "private",
+    });
+    // `visibility` is dropped rather than honoured: flipping a shared thread to
+    // private would take replies out of view with it.
+    expect(parsed).not.toHaveProperty("visibility");
+  });
+
+  it("resolveAnnotationSchema takes an explicit boolean, so reopening is possible", () => {
+    const id = crypto.randomUUID();
+    expect(resolveAnnotationSchema.safeParse({ id, resolved: false }).success).toBe(true);
+    expect(resolveAnnotationSchema.safeParse({ id }).success).toBe(false);
   });
 });
