@@ -216,7 +216,19 @@ scripts/agent.sh file_waiver '{
 >   repeated. Without it, two retries racing each other both pass the duplicate
 >   check — neither can see a row the other has not committed yet — and you get
 >   the exact double-filing the check is meant to stop. A **new** id means a new
->   waiver, so never reuse one across different records.
+>   waiver, so never reuse one across different records — an id already bound to
+>   a different record is refused with `409 submission_id_conflict`, which no
+>   retry will ever fix.
+> - **Sending an id means you own finishing that record.** Without one, a failed
+>   filing cleans up after itself and means "nothing happened, send it again".
+>   With one, the row is KEPT so your retry can resume it, and a
+>   `503 waiver_filing_incomplete` means a waiver exists with no document behind
+>   it. Retry until it succeeds. If you abandon it, a manager is left with a
+>   pending waiver they cannot approve.
+> - **The result's `created` tells a replay from a fresh filing.** `false` means
+>   this call resolved to a waiver an earlier attempt already filed. Count those
+>   separately when you report a batch, or a run that silently retried half its
+>   calls will look identical to a clean one.
 > - **Filing the same paper twice is caught.** If the person already has a
 >   waiver signed on that `signed_on`, the call is refused with
 >   `409 duplicate_waiver` and `error.details.existing` lists the waivers it

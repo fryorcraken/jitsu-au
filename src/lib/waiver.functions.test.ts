@@ -143,9 +143,15 @@ function fakeAdmin(opts: {
     pdf_path: string | null;
     email?: string;
     signed_at?: string;
+    signer_meta?: { source: string };
   } | null;
   /** The row the unique index says won, looked up after a 23505 insert. */
-  racedSubmission?: { id: string; user_id: string; pdf_path: string | null } | null;
+  racedSubmission?: {
+    id: string;
+    user_id: string;
+    pdf_path: string | null;
+    signer_meta?: { source: string };
+  } | null;
   insert?: Result;
   upload?: { error: { message: string } | null };
   delete?: { error: { message: string } | null };
@@ -228,7 +234,19 @@ function fakeAdmin(opts: {
             return Promise.resolve(
               ok(
                 row
-                  ? { email: "ada@example.com", signed_at: "2020-01-15T00:00:00.000Z", ...row }
+                  ? // The DATABASE read format: PostgREST renders TIMESTAMPTZ as
+                    // offset notation with no fractional part when it is zero.
+                    // Deliberately NOT the `…T00:00:00.000Z` this module writes —
+                    // a fixture in the write format hid a bug where every keyed
+                    // retry was refused as belonging to a different waiver.
+                    {
+                      email: "ada@example.com",
+                      signed_at: "2020-01-15T00:00:00+00:00",
+                      // The lookups only ever resolve PAPER filings: the key
+                      // namespace is shared with the public signing path.
+                      signer_meta: { source: "paper_upload" },
+                      ...row,
+                    }
                   : null,
               ),
             );
@@ -313,7 +331,7 @@ describe("filePaperWaiver", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await filePaperWaiver(admin as any, validInput, MANAGER_ID);
 
-    expect(result).toEqual({ id: "waiver-1", user_id: EXISTING_USER });
+    expect(result).toEqual({ id: "waiver-1", user_id: EXISTING_USER, created: true });
     expect(calls.createUser).toHaveLength(0);
     expect(calls.insert).toHaveLength(1);
     const row = calls.insert[0] as Record<string, unknown>;
@@ -520,7 +538,7 @@ describe("filePaperWaiver", () => {
       { ...validInput, confirm_duplicate: true },
       MANAGER_ID,
     );
-    expect(result).toEqual({ id: "waiver-1", user_id: EXISTING_USER });
+    expect(result).toEqual({ id: "waiver-1", user_id: EXISTING_USER, created: true });
     expect(calls.insert).toHaveLength(1);
     // Confirmed means the probe is not even run.
     expect(calls.selects).toHaveLength(0);
@@ -639,7 +657,8 @@ describe("filePaperWaiver", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
 
-      expect(result).toEqual({ id: "waiver-first", user_id: EXISTING_USER });
+      // A replay: this call did not create it.
+      expect(result).toEqual({ id: "waiver-first", user_id: EXISTING_USER, created: false });
       // The expensive work is skipped entirely: no PDF built, nothing inserted.
       expect(buildScanPdf).not.toHaveBeenCalled();
       expect(calls.insert).toHaveLength(0);
@@ -658,12 +677,71 @@ describe("filePaperWaiver", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
 
-      expect(result).toEqual({ id: "waiver-half", user_id: EXISTING_USER });
+      expect(result).toEqual({ id: "waiver-half", user_id: EXISTING_USER, created: false });
       // No second waiver: it resumes the row it found...
       expect(calls.insert).toHaveLength(0);
       // ...and actually stores the scan against it, which is what was missing.
       expect(calls.uploads[0].path).toBe("waiver-half.pdf");
       expect(calls.updates[0]).toEqual({ pdf_path: "waiver-half.pdf" });
+    });
+
+    // The lookup reads signed_at back from Postgres, which renders TIMESTAMPTZ
+    // as `+00:00` with no fractional part — not the `.000Z` this module writes.
+    // Comparing the raw strings made every keyed retry look like a different
+    // record, so the whole idempotency path was dead.
+    it("matches a retry despite the database's timestamp format differing from ours", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        priorSubmission: {
+          id: "waiver-first",
+          user_id: EXISTING_USER,
+          pdf_path: "waiver-first.pdf",
+          signed_at: "2020-01-15T00:00:00+00:00",
+        },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
+      expect(result).toEqual({ id: "waiver-first", user_id: EXISTING_USER, created: false });
+      expect(calls.insert).toHaveLength(0);
+    });
+
+    // One partial unique index covers the whole table, so a caller-chosen id can
+    // land on a waiver a signer's own browser minted. This endpoint may only
+    // ever resolve its own records.
+    it("refuses to resolve an id that belongs to an online signing, not a paper filing", async () => {
+      const { admin, calls } = fakeAdmin({
+        existingId: EXISTING_USER,
+        priorSubmission: {
+          id: "waiver-online",
+          user_id: EXISTING_USER,
+          pdf_path: "waiver-online.pdf",
+          signer_meta: { source: "web" },
+        },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      const { SubmissionIdConflictError } = await import("./waiver-duplicates");
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filePaperWaiver(admin as any, withId, MANAGER_ID),
+      ).rejects.toBeInstanceOf(SubmissionIdConflictError);
+      expect(calls.insert).toHaveLength(0);
+    });
+
+    it("raises a typed, retryable error when the scan fails to store", async () => {
+      const { admin } = fakeAdmin({
+        existingId: EXISTING_USER,
+        upload: { error: { message: "storage down" } },
+      });
+      const { filePaperWaiver } = await import("./waiver.functions");
+      const { WaiverFilingIncompleteError } = await import("./waiver-duplicates");
+      // Typed so the API can map it to a 5xx: the row is half-filed and only a
+      // retry with the same id completes it. A 4xx would tell a well-behaved
+      // caller to change the request, and the only thing to change is the id.
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filePaperWaiver(admin as any, withId, MANAGER_ID),
+      ).rejects.toBeInstanceOf(WaiverFilingIncompleteError);
     });
 
     it("refuses an id already used for a different record instead of returning its waiver", async () => {
@@ -701,7 +779,7 @@ describe("filePaperWaiver", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
 
-      expect(result).toEqual({ id: "waiver-winner", user_id: EXISTING_USER });
+      expect(result).toEqual({ id: "waiver-winner", user_id: EXISTING_USER, created: false });
       // No second waiver, and no scan uploaded over the winner's.
       expect(calls.uploads).toHaveLength(0);
     });
@@ -720,7 +798,7 @@ describe("filePaperWaiver", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await filePaperWaiver(admin as any, withId, MANAGER_ID);
 
-      expect(result).toEqual({ id: "waiver-winner", user_id: EXISTING_USER });
+      expect(result).toEqual({ id: "waiver-winner", user_id: EXISTING_USER, created: false });
       expect(calls.uploads[0].path).toBe("waiver-winner.pdf");
     });
 

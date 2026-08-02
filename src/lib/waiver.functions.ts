@@ -32,6 +32,8 @@ import {
 import {
   DuplicateCheckFailedError,
   DuplicateWaiverError,
+  SubmissionIdConflictError,
+  WaiverFilingIncompleteError,
   toDuplicateRefs,
 } from "@/lib/waiver-duplicates";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
@@ -993,7 +995,7 @@ export async function filePaperWaiver(
   admin: SupabaseClient<Database>,
   data: PaperWaiverUploadInput,
   uploadedByUserId: string,
-): Promise<{ id: string; user_id: string }> {
+): Promise<{ id: string; user_id: string; created: boolean }> {
   if (isFutureSigningDate(data.signed_on, new Date().toISOString())) {
     throw new Error("The signing date is in the future. Check the date on the form.");
   }
@@ -1011,28 +1013,46 @@ export async function filePaperWaiver(
   if (submissionId) {
     const { data: already, error: lookupErr } = await admin
       .from("waivers")
-      .select("id, user_id, pdf_path, email, signed_at")
+      .select("id, user_id, pdf_path, email, signed_at, signer_meta")
       .eq("client_submission_id", submissionId)
       .maybeSingle();
     // Not fatal: falling through re-does the work, and the unique index still
     // stops a duplicate. Logged because the fallthrough is slower and can end in
     // a confusing duplicate_waiver, so it should be findable.
     if (lookupErr) console.error("[filePaperWaiver] submission lookup failed:", lookupErr);
+    // The key namespace is shared with the PUBLIC online signing path — one
+    // partial unique index over the whole table — so an id could land on a
+    // waiver a signer's own browser minted. Ignore anything that is not a paper
+    // filing: this endpoint may only ever resolve its own records, whatever the
+    // caller's id scheme happens to collide with.
+    if (already && !isPaperWaiver(already.signer_meta)) {
+      throw new SubmissionIdConflictError();
+    }
     if (already) {
       // One id, one record. A loop that mints the key per BATCH rather than per
       // record would otherwise hand back the first waiver's id for every record
       // after it, each with a 200, and file none of them.
-      if (already.email !== email || already.signed_at !== signed_at) {
-        throw new Error(
-          "That client_submission_id already belongs to a different waiver. Mint a new id per record, and resend the same id only when retrying that record.",
-        );
+      // Compare the DATE, not the timestamp string. `signed_at` is TIMESTAMPTZ,
+      // and PostgREST renders it as `2020-01-15T00:00:00+00:00` — offset
+      // notation, no fractional part when it is zero — where this function
+      // WRITES `2020-01-15T00:00:00.000Z`. Comparing those two directly is
+      // always unequal, which made every keyed retry fail this check and be
+      // told its id belonged to a different waiver: the idempotency path was
+      // dead, and an importer following that advice would mint a fresh id and
+      // file the duplicate this whole feature exists to prevent.
+      if (already.email !== email || already.signed_at.slice(0, 10) !== data.signed_on) {
+        throw new SubmissionIdConflictError();
       }
       // Only a row whose scan is stored is genuinely done. A row with no
       // pdf_path is a half-filed waiver: reporting it as filed would let a
       // manager approve a waiver with no document behind it, which for a paper
       // record cannot be regenerated from anything.
       if (already.pdf_path && already.user_id) {
-        return { id: already.id, user_id: already.user_id };
+        // A REPLAY, not a new filing. Without saying so, an import that
+        // silently retried half its calls looks identical to a clean run, and
+        // "how many did I actually file" is unanswerable against a stack of
+        // paper. Same reason edit_invoice reports `changed`.
+        return { id: already.id, user_id: already.user_id, created: false };
       }
       resumeWaiverId = already.id;
     }
@@ -1215,10 +1235,14 @@ export async function filePaperWaiver(
   if (insErr?.code === UNIQUE_VIOLATION && submissionId) {
     const { data: raced } = await admin
       .from("waivers")
-      .select("id, user_id, pdf_path")
+      .select("id, user_id, pdf_path, signer_meta")
       .eq("client_submission_id", submissionId)
       .maybeSingle();
-    if (raced?.user_id && raced.pdf_path) return { id: raced.id, user_id: raced.user_id };
+    // Same scoping as the lookup above: never adopt a non-paper row.
+    if (raced && !isPaperWaiver(raced.signer_meta)) throw new SubmissionIdConflictError();
+    if (raced?.user_id && raced.pdf_path) {
+      return { id: raced.id, user_id: raced.user_id, created: false };
+    }
     // The winner is mid-flight. Both attempts carry the same scan and write to
     // the same path, so finishing its row is safe and idempotent rather than a
     // race to be avoided.
@@ -1245,7 +1269,7 @@ export async function filePaperWaiver(
     // out and the manager simply files it again.
     console.error("[filePaperWaiver] scan upload failed:", upErr);
     if (submissionId) {
-      throw new Error(
+      throw new WaiverFilingIncompleteError(
         "The scan could not be stored, so this waiver is not filed yet. Retry with the same client_submission_id to finish it.",
       );
     }
@@ -1272,7 +1296,7 @@ export async function filePaperWaiver(
     // re-upload. Unkeyed calls unwind both, exactly as before.
     console.error("[filePaperWaiver] could not point the waiver at its scan:", pathErr);
     if (submissionId) {
-      throw new Error(
+      throw new WaiverFilingIncompleteError(
         "Could not finish filing this waiver, so it is not filed yet. Retry with the same client_submission_id to finish it.",
       );
     }
@@ -1288,7 +1312,12 @@ export async function filePaperWaiver(
     );
   }
 
-  return { id: waiverId, user_id: userId };
+  // `created` is false when this call resumed a row an earlier attempt had
+  // already inserted: the waiver is complete either way, but only one call
+  // created it. Named `created` rather than `filed` because uploadPaperWaiver
+  // already uses `filed` for a different question (filed, or blocked as a
+  // duplicate), and two meanings for one word in one flow is a trap.
+  return { id: waiverId, user_id: userId, created: !resumeWaiverId };
 }
 
 /**
@@ -1369,6 +1398,22 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
         .maybeSingle();
       if (wErr) throw new Error(wErr.message);
       if (!waiver) throw new Error("Waiver not found.");
+
+      // A waiver with no stored document must never become somebody's ACTIVE
+      // record. Approving promotes it onto the profile and makes it the waiver
+      // the club would produce if anyone asked what this person signed —
+      // discovered as missing only when a manager clicks download, long after.
+      //
+      // The window is real on every path: a row exists before its PDF does. It
+      // is widest for a paper filing, whose scan cannot be regenerated from
+      // anything, and an abandoned keyed attempt can leave one indefinitely.
+      // Cheap to check here, and it closes the dangerous end regardless of how
+      // the row got into that state.
+      if (!waiver.pdf_path) {
+        throw new Error(
+          "This waiver has no document stored yet, so it cannot be approved. If it was filed from a scan, file it again; if it was signed on the site, wait a moment and reload.",
+        );
+      }
 
       // Promote: the approved submission becomes the person's record.
       const { error: pErr } = await admin
