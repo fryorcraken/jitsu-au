@@ -398,6 +398,7 @@ describe("manager agent route", () => {
       expect(res.status).toBe(503);
       const body = await res.json();
       expect(body.error.code).toBe("duplicate_check_failed");
+      expect(res.headers.get("retry-after")).toBe("5");
       // Must not point the caller at the flag that would disable the check.
       expect(body.error.message).not.toMatch(/confirm_duplicate/);
     });
@@ -409,11 +410,43 @@ describe("manager agent route", () => {
       expect((await res.json()).error.code).toBe("file_waiver_failed");
     });
 
-    it("returns the filed waiver on success", async () => {
-      filePaperWaiverMock.mockResolvedValue({ id: "w-9", user_id: "u-9" });
+    // A half-filed row is completed ONLY by retrying with the same id, so this
+    // must read as 5xx. As a 422 it told a caller obeying the documented "4xx
+    // means change the request" rule to change the one thing it could — the id
+    // — filing a second waiver against the same paper.
+    it("maps an unfinished filing to a retryable 503, not the generic 422", async () => {
+      const { WaiverFilingIncompleteError } = await import("@/lib/waiver-duplicates");
+      filePaperWaiverMock.mockRejectedValue(
+        new WaiverFilingIncompleteError("The scan could not be stored."),
+      );
+      const res = await post({ action: "file_waiver", params });
+      expect(res.status).toBe(503);
+      expect((await res.json()).error.code).toBe("waiver_filing_incomplete");
+      expect(res.headers.get("retry-after")).toBe("5");
+    });
+
+    // The opposite: permanent. It must not share a code with the retryable ones,
+    // or a caller cannot tell "retry unchanged" from "your ids are wrong".
+    it("maps an id bound to another record to a permanent 409", async () => {
+      const { SubmissionIdConflictError } = await import("@/lib/waiver-duplicates");
+      filePaperWaiverMock.mockRejectedValue(new SubmissionIdConflictError());
+      const res = await post({ action: "file_waiver", params });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error.code).toBe("submission_id_conflict");
+      expect(res.headers.get("retry-after")).toBeNull();
+    });
+
+    it("returns the filed waiver on success, saying whether this call created it", async () => {
+      filePaperWaiverMock.mockResolvedValue({ id: "w-9", user_id: "u-9", created: true });
       const res = await post({ action: "file_waiver", params });
       expect(res.status).toBe(200);
-      expect((await res.json()).result).toEqual({ id: "w-9", user_id: "u-9" });
+      expect((await res.json()).result).toEqual({ id: "w-9", user_id: "u-9", created: true });
+    });
+
+    it("reports a replay so a partially retried import can be reconciled", async () => {
+      filePaperWaiverMock.mockResolvedValue({ id: "w-9", user_id: "u-9", created: false });
+      const body = await (await post({ action: "file_waiver", params })).json();
+      expect(body.result.created).toBe(false);
     });
   });
 });

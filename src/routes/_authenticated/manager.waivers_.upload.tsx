@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MAX_SCAN_BYTES, isMinorOn, scanMimeTypes } from "@/lib/validation";
 import { getCurrentWaiverTemplate, uploadPaperWaiver } from "@/lib/waiver.functions";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
+import { newSubmissionId } from "@/lib/submit-resilience";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/waivers_/upload")({
@@ -86,6 +87,13 @@ function UploadPaperWaiverPage() {
     email: string;
     signedOn: string;
   } | null>(null);
+  // One id for this form fill, so a resend of the SAME scan resolves to the one
+  // waiver instead of a second copy. A 10 MB upload that times out in the
+  // browser has still very often reached the server; without this, pressing the
+  // button again after that files the paper twice. The page navigates away on
+  // success, so one id per mount is one id per record.
+  const [submissionId] = useState(newSubmissionId);
+
   const [signedOn, setSignedOn] = useState(todayLocal());
   const [templateVersion, setTemplateVersion] = useState("");
 
@@ -194,6 +202,7 @@ function UploadPaperWaiverPage() {
           template_version: templateVersion.trim() ? Number(templateVersion) : null,
           scan,
           confirm_duplicate: confirmDuplicate,
+          client_submission_id: submissionId,
         },
       });
       if (!res.filed) {

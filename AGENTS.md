@@ -112,9 +112,24 @@ driven directly by the bundled skill.
       toast with the detail lost, which is what makes the guard useless to a
       human.
     - The check is **check-then-insert, so it cannot stop two racing retries**
-      — neither sees a row the other has not committed. Closing that needs an
-      idempotency key on the filing itself; until then a bulk importer that
-      retries in flight can still double-file.
+      — neither sees a row the other has not committed. `client_submission_id`
+      is what makes a retry safe: same key, same waiver, enforced by the partial
+      unique index from `20260729020000`, exactly as the online signing path
+      uses it. That index covers the WHOLE table, so the key namespace is shared
+      with the public signing path — both lookups therefore ignore anything that
+      is not a paper filing, or a caller-chosen id could resolve to a waiver a
+      signer's browser minted. Scoping uniqueness per caller
+      (`(uploaded_by, client_submission_id)`) would need a migration and is a
+      deliberate follow-up, not an oversight.
+    - Comparing `signed_at` to the string this code WRITES never matches:
+      PostgREST renders TIMESTAMPTZ as `+00:00` with no fractional part. Compare
+      the date part. This killed the whole idempotency path once, and the test
+      fixture hid it by using the write format.
+    - Sending a key **transfers an obligation**: a failed filing keeps its row
+      for the retry instead of deleting it, so an abandoned attempt leaves a
+      documentless waiver. `setWaiverApproval` refuses a waiver with no
+      `pdf_path` so that row can never become somebody's ACTIVE record, and the
+      manifest says the obligation exists.
     - A failed probe is `503 duplicate_check_failed` with a `Retry-After`
       header, deliberately distinct from `file_waiver_failed` and deliberately
       silent about `confirm_duplicate` — offering that flag as the fix for an

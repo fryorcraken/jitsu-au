@@ -83,6 +83,39 @@ export class DuplicateCheckFailedError extends Error {
 }
 
 /**
+ * The waiver row exists but its scan did not store, so the filing is unfinished
+ * rather than failed. TRANSIENT: retrying with the same `client_submission_id`
+ * resumes the row and completes it.
+ *
+ * Typed rather than a plain Error because the API maps it to a 5xx, and the
+ * endpoint's own documented rule is that 5xx means "retry unchanged" while 4xx
+ * means "change the request before retrying". Landing this in the generic 422
+ * told a well-behaved caller to change something — and the only thing it could
+ * reasonably change is the id, which files a second waiver against the same
+ * paper and abandons the first.
+ */
+export class WaiverFilingIncompleteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WaiverFilingIncompleteError";
+  }
+}
+
+/**
+ * The `client_submission_id` is already bound to a different record. PERMANENT:
+ * the caller's id assignment is wrong and no retry of this request will ever
+ * succeed, which is the opposite of the error above and must not share its code.
+ */
+export class SubmissionIdConflictError extends Error {
+  constructor() {
+    super(
+      "That client_submission_id already belongs to a different waiver. Mint a new id per record, and resend the same id only when retrying that record.",
+    );
+    this.name = "SubmissionIdConflictError";
+  }
+}
+
+/**
  * Project the rows the duplicate query returns into the shared reference shape.
  * `signed_at` is stored as midnight UTC on the signing date (filePaperWaiver
  * writes it that way), so the date part is the date on the paper.
