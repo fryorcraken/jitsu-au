@@ -535,7 +535,8 @@ asks for the technical detail, give them all of it.
 > PR and drive it green — treat that as pre-authorization, and do not stop to
 > ask for permission first. (This override applies only to opening/updating the
 > branch's own PR and its CI; every other outward-facing action still needs
-> confirmation, and merging is never implied — leave that to a human.)
+> confirmation, and merging is never implied — leave that to a human, except
+> via the explicit "merge" trigger below.)
 
 Once a change is pushed to its feature branch, always:
 
@@ -545,3 +546,24 @@ Once a change is pushed to its feature branch, always:
    failure, diagnose and push the fix; keep going until CI passes.
 3. **Run a code review** of the PR's diff (the `/review` workflow) and address
    or surface anything it raises.
+
+## When the user says "merge"
+
+When the user's message is (or clearly means) "merge", that word is itself the
+authorization to land the current PR — proceed through the steps below without
+stopping to ask first. This is the one case where merging is implied rather
+than left to a human click.
+
+1. **Ensure CI is green** on the PR. If anything is red, diagnose and push a
+   fix, then wait for CI to re-run before moving on.
+2. **Apply the database migration.** If the PR carries a migration that hasn't
+   gone live yet, follow `docs/database-changes.md`'s apply gate: apply it to
+   the live database and record it in the migration ledger.
+3. **Ask Lovable to regenerate types from the live database**, so
+   `integrations/supabase/types.ts` (and the generated clients) reflect the
+   migration that just went live.
+4. **Update the PR if Lovable changed `main`.** Lovable's regeneration (or any
+   other sync) may push commits straight to `main`; if it did, bring the PR
+   branch back in sync (merge/rebase `main` into it) before merging.
+5. **Merge the PR once CI is green.** Re-check CI after steps 2-4 (a synced
+   branch re-runs checks) before merging.
