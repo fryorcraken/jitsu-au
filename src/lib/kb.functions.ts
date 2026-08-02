@@ -18,6 +18,8 @@ import {
   canEditAnnotation,
   canReadArticle,
   canResolveThread,
+  likePattern,
+  matchArticleText,
 } from "@/lib/kb";
 import type { AnnotationVisibility, Viewer } from "@/lib/kb";
 import {
@@ -277,6 +279,8 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
  * migration, a trigger and a tsvector column to speed up a query that is already
  * instant. If this ever gets slow, that is the moment to add one.
  *
+ * A title hit ranks above a body hit, and only a body hit carries a snippet.
+ *
  * Visibility is applied to the ARTICLE list before the bodies are searched, so a
  * managers-only draft cannot surface a snippet of itself to a member through a
  * lucky search term.
@@ -292,63 +296,109 @@ export const searchKnowledgeBase = createServerFn({ method: "POST" })
       .select("id, slug, visibility, nav_title, link_path");
     if (error) throw new Error(error.message);
 
-    // Link entries hold no text of their own, so they match on their label only.
     const readable = ((articles ?? []) as KbArticleRow[]).filter((a) =>
       canReadArticle(a.visibility, viewer),
     );
     if (!readable.length) return [];
 
-    const { data: versions, error: vErr } = await db
-      .from("kb_article_versions")
-      .select("article_id, title, body_md")
-      .in(
-        "article_id",
-        readable.filter((a) => !a.link_path).map((a) => a.id),
-      )
-      .eq("is_current", true);
-    if (vErr) throw new Error(vErr.message);
+    const searchable = readable.filter((a) => !a.link_path).map((a) => a.id);
+    const pattern = likePattern(data.q);
 
+    // Two queries rather than one `.or(...)`, and the split is the point.
+    //
+    // Matching happens in the DATABASE. Reading every live version and scanning
+    // it here would pull the whole knowledge base (200k of markdown per article
+    // is the schema's cap) across the wire on every keystroke, and grow with
+    // every article the club writes.
+    //
+    // Only the body query selects `body_md`, and only for rows that already
+    // matched, so the payload is bounded by the result limit rather than by the
+    // size of the corpus. A title hit needs no snippet, so it never fetches one.
+    //
+    // `.or()` would do it in one round trip, but its filter string is assembled
+    // by hand, and a reader typing a comma or a bracket would be editing that
+    // expression rather than searching for the character.
+    const [titleHits, bodyHits] = await Promise.all([
+      searchable.length
+        ? db
+            .from("kb_article_versions")
+            .select("article_id, title")
+            .in("article_id", searchable)
+            .eq("is_current", true)
+            .ilike("title", pattern)
+            .limit(SEARCH_RESULT_LIMIT)
+        : Promise.resolve({ data: [], error: null }),
+      searchable.length
+        ? db
+            .from("kb_article_versions")
+            .select("article_id, title, body_md")
+            .in("article_id", searchable)
+            .eq("is_current", true)
+            .ilike("body_md", pattern)
+            .limit(SEARCH_RESULT_LIMIT)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (titleHits.error) throw new Error(titleHits.error.message);
+    if (bodyHits.error) throw new Error(bodyHits.error.message);
+
+    const byId = new Map(readable.map((a) => [a.id, a]));
+    const results: {
+      slug: string;
+      title: string;
+      link_path: string | null;
+      snippet: string | null;
+    }[] = [];
+    const seen = new Set<string>();
+
+    const label = (article: KbArticleRow, versionTitle?: string) =>
+      article.nav_title ?? versionTitle ?? article.slug;
+
+    // Title matches first: an article whose heading is what you typed is the
+    // one you meant, and it needs no snippet to explain itself.
+    for (const hit of titleHits.data ?? []) {
+      const article = byId.get(hit.article_id);
+      if (!article || seen.has(article.id)) continue;
+      seen.add(article.id);
+      results.push({
+        slug: article.slug,
+        title: label(article, hit.title),
+        link_path: null,
+        snippet: null,
+      });
+    }
+
+    for (const hit of bodyHits.data ?? []) {
+      const article = byId.get(hit.article_id);
+      if (!article || seen.has(article.id)) continue;
+      // Re-checked against the literal term, which is what lets the pattern
+      // above stay permissive about `*` without changing the results.
+      const snippet = matchArticleText(hit.body_md, data.q);
+      if (!snippet) continue;
+      seen.add(article.id);
+      results.push({
+        slug: article.slug,
+        title: label(article, hit.title),
+        link_path: null,
+        snippet,
+      });
+    }
+
+    // Link entries hold no text here, so they match on their label alone. There
+    // are a handful of them and they carry no body, so this costs nothing.
     const needle = data.q.toLowerCase();
-    const bodyByArticle = new Map((versions ?? []).map((v) => [v.article_id, v]));
+    for (const article of readable) {
+      if (!article.link_path || seen.has(article.id)) continue;
+      const title = label(article);
+      if (!title.toLowerCase().includes(needle)) continue;
+      seen.add(article.id);
+      results.push({ slug: article.slug, title, link_path: article.link_path, snippet: null });
+    }
 
-    return readable
-      .map((a) => {
-        const live = bodyByArticle.get(a.id);
-        const title = a.nav_title ?? live?.title ?? a.slug;
-        if (!live) {
-          // A link entry, or an article with no live version: label only.
-          return a.link_path && title.toLowerCase().includes(needle)
-            ? { slug: a.slug, title, link_path: a.link_path, snippet: null }
-            : null;
-        }
-        if (live.title.toLowerCase().includes(needle)) {
-          return { slug: a.slug, title, link_path: null, snippet: null };
-        }
-        const at = live.body_md.toLowerCase().indexOf(needle);
-        if (at === -1) return null;
-        return { slug: a.slug, title, link_path: null, snippet: snippetAround(live.body_md, at) };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-      .slice(0, SEARCH_RESULT_LIMIT);
+    return results.slice(0, SEARCH_RESULT_LIMIT);
   });
 
 /** How many search results the top bar shows. */
 const SEARCH_RESULT_LIMIT = 12;
-
-/**
- * A one-line window around a match, so a result says why it matched.
- *
- * Collapses whitespace and markdown punctuation is left as-is: stripping it
- * properly needs a parser, and a stray `**` in a preview line is a much smaller
- * problem than a snippet that silently drops the matched word.
- */
-function snippetAround(body: string, at: number): string {
-  const RADIUS = 90;
-  const start = Math.max(0, at - RADIUS);
-  const end = Math.min(body.length, at + RADIUS);
-  const text = body.slice(start, end).replace(/\s+/g, " ").trim();
-  return `${start > 0 ? "…" : ""}${text}${end < body.length ? "…" : ""}`;
-}
 
 /**
  * Load an article and check the caller may read it, or throw. The shared first

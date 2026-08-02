@@ -8,6 +8,8 @@ import {
   canReadArticle,
   canResolveThread,
   groupThreads,
+  likePattern,
+  matchArticleText,
   normalizeBlockText,
   resolveAnchors,
   splitBlocks,
@@ -259,5 +261,64 @@ describe("canResolveThread", () => {
   // A private note is not a conversation, so there is nothing to resolve.
   it("refuses to resolve a private note, even for a manager", () => {
     expect(canResolveThread({ user_id: "u-member", visibility: "private" }, manager)).toBe(false);
+  });
+});
+
+// Search: the two halves that decide what the database is asked for and what
+// survives the answer. Both are pure, and between them they are the whole
+// correctness argument for pre-filtering in SQL and re-checking here.
+describe("likePattern", () => {
+  it("wraps the term so it matches anywhere in the text", () => {
+    expect(likePattern("grading")).toBe("%grading%");
+  });
+
+  // Without this, searching for "50%" asks the database for every article
+  // containing "50" and the reader is shown a page of noise.
+  it("treats a percent sign the reader typed as text, not a wildcard", () => {
+    expect(likePattern("50%")).toBe("%50\\%%");
+  });
+
+  it("escapes the single-character wildcard too", () => {
+    expect(likePattern("gi_bag")).toBe("%gi\\_bag%");
+  });
+
+  it("escapes a backslash before it can escape something else", () => {
+    expect(likePattern("a\\b")).toBe("%a\\\\b%");
+  });
+});
+
+describe("matchArticleText", () => {
+  it("returns a window around the hit", () => {
+    expect(matchArticleText("Gradings run twice a year.", "twice")).toBe(
+      "Gradings run twice a year.",
+    );
+  });
+
+  it("finds the term whatever case it was written in", () => {
+    expect(matchArticleText("Wash your GI before class.", "gi")).not.toBeNull();
+  });
+
+  it("marks both ends when the article continues past the window", () => {
+    const body = `${"x".repeat(200)} needle ${"y".repeat(200)}`;
+    const snippet = matchArticleText(body, "needle");
+    expect(snippet?.startsWith("…")).toBe(true);
+    expect(snippet?.endsWith("…")).toBe(true);
+    expect(snippet).toContain("needle");
+  });
+
+  it("keeps the whole term visible, not just its first character", () => {
+    const body = `${"x".repeat(200)}${"long-search-term"}${"y".repeat(200)}`;
+    expect(matchArticleText(body, "long-search-term")).toContain("long-search-term");
+  });
+
+  it("collapses the line breaks inside the window", () => {
+    expect(matchArticleText("Belts\n\nand    grading", "and")).toBe("Belts and grading");
+  });
+
+  // This is what makes the database pre-filter safe to widen: a row matched by
+  // a `*` the reader typed, which PostgREST turns into a wildcard, is dropped
+  // here rather than shown as a hit with nothing in it.
+  it("returns null when the term is not really there", () => {
+    expect(matchArticleText("Gradings run twice a year.", "belt*system")).toBeNull();
   });
 });

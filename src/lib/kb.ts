@@ -288,6 +288,48 @@ export function groupThreads<A extends Threadable>(annotations: A[]): Thread<A>[
   }));
 }
 
+/**
+ * A search term as a SQL `LIKE` pattern, with the wildcards a reader typed
+ * treated as literal text.
+ *
+ * `%` and `_` are escaped with a backslash (Postgres's default LIKE escape), so
+ * searching for "50%" finds the words "50%" rather than every article
+ * containing "50". `*` is deliberately NOT escaped: PostgREST translates it to
+ * `%` inside an `ilike` value and offers no way to quote it, so it stays a
+ * wildcard here — which is safe only because every row the database returns is
+ * re-checked against the literal term in `matchArticleText`. A wildcard can
+ * therefore widen the candidate set but never change the results.
+ */
+export function likePattern(term: string): string {
+  const escaped = term.replace(/\\/g, "\\\\").replace(/[%_]/g, "\\$&");
+  return `%${escaped}%`;
+}
+
+/** How much of an article to show either side of a search hit. */
+const SNIPPET_RADIUS = 90;
+
+/**
+ * Where a search term appears in an article's text, and a one-line window
+ * around it so a result can say why it matched.
+ *
+ * Returns null when the term is not actually there. That is what makes the
+ * database pre-filter safe to widen: a `*` the reader typed, or a row matched
+ * on a case fold the two engines disagree about, is dropped here rather than
+ * shown as a hit with no visible match in it.
+ *
+ * Markdown punctuation is left in the snippet. Stripping it properly needs a
+ * parser, and a stray `**` in a preview line is a much smaller problem than a
+ * snippet that silently drops the word the reader searched for.
+ */
+export function matchArticleText(body: string, term: string): string | null {
+  const at = body.toLowerCase().indexOf(term.toLowerCase());
+  if (at === -1) return null;
+  const start = Math.max(0, at - SNIPPET_RADIUS);
+  const end = Math.min(body.length, at + term.length + SNIPPET_RADIUS);
+  const text = body.slice(start, end).replace(/\s+/g, " ").trim();
+  return `${start > 0 ? "…" : ""}${text}${end < body.length ? "…" : ""}`;
+}
+
 /** Who is asking. `userId` is null for a signed-out visitor. */
 export type Viewer = { userId: string | null; isManager: boolean };
 
