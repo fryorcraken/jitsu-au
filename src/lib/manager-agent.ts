@@ -66,6 +66,7 @@ export const AGENT_MANIFEST: {
         "file_waiver: a failed duplicate check is 503 duplicate_check_failed; nothing was filed and the call is safe to retry unchanged.",
         "file_waiver: accepts client_submission_id, which makes a retry safe. Send one per record in any bulk import; the result's `created` says whether that call filed the waiver or replayed an earlier one.",
         "file_waiver: a half-filed waiver (scan not stored) is 503 waiver_filing_incomplete with Retry-After — the row is KEPT and only a retry with the same id completes it. An id bound to another record is 409 submission_id_conflict and will never succeed.",
+        "file_waiver: client_submission_id draws from one namespace covering every waiver, paper and online, and every caller — not one scoped per token. It only ever resolves back to another paper filing, so a collision with an online signature is safe (409 submission_id_conflict), but two separate imports sharing the same id scheme can collide with each other. Prefer a random id per record.",
         "list_users / list_invoices: every invoice gained sessions_allowed and sessions_remaining.",
       ],
     },

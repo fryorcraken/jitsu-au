@@ -219,6 +219,17 @@ scripts/agent.sh file_waiver '{
 >   waiver, so never reuse one across different records — an id already bound to
 >   a different record is refused with `409 submission_id_conflict`, which no
 >   retry will ever fix.
+> - **The id space is global, not per token.** Every `client_submission_id` you
+>   mint — including the club's own online waiver signing — draws from one
+>   namespace covering the whole `waivers` table, not one scoped to your
+>   import or your token. `file_waiver` only ever resolves an id back to another
+>   paper filing, so an accidental collision with someone's online signature is
+>   safe: you get `409 submission_id_conflict`, never their waiver. But two
+>   different bulk imports (yours and another manager's, run separately) share
+>   that same space, so an id derived deterministically from record data (e.g.
+>   a UUID from the person's email) can collide across imports in a way a
+>   random UUID cannot. Prefer minting a fresh random id per record unless you
+>   have a specific reason to derive one.
 > - **Sending an id means you own finishing that record.** Without one, a failed
 >   filing cleans up after itself and means "nothing happened, send it again".
 >   With one, the row is KEPT so your retry can resume it, and a
