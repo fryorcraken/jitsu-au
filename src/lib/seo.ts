@@ -130,6 +130,9 @@ export const PUBLIC_PAGES: SitemapPage[] = [
 export const CRAWLER_DISALLOW = [
   "/account",
   "/api/",
+  // The knowledge base is signed-in only and renders client-side, so its
+  // `noindex` never reaches a crawler: exactly the case this list is for.
+  "/kb",
   "/lovable/",
   "/manager",
   "/membership",

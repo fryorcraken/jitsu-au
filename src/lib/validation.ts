@@ -1027,6 +1027,7 @@ export const managerAgentActions = [
   "file_waiver",
   "list_kb_sections",
   "save_kb_section",
+  "delete_kb_section",
   "list_kb_articles",
   "get_kb_article",
   "save_kb_article",
@@ -1503,6 +1504,30 @@ export const saveKbSectionSchema = z.object({
   position: z.number().int().min(0).max(100000).optional(),
 });
 export type SaveKbSectionInput = z.infer<typeof saveKbSectionSchema>;
+
+/**
+ * Manager: delete a section.
+ *
+ * Only the slug, because deleting one is not a decision with options: the
+ * articles filed under it are never deleted with it (`ON DELETE SET NULL`), so
+ * there is no "and its articles" variant to offer.
+ */
+export const deleteKbSectionSchema = z.object({ slug: kbSlugSchema });
+export type DeleteKbSectionInput = z.infer<typeof deleteKbSectionSchema>;
+
+/**
+ * A reader reaching the end of an article.
+ *
+ * Carries the version they actually read, not "the live one": those differ when
+ * somebody published while the page was open, and recording the live number
+ * would mark a member as having read wording they never saw — which is the one
+ * thing that would make "updated since you read it" a lie.
+ */
+export const markKbArticleReadSchema = z.object({
+  slug: kbSlugSchema,
+  version: z.number().int().positive(),
+});
+export type MarkKbArticleReadInput = z.infer<typeof markKbArticleReadSchema>;
 
 /** A reader searching the knowledge base from the top bar. */
 export const searchKnowledgeBaseSchema = z.object({

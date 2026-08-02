@@ -7,7 +7,9 @@ import {
   extractHeadings,
   flattenKbNav,
   headingSlug,
+  kbProgress,
   parseHeading,
+  readState,
   UNSECTIONED_TITLE,
   type KbEntryInput,
   type KbSectionInput,
@@ -223,5 +225,66 @@ describe("buildKbNav visibility", () => {
     ]);
     const byId = Object.fromEntries(nav[0].entries.map((e) => [e.slug, e.visibility]));
     expect(byId).toEqual({ "draft-policy": "managers", published: "members" });
+  });
+});
+
+describe("reading progress", () => {
+  /** An article the reader has read at `read`, live at `live`. */
+  const read = (slug: string, live: number, readVersion: number | null) =>
+    entry({ slug, version: live, read_version: readVersion });
+
+  it("counts an entry read at the live version as read", () => {
+    expect(readState(buildKbNav(sections, [read("a", 3, 3)])[0].entries[0])).toBe("read");
+  });
+
+  it("counts one that has been rewritten since as updated, not read", () => {
+    expect(readState(buildKbNav(sections, [read("a", 4, 3)])[0].entries[0])).toBe("updated");
+  });
+
+  it("counts one that was never opened as unread", () => {
+    expect(readState(buildKbNav(sections, [read("a", 1, null)])[0].entries[0])).toBe("unread");
+  });
+
+  // A link entry points at a page on the marketing site, which has no way to
+  // report back that somebody read it. Counting one would put a tick nobody can
+  // ever earn in the denominator.
+  it("leaves link entries out of the total entirely", () => {
+    const nav = buildKbNav(sections, [
+      read("a", 1, 1),
+      entry({ slug: "faq", link_path: "/faq", position: 20 }),
+    ]);
+    expect(kbProgress(nav)).toMatchObject({ read: 1, total: 1 });
+  });
+
+  it("adds up what has been read across the whole knowledge base", () => {
+    const nav = buildKbNav(sections, [
+      read("a", 1, 1),
+      { ...read("b", 2, 1), position: 20 },
+      { ...read("c", 1, null), position: 30 },
+    ]);
+    expect(kbProgress(nav)).toMatchObject({ read: 1, updated: 1, total: 3 });
+  });
+
+  // Reading order, not "most recently opened": the order a manager set is the
+  // onboarding path, so somebody who dipped into the syllabus is still sent
+  // back to what comes next.
+  it("points at the first entry that is unread or has changed", () => {
+    const nav = buildKbNav(sections, [
+      read("first", 1, 1),
+      { ...read("second", 3, 2), position: 20 },
+      { ...read("third", 1, null), position: 30 },
+    ]);
+    expect(kbProgress(nav).next?.slug).toBe("second");
+  });
+
+  it("has nothing left to point at once everything is read", () => {
+    const nav = buildKbNav(sections, [read("a", 1, 1), { ...read("b", 2, 2), position: 20 }]);
+    expect(kbProgress(nav).next).toBeNull();
+  });
+
+  // The empty knowledge base, and the one nobody has read: neither should make
+  // the progress panel divide by zero or claim anything.
+  it("says nothing about a knowledge base with nothing in it", () => {
+    expect(kbProgress([])).toMatchObject({ read: 0, total: 0, updated: 0, next: null });
   });
 });

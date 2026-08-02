@@ -11,6 +11,14 @@ export type ArticleDraft = {
   body_md: string;
   visibility: ArticleVisibility;
   annotations_enabled: boolean;
+  /** Slug of the section it sits in, or "" for none. */
+  section: string;
+  /** Lower sorts first within the section. */
+  position: number;
+  /** Sidebar label, or "" to fall back to the title. */
+  nav_title: string;
+  /** Non-empty makes the entry a LINK to a page elsewhere on the site. */
+  link_path: string;
 };
 
 /**
@@ -28,12 +36,21 @@ export type ArticleDraft = {
  * unchanged body is not an edit worth warning about losing.
  */
 export function isArticleDirty(draft: ArticleDraft, stored: ArticleDraft | null): boolean {
-  if (!stored) return Boolean(draft.title.trim() || draft.body_md.trim());
+  if (!stored) {
+    return Boolean(draft.title.trim() || draft.body_md.trim() || draft.link_path.trim());
+  }
   return (
     draft.title !== stored.title ||
     draft.body_md !== stored.body_md ||
     draft.visibility !== stored.visibility ||
-    draft.annotations_enabled !== stored.annotations_enabled
+    draft.annotations_enabled !== stored.annotations_enabled ||
+    // Placement counts as unsaved work for the same reason the text does: a
+    // manager who has just moved an article into "Start here" and clicks
+    // another one has lost that move, and nothing on the screen said so.
+    draft.section !== stored.section ||
+    draft.position !== stored.position ||
+    draft.nav_title !== stored.nav_title ||
+    draft.link_path !== stored.link_path
   );
 }
 
@@ -55,6 +72,68 @@ export function wideningVisibility(
 ): VisibilityChange {
   if (!stored || stored === next) return null;
   return visibilityReach[next] > visibilityReach[stored] ? { from: stored, to: next } : null;
+}
+
+/** Anything the reading order can move: a section, or an entry inside one. */
+export type Orderable = { slug: string; position: number };
+
+/**
+ * The step between two neighbours in the reading order.
+ *
+ * Ten, matching the seeded 10/20/30, so a manager (or the agent API) can still
+ * slot something between two entries by hand without renumbering anything.
+ */
+export const POSITION_STEP = 10;
+
+/**
+ * The position a new entry should take: after everything already there.
+ *
+ * A new article defaulting to 0 would land it at the TOP of the section it was
+ * filed into, ahead of the article the manager deliberately made first, which is
+ * the one thing the reading order is for.
+ */
+export function nextPosition(siblings: Orderable[]): number {
+  const highest = siblings.reduce((max, item) => Math.max(max, item.position), 0);
+  return highest + POSITION_STEP;
+}
+
+/**
+ * Move one item up or down its list, and report the rows whose position that
+ * changes.
+ *
+ * The whole list is renumbered in steps of ten and only the rows that actually
+ * moved are returned, which is what makes the arrows reliable rather than
+ * usually-right: positions default to 0, so a knowledge base nobody has ordered
+ * yet has every entry tied on the same number, and a "swap these two numbers"
+ * implementation would swap 0 for 0 and appear to do nothing. Renumbering breaks
+ * the tie once, on the first move, and after that the swaps are the only writes.
+ *
+ * `items` must already be IN the order they are shown, not in some order this
+ * function re-derives. Ties on `position` are broken by title in the sidebar
+ * (`buildKbNav`), and a second, slightly different sort here would move whatever
+ * this function thinks is above rather than what the manager can see is above.
+ *
+ * `direction` is -1 for up and 1 for down. Moving the first item up or the last
+ * one down returns nothing, so the caller can disable the arrow without a second
+ * definition of "first".
+ */
+export function reorder<T extends Orderable>(
+  items: T[],
+  slug: string,
+  direction: -1 | 1,
+): Orderable[] {
+  const ordered = items;
+  const from = ordered.findIndex((item) => item.slug === slug);
+  const to = from + direction;
+  if (from === -1 || to < 0 || to >= ordered.length) return [];
+
+  const moved = ordered.slice();
+  [moved[from], moved[to]] = [moved[to], moved[from]];
+
+  const before = new Map(items.map((item) => [item.slug, item.position]));
+  return moved
+    .map((item, index) => ({ slug: item.slug, position: (index + 1) * POSITION_STEP }))
+    .filter((item) => before.get(item.slug) !== item.position);
 }
 
 /**

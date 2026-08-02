@@ -12,11 +12,11 @@
 // know who is reading, and the reader's bearer token reaches a server function
 // through `attachSupabaseAuth` on an RPC from the browser, not during SSR.
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRight, ChevronRight, ExternalLink, List } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronRight, ExternalLink, List } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -28,10 +28,17 @@ import {
   deleteAnnotation,
   getKbArticle,
   listAnnotations,
+  markKbArticleRead,
   resolveAnnotation,
   updateAnnotation,
 } from "@/lib/kb.functions";
-import { adjacentEntries, entryBreadcrumbs, extractHeadings, type KbNavEntry } from "@/lib/kb-nav";
+import {
+  adjacentEntries,
+  entryBreadcrumbs,
+  extractHeadings,
+  readState,
+  type KbNavEntry,
+} from "@/lib/kb-nav";
 import { formatDate } from "@/lib/dates";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -92,6 +99,57 @@ function ArticlePage() {
   const headings = useMemo(() => (article ? extractHeadings(article.body_md) : []), [article]);
   const crumbs = entryBreadcrumbs(nav, slug);
   const { previous, next } = adjacentEntries(nav, slug);
+  const entry = crumbs?.entry ?? null;
+  const state = entry ? readState(entry) : "unread";
+
+  /**
+   * Mark the article read when the reader reaches the END of it.
+   *
+   * On reaching the end, not on opening: "opened" and "read" are different
+   * claims, and a progress list built on the first is one a member cannot
+   * trust. The sentinel sits above the previous/next links, so a short article
+   * that fits on one screen counts immediately (which is honest: it has been
+   * read) and a syllabus counts only when somebody has actually scrolled it.
+   *
+   * Fires once per article per visit. `markKbArticleRead` is an upsert, so a
+   * repeat would be harmless, but an observer that re-fires on every scroll
+   * back to the bottom would write on every wobble of a phone in somebody's
+   * hand.
+   */
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const markedRef = useRef<string | null>(null);
+  const markRead = useServerFn(markKbArticleRead);
+
+  useEffect(() => {
+    const target = endRef.current;
+    const version = article?.version;
+    if (!target || !version || !viewer?.signed_in) return;
+    const key = `${slug}@${version}`;
+    if (markedRef.current === key) return;
+
+    const observer = new IntersectionObserver((observed) => {
+      if (!observed.some((e) => e.isIntersecting)) return;
+      if (markedRef.current === key) return;
+      markedRef.current = key;
+      observer.disconnect();
+      void markRead({ data: { slug, version } })
+        .then((res) => {
+          // Refresh the sidebar so the tick appears where the reader is
+          // looking. Only on a write that actually landed: re-fetching after a
+          // refusal would show the same page again with nothing changed.
+          if (res.recorded) {
+            void queryClient.invalidateQueries({ queryKey: ["kb-nav"] });
+          }
+        })
+        // Progress is the one thing on this page nobody asked for, so a failure
+        // to record it says nothing at all to the reader.
+        .catch(() => {
+          markedRef.current = null;
+        });
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [slug, article?.version, viewer?.signed_in, markRead, queryClient]);
 
   const refreshAnnotations = () =>
     queryClient.invalidateQueries({ queryKey: ["kb-annotations", slug] });
@@ -162,11 +220,10 @@ function ArticlePage() {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-3xl font-bold md:text-4xl">{article.title}</h1>
           <Badge variant="outline">Version {article.version}</Badge>
-          {article.visibility !== "public" && (
-            <Badge variant="secondary">
-              {article.visibility === "managers" ? "Managers only" : "Members"}
-            </Badge>
-          )}
+          {/* Only the managers-only case is worth a badge. Everything here is
+              members-only by definition now, so a "Members" badge on every
+              article would be a label that never varies. */}
+          {article.visibility === "managers" && <Badge variant="secondary">Managers only</Badge>}
         </div>
         {/* No em dash: AGENTS.md bans them in user-facing copy, and this is copy
             on the page. `·` is the separator the index page already uses. */}
@@ -174,12 +231,18 @@ function ArticlePage() {
           Last updated {formatDate(article.updated_at)}
           {article.change_note ? ` · ${article.change_note}` : ""}
         </p>
+        {/* Kept, though the route gate means it should never appear: a session
+            that expires while the page is open resolves the reader as signed
+            out server-side, and the honest thing to show then is the way back
+            in rather than a comment box that will refuse everything typed into
+            it. */}
         {!viewer.signed_in && (
           <p className="mt-3 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+            Your session has ended.{" "}
             <Link to="/auth" search={{ redirect: `/kb/${slug}` }} className="underline">
-              Sign in
+              Sign in again
             </Link>{" "}
-            to leave a comment or keep private notes on this page.
+            to keep reading and commenting.
           </p>
         )}
       </header>
@@ -240,6 +303,20 @@ function ArticlePage() {
           await run(() => resolve({ data: { id, resolved } }), "Could not update that thread");
         }}
       />
+
+      {/* What the read observer watches. Deliberately after the article and
+          before the prev/next links: reaching it means the reader is at the end
+          of the text, not merely that the page loaded. */}
+      <div ref={endRef} aria-hidden className="h-px" />
+
+      {state !== "unread" && (
+        <p className="mt-8 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Check className="h-4 w-4" />
+          {state === "updated"
+            ? `You read version ${entry?.read_version} of this. It has been updated since.`
+            : "Read"}
+        </p>
+      )}
 
       {(previous || next) && (
         <nav

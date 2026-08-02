@@ -23,6 +23,7 @@ import {
 } from "@/lib/kb";
 import type { AnnotationVisibility, Viewer } from "@/lib/kb";
 import {
+  listKbSections,
   listSharedAnnotations,
   loadKbArticle,
   loadKbArticleRow,
@@ -35,10 +36,12 @@ import {
   deleteAnnotationSchema,
   getKbArticleSchema,
   kbSlugSchema,
+  markKbArticleReadSchema,
   nameWithPreferred,
   readKbArticleSchema,
   resolveAnnotationSchema,
   saveKbArticleSchema,
+  saveKbSectionSchema,
   searchKnowledgeBaseSchema,
   updateAnnotationSchema,
 } from "@/lib/validation";
@@ -61,22 +64,22 @@ async function adminClient(): Promise<KbClient> {
 /**
  * Who is asking, resolved from the request's bearer token.
  *
- * Deliberately NOT the `requireSupabaseAuth` middleware: a public article has
- * to render for a signed-out visitor, so "nobody" is a valid answer here rather
- * than a 401. Handlers that genuinely need a person say so themselves by
- * throwing on `viewer.userId === null`.
+ * Deliberately NOT the `requireSupabaseAuth` middleware: "nobody" is a valid
+ * answer here rather than a 401, and the handlers decide what to do with it.
+ * `canReadArticle` then refuses a signed-out viewer every article, so the
+ * difference from a 401 is the WORDS a reader gets (the same "not available"
+ * every unreadable article gets) rather than the access.
  *
  * An expired or junk token resolves to the same signed-out viewer as no token
- * at all — the reader sees the public view rather than an error about a session
- * they cannot do anything about.
+ * at all, and the page invites them to sign in again rather than showing an
+ * error about a session they cannot do anything about.
  *
  * `strict` changes what a FAILURE means, not what a valid answer is. Degrading
- * to signed-out is right for a reader (they get the public view of a public
- * page), and wrong for a manager screen: a momentary Supabase hiccup would
- * demote a real manager to "not a manager", and the resulting `Forbidden` is
- * indistinguishable from "you are not allowed", so the screen would tell them
- * they have no articles. In strict mode a failed identity or role lookup is
- * raised as itself.
+ * to signed-out is survivable for a reader, and wrong for a manager screen: a
+ * momentary Supabase hiccup would demote a real manager to "not a manager", and
+ * the resulting `Forbidden` is indistinguishable from "you are not allowed", so
+ * the screen would tell them they have no articles. In strict mode a failed
+ * identity or role lookup is raised as itself.
  */
 async function resolveViewer(db: KbClient, opts: { strict?: boolean } = {}): Promise<Viewer> {
   const getHeader = await headerGetter();
@@ -130,10 +133,25 @@ const NOT_FOUND = "That article does not exist, or is not available to you.";
 // `KbArticleRow` here would promise `created_by` and `created_at`, which were
 // never fetched, so reading one would typecheck and be `undefined`.
 
-/** What the manager list selects. */
+/**
+ * What the manager list selects.
+ *
+ * The placement columns are here rather than only on the single-article read
+ * because a LINK ENTRY has no version, so `getManagerArticle` cannot return one
+ * at all: the list is the only place the editor can learn where a link entry
+ * points and what it is called.
+ */
 type KbArticleListRow = Pick<
   KbArticleRow,
-  "id" | "slug" | "visibility" | "annotations_enabled" | "updated_at"
+  | "id"
+  | "slug"
+  | "visibility"
+  | "annotations_enabled"
+  | "updated_at"
+  | "section_id"
+  | "position"
+  | "nav_title"
+  | "link_path"
 >;
 
 /** What search selects: enough to label a hit and decide where it goes. */
@@ -142,9 +160,13 @@ type KbSearchArticleRow = Pick<
   "id" | "slug" | "visibility" | "nav_title" | "link_path"
 >;
 
-/** What the reader's nav query selects, which also needs the placement. */
-type KbNavArticleRow = KbArticleListRow &
-  Pick<KbArticleRow, "section_id" | "position" | "nav_title" | "link_path">;
+/**
+ * What the reader's nav query selects: the manager list's columns less
+ * `annotations_enabled`, which the sidebar has no use for. Stated as an `Omit`
+ * rather than inherited whole, because a cast that promises a column the
+ * `.select()` never asked for reads as `undefined` at runtime and typechecks.
+ */
+type KbNavArticleRow = Omit<KbArticleListRow, "annotations_enabled">;
 
 /**
  * Read one article, always the LIVE version.
@@ -245,6 +267,27 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
     liveByArticle = new Map((versions ?? []).map((v) => [v.article_id, v]));
   }
 
+  // What this reader has already read. One query for the whole knowledge base,
+  // on the same call that builds the sidebar, so a tick costs no extra round
+  // trip. Nobody else's reads are ever fetched: the filter is `user_id`, so
+  // there is no shape of downstream bug that could show one member another
+  // member's progress.
+  let readByArticle = new Map<string, number>();
+  if (viewer.userId && needVersions.length) {
+    const { data: reads, error: rErr } = await db
+      .from("kb_article_reads")
+      .select("article_id, version")
+      .eq("user_id", viewer.userId)
+      .in(
+        "article_id",
+        needVersions.map((a) => a.id),
+      );
+    // Progress is decoration on a page that works without it, so a failure here
+    // shows everything as unread rather than taking the sidebar down with it.
+    if (rErr) console.warn("[kb] could not read this member's progress:", rErr.message);
+    else readByArticle = new Map((reads ?? []).map((r) => [r.article_id, r.version]));
+  }
+
   const entries = readable
     .map((a) => {
       if (a.link_path) {
@@ -256,6 +299,9 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
           position: a.position,
           visibility: a.visibility,
           version: null as number | null,
+          // Never "read": a link entry is a signpost to a page on the marketing
+          // site, and there is nothing here to have finished.
+          read_version: null as number | null,
           updated_at: a.updated_at,
         };
       }
@@ -275,6 +321,10 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
         // badge on every row would be noise.
         visibility: a.visibility,
         version: live.version,
+        // The version this reader read, which is not always the live one: an
+        // article rewritten since is what the reader is told about, rather than
+        // it staying quietly ticked off.
+        read_version: readByArticle.get(a.id) ?? null,
         updated_at: live.created_at,
       };
     })
@@ -282,6 +332,52 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
 
   return { sections, entries };
 });
+
+/**
+ * Record that this reader has read an article, and which version of it.
+ *
+ * Called when the reader reaches the END of the page, not when they open it:
+ * "opened" and "read" are different claims, and a progress list built on the
+ * first is one a member cannot trust.
+ *
+ * Fails SOFT. Every refusal (signed out, cannot read it, no club record yet)
+ * comes back as `{ recorded: false }` rather than an exception, because nothing
+ * on the page depends on it: this is a background write behind a reader who is
+ * already reading, and a toast saying their progress could not be saved would
+ * be the most annoying possible response to a problem they cannot act on.
+ */
+export const markKbArticleRead = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => markKbArticleReadSchema.parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    const viewer = await resolveViewer(db);
+    if (!viewer.userId) return { recorded: false as const };
+
+    const row = await loadKbArticleRow(db, data.slug);
+    // A link entry has no page here, so there is nothing to have read. Counting
+    // one would also make 100% unreachable, since the reader can never come back
+    // and tick it off.
+    if (!row || row.link_path) return { recorded: false as const };
+    if (!canReadArticle(row.visibility, viewer)) return { recorded: false as const };
+
+    const { error } = await db.from("kb_article_reads").upsert(
+      {
+        user_id: viewer.userId,
+        article_id: row.id,
+        version: data.version,
+        read_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,article_id" },
+    );
+    if (error) {
+      // A foreign key violation here is a signed-in person with no `profiles`
+      // row, which the rest of the app treats as "not set up yet". Not an error
+      // worth failing a page over, and not one the reader can do anything about.
+      console.warn(`[kb] could not record a read of "${data.slug}":`, error.message);
+      return { recorded: false as const };
+    }
+    return { recorded: true as const, version: data.version };
+  });
 
 /**
  * Search the knowledge base from the top bar.
@@ -787,13 +883,22 @@ export const listManagerArticles = createServerFn({ method: "GET" }).handler(asy
   const db = await adminClient();
   await requireManagerViewer(db);
 
-  const { data: docs, error } = await db
-    .from("kb_articles")
-    .select("id, slug, visibility, annotations_enabled, created_at, updated_at")
-    .order("slug")
-    .limit(MANAGER_ARTICLES_LIMIT);
+  const [{ data: docs, error }, sectionRows] = await Promise.all([
+    db
+      .from("kb_articles")
+      .select(
+        "id, slug, visibility, annotations_enabled, updated_at, section_id, position, nav_title, link_path",
+      )
+      .order("slug")
+      .limit(MANAGER_ARTICLES_LIMIT),
+    listKbSections(db),
+  ]);
   if (error) throw new Error(error.message);
   const articles = (docs ?? []) as KbArticleListRow[];
+  // Reported by SLUG, never by id: the slug is what a save takes back, so the
+  // editor can move an article using exactly what it just read. Same rule the
+  // agent API's `list_kb_articles` follows.
+  const sectionSlugById = new Map(sectionRows.map((s) => [s.id, s.slug]));
   if (articles.length >= MANAGER_ARTICLES_LIMIT) {
     console.warn(
       `[kb] manager list capped at ${MANAGER_ARTICLES_LIMIT}; some articles are not shown`,
@@ -843,9 +948,51 @@ export const listManagerArticles = createServerFn({ method: "GET" }).handler(asy
       annotations_enabled: d.annotations_enabled,
       change_note: current?.change_note ?? null,
       updated_at: current?.created_at ?? d.updated_at,
+      // Where it sits, and what it is called there. A link entry is the row
+      // that needs all four: it has no version, so this is the only description
+      // of it the editor ever gets.
+      section: d.section_id ? (sectionSlugById.get(d.section_id) ?? "") : "",
+      position: d.position,
+      nav_title: d.nav_title,
+      link_path: d.link_path,
     };
   });
 });
+
+/** Every section, in sidebar order, for the manager screen. Managers only. */
+export const listManagerSections = createServerFn({ method: "GET" }).handler(async () => {
+  const db = await adminClient();
+  await requireManagerViewer(db);
+  const sections = await listKbSections(db);
+  return sections.map((s) => ({ slug: s.slug, title: s.title, position: s.position }));
+});
+
+/**
+ * Create a section, rename it, or move it in the sidebar. Straight through to
+ * the same `saveKbSection` the agent API calls, so an unknown slug creates one.
+ */
+export const saveManagerSection = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => saveKbSectionSchema.parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+    const { saveKbSection } = await import("@/lib/kb-admin");
+    return saveKbSection(db, data);
+  });
+
+/**
+ * Delete a section. Its articles are not deleted with it: they fall into the
+ * "Everything else" group, and the count comes back so the screen can say how
+ * many moved.
+ */
+export const deleteManagerSection = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ slug: kbSlugSchema }).parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+    const { deleteKbSection } = await import("@/lib/kb-admin");
+    return deleteKbSection(db, data.slug);
+  });
 
 /** One article for the editor: the live version, or a named one. Managers only. */
 export const getManagerArticle = createServerFn({ method: "POST" })

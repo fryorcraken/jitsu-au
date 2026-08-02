@@ -9,8 +9,18 @@
 // No server imports, no Supabase, no React — see src/lib/validation.ts for the
 // same rule and the same reason.
 
-/** Who may read an article. */
-export const articleVisibilities = ["public", "members", "managers"] as const;
+/**
+ * Who may read an article.
+ *
+ * There is no `public` level, and its absence is the feature rather than a gap
+ * waiting to be filled. The knowledge base is the club's own reading for people
+ * who train here, reached from the member area and nowhere else, so every reader
+ * is signed in before visibility is consulted at all (see `canReadArticle`). A
+ * third level meaning "anyone" would have been a setting a manager could pick
+ * that changed nothing, which is worse than not offering it: the club's public
+ * writing lives on the marketing pages and the blog.
+ */
+export const articleVisibilities = ["members", "managers"] as const;
 export type ArticleVisibility = (typeof articleVisibilities)[number];
 
 /**
@@ -24,14 +34,12 @@ export type ArticleVisibility = (typeof articleVisibilities)[number];
 export const visibilityReach: Record<ArticleVisibility, number> = {
   managers: 0,
   members: 1,
-  public: 2,
 };
 
 /** The people a visibility admits, for a sentence a manager reads. */
 export const visibilityAudience: Record<ArticleVisibility, string> = {
   managers: "Managers",
   members: "Members",
-  public: "Anyone, signed in or not",
 };
 
 /** A private note, or a comment thread everyone who can read the article sees. */
@@ -374,18 +382,22 @@ export function annotationReadFilter(viewer: Viewer): AnnotationReadFilter {
  *
  * The server functions and the manager agent endpoint both call this rather than
  * writing the comparison out, so "who can see a draft" has exactly one answer.
+ *
+ * **A signed-out viewer reads nothing**, whatever the article says. The route
+ * guard on `/kb` sends them to sign in first, but a guard is a redirect and this
+ * is the lock: every read still arrives here through a server function, so a
+ * saved URL, a stale tab or a direct RPC gets the same answer as the browser.
  */
 export function canReadArticle(visibility: ArticleVisibility, viewer: Viewer): boolean {
+  if (!viewer.userId) return false;
   if (viewer.isManager) return true;
-  if (visibility === "public") return true;
-  if (visibility === "members") return Boolean(viewer.userId);
-  return false;
+  return visibility === "members";
 }
 
 /**
- * Whether this viewer may annotate it. Stricter than reading on purpose: a
- * public article is readable signed-out, but every annotation belongs to a
- * person, so annotating always needs a login.
+ * Whether this viewer may annotate it. Reading already requires a login, so the
+ * remaining questions are whether the article takes comments at all and whether
+ * this person can read it.
  */
 export function canAnnotate(
   doc: { visibility: ArticleVisibility; annotations_enabled: boolean },

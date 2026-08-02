@@ -2,7 +2,8 @@
 
 Versioned markdown pages the club publishes to its members, which members can
 read and annotate, grouped into ordered sections and served at `/kb/<slug>` with
-an index at `/kb`.
+an index at `/kb`. **You have to be signed in to read any of it**, and you get
+there from the member area.
 
 The schema reference is `docs/database.md` ("Knowledge base"); this document is
 the product spec.
@@ -24,18 +25,32 @@ session" sat below "The full syllabus" for no reason a reader would recognise,
 and once you were inside a page there was no way to reach the next one. Sections,
 an explicit order, and a shell of its own are what fixed that.
 
-## It is its own section of the site
+## It is behind the sign-in, and part of the member area
+
+This is the club's reading for the people who train here, not marketing. So:
+
+- `/kb` and everything under it **requires a login**. A signed-out visitor is
+  sent to `/auth` and back afterwards.
+- Nothing in the marketing header or footer links to it. The ways in are the
+  member area: the sidebar's first item, and a card at the top of `/account`.
+- The sidebar's first entry, above the articles, is **"Back to member space"**,
+  and the top bar carries the same link. On a phone the drawer is the only
+  navigation on screen, so the way out cannot live only in the top bar. Neither
+  of them waits on the article list loading.
+
+The gate is enforced twice on purpose, and the two are not the same thing. The
+route redirect is a courtesy for a person; `canReadArticle` (`src/lib/kb.ts`)
+refuses a signed-out viewer every article, and that is what a saved URL, a stale
+tab or a direct call to the server function hits.
 
 Everything under `/kb` renders inside `KbLayout`, not `SiteLayout`. The ten-item
 marketing nav and the marketing footer are gone while you are in there; the top
-bar carries the logo, the words "Knowledge base", search, your account, and one
-link back to the club site. That last one moves into the minimal footer on a
-narrow screen, where the top bar has no room for it.
+bar carries the logo, the words "Knowledge base", search, and the way back to
+the member area.
 
 That is a deliberate trade, not an oversight. Reading the syllabus is not the
 moment to be sold a trial class, and a sidebar bolted underneath a full site
 header reads as a page with navigation attached rather than a place you are in.
-Getting to Pricing costs one extra click.
 
 ## The reading order is the product
 
@@ -110,41 +125,76 @@ the entry became a link.
   that, because the sidebar already owns the left from `lg` and three columns on
   a 1024px laptop leaves a reading column too narrow for a syllabus.
 
-> [!IMPORTANT]
-> **Markdown tables do not render yet.** The renderer is CommonMark-only, which
-> has no tables, so `| Belt | Time |` comes out as a paragraph of pipe
-> characters. Nothing warns when you save one. Write the syllabus as headings
-> and lists until `remark-gfm` is added, which needs a dependency change
-> (see the note at the top of `src/lib/kb-markdown.tsx`).
+**Markdown tables render.** `| Belt | Time |` is a table, in the reader and in
+the manager's preview, and a wide one scrolls inside its own box rather than
+scrolling the page sideways on a phone. Alignment markers (`| :-: |`) work, and
+so does inline markdown inside a cell.
+
+That is this repo's own `remark-kb-tables` plugin rather than `remark-gfm`,
+which would have meant a dependency and a wait for Lovable to re-resolve the
+lockfile. The rest of GFM (strikethrough, task lists, footnotes) is still not
+there; if the club ever wants it, that is the moment to add the real plugin and
+delete ours.
+
+## Reading progress
+
+The knowledge base is a path, so it keeps track of how far along it a member is.
+
+- An article is marked read when the reader reaches **the end of it**, not when
+  they open it. "Opened" and "read" are different claims, and a list built on the
+  first is one nobody can trust. A short article that fits on one screen counts
+  straight away, which is honest; a syllabus counts once somebody has scrolled it.
+- The sidebar ticks off what has been read, and the index page shows "3 of 9
+  read" with a bar, plus a **"carry on where you left off"** card pointing at the
+  first thing in reading order that is unread. Reading order, not "most recently
+  opened": somebody who dipped into the syllabus is still handed the thing that
+  comes next on the path.
+- What is recorded is the VERSION they read. An article rewritten afterwards is
+  shown as **"updated since you read it"** rather than staying quietly ticked
+  off, and it becomes the next thing the index points at. A tick that claimed
+  they had read wording that did not exist when they read it would be the one
+  thing that makes the whole feature untrustworthy.
+- **Link entries are not counted.** A page on the marketing site cannot report
+  back that it was read, so counting one would put a tick nobody can ever earn
+  into the total and leave "9 of 10" as the best a member could do.
+- The progress panel appears only once there is progress. "0 of 9 read" is a
+  scoreboard shown to somebody who has done nothing wrong.
+
+**A member's progress is theirs.** No manager screen and no agent action can read
+it, and the table's only policy is owner-scoped. It is the same call the feature
+already makes about private notes. It is also decoration: if the read fails or
+the write does, the page works and everything shows as unread.
 
 ## Who sees what
 
-Each article carries a `visibility`:
+Everyone reading is signed in, so an article's `visibility` decides which of
+them:
 
 | Visibility | Who can read it                     | Typical use            |
 | ---------- | ----------------------------------- | ---------------------- |
-| `public`   | anyone, signed in or not            | a published policy     |
 | `members`  | any signed-in person the club knows | handbooks, house rules |
 | `managers` | managers only                       | drafts, internal notes |
 
 `members` is the default for a new article, on purpose: the safe failure for a
-mis-set visibility is "a member had to sign in", not "a draft policy was public".
+mis-set visibility is "every member read the draft" rather than "the manager
+could not find the article they wrote".
 
-**Annotating always requires a login**, even on a public article, because every
-annotation belongs to a person. A signed-out reader sees the article and a
-prompt to sign in.
+There is deliberately **no `public` level**. It used to exist, and once the
+section needed a login it was a setting a manager could pick that changed
+nothing, labelled "anyone, signed in or not" while meaning the opposite. What
+the club publishes to the world lives on the marketing pages and the blog.
 
 ## Ways in
 
-The knowledge base is reachable from the site header, the footer's Explore
-column, the member area sidebar (its first item), a card at the top of
-`/account`, and the waiver-confirmation email, which points a brand-new person at
-it while they wait for approval. Managers reach the editor from their own sidebar
+From the member area: the sidebar's first item, and a card at the top of
+`/account`. Managers additionally reach the editor from their own sidebar
 ("Knowledge base editor"), which is a different entry from the reader above it.
 
-That list exists because the feature previously had **none** of them: nothing on
-the site linked to `/docs` at all, so the only ways in were typing the URL or a
-manager pasting a link.
+The waiver-confirmation email **mentions** the knowledge base and deliberately
+does not link to it. Whoever is reading that email cannot sign in yet: their
+account is created locked, and a manager approving the waiver is what sends the
+sign-in link. A link there would land a brand-new person on a sign-in screen
+they have no password for.
 
 ## Private notes and shared threads
 
@@ -175,9 +225,9 @@ whole.
 
 ### The name a comment is signed with
 
-A shared comment can be as visible as a blog comment (every member who can read
-the article, or on a `public` article, anyone), so on the member-facing page it
-is signed with the same privacy-conscious name: the commenter's own
+A shared comment is visible to every member who can read the article, so on the
+member-facing page it is signed with the same privacy-conscious name a blog
+comment gets: the commenter's own
 `display_name` override, else "preferred/first name + last initial"
 (`commentDisplayName` in `src/lib/validation.ts`), never the full legal name.
 
@@ -228,7 +278,7 @@ comment on older wording is a perfectly good comment.
 older one, and that is deliberate rather than a missing feature: visibility is a
 property of the article, not of each version, so serving an older version to
 whoever the _current_ visibility admits would publish the drafting history of
-every article that was once managers-only. A manager drafting a policy at
+every article that was once a managers-only draft. A manager drafting a policy at
 `managers` visibility and then publishing it to members would, without this,
 hand every member every draft they went through. Only a **manager** can read a
 specific version, on the manager screen or through the agent API.
@@ -255,9 +305,8 @@ What is here that the waiver template does not have:
 - **Feedback.** Open shared threads members left, quoted passage and all.
   Private notes are never listed here. Replying happens on the article itself.
 
-Widening who can read an article (managers → members, members → public) asks
-first. Narrowing does not: it takes an article away from people, which is
-recoverable.
+Widening who can read an article (managers → members) asks first. Narrowing does
+not: it takes an article away from people, which is recoverable.
 
 The same distinction decides the ORDER a save writes in, which matters when half
 of it fails. Widening writes the new text first and the wider audience second, so
@@ -266,11 +315,28 @@ the narrower audience first, so a failure leaves the old text under it rather
 than publishing the new text to the audience it was being taken away from. Either
 way the failure direction is "fewer people can read it".
 
-> [!NOTE]
-> **Sections, order and link entries are agent-only for now.** The screen edits
-> an article's text and who can read it; it does not yet set `section`,
-> `position`, `nav_title` or `link_path`, so the reading order a member walks is
-> still shaped through the agent API. That is a gap, not a decision.
+**The reading order is editable here too.** The list down the side is not a flat
+alphabetical index next to a separate ordering panel: it IS the sidebar a member
+sees, sections and all, and it is edited in place.
+
+- **Up/down arrows** on an entry move it inside its section, and on a section
+  heading move the whole section. An arrow at the end of a list is disabled
+  rather than doing nothing.
+- **The section select** on the left moves an article between sections, and puts
+  it at the END of the one it lands in. Anywhere else would look like the select
+  was also shuffling the order.
+- **New section** takes a name; positions are handed out in tens so there is
+  always room to slot something between two others. Deleting a section keeps its
+  articles, dropping them into "Everything else", and the confirmation says how
+  many that is.
+- **New link** creates a link entry: a name for the sidebar and a path on this
+  site. An existing link entry can be turned back into an article, and the
+  editor says the link is only replaced when you save.
+- Moving something writes **no new version**, so reordering the knowledge base
+  never tells every reader an article was updated.
+
+Everything here does the same thing to the same data as the agent API, through
+the same code (`kb-admin.ts`). Neither is the "real" one.
 
 ### From an agent: `/api/manager/agent`
 
@@ -278,9 +344,10 @@ Driven by the `uts-manager-agent` skill, for the case the editor is bad at: an
 agent applying a marked-up draft rather than a person typing markdown into a
 textarea, and everything to do with the reading order.
 
-Six actions: `list_kb_sections`, `save_kb_section`, `list_kb_articles`,
-`get_kb_article`, `save_kb_article`, `list_kb_comments`. The manifest at
-`GET /api/manager/agent` is the runtime source of truth for their parameters.
+Seven actions: `list_kb_sections`, `save_kb_section`, `delete_kb_section`,
+`list_kb_articles`, `get_kb_article`, `save_kb_article`, `list_kb_comments`. The
+manifest at `GET /api/manager/agent` is the runtime source of truth for their
+parameters.
 
 Four things that bite:
 
@@ -317,31 +384,33 @@ syllabus, our history, how to contribute) are content, written through the skill
 
 ## SEO
 
-`/kb` and `/kb/<slug>` are `noindex`. Most of what they serve is members-only, so
-they are not marketing pages, and an index would advertise the slug of every
-managers-only draft to a crawler that cannot read any of them.
+`/kb` is in `robots.txt`'s disallow list, and every page under it is `noindex`
+as well. Both, because they answer different questions: a crawler cannot read a
+page that needs a login, so there is nothing to spend crawl budget on, and the
+section renders client-side, so a `noindex` tag would never reach a crawler
+anyway.
 
-Making a genuinely public article indexable is a deliberate change: drop the
-`noindex`, give the page a real canonical, and add it to `PUBLIC_PAGES` in
-`src/lib/seo.ts`. `src/lib/seo.test.ts` enforces that pairing, so a page cannot
-be indexable and missing from the sitemap.
+Making an article public is not a matter of dropping the `noindex`: the whole
+section is behind the sign-in, so publishing something to the world means writing
+it as a marketing page or a blog post instead.
 
 ## Where the code lives
 
-| Concern                                  | File                                                |
-| ---------------------------------------- | --------------------------------------------------- |
-| Block splitting, anchoring, permissions  | `src/lib/kb.ts` (pure, tested)                      |
-| Sections, reading order, headings        | `src/lib/kb-nav.ts` (pure, tested)                  |
-| Editor decisions (dirty, widening, slug) | `src/lib/kb-editor.ts` (pure, tested)               |
-| Saving, versioning, promotion, sections  | `src/lib/kb-admin.ts`                               |
-| Reader/annotation server functions       | `src/lib/kb.functions.ts`                           |
-| Wire schemas                             | `src/lib/validation.ts`                             |
-| Article typography                       | `src/lib/kb-markdown.tsx`                           |
-| Shell (top bar, sidebar, search)         | `src/components/site/KbLayout.tsx`                  |
-| Reader UI                                | `src/components/site/KbArticleReader.tsx`           |
-| Reader routes                            | `src/routes/kb/route.tsx`, `index.tsx`, `$slug.tsx` |
-| Manager screen                           | `src/routes/_authenticated/manager.kb.tsx`          |
-| Manager API actions                      | `src/routes/api/manager/agent.ts`                   |
+| Concern                                     | File                                                |
+| ------------------------------------------- | --------------------------------------------------- |
+| Block splitting, anchoring, permissions     | `src/lib/kb.ts` (pure, tested)                      |
+| Sections, reading order, progress, headings | `src/lib/kb-nav.ts` (pure, tested)                  |
+| Editor decisions (dirty, widening, reorder) | `src/lib/kb-editor.ts` (pure, tested)               |
+| Saving, versioning, promotion, sections     | `src/lib/kb-admin.ts`                               |
+| Reader/annotation/progress server functions | `src/lib/kb.functions.ts`                           |
+| Wire schemas                                | `src/lib/validation.ts`                             |
+| Article typography                          | `src/lib/kb-markdown.tsx`                           |
+| Markdown tables                             | `src/lib/remark-kb-tables.ts` (pure, tested)        |
+| Shell (top bar, sidebar, search, progress)  | `src/components/site/KbLayout.tsx`                  |
+| Reader UI                                   | `src/components/site/KbArticleReader.tsx`           |
+| Sign-in gate + reader routes                | `src/routes/kb/route.tsx`, `index.tsx`, `$slug.tsx` |
+| Manager screen                              | `src/routes/_authenticated/manager.kb.tsx`          |
+| Manager API actions                         | `src/routes/api/manager/agent.ts`                   |
 
 `src/lib/kb-types.ts` aliases the generated
 `src/integrations/supabase/types.ts`, with one narrowing: `visibility` is a text

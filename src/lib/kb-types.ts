@@ -35,6 +35,9 @@ export type KbArticleRow = Omit<Tables["kb_articles"]["Row"], "visibility"> & {
 /** One saved version of an article's text. */
 export type KbArticleVersionRow = Tables["kb_article_versions"]["Row"];
 
+/** That a person read an article, and which version of it they read. */
+export type KbArticleReadRow = Tables["kb_article_reads"]["Row"];
+
 /** A private note or a shared comment, anchored to a block of a version. */
 export type KbAnnotationRow = Omit<Tables["kb_annotations"]["Row"], "visibility"> & {
   visibility: AnnotationVisibility;

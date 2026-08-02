@@ -149,6 +149,43 @@ export async function saveKbSection(
 }
 
 /**
+ * Delete a section.
+ *
+ * Its articles are NOT deleted with it — `section_id` is `ON DELETE SET NULL`,
+ * so they fall into the "Everything else" group, which is visible and
+ * recoverable. That is the whole reason deleting one is safe enough to offer on
+ * a screen: the worst case is a manager re-filing a few articles, not a club
+ * losing its handbook because it tidied its navigation.
+ *
+ * Reports how many articles were displaced so the caller can say so, rather
+ * than a silent "deleted" that leaves the manager to discover the sidebar has
+ * changed shape.
+ */
+export async function deleteKbSection(
+  db: KbClient,
+  slug: string,
+): Promise<{ slug: string; displaced: number }> {
+  const { data: section, error: findErr } = await db
+    .from("kb_sections")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (findErr) throw new Error(findErr.message);
+  if (!section) throw new Error(`There is no section "${slug}".`);
+
+  // Counted BEFORE the delete: afterwards the rows no longer name it.
+  const { count, error: cntErr } = await db
+    .from("kb_articles")
+    .select("id", { count: "exact", head: true })
+    .eq("section_id", section.id);
+  if (cntErr) throw new Error(cntErr.message);
+
+  const { error } = await db.from("kb_sections").delete().eq("id", section.id);
+  if (error) throw new Error(error.message);
+  return { slug, displaced: count ?? 0 };
+}
+
+/**
  * Resolve a section slug to its id for a save.
  *
  * An empty string is "take it out of every section" (it lands in the

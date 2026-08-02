@@ -679,6 +679,42 @@ export type Database = {
           },
         ]
       }
+      kb_article_reads: {
+        Row: {
+          article_id: string
+          read_at: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          article_id: string
+          read_at?: string
+          user_id: string
+          version: number
+        }
+        Update: {
+          article_id?: string
+          read_at?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_article_reads_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "kb_articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_article_reads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       kb_article_versions: {
         Row: {
           article_id: string

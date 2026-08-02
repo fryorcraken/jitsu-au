@@ -247,9 +247,12 @@ Core tables:
   which version. The document itself lives in the repo (`src/lib/code-of-conduct.ts`),
   not in a table: no template editor, no PDF, no approval. Signing it is never a
   gate on anything. Product flows: `docs/code-of-conduct.md`.
-- `kb_sections` / `kb_articles` / `kb_article_versions` / `kb_annotations` — the
-  **knowledge base**: versioned markdown pages served at `/kb/<slug>` that
-  members read and annotate, grouped into ordered sections. That order (section
+- `kb_sections` / `kb_articles` / `kb_article_versions` / `kb_annotations` /
+  `kb_article_reads` — the **knowledge base**: versioned markdown pages served at
+  `/kb/<slug>` that members read and annotate, grouped into ordered sections.
+  **Signed-in only**, reached from the member area: `/kb` redirects a signed-out
+  visitor to `/auth`, `canReadArticle` refuses them every article, and article
+  `visibility` is `members | managers` with no public level. That order (section
   `position`, then article `position`) is the single source of the sidebar, the
   index page and the previous/next links, so it is the onboarding path members
   walk. Versioning copies `waiver_templates` (save writes a new version and
@@ -259,8 +262,11 @@ Core tables:
   (readable by its author alone, **managers included**) or `shared` (a thread).
   An article row carrying `link_path` is not an article at all but a sidebar
   **link entry** pointing at a page elsewhere on the site (`/first-class`,
-  `/faq`), with no versions of its own. Managers edit all of this through the
-  manager agent API, not a web editor. Product flows: `docs/knowledge-base.md`.
+  `/faq`), with no versions of its own. `kb_article_reads` is one row per person
+  per article recording which version they read, so the sidebar can tick off the
+  path; it is owner-scoped and **no manager screen reads it**. Managers edit all
+  of this at `/manager/kb` or through the manager agent API, which do the same
+  things to the same data. Product flows: `docs/knowledge-base.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.
