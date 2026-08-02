@@ -41,16 +41,27 @@ CREATE TABLE public.club_semesters (
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT club_semesters_order_ok CHECK (ends_on >= starts_on),
-  CONSTRAINT club_semesters_year_half_unique UNIQUE (year, half)
+  CONSTRAINT club_semesters_year_half_unique UNIQUE (year, half),
+  -- `code` is derived from `year`/`half` everywhere the app writes it, but
+  -- nothing stops the two from being written inconsistently by hand (or by a
+  -- future bug) without this: UNIQUE(code) and UNIQUE(year, half) each hold on
+  -- their own even if a row's code says '2026-s1' while its year/half say
+  -- 2027/2.
+  CONSTRAINT club_semesters_code_matches_year_half
+    CHECK (code = year::text || '-s' || half::text)
 );
 
--- Two semesters can never overlap: an ambiguous "which semester is running
--- now" would silently break the purchase list (`sellableSemesters`), which
--- assumes at most one semester covers any given day. `daterange` carries its
--- own built-in GiST operator class, so no extension is needed here.
+-- Two ACTIVE semesters can never overlap: an ambiguous "which semester is
+-- running now" would silently break the purchase list (`sellableSemesters`),
+-- which assumes at most one semester covers any given day. Scoped to
+-- `is_active` (a partial exclusion constraint) rather than every row, so
+-- retiring a wrongly-dated semester and adding its corrected replacement over
+-- the same dates is not blocked by the mistake it is replacing. `daterange`
+-- carries its own built-in GiST operator class, so no extension is needed here.
 ALTER TABLE public.club_semesters
   ADD CONSTRAINT club_semesters_no_overlap
-  EXCLUDE USING gist (daterange(starts_on, ends_on, '[]') WITH &&);
+  EXCLUDE USING gist (daterange(starts_on, ends_on, '[]') WITH &&)
+  WHERE (is_active);
 
 -- ---------- Grants ----------
 -- Supabase's bootstrap grants ALL on every new table to anon and authenticated,
