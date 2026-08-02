@@ -115,10 +115,23 @@ driven directly by the bundled skill.
       — neither sees a row the other has not committed. Closing that needs an
       idempotency key on the filing itself; until then a bulk importer that
       retries in flight can still double-file.
-    - A failed probe is `503 duplicate_check_failed`, deliberately distinct
-      from `file_waiver_failed` and deliberately silent about
-      `confirm_duplicate` — offering that flag as the fix for an outage invites
-      a retry policy to disable the guard wholesale.
+    - A failed probe is `503 duplicate_check_failed` with a `Retry-After`
+      header, deliberately distinct from `file_waiver_failed` and deliberately
+      silent about `confirm_duplicate` — offering that flag as the fix for an
+      outage invites a retry policy to disable the guard wholesale. The 503 is
+      documented as "nothing was filed, safe to retry unchanged", which is true
+      only because the probe runs BEFORE `resolvePersonId`. Moving person
+      creation above it would strand an auth user per retry, and no status-code
+      test would notice.
+    - The probe matches a **UTC-day range**, not the midnight instant a paper
+      filing writes, so it catches an online signature on the same day too. The
+      club is UTC+10/+11, so a Sydney-morning signature falls on the previous
+      UTC day — known and accepted, since widening to the club's own day would
+      collide across two dates instead.
+    - `paperWaiverUploadSchema` is `.strict()`, matching `editInvoiceSchema`. A
+      misspelled `confirm_duplicate` would otherwise be stripped by Zod, default
+      to false, and return the same 409 forever while the message told the
+      caller to do what they thought they just did.
 - **Agent glue:** `.claude/skills/uts-manager-agent/` — a skill (with a `curl`
   helper) that documents how to call the endpoint. An MCP wrapper is equally
   simple: one tool per manifest action, forwarding to this endpoint.
@@ -144,7 +157,20 @@ refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
 test so the bump is a deliberate edit, and the current value is `"2"`.
 
-**Add a `changes` entry in the same edit.** A version number alone says only
+**Responses carry `version` too**, not just the manifest, so a client that
+cached the manifest at the start of a long run can notice a bump per call
+instead of meeting it as an unexplained refusal. Error payload beyond
+`code`/`message` is nested under `error.details` — never flat-merged, so the
+envelope can grow a reserved key without shadowing a caller's field.
+
+**There is no version pinning.** A caller cannot request the old behaviour; the
+contract is latest-only. That is defensible for a single-tenant API with
+manager-issued tokens where every caller is known, but it means `changes` is a
+record of what already happened, not a negotiation — say so rather than letting
+somebody build a client that expects to pin.
+
+**Add a `changes` entry in the same edit**, with `breaking: true` when the
+version turns a call that used to succeed into an error. A version number alone says only
 that something moved; the client that most needs to know what is the one that
 read the manifest at the start of a long import and cannot re-read it mid-run.
 A test asserts the head of `changes` matches `version`, so the two cannot drift.

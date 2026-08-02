@@ -60,9 +60,20 @@ function fakeAdminForListInvoices(rows: (typeof ROW)[], total: number) {
  * A fake service-role client covering the chains edit_invoice walks: find the
  * row, update it, then look its plan up to decorate the echo. Records the patch
  * so a test can assert nothing was written when the edit was refused.
+ *
+ * The update chain EVALUATES its filters rather than ignoring them, against
+ * `atWriteTime` (defaulting to `existing`). That is what makes the
+ * compare-and-swap tests real: a fake that always returned a row would pass
+ * just as happily with the guard deleted, which is the trap this whole PR keeps
+ * finding in its own tests. Pass a different `atWriteTime` to model another
+ * writer landing between the read and the write.
  */
-function fakeAdminForEditInvoice(existing: Record<string, unknown> | null, raced = false) {
+function fakeAdminForEditInvoice(
+  existing: Record<string, unknown> | null,
+  atWriteTime?: Record<string, unknown> | null,
+) {
   const updates: Record<string, unknown>[] = [];
+  const current = atWriteTime === undefined ? existing : atWriteTime;
   return {
     updates,
     db: {
@@ -72,15 +83,24 @@ function fakeAdminForEditInvoice(existing: Record<string, unknown> | null, raced
             select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(ok(existing)) }) }),
             update: (patch: Record<string, unknown>) => {
               updates.push(patch);
-              // The update is guarded on the paid_at that was read, so the chain
-              // is .eq("id") then .eq/.is("paid_at") then .select().maybeSingle().
-              // `raced` models a concurrent write moving paid_at underneath us:
-              // the filter matches nothing and PostgREST returns null.
+              const filters: [string, unknown][] = [];
               const chain = {
-                eq: () => chain,
-                is: () => chain,
+                eq: (col: string, val: unknown) => {
+                  filters.push([col, val]);
+                  return chain;
+                },
+                is: (col: string, val: unknown) => {
+                  filters.push([col, val]);
+                  return chain;
+                },
                 select: () => chain,
-                maybeSingle: () => Promise.resolve(ok(raced ? null : { ...existing, ...patch })),
+                maybeSingle: () => {
+                  if (!current) return Promise.resolve(ok(null));
+                  const matches = filters.every(([col, val]) =>
+                    col === "id" ? current.id === val : (current[col] ?? null) === val,
+                  );
+                  return Promise.resolve(ok(matches ? { ...current, ...patch } : null));
+                },
               };
               return chain;
             },
@@ -200,8 +220,8 @@ describe("manager agent route", () => {
       expect(res.status).toBe(409);
       const body = await res.json();
       expect(body.error.code).toBe("reconciled_invoice");
-      expect(body.error.blocked).toEqual(["price_cents"]);
-      expect(body.error.previous).toEqual({ price_cents: 0 });
+      expect(body.error.details.blocked).toEqual(["price_cents"]);
+      expect(body.error.details.previous).toEqual({ price_cents: 0 });
       // And nothing was written.
       expect(fake.updates).toHaveLength(0);
     });
@@ -234,9 +254,9 @@ describe("manager agent route", () => {
       });
       expect(res.status).toBe(409);
       const body = await res.json();
-      expect(body.error.blocked).toEqual(["price_cents"]);
-      expect(body.error.previous).toEqual({ price_cents: 0 });
-      expect(body.error.previous).not.toHaveProperty("notes");
+      expect(body.error.details.blocked).toEqual(["price_cents"]);
+      expect(body.error.details.previous).toEqual({ price_cents: 0 });
+      expect(body.error.details.previous).not.toHaveProperty("notes");
       // Nothing written, including the unguarded field sent alongside.
       expect(fake.updates).toHaveLength(0);
     });
@@ -283,7 +303,11 @@ describe("manager agent route", () => {
   // would otherwise let a guarded edit through against an invoice that became
   // paid after the check said it was not.
   it("refuses the write if the invoice was reconciled between the check and the update", async () => {
-    const fake = fakeAdminForEditInvoice({ ...ROW, id: INVOICE_ID, paid_at: null }, true);
+    const fake = fakeAdminForEditInvoice(
+      { ...ROW, id: INVOICE_ID, paid_at: null },
+      // A payment reconciled after the guard read the row as unpaid.
+      { ...ROW, id: INVOICE_ID, paid_at: "2026-07-28T11:06:27.181Z" },
+    );
     currentAdmin = fake.db;
     const res = await post({
       action: "edit_invoice",
@@ -294,6 +318,24 @@ describe("manager agent route", () => {
     expect(body.error.code).toBe("invoice_changed");
     // Tells the caller to re-read rather than blindly retry into the same race.
     expect(body.error.message).toMatch(/read it again/i);
+  });
+
+  // Without pinning the edited columns too, this call would succeed and log
+  // `"cash" -> "card"` — a transition that never happened, in the club's only
+  // record of who changed an invoice.
+  it("refuses the write if an edited field moved under it, so the audit cannot lie", async () => {
+    const fake = fakeAdminForEditInvoice(
+      { ...ROW, id: INVOICE_ID, paid_at: null, notes: "cash" },
+      // Another manager got there first.
+      { ...ROW, id: INVOICE_ID, paid_at: null, notes: "cheque" },
+    );
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "edit_invoice",
+      params: { id: INVOICE_ID, notes: "card" },
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("invoice_changed");
   });
 
   it("reports a missing invoice as not_found rather than a guard failure", async () => {
@@ -333,8 +375,8 @@ describe("manager agent route", () => {
       expect(body.error.code).toBe("duplicate_waiver");
       // The ids are the actionable part: without them a caller cannot go and
       // look at what it collided with.
-      expect(body.error.existing).toEqual(rows);
-      expect(body.error.truncated).toBe(false);
+      expect(body.error.details.existing).toEqual(rows);
+      expect(body.error.details.truncated).toBe(false);
     });
 
     it("passes truncation through so a caller is not told a capped count is the total", async () => {
@@ -343,7 +385,7 @@ describe("manager agent route", () => {
       filePaperWaiverMock.mockRejectedValue(new DuplicateWaiverError(rows, true));
 
       const body = await (await post({ action: "file_waiver", params })).json();
-      expect(body.error.truncated).toBe(true);
+      expect(body.error.details.truncated).toBe(true);
     });
 
     // 503, not 4xx: the request is fine and nothing was filed, so the agent

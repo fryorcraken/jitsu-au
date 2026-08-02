@@ -190,6 +190,10 @@ function fakeAdmin(opts: {
       if (table === "waivers") {
         const dupProbe = {
           eq: () => dupProbe,
+          // The probe matches a RANGE over the signing day, not equality on
+          // midnight — an online waiver stores a real wall-clock time.
+          gte: () => dupProbe,
+          lt: () => dupProbe,
           order: () => dupProbe,
           limit: () => Promise.resolve(opts.duplicates ?? ok([])),
         };

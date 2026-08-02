@@ -29,6 +29,7 @@ import {
   MAX_SCAN_BYTES,
   base64ByteLength,
   normalizeEmail,
+  nextUtcDay,
   paperWaiverUploadSchema,
   profileFullName,
   resolveNamePrefill,
@@ -1381,6 +1382,19 @@ describe("isPaperWaiver", () => {
   });
 });
 
+describe("nextUtcDay", () => {
+  it("advances one UTC day", () => {
+    expect(nextUtcDay("2026-07-20")).toBe("2026-07-21");
+  });
+
+  it("rolls over month and year ends, and handles a leap day", () => {
+    expect(nextUtcDay("2026-07-31")).toBe("2026-08-01");
+    expect(nextUtcDay("2026-12-31")).toBe("2027-01-01");
+    expect(nextUtcDay("2028-02-28")).toBe("2028-02-29");
+    expect(nextUtcDay("2027-02-28")).toBe("2027-03-01");
+  });
+});
+
 describe("paperWaiverUploadSchema", () => {
   /** A one-page scan: base64 is not decoded by the schema, only sized. */
   const onePage = [{ name: "waiver.pdf", type: "application/pdf" as const, data: "aGlw" }];
@@ -1400,6 +1414,26 @@ describe("paperWaiverUploadSchema", () => {
 
   it("accepts a filed adult form", () => {
     expect(paperWaiverUploadSchema.safeParse(validAdult).success).toBe(true);
+  });
+
+  // Without .strict() Zod STRIPS an unknown key, so a misspelled confirm flag
+  // would vanish, default to false, and return the same 409 — telling the caller
+  // to do the thing they believe they just did, with no signal it never arrived.
+  // An agent guessing a name from prose is exactly who this endpoint serves.
+  it("rejects a misspelled confirm flag instead of silently dropping it", () => {
+    const result = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      confirmDuplicate: true,
+    });
+    expect(result.success).toBe(false);
+    expect(result.success ? "" : result.error.issues[0].message).toMatch(/confirmDuplicate/);
+  });
+
+  it("still takes the correctly spelled flag", () => {
+    const parsed = paperWaiverUploadSchema.parse({ ...validAdult, confirm_duplicate: true });
+    expect(parsed.confirm_duplicate).toBe(true);
+    // And defaults it when absent, rather than leaving it undefined.
+    expect(paperWaiverUploadSchema.parse(validAdult).confirm_duplicate).toBe(false);
   });
 
   it("does not ask for a signature, ticks or health answers: they are on the scan", () => {
