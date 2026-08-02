@@ -117,6 +117,12 @@ async function resolveViewer(db: DocumentClient, opts: { strict?: boolean } = {}
  */
 const NOT_FOUND = "That document does not exist, or is not available to you.";
 
+/** The columns both index queries select. Narrower than `DocumentRow` on purpose. */
+type DocumentListRow = Pick<
+  DocumentRow,
+  "id" | "slug" | "visibility" | "annotations_enabled" | "updated_at"
+>;
+
 /**
  * Read one document, always the LIVE version.
  *
@@ -157,7 +163,10 @@ export const listDocuments = createServerFn({ method: "GET" }).handler(async () 
     .order("slug");
   if (error) throw new Error(error.message);
 
-  const readable = ((docs ?? []) as DocumentRow[]).filter((d) =>
+  // Cast to exactly what the `.select()` asked for, not to the whole row: a
+  // `DocumentRow[]` here would promise `created_by` and `created_at`, which were
+  // never fetched, so reading one would typecheck and be `undefined`.
+  const readable = ((docs ?? []) as DocumentListRow[]).filter((d) =>
     canReadDocument(d.visibility, viewer),
   );
   if (!readable.length) return [];
@@ -532,7 +541,7 @@ export const listManagerDocuments = createServerFn({ method: "GET" }).handler(as
     .order("slug")
     .limit(MANAGER_DOCUMENTS_LIMIT);
   if (error) throw new Error(error.message);
-  const documents = (docs ?? []) as DocumentRow[];
+  const documents = (docs ?? []) as DocumentListRow[];
   if (documents.length >= MANAGER_DOCUMENTS_LIMIT) {
     console.warn(
       `[documents] manager list capped at ${MANAGER_DOCUMENTS_LIMIT}; some documents are not shown`,

@@ -34,7 +34,7 @@ import {
   saveManagerDocument,
   setCurrentDocumentVersion,
 } from "@/lib/documents.functions";
-import { documentVisibilities } from "@/lib/documents";
+import { documentVisibilities, visibilityAudience } from "@/lib/documents";
 import type { DocumentVisibility } from "@/lib/documents";
 import { isDocumentDirty, slugFromTitle, wideningVisibility } from "@/lib/document-editor";
 import { versionLabel } from "@/lib/waiver-template-editor";
@@ -111,6 +111,30 @@ function DocumentsManager() {
     body_md: string;
   } | null>(null);
 
+  /**
+   * The visibility this document is stored with, which is NOT the same thing as
+   * `stored?.visibility`.
+   *
+   * `stored` is the loaded VERSION, and it is null whenever that load failed.
+   * Visibility lives on the document, so it is still known then (the sidebar
+   * list carries it), and it has to be: `wideningVisibility` consults this, and
+   * a null baseline silently skips the prompt. Reading them off the same object
+   * meant a document whose version failed to load kept the PREVIOUS document's
+   * visibility in the select, and the next save published a managers-only draft
+   * to members with nothing asked and nothing shown.
+   */
+  const [baseVisibility, setBaseVisibility] = useState<DocumentVisibility | null>(null);
+
+  /**
+   * What could not be loaded for the document on screen. Panels say so instead
+   * of rendering an empty list, which reads as "there is nothing here" — a
+   * confident wrong answer on the panel a manager uses to decide whether members'
+   * feedback has been dealt with.
+   */
+  const [failed, setFailed] = useState<{ document: boolean; versions: boolean; feedback: boolean }>(
+    { document: false, versions: false, feedback: false },
+  );
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
@@ -160,7 +184,11 @@ function DocumentsManager() {
   }, [fetchDocuments]);
 
   async function openDocument(next: string, opts: { force?: boolean } = {}) {
-    if (!opts.force && next === slug && !creating) return;
+    // Clicking the document already open is a no-op, UNLESS its last load
+    // failed: then the click is a retry, and swallowing it leaves the only
+    // way out of that state a page reload.
+    const retrying = next === slug && !creating && (failed.document || failed.versions);
+    if (!opts.force && !retrying && next === slug && !creating) return;
     if (dirty && !window.confirm("Discard your unsaved changes and open this?")) {
       return;
     }
@@ -187,6 +215,11 @@ function DocumentsManager() {
       setPreview(null);
       setVersions(vsRes.status === "fulfilled" ? vsRes.value : []);
       setFeedback(fbRes.status === "fulfilled" ? fbRes.value : []);
+      setFailed({
+        document: docRes.status === "rejected",
+        versions: vsRes.status === "rejected",
+        feedback: fbRes.status === "rejected",
+      });
 
       if (docRes.status === "fulfilled") {
         const doc = docRes.value;
@@ -194,6 +227,7 @@ function DocumentsManager() {
         setBody(doc.body_md);
         setVisibility(doc.visibility);
         setAnnotationsEnabled(doc.annotations_enabled);
+        setBaseVisibility(doc.visibility);
         setStored({
           title: doc.title,
           body_md: doc.body_md,
@@ -201,14 +235,32 @@ function DocumentsManager() {
           annotations_enabled: doc.annotations_enabled,
         });
       } else {
-        // No published version. Show an empty editor over the real version list
-        // so the manager can publish one of them, and say why rather than
-        // leaving a blank screen.
+        // The version could not be read. Show an empty editor over the real
+        // version list so the manager can publish one of them.
+        //
+        // Visibility comes from the SIDEBAR row, not from the failed read, and
+        // never from whatever was on screen a moment ago. Leaving the previous
+        // document's setting here is how a managers-only draft got republished
+        // to members by a manager who did exactly what the toast told them to.
+        const summary = documents.find((d) => d.slug === next);
         setTitle("");
         setBody("");
         setStored(null);
+        // Nothing is known about this document's settings, so refuse to guess.
+        // A null baseline makes `onSave` stop rather than send one.
+        setBaseVisibility(summary?.visibility ?? null);
+        if (summary) {
+          setVisibility(summary.visibility);
+          setAnnotationsEnabled(summary.annotations_enabled);
+        }
+        // The reason matters: "no published version" invites the manager to
+        // write one, and saying it about a transient failure invites them to
+        // retype a document that is perfectly fine.
+        const why = docRes.reason;
         toast.warning(
-          `"${next}" has no published version. Publish one from the version list, or write a new one.`,
+          why instanceof Error && !/no such document/i.test(why.message)
+            ? `"${next}" could not be opened: ${why.message}`
+            : `"${next}" has no published version. Publish one from the version list, or write a new one.`,
         );
       }
     } finally {
@@ -226,9 +278,11 @@ function DocumentsManager() {
     setAnnotationsEnabled(true);
     setChangeNote("");
     setStored(null);
+    setBaseVisibility(null);
     setVersions([]);
     setFeedback([]);
     setPreview(null);
+    setFailed({ document: false, versions: false, feedback: false });
   }
 
   /**
@@ -272,8 +326,9 @@ function DocumentsManager() {
     // server treats a known slug as "add a version to it". Left unchecked, a
     // manager typing the title of an existing managers-only draft would replace
     // its live text AND, because the form always sends a visibility, publish it
-    // to everyone. `stored` is null while creating, so the widening prompt below
-    // does not fire either. Refuse, and point at the list.
+    // to everyone. Refuse here for a message that points at the list; the save
+    // also carries `expect_new`, so the database refuses it too when this list
+    // is a stale snapshot and somebody else took the key in the meantime.
     if (creating && documents.some((d) => d.slug === targetSlug)) {
       toast.error(
         `A document already exists at /docs/${targetSlug}. Open it from the list to add a version.`,
@@ -281,10 +336,21 @@ function DocumentsManager() {
       return;
     }
 
+    // Saving an existing document whose settings never loaded would send a
+    // visibility that was never read off it. Stop instead of guessing: the
+    // widening prompt below cannot fire without a baseline, so this would be the
+    // one save that changes who can read a document with nothing asked.
+    if (!creating && baseVisibility === null) {
+      toast.error(
+        `Who can read "${targetSlug}" is not known yet, so saving could change it. Open it again from the list first.`,
+      );
+      return;
+    }
+
     // Widening is the one save worth stopping for: it publishes text to people
     // who could not read it a moment ago. Narrowing is recoverable, so it goes
     // through without a prompt.
-    const widening = wideningVisibility(stored?.visibility ?? null, visibility);
+    const widening = wideningVisibility(baseVisibility, visibility);
     if (
       widening &&
       !window.confirm(
@@ -305,6 +371,7 @@ function DocumentsManager() {
           visibility,
           annotations_enabled: annotationsEnabled,
           change_note: changeNote,
+          expect_new: creating,
         },
       });
       // Report the save the moment it succeeds. Refreshing the lists is a second
@@ -323,6 +390,8 @@ function DocumentsManager() {
       setCreating(false);
       setSlug(targetSlug);
       setChangeNote("");
+      setBaseVisibility(visibility);
+      setFailed({ document: false, versions: false, feedback: false });
       setStored({
         title,
         body_md: body,
@@ -334,6 +403,7 @@ function DocumentsManager() {
           fetchDocuments(),
           fetchVersions({ data: { slug: targetSlug } }),
         ]);
+        if (stale(token)) return;
         setDocuments(rows);
         setVersions(vs);
       } catch {
@@ -343,6 +413,9 @@ function DocumentsManager() {
       toast.error(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
+      // Clears a `busy` a load abandoned when this save overtook it. That load
+      // deliberately leaves it to whoever claimed next, and that is here.
+      setBusy(false);
     }
   }
 
@@ -362,7 +435,7 @@ function DocumentsManager() {
     }
     if (
       !window.confirm(
-        `Publish version ${version.version}? Members will read it from now on. Comments stay attached to the version they were written against.`,
+        `Publish version ${version.version}? ${visibilityAudience[baseVisibility ?? visibility]} will read it from now on. Comments stay attached to the version they were written against.`,
       )
     ) {
       return;
@@ -392,6 +465,8 @@ function DocumentsManager() {
         setBody(doc.body_md);
         setVisibility(doc.visibility);
         setAnnotationsEnabled(doc.annotations_enabled);
+        setBaseVisibility(doc.visibility);
+        setFailed({ document: false, versions: false, feedback: false });
         setStored({
           title: doc.title,
           body_md: doc.body_md,
@@ -405,6 +480,8 @@ function DocumentsManager() {
       toast.error(e instanceof Error ? e.message : "Could not change the live version");
     } finally {
       setPromoting(false);
+      // See `onSave`: this claim owns clearing a `busy` an overtaken load left.
+      setBusy(false);
     }
   }
 
@@ -588,7 +665,24 @@ function DocumentsManager() {
             </CardContent>
           </Card>
 
-          {!creating && versions.length > 0 && (
+          {!creating && failed.versions && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Versions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Not "no versions". An empty list here would say this
+                    document has no history, which is a confident wrong answer
+                    about the one panel that can undo an edit. */}
+                <p className="text-sm text-muted-foreground">
+                  The version list could not be loaded. Click this document in the list above to try
+                  again.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {!creating && !failed.versions && versions.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Versions</CardTitle>
@@ -661,7 +755,15 @@ function DocumentsManager() {
                   Open comment threads members left. Private notes are never shown to the club, only
                   to the person who wrote them.
                 </p>
-                {feedback.length === 0 ? (
+                {failed.feedback ? (
+                  // "No open comments" would tell a manager members had nothing
+                  // to say, on the panel they use to decide whether feedback has
+                  // been dealt with.
+                  <p className="text-sm text-muted-foreground">
+                    The comments could not be loaded, so this is not the full picture. Click this
+                    document in the list above to try again.
+                  </p>
+                ) : feedback.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No open comments.</p>
                 ) : (
                   feedback.map((f) => (

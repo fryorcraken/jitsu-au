@@ -130,6 +130,13 @@ Widening who can read a document (managers → members, members → public) asks
 first. Narrowing does not: it takes a document away from people, which is
 recoverable.
 
+The same distinction decides the ORDER a save writes in, which matters when half
+of it fails. Widening writes the new text first and the wider audience second, so
+a failure leaves the text live under the old, narrower audience. Narrowing writes
+the narrower audience first, so a failure leaves the old text under it rather
+than publishing the new text to the audience it was being taken away from. Either
+way the failure direction is "fewer people can read it".
+
 ### From an agent: `/api/manager/agent`
 
 Driven by the `uts-manager-agent` skill, for the case the editor is bad at: an
@@ -146,7 +153,9 @@ Three things that bite:
   current version with `get_document` and edit what comes back, or everything not
   included is dropped from the new version.
 - **An unknown slug creates a new document** at a new URL, so a typo makes a
-  second one. `list_documents` first if unsure.
+  second one. `list_documents` first if unsure, and pass `expect_new: true` when
+  creating: the save is then refused if the slug is taken, rather than adding a
+  version to an existing document and patching its visibility to yours.
 - **Omitting `visibility` leaves it alone.** That is what stops an agent editing
   the text of a managers-only draft from publishing it to the world by not
   mentioning a field.

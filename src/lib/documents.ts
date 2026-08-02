@@ -13,6 +13,27 @@
 export const documentVisibilities = ["public", "members", "managers"] as const;
 export type DocumentVisibility = (typeof documentVisibilities)[number];
 
+/**
+ * How far a visibility reaches, so "wider" and "narrower" are one definition.
+ *
+ * Both the editor's confirm prompt and the order `saveDocument` writes in turn
+ * on this comparison, and they must agree: the prompt warns about widening, and
+ * the save writes a NARROWING in a different order so a half-failed save cannot
+ * leave new text live under the old, wider audience.
+ */
+export const visibilityReach: Record<DocumentVisibility, number> = {
+  managers: 0,
+  members: 1,
+  public: 2,
+};
+
+/** The people a visibility admits, for a sentence a manager reads. */
+export const visibilityAudience: Record<DocumentVisibility, string> = {
+  managers: "Managers",
+  members: "Members",
+  public: "Anyone, signed in or not",
+};
+
 /** A private note, or a comment thread everyone who can read the document sees. */
 export const annotationVisibilities = ["private", "shared"] as const;
 export type AnnotationVisibility = (typeof annotationVisibilities)[number];

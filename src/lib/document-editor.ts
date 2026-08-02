@@ -1,6 +1,7 @@
 // Decisions the manager's document editor makes, kept out of the component so
 // they are unit-testable — the same split `waiver-template-editor.ts` uses, for
 // the same reason. No React, no toasts, no server calls.
+import { visibilityReach } from "./documents";
 import type { DocumentVisibility } from "./documents";
 import { slugify } from "./slug";
 
@@ -48,14 +49,12 @@ export type VisibilityChange = { from: DocumentVisibility; to: DocumentVisibilit
  * moment ago, and for a document that has been sitting at `managers` while it
  * was drafted, that is the one click nobody should make by accident.
  */
-const REACH: Record<DocumentVisibility, number> = { managers: 0, members: 1, public: 2 };
-
 export function wideningVisibility(
   stored: DocumentVisibility | null,
   next: DocumentVisibility,
 ): VisibilityChange {
   if (!stored || stored === next) return null;
-  return REACH[next] > REACH[stored] ? { from: stored, to: next } : null;
+  return visibilityReach[next] > visibilityReach[stored] ? { from: stored, to: next } : null;
 }
 
 /**

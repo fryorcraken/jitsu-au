@@ -235,6 +235,81 @@ describe("saveDocument", () => {
     expect(promote).toHaveLength(1);
   });
 
+  /**
+   * ORDER, not just presence. Every assertion above finds the visibility patch
+   * with `calls.find(...)`, so moving it back above the version insert — the
+   * exact bug this ordering exists to prevent — left the whole suite green.
+   *
+   * WIDENING patches last: a failed version insert must not have already
+   * published a managers-only draft to members while reporting that the save did
+   * not happen.
+   */
+  it("does not touch visibility when a widening save's version insert fails", async () => {
+    const existing = { id: "doc-1", slug: "house-rules", visibility: "managers" };
+    const { db, calls } = fakeClient((op) => {
+      if (op.table === "document_versions" && op.verb === "insert")
+        return { data: null, error: { message: "boom" } };
+      if (op.table === "documents" && op.verb === "select") return ok(existing);
+      if (op.table === "documents" && op.verb === "update") return ok({ ...existing, ...op.patch });
+      return ok(null);
+    });
+    await expect(saveDocument(db, { ...baseInput, visibility: "public" }, null)).rejects.toThrow(
+      "boom",
+    );
+    expect(calls.filter((c) => c.table === "documents" && c.verb === "update")).toHaveLength(0);
+  });
+
+  /**
+   * NARROWING patches first, and this is the other half of the same rule.
+   *
+   * Taking a public page to managers-only is usually done because the new text
+   * is not for everyone. Patching last would publish that text to the audience
+   * it was being taken away from if the patch then failed, while telling the
+   * caller the save had not happened.
+   */
+  it("narrows visibility before the new text can go live", async () => {
+    const existing = { id: "doc-1", slug: "house-rules", visibility: "public" };
+    const { db, calls } = saveHarness({ existing, maxVersion: 1 });
+    await saveDocument(db, { ...baseInput, visibility: "managers" }, null);
+    const patchAt = calls.findIndex((c) => c.table === "documents" && c.verb === "update");
+    const insertAt = calls.findIndex((c) => c.table === "document_versions" && c.verb === "insert");
+    expect(patchAt).toBeGreaterThanOrEqual(0);
+    expect(patchAt).toBeLessThan(insertAt);
+  });
+
+  it("widens visibility only after the new text is live", async () => {
+    const existing = { id: "doc-1", slug: "house-rules", visibility: "managers" };
+    const { db, calls } = saveHarness({ existing, maxVersion: 1 });
+    await saveDocument(db, { ...baseInput, visibility: "public" }, null);
+    const patchAt = calls.findIndex((c) => c.table === "documents" && c.verb === "update");
+    const promoteAt = calls.findIndex((c) => c.verb === "update" && c.patch?.is_current === true);
+    expect(promoteAt).toBeGreaterThanOrEqual(0);
+    expect(patchAt).toBeGreaterThan(promoteAt);
+  });
+
+  /**
+   * The create-versus-update race. The web editor checks its own list of
+   * documents first, but that list is a snapshot: another manager, or the agent
+   * API, can take the slug between it loading and this save. Without this the
+   * save silently becomes an update — a new version over somebody else's page,
+   * with its visibility patched to whatever this caller had selected.
+   */
+  it("refuses a save that expected to create a document whose slug is taken", async () => {
+    const existing = { id: "doc-1", slug: "house-rules", visibility: "managers" };
+    const { db, calls } = saveHarness({ existing, maxVersion: 3 });
+    await expect(
+      saveDocument(db, { ...baseInput, visibility: "public", expect_new: true }, null),
+    ).rejects.toThrow(/already exists/);
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("still creates when the slug really is free and the caller expected to", async () => {
+    const { db } = saveHarness({ existing: null, maxVersion: 0 });
+    await expect(saveDocument(db, { ...baseInput, expect_new: true }, null)).resolves.toMatchObject(
+      { created: true, version: 1 },
+    );
+  });
+
   // The break-glass agent key authenticates as a non-UUID sentinel with no auth
   // user behind it; writing it into a `references auth.users` column fails the
   // insert outright.
@@ -286,6 +361,16 @@ describe("listSharedAnnotations", () => {
     const { db, calls } = fakeClient(() => ok(rows));
     await listSharedAnnotations(db, "doc-1", { limit: 200 });
     expect(calls[0].filters).toContainEqual(["resolved_at", null]);
+  });
+
+  // The agent API filters by version through this, rather than keeping its own
+  // copy of the query. A second copy is a second place the shared-only filter
+  // can be dropped without a test noticing.
+  it("can narrow to one version without loosening the shared filter", async () => {
+    const { db, calls } = fakeClient(() => ok(rows));
+    await listSharedAnnotations(db, "doc-1", { version: 3, limit: 200 });
+    expect(calls[0].filters).toContainEqual(["document_version", 3]);
+    expect(calls[0].filters).toContainEqual(["visibility", "shared"]);
   });
 
   it("passes the caller's cap through to the query", async () => {

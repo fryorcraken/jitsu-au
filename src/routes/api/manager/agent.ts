@@ -44,6 +44,7 @@ import type {
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import {
+  listSharedAnnotations,
   loadDocument,
   projectAnnotation,
   projectDocument,
@@ -559,23 +560,20 @@ async function handleListDocumentAnnotations(params: unknown) {
   if (docErr) throw new AgentError(500, "db_error", docErr.message);
   if (!doc) throw new AgentError(404, "not_found", "No such document.");
 
-  let query = db
-    .from("document_annotations")
-    .select("*")
-    .eq("document_id", doc.id)
-    // SHARED only, and this is not an oversight to be fixed later: a private
-    // note is private from the club too (see the migration), which is what makes
-    // it usable for "things I want to remember". A manager reading feedback gets
-    // the conversation, never somebody's notebook.
-    .eq("visibility", "shared")
-    .order("created_at", { ascending: true });
-  if (input.version !== undefined) query = query.eq("document_version", input.version);
-  if (!input.include_resolved) query = query.is("resolved_at", null);
-
-  const { data: rows, error } = await query.limit(input.limit ?? 200);
-  if (error) throw new AgentError(500, "db_error", error.message);
-
-  const annotations = (rows ?? []) as DocumentAnnotationRow[];
+  // Through `listSharedAnnotations`, not a second query of its own. The
+  // `visibility = 'shared'` filter is the single line keeping members' private
+  // notes away from the club, and a copy of it here is a copy that can be
+  // edited without the test noticing.
+  let annotations: DocumentAnnotationRow[];
+  try {
+    annotations = await listSharedAnnotations(db, doc.id, {
+      includeResolved: input.include_resolved,
+      version: input.version,
+      limit: input.limit ?? 200,
+    });
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : "Could not read them.");
+  }
   const userIds = [...new Set(annotations.map((a) => a.user_id))];
   const nameByUser = new Map<string, string>();
   if (userIds.length) {

@@ -6,6 +6,7 @@
 // about what "save" means. Taking the client as a parameter also makes the
 // failure paths unit-testable, exactly as `promoteWaiverTemplate` and
 // `applyCoverage` do: a `createServerFn` handler cannot run in the test runner.
+import { visibilityReach } from "@/lib/documents";
 import type { DocumentAnnotationRow, DocumentClient, DocumentRow } from "@/lib/document-types";
 import type { DocumentVersionRow } from "@/lib/document-types";
 import type { SaveDocumentInput } from "@/lib/validation";
@@ -126,6 +127,17 @@ export async function saveDocument(
   let document = existing as DocumentRow | null;
   const created = !document;
 
+  // The caller believed it was creating this document. It is not, and carrying
+  // on would add a version to somebody else's page and patch its visibility to
+  // whatever this caller happened to have selected. The web editor checks its
+  // own list first, but that list is a snapshot and this is not: between it
+  // loading and this save, another manager or the agent API can create the slug.
+  if (document && input.expect_new) {
+    throw new Error(
+      `A document already exists at /docs/${input.slug}. Open it and save a new version, rather than creating it again.`,
+    );
+  }
+
   if (!document) {
     const { data: inserted, error: insErr } = await db
       .from("documents")
@@ -157,6 +169,59 @@ export async function saveDocument(
     .maybeSingle();
   if (maxErr) throw new Error(maxErr.message);
   const nextVersion = (maxRow?.version ?? 0) + 1;
+
+  /**
+   * Write the document's own settings (`visibility`, `annotations_enabled`).
+   *
+   * `textIsLive` shapes the failure message only. It is the difference between
+   * "nothing happened" and "your words are published under the old audience",
+   * and a manager who is told the first when the second is true will retype the
+   * save rather than go and check.
+   */
+  const patchSettings = async (textIsLive: boolean) => {
+    const patch: Partial<DocumentRow> = { updated_at: new Date().toISOString() };
+    if (input.visibility !== undefined) patch.visibility = input.visibility;
+    if (input.annotations_enabled !== undefined) {
+      patch.annotations_enabled = input.annotations_enabled;
+    }
+    const { data: updated, error: updErr } = await db
+      .from("documents")
+      .update(patch)
+      .eq("id", document!.id)
+      .select("*")
+      .single();
+    if (updErr || !updated) {
+      throw new Error(
+        textIsLive
+          ? `The new text is published, but who can read "${input.slug}" could not be changed, so it is still ${document!.visibility}. Try that change again.`
+          : (updErr?.message ?? "Could not update the document."),
+      );
+    }
+    document = updated as DocumentRow;
+  };
+
+  // Which side of the version write the settings go on.
+  //
+  // `visibility` lives on the document and the text lives on the version, so the
+  // two writes cannot be made atomic from PostgREST. The only question is which
+  // way a half-failed save should fail, and that depends on the direction:
+  //
+  // - WIDENING (managers -> members): patch LAST. A failure leaves the new text
+  //   live under the OLD, narrower audience.
+  // - NARROWING (public -> managers): patch FIRST. A failure leaves the OLD text
+  //   under the new, narrower audience. Patching last would publish the new text
+  //   — which is usually the whole reason for narrowing — to the wider audience
+  //   it was being taken away from, while telling the caller the save failed.
+  //
+  // Either way the failure direction is "fewer people can read it", which is the
+  // only one that cannot be undone by trying again.
+  const hasSettings =
+    !created && (input.visibility !== undefined || input.annotations_enabled !== undefined);
+  const narrowing =
+    input.visibility !== undefined &&
+    visibilityReach[input.visibility] < visibilityReach[document.visibility];
+
+  if (hasSettings && narrowing) await patchSettings(false);
 
   // Write the new version as a draft, THEN promote it. The obvious order (clear
   // `is_current`, then insert the row already current) leaves the document
@@ -193,29 +258,7 @@ export async function saveDocument(
 
   await promoteDocumentVersion(db, createdVersion.id);
 
-  // The document's own settings are written LAST, and only when supplied.
-  //
-  // Ordering matters more than it looks: `visibility` lives here, so patching it
-  // first meant a save whose version insert then failed had already published a
-  // managers-only draft to whoever the new visibility admits — while returning
-  // an error that said the save had not happened. Doing it after means a failure
-  // leaves the new text live under the OLD visibility, which is the safe
-  // direction to fail.
-  if (!created && (input.visibility !== undefined || input.annotations_enabled !== undefined)) {
-    const patch: Partial<DocumentRow> = { updated_at: new Date().toISOString() };
-    if (input.visibility !== undefined) patch.visibility = input.visibility;
-    if (input.annotations_enabled !== undefined) {
-      patch.annotations_enabled = input.annotations_enabled;
-    }
-    const { data: updated, error: updErr } = await db
-      .from("documents")
-      .update(patch)
-      .eq("id", document.id)
-      .select("*")
-      .single();
-    if (updErr || !updated) throw new Error(updErr?.message ?? "Could not update the document.");
-    document = updated as DocumentRow;
-  }
+  if (hasSettings && !narrowing) await patchSettings(true);
 
   return {
     slug: document.slug,
@@ -286,7 +329,7 @@ export function projectDocument({ document, version }: LoadedDocument) {
 export async function listSharedAnnotations(
   db: DocumentClient,
   documentId: string,
-  opts: { includeResolved?: boolean; limit: number },
+  opts: { includeResolved?: boolean; version?: number; limit: number },
 ): Promise<DocumentAnnotationRow[]> {
   let query = db
     .from("document_annotations")
@@ -294,6 +337,7 @@ export async function listSharedAnnotations(
     .eq("document_id", documentId)
     .eq("visibility", "shared")
     .order("created_at", { ascending: true });
+  if (opts.version !== undefined) query = query.eq("document_version", opts.version);
   if (!opts.includeResolved) query = query.is("resolved_at", null);
 
   const { data, error } = await query.limit(opts.limit);
