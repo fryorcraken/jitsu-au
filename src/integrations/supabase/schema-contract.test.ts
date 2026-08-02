@@ -241,6 +241,51 @@ export type _WaiverSubmissionIdIsNullable = Expect<
   Equals<Tables["waivers"]["Row"]["client_submission_id"], string | null>
 >;
 
+// ---- documents: versioned pages members read and annotate ----
+export type _DocumentColumns = RequireColumns<
+  Tables["documents"]["Row"],
+  "id" | "slug" | "visibility" | "annotations_enabled" | "created_at" | "updated_at" | "created_by"
+>;
+
+export type _DocumentVersionColumns = RequireColumns<
+  Tables["document_versions"]["Row"],
+  "id" | "document_id" | "version" | "title" | "body_md" | "change_note" | "is_current"
+>;
+
+export type _DocumentAnnotationColumns = RequireColumns<
+  Tables["document_annotations"]["Row"],
+  | "id"
+  | "document_id"
+  | "document_version"
+  | "user_id"
+  | "block_id"
+  | "quote"
+  | "visibility"
+  | "parent_id"
+  | "body"
+  | "resolved_at"
+  | "resolved_by"
+>;
+
+/**
+ * The flag the "exactly one live version per document" partial unique index is
+ * built on. A nullable widening would mean the NOT NULL was dropped live, and a
+ * NULL here reads as "not current" to every query while satisfying the index,
+ * so a document could end up with no version anyone can find.
+ */
+export type _DocumentVersionIsCurrentIsBoolean = Expect<
+  Equals<Tables["document_versions"]["Row"]["is_current"], boolean>
+>;
+
+/**
+ * Anchors are nullable on purpose: an annotation may be about the document as a
+ * whole rather than a block. Pinned so a migration that makes them NOT NULL
+ * fails here rather than at the first document-level comment.
+ */
+export type _DocumentAnnotationBlockIsNullable = Expect<
+  Equals<Tables["document_annotations"]["Row"]["block_id"], string | null>
+>;
+
 describe("live schema contract", () => {
   it("is enforced by the typechecker, not by this test", () => {
     // Nothing to assert at runtime: the contract is the type declarations above,

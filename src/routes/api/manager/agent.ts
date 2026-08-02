@@ -54,12 +54,12 @@ import type {
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import {
+  listSharedAnnotations,
   loadDocument,
   projectAnnotation,
   projectDocument,
   saveDocument,
 } from "@/lib/document-admin";
-import { asDocumentClient } from "@/lib/document-types";
 import type { DocumentAnnotationRow, DocumentRow } from "@/lib/document-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
@@ -590,7 +590,7 @@ const DOCUMENTS_LIMIT = 500;
 
 // ---- action: list_documents ----
 async function handleListDocuments() {
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
 
   // Only the LIVE version of each document, not every version ever saved.
   //
@@ -657,7 +657,7 @@ async function handleListDocuments() {
 // ---- action: get_document ----
 async function handleGetDocument(params: unknown) {
   const input = getDocumentSchema.parse(params);
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
   const loaded = await loadDocument(db, input.slug, input.version);
   // A manager token sees every document, drafts included, so there is no
   // visibility check here — unlike the public reader, which hides a missing
@@ -669,7 +669,7 @@ async function handleGetDocument(params: unknown) {
 // ---- action: save_document ----
 async function handleSaveDocument(params: unknown, actingAs: string) {
   const input = saveDocumentSchema.parse(params);
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
   try {
     const result = await saveDocument(db, input, actingAs);
     return {
@@ -693,7 +693,7 @@ async function handleSaveDocument(params: unknown, actingAs: string) {
 // ---- action: list_document_annotations ----
 async function handleListDocumentAnnotations(params: unknown) {
   const input = listDocumentAnnotationsSchema.parse(params);
-  const db = asDocumentClient(await adminClient());
+  const db = await adminClient();
 
   const { data: doc, error: docErr } = await db
     .from("documents")
@@ -703,23 +703,20 @@ async function handleListDocumentAnnotations(params: unknown) {
   if (docErr) throw new AgentError(500, "db_error", docErr.message);
   if (!doc) throw new AgentError(404, "not_found", "No such document.");
 
-  let query = db
-    .from("document_annotations")
-    .select("*")
-    .eq("document_id", doc.id)
-    // SHARED only, and this is not an oversight to be fixed later: a private
-    // note is private from the club too (see the migration), which is what makes
-    // it usable for "things I want to remember". A manager reading feedback gets
-    // the conversation, never somebody's notebook.
-    .eq("visibility", "shared")
-    .order("created_at", { ascending: true });
-  if (input.version !== undefined) query = query.eq("document_version", input.version);
-  if (!input.include_resolved) query = query.is("resolved_at", null);
-
-  const { data: rows, error } = await query.limit(input.limit ?? 200);
-  if (error) throw new AgentError(500, "db_error", error.message);
-
-  const annotations = (rows ?? []) as DocumentAnnotationRow[];
+  // Through `listSharedAnnotations`, not a second query of its own. The
+  // `visibility = 'shared'` filter is the single line keeping members' private
+  // notes away from the club, and a copy of it here is a copy that can be
+  // edited without the test noticing.
+  let annotations: DocumentAnnotationRow[];
+  try {
+    annotations = await listSharedAnnotations(db, doc.id, {
+      includeResolved: input.include_resolved,
+      version: input.version,
+      limit: input.limit ?? 200,
+    });
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : "Could not read them.");
+  }
   const userIds = [...new Set(annotations.map((a) => a.user_id))];
   const nameByUser = new Map<string, string>();
   if (userIds.length) {

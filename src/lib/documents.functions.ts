@@ -20,15 +20,17 @@ import {
   canResolveThread,
 } from "@/lib/documents";
 import type { AnnotationVisibility, Viewer } from "@/lib/documents";
-import { loadDocument, projectDocument } from "@/lib/document-admin";
-import { asDocumentClient } from "@/lib/document-types";
+import { listSharedAnnotations, loadDocument, projectDocument } from "@/lib/document-admin";
 import type { DocumentAnnotationRow, DocumentClient, DocumentRow } from "@/lib/document-types";
 import {
   createAnnotationSchema,
   deleteAnnotationSchema,
+  documentSlugSchema,
+  getDocumentSchema,
   greetingName,
   readDocumentSchema,
   resolveAnnotationSchema,
+  saveDocumentSchema,
   updateAnnotationSchema,
 } from "@/lib/validation";
 
@@ -44,7 +46,7 @@ async function headerGetter(): Promise<(name: string) => string | undefined> {
 
 async function adminClient(): Promise<DocumentClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return asDocumentClient(supabaseAdmin);
+  return supabaseAdmin;
 }
 
 /**
@@ -58,23 +60,50 @@ async function adminClient(): Promise<DocumentClient> {
  * An expired or junk token resolves to the same signed-out viewer as no token
  * at all — the reader sees the public view rather than an error about a session
  * they cannot do anything about.
+ *
+ * `strict` changes what a FAILURE means, not what a valid answer is. Degrading
+ * to signed-out is right for a reader (they get the public view of a public
+ * page), and wrong for a manager screen: a momentary Supabase hiccup would
+ * demote a real manager to "not a manager", and the resulting `Forbidden` is
+ * indistinguishable from "you are not allowed", so the screen would tell them
+ * they have no documents. In strict mode a failed identity or role lookup is
+ * raised as itself.
  */
-async function resolveViewer(db: DocumentClient): Promise<Viewer> {
+async function resolveViewer(db: DocumentClient, opts: { strict?: boolean } = {}): Promise<Viewer> {
   const getHeader = await headerGetter();
   const bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
   if (!bearer) return { userId: null, isManager: false };
 
+  const unavailable = new Error(
+    "Could not confirm who you are just now. Reload the page and try again.",
+  );
+
+  let userId: string | null = null;
   try {
-    const { data } = await db.auth.getUser(bearer);
-    const userId = data.user?.id ?? null;
-    if (!userId) return { userId: null, isManager: false };
-    const { data: isManager } = await db.rpc("has_role", {
+    const { data, error } = await db.auth.getUser(bearer);
+    // An `error` here is ambiguous: an expired token and an unreachable auth
+    // service look the same. Signed-out is the safe read for a public page, and
+    // the wrong one for a manager screen — hence `strict`.
+    if (error && opts.strict) throw unavailable;
+    userId = data.user?.id ?? null;
+  } catch (e) {
+    if (opts.strict) throw e === unavailable ? e : unavailable;
+    return { userId: null, isManager: false };
+  }
+  if (!userId) return { userId: null, isManager: false };
+
+  try {
+    const { data: isManager, error } = await db.rpc("has_role", {
       _user_id: userId,
       _role: "manager",
     });
+    // A failed role lookup is not "not a manager". Under `strict` it must not be
+    // reported as one.
+    if (error && opts.strict) throw unavailable;
     return { userId, isManager: Boolean(isManager) };
-  } catch {
-    return { userId: null, isManager: false };
+  } catch (e) {
+    if (opts.strict) throw e === unavailable ? e : unavailable;
+    return { userId, isManager: false };
   }
 }
 
@@ -87,6 +116,12 @@ async function resolveViewer(db: DocumentClient): Promise<Viewer> {
  * them to anyone who guessed a URL.
  */
 const NOT_FOUND = "That document does not exist, or is not available to you.";
+
+/** The columns both index queries select. Narrower than `DocumentRow` on purpose. */
+type DocumentListRow = Pick<
+  DocumentRow,
+  "id" | "slug" | "visibility" | "annotations_enabled" | "updated_at"
+>;
 
 /**
  * Read one document, always the LIVE version.
@@ -128,7 +163,10 @@ export const listDocuments = createServerFn({ method: "GET" }).handler(async () 
     .order("slug");
   if (error) throw new Error(error.message);
 
-  const readable = ((docs ?? []) as DocumentRow[]).filter((d) =>
+  // Cast to exactly what the `.select()` asked for, not to the whole row: a
+  // `DocumentRow[]` here would promise `created_by` and `created_at`, which were
+  // never fetched, so reading one would typecheck and be `undefined`.
+  const readable = ((docs ?? []) as DocumentListRow[]).filter((d) =>
     canReadDocument(d.visibility, viewer),
   );
   if (!readable.length) return [];
@@ -449,4 +487,229 @@ export const resolveAnnotation = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     return { ok: true as const, resolved: data.resolved };
+  });
+
+// ---------------------------------------------------------------------------
+// Manager screens (`/manager/documents`)
+//
+// The same operations the manager agent API exposes, reached from the site
+// instead of a bearer token. Both drive `document-admin.ts`, so "save" means one
+// thing however it was asked for — a second implementation behind the web UI is
+// how the two quietly stop agreeing.
+//
+// Each of these gates on `isManager` itself. The `_authenticated` route group
+// only proves somebody is signed in, and the client-side redirect on the page is
+// a courtesy, not a lock.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cap on documents the manager list returns. A club with more pages than this
+ * has outgrown a flat sidebar; the handler warns rather than truncating in
+ * silence.
+ */
+const MANAGER_DOCUMENTS_LIMIT = 500;
+
+/**
+ * Fail unless the caller holds the manager role.
+ *
+ * Strict: on a manager screen, "we could not check" must not arrive as
+ * "Forbidden". The page suppresses `Forbidden` (a non-manager is being
+ * redirected anyway), so a swallowed lookup failure would leave a real manager
+ * staring at an empty documents list with no error to act on.
+ */
+async function requireManagerViewer(db: DocumentClient): Promise<Viewer> {
+  const viewer = await resolveViewer(db, { strict: true });
+  if (!viewer.isManager) throw new Error("Forbidden");
+  return viewer;
+}
+
+/**
+ * Every document, for the manager list — drafts included.
+ *
+ * Unlike `listDocuments`, this does NOT filter by visibility: a manager is the
+ * audience for the managers-only drafts. It also reports documents with no
+ * published version, which the member-facing list skips, because that state is
+ * exactly what a manager needs to see and fix.
+ */
+export const listManagerDocuments = createServerFn({ method: "GET" }).handler(async () => {
+  const db = await adminClient();
+  await requireManagerViewer(db);
+
+  const { data: docs, error } = await db
+    .from("documents")
+    .select("id, slug, visibility, annotations_enabled, created_at, updated_at")
+    .order("slug")
+    .limit(MANAGER_DOCUMENTS_LIMIT);
+  if (error) throw new Error(error.message);
+  const documents = (docs ?? []) as DocumentListRow[];
+  if (documents.length >= MANAGER_DOCUMENTS_LIMIT) {
+    console.warn(
+      `[documents] manager list capped at ${MANAGER_DOCUMENTS_LIMIT}; some documents are not shown`,
+    );
+  }
+  if (!documents.length) return [];
+
+  const ids = documents.map((d) => d.id);
+  const { data: live, error: lErr } = await db
+    .from("document_versions")
+    .select("document_id, title, version, created_at, change_note")
+    .in("document_id", ids)
+    .eq("is_current", true);
+  if (lErr) throw new Error(lErr.message);
+
+  // Count versions IN the database, one `head: true` count per document.
+  //
+  // Reading every version row just to length them in JS grows without bound —
+  // every save adds one — and would eventually be truncated by the server-side
+  // row cap. That truncation is silent and unordered, so a document would
+  // quietly report "Version 12 of 74" when it has 90: a confident wrong number,
+  // which is the failure `handleListUsers` in the agent endpoint exists to warn
+  // about. These counts transfer no rows.
+  const liveByDoc = new Map((live ?? []).map((v) => [v.document_id, v]));
+  const countByDoc = new Map<string, number>();
+  await Promise.all(
+    documents.map(async (d) => {
+      const { count, error: cErr } = await db
+        .from("document_versions")
+        .select("*", { count: "exact", head: true })
+        .eq("document_id", d.id);
+      if (cErr) throw new Error(cErr.message);
+      countByDoc.set(d.id, count ?? 0);
+    }),
+  );
+
+  return documents.map((d) => {
+    const current = liveByDoc.get(d.id);
+    return {
+      slug: d.slug,
+      // Null when a save half-failed and left the document with no live
+      // version. Surfaced rather than hidden — the manager is who fixes it.
+      title: current?.title ?? null,
+      version: current?.version ?? null,
+      versions: countByDoc.get(d.id) ?? 0,
+      visibility: d.visibility,
+      annotations_enabled: d.annotations_enabled,
+      change_note: current?.change_note ?? null,
+      updated_at: current?.created_at ?? d.updated_at,
+    };
+  });
+});
+
+/** One document for the editor: the live version, or a named one. Managers only. */
+export const getManagerDocument = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => getDocumentSchema.parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+    const loaded = await loadDocument(db, data.slug, data.version);
+    if (!loaded) throw new Error("No such document, or no such version.");
+    return projectDocument(loaded);
+  });
+
+/** Every version of a document, newest first. Managers only. */
+export const listDocumentVersions = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ slug: documentSlugSchema }).parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+
+    const { data: doc, error: docErr } = await db
+      .from("documents")
+      .select("id")
+      .eq("slug", data.slug)
+      .maybeSingle();
+    if (docErr) throw new Error(docErr.message);
+    if (!doc) throw new Error("No such document.");
+
+    const { data: rows, error } = await db
+      .from("document_versions")
+      .select("id, version, title, change_note, is_current, created_at")
+      .eq("document_id", doc.id)
+      .order("version", { ascending: false })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });
+
+/**
+ * Save a document from the editor: creates it if the slug is new, otherwise adds
+ * a version and publishes it. Straight through to the same `saveDocument` the
+ * agent API calls.
+ */
+export const saveManagerDocument = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => saveDocumentSchema.parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    const viewer = await requireManagerViewer(db);
+    const { saveDocument } = await import("@/lib/document-admin");
+    return saveDocument(db, data, viewer.userId);
+  });
+
+/**
+ * Publish an existing version — the rollback path.
+ *
+ * Separate from saving because it publishes a version that already exists rather
+ * than writing a new one, which is how a manager undoes an edit without
+ * retyping the version they want back.
+ */
+export const setCurrentDocumentVersion = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    await requireManagerViewer(db);
+    const { promoteDocumentVersion } = await import("@/lib/document-admin");
+    const { version } = await promoteDocumentVersion(db, data.id);
+    return { ok: true as const, version };
+  });
+
+/**
+ * The SHARED feedback on a document, for the manager reading it back.
+ *
+ * Shared only, and that is not an oversight to be fixed later: a private note is
+ * private from the club too (see the migration), which is what makes it usable
+ * for "things I want to remember". A manager gets the conversation, never
+ * somebody's notebook — the same rule `list_document_annotations` follows on the
+ * agent API.
+ */
+export const listManagerAnnotations = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z.object({ slug: documentSlugSchema, include_resolved: z.boolean().optional() }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    const viewer = await requireManagerViewer(db);
+
+    const { data: doc, error: docErr } = await db
+      .from("documents")
+      .select("id")
+      .eq("slug", data.slug)
+      .maybeSingle();
+    if (docErr) throw new Error(docErr.message);
+    if (!doc) throw new Error("No such document.");
+
+    const annotations = await listSharedAnnotations(db, doc.id, {
+      includeResolved: data.include_resolved,
+      limit: ANNOTATIONS_LIMIT,
+    });
+    const names = await authorNames(
+      db,
+      annotations.map((a) => a.user_id),
+    );
+
+    return annotations.map((a) => ({
+      id: a.id,
+      body: a.body,
+      visibility: a.visibility,
+      block_id: a.block_id,
+      quote: a.quote,
+      parent_id: a.parent_id,
+      document_version: a.document_version,
+      author: names.get(a.user_id) ?? null,
+      is_mine: a.user_id === viewer.userId,
+      can_edit: canEditAnnotation(a, viewer),
+      can_resolve: canResolveThread(a, viewer),
+      resolved_at: a.resolved_at,
+      created_at: a.created_at,
+      updated_at: a.updated_at,
+    }));
   });
