@@ -241,22 +241,37 @@ export type _WaiverSubmissionIdIsNullable = Expect<
   Equals<Tables["waivers"]["Row"]["client_submission_id"], string | null>
 >;
 
-// ---- documents: versioned pages members read and annotate ----
-export type _DocumentColumns = RequireColumns<
-  Tables["documents"]["Row"],
-  "id" | "slug" | "visibility" | "annotations_enabled" | "created_at" | "updated_at" | "created_by"
->;
-
-export type _DocumentVersionColumns = RequireColumns<
-  Tables["document_versions"]["Row"],
-  "id" | "document_id" | "version" | "title" | "body_md" | "change_note" | "is_current"
->;
-
-export type _DocumentAnnotationColumns = RequireColumns<
-  Tables["document_annotations"]["Row"],
+// ---- knowledge base: versioned pages members read and annotate ----
+export type _KbArticleColumns = RequireColumns<
+  Tables["kb_articles"]["Row"],
   | "id"
-  | "document_id"
-  | "document_version"
+  | "slug"
+  | "visibility"
+  | "annotations_enabled"
+  | "created_at"
+  | "updated_at"
+  | "created_by"
+  | "section_id"
+  | "position"
+  | "nav_title"
+  | "link_path"
+>;
+
+export type _KbSectionColumns = RequireColumns<
+  Tables["kb_sections"]["Row"],
+  "id" | "slug" | "title" | "position" | "created_at" | "updated_at"
+>;
+
+export type _KbArticleVersionColumns = RequireColumns<
+  Tables["kb_article_versions"]["Row"],
+  "id" | "article_id" | "version" | "title" | "body_md" | "change_note" | "is_current"
+>;
+
+export type _KbAnnotationColumns = RequireColumns<
+  Tables["kb_annotations"]["Row"],
+  | "id"
+  | "article_id"
+  | "article_version"
   | "user_id"
   | "block_id"
   | "quote"
@@ -268,22 +283,40 @@ export type _DocumentAnnotationColumns = RequireColumns<
 >;
 
 /**
- * The flag the "exactly one live version per document" partial unique index is
+ * The flag the "exactly one live version per article" partial unique index is
  * built on. A nullable widening would mean the NOT NULL was dropped live, and a
  * NULL here reads as "not current" to every query while satisfying the index,
- * so a document could end up with no version anyone can find.
+ * so an article could end up with no version anyone can find.
  */
-export type _DocumentVersionIsCurrentIsBoolean = Expect<
-  Equals<Tables["document_versions"]["Row"]["is_current"], boolean>
+export type _KbArticleVersionIsCurrentIsBoolean = Expect<
+  Equals<Tables["kb_article_versions"]["Row"]["is_current"], boolean>
 >;
 
 /**
- * Anchors are nullable on purpose: an annotation may be about the document as a
+ * Anchors are nullable on purpose: an annotation may be about the article as a
  * whole rather than a block. Pinned so a migration that makes them NOT NULL
- * fails here rather than at the first document-level comment.
+ * fails here rather than at the first article-level comment.
  */
-export type _DocumentAnnotationBlockIsNullable = Expect<
-  Equals<Tables["document_annotations"]["Row"]["block_id"], string | null>
+export type _KbAnnotationBlockIsNullable = Expect<
+  Equals<Tables["kb_annotations"]["Row"]["block_id"], string | null>
+>;
+
+/**
+ * `link_path` is what makes a row a sidebar LINK rather than an article, so it
+ * has to stay nullable: every real article has none. A NOT NULL here would mean
+ * the column had become mandatory, which no article can satisfy.
+ */
+export type _KbArticleLinkPathIsNullable = Expect<
+  Equals<Tables["kb_articles"]["Row"]["link_path"], string | null>
+>;
+
+/**
+ * The reading order. `position` carries a default and is NOT NULL, so a
+ * nullable widening would let an article sort unpredictably against its
+ * siblings and quietly break the onboarding path the sidebar is built on.
+ */
+export type _KbArticlePositionIsNumber = Expect<
+  Equals<Tables["kb_articles"]["Row"]["position"], number>
 >;
 
 describe("live schema contract", () => {

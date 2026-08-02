@@ -496,150 +496,6 @@ export type Database = {
         }
         Relationships: []
       }
-      document_annotations: {
-        Row: {
-          block_id: string | null
-          body: string
-          created_at: string
-          document_id: string
-          document_version: number
-          id: string
-          parent_id: string | null
-          quote: string | null
-          resolved_at: string | null
-          resolved_by: string | null
-          updated_at: string
-          user_id: string
-          visibility: string
-        }
-        Insert: {
-          block_id?: string | null
-          body: string
-          created_at?: string
-          document_id: string
-          document_version: number
-          id?: string
-          parent_id?: string | null
-          quote?: string | null
-          resolved_at?: string | null
-          resolved_by?: string | null
-          updated_at?: string
-          user_id: string
-          visibility: string
-        }
-        Update: {
-          block_id?: string | null
-          body?: string
-          created_at?: string
-          document_id?: string
-          document_version?: number
-          id?: string
-          parent_id?: string | null
-          quote?: string | null
-          resolved_at?: string | null
-          resolved_by?: string | null
-          updated_at?: string
-          user_id?: string
-          visibility?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "document_annotations_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "documents"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "document_annotations_parent_id_fkey"
-            columns: ["parent_id"]
-            isOneToOne: false
-            referencedRelation: "document_annotations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "document_annotations_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["user_id"]
-          },
-        ]
-      }
-      document_versions: {
-        Row: {
-          body_md: string
-          change_note: string | null
-          created_at: string
-          created_by: string | null
-          document_id: string
-          id: string
-          is_current: boolean
-          title: string
-          version: number
-        }
-        Insert: {
-          body_md: string
-          change_note?: string | null
-          created_at?: string
-          created_by?: string | null
-          document_id: string
-          id?: string
-          is_current?: boolean
-          title: string
-          version: number
-        }
-        Update: {
-          body_md?: string
-          change_note?: string | null
-          created_at?: string
-          created_by?: string | null
-          document_id?: string
-          id?: string
-          is_current?: boolean
-          title?: string
-          version?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "document_versions_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "documents"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      documents: {
-        Row: {
-          annotations_enabled: boolean
-          created_at: string
-          created_by: string | null
-          id: string
-          slug: string
-          updated_at: string
-          visibility: string
-        }
-        Insert: {
-          annotations_enabled?: boolean
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          slug: string
-          updated_at?: string
-          visibility?: string
-        }
-        Update: {
-          annotations_enabled?: boolean
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          slug?: string
-          updated_at?: string
-          visibility?: string
-        }
-        Relationships: []
-      }
       email_verification_tokens: {
         Row: {
           created_at: string
@@ -750,6 +606,197 @@ export type Database = {
           phone?: string | null
           sms_whatsapp_consent?: boolean
           uts_student?: boolean
+        }
+        Relationships: []
+      }
+      kb_annotations: {
+        Row: {
+          article_id: string
+          article_version: number
+          block_id: string | null
+          body: string
+          created_at: string
+          id: string
+          parent_id: string | null
+          quote: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          updated_at: string
+          user_id: string
+          visibility: string
+        }
+        Insert: {
+          article_id: string
+          article_version: number
+          block_id?: string | null
+          body: string
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          quote?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          updated_at?: string
+          user_id: string
+          visibility: string
+        }
+        Update: {
+          article_id?: string
+          article_version?: number
+          block_id?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          quote?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          updated_at?: string
+          user_id?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_annotations_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "kb_articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_annotations_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "kb_annotations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_annotations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      kb_article_versions: {
+        Row: {
+          article_id: string
+          body_md: string
+          change_note: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_current: boolean
+          title: string
+          version: number
+        }
+        Insert: {
+          article_id: string
+          body_md: string
+          change_note?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_current?: boolean
+          title: string
+          version: number
+        }
+        Update: {
+          article_id?: string
+          body_md?: string
+          change_note?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_current?: boolean
+          title?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_article_versions_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "kb_articles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_articles: {
+        Row: {
+          annotations_enabled: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          link_path: string | null
+          nav_title: string | null
+          position: number
+          section_id: string | null
+          slug: string
+          updated_at: string
+          visibility: string
+        }
+        Insert: {
+          annotations_enabled?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          link_path?: string | null
+          nav_title?: string | null
+          position?: number
+          section_id?: string | null
+          slug: string
+          updated_at?: string
+          visibility?: string
+        }
+        Update: {
+          annotations_enabled?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          link_path?: string | null
+          nav_title?: string | null
+          position?: number
+          section_id?: string | null
+          slug?: string
+          updated_at?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_articles_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "kb_sections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_sections: {
+        Row: {
+          created_at: string
+          id: string
+          position: number
+          slug: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          position?: number
+          slug: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          position?: number
+          slug?: string
+          title?: string
+          updated_at?: string
         }
         Relationships: []
       }

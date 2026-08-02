@@ -208,7 +208,12 @@ export async function saveKbArticle(
 
   let article = existing as KbArticleRow | null;
   const created = !article;
-  const writingText = Boolean(input.title && input.body_md);
+  // Held as a narrowed pair rather than a boolean so the insert below can see
+  // that both halves are present. The column is NOT NULL and the schema makes
+  // both optional (a placement-only save sends neither), so a bare boolean
+  // leaves `string | undefined` reaching a `string` column.
+  const text = input.title && input.body_md ? { title: input.title, body_md: input.body_md } : null;
+  const writingText = text !== null;
 
   // The caller believed it was creating this article. It is not, and carrying on
   // would add a version to somebody else's page and patch its visibility to
@@ -349,7 +354,7 @@ export async function saveKbArticle(
 
   let versionNumber: number | null = null;
 
-  if (writingText) {
+  if (text) {
     // A failed read here would number the new version 1 and collide with the
     // existing version 1, so the save would fail on a duplicate-key message that
     // says nothing about what went wrong. (Same guard as `saveWaiverTemplate`.)
@@ -373,8 +378,8 @@ export async function saveKbArticle(
       .insert({
         article_id: article.id,
         version: nextVersion,
-        title: input.title,
-        body_md: input.body_md,
+        title: text.title,
+        body_md: text.body_md,
         change_note: input.change_note || null,
         is_current: false,
         created_by: createdBy,

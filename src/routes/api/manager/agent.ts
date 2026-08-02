@@ -64,7 +64,6 @@ import {
   saveKbArticle,
   saveKbSection,
 } from "@/lib/kb-admin";
-import { asKbClient } from "@/lib/kb-types";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
@@ -595,7 +594,7 @@ const ARTICLES_LIMIT = 500;
 
 // ---- action: list_kb_sections ----
 async function handleListKbSections() {
-  const db = asKbClient(await adminClient());
+  const db = await adminClient();
   const sections = await listKbSections(db);
   return {
     count: sections.length,
@@ -606,7 +605,7 @@ async function handleListKbSections() {
 // ---- action: save_kb_section ----
 async function handleSaveKbSection(params: unknown) {
   const input = saveKbSectionSchema.parse(params);
-  const db = asKbClient(await adminClient());
+  const db = await adminClient();
   try {
     return await saveKbSection(db, input);
   } catch (e) {
@@ -620,7 +619,7 @@ async function handleSaveKbSection(params: unknown) {
 
 // ---- action: list_kb_articles ----
 async function handleListKbArticles() {
-  const db = asKbClient(await adminClient());
+  const db = await adminClient();
 
   // Only the LIVE version of each article, not every version ever saved.
   //
@@ -687,7 +686,7 @@ async function handleListKbArticles() {
 // ---- action: get_kb_article ----
 async function handleGetKbArticle(params: unknown) {
   const input = getKbArticleSchema.parse(params);
-  const db = asKbClient(await adminClient());
+  const db = await adminClient();
   const loaded = await loadKbArticle(db, input.slug, input.version);
   // A manager token sees every article, drafts included, so there is no
   // visibility check here — unlike the public reader, which hides a missing
@@ -699,7 +698,7 @@ async function handleGetKbArticle(params: unknown) {
 // ---- action: save_kb_article ----
 async function handleSaveKbArticle(params: unknown, actingAs: string) {
   const input = saveKbArticleSchema.parse(params);
-  const db = asKbClient(await adminClient());
+  const db = await adminClient();
   try {
     const result = await saveKbArticle(db, input, actingAs);
     return {
@@ -723,7 +722,7 @@ async function handleSaveKbArticle(params: unknown, actingAs: string) {
 // ---- action: list_kb_comments ----
 async function handleListKbComments(params: unknown) {
   const input = listKbCommentsSchema.parse(params);
-  const db = asKbClient(await adminClient());
+  const db = await adminClient();
 
   const { data: doc, error: docErr } = await db
     .from("kb_articles")

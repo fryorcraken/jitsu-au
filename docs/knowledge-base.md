@@ -343,7 +343,7 @@ be indexable and missing from the sitemap.
 | Manager screen                           | `src/routes/_authenticated/manager.kb.tsx`          |
 | Manager API actions                      | `src/routes/api/manager/agent.ts`                   |
 
-`src/lib/kb-types.ts` holds **provisional hand-written row types**, which must be
-replaced with aliases into the generated `src/integrations/supabase/types.ts`
-once `20260802100000_knowledge_base.sql` has been applied and the types
-regenerated. That file says so at the top.
+`src/lib/kb-types.ts` aliases the generated
+`src/integrations/supabase/types.ts`, with one narrowing: `visibility` is a text
+column with a CHECK rather than an enum, so the generator can only say `string`
+and the app's unions are asserted in that one file.

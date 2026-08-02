@@ -28,7 +28,6 @@ import {
   loadKbArticleRow,
   projectArticle,
 } from "@/lib/kb-admin";
-import { asKbClient } from "@/lib/kb-types";
 import type { KbAnnotationRow, KbArticleRow, KbClient, KbSectionRow } from "@/lib/kb-types";
 import {
   commentDisplayName,
@@ -56,7 +55,7 @@ async function headerGetter(): Promise<(name: string) => string | undefined> {
 
 async function adminClient(): Promise<KbClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return asKbClient(supabaseAdmin);
+  return supabaseAdmin;
 }
 
 /**
