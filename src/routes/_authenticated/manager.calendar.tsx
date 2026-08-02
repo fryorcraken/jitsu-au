@@ -127,6 +127,10 @@ function ManagerCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ ...emptyEntry });
+  // Whether "Ends" holds the manager's own answer rather than the one derived
+  // from "Starts". Kept out of `form` because it describes the editing session,
+  // not the entry being created.
+  const [endEdited, setEndEdited] = useState(false);
 
   // Which event is open for editing, and the draft for it.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -210,6 +214,7 @@ function ManagerCalendarPage() {
           : "Added to the calendar.",
       );
       setForm({ ...emptyEntry });
+      setEndEdited(false);
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not add it to the calendar");
@@ -408,13 +413,13 @@ function ManagerCalendarPage() {
                   type="datetime-local"
                   value={form.starts_at}
                   onChange={(e) =>
-                    setForm({
-                      ...form,
+                    setForm((prev) => ({
+                      ...prev,
                       starts_at: e.target.value,
-                      // Picking a start fills in an end an hour later on the same
-                      // day, so the common case needs one date picker, not two.
-                      ends_at: defaultEndForStart(e.target.value, form.ends_at),
-                    })
+                      // Picking a start fills in an end an hour later, so the
+                      // common case needs one date picker, not two.
+                      ends_at: defaultEndForStart(e.target.value, prev.ends_at, endEdited),
+                    }))
                   }
                 />
               </label>
@@ -423,7 +428,10 @@ function ManagerCalendarPage() {
                 <Input
                   type="datetime-local"
                   value={form.ends_at}
-                  onChange={(e) => setForm({ ...form, ends_at: e.target.value })}
+                  onChange={(e) => {
+                    setEndEdited(true);
+                    setForm((prev) => ({ ...prev, ends_at: e.target.value }));
+                  }}
                 />
               </label>
             </>
@@ -502,7 +510,6 @@ function ManagerCalendarPage() {
             <Input
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
-              placeholder="UTS Ultimo"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium sm:col-span-2">

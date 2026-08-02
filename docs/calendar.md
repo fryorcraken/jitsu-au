@@ -40,10 +40,11 @@ past.
 The add form opens with the answers that are right most of the time, so a routine
 entry takes a title and a start time and nothing else:
 
-- **Ends** follows **Starts**: pick a start and the end fills in an hour later on
-  the same day. An end that has been set by hand is left alone, unless moving the
-  start puts it at or past that end, in which case it is re-derived so the entry
-  is never backwards.
+- **Ends** follows **Starts**: pick a start and the end fills in an hour later.
+  Correcting the start moves that end with it, so fixing 18:00 to 09:00 gives a
+  one-hour entry rather than a nine-hour one. Once the end has been **typed in**,
+  it is the manager's answer and is left alone; the only thing that overrides it
+  is a start that moves past it, which would make the entry backwards.
 - **Location** is pre-filled with the club's gym (ActivateFit Gym, UTS Building 4,
   745 Harris St, Ultimo). Somewhere else, or nowhere booked yet: overwrite or
   clear it.

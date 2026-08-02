@@ -184,40 +184,64 @@ describe("diffOccurrences", () => {
 });
 
 describe("defaultEndForStart", () => {
-  it("fills an empty end with the same day, an hour later", () => {
-    expect(defaultEndForStart("2026-08-10T18:00", "")).toBe("2026-08-10T19:00");
+  it("fills an empty end with an hour after the start", () => {
+    expect(defaultEndForStart("2026-08-10T18:00", "", false)).toBe("2026-08-10T19:00");
   });
 
-  it("keeps an end the manager chose themselves", () => {
-    expect(defaultEndForStart("2026-08-10T18:00", "2026-08-10T20:30")).toBe("2026-08-10T20:30");
+  it("keeps an end the manager typed themselves", () => {
+    expect(defaultEndForStart("2026-08-10T18:00", "2026-08-10T20:30", true)).toBe(
+      "2026-08-10T20:30",
+    );
   });
 
-  it("re-derives an end that the new start has overtaken", () => {
-    // Moving the start to a later day must not leave an end behind it, which
-    // the form would reject.
-    expect(defaultEndForStart("2026-08-11T18:00", "2026-08-10T19:00")).toBe("2026-08-11T19:00");
-    // Same instant counts as overtaken: an event has to have some length.
-    expect(defaultEndForStart("2026-08-10T18:00", "2026-08-10T18:00")).toBe("2026-08-10T19:00");
+  it("follows the start when the end is only the one it derived", () => {
+    // The bug this guards: 18:00 auto-fills 19:00, the manager then corrects the
+    // start to 09:00, and a derived end left alone would save a nine-hour entry.
+    expect(defaultEndForStart("2026-08-10T09:00", "2026-08-10T19:00", false)).toBe(
+      "2026-08-10T10:00",
+    );
+    // Later in the day, same rule.
+    expect(defaultEndForStart("2026-08-10T20:00", "2026-08-10T19:00", false)).toBe(
+      "2026-08-10T21:00",
+    );
+  });
+
+  it("re-derives even a hand-typed end once the start has overtaken it", () => {
+    // Moving the start past the end would make the entry backwards, which the
+    // server rejects, so the manager's answer cannot survive here.
+    expect(defaultEndForStart("2026-08-11T18:00", "2026-08-10T19:00", true)).toBe(
+      "2026-08-11T19:00",
+    );
+    // Same instant counts as overtaken: an entry has to have some length.
+    expect(defaultEndForStart("2026-08-10T18:00", "2026-08-10T18:00", true)).toBe(
+      "2026-08-10T19:00",
+    );
   });
 
   it("rolls over midnight rather than inventing a same-day end", () => {
-    expect(defaultEndForStart("2026-08-10T23:30", "")).toBe("2026-08-11T00:30");
+    expect(defaultEndForStart("2026-08-10T23:30", "", false)).toBe("2026-08-11T00:30");
   });
 
   it("leaves the end alone until a start is picked", () => {
-    expect(defaultEndForStart("", "2026-08-10T19:00")).toBe("2026-08-10T19:00");
-    expect(defaultEndForStart("", "")).toBe("");
+    expect(defaultEndForStart("", "2026-08-10T19:00", true)).toBe("2026-08-10T19:00");
+    expect(defaultEndForStart("", "2026-08-10T19:00", false)).toBe("2026-08-10T19:00");
+    expect(defaultEndForStart("", "", false)).toBe("");
     // A half-typed date (the picker emits partial values while editing).
-    expect(defaultEndForStart("2026-08", "2026-08-10T19:00")).toBe("2026-08-10T19:00");
+    expect(defaultEndForStart("2026-08", "2026-08-10T19:00", false)).toBe("2026-08-10T19:00");
+  });
+
+  it("fills an end back in when the manager clears the one they typed", () => {
+    expect(defaultEndForStart("2026-08-10T18:00", "", true)).toBe("2026-08-10T19:00");
   });
 
   it("tolerates a value that carries seconds", () => {
-    expect(defaultEndForStart("2026-08-10T18:00:00", "")).toBe("2026-08-10T19:00");
+    expect(defaultEndForStart("2026-08-10T18:00:00", "", false)).toBe("2026-08-10T19:00");
   });
 });
 
 describe("DEFAULT_EVENT_LOCATION", () => {
-  it("is the gym the club trains at", () => {
+  it("is the gym the club trains at, spelled out to the building", () => {
+    // Composed from the shared venue name, so a rename reaches the calendar too.
     expect(DEFAULT_EVENT_LOCATION).toBe("ActivateFit Gym, UTS Building 4, 745 Harris St, Ultimo");
   });
 });
