@@ -406,24 +406,24 @@ A calendar entry that repeats weekly. It is a template, not a thing members see:
 the public surface is the dated `calendar_events` generated from it, which copy
 its details including `visibility` and `invite_only`.
 
-| Column             | Type          | Null | Notes                                                                  |
-| ------------------ | ------------- | ---- | ---------------------------------------------------------------------- |
-| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                           |
-| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".                          |
-| `description`      | `text`        | yes  |                                                                        |
-| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                |
-| `location`         | `text`        | yes  | No default — the club picks it, or leaves it blank.                    |
-| `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date. |
-| `invite_only`      | `boolean`     | no   | Default `false`. Display badge only. Copied onto every generated date. |
-| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                              |
-| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                  |
-| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                           |
-| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.                      |
-| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`.                   |
-| `is_active`        | `boolean`     | no   | Default `true`.                                                        |
-| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                        |
-| `created_at`       | `timestamptz` | no   | Default `now()`.                                                       |
-| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                                         |
+| Column             | Type          | Null | Notes                                                                        |
+| ------------------ | ------------- | ---- | ---------------------------------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                                 |
+| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".                                |
+| `description`      | `text`        | yes  |                                                                              |
+| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                      |
+| `location`         | `text`        | yes  | No column default. The add form pre-fills the club's gym; it can be cleared. |
+| `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date.       |
+| `invite_only`      | `boolean`     | no   | Default `false`. Display badge only. Copied onto every generated date.       |
+| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                                    |
+| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                        |
+| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                                 |
+| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.                            |
+| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`.                         |
+| `is_active`        | `boolean`     | no   | Default `true`.                                                              |
+| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                              |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                                             |
+| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                                               |
 
 **Grants:** none for `anon`/`authenticated` — this table is reached only through
 the service role. **RLS:** manager-only (read and write). Deliberately **not**
@@ -443,7 +443,7 @@ on the calendar — cancel those individually.
 | `title`           | `text`        | no   |                                                                                 |
 | `description`     | `text`        | yes  |                                                                                 |
 | `instructor_name` | `text`        | yes  | Per-date override of the series instructor.                                     |
-| `location`        | `text`        | yes  | No default — the club picks it, or leaves it blank.                             |
+| `location`        | `text`        | yes  | No column default. The add form pre-fills the club's gym; it can be cleared.    |
 | `starts_at`       | `timestamptz` | no   | Absolute instant (indexed).                                                     |
 | `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
 | `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |

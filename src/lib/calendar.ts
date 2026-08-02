@@ -6,6 +6,8 @@
 // absolute UTC instants for each date, handling DST via the Intl API (no
 // timezone dependency).
 
+import { VENUE_NAME } from "./venue";
+
 export const CLUB_TIME_ZONE = "Australia/Sydney";
 
 /** JS weekday indices (Date.getUTCDay / getDay): 0 = Sunday .. 6 = Saturday. */
@@ -106,6 +108,61 @@ export function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: s
 /** A new Date `minutes` after `d` (never mutates `d`). */
 export function addMinutes(d: Date, minutes: number): Date {
   return new Date(d.getTime() + minutes * 60000);
+}
+
+/** How long a one-off entry runs unless the manager says otherwise. */
+export const DEFAULT_EVENT_DURATION_MINUTES = 60;
+
+/**
+ * Where the club trains, pre-filled on a new calendar entry. Built from the
+ * shared venue name so a rename reaches the calendar too; the rest is more
+ * specific than the marketing address because it has to get someone from the
+ * street to the mats.
+ */
+export const DEFAULT_EVENT_LOCATION = `${VENUE_NAME}, UTS Building 4, 745 Harris St, Ultimo`;
+
+/**
+ * Read a `datetime-local` value ("YYYY-MM-DDTHH:MM", seconds optional) as plain
+ * wall-clock fields. Anchored to UTC so the arithmetic below stays wall-clock:
+ * these strings are what the manager sees in the picker, and the club timezone
+ * is only applied later, on submit.
+ */
+function parseLocalDateTime(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!m) return null;
+  const [, y, mo, d, hh, mm] = m;
+  return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm)));
+}
+
+function formatLocalDateTime(d: Date): string {
+  return d.toISOString().slice(0, 16);
+}
+
+/**
+ * The "Ends" a manager should see once they have picked a "Starts": an hour
+ * later, which is the same day for anything but a late-night entry.
+ *
+ * `endEdited` says whether the manager has typed in the Ends field themselves.
+ * Their own end is kept and the start moves freely under it, up to the point
+ * where it would overtake the end and make the entry backwards. An end this
+ * function filled in is not theirs, so it follows every correction to the start
+ * rather than quietly leaving a nine-hour entry behind when 18:00 becomes 09:00.
+ *
+ * The hour is added in wall-clock terms, matching what the picker shows. On the
+ * one Sydney morning a year when 02:00-02:59 does not exist, the club-time
+ * conversion on submit collapses both ends onto the same instant; a manager
+ * scheduling into that hour has to set the end themselves.
+ */
+export function defaultEndForStart(
+  startLocal: string,
+  currentEndLocal: string,
+  endEdited: boolean,
+): string {
+  const start = parseLocalDateTime(startLocal);
+  if (!start) return currentEndLocal;
+  const currentEnd = parseLocalDateTime(currentEndLocal);
+  if (endEdited && currentEnd && currentEnd.getTime() > start.getTime()) return currentEndLocal;
+  return formatLocalDateTime(addMinutes(start, DEFAULT_EVENT_DURATION_MINUTES));
 }
 
 export type SeriesSpec = {
