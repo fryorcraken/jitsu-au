@@ -48,7 +48,26 @@ CREATE SCHEMA IF NOT EXISTS private;
 REVOKE ALL ON SCHEMA private FROM PUBLIC;
 GRANT USAGE ON SCHEMA private TO anon, authenticated, service_role;
 
+-- ⚠️ EVERY function added here needs its own explicit
+-- `REVOKE ALL ON FUNCTION ... FROM PUBLIC`. Postgres grants EXECUTE to PUBLIC on
+-- every newly created function, and there is NO default-privileges safety net
+-- for it: `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`
+-- is accepted without error but does nothing. The built-in PUBLIC grant is an
+-- implicit NULL ACL, so there is no stored entry to revoke from — no row lands
+-- in pg_default_acl, and a function created afterwards still comes out
+-- world-executable. (Verified on PG16, in both orderings: revoking first stores
+-- nothing, and revoking after a GRANT leaves a stored default that function
+-- creation then discards.)
+--
+-- Nothing else will catch a miss, either: lints 0028/0029 scan only the
+-- PostgREST-exposed schemas, so a `private` helper without its REVOKE gets
+-- `anon` EXECUTE with no advisor finding and no CI failure. The REVOKE below
+-- each function is the whole guard.
+
 -- ---------- the helpers, unchanged apart from their schema ----------
+-- Bodies and grantee lists are copied verbatim from 20260730113925 /
+-- 20260730114023 / 20260731110000, which is why the grantees differ between
+-- them: only is_commenter_blocked ever had a service_role grant.
 -- Is this event invite-only, either directly or via its series?
 CREATE OR REPLACE FUNCTION private.event_is_invite_only(_event_id uuid)
 RETURNS boolean
@@ -98,7 +117,7 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION private.is_commenter_blocked(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION private.is_commenter_blocked(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION private.is_commenter_blocked(uuid) TO authenticated, service_role;
 
 -- ---------- repoint the policies ----------
 -- Identical predicates to 20260730113925; only the schema qualifier changes.
@@ -141,6 +160,11 @@ TO authenticated
 WITH CHECK (auth.uid() = user_id AND NOT private.is_commenter_blocked(auth.uid()));
 
 -- ---------- retire the exposed copies ----------
+-- No CASCADE on purpose: if the live database holds a policy referencing one of
+-- these that this repo does not know about, the DROP must fail loudly rather
+-- than silently take that policy with it.
 DROP FUNCTION IF EXISTS public.event_is_invite_only(uuid);
 DROP FUNCTION IF EXISTS public.is_event_invitee(uuid, uuid);
 DROP FUNCTION IF EXISTS public.is_commenter_blocked(uuid);
+
+NOTIFY pgrst, 'reload schema';

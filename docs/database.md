@@ -132,11 +132,33 @@ schema (a prerequisite for `EXECUTE`, and nothing on its own) plus `EXECUTE` on
 the individual helpers. Migration `20260802000000_private_rls_helpers.sql`
 created the schema and moved the three helpers into it.
 
+> [!IMPORTANT]
+> **`private` is an API boundary, not a privilege boundary.** `anon` keeps
+> `USAGE` on the schema and `EXECUTE` on `event_is_invite_only` — it has to, or
+> the anon read policy fails. What stops the outside world calling it is only
+> that `private` is absent from **Settings → API → Exposed schemas**. Add it
+> there and all three helpers are routable again, with no migration to review
+> and nothing for CI or the advisors to report (both lints scan the exposed
+> schemas only). So: never add `private` to that list, and check it is still
+> `public, graphql_public` when verifying a migration that touches this schema.
+
 **No tables belong in `private`, only helper functions.** Supabase's bootstrap
 `ALTER DEFAULT PRIVILEGES` is scoped to `public`, so objects created in `private`
 do not arrive pre-granted the way a new `public` table does — but a table hidden
 from PostgREST is a table whose access rules stop being reviewable, which is the
 opposite of what this schema is for.
+
+> [!WARNING]
+> **Every helper added to `private` needs its own explicit
+> `REVOKE ALL ON FUNCTION ... FROM PUBLIC`, and nothing will remind you.**
+> Postgres grants `EXECUTE` to `PUBLIC` on every new function. Unlike the table
+> case there is no default-privileges fix:
+> `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` is
+> accepted silently and does nothing, because the built-in `PUBLIC` grant is an
+> implicit NULL ACL with no stored entry to revoke from. And the advisors scan
+> only the exposed schemas, so a `private` helper that forgets the `REVOKE` is
+> world-executable with no finding and no CI failure. The `REVOKE` line under
+> each function in `20260802000000` is the entire guard.
 
 When a helper's only caller is a policy, move it here rather than adding a line
 to `supabase/lint/advisors-allowlist.txt`; acknowledge a finding only when the
@@ -430,7 +452,7 @@ members-only entries and get them in their personal calendar feed. See
 `docs/calendar.md` for the product flows.
 
 **`has_active_paid_membership(_user_id uuid) → boolean`** — SECURITY DEFINER SQL
-helper (`SET search_path = public`) used by the events RLS policy: true when the
+helper (`SET search_path = ''`) used by the events RLS policy: true when the
 person has an `active` membership whose plan `kind <> 'trial'` and whose
 `price_cents > 0`, mirroring `deriveLifecycleStatus`. EXECUTE is revoked from
 PUBLIC/anon and granted to `authenticated` (it is evaluated inside RLS as the
@@ -500,7 +522,7 @@ sees both sets. Cancelled events stay readable so the cancellation shows.
 Managers insert/update/delete.
 
 Those policies call two helpers that live in the **`private`** schema, not
-`public` (see "RLS-only helpers live in `private`" below):
+`public` (see "RLS-only helpers live in `private`" above):
 
 **`private.event_is_invite_only(_event_id uuid) → boolean`** — SECURITY DEFINER
 (`SET search_path = ''`): is this date invite-only, on its own row or inherited
