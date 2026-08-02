@@ -129,6 +129,19 @@ Current entries:
   is a `SECURITY DEFINER` helper used by RLS policies **and** called directly as
   a server RPC, so `authenticated` must keep `EXECUTE` (see migration
   `20260721023901`). The lint's suggested fix would break every manager check.
+- The other entries follow the same shape (`has_active_paid_membership`,
+  `is_commenter_blocked`); read the file, each one says why.
+
+### Before you add a `*_security_definer_function_executable_*` entry
+
+Ask first whether the app calls the function **by RPC**. If it does not — if its
+only caller is an RLS policy — it does not belong in `public` at all, and the
+finding is fixable rather than acknowledgeable. PostgREST routes `/rest/v1/rpc/*`
+only to its `db-schemas` list (`public, graphql_public`), so a helper defined in
+the `private` schema is unreachable from the API while RLS can still call it, and
+the advisors (which scan the exposed schemas) stop reporting it. Migration
+`20260802000000_private_rls_helpers.sql` did that to the two calendar helpers and
+is the pattern to copy. Acknowledge only what has a real PostgREST caller.
 
 ## Testing the checker
 

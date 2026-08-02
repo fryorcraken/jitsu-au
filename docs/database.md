@@ -105,6 +105,43 @@ migration, generated types, tests and a product spec (`docs/check-in.md`). See
 the `## Check-ins` section below for what changed from that recorded design and
 why.
 
+## RLS-only helpers live in `private`
+
+The way out of the first trap above is a `SECURITY DEFINER` helper: the policy
+calls a function that runs as its owner, so it can read a table the caller has no
+grant on. The cost is that the caller needs `EXECUTE` on that function, and a
+policy expression is evaluated as the **querying** role — so an anon-readable
+table's policy means granting `EXECUTE` to `anon`.
+
+Everything in `public` is routable. That grant therefore also lets anyone with
+the publishable key call the helper directly as
+`POST /rest/v1/rpc/<name>`, with arguments of their choosing, which is what
+Supabase advisors 0028/0029 (`*_security_definer_function_executable`) report.
+
+So the schema a helper lives in follows from who calls it:
+
+| Helper                                                             | Schema    | Why                                                                            |
+| ------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------ |
+| `has_role`, `has_active_paid_membership`, the `user_emails` family | `public`  | the app calls them over PostgREST (`.rpc(...)`), so they have to stay routable |
+| `event_is_invite_only`, `is_event_invitee`                         | `private` | only an RLS policy ever calls them, so nothing needs them routable             |
+
+PostgREST routes `/rest/v1/rpc/*` only to the schemas in its `db-schemas` list
+(`public, graphql_public`), so a function in `private` is unreachable from the
+API while RLS can still call it. `anon`/`authenticated` hold `USAGE` on the
+schema (a prerequisite for `EXECUTE`, and nothing on its own) plus `EXECUTE` on
+the individual helpers. Migration `20260802000000_private_rls_helpers.sql`
+created the schema and moved the two calendar helpers into it.
+
+**No tables belong in `private`, only helper functions.** Supabase's bootstrap
+`ALTER DEFAULT PRIVILEGES` is scoped to `public`, so objects created in `private`
+do not arrive pre-granted the way a new `public` table does — but a table hidden
+from PostgREST is a table whose access rules stop being reviewable, which is the
+opposite of what this schema is for.
+
+When a helper's only caller is a policy, move it here rather than adding a line
+to `supabase/lint/advisors-allowlist.txt`; acknowledge a finding only when the
+function has a real PostgREST caller.
+
 ## People and waivers: the shape
 
 A person = an **auth user** (their email lives on `auth.users`, the ONLY email
@@ -406,24 +443,24 @@ A calendar entry that repeats weekly. It is a template, not a thing members see:
 the public surface is the dated `calendar_events` generated from it, which copy
 its details including `visibility` and `invite_only`.
 
-| Column             | Type          | Null | Notes                                                                  |
-| ------------------ | ------------- | ---- | ---------------------------------------------------------------------- |
-| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                           |
-| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".                          |
-| `description`      | `text`        | yes  |                                                                        |
-| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                |
-| `location`         | `text`        | yes  | No default — the club picks it, or leaves it blank.                    |
-| `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date. |
-| `invite_only`      | `boolean`     | no   | Default `false`. Display badge only. Copied onto every generated date. |
-| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                              |
-| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                  |
-| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                           |
-| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.                      |
-| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`.                   |
-| `is_active`        | `boolean`     | no   | Default `true`.                                                        |
-| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                        |
-| `created_at`       | `timestamptz` | no   | Default `now()`.                                                       |
-| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                                         |
+| Column             | Type          | Null | Notes                                                                   |
+| ------------------ | ------------- | ---- | ----------------------------------------------------------------------- |
+| `id`               | `uuid` PK     | no   | `DEFAULT gen_random_uuid()`.                                            |
+| `title`            | `text`        | no   | The only required detail. e.g. "Beginner Gi".                           |
+| `description`      | `text`        | yes  |                                                                         |
+| `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                 |
+| `location`         | `text`        | yes  | No default — the club picks it, or leaves it blank.                     |
+| `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date.  |
+| `invite_only`      | `boolean`     | no   | Default `false`. Access, and a badge. Copied onto every generated date. |
+| `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                               |
+| `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                   |
+| `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                            |
+| `starts_on`        | `date`        | no   | **Required.** First date the weekly session runs.                       |
+| `ends_on`          | `date`        | yes  | **NULL = open-ended.** `CHECK ends_on >= starts_on`.                    |
+| `is_active`        | `boolean`     | no   | Default `true`.                                                         |
+| `created_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                         |
+| `created_at`       | `timestamptz` | no   | Default `now()`.                                                        |
+| `updated_at`       | `timestamptz` | no   | Default `now()`; set app-side.                                          |
 
 **Grants:** none for `anon`/`authenticated` — this table is reached only through
 the service role. **RLS:** manager-only (read and write). Deliberately **not**
@@ -448,17 +485,34 @@ on the calendar — cancel those individually.
 | `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
 | `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |
 | `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only. |
-| `invite_only`     | `boolean`     | no   | **DISPLAY ONLY.** Default `false`. Badges the event; enforces nothing.          |
+| `invite_only`     | `boolean`     | no   | **ACCESS, and a badge.** Default `false`. Only invitees and managers see it.    |
 | `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                 |
 | `created_at`      | `timestamptz` | no   | Default `now()`.                                                                |
 | `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                  |
 
 Partial unique index on `(series_id, starts_at) WHERE series_id IS NOT NULL`
 keeps date generation idempotent. **RLS:** everyone (incl. anon) reads
-`visibility = 'public'`; a second policy adds `members` events for callers where
-`has_active_paid_membership(auth.uid())` or `has_role(auth.uid(),'manager')` —
-policies are OR'd, so a paid member sees both sets. Cancelled events stay
-readable so the cancellation shows. Managers insert/update/delete.
+`visibility = 'public'` that is not invite-only; a second policy adds `members`
+events for callers where `has_active_paid_membership(auth.uid())` or
+`has_role(auth.uid(),'manager')`, and lets a non-manager through an invite-only
+date only when they have an RSVP row for it — policies are OR'd, so a paid member
+sees both sets. Cancelled events stay readable so the cancellation shows.
+Managers insert/update/delete.
+
+Those policies call two helpers that live in the **`private`** schema, not
+`public` (see "RLS-only helpers live in `private`" below):
+
+**`private.event_is_invite_only(_event_id uuid) → boolean`** — SECURITY DEFINER
+(`SET search_path = ''`): is this date invite-only, on its own row or inherited
+from its series? It is SECURITY DEFINER because the policy has to read
+`calendar_series`, which no client role may read directly. `anon` and
+`authenticated` hold EXECUTE, since both read policies call it.
+
+**`private.is_event_invitee(_event_id uuid, _user_id uuid) → boolean`** —
+SECURITY DEFINER (`SET search_path = ''`): does an `event_rsvps` row exist for
+this person and date? That is what unlocks an invite-only date for its invitees,
+and it is SECURITY DEFINER so the check does not depend on the caller's own RLS
+over `event_rsvps`. `authenticated` holds EXECUTE; `anon` does not.
 
 ### `event_rsvps` — who's coming
 
