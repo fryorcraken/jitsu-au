@@ -215,7 +215,7 @@ never stored.
 | Column                           | Type          | Null | Notes                                                                                                                                 |
 | -------------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                           |
-| `first_name`                     | `text`        | yes  |                                                                                                                                       |
+| `first_name`                     | `text`        | no   | Non-blank (`profiles_first_name_not_blank`). Every person has a name to show; `ensure_profile` seeds one when the auth user arrives.  |
 | `middle_name`                    | `text`        | yes  |                                                                                                                                       |
 | `last_name`                      | `text`        | yes  |                                                                                                                                       |
 | `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`).                     |
@@ -250,9 +250,17 @@ inside the waiver PDF), and no `full_name`.
   lifts the ban, sends a sign-in email, and assigns the free trial
   (`assignTrialMembership`, one per person ever, activation email suppressed).
 - `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
-  revoked from PUBLIC/anon/authenticated): inserts the empty profile row for
-  every new auth user, however created. Pure id attachment — no email matching,
-  so nothing can be claimed by typing someone else's address.
+  revoked from PUBLIC/anon/authenticated): inserts the profile row for every new
+  auth user, however created. Pure id attachment — no email matching, so nothing
+  can be claimed by typing someone else's address. It seeds `first_name` (which
+  is NOT NULL) from the auth user's metadata, else the literal `Member`; the
+  waiver path overwrites that with the submitted name in the same request, so
+  the seed only survives for an auth user created outside the product
+  (dashboard, invite). The fallback exists so a missing name can never abort the
+  `auth.users` insert, and it is deliberately not the email's local part —
+  `first_name` is shown publicly on blog comments and greets people in email.
+  The trigger only fires on INSERT, so auth users predating it had no row at
+  all until `20260802093000` backfilled them.
 
 **RLS:** owner reads/updates own row (`auth.uid() = user_id`); managers
 read/update all; no public insert path.
@@ -1006,7 +1014,8 @@ created **locked** (banned, no credentials) by waiver submission; approval
 lifts the ban. There is no self-serve sign-up. Two triggers fire:
 
 - `handle_new_user_role` — grants `manager` to a confirmed whitelisted address.
-- `ensure_profile` — inserts the empty `profiles` row for every new auth user.
+- `ensure_profile` — inserts the `profiles` row for every new auth user, with a
+  seeded `first_name` (the auth user's metadata name, else `Member`).
   EXECUTE is revoked from the public RPC surface.
 
 `profiles.user_id`, `waivers.user_id`, `memberships.user_id`,
