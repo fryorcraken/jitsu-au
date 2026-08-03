@@ -57,6 +57,7 @@ function on the service-role client, which bypasses both grants and RLS.
 | `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                       |
 | `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                     |
 | `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                 |
+| `club_semesters`         | `anon`+`auth`   | `SELECT`  | the public pricing page and the member purchase flow (follow-up PR)             |
 | `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
 | `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
 | `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
@@ -69,7 +70,7 @@ function on the service-role client, which bypasses both grants and RLS.
 Every other table grants the client roles **nothing**.
 
 > [!IMPORTANT]
-> The first four rows are **server** functions, not browser code. They run in
+> The first five rows are **server** functions, not browser code. They run in
 > `*.functions.ts` handlers but build their own client from
 > `SUPABASE_PUBLISHABLE_KEY` with no user session, so PostgREST resolves them to
 > `anon` and they need real grants. Grepping for imports of the shared browser
@@ -416,25 +417,52 @@ waiver.
 
 ## Membership ledger
 
+### `club_semesters` — the club's fixed semester dates
+
+`id` PK, `code` (unique, `<year>-s<1|2>`, e.g. `2026-s1`), `name`, `year`, `half`
+(`1|2`), `starts_on`, `ends_on` (inclusive — the last day of training),
+`is_active`, `created_at`. An exclusion constraint
+(`club_semesters_no_overlap`) forbids two semesters' date ranges from
+overlapping, so "the semester running today" is never ambiguous. These are the
+club's own dates: aligned with the UTS teaching calendar but entered by a
+manager, not derived from it, and they move by about a week every year.
+**RLS:** anyone reads active semesters; managers read all. Writes are
+service-role only, through the manager screen and the manager agent API.
+
 ### `membership_plans` — manager-editable catalog
 
 `id` PK, `code` (unique), `name`, `description`, `kind`
 (`insurance|trial|session|period`), `public_price_cents`, `student_price_cents`,
-`duration_days`, `session_credits`, `is_active`, `sort_order`, `created_at`.
+`duration_days`, `session_credits`, `period_basis` (`rolling|semester`),
+`is_active`, `sort_order`, `created_at`. `period_basis` says how a `period`
+plan's dates are computed: `rolling` (the default; `duration_days` days from
+activation — this is `insurance_yearly`, a genuine 12-months-from-payment
+membership) or `semester` (the dates come from the `club_semesters` row the
+member chose at purchase; `duration_days` becomes unused). This is the
+`semester` plan. Its `duration_days` is cleared to `NULL` once the code that
+reads `period_basis` is live, not in the same migration that adds the column —
+see the comment on the `UPDATE` in
+`20260802110000_club_semesters.sql`.
 **RLS:** anyone reads active plans; managers read all and write.
 
 ### `memberships` — enrollment/billing records
 
 `id` PK, `user_id → auth.users(id) ON DELETE SET NULL`,
-`plan_id → membership_plans(id)`, `status`
-(`pending|active|expired|cancelled`), `is_student`, `uts_student_number`,
-`price_cents`, `payment_reference` (indexed; per-member, not unique),
-`payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
-`ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
-Constraint: the student rate requires a `uts_student_number`. The `member` role
-is granted on paid activation. The member's display name/email come from their
-profile (via `user_id`). `sessions_remaining` is set at activation and spent by a
-**check-in** — see `session_checkins` below, the only writer that decrements it.
+`plan_id → membership_plans(id)`, `semester_id → club_semesters(id)` (set only
+for a `period_basis = 'semester'` plan; which semester the member picked at
+purchase), `status` (`pending|active|expired|cancelled`), `is_student`,
+`uts_student_number`, `price_cents`, `payment_reference` (indexed; per-member,
+not unique), `payment_method` (`bank_transfer|stripe|manual`), `paid_at`,
+`starts_at`, `ends_at`, `sessions_remaining`, `session_date`, `notes`,
+`created_at`. Constraint: the student rate requires a `uts_student_number`.
+The `member` role is granted on paid activation. The member's display
+name/email come from their profile (via `user_id`). For a semester plan,
+`starts_at`/`ends_at` are the chosen semester's dates (`starts_on` at
+00:00 and `ends_on` at 23:59:59, both Australia/Sydney), not "now +
+duration_days" — full price applies regardless of when in the semester the
+member joins; there is no pro rata. `sessions_remaining` is set at activation
+and spent by a **check-in** — see `session_checkins` below, the only writer
+that decrements it.
 **RLS:** users read own; managers read/update all; direct member INSERT is
 revoked (all inserts go through the service-role `startMembership`).
 
