@@ -53,6 +53,20 @@ type Equals<A, B> =
  */
 type Expect<T extends true> = T;
 
+/**
+ * Fails to compile when `K` IS a key of `T`. Use to assert that a dropped
+ * column has not crept back into the generated types.
+ */
+type AssertAbsent<T, K> = K extends keyof T ? false : true;
+
+// ---- membership_plans: columns dropped by 20260803120000_membership_windows_contract.sql ----
+export type _MembershipPlansNoDurationDays = Expect<
+  AssertAbsent<Tables["membership_plans"]["Row"], "duration_days">
+>;
+export type _MembershipPlansNoPeriodBasis = Expect<
+  AssertAbsent<Tables["membership_plans"]["Row"], "period_basis">
+>;
+
 // ---- waivers: the approval workflow (the columns the outage was about) ----
 export type _WaiverApprovalColumns = RequireColumns<
   Tables["waivers"]["Row"],

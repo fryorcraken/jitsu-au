@@ -888,6 +888,23 @@ export function matchesMembershipReference(
   return normalizeRef(description).includes(ref) && amountCents === priceCents;
 }
 
+/**
+ * True when the haystack (a bank-statement line) contains the reference as a
+ * whole alphanumeric token, not merely as a substring. Splits the haystack on
+ * non-alphanumeric boundaries and normalizes each token, so `MEMSMITHAB12` does
+ * not match inside `MEMSMITHAB123`. Used for bundle matching where amount alone
+ * cannot disambiguate. Slightly stricter than `matchesMembershipReference` —
+ * a reference split by the member with spaces (e.g. "MEM SMITH AB12") will not
+ * match, which is acceptable because false negatives are safer than false
+ * positives in bundle grouping.
+ */
+export function haystackContainsRef(haystack: string, reference: string): boolean {
+  const ref = normalizeRef(reference);
+  if (!ref) return false;
+  const tokens = (haystack || "").toUpperCase().match(/[A-Z0-9]+/g) ?? [];
+  return tokens.some((t) => normalizeRef(t) === ref);
+}
+
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 /**

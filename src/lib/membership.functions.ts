@@ -9,6 +9,7 @@ import {
   importBankStatementSchema,
   INSURANCE_YEAR_DAYS,
   isUtsStudent,
+  haystackContainsRef,
   matchesMembershipReference,
   matchTransactionSchema,
   membershipWindowNotifications,
@@ -699,6 +700,8 @@ export const startMembership = createServerFn({ method: "POST" })
           .update({
             payment_reference: inserted.payment_reference,
             price_cents: insurancePrice,
+            is_student: isStudent,
+            uts_student_number: utsStudentNumber,
           })
           .eq("id", existingIns.id)
           .select("*")
@@ -1310,7 +1313,7 @@ export async function reconcileUnmatched(
       const refGroups = new Map<string, MembershipRow[]>();
       for (const m of pendingList) {
         if (!remaining.has(m.id)) continue;
-        if (!normalizeRef(haystack).includes(normalizeRef(m.payment_reference))) continue;
+        if (!haystackContainsRef(haystack, m.payment_reference)) continue;
         const group = refGroups.get(m.payment_reference) ?? [];
         group.push(m);
         refGroups.set(m.payment_reference, group);

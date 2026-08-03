@@ -4,6 +4,7 @@ import {
   computeMembershipPrice,
   deriveLifecycleStatus,
   formatCents,
+  haystackContainsRef,
   insuranceSelection,
   matchesMembershipReference,
   membershipWindowNotifications,
@@ -159,6 +160,25 @@ describe("normalizeRef", () => {
   it("uppercases and strips all non-alphanumerics", () => {
     expect(normalizeRef("mem-nguyen 7q!")).toBe("MEMNGUYEN7Q");
     expect(normalizeRef("")).toBe("");
+  });
+});
+
+describe("haystackContainsRef", () => {
+  it("matches a reference that appears as a whole alphanumeric token", () => {
+    expect(haystackContainsRef("OSKO PAYMENT MEMSMITHAB12", "MEMSMITHAB12")).toBe(true);
+    expect(haystackContainsRef("MEMSMITHAB12 deposit", "MEMSMITHAB12")).toBe(true);
+    expect(haystackContainsRef("MEM-SMITH-AB12", "MEMSMITHAB12")).toBe(false);
+  });
+
+  it("does not match when the reference is a prefix or suffix of a longer token", () => {
+    expect(haystackContainsRef("OSKO PAYMENT MEMSMITHAB123", "MEMSMITHAB12")).toBe(false);
+    expect(haystackContainsRef("OSKO PAYMENT XMEMSMITHAB12", "MEMSMITHAB12")).toBe(false);
+    expect(haystackContainsRef("OSKO PAYMENT MEMSMITHAB12", "MEMSMITHAB123")).toBe(false);
+  });
+
+  it("returns false when the reference is absent", () => {
+    expect(haystackContainsRef("Random deposit", "MEMSMITHAB12")).toBe(false);
+    expect(haystackContainsRef("", "MEMSMITHAB12")).toBe(false);
   });
 });
 
