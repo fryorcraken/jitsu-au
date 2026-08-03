@@ -168,11 +168,12 @@ function Pricing() {
   };
 
   // The semester tier's third bullet names the actual dates on sale right now
-  // (the one running today, or the next to open) instead of a vague promise.
-  // Falls back to the static copy when no semester is configured yet.
+  // (the one running today, or the next to open) instead of a vague promise,
+  // while keeping the "UTS calendar" framing that motivated showing dates at
+  // all. Falls back to the static copy when no semester is configured yet.
   const currentOrNextSemester = sellableSemesters(semesters, new Date().toISOString())[0] ?? null;
   const semesterDatesLabel = currentOrNextSemester
-    ? `${formatDateOnly(currentOrNextSemester.starts_on)} to ${formatDateOnly(currentOrNextSemester.ends_on)}`
+    ? `UTS calendar dates: ${formatDateOnly(currentOrNextSemester.starts_on)} to ${formatDateOnly(currentOrNextSemester.ends_on)}`
     : null;
   const featuresFor = (tier: Tier): string[] =>
     tier.planCode === "semester" && semesterDatesLabel

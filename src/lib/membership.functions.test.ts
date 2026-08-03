@@ -330,4 +330,55 @@ describe("reconcileUnmatched", () => {
     // next day's midnight, not a bare "now + 182 days" instant.
     expect(activation!.patch.ends_at).toBe("2026-11-22T12:59:59.000Z");
   });
+
+  // A semester-basis row with no semester_id (activateMembershipRow refuses
+  // it rather than silently defaulting to a rolling window) must not abort
+  // every OTHER transaction in the same statement import. Without a per-row
+  // guard around the activation call, this one bad invoice would throw out of
+  // the whole loop, leaving PENDING's transaction unprocessed too even though
+  // nothing is wrong with it.
+  it("does not let one broken invoice's activation failure block the rest of the import", async () => {
+    const BROKEN_SEMESTER_REFERENCE = buildPaymentReference(
+      "Broken",
+      "user-3",
+      undefined,
+      undefined,
+    );
+    const BROKEN_PENDING = {
+      id: "mem-3",
+      user_id: "user-3",
+      plan_id: SEMESTER_PLAN.id,
+      semester_id: null, // never set -- e.g. a row from before this code existed
+      status: "pending",
+      payment_reference: BROKEN_SEMESTER_REFERENCE,
+      price_cents: 44500,
+      payment_method: "bank_transfer",
+    };
+    const BROKEN_TXN = {
+      id: "txn-3",
+      status: "unmatched",
+      description: `OSKO PAYMENT ${BROKEN_SEMESTER_REFERENCE.toLowerCase()}`,
+      reference: null,
+      amount_cents: 44500,
+    };
+
+    const fake = fakeReconcileAdmin({
+      txns: ok([TXN, BROKEN_TXN]),
+      pending: ok([PENDING, BROKEN_PENDING]),
+      plans: ok([PAID_PLAN, SEMESTER_PLAN]),
+      // No `semester` reply needed -- activateMembershipRow throws on the
+      // missing semester_id before it ever reads club_semesters.
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
+    const activations = fake.updates.filter(
+      (u) => u.table === "memberships" && u.patch.status === "active",
+    );
+    expect(activations).toHaveLength(1);
+    const matchedTxns = fake.updates.filter(
+      (u) => u.table === "bank_transactions" && u.patch.status === "matched",
+    );
+    expect(matchedTxns).toHaveLength(1);
+  });
 });

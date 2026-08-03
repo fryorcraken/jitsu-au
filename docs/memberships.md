@@ -53,7 +53,10 @@ At purchase, a member picks from a **short list**: the semester running today
 that semester's dates** — `00:00` on `starts_on` through `23:59:59` on
 `ends_on`, both in the club's own timezone (Australia/Sydney) — computed once
 at activation (`activateMembershipRow` in `src/lib/membership.functions.ts`)
-and never touched again.
+and never touched again. That last point matters for a manager correcting a
+semester's dates after some memberships have already activated against it:
+the correction only changes what a membership activated **from now on** gets.
+Anyone already active keeps the window they were given — there is no re-sync.
 
 **There is no pro rata.** Joining in week one or week ten costs the same. A
 late joiner who would rather pay for only what is left is pointed at the
@@ -78,9 +81,9 @@ An "invoice" is a `memberships` row: its `price_cents`, `payment_reference`
 and `status` **are** the invoice. A member buying a semester plan pending
 payment gets a reference tagged to that semester (so buying Semester 1 while a
 Semester 2 invoice from last time is still sitting pending reconciles to the
-right one), and reconciliation, activation and cancellation all work exactly
-as they do for any other plan — see the `edit_invoice` / bank-reconciliation
-flow in `.claude/skills/uts-manager-agent/SKILL.md` and
+right one), and reconciliation, activation and cancellation follow the same
+`edit_invoice` / bank-reconciliation flow as any other plan — see
+`.claude/skills/uts-manager-agent/SKILL.md` and
 `/manager/reconciliation`.
 
 ## Manager screens & the manager agent API

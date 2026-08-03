@@ -369,7 +369,16 @@ export async function listSemesterRows(
 // ---- Public: list active semesters (for the pricing page + purchase flow) ----
 export const listSemesters = createServerFn({ method: "GET" }).handler(async () => {
   const supabase = serverSupabase();
-  return listSemesterRows(supabase, { activeOnly: true });
+  const rows = await listSemesterRows(supabase, { activeOnly: true });
+  return rows.map((s) => ({
+    code: s.code,
+    name: s.name,
+    year: s.year,
+    half: s.half,
+    starts_on: s.starts_on,
+    ends_on: s.ends_on,
+    is_active: s.is_active,
+  }));
 });
 
 // ---- Member: my memberships + lifecycle ----
@@ -1164,7 +1173,22 @@ export async function reconcileUnmatched(
     const hit = hits[0];
     const plan = planById.get(hit.plan_id);
     if (!plan) continue;
-    await activateMembershipRow(admin, hit, plan, { paymentMethod: "bank_transfer" });
+    // One bad invoice (e.g. a semester-basis row with no semester_id, which
+    // activateMembershipRow refuses rather than silently defaulting) must not
+    // abort every other transaction in this statement. The bank_transactions
+    // row this txn came from was already committed by importBankStatement
+    // before this function ever ran, so an uncaught throw here would leave it
+    // permanently unmatched: every future import hits the same pair and fails
+    // the same way, with nothing after it in the loop ever getting a chance.
+    try {
+      await activateMembershipRow(admin, hit, plan, { paymentMethod: "bank_transfer" });
+    } catch (e) {
+      console.error(
+        `[reconcile] activation failed for membership ${hit.id} (transaction ${txn.id}); left unmatched for a manager to resolve:`,
+        e,
+      );
+      continue;
+    }
     await admin
       .from("bank_transactions")
       .update({

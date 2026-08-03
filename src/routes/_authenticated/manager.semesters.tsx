@@ -137,8 +137,10 @@ function SemestersPage() {
             <h1 className="text-3xl font-black">Semesters</h1>
             <p className="text-sm text-muted-foreground">
               The club's own fixed training dates for each half-year. A member picks one of these
-              when they buy a semester membership, and it runs exactly the dates set here, full
-              price regardless of when in it they join.
+              when they buy a semester membership, and their membership runs exactly the dates set
+              here at that moment, full price regardless of when in it they join. Editing an
+              existing semester's dates only changes what a NEW membership gets: anyone who has
+              already joined keeps the dates they were given.
             </p>
           </div>
           <Button asChild variant="outline">
