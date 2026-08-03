@@ -55,16 +55,16 @@ describe("SiteHeader", () => {
     expect(screen.queryByText(/member login/i)).not.toBeInTheDocument();
   });
 
-  // The knowledge base is unreachable without this: nothing else on the public
-  // site links to it.
-  it("links to the knowledge base for signed-out visitors too", () => {
-    mockUseAuth.mockReturnValue({ user: null });
-    render(<SiteHeader />);
-
-    const links = screen.getAllByRole("link", { name: /^knowledge base$/i });
-    expect(links.length).toBeGreaterThanOrEqual(1);
-    for (const link of links) {
-      expect(link).toHaveAttribute("href", "/kb");
+  // The marketing header is for people deciding whether to come. The knowledge
+  // base needs a login and is reached from the member area, so advertising it
+  // here would put a link to a sign-in wall in the middle of the nav a visitor
+  // is browsing. Signed in or out: this header does not link to it.
+  it("does not link to the knowledge base, which is members-only", () => {
+    for (const user of [null, { id: "u1" }]) {
+      mockUseAuth.mockReturnValue({ user });
+      const { unmount } = render(<SiteHeader />);
+      expect(screen.queryByRole("link", { name: /knowledge base/i })).not.toBeInTheDocument();
+      unmount();
     }
   });
 

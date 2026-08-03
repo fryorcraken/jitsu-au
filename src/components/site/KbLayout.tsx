@@ -16,7 +16,18 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, BookOpen, ExternalLink, Menu, Search, User, X } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Check,
+  ChevronLeft,
+  ExternalLink,
+  Menu,
+  RefreshCw,
+  Search,
+  User,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -24,11 +35,11 @@ import { cn } from "@/lib/utils";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
 import { useAuth } from "@/hooks/useAuth";
 import { useKbNav } from "@/hooks/useKbNav";
-import type { KbNavSection } from "@/lib/kb-nav";
+import { readState } from "@/lib/kb-nav";
+import type { KbNavEntry, KbNavSection } from "@/lib/kb-nav";
 import { searchKnowledgeBase } from "@/lib/kb.functions";
 
 export function KbLayout({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
   const { nav, loading } = useKbNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
@@ -68,26 +79,17 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
             <span className="hidden text-sm font-semibold sm:inline">Knowledge base</span>
           </Link>
 
+          {/* Everyone here is signed in (the route gate sees to that), so there
+              is no sign-in branch: the one identity control is the way back to
+              the member area. */}
           <div className="ml-auto flex items-center gap-2">
             <KbSearch />
-            <Button asChild size="sm" variant="ghost" className="max-md:hidden">
-              <Link to="/">
-                <ArrowLeft className="mr-1 h-4 w-4" />
-                Back to the club site
+            <Button asChild size="sm" variant="ghost" className="max-sm:px-2">
+              <Link to="/account">
+                <User className="h-4 w-4 sm:mr-1" />
+                <span className="max-sm:sr-only">Member space</span>
               </Link>
             </Button>
-            {user ? (
-              <Button asChild size="sm" variant="ghost" className="max-sm:px-2">
-                <Link to="/account">
-                  <User className="h-4 w-4 sm:mr-1" />
-                  <span className="max-sm:sr-only">Member space</span>
-                </Link>
-              </Button>
-            ) : (
-              <Button asChild size="sm" variant="ghost">
-                <Link to="/auth">Sign in</Link>
-              </Button>
-            )}
           </div>
         </div>
       </header>
@@ -121,20 +123,45 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
 function KbNavList({ nav, loading }: { nav: KbNavSection[]; loading: boolean }) {
   const location = useLocation();
 
+  // Above everything, including the loading and empty states: the way out is
+  // the one control that must never depend on a fetch landing. The top bar has
+  // the same link, but a reader who has scrolled a long article is looking at
+  // the sidebar, and on a phone the drawer is the only nav on screen at all.
+  const backToMemberSpace = (
+    <Link
+      to="/account"
+      className="mb-4 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+    >
+      <ChevronLeft className="h-4 w-4 shrink-0" />
+      Back to member space
+    </Link>
+  );
+
   // "There is nothing here" and "this has not arrived yet" are different
   // answers, and the sidebar used to give the first one for both. On a cold
   // load that flashed an empty-knowledge-base message next to a fully rendered
   // article, and on a failed nav fetch it stayed there.
-  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>;
+  if (loading) {
+    return (
+      <>
+        {backToMemberSpace}
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </>
+    );
+  }
 
   if (!nav.length) {
     return (
-      <p className="text-sm text-muted-foreground">There is nothing in the knowledge base yet.</p>
+      <>
+        {backToMemberSpace}
+        <p className="text-sm text-muted-foreground">There is nothing in the knowledge base yet.</p>
+      </>
     );
   }
 
   return (
     <nav aria-label="Knowledge base" className="space-y-6">
+      {backToMemberSpace}
       {nav.map((section) => (
         <div key={section.slug ?? "unsectioned"} className="space-y-1">
           <p className="px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -176,6 +203,7 @@ function KbNavList({ nav, loading }: { nav: KbNavSection[]; loading: boolean }) 
                           Draft
                         </span>
                       )}
+                      <ReadMark entry={entry} />
                     </Link>
                   )}
                 </li>
@@ -185,6 +213,31 @@ function KbNavList({ nav, loading }: { nav: KbNavSection[]; loading: boolean }) 
         </div>
       ))}
     </nav>
+  );
+}
+
+/**
+ * The tick beside an entry a member has read, or the dot beside one that has
+ * been rewritten since they read it.
+ *
+ * Both are marks rather than words, and both carry an accessible label: an icon
+ * with no name is a decoration to a screen reader, and "have I read this" is
+ * the one thing this list is being asked.
+ */
+function ReadMark({ entry }: { entry: KbNavEntry }) {
+  const state = readState(entry);
+  if (state === "unread") return null;
+  return state === "updated" ? (
+    <span
+      title="Updated since you read it"
+      className="ml-auto flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground"
+    >
+      <RefreshCw className="h-3 w-3" aria-hidden />
+      <span className="sr-only">Updated since you read it</span>
+      New
+    </span>
+  ) : (
+    <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Read" />
   );
 }
 

@@ -70,17 +70,16 @@ export const WaiverConfirmationEmail = ({
           A manager will review your submission. You&apos;ll be cleared to train once it&apos;s
           approved.
         </Text>
-        {/* A line rather than a fourth button: this email already asks for two
-            actions, and the knowledge base is reading for while you wait, not
-            another thing to tick off. It is also the earliest point anyone is
-            new, which is exactly who it is written for. */}
+        {/* Told about, deliberately NOT linked. The knowledge base is signed-in
+            only, and nobody reading this email can sign in yet: their account is
+            created locked and a manager approving the waiver is what sends the
+            sign-in link. A link here would land a brand-new person on a sign-in
+            screen they have no password for, which reads as the club being
+            broken on their first click. */}
         <Text style={text}>
-          While you wait, have a look through our{" "}
-          <Link href={`${siteUrl}/kb`} style={link}>
-            knowledge base
-          </Link>
-          . It covers what happens in your first session, how our belts and grading work, and how
-          the club runs.
+          Once you&apos;re approved you&apos;ll get a link to sign in, and your member area has our
+          knowledge base in it: what happens in your first session, how our belts and grading work,
+          and how the club runs.
         </Text>
         {codeOfConductUrl ? (
           <>

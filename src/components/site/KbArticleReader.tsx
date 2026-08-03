@@ -20,7 +20,7 @@ import { formatDate } from "@/lib/dates";
 import { groupThreads, resolveAnchors, splitBlocks } from "@/lib/kb";
 import type { AnnotationVisibility } from "@/lib/kb";
 import { extractHeadings } from "@/lib/kb-nav";
-import { kbMarkdownComponents } from "@/lib/kb-markdown";
+import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 
 /** One annotation, exactly as `listAnnotations` returns it. */
 export type ReaderAnnotation = {
@@ -148,7 +148,9 @@ export function KbArticleReader({
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
               </button>
 
-              <ReactMarkdown components={kbMarkdownComponents}>{block.markdown}</ReactMarkdown>
+              <ReactMarkdown components={kbMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
+                {block.markdown}
+              </ReactMarkdown>
 
               {/* Always rendered when there is anything to show OR the reader
                   could add something. Gating this on `shared + notes > 0` (as it

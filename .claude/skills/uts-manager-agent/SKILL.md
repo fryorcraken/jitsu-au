@@ -285,11 +285,21 @@ scripts/agent.sh save_kb_section '{"slug":"belts-and-grading","title":"Belts and
 > Positions are seeded as 10, 20, 30 so you can slot a new section between two
 > others without renumbering anything. Keep that habit.
 
+### `delete_kb_section` — remove a group
+
+Its articles are **not** deleted with it: they drop into the "Everything else"
+group at the bottom of the sidebar, where members can still find them. The
+result says how many were displaced, so re-file them.
+
+```bash
+scripts/agent.sh delete_kb_section '{"slug":"belts-and-grading"}'
+```
+
 ### `list_kb_articles` — everything in the knowledge base
 
 Returns each entry's `slug`, live `title` and `version`, how many `versions` it
-has, its `section` and `position`, `visibility` (`public | members | managers`),
-and whether it is still `annotations_enabled`.
+has, its `section` and `position`, `visibility` (`members | managers`), and
+whether it is still `annotations_enabled`.
 
 An entry with a `link_path` is **not an article**: it is a sidebar link to a page
 elsewhere on the site (`/first-class`, `/faq`), it has no versions, and its
@@ -353,8 +363,9 @@ scripts/agent.sh save_kb_article '{
 >   refused if the slug is already taken, rather than adding a version to an
 >   existing article and patching its visibility to whatever you sent.
 > - **Omit `visibility` unless you mean to change it.** Omitting leaves it as it
->   is; passing `public` on what was a managers-only draft publishes it to the
->   world. New articles default to `members`.
+>   is; passing `members` on what was a managers-only draft publishes it to every
+>   member of the club. New articles default to `members`. There is no `public`
+>   level: the whole knowledge base needs a login.
 > - **`link_path` takes site-relative paths only** (`/faq`, not
 >   `https://...`), needs a `nav_title`, and cannot be combined with
 >   `title`/`body_md`. An article that already has versions cannot be turned

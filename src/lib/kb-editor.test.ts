@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { isArticleDirty, slugFromTitle, wideningVisibility } from "./kb-editor";
+import {
+  isArticleDirty,
+  nextPosition,
+  reorder,
+  slugFromTitle,
+  wideningVisibility,
+} from "./kb-editor";
 import type { ArticleDraft } from "./kb-editor";
 
 const stored: ArticleDraft = {
@@ -7,6 +13,10 @@ const stored: ArticleDraft = {
   body_md: "# Rules",
   visibility: "members",
   annotations_enabled: true,
+  section: "start-here",
+  position: 20,
+  nav_title: "",
+  link_path: "",
 };
 
 describe("isArticleDirty", () => {
@@ -17,8 +27,18 @@ describe("isArticleDirty", () => {
   it("notices every field a save would keep", () => {
     expect(isArticleDirty({ ...stored, title: "Rules" }, stored)).toBe(true);
     expect(isArticleDirty({ ...stored, body_md: "# Other" }, stored)).toBe(true);
-    expect(isArticleDirty({ ...stored, visibility: "public" }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, visibility: "managers" }, stored)).toBe(true);
     expect(isArticleDirty({ ...stored, annotations_enabled: false }, stored)).toBe(true);
+  });
+
+  // Placement is work a save would keep too. Without it, a manager who moved an
+  // article into "Start here" and then clicked another one lost the move with
+  // nothing on screen having said so.
+  it("notices a change of placement", () => {
+    expect(isArticleDirty({ ...stored, section: "about-the-club" }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, position: 30 }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, nav_title: "Rules" }, stored)).toBe(true);
+    expect(isArticleDirty({ ...stored, link_path: "/faq" }, stored)).toBe(true);
   });
 
   // While creating there is no stored version, but anything typed is still
@@ -43,19 +63,17 @@ describe("wideningVisibility", () => {
       from: "managers",
       to: "members",
     });
-    expect(wideningVisibility("members", "public")).toEqual({ from: "members", to: "public" });
-    expect(wideningVisibility("managers", "public")).toEqual({ from: "managers", to: "public" });
   });
 
   // Taking an article away from people is recoverable and unsurprising.
   it("does not flag a narrowing change", () => {
-    expect(wideningVisibility("public", "members")).toBeNull();
     expect(wideningVisibility("members", "managers")).toBeNull();
   });
 
   it("does not flag an unchanged visibility, or a brand-new article", () => {
     expect(wideningVisibility("members", "members")).toBeNull();
-    expect(wideningVisibility(null, "public")).toBeNull();
+    expect(wideningVisibility("managers", "managers")).toBeNull();
+    expect(wideningVisibility(null, "members")).toBeNull();
   });
 });
 
@@ -89,5 +107,90 @@ describe("slugFromTitle", () => {
   it("gives back nothing when the title has nothing usable in it", () => {
     expect(slugFromTitle("!!!")).toBe("");
     expect(slugFromTitle("   ")).toBe("");
+  });
+});
+
+describe("nextPosition", () => {
+  it("puts a new entry after everything already there", () => {
+    expect(
+      nextPosition([
+        { slug: "a", position: 10 },
+        { slug: "b", position: 20 },
+      ]),
+    ).toBe(30);
+  });
+
+  it("starts at the step when the section is empty", () => {
+    expect(nextPosition([])).toBe(10);
+  });
+
+  // The reason this exists rather than defaulting to 0: a brand-new article at
+  // position 0 lands ABOVE the article a manager deliberately made the first
+  // thing a new member reads.
+  it("never proposes the top of the section", () => {
+    expect(nextPosition([{ slug: "a", position: 0 }])).toBe(10);
+  });
+});
+
+describe("reorder", () => {
+  const list = [
+    { slug: "a", position: 10 },
+    { slug: "b", position: 20 },
+    { slug: "c", position: 30 },
+  ];
+
+  it("swaps an entry with the one above it", () => {
+    expect(reorder(list, "b", -1)).toEqual([
+      { slug: "b", position: 10 },
+      { slug: "a", position: 20 },
+    ]);
+  });
+
+  it("swaps an entry with the one below it", () => {
+    expect(reorder(list, "b", 1)).toEqual([
+      { slug: "c", position: 20 },
+      { slug: "b", position: 30 },
+    ]);
+  });
+
+  it("returns only the rows that actually moved", () => {
+    // "c" stays at 30, so it is not written.
+    expect(reorder(list, "a", 1).map((m) => m.slug)).toEqual(["b", "a"]);
+  });
+
+  it("does nothing at either end", () => {
+    expect(reorder(list, "a", -1)).toEqual([]);
+    expect(reorder(list, "c", 1)).toEqual([]);
+    expect(reorder(list, "missing", 1)).toEqual([]);
+  });
+
+  // The case a "swap the two numbers" implementation gets wrong: a knowledge
+  // base nobody has ordered yet has everything on 0, so swapping positions
+  // swaps 0 for 0 and the arrow appears to be broken. Renumbering breaks the
+  // tie on the first click.
+  it("breaks a tie when nothing has been ordered yet", () => {
+    const unordered = [
+      { slug: "a", position: 0 },
+      { slug: "b", position: 0 },
+      { slug: "c", position: 0 },
+    ];
+    expect(reorder(unordered, "c", -1)).toEqual([
+      { slug: "a", position: 10 },
+      { slug: "c", position: 20 },
+      { slug: "b", position: 30 },
+    ]);
+  });
+
+  // The list is taken in the order it is DISPLAYED. Re-sorting here by anything
+  // of its own would move whatever this function thought was above, rather than
+  // what the manager can see is above.
+  it("trusts the order it is given", () => {
+    const shown = [
+      { slug: "later", position: 30 },
+      { slug: "earlier", position: 10 },
+    ];
+    // "earlier" is already on 10 and stays there, so the only write is the row
+    // that had to move out of its way.
+    expect(reorder(shown, "earlier", -1)).toEqual([{ slug: "later", position: 20 }]);
   });
 });

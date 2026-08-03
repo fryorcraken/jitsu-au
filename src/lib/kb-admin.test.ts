@@ -9,6 +9,7 @@
 // scoped to one article.
 import { describe, expect, it } from "vitest";
 import {
+  deleteKbSection,
   listSharedAnnotations,
   promoteArticleVersion,
   saveKbArticle,
@@ -22,7 +23,7 @@ const ok = (data: unknown): Result => ({ data, error: null });
 
 type Op = {
   table: string;
-  verb: "select" | "update" | "insert";
+  verb: "select" | "update" | "insert" | "delete";
   patch?: Record<string, unknown>;
   values?: Record<string, unknown>;
   filters: [string, unknown][];
@@ -59,6 +60,7 @@ function fakeClient(respond: (op: Op, calls: Op[]) => Result, count?: number) {
         chain({ table, verb: "update", patch, filters: [] }),
       insert: (values: Record<string, unknown>) =>
         chain({ table, verb: "insert", values, filters: [] }),
+      delete: () => chain({ table, verb: "delete", filters: [] }),
     }),
   };
   return { db: db as unknown as KbClient, calls };
@@ -240,9 +242,9 @@ describe("saveKbArticle", () => {
   it("applies visibility when the save does mention it", async () => {
     const existing = { id: "doc-1", slug: "house-rules", visibility: "managers" };
     const { db, calls } = saveHarness({ existing, maxVersion: 1 });
-    await saveKbArticle(db, { ...baseInput, visibility: "public" }, null);
+    await saveKbArticle(db, { ...baseInput, visibility: "members" }, null);
     const patch = calls.find((c) => c.table === "kb_articles" && c.verb === "update")?.patch ?? {};
-    expect(patch).toMatchObject({ visibility: "public" });
+    expect(patch).toMatchObject({ visibility: "members" });
   });
 
   // The version row is written as a draft and promoted afterwards, so a failed
@@ -274,7 +276,7 @@ describe("saveKbArticle", () => {
         return ok({ ...existing, ...op.patch });
       return ok(null);
     });
-    await expect(saveKbArticle(db, { ...baseInput, visibility: "public" }, null)).rejects.toThrow(
+    await expect(saveKbArticle(db, { ...baseInput, visibility: "members" }, null)).rejects.toThrow(
       "boom",
     );
     expect(calls.filter((c) => c.table === "kb_articles" && c.verb === "update")).toHaveLength(0);
@@ -283,13 +285,13 @@ describe("saveKbArticle", () => {
   /**
    * NARROWING patches first, and this is the other half of the same rule.
    *
-   * Taking a public page to managers-only is usually done because the new text
+   * Taking a members page to managers-only is usually done because the new text
    * is not for everyone. Patching last would publish that text to the audience
    * it was being taken away from if the patch then failed, while telling the
    * caller the save had not happened.
    */
   it("narrows visibility before the new text can go live", async () => {
-    const existing = { id: "doc-1", slug: "house-rules", visibility: "public" };
+    const existing = { id: "doc-1", slug: "house-rules", visibility: "members" };
     const { db, calls } = saveHarness({ existing, maxVersion: 1 });
     await saveKbArticle(db, { ...baseInput, visibility: "managers" }, null);
     const patchAt = calls.findIndex((c) => c.table === "kb_articles" && c.verb === "update");
@@ -303,7 +305,7 @@ describe("saveKbArticle", () => {
   it("widens visibility only after the new text is live", async () => {
     const existing = { id: "doc-1", slug: "house-rules", visibility: "managers" };
     const { db, calls } = saveHarness({ existing, maxVersion: 1 });
-    await saveKbArticle(db, { ...baseInput, visibility: "public" }, null);
+    await saveKbArticle(db, { ...baseInput, visibility: "members" }, null);
     const patchAt = calls.findIndex((c) => c.table === "kb_articles" && c.verb === "update");
     const promoteAt = calls.findIndex((c) => c.verb === "update" && c.patch?.is_current === true);
     expect(promoteAt).toBeGreaterThanOrEqual(0);
@@ -321,7 +323,7 @@ describe("saveKbArticle", () => {
     const existing = { id: "doc-1", slug: "house-rules", visibility: "managers" };
     const { db, calls } = saveHarness({ existing, maxVersion: 3 });
     await expect(
-      saveKbArticle(db, { ...baseInput, visibility: "public", expect_new: true }, null),
+      saveKbArticle(db, { ...baseInput, visibility: "members", expect_new: true }, null),
     ).rejects.toThrow(/already exists/);
     expect(writes(calls)).toHaveLength(0);
   });
@@ -490,6 +492,46 @@ describe("saveKbSection", () => {
   });
 });
 
+describe("deleteKbSection", () => {
+  function deleteHarness(section: Record<string, unknown> | null, inside: number) {
+    return fakeClient((op) => {
+      if (op.table === "kb_sections" && op.verb === "select") return ok(section);
+      return ok(null);
+    }, inside);
+  }
+
+  // The point of the whole function: deleting a heading is a tidy-up of the
+  // navigation, and it must never take the club's articles with it. The
+  // `ON DELETE SET NULL` does that; what this checks is that nothing here
+  // deletes articles as well.
+  it("deletes the section and nothing else", async () => {
+    const { db, calls } = deleteHarness({ id: "sec-1" }, 3);
+    const res = await deleteKbSection(db, "belts");
+    expect(res).toEqual({ slug: "belts", displaced: 3 });
+    const deletes = calls.filter((c) => c.verb === "delete");
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].table).toBe("kb_sections");
+    expect(deletes[0].filters).toContainEqual(["id", "sec-1"]);
+  });
+
+  // Counted before the delete, or the rows no longer name the section and the
+  // manager is told nothing moved when several did.
+  it("counts the displaced articles before deleting", async () => {
+    const { db, calls } = deleteHarness({ id: "sec-1" }, 2);
+    await deleteKbSection(db, "belts");
+    const countAt = calls.findIndex((c) => c.table === "kb_articles");
+    const deleteAt = calls.findIndex((c) => c.verb === "delete");
+    expect(countAt).toBeGreaterThanOrEqual(0);
+    expect(countAt).toBeLessThan(deleteAt);
+  });
+
+  it("refuses a section that is not there rather than deleting nothing quietly", async () => {
+    const { db, calls } = deleteHarness(null, 0);
+    await expect(deleteKbSection(db, "ghosts")).rejects.toThrow(/no section/);
+    expect(writes(calls)).toHaveLength(0);
+  });
+});
+
 /**
  * The privacy filter, which is the reason this function takes its client as a
  * parameter at all.
@@ -587,7 +629,7 @@ describe("saveKbArticle link entry transitions", () => {
   it("writes the article's settings exactly once", async () => {
     for (const input of [
       { slug: "house-rules", section: "start-here", position: 30 },
-      { ...baseInput, visibility: "public" as const },
+      { ...baseInput, visibility: "members" as const },
       { ...baseInput, visibility: "managers" as const },
     ]) {
       const { db, calls } = saveHarness({
