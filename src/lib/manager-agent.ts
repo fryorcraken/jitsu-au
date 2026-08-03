@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "4",
+  version: "5",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "5",
+      // Purely additive: two new actions, and a decorative field on existing
+      // ones. Nothing already working starts failing or means something
+      // different.
+      breaking: false,
+      notes: [
+        "New actions list_semesters and save_semester. The `semester` membership plan now runs for a fixed, club-set semester date range instead of a rolling window from payment date; these actions manage the club's semester dates the same way list_kb_sections/save_kb_section manage the knowledge base's sections.",
+        "list_invoices / edit_invoice's returned invoice, and each invoice inside list_users, now carry semester_code and semester_name — set when the invoice is for a semester-anchored plan, null otherwise.",
+      ],
+    },
     {
       version: "4",
       // `visibility: "public"` is now refused by the schema, so a client that
@@ -303,6 +314,41 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "Your own UUID for this filing attempt, minted once per record and RESENT UNCHANGED on every retry of it. This is what makes retrying safe: the same id always resolves to the same waiver, so a call whose reply you never saw can be repeated without filing twice. The duplicate check alone cannot catch two retries racing each other; this can. Send one per record in any bulk import. A new id means a new waiver, and an id already used for a different record is refused (409 submission_id_conflict). NOTE: sending an id means you own finishing that record — a filing that fails with 503 waiver_filing_incomplete leaves a waiver with no document, which only your retry completes.",
+        },
+      ],
+    },
+    {
+      name: "list_semesters",
+      method: "POST",
+      summary:
+        "List the club's semesters (its own fixed training dates for each UTS half-year, e.g. '2026-s1' running 2 Feb to 27 Jun), newest-starting last. A `semester`-basis membership plan runs exactly a chosen semester's dates, full price regardless of when in it a member joins — there is no pro rata. Includes inactive (retired) semesters.",
+      params: [],
+    },
+    {
+      name: "save_semester",
+      method: "POST",
+      summary:
+        "Create or update a semester. Upserts by (year, half) — code is always derived as '<year>-s<half>', so it is never taken as an input and can never disagree with the dates. An unknown (year, half) creates it; a known one updates its name/dates in place (and is_active, if sent). name, starts_on and ends_on are required on every call, since a semester is saved as a whole row, not patched field-by-field.",
+      params: [
+        { name: "year", required: true, description: "e.g. 2026." },
+        { name: "half", required: true, description: "1 or 2." },
+        { name: "name", required: true, description: "What members see, e.g. 'Semester 1 2026'." },
+        {
+          name: "starts_on",
+          required: true,
+          description: "YYYY-MM-DD, the first day of training.",
+        },
+        {
+          name: "ends_on",
+          required: true,
+          description:
+            "YYYY-MM-DD, the LAST day of training (inclusive) — must be on or after starts_on. A membership bought for this semester covers this whole day.",
+        },
+        {
+          name: "is_active",
+          required: false,
+          description:
+            "Whether members can currently buy this semester. Omit to leave unchanged (defaults to true on create).",
         },
       ],
     },
@@ -689,12 +735,18 @@ export function invoiceEditAudit(opts: {
 }
 
 /** Client-safe projection of an invoice (membership) joined with its plan. */
-export function projectInvoice(m: MembershipRow, plan?: MembershipPlanRow) {
+export function projectInvoice(
+  m: MembershipRow,
+  plan?: MembershipPlanRow,
+  semester?: { code: string; name: string },
+) {
   return {
     id: m.id,
     user_id: m.user_id,
     plan_code: plan?.code ?? null,
     plan_name: plan?.name ?? null,
+    semester_code: semester?.code ?? null,
+    semester_name: semester?.name ?? null,
     status: m.status,
     price_cents: m.price_cents,
     price: formatCents(m.price_cents),

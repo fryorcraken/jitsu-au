@@ -25,6 +25,7 @@ import {
   paperWaiverUploadSchema,
   saveKbArticleSchema,
   saveKbSectionSchema,
+  saveSemesterSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -68,7 +69,13 @@ import {
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
-import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
+import { listSemesterRows, saveSemester } from "@/lib/membership.functions";
+import type {
+  ClubSemesterRow,
+  MembershipClient,
+  MembershipPlanRow,
+  MembershipRow,
+} from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 
@@ -248,6 +255,7 @@ async function handleListUsers(params: unknown) {
     { data: profiles, error: pErr },
     { data: rows, error },
     { data: plans, error: plErr },
+    { data: semesters, error: semErr },
     { data: waivers, error: wErr },
     { data: checkins, error: cErr },
     { data: leadRows, error: lErr },
@@ -260,6 +268,7 @@ async function handleListUsers(params: unknown) {
       .limit(5000),
     db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
     db.from("membership_plans").select("*"),
+    db.from("club_semesters").select("id, code, name"),
     // ALL waivers: approved => visitor+, pending-only => applicant.
     pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
     // Attendance, counted per person: "who has been coming" is squarely this
@@ -283,6 +292,9 @@ async function handleListUsers(params: unknown) {
   if (wErr) throw new AgentError(500, "db_error", wErr.message);
   if (cErr) throw new AgentError(500, "db_error", cErr.message);
   if (lErr) throw new AgentError(500, "db_error", lErr.message);
+  // Decoration only (which semester an invoice names); starts_at/ends_at on
+  // the invoice are the source of truth regardless, so this degrades quietly.
+  if (semErr) console.error("[agent.list_users] semester lookup failed:", semErr);
 
   const leads = (leadRows ?? []) as ClubUserLead[];
   if ((checkins ?? []).length >= CHECKINS_LIMIT) {
@@ -298,6 +310,7 @@ async function handleListUsers(params: unknown) {
 
   const memberships = (rows ?? []) as MembershipRow[];
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
+  const semesterById = new Map((semesters ?? []).map((s) => [s.id, s]));
   const profileRows = (profiles ?? []) as ClubUserProfile[];
   const waiverRows = (waivers ?? []) as ClubUserWaiver[];
 
@@ -354,7 +367,11 @@ async function handleListUsers(params: unknown) {
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,
     invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) =>
-      projectInvoice(m, planById.get(m.plan_id)),
+      projectInvoice(
+        m,
+        planById.get(m.plan_id),
+        m.semester_id ? semesterById.get(m.semester_id) : undefined,
+      ),
     ),
   }));
 
@@ -376,20 +393,28 @@ async function handleListInvoices(params: unknown) {
   // a truncated one, and there's no offset/cursor to page past the cap.
   let countQuery = db.from("memberships").select("*", { count: "exact", head: true });
   if (status) countQuery = countQuery.eq("status", status);
-  const [{ data: rows, error }, { data: plans, error: plErr }, { count, error: countErr }] =
-    await Promise.all([
-      query.limit(limit ?? 200),
-      db.from("membership_plans").select("*"),
-      countQuery,
-    ]);
+  const [
+    { data: rows, error },
+    { data: plans, error: plErr },
+    { data: semesters, error: semErr },
+    { count, error: countErr },
+  ] = await Promise.all([
+    query.limit(limit ?? 200),
+    db.from("membership_plans").select("*"),
+    db.from("club_semesters").select("id, code, name"),
+    countQuery,
+  ]);
   if (error) throw new AgentError(500, "db_error", error.message);
   // Without this, a failed plans read returns invoices whose plan name, kind and
   // price basis are all null — an agent asked to correct one has no way to tell
   // that from an invoice genuinely missing its plan.
   if (plErr) throw new AgentError(500, "db_error", plErr.message);
   if (countErr) throw new AgentError(500, "db_error", countErr.message);
+  // Decoration only; see the same note in handleListUsers.
+  if (semErr) console.error("[agent.list_invoices] semester lookup failed:", semErr);
 
   const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
+  const semesterById = new Map((semesters ?? []).map((s) => [s.id, s]));
 
   // Resolve each member's display name from their profile and email from the
   // auth user (the one email store).
@@ -416,7 +441,11 @@ async function handleListInvoices(params: unknown) {
   }
 
   const invoices = ((rows ?? []) as MembershipRow[]).map((r) => ({
-    ...projectInvoice(r, planById.get(r.plan_id)),
+    ...projectInvoice(
+      r,
+      planById.get(r.plan_id),
+      r.semester_id ? semesterById.get(r.semester_id) : undefined,
+    ),
     member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
     member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
   }));
@@ -491,16 +520,28 @@ async function handleEditInvoice(params: unknown, actingAs: string) {
     );
   }
 
-  // The one read here that must NOT throw: the update above has already
-  // committed, so failing now would report a successful edit as an error and
-  // invite the agent to retry it. The plan only decorates the echoed invoice, so
-  // log and return what did happen.
+  // The two reads here must NOT throw: the update above has already committed,
+  // so failing now would report a successful edit as an error and invite the
+  // agent to retry it. Both only decorate the echoed invoice, so log and return
+  // what did happen.
   const { data: plan, error: planErr } = await db
     .from("membership_plans")
     .select("*")
     .eq("id", updated.plan_id)
     .maybeSingle();
   if (planErr) console.error("[agent.edit_invoice] plan lookup failed after update:", planErr);
+  const semester = updated.semester_id
+    ? await db
+        .from("club_semesters")
+        .select("id, code, name")
+        .eq("id", updated.semester_id)
+        .maybeSingle()
+        .then(({ data, error: semErr }) => {
+          if (semErr)
+            console.error("[agent.edit_invoice] semester lookup failed after update:", semErr);
+          return data ?? undefined;
+        })
+    : undefined;
 
   // The audit trail. There is no audit table, so the server log is where an
   // invoice's edit history lives: without it, a disagreement between the books
@@ -527,6 +568,7 @@ async function handleEditInvoice(params: unknown, actingAs: string) {
     invoice: projectInvoice(
       updated as MembershipRow,
       (plan ?? undefined) as MembershipPlanRow | undefined,
+      semester,
     ),
     // What moved, and what it held before. An edit that changed nothing comes
     // back with an empty `changed`, so a caller can tell a real correction from
@@ -583,6 +625,41 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
       422,
       "file_waiver_failed",
       e instanceof Error ? e.message : "Could not file the waiver.",
+    );
+  }
+}
+
+/** Project a semester row the way `list_semesters` returns it. */
+function projectAgentSemester(s: ClubSemesterRow) {
+  return {
+    code: s.code,
+    name: s.name,
+    year: s.year,
+    half: s.half,
+    starts_on: s.starts_on,
+    ends_on: s.ends_on,
+    is_active: s.is_active,
+  };
+}
+
+// ---- action: list_semesters ----
+async function handleListSemesters() {
+  const db = await adminClient();
+  const semesters = await listSemesterRows(db);
+  return { count: semesters.length, semesters: semesters.map(projectAgentSemester) };
+}
+
+// ---- action: save_semester ----
+async function handleSaveSemester(params: unknown) {
+  const input = saveSemesterSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await saveSemester(db, input);
+  } catch (e) {
+    throw new AgentError(
+      422,
+      "save_semester_failed",
+      e instanceof Error ? e.message : "Could not save the semester.",
     );
   }
 }
@@ -788,6 +865,10 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleEditInvoice(params, actingAs);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
+    case "list_semesters":
+      return handleListSemesters();
+    case "save_semester":
+      return handleSaveSemester(params);
     case "list_kb_sections":
       return handleListKbSections();
     case "save_kb_section":

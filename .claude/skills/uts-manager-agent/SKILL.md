@@ -2,11 +2,12 @@
 name: uts-manager-agent
 description: >-
   Perform UTS Jitsu manager actions (list members and their status, edit an
-  invoice's details, file a scanned paper waiver, publish and reorder the club's
-  knowledge base and read members' comments on it) against the live site via its
-  manager agent HTTP API. Use when a club manager asks an agent to look up
-  members/invoices, correct invoice details (price, payment reference, notes,
-  status), migrate/bulk-file waivers the club holds on paper, or edit a
+  invoice's details, file a scanned paper waiver, manage the club's semester
+  dates, publish and reorder the club's knowledge base and read members'
+  comments on it) against the live site via its manager agent HTTP API. Use when
+  a club manager asks an agent to look up members/invoices, correct invoice
+  details (price, payment reference, notes, status), migrate/bulk-file waivers
+  the club holds on paper, add or edit a semester's start/end dates, or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them. Requires the UTS_MANAGER_API_URL and
   UTS_MANAGER_API_KEY environment variables.
@@ -115,10 +116,14 @@ a mistaken note), `payment_reference`, `payment_method`
 (`bank_transfer | stripe | manual`), `status` (`pending | cancelled | expired`).
 Any other key is rejected, naming itself in the error — so a typo like `price`
 doesn't get silently ignored. This includes the read-only fields a `list_*`
-call decorates an invoice with (`plan_code`, `plan_name`, `price`, `is_student`,
-`paid_at`, `starts_at`, `ends_at`, `created_at`, `member_name`,
-`member_email`): send only `id` plus the field(s) you're actually changing,
-never a listed invoice echoed back wholesale.
+call decorates an invoice with (`plan_code`, `plan_name`, `semester_code`,
+`semester_name`, `price`, `is_student`, `paid_at`, `starts_at`, `ends_at`,
+`created_at`, `member_name`, `member_email`): send only `id` plus the field(s)
+you're actually changing, never a listed invoice echoed back wholesale.
+`semester_code`/`semester_name` are set only when the invoice is for the
+semester-anchored plan — see `list_semesters` below for what they mean and
+how the dates get onto an invoice in the first place; they are not editable
+here (moving one person's dates is a semester correction, not an invoice edit).
 
 ```bash
 scripts/agent.sh edit_invoice '{"id":"<uuid>","price_cents":24500,"notes":"student rate applied"}'
@@ -156,6 +161,46 @@ audit log with who made it and each field's old and new value.
 >
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
+
+### `list_semesters` / `save_semester` — the club's semester dates
+
+The `semester` membership plan does **not** run for a fixed number of days from
+payment. It runs for a fixed **semester**: a from/to date the club sets itself,
+aligned with the UTS teaching calendar but not identical to it, and it moves by
+about a week every year. `club_semesters` is where those dates live; a member
+picks one of them (the semester running now, or the next one to start) when
+they buy, and their membership runs exactly that semester's dates, full price
+regardless of when in it they join — there is no pro rata.
+
+```bash
+scripts/agent.sh list_semesters '{}'
+```
+
+Returns every semester (including retired ones), each with `code`
+(`<year>-s<1|2>`, e.g. `2026-s1`), `name`, `year`, `half`, `starts_on`,
+`ends_on` (inclusive — the last day of training), and `is_active`.
+
+```bash
+scripts/agent.sh save_semester '{
+  "year": 2027, "half": 1, "name": "Semester 1 2027",
+  "starts_on": "2027-02-01", "ends_on": "2027-06-26"
+}'
+```
+
+`save_semester` upserts by **(year, half)** — `code` is always derived from
+them, never taken as an input, so it can never disagree with the dates. An
+unknown (year, half) creates a semester; a known one updates its name and
+dates in place. `name`, `starts_on` and `ends_on` are **required on every
+call** (a semester is saved as a whole row, not patched field by field);
+`is_active` may be omitted to leave it unchanged (defaults to `true` on
+create). The club only sells two semesters a year — there is no summer term —
+so `half` is `1` or `2`, nothing else.
+
+> [!TIP]
+> Add next year's semesters before enrolments open for them, and check
+> `list_semesters` shows exactly two live (non-overlapping) dates a member
+> could be buying into at any moment — the server refuses two semesters whose
+> dates overlap, so a mistake here surfaces as a save error, not a live bug.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 
@@ -420,7 +465,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"2"`), and its
+- The manifest's `version` tells generations apart (currently `"5"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

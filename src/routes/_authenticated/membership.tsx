@@ -13,9 +13,16 @@ import {
   computeMembershipPrice,
   formatCents,
   isUtsStudent,
+  sellableSemesters,
   type LifecycleStatus,
 } from "@/lib/validation";
-import { getMyMemberships, listMembershipPlans, startMembership } from "@/lib/membership.functions";
+import { formatDateOnly } from "@/lib/dates";
+import {
+  getMyMemberships,
+  listMembershipPlans,
+  listSemesters,
+  startMembership,
+} from "@/lib/membership.functions";
 import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
@@ -27,6 +34,7 @@ export const Route = createFileRoute("/_authenticated/membership")({
 });
 
 type Plan = Awaited<ReturnType<typeof listMembershipPlans>>[number];
+type Semester = Awaited<ReturnType<typeof listSemesters>>[number];
 type Mine = Awaited<ReturnType<typeof getMyMemberships>>;
 
 // The words are this page's own: a member reads "On trial", a manager reads
@@ -95,14 +103,17 @@ function CodeOfConductNudge() {
 function MembershipPage() {
   const navigate = useNavigate();
   const fetchPlans = useServerFn(listMembershipPlans);
+  const fetchSemesters = useServerFn(listSemesters);
   const fetchMine = useServerFn(getMyMemberships);
   const start = useServerFn(startMembership);
 
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [semesters, setSemesters] = useState<Semester[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
   const [loading, setLoading] = useState(true);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [semesterCode, setSemesterCode] = useState<string | null>(null);
   const [pendingCode, setPendingCode] = useState<string | null>(null);
 
   // A non-empty UTS student number is what makes someone a student; there is no
@@ -110,17 +121,25 @@ function MembershipPage() {
   // rule the server uses for authoritative pricing, so the two can't disagree.
   const isStudent = isUtsStudent(studentNumber);
 
+  // At most two: the semester running now (if any) plus the next one to start.
+  // No pro rata either way -- this is only ever a choice of which, not a price.
+  const offeredSemesters = useMemo(
+    () => sellableSemesters(semesters, new Date().toISOString()),
+    [semesters],
+  );
+
   const reload = useMemo(
     () => () => {
-      return Promise.all([fetchPlans(), fetchMine()]).then(([p, m]) => {
+      return Promise.all([fetchPlans(), fetchSemesters(), fetchMine()]).then(([p, s, m]) => {
         setPlans(p);
+        setSemesters(s);
         setMine(m);
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
         if (m.uts_student_number) setStudentNumber(m.uts_student_number);
       });
     },
-    [fetchPlans, fetchMine],
+    [fetchPlans, fetchSemesters, fetchMine],
   );
 
   useEffect(() => {
@@ -128,6 +147,13 @@ function MembershipPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load memberships"))
       .finally(() => setLoading(false));
   }, [reload]);
+
+  // Default the picker to the first offered semester once the list loads, so a
+  // member who never touches the picker still buys a valid one.
+  useEffect(() => {
+    if (semesterCode || offeredSemesters.length === 0) return;
+    setSemesterCode(offeredSemesters[0].code);
+  }, [offeredSemesters, semesterCode]);
 
   async function choose(plan: Plan) {
     setPendingCode(plan.code);
@@ -138,6 +164,7 @@ function MembershipPage() {
           is_student: isStudent,
           uts_student_number: studentNumber.trim(),
           session_date: plan.kind === "session" ? sessionDate : "",
+          semester_code: plan.period_basis === "semester" ? (semesterCode ?? "") : "",
           hp: "",
         },
       });
@@ -225,6 +252,7 @@ function MembershipPage() {
                           )}
                         </td>
                         <td className="px-3 py-2">
+                          {m.semester_name ? `${m.semester_name}, ` : ""}
                           {m.ends_at
                             ? new Date(m.ends_at).toLocaleDateString("en-AU")
                             : m.sessions_remaining != null
@@ -314,7 +342,7 @@ function MembershipPage() {
                         {plan.session_credits} session{plan.session_credits === 1 ? "" : "s"}
                       </li>
                     )}
-                    {plan.duration_days != null && (
+                    {plan.period_basis !== "semester" && plan.duration_days != null && (
                       <li className="flex items-center gap-2">
                         <Check className="h-4 w-4 text-primary" />
                         Valid {plan.duration_days} days
@@ -335,9 +363,52 @@ function MembershipPage() {
                       />
                     </div>
                   )}
+                  {plan.period_basis === "semester" && (
+                    <div className="mt-4 space-y-2">
+                      <Label className="text-xs">Which semester?</Label>
+                      {offeredSemesters.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          No semester is open for enrolment right now. Check back soon, or train
+                          casually in the meantime.
+                        </p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {offeredSemesters.map((s) => (
+                            <label
+                              key={s.code}
+                              className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                            >
+                              <input
+                                type="radio"
+                                name={`semester-${plan.code}`}
+                                value={s.code}
+                                checked={semesterCode === s.code}
+                                onChange={() => setSemesterCode(s.code)}
+                              />
+                              <span>
+                                {s.name}
+                                <span className="text-muted-foreground">
+                                  {" "}
+                                  ({formatDateOnly(s.starts_on)} to {formatDateOnly(s.ends_on)})
+                                </span>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Same price whichever you pick, and however far in it starts. Prefer to pay
+                        as you go instead? Choose a casual class below.
+                      </p>
+                    </div>
+                  )}
                   <Button
                     className="mt-6"
-                    disabled={pendingCode !== null}
+                    disabled={
+                      pendingCode !== null ||
+                      (plan.period_basis === "semester" &&
+                        (!semesterCode || offeredSemesters.length === 0))
+                    }
                     onClick={() => choose(plan)}
                   >
                     {pendingCode === plan.code

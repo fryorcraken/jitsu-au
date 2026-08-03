@@ -45,6 +45,7 @@ import { Route as AuthenticatedManagerKbRouteImport } from './routes/_authentica
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
+import { Route as AuthenticatedManagerSemestersRouteImport } from './routes/_authenticated/manager.semesters'
 import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
 import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
@@ -246,6 +247,12 @@ const AuthenticatedManagerReconciliationRoute =
     path: '/manager/reconciliation',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerSemestersRoute =
+  AuthenticatedManagerSemestersRouteImport.update({
+    id: '/manager/semesters',
+    path: '/manager/semesters',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerSettingsRoute =
   AuthenticatedManagerSettingsRouteImport.update({
     id: '/manager/settings',
@@ -356,6 +363,7 @@ export interface FileRoutesByFullPath {
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
+  '/manager/semesters': typeof AuthenticatedManagerSemestersRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
@@ -405,6 +413,7 @@ export interface FileRoutesByTo {
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
+  '/manager/semesters': typeof AuthenticatedManagerSemestersRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
@@ -457,6 +466,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
+  '/_authenticated/manager/semesters': typeof AuthenticatedManagerSemestersRoute
   '/_authenticated/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/_authenticated/manager/users': typeof AuthenticatedManagerUsersRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
@@ -509,6 +519,7 @@ export interface FileRouteTypes {
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
+    | '/manager/semesters'
     | '/manager/settings'
     | '/manager/users'
     | '/manager/waiver-template'
@@ -558,6 +569,7 @@ export interface FileRouteTypes {
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
+    | '/manager/semesters'
     | '/manager/settings'
     | '/manager/users'
     | '/manager/waiver-template'
@@ -609,6 +621,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
+    | '/_authenticated/manager/semesters'
     | '/_authenticated/manager/settings'
     | '/_authenticated/manager/users'
     | '/_authenticated/manager/waiver-template'
@@ -909,6 +922,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerReconciliationRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/semesters': {
+      id: '/_authenticated/manager/semesters'
+      path: '/manager/semesters'
+      fullPath: '/manager/semesters'
+      preLoaderRoute: typeof AuthenticatedManagerSemestersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/settings': {
       id: '/_authenticated/manager/settings'
       path: '/manager/settings'
@@ -1015,6 +1035,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
+  AuthenticatedManagerSemestersRoute: typeof AuthenticatedManagerSemestersRoute
   AuthenticatedManagerSettingsRoute: typeof AuthenticatedManagerSettingsRoute
   AuthenticatedManagerUsersRoute: typeof AuthenticatedManagerUsersRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
@@ -1039,6 +1060,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,
   AuthenticatedManagerReconciliationRoute:
     AuthenticatedManagerReconciliationRoute,
+  AuthenticatedManagerSemestersRoute: AuthenticatedManagerSemestersRoute,
   AuthenticatedManagerSettingsRoute: AuthenticatedManagerSettingsRoute,
   AuthenticatedManagerUsersRoute: AuthenticatedManagerUsersRoute,
   AuthenticatedManagerWaiverTemplateRoute:

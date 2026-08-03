@@ -104,6 +104,7 @@ function ManagerMembershipsPage() {
                 <tr>
                   <th className="px-3 py-2">Member</th>
                   <th className="px-3 py-2">Plan</th>
+                  <th className="px-3 py-2">Semester</th>
                   <th className="px-3 py-2">Price</th>
                   <th className="px-3 py-2">Student #</th>
                   <th className="px-3 py-2">Reference</th>
@@ -121,6 +122,7 @@ function ManagerMembershipsPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2">{r.plan_name ?? "—"}</td>
+                    <td className="px-3 py-2">{r.semester_name ?? "—"}</td>
                     <td className="px-3 py-2">{formatCents(r.price_cents)}</td>
                     <td className="px-3 py-2">{r.uts_student_number ?? "—"}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.payment_reference}</td>

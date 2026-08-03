@@ -3,21 +3,24 @@ import { Check } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
-import { formatCents } from "@/lib/validation";
-import { listMembershipPlans } from "@/lib/membership.functions";
+import { formatCents, sellableSemesters } from "@/lib/validation";
+import { formatDateOnly } from "@/lib/dates";
+import { listMembershipPlans, listSemesters } from "@/lib/membership.functions";
 import { buildPageMeta } from "@/lib/seo";
 
 type PlanSummary = Awaited<ReturnType<typeof listMembershipPlans>>[number];
+type SemesterSummary = Awaited<ReturnType<typeof listSemesters>>[number];
 
 export const Route = createFileRoute("/pricing")({
   // Prices come from the manager-editable plan catalog (single source of truth).
   // Fall back to an empty list on any error so the page still renders with the
   // static copy. The explicit return type keeps both branches on one shape.
-  loader: async (): Promise<{ plans: PlanSummary[] }> => {
+  loader: async (): Promise<{ plans: PlanSummary[]; semesters: SemesterSummary[] }> => {
     try {
-      return { plans: await listMembershipPlans() };
+      const [plans, semesters] = await Promise.all([listMembershipPlans(), listSemesters()]);
+      return { plans, semesters };
     } catch {
-      return { plans: [] };
+      return { plans: [], semesters: [] };
     }
   },
   head: () => ({
@@ -142,7 +145,8 @@ function TierCard({ tier }: { tier: Tier }) {
 
 function Pricing() {
   // `useLoaderData` widens to `any` for this route, so pin the shape explicitly.
-  const { plans }: { plans: PlanSummary[] } = Route.useLoaderData();
+  const { plans, semesters }: { plans: PlanSummary[]; semesters: SemesterSummary[] } =
+    Route.useLoaderData();
   const byCode = new Map(plans.map((p) => [p.code, p]));
 
   // Prefer the live catalog price; fall back to the static copy on the tier.
@@ -163,6 +167,18 @@ function Pricing() {
     return formatCents(plan.public_price_cents);
   };
 
+  // The semester tier's third bullet names the actual dates on sale right now
+  // (the one running today, or the next to open) instead of a vague promise.
+  // Falls back to the static copy when no semester is configured yet.
+  const currentOrNextSemester = sellableSemesters(semesters, new Date().toISOString())[0] ?? null;
+  const semesterDatesLabel = currentOrNextSemester
+    ? `${formatDateOnly(currentOrNextSemester.starts_on)} to ${formatDateOnly(currentOrNextSemester.ends_on)}`
+    : null;
+  const featuresFor = (tier: Tier): string[] =>
+    tier.planCode === "semester" && semesterDatesLabel
+      ? [tier.features[0], tier.features[1], semesterDatesLabel]
+      : tier.features;
+
   return (
     <SiteLayout>
       <section className="mx-auto max-w-4xl px-4 py-16 md:py-20">
@@ -178,7 +194,7 @@ function Pricing() {
         <h2 className="text-2xl font-bold">For UTS students</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {student.map((t) => (
-            <TierCard key={t.title} tier={{ ...t, price: priceFor(t) }} />
+            <TierCard key={t.title} tier={{ ...t, price: priceFor(t), features: featuresFor(t) }} />
           ))}
         </div>
       </section>
@@ -187,7 +203,7 @@ function Pricing() {
         <h2 className="text-2xl font-bold">For the general public</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {public_.map((t) => (
-            <TierCard key={t.title} tier={{ ...t, price: priceFor(t) }} />
+            <TierCard key={t.title} tier={{ ...t, price: priceFor(t), features: featuresFor(t) }} />
           ))}
         </div>
       </section>

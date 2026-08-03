@@ -20,6 +20,7 @@
 // `startMembership` share the defect but not the seam; see issue #72 on whether
 // route/server-function tests get built.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildPaymentReference } from "./validation";
 
 type Result = { data: unknown; error: { message: string } | null };
 
@@ -184,6 +185,7 @@ function fakeReconcileAdmin(reads: {
   txns?: Result;
   pending?: Result;
   plans?: Result;
+  semester?: Result;
   count?: { count: number | null; error: { message: string } | null };
 }) {
   const updates: { table: string; patch: Record<string, unknown> }[] = [];
@@ -202,6 +204,8 @@ function fakeReconcileAdmin(reads: {
         if (table === "memberships") return { eq: () => Promise.resolve(reads.pending ?? ok([])) };
         if (table === "membership_plans")
           return { in: () => Promise.resolve(reads.plans ?? ok([PAID_PLAN])) };
+        if (table === "club_semesters")
+          return { eq: () => ({ maybeSingle: () => Promise.resolve(reads.semester ?? ok(null)) }) };
         if (table === "profiles")
           return { eq: () => ({ maybeSingle: () => Promise.resolve(ok(null)) }) };
         throw new Error(`unexpected select on ${table}`);
@@ -263,5 +267,67 @@ describe("reconcileUnmatched", () => {
     expect(fake.updates.some((u) => u.table === "memberships" && u.patch.status === "active")).toBe(
       true,
     );
+  });
+
+  // The case an earlier version of this change would have failed: a
+  // semester-anchored plan must activate with the CHOSEN SEMESTER's dates, not
+  // "now + duration_days" (duration_days is even left non-null on this fixture,
+  // matching how the migration leaves it until the follow-up contract phase, to
+  // prove the code branches on period_basis rather than falling back to it).
+  const SEMESTER_PLAN = {
+    id: "plan-semester",
+    code: "semester",
+    name: "One semester",
+    kind: "period",
+    is_active: true,
+    duration_days: 182,
+    session_credits: null,
+    period_basis: "semester",
+    price_cents: 44500,
+  };
+  const SEMESTER = {
+    id: "sem-2026-s2",
+    code: "2026-s2",
+    name: "Semester 2 2026",
+    starts_on: "2026-07-20",
+    ends_on: "2026-11-22",
+  };
+  const SEMESTER_REFERENCE = buildPaymentReference("Jones", "user-2", undefined, SEMESTER.code);
+  const PENDING_SEMESTER = {
+    id: "mem-2",
+    user_id: "user-2",
+    plan_id: SEMESTER_PLAN.id,
+    semester_id: SEMESTER.id,
+    status: "pending",
+    payment_reference: SEMESTER_REFERENCE,
+    price_cents: 44500,
+    payment_method: "bank_transfer",
+  };
+  const SEMESTER_TXN = {
+    id: "txn-2",
+    status: "unmatched",
+    // Banks reformat references, same as TXN above; the match normalizes both.
+    description: `OSKO PAYMENT ${SEMESTER_REFERENCE.toLowerCase()}`,
+    reference: null,
+    amount_cents: 44500,
+  };
+
+  it("activates a semester-anchored plan with the chosen semester's dates, not now + duration_days", async () => {
+    const fake = fakeReconcileAdmin({
+      txns: ok([SEMESTER_TXN]),
+      pending: ok([PENDING_SEMESTER]),
+      plans: ok([SEMESTER_PLAN]),
+      semester: ok(SEMESTER),
+    });
+    await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
+    const activation = fake.updates.find(
+      (u) => u.table === "memberships" && u.patch.status === "active",
+    );
+    expect(activation).toBeTruthy();
+    // 00:00 Australia/Sydney on starts_on -> 2026-07-19T14:00:00.000Z (AEST, +10).
+    expect(activation!.patch.starts_at).toBe("2026-07-19T14:00:00.000Z");
+    // 23:59:59 Australia/Sydney on ends_on, inclusive -> one second before the
+    // next day's midnight, not a bare "now + 182 days" instant.
+    expect(activation!.patch.ends_at).toBe("2026-11-22T12:59:59.000Z");
   });
 });

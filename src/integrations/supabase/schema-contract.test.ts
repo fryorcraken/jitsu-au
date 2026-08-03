@@ -107,6 +107,28 @@ export type _InterestColumns = RequireColumns<
   "sms_whatsapp_consent"
 >;
 
+// ---- club_semesters: the club's own fixed semester dates ----
+export type _ClubSemesterColumns = RequireColumns<
+  Tables["club_semesters"]["Row"],
+  "code" | "name" | "year" | "half" | "starts_on" | "ends_on" | "is_active"
+>;
+
+// ---- membership_plans: the rolling/semester discriminator ----
+// `semesterMembershipWindow`/`activateMembershipRow` branch on this column
+// directly, so if it went missing every `period` plan would silently fall back
+// to the rolling "now + duration_days" computation this column exists to
+// replace for a semester-anchored plan.
+export type _MembershipPlanPeriodBasisColumn = RequireColumns<
+  Tables["membership_plans"]["Row"],
+  "period_basis"
+>;
+
+// ---- memberships: which semester a semester-anchored invoice is for ----
+export type _MembershipSemesterIdColumn = RequireColumns<
+  Tables["memberships"]["Row"],
+  "semester_id"
+>;
+
 // ---- email_verification_tokens: proof that someone can read an address ----
 export type _VerificationTokenColumns = RequireColumns<
   Tables["email_verification_tokens"]["Row"],
