@@ -7,6 +7,7 @@ import {
   canEditAnnotation,
   canReadArticle,
   canResolveThread,
+  clampReadVersion,
   groupThreads,
   likePattern,
   matchArticleText,
@@ -164,12 +165,15 @@ describe("groupThreads", () => {
 });
 
 describe("canReadArticle", () => {
-  it("lets anyone read a public article", () => {
-    expect(canReadArticle("public", anon)).toBe(true);
+  // The gate the whole section rests on. `/kb` redirects a signed-out visitor
+  // to sign in, but that is a redirect; this is what a saved URL, a stale tab
+  // or a direct RPC hits.
+  it("refuses a signed-out reader everything", () => {
+    expect(canReadArticle("members", anon)).toBe(false);
+    expect(canReadArticle("managers", anon)).toBe(false);
   });
 
-  it("requires a login for a members article", () => {
-    expect(canReadArticle("members", anon)).toBe(false);
+  it("lets a signed-in member read a members article", () => {
     expect(canReadArticle("members", member)).toBe(true);
   });
 
@@ -177,15 +181,22 @@ describe("canReadArticle", () => {
     expect(canReadArticle("managers", member)).toBe(false);
     expect(canReadArticle("managers", manager)).toBe(true);
   });
+
+  // A manager with no session is still nobody: `isManager` cannot be true
+  // without a user id in practice, and the order of the checks makes that
+  // explicit rather than relying on it.
+  it("refuses a signed-out viewer even if it somehow claims to be a manager", () => {
+    expect(canReadArticle("members", { userId: null, isManager: true })).toBe(false);
+  });
 });
 
 describe("canAnnotate", () => {
-  it("refuses a signed-out reader even on a public article", () => {
-    expect(canAnnotate({ visibility: "public", annotations_enabled: true }, anon)).toBe(false);
+  it("refuses a signed-out reader", () => {
+    expect(canAnnotate({ visibility: "members", annotations_enabled: true }, anon)).toBe(false);
   });
 
   it("refuses when the article has annotations turned off, managers included", () => {
-    const doc = { visibility: "public", annotations_enabled: false } as const;
+    const doc = { visibility: "members", annotations_enabled: false } as const;
     expect(canAnnotate(doc, member)).toBe(false);
     expect(canAnnotate(doc, manager)).toBe(false);
   });
@@ -320,5 +331,19 @@ describe("matchArticleText", () => {
   // here rather than shown as a hit with nothing in it.
   it("returns null when the term is not really there", () => {
     expect(matchArticleText("Gradings run twice a year.", "belt*system")).toBeNull();
+  });
+});
+
+describe("clampReadVersion", () => {
+  it("keeps a claim at or below the live version untouched", () => {
+    expect(clampReadVersion(2, 5)).toBe(2);
+    expect(clampReadVersion(5, 5)).toBe(5);
+  });
+
+  // A version above anything that exists cannot have been read. Recording it
+  // verbatim would make `readState` unable to ever report "updated" for this
+  // article again, however many times it is rewritten afterwards.
+  it("clamps a claim above the live version down to it", () => {
+    expect(clampReadVersion(999, 5)).toBe(5);
   });
 });

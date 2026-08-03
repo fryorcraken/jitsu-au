@@ -23,11 +23,12 @@ export function useKbNav(): { nav: KbNavSection[]; loading: boolean } {
     // Keyed by WHO it was fetched for. `__root.tsx` deliberately does not
     // invalidate the query cache on SIGNED_OUT, which was safe while every
     // screen holding privileged data lived under `_authenticated` and navigated
-    // away. `/kb` is public, so a manager who signs out from the header stays on
-    // the page with the observer mounted, and a bare `["kb-nav"]` would keep
-    // listing every managers-only draft's title until something forced a
-    // refetch. The reads themselves are gated server-side; this stops the
-    // titles lingering on screen.
+    // away. The route gate on `/kb` (`beforeLoad`) only runs on navigation, so a
+    // manager whose session ends while a tab is already open (an expired token,
+    // storage cleared in another tab) stays on the page with the observer
+    // mounted, and a bare `["kb-nav"]` would keep listing every managers-only
+    // draft's title until something forced a refetch. The reads themselves are
+    // gated server-side; this stops the titles lingering on screen.
     queryKey: ["kb-nav", user?.id ?? null],
     queryFn: () => fetchNav(),
     // The server resolves the reader from the request's bearer token, so asking

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import ReactMarkdown from "react-markdown";
-import { kbMarkdownComponents } from "./kb-markdown";
+import { kbMarkdownComponents, kbRemarkPlugins } from "./kb-markdown";
 
 function renderMarkdown(markdown: string) {
   return render(<ReactMarkdown components={kbMarkdownComponents}>{markdown}</ReactMarkdown>);
@@ -32,16 +32,25 @@ describe("kbMarkdownComponents", () => {
     expect(screen.getByRole("link", { name: "Activate" })).toHaveAttribute("target", "_blank");
   });
 
-  // > [!IMPORTANT]
-  // > This test pins a LIMITATION, not a feature. `react-markdown` is
-  // > CommonMark-only without `remark-gfm`, which this repo does not depend on,
-  // > so the `table`/`th`/`td` overrides in the components map are inert and a
-  // > manager who writes a grading table gets a paragraph of pipes with no
-  // > warning. When `remark-gfm` is added, this test should FAIL — invert it
-  // > then, and drop the warning from docs/knowledge-base.md.
-  it("does not render a markdown table yet, because remark-gfm is not installed", () => {
+  // The table styling in this map is only reachable through `kbRemarkPlugins`,
+  // since CommonMark has no tables: rendered without them, a grading table is
+  // still a paragraph of pipes. `remark-kb-tables.test.tsx` covers the wired-up
+  // path; this pins the pairing so a caller that drops the plugins is a visible
+  // failure rather than a page that quietly loses its tables.
+  it("leaves a table unrendered when the plugins are not passed", () => {
     renderMarkdown("| Belt | Time |\n| --- | --- |\n| White | 0 |");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.getByText(/\| Belt \| Time \|/)).toBeInTheDocument();
+  });
+
+  it("styles a table when the knowledge base plugins are used", () => {
+    render(
+      <ReactMarkdown components={kbMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
+        {"| Belt | Time |\n| --- | --- |\n| White | 0 |"}
+      </ReactMarkdown>,
+    );
+    expect(screen.getByRole("table").className).toContain("border-collapse");
+    // The wrapper is what stops a wide syllabus table scrolling the whole page
+    // sideways on a phone.
+    expect(screen.getByRole("table").parentElement?.className).toContain("overflow-x-auto");
   });
 });

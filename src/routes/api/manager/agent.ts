@@ -15,6 +15,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ZodError } from "zod";
 import {
   editInvoiceSchema,
+  deleteKbSectionSchema,
   getKbArticleSchema,
   listAgentInvoicesSchema,
   listAgentUsersSchema,
@@ -56,6 +57,7 @@ import type {
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import {
+  deleteKbSection,
   listKbSections,
   listSharedAnnotations,
   loadKbArticle,
@@ -617,6 +619,21 @@ async function handleSaveKbSection(params: unknown) {
   }
 }
 
+// ---- action: delete_kb_section ----
+async function handleDeleteKbSection(params: unknown) {
+  const input = deleteKbSectionSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await deleteKbSection(db, input.slug);
+  } catch (e) {
+    throw new AgentError(
+      422,
+      "delete_kb_section_failed",
+      e instanceof Error ? e.message : "Could not delete the section.",
+    );
+  }
+}
+
 // ---- action: list_kb_articles ----
 async function handleListKbArticles() {
   const db = await adminClient();
@@ -775,6 +792,8 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleListKbSections();
     case "save_kb_section":
       return handleSaveKbSection(params);
+    case "delete_kb_section":
+      return handleDeleteKbSection(params);
     case "list_kb_articles":
       return handleListKbArticles();
     case "get_kb_article":

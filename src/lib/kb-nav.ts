@@ -30,6 +30,10 @@ export type KbEntryInput = {
   position: number;
   /** Only `managers` is ever shown, as a draft marker. */
   visibility?: string;
+  /** The live version. Null on a link entry, which has none. */
+  version?: number | null;
+  /** The version THIS reader read, or null for "not read". */
+  read_version?: number | null;
 };
 
 export type KbNavEntry = KbEntryInput & {
@@ -71,8 +75,17 @@ export function entryHref(entry: { slug: string; link_path: string | null }): st
  *
  * An entry naming a section that does not exist is treated as unsectioned rather
  * than dropped, for the same reason the catch-all group exists at all.
+ *
+ * `keepEmpty` is for the MANAGER screen only. A section with nothing in it is
+ * noise to a member, so the reader drops it — but the manager who has just
+ * created one needs to see it in order to put anything in it, and a "New
+ * section" button whose result does not appear is one they will press twice.
  */
-export function buildKbNav(sections: KbSectionInput[], entries: KbEntryInput[]): KbNavSection[] {
+export function buildKbNav(
+  sections: KbSectionInput[],
+  entries: KbEntryInput[],
+  opts: { keepEmpty?: boolean } = {},
+): KbNavSection[] {
   const known = new Map(sections.map((s) => [s.slug, s]));
 
   const ordered = [...sections].sort(
@@ -104,7 +117,7 @@ export function buildKbNav(sections: KbSectionInput[], entries: KbEntryInput[]):
     }))
     // An empty section is a heading with nothing under it. A manager who has
     // created one but not filled it yet should not have it shown to members.
-    .filter((section) => section.entries.length > 0);
+    .filter((section) => opts.keepEmpty || section.entries.length > 0);
 
   const loose = bySection.get(null);
   if (loose?.length) {
@@ -154,6 +167,65 @@ export function entryBreadcrumbs(
     if (entry) return { section, entry };
   }
   return null;
+}
+
+/**
+ * Whether an entry counts towards reading progress at all.
+ *
+ * A LINK ENTRY does not. It points at a page on the marketing site, which has no
+ * way to report back that somebody read it, so counting one would put a tick
+ * nobody can ever earn in the denominator and leave "9 of 10" as the best a
+ * member could do.
+ */
+export function countsTowardsProgress(entry: KbNavEntry): boolean {
+  return !entry.link_path;
+}
+
+/** How an entry stands with this reader. */
+export type ReadState = "unread" | "read" | "updated";
+
+/**
+ * Whether the reader has read an entry, and whether it has changed since.
+ *
+ * "updated" is the state worth having: a policy rewritten after somebody read
+ * it is exactly the thing they need told, and a plain tick would quietly claim
+ * they had read wording that did not exist when they did.
+ */
+export function readState(entry: KbNavEntry): ReadState {
+  if (!countsTowardsProgress(entry) || entry.read_version == null) return "unread";
+  if (entry.version != null && entry.read_version < entry.version) return "updated";
+  return "read";
+}
+
+export type KbProgress = {
+  /** Entries this reader has finished, on the wording that is live now. */
+  read: number;
+  /** Entries there are to read. Link entries are not among them. */
+  total: number;
+  /** Read once, but rewritten since. Counted apart from `read`. */
+  updated: number;
+  /**
+   * Where to carry on: the first entry in READING ORDER that is unread or has
+   * changed since it was read.
+   *
+   * Reading order rather than "most recently opened", because the order is the
+   * onboarding path a manager set. Somebody who dipped into the syllabus should
+   * still be sent back to the thing that comes next, not forward from wherever
+   * they happened to land.
+   */
+  next: KbNavEntry | null;
+};
+
+/** How far through the knowledge base this reader is. */
+export function kbProgress(nav: KbNavSection[]): KbProgress {
+  const entries = flattenKbNav(nav).filter(countsTowardsProgress);
+  const states = entries.map((entry) => ({ entry, state: readState(entry) }));
+  return {
+    read: states.filter((s) => s.state === "read").length,
+    total: entries.length,
+    updated: states.filter((s) => s.state === "updated").length,
+    next: states.find((s) => s.state !== "read")?.entry ?? null,
+  };
 }
 
 /** One heading inside an article, for the "On this page" list. */

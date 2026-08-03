@@ -1,0 +1,304 @@
+// A remark plugin that turns GFM pipe tables into real mdast `table` nodes.
+//
+// `react-markdown` is CommonMark-only, and CommonMark has no tables, so
+// `| Belt | Time |` used to reach the reader as a paragraph of pipe characters.
+// The styling for tables was already written in `kb-markdown.tsx`; nothing was
+// ever producing a node for it to style.
+//
+// The obvious fix is `remark-gfm`, and it is deliberately NOT what this is.
+// Adding a dependency in this repo means editing `package.json` and waiting for
+// LOVABLE to re-resolve `bun.lock` (see CLAUDE.md, "Lock file strategy"): a
+// lockfile produced this side cannot be committed, and CI installs Lovable's
+// exact locked versions, so an import of a package it has not resolved fails the
+// build. A club that cannot write a grading table until somebody buys editor
+// credits is the wrong trade for about a hundred lines.
+//
+// What this does NOT bring is the rest of GFM (strikethrough, task lists,
+// autolinks, footnotes). Tables are the one piece the knowledge base actually
+// needs, because a syllabus is a table; if the rest is ever wanted, that IS the
+// moment for `remark-gfm`, and this file should be deleted rather than grown.
+//
+// It works on the ALREADY-PARSED paragraph rather than on the source text, which
+// is what keeps `**bold**`, `[links](/x)` and `` `code` `` working inside a cell:
+// their nodes are moved into the cell whole, not re-parsed. The one thing that
+// costs is escaping — see `escapedIndexes`.
+import type { Paragraph, PhrasingContent, Root, RootContent, Table, TableRow } from "mdast";
+
+/** A row under construction: a list of cells, each a list of inline nodes. */
+type CellDraft = PhrasingContent[];
+type RowDraft = CellDraft[];
+
+/**
+ * The mdast alignment for a delimiter cell, or null for "not specified".
+ *
+ * Returns undefined when the cell is not a delimiter at all, which is how the
+ * caller decides whether the second line of a paragraph makes it a table.
+ */
+function delimiterAlign(text: string): "left" | "right" | "center" | null | undefined {
+  const cell = text.trim();
+  if (!/^:?-+:?$/.test(cell)) return undefined;
+  const left = cell.startsWith(":");
+  const right = cell.endsWith(":");
+  if (left && right) return "center";
+  if (left) return "left";
+  if (right) return "right";
+  return null;
+}
+
+/** Punctuation a backslash may escape in markdown. */
+const ESCAPABLE = /[!-/:-@[-`{-~]/;
+
+/**
+ * Which characters of a text node's VALUE came from a backslash escape in the
+ * SOURCE, so a `\|` a manager wrote inside a cell is not read as a cell break.
+ *
+ * By the time a plugin runs, `\|` is already a plain `|` in the node's value and
+ * nothing in the tree records that it was escaped. The raw source is still
+ * reachable through the node's position, so the two are walked in step and every
+ * escape is noted by the index it produced.
+ *
+ * Returns null when the walk desynchronises, which a character reference
+ * (`&amp;`) or anything else remark rewrites will do. The caller then falls back
+ * to splitting on every pipe: an escaped pipe in a cell is rare, and a table
+ * that silently refuses to render because one cell had an `&amp;` in it would be
+ * a much worse failure than a cell that splits where it should not.
+ */
+function escapedIndexes(raw: string, value: string): Set<number> | null {
+  const escaped = new Set<number>();
+  let r = 0;
+  let v = 0;
+  while (r < raw.length && v < value.length) {
+    if (raw[r] === "\\" && ESCAPABLE.test(raw[r + 1] ?? "") && raw[r + 1] === value[v]) {
+      escaped.add(v);
+      r += 2;
+      v += 1;
+      continue;
+    }
+    if (raw[r] !== value[v]) return null;
+    r += 1;
+    v += 1;
+  }
+  return v === value.length ? escaped : null;
+}
+
+/** The source text a node was parsed from, when positions are available. */
+function rawText(
+  node: { position?: { start: { offset?: number }; end: { offset?: number } } },
+  source: string,
+): string | null {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (typeof start !== "number" || typeof end !== "number") return null;
+  return source.slice(start, end);
+}
+
+/**
+ * Everything a cell holds, as one string, for reading a delimiter row.
+ *
+ * Only a plain `text` node contributes its own characters. Anything else
+ * (emphasis, a link, and — the case that bit this — `inlineCode`, which also
+ * carries a `.value`) is replaced with U+FFFD, a character `delimiterAlign`'s
+ * pattern never matches. Without that narrowing, a delimiter line written as
+ * `` | `---` | --- | `` read the backtick span as `---` and accepted it as a
+ * real delimiter cell, so the row of actual content above it was consumed as
+ * a header instead of a body row.
+ */
+function cellText(cell: CellDraft): string {
+  return cell.map((node) => (node.type === "text" ? node.value : "�")).join("");
+}
+
+/** A cell with nothing in it but whitespace, i.e. an optional edge pipe. */
+function isBlank(cell: CellDraft): boolean {
+  return cell.every((node) => "value" in node && String(node.value).trim() === "");
+}
+
+/** Drop the whitespace a cell's pipes left around its text. */
+function trimCell(cell: CellDraft): CellDraft {
+  const nodes = cell.slice();
+  while (nodes.length && isBlank([nodes[0]])) nodes.shift();
+  while (nodes.length && isBlank([nodes[nodes.length - 1]])) nodes.pop();
+  const first = nodes[0];
+  if (first && first.type === "text") {
+    nodes[0] = { ...first, value: first.value.replace(/^[ \t]+/, "") };
+  }
+  const last = nodes[nodes.length - 1];
+  if (last && last.type === "text") {
+    nodes[nodes.length - 1] = { ...last, value: last.value.replace(/[ \t]+$/, "") };
+  }
+  return nodes;
+}
+
+/**
+ * Split a paragraph's inline content into lines of cells.
+ *
+ * Line breaks inside a paragraph arrive two ways — a `\n` inside a text node
+ * (a soft break) and a `break` node (a hard break, from two trailing spaces) —
+ * and both end a row. Anything that is not a text node (emphasis, a link, inline
+ * code) is dropped into the current cell whole, which is what keeps formatting
+ * inside a cell working without re-parsing anything.
+ */
+function toRows(paragraph: Paragraph, source: string): RowDraft[] {
+  const rows: RowDraft[] = [[[]]];
+
+  const currentRow = () => rows[rows.length - 1];
+  const currentCell = () => {
+    const row = currentRow();
+    return row[row.length - 1];
+  };
+  const newRow = () => rows.push([[]]);
+  const newCell = () => currentRow().push([]);
+
+  for (const child of paragraph.children) {
+    if (child.type === "break") {
+      newRow();
+      continue;
+    }
+    if (child.type !== "text") {
+      currentCell().push(child);
+      continue;
+    }
+
+    const raw = rawText(child, source);
+    const escaped = raw === null ? null : escapedIndexes(raw, child.value);
+
+    let buffer = "";
+    const flush = () => {
+      if (buffer) currentCell().push({ type: "text", value: buffer });
+      buffer = "";
+    };
+    for (let i = 0; i < child.value.length; i++) {
+      const char = child.value[i];
+      if (char === "\n") {
+        flush();
+        newRow();
+        continue;
+      }
+      if (char === "|" && !escaped?.has(i)) {
+        flush();
+        newCell();
+        continue;
+      }
+      buffer += char;
+    }
+    flush();
+  }
+
+  return rows;
+}
+
+/**
+ * Drop the optional pipes at either end of a row.
+ *
+ * `| a | b |` and `a | b` are the same table in GFM, so a blank cell at either
+ * end is a delimiter rather than an empty column — but only when there is
+ * something left after removing it, otherwise `|` alone would become no columns
+ * at all.
+ */
+function trimEdgePipes(row: RowDraft): RowDraft {
+  const cells = row.slice();
+  if (cells.length > 1 && isBlank(cells[0])) cells.shift();
+  if (cells.length > 1 && isBlank(cells[cells.length - 1])) cells.pop();
+  return cells;
+}
+
+/**
+ * Bring a body row to the header's column count.
+ *
+ * A SHORT row is padded with empty cells at the end, matching GFM: a manager
+ * who forgot a trailing pipe should get a gap, not a refused table.
+ *
+ * A LONG row is never truncated. GFM would drop the excess, and that is right
+ * when the excess is genuinely the manager's — one pipe too many. It is NOT
+ * right here, because this parser can also manufacture an extra cell of its
+ * own: `escapedIndexes` gives up (see its own comment) on a text node that
+ * spans a blockquote or list continuation line, and a `\|` inside a row like
+ * that is then read as a real column break, splitting one cell into two. The
+ * excess in THAT case is the second half of a cell the manager wrote as one,
+ * and dropping it would erase words nobody asked to have removed. Folding the
+ * overflow back into the last kept cell, with the pipe restored as ordinary
+ * text, keeps every character the manager typed on screen in both cases —
+ * merged oddly for a genuine mis-count, whole for a mis-split.
+ */
+function normalizeRowLength(row: RowDraft, columns: number): RowDraft {
+  if (row.length <= columns) {
+    const cells = row.slice();
+    while (cells.length < columns) cells.push([]);
+    return cells;
+  }
+  const kept = row.slice(0, columns - 1);
+  const overflow = row.slice(columns - 1);
+  const restored: CellDraft = overflow.flatMap((cell, i) =>
+    i === 0 ? cell : [{ type: "text", value: "|" }, ...cell],
+  );
+  return [...kept, restored];
+}
+
+/** The table a paragraph describes, or null when it is ordinary prose. */
+function paragraphToTable(paragraph: Paragraph, source: string): Table | null {
+  const rawRows = toRows(paragraph, source);
+  if (rawRows.length < 2) return null;
+  const rows = rawRows.map(trimEdgePipes);
+
+  const header = rows[0];
+  const delimiter = rows[1];
+  // A table has to have a pipe in its header line SOMEWHERE, or a two-line
+  // paragraph whose second line happens to be "---" would become a one-column
+  // table. A single-column table writes its pipes at the edges, and those leave
+  // blank cells `trimEdgePipes` has just removed, so the count is checked
+  // against the untrimmed row.
+  if (header.length < 2 && rawRows[0].length < 2) return null;
+  if (delimiter.length !== header.length) return null;
+
+  const align = delimiter.map((cell) => delimiterAlign(cellText(cell)));
+  if (align.some((a) => a === undefined)) return null;
+
+  const columns = header.length;
+  const body = rows.slice(2).map((row) => normalizeRowLength(row, columns));
+
+  const toRow = (cells: RowDraft): TableRow => ({
+    type: "tableRow",
+    children: cells.map((cell) => ({ type: "tableCell", children: trimCell(cell) })),
+  });
+
+  return {
+    type: "table",
+    align: align as (("left" | "right" | "center") | null)[],
+    children: [toRow(header), ...body.map(toRow)],
+    position: paragraph.position,
+  };
+}
+
+/**
+ * Replace every pipe-table paragraph in the tree with a table node.
+ *
+ * Recursive over anything with children, so a table inside a list item or a
+ * block quote is picked up too.
+ */
+function transform(node: { children?: unknown }, source: string): void {
+  const children = node.children;
+  if (!Array.isArray(children)) return;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i] as RootContent;
+    if (child.type === "paragraph") {
+      const table = paragraphToTable(child, source);
+      if (table) {
+        children[i] = table;
+        continue;
+      }
+    }
+    transform(child as { children?: unknown }, source);
+  }
+}
+
+/**
+ * The plugin itself. Pass it to `react-markdown` as
+ * `remarkPlugins={[remarkKbTables]}`.
+ */
+export function remarkKbTables() {
+  return (tree: Root, file: { value?: unknown }) => {
+    transform(tree, typeof file?.value === "string" ? file.value : "");
+  };
+}
+
+/** Exported for the tests, which check the node shape without rendering. */
+export const __internal = { paragraphToTable, escapedIndexes };

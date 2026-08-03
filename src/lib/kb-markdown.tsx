@@ -16,6 +16,17 @@
 // a manager's markdown never produces a second `<h1>` competing with the page's
 // own title, keeping the heading outline correct for assistive tech.
 import type { Components } from "react-markdown";
+import { remarkKbTables } from "@/lib/remark-kb-tables";
+
+/**
+ * The remark plugins every knowledge base rendering surface uses: the reader,
+ * one block at a time, and the manager preview, which renders a whole body.
+ *
+ * Exported as one list rather than wired up separately in each, because a table
+ * that renders for a member but not in the preview a manager checked it in is
+ * the version of this bug that is hardest to notice.
+ */
+export const kbRemarkPlugins = [remarkKbTables];
 
 export const kbMarkdownComponents: Components = {
   h1: ({ children }) => (
@@ -88,35 +99,33 @@ export const kbMarkdownComponents: Components = {
       className="my-6 h-auto w-full rounded-xl"
     />
   ),
-  // > [!IMPORTANT]
-  // > **These three do nothing today.** `react-markdown` is CommonMark-only
-  // > unless it is given `remark-gfm`, and that package is not a dependency of
-  // > this repo, so a markdown table in an article renders as a paragraph of
-  // > pipe characters. They are kept because the styling is right and the fix is
-  // > one plugin, not because they are live.
-  // >
-  // > Adding `remark-gfm` means adding a dependency, which per CLAUDE.md means
-  // > editing `package.json` and letting LOVABLE re-resolve `bun.lock` — a
-  // > lockfile this side produces cannot be committed, and CI installs Lovable's
-  // > exact locked versions, so importing a package it has not resolved fails
-  // > the build. That is why it is a separate change and not this one.
-  // >
-  // > Until then `docs/knowledge-base.md` tells managers to write the syllabus
-  // > as headings and lists rather than a table.
+  // Live via `remarkKbTables`, this repo's own pipe-table plugin, rather than
+  // `remark-gfm` — see `src/lib/remark-kb-tables.ts` for why a dependency was
+  // the wrong price for the one piece of GFM a syllabus needs.
   //
-  // The scroller is the part that matters when they do become live: a wide
-  // grading table must never make the whole page scroll sideways on a phone.
+  // The scroller is the part that matters: a wide grading table must never make
+  // the whole page scroll sideways on a phone.
   table: ({ children }) => (
     <div className="my-6 overflow-x-auto">
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   ),
-  th: ({ children }) => (
-    <th className="border-b border-border px-3 py-2 text-left font-semibold text-foreground">
+  // `style` is forwarded, and it is the only reason a column alignment survives:
+  // an alignment marker (`| :-: |`) reaches the renderer as an inline
+  // `text-align` on the cell, so an override that took only `children` would
+  // silently centre nothing. The inline style wins over `text-left` below, which
+  // is the default for a cell that named no alignment.
+  th: ({ children, style }) => (
+    <th
+      style={style}
+      className="border-b border-border px-3 py-2 text-left font-semibold text-foreground"
+    >
       {children}
     </th>
   ),
-  td: ({ children }) => (
-    <td className="border-b border-border px-3 py-2 align-top text-foreground">{children}</td>
+  td: ({ children, style }) => (
+    <td style={style} className="border-b border-border px-3 py-2 align-top text-foreground">
+      {children}
+    </td>
   ),
 };

@@ -910,9 +910,11 @@ service role only.
 ## Knowledge base
 
 Versioned markdown pages members read and annotate, served at `/kb/<slug>`,
-grouped into ordered sections. The product spec is **`docs/knowledge-base.md`**.
-Added by `20260731140000_documents.sql` and renamed/extended by
-`20260802100000_knowledge_base.sql`.
+grouped into ordered sections. **Signed-in only.** The product spec is
+**`docs/knowledge-base.md`**. Added by `20260731140000_documents.sql`, renamed and
+extended by `20260802100000_knowledge_base.sql`, and narrowed to members-only
+(plus reading progress) by
+`20260802160000_kb_members_only_and_reading_progress.sql`.
 
 ### `kb_sections` — the groups, and the reading order
 
@@ -928,16 +930,22 @@ slotted between two others without renumbering.
 ### `kb_articles` — an article's identity, and where it sits
 
 `id` PK, `slug` (**unique**, CHECK'd to lowercase kebab-case so it never needs
-escaping in a URL), `visibility` (`public | members | managers`, default
-`members`), `annotations_enabled` (default true), `section_id → kb_sections(id)
+escaping in a URL), `visibility` (`members | managers`, default `members`),
+`annotations_enabled` (default true), `section_id → kb_sections(id)
 ON DELETE SET NULL`, `position`, `nav_title`, `link_path`, `created_at`,
 `updated_at`, `created_by → auth.users(id) ON DELETE SET NULL`. Index on
 `(section_id, position)`.
 
 Nothing here is rewritten when the text changes: a slug is a permanent URL, and
-the text lives on the versions below. `visibility` is the only read gate, and it
-is enforced **in the server functions** (`canReadArticle` in `src/lib/kb.ts`),
-not by RLS — see the RLS note at the end of this section.
+the text lives on the versions below.
+
+**`visibility` decides which SIGNED-IN people, not whether a login is needed.**
+There is no `public` level: `canReadArticle` (`src/lib/kb.ts`) refuses a viewer
+with no user id every article, whatever it says, and the route gate on `/kb`
+redirects them to `/auth` first. The CHECK was narrowed to two values in
+`20260802160000`, which also moved the rows that were `public` (the two seeded
+link entries) to `members`. The gate is enforced **in the server functions**, not
+by RLS — see the RLS note at the end of this section.
 
 Two columns are easy to miss:
 
@@ -981,6 +989,28 @@ A save that carries neither `title` nor `body_md` writes no version at all. That
 is how "move this article into Start here" is a placement change rather than a
 republish that would show every reader "updated today".
 
+### `kb_article_reads` — how far along the path a member is
+
+`user_id → profiles(user_id) ON DELETE CASCADE`, `article_id → kb_articles(id)
+ON DELETE CASCADE`, `version` (which version they read), `read_at`, with
+`PRIMARY KEY (user_id, article_id)`.
+
+One row per person per article, **overwritten on a re-read**: this is "when did
+you last read it", not a log. Reading is a state a member glances at, not an
+audit trail, and a row per view of a syllabus somebody keeps open would dwarf
+every other table here. The composite PK leads with `user_id`, which is also the
+only query ("everything this person has read"), so no second index is needed.
+
+`version` is why the sidebar can say **"updated since you read it"** rather than
+leaving an article ticked off after it was rewritten. It is a plain integer and
+not a foreign key, for the same reason `kb_annotations.article_version` is one:
+it records what was on screen, not a live join.
+
+**RLS is owner-scoped in both directions, and there is deliberately no manager
+policy.** What a member has and has not read is theirs; no manager screen and no
+agent action reads this table. Same call the feature already makes about private
+notes.
+
 ### `kb_annotations` — private notes and shared comment threads
 
 `id` PK, `article_id → kb_articles(id) ON DELETE CASCADE`, `article_version`
@@ -1021,7 +1051,7 @@ article's whole drafting history the moment it goes live. The public read
 (`readKbArticleSchema`) has no `version` parameter at all; only the manager agent
 API can name one.
 
-**RLS:** enabled on all four, with owner/manager read policies as **defence in
+**RLS:** enabled on all five, with owner/manager read policies as **defence in
 depth only** — there are no client grants (`REVOKE ALL` from anon/authenticated),
 so nothing here is reachable from a browser and `client-grants-expected.txt`
 needs no entry. Every read and write runs through a server function on the

@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "3",
+  version: "4",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,18 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "4",
+      // `visibility: "public"` is now refused by the schema, so a client that
+      // sends it on every save (rather than omitting it, as the guidance has
+      // always said) starts failing. That is a 422, not a silent downgrade.
+      breaking: true,
+      notes: [
+        "The knowledge base is signed-in only, reached from the member area. `visibility` lost its `public` level: it is now members | managers, and any article that was public is now members. Sending 'public' is refused.",
+        "New action delete_kb_section. Deleting a section leaves its articles in place, in the 'Everything else' group, and reports how many were displaced.",
+        "list_kb_articles is unchanged in shape, but no article can report visibility 'public' any more.",
+      ],
+    },
     {
       version: "3",
       // Every document action was renamed, so every call a cached client makes
@@ -327,6 +339,15 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
+      name: "delete_kb_section",
+      method: "POST",
+      summary:
+        "Delete a section. Its articles are NOT deleted: they fall into the 'Everything else' group at the bottom of the sidebar, where a member can still find them, so this tidies the navigation rather than removing anything anyone reads. Reports how many articles it displaced.",
+      params: [
+        { name: "slug", required: true, description: "The section's URL key, e.g. start-here." },
+      ],
+    },
+    {
       name: "list_kb_articles",
       method: "POST",
       summary:
@@ -399,7 +420,7 @@ export const AGENT_MANIFEST: {
           name: "visibility",
           required: false,
           description:
-            "public | members | managers. Omit to leave it as it is; a new article defaults to members. 'managers' is the one to use for a draft.",
+            "members | managers. Omit to leave it as it is; a new article defaults to members. 'managers' is the one to use for a draft. There is no public level: the whole knowledge base needs a login, so an article is either for the members or for the managers alone.",
         },
         {
           name: "annotations_enabled",
