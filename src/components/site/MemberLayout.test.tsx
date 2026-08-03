@@ -94,10 +94,7 @@ describe("MemberLayout", () => {
       </MemberLayout>,
     );
 
-    expect(screen.getByRole("link", { name: /^dashboard$/i })).toHaveAttribute(
-      "href",
-      "/manager",
-    );
+    expect(screen.getByRole("link", { name: /^dashboard$/i })).toHaveAttribute("href", "/manager");
     expect(screen.getByRole("link", { name: /check in/i })).toHaveAttribute(
       "href",
       "/manager/check-in",

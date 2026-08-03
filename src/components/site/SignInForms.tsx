@@ -93,7 +93,7 @@ function PasswordSignIn({ redirect, email }: { redirect?: string; email: string 
         .eq("user_id", data.user.id)
         .eq("role", "manager");
       if ((roles ?? []).length > 0) {
-        navigate({ to: "/manager" as any });
+        window.location.href = "/manager";
         return;
       }
     }

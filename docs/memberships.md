@@ -88,11 +88,11 @@ bank-reconciliation flow as any other plan — see
 
 ## Manager screens & the manager agent API
 
-| Manager UI                  | Manager agent actions                          | What it does                                                   |
-| --------------------------- | ---------------------------------------------- | -------------------------------------------------------------- |
-| `/manager/membership-plans` | —                                              | Edit a plan's price and activity.                              |
-| `/manager/membership-plans` | `list_membership_windows` / `save_membership_window` | Add or edit a membership window's dates.                       |
-| `/manager/memberships`      | `list_invoices` / `edit_invoice`               | See and correct invoices, including which window one is for.   |
+| Manager UI                  | Manager agent actions                                | What it does                                                 |
+| --------------------------- | ---------------------------------------------------- | ------------------------------------------------------------ |
+| `/manager/membership-plans` | —                                                    | Edit a plan's price and activity.                            |
+| `/manager/membership-plans` | `list_membership_windows` / `save_membership_window` | Add or edit a membership window's dates.                     |
+| `/manager/memberships`      | `list_invoices` / `edit_invoice`                     | See and correct invoices, including which window one is for. |
 
 Per this repo's standing rule (`AGENTS.md`, "Manager agent API"), the agent
 actions mirror what a manager can do in the UI — see the skill file for the

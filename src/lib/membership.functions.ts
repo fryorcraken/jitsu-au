@@ -558,9 +558,10 @@ export const startMembership = createServerFn({ method: "POST" })
         .eq("kind", "insurance");
       if (ipErr) throw new Error(ipErr.message);
       const insurancePlanIds = new Set((insPlans ?? []).map((p) => p.id));
-      insurancePlan = (insPlans ?? []).filter((p) => p.is_active).sort(
-        (a, b) => a.sort_order - b.sort_order,
-      )[0] ?? null;
+      insurancePlan =
+        (insPlans ?? [])
+          .filter((p) => p.is_active)
+          .sort((a, b) => a.sort_order - b.sort_order)[0] ?? null;
 
       let coverEndsAt: string | null = null;
       if (insurancePlanIds.size > 0) {
@@ -742,9 +743,7 @@ export const startMembership = createServerFn({ method: "POST" })
       const email = emails.get(context.userId) ?? null;
       if (email) {
         const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
-        const planName = insuranceInvoice
-          ? `${plan.name} + ${insurancePlan!.name}`
-          : plan.name;
+        const planName = insuranceInvoice ? `${plan.name} + ${insurancePlan!.name}` : plan.name;
         const { sendMembershipPaymentEmail } = await import("./membership-email.server");
         await sendMembershipPaymentEmail({
           membershipId: inserted.id,
@@ -1318,8 +1317,7 @@ export async function reconcileUnmatched(
       }
       const bundles = [...refGroups.values()].filter(
         (group) =>
-          group.length > 1 &&
-          group.reduce((sum, m) => sum + m.price_cents, 0) === txn.amount_cents,
+          group.length > 1 && group.reduce((sum, m) => sum + m.price_cents, 0) === txn.amount_cents,
       );
       if (bundles.length !== 1) {
         if (bundles.length > 1) {

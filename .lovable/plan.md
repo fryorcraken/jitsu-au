@@ -99,8 +99,8 @@ data is test data, this redesign may be destructive.
   `list_membership_windows`/`save_membership_window` (same params).
   All four sync points change together: `src/lib/validation.ts`
   (`managerAgentActions`), `src/lib/manager-agent.ts` (manifest → version "6"
-  + `changes` entry with `breaking: true`), `src/routes/api/manager/agent.ts`,
-  `.claude/skills/uts-manager-agent/SKILL.md`. AGENTS.md action list updated.
+  - `changes` entry with `breaking: true`), `src/routes/api/manager/agent.ts`,
+    `.claude/skills/uts-manager-agent/SKILL.md`. AGENTS.md action list updated.
 
 ### Docs
 

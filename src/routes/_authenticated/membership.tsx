@@ -347,10 +347,8 @@ function MembershipPage() {
               />
               <span>
                 <span className="text-sm font-medium">
-                  Yearly insurance ({formatCents(
-                    computeMembershipPrice(insurancePlan, isStudent),
-                  )}
-                  ) {insuranceIncluded ? "included" : "not included"}
+                  Yearly insurance ({formatCents(computeMembershipPrice(insurancePlan, isStudent))}){" "}
+                  {insuranceIncluded ? "included" : "not included"}
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
                   {insuranceRules.canDeselect
@@ -424,8 +422,8 @@ function MembershipPage() {
                       <Label className="text-xs">Which membership window?</Label>
                       {offeredSemesters.length === 0 ? (
                         <p className="text-xs text-muted-foreground">
-                          No membership window is open for enrolment right now. Check back soon,
-                          or train casually in the meantime.
+                          No membership window is open for enrolment right now. Check back soon, or
+                          train casually in the meantime.
                         </p>
                       ) : (
                         <div className="space-y-1.5">

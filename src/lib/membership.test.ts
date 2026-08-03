@@ -521,10 +521,7 @@ describe("membershipWindowNotifications", () => {
   });
 
   it("ignores retired (inactive) windows when judging the latest end", () => {
-    const n = membershipWindowNotifications(
-      [w("Semester 2 2026", "2026-08-20", false)],
-      NOW,
-    );
+    const n = membershipWindowNotifications([w("Semester 2 2026", "2026-08-20", false)], NOW);
     expect(n).toHaveLength(1);
     expect(n[0].title).toMatch(/set up/i);
   });

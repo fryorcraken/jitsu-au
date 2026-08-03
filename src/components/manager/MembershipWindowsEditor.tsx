@@ -117,8 +117,8 @@ export function MembershipWindowsEditor() {
       <p className="text-sm text-muted-foreground">
         Windows are the date spans a membership runs for, such as 20 Jul to 16 Dec. A member picks
         the current window or the next one when they join, and their membership runs exactly those
-        dates, full price regardless of when in it they join. Editing dates changes only what a
-        NEW membership gets.
+        dates, full price regardless of when in it they join. Editing dates changes only what a NEW
+        membership gets.
       </p>
 
       {windows.length === 0 && (
