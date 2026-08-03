@@ -124,6 +124,10 @@ describe("MemberLayout", () => {
       "href",
       "/manager/kb",
     );
+    expect(screen.getByRole("link", { name: /^semesters$/i })).toHaveAttribute(
+      "href",
+      "/manager/semesters",
+    );
     // Member links remain available to managers too.
     expect(screen.getByRole("link", { name: /account/i })).toBeInTheDocument();
   });

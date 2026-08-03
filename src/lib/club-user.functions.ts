@@ -53,6 +53,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: waivers, error: wErr },
       { data: memberships, error: mErr },
       { data: plans, error: plErr },
+      { data: semesters, error: semErr },
       { data: roles, error: rErr },
       { data: emailRows, error: emailErr },
       { data: checkins, error: cErr },
@@ -73,6 +74,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         .order("created_at", { ascending: false })
         .limit(MEMBERSHIPS_LIMIT),
       admin.from("membership_plans").select("id, name, kind"),
+      admin.from("club_semesters").select("id, name"),
       admin.from("user_roles").select("user_id, role").eq("user_id", data.userId),
       userEmails(admin, [data.userId]),
       admin
@@ -109,11 +111,15 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (cErr) throw new Error(cErr.message);
     if (ccErr) throw new Error(ccErr.message);
     if (!profile) throw new Error("User not found.");
+    // Decoration only (which semester an invoice names); starts_at/ends_at on
+    // the row are the source of truth regardless, so this degrades quietly.
+    if (semErr) console.error("[getClubUser] semester lookup failed:", semErr);
 
     const waiverRows = waivers ?? [];
     const membershipRows = memberships ?? [];
     const planRows = plans ?? [];
     const planById = new Map(planRows.map((p) => [p.id, p]));
+    const semesterById = new Map((semesters ?? []).map((s) => [s.id, s]));
 
     // Surface the caps rather than silently showing a partial history. Both
     // read newest first, so what falls off is ancient; note the waiver cap can
@@ -238,6 +244,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       memberships: membershipRows.map((m) => ({
         id: m.id,
         plan_name: planById.get(m.plan_id)?.name ?? null,
+        semester_name: m.semester_id ? (semesterById.get(m.semester_id)?.name ?? null) : null,
         status: m.status,
         price_cents: m.price_cents,
         payment_reference: m.payment_reference,

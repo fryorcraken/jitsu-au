@@ -34,9 +34,9 @@
 # does not find them. RLS narrows each: the intake tables are insert-only (and
 # the handlers deliberately skip `.select()` so nothing can be read back), the
 # template read is `is_current = true`, the plans/semesters read is
-# `is_active = true`. `club_semesters`'s reader (`listSemesters`) lands in the
-# follow-up PR; the grant ships ahead of it here so the migration stays
-# additive-only.
+# `is_active = true`. `club_semesters`'s reader is `listSemesters`
+# (membership.functions.ts), used by the pricing page and the member purchase
+# flow.
 interest_registrations:anon:INSERT
 interest_registrations:authenticated:INSERT
 contact_messages:anon:INSERT

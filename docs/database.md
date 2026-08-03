@@ -57,7 +57,7 @@ function on the service-role client, which bypasses both grants and RLS.
 | `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                       |
 | `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                     |
 | `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                 |
-| `club_semesters`         | `anon`+`auth`   | `SELECT`  | the public pricing page and the member purchase flow (follow-up PR)             |
+| `club_semesters`         | `anon`+`auth`   | `SELECT`  | `listSemesters` — the public pricing page and the member purchase flow          |
 | `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
 | `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
 | `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
@@ -417,6 +417,10 @@ waiver.
 
 ## Membership ledger
 
+See `docs/memberships.md` for the product flows (plan catalogue, the
+pick-a-semester purchase flow, no pro rata, staying a member through the
+break).
+
 ### `club_semesters` — the club's fixed semester dates
 
 `id` PK, `code` (unique, `<year>-s<1|2>`, e.g. `2026-s1`), `name`, `year`, `half`
@@ -439,10 +443,13 @@ plan's dates are computed: `rolling` (the default; `duration_days` days from
 activation — this is `insurance_yearly`, a genuine 12-months-from-payment
 membership) or `semester` (the dates come from the `club_semesters` row the
 member chose at purchase; `duration_days` becomes unused). This is the
-`semester` plan. Its `duration_days` is cleared to `NULL` once the code that
-reads `period_basis` is live, not in the same migration that adds the column —
-see the comment on the `UPDATE` in
-`20260802110000_club_semesters.sql`.
+`semester` plan. `period_basis` was added in `20260802110000_club_semesters.sql`
+without touching `duration_days`, on purpose: that migration is additive-only
+and shipped ahead of the code that reads `period_basis`, so clearing
+`duration_days` in the same statement would have handed out never-expiring
+semester memberships in the gap. `20260803010000_clear_semester_plan_duration.sql`
+clears it, once `activateMembershipRow` (`src/lib/membership.functions.ts`) no
+longer reads it for this plan.
 **RLS:** anyone reads active plans; managers read all and write.
 
 ### `memberships` — enrollment/billing records

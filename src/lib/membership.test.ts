@@ -10,6 +10,9 @@ import {
   sanitizeSurname,
   saveClubSettingsSchema,
   savePlanSchema,
+  saveSemesterSchema,
+  sellableSemesters,
+  semesterMembershipWindow,
   sessionDateTag,
   stableCode,
   startMembershipSchema,
@@ -227,6 +230,27 @@ describe("buildPaymentReference", () => {
   it("contains only uppercase alphanumerics (no separators)", () => {
     expect(buildPaymentReference("O'Brien", uid, "2026-12-07")).toMatch(/^[A-Z0-9]+$/);
   });
+
+  it("keeps MEM and appends a semester tag for a semester-anchored plan", () => {
+    const ref = buildPaymentReference("Nguyen", uid, undefined, "2026-s1");
+    expect(ref.startsWith("MEMNGUYEN")).toBe(true);
+    expect(ref.endsWith("S126")).toBe(true);
+    expect(ref.length).toBeLessThanOrEqual(18);
+  });
+
+  it("distinguishes two semesters for the same member", () => {
+    const s1 = buildPaymentReference("Nguyen", uid, undefined, "2026-s1");
+    const s2 = buildPaymentReference("Nguyen", uid, undefined, "2026-s2");
+    expect(s1).not.toBe(s2);
+  });
+
+  it("ignores the semester code once a session date is given", () => {
+    // sessionDate takes precedence -- a plan is either per-session or
+    // semester-anchored, never both, but the tag priority must still be
+    // deterministic if both were ever passed.
+    const ref = buildPaymentReference("Nguyen", uid, "2026-12-07", "2026-s1");
+    expect(ref.endsWith("7DEC")).toBe(true);
+  });
 });
 
 describe("startMembershipSchema", () => {
@@ -257,6 +281,20 @@ describe("startMembershipSchema", () => {
     });
     expect(r.success).toBe(false);
   });
+
+  it("accepts an omitted semester_code (only meaningful for a semester plan)", () => {
+    const r = startMembershipSchema.safeParse({ plan_code: "casual_session", is_student: false });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a semester_code alongside a semester plan", () => {
+    const r = startMembershipSchema.safeParse({
+      plan_code: "semester",
+      is_student: false,
+      semester_code: "2026-s2",
+    });
+    expect(r.success).toBe(true);
+  });
 });
 
 describe("savePlanSchema", () => {
@@ -268,6 +306,7 @@ describe("savePlanSchema", () => {
     student_price_cents: 24500,
     duration_days: 182,
     session_credits: null,
+    period_basis: "semester" as const,
     is_active: true,
     sort_order: 2,
   };
@@ -282,6 +321,140 @@ describe("savePlanSchema", () => {
 
   it("rejects an unknown kind", () => {
     expect(savePlanSchema.safeParse({ ...base, kind: "gold" }).success).toBe(false);
+  });
+
+  it("rejects an unknown period_basis", () => {
+    expect(savePlanSchema.safeParse({ ...base, period_basis: "termly" }).success).toBe(false);
+  });
+
+  it("accepts a rolling plan (e.g. the yearly insurance membership)", () => {
+    expect(
+      savePlanSchema.safeParse({ ...base, code: "insurance_yearly", period_basis: "rolling" })
+        .success,
+    ).toBe(true);
+  });
+});
+
+describe("saveSemesterSchema", () => {
+  const base = {
+    year: 2026,
+    half: 1 as const,
+    name: "Semester 1 2026",
+    starts_on: "2026-02-02",
+    ends_on: "2026-06-28",
+  };
+
+  it("accepts a well-formed semester", () => {
+    expect(saveSemesterSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("accepts half 2", () => {
+    expect(saveSemesterSchema.safeParse({ ...base, half: 2 }).success).toBe(true);
+  });
+
+  it("rejects a half outside 1 or 2", () => {
+    expect(saveSemesterSchema.safeParse({ ...base, half: 3 }).success).toBe(false);
+  });
+
+  it("rejects an end date before the start date", () => {
+    const r = saveSemesterSchema.safeParse({
+      ...base,
+      starts_on: "2026-06-28",
+      ends_on: "2026-02-02",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts a same-day semester (start equals end)", () => {
+    expect(saveSemesterSchema.safeParse({ ...base, ends_on: base.starts_on }).success).toBe(true);
+  });
+
+  it("rejects a malformed date", () => {
+    expect(saveSemesterSchema.safeParse({ ...base, starts_on: "2/2/2026" }).success).toBe(false);
+  });
+
+  it("is_active may be omitted", () => {
+    const r = saveSemesterSchema.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.is_active).toBeUndefined();
+  });
+});
+
+describe("semesterMembershipWindow", () => {
+  it("starts at 00:00 Australia/Sydney on starts_on", () => {
+    const w = semesterMembershipWindow({ starts_on: "2026-07-20", ends_on: "2026-11-22" });
+    // AEST (+10) in July, no daylight saving.
+    expect(w.starts_at).toBe("2026-07-19T14:00:00.000Z");
+  });
+
+  it("ends at 23:59:59 Australia/Sydney on ends_on, inclusive", () => {
+    const w = semesterMembershipWindow({ starts_on: "2026-07-20", ends_on: "2026-11-22" });
+    // AEDT (+11) by late November.
+    expect(w.ends_at).toBe("2026-11-22T12:59:59.000Z");
+  });
+
+  it("survives the April daylight-saving boundary (Semester 1's end)", () => {
+    // 2026-04-05 02:00 AEDT is when clocks fall back to AEST in Sydney.
+    const w = semesterMembershipWindow({ starts_on: "2026-02-02", ends_on: "2026-04-05" });
+    expect(w.starts_at).toBe("2026-02-01T13:00:00.000Z"); // AEDT (+11) in February
+    expect(w.ends_at).toBe("2026-04-05T13:59:59.000Z"); // AEST (+10) once fallen back
+  });
+
+  it("survives the October daylight-saving boundary (Semester 2's start)", () => {
+    // 2026-10-04 02:00 AEST is when clocks spring forward to AEDT in Sydney.
+    const w = semesterMembershipWindow({ starts_on: "2026-10-04", ends_on: "2026-11-22" });
+    expect(w.starts_at).toBe("2026-10-03T14:00:00.000Z"); // still AEST (+10) at 00:00 on the 4th
+  });
+});
+
+describe("sellableSemesters", () => {
+  const s1 = {
+    code: "2026-s1",
+    starts_on: "2026-02-02",
+    ends_on: "2026-06-28",
+    is_active: true,
+  };
+  const s2 = {
+    code: "2026-s2",
+    starts_on: "2026-07-20",
+    ends_on: "2026-11-22",
+    is_active: true,
+  };
+  const all = [s1, s2];
+
+  it("offers the running semester plus the next one", () => {
+    // Inside s1's window.
+    const offered = sellableSemesters(all, "2026-03-01T00:00:00.000Z");
+    expect(offered.map((s) => s.code)).toEqual(["2026-s1", "2026-s2"]);
+  });
+
+  it("offers only the next semester during a break, not the one just finished", () => {
+    // The winter break between s1 and s2.
+    const offered = sellableSemesters(all, "2026-07-01T00:00:00.000Z");
+    expect(offered.map((s) => s.code)).toEqual(["2026-s2"]);
+  });
+
+  it("offers nothing once the last configured semester has ended", () => {
+    const offered = sellableSemesters(all, "2026-12-01T00:00:00.000Z");
+    expect(offered).toEqual([]);
+  });
+
+  it("ignores an inactive (retired) semester", () => {
+    const offered = sellableSemesters(
+      [s1, { ...s2, is_active: false }],
+      "2026-08-01T00:00:00.000Z",
+    );
+    expect(offered).toEqual([]);
+  });
+
+  it("is inclusive of the semester's own start and end days", () => {
+    expect(sellableSemesters(all, "2026-02-02T00:00:00.000Z").map((s) => s.code)).toContain(
+      "2026-s1",
+    );
+    // 2026-06-28T10:00 UTC is still 28 June in Sydney (AEST, +10).
+    expect(sellableSemesters(all, "2026-06-28T10:00:00.000Z").map((s) => s.code)).toContain(
+      "2026-s1",
+    );
   });
 });
 

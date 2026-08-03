@@ -51,6 +51,9 @@ function fakeAdminForListInvoices(rows: (typeof ROW)[], total: number) {
       if (table === "membership_plans") {
         return { select: () => Promise.resolve(ok([])) };
       }
+      if (table === "club_semesters") {
+        return { select: () => Promise.resolve(ok([])) };
+      }
       throw new Error(`unexpected table ${table}`);
     },
   };

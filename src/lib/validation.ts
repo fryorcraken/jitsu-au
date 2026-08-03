@@ -10,6 +10,11 @@ import { z } from "zod";
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
 import { annotationVisibilities, articleVisibilities } from "./kb";
+// Semester windows are computed in the club's own timezone (a semester's last
+// day must cover that evening's class, not cut off at UTC midnight), so this
+// module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
+// the same kind of module as this one (pure, no server imports).
+import { CLUB_TIME_ZONE, clubLocalDate, zonedWallTimeToUtc } from "./calendar";
 
 // ---- Pure helpers ----
 
@@ -776,6 +781,16 @@ export type ManagerEmailChangeInput = z.infer<typeof managerEmailChangeSchema>;
 export const membershipPlanKinds = ["insurance", "trial", "session", "period"] as const;
 export type MembershipPlanKind = (typeof membershipPlanKinds)[number];
 
+/**
+ * How a `period` plan's `starts_at`/`ends_at` are computed: `rolling` (the
+ * default; N days from activation — `insurance_yearly`, a genuine
+ * 12-months-from-payment membership) or `semester` (the dates come from the
+ * `club_semesters` row the member chose at purchase — the `semester` plan).
+ * `duration_days` is meaningless for a `semester`-basis plan.
+ */
+export const membershipPeriodBases = ["rolling", "semester"] as const;
+export type MembershipPeriodBasis = (typeof membershipPeriodBases)[number];
+
 /** The lifecycle a person moves through as they join the club:
  * lead (registered interest only) -> applicant (signed the waiver) ->
  * visitor (waiver approved, trial assigned) -> member (active paid
@@ -910,10 +925,21 @@ export function sessionDateTag(sessionDate: string): string {
   return `${Number(m[3])}${month}`;
 }
 
+/** Format a `club_semesters.code` like "2026-s1" as a compact tag: "S126". */
+export function semesterCodeTag(semesterCode: string): string {
+  const m = /^(\d{4})-s([12])$/.exec(semesterCode.trim());
+  if (!m) return "";
+  return `S${m[2]}${m[1].slice(2)}`;
+}
+
 /**
  * Build a member's bank transfer reference: compact, uppercase, alphanumeric,
  * <= 18 chars (the Australian pay-anyone limit). Stable per member.
- *   - period / insurance / trial: `MEM<SURNAME><CODE>`         e.g. MEMNGUYEN7Q
+ *   - period / insurance / trial: `MEM<SURNAME><CODE>`          e.g. MEMNGUYEN7Q
+ *   - semester-anchored (semesterCode set): `MEM<SURNAME><CODE><SemTag>`
+ *     e.g. MEMNGUYEN7QS126 (keeps the MEM prefix -- unlike casual sessions,
+ *     this still is not per-session; the tag only tells two semesters apart
+ *     when both have a pending invoice at once).
  *   - per-session (sessionDate set): `<SURNAME><CODE><Day><Mon>` e.g. NGUYEN7Q7DEC
  *     (no MEM prefix — the session date already identifies the payment).
  */
@@ -921,9 +947,14 @@ export function buildPaymentReference(
   surname: string,
   userId: string,
   sessionDate?: string,
+  semesterCode?: string,
 ): string {
   const code = stableCode(userId);
-  const datePart = sessionDate ? sessionDateTag(sessionDate) : "";
+  const datePart = sessionDate
+    ? sessionDateTag(sessionDate)
+    : semesterCode
+      ? semesterCodeTag(semesterCode)
+      : "";
   const prefix = sessionDate ? "" : "MEM";
   const assemble = (sur: string) => `${prefix}${sur}${code}${datePart}`;
   let sur = sanitizeSurname(surname);
@@ -935,6 +966,81 @@ export function buildPaymentReference(
     ref = assemble(sur);
   }
   return ref.slice(0, 18);
+}
+
+// ---- Club semesters ----
+
+/** A club semester as read from `club_semesters` (or projected from it). */
+export type SemesterWindow = {
+  starts_on: string; // YYYY-MM-DD
+  ends_on: string; // YYYY-MM-DD, inclusive
+};
+
+/** Manager: create or update a semester. Upserts by (year, half) — the code is
+ * always derived server-side (`${year}-s${half}`), never taken from the caller,
+ * so it can never drift from the pair the DB's own CHECK constraint ties it to.
+ * `name`/dates are required on every save (semesters are edited as a whole row,
+ * not patched field-by-field); `is_active` is the one field that may be
+ * omitted to mean "leave it as it is". */
+export const saveSemesterSchema = z
+  .object({
+    year: z.number().int().min(2020).max(2100),
+    half: z.union([z.literal(1), z.literal(2)]),
+    name: z.string().trim().min(1).max(120),
+    starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD."),
+    ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD."),
+    is_active: z.boolean().optional(),
+  })
+  .refine((d) => d.ends_on >= d.starts_on, {
+    message: "End date must be on or after the start date.",
+    path: ["ends_on"],
+  });
+export type SaveSemesterInput = z.infer<typeof saveSemesterSchema>;
+
+/** `dateStr` (YYYY-MM-DD) plus `days` calendar days, as a new YYYY-MM-DD string. */
+function addCalendarDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d) + days * 86_400_000);
+  return `${String(dt.getUTCFullYear()).padStart(4, "0")}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+/**
+ * The absolute instants a semester-anchored membership runs for: 00:00
+ * Australia/Sydney on `starts_on`, through 23:59:59 Australia/Sydney on
+ * `ends_on` inclusive (one second before the next day's midnight), so the
+ * final evening's class is covered rather than cut off at UTC midnight.
+ */
+export function semesterMembershipWindow(semester: SemesterWindow): {
+  starts_at: string;
+  ends_at: string;
+} {
+  const starts_at = zonedWallTimeToUtc(semester.starts_on, "00:00", CLUB_TIME_ZONE).toISOString();
+  const nextDayMidnightMs = zonedWallTimeToUtc(
+    addCalendarDays(semester.ends_on, 1),
+    "00:00",
+    CLUB_TIME_ZONE,
+  ).getTime();
+  const ends_at = new Date(nextDayMidnightMs - 1000).toISOString();
+  return { starts_at, ends_at };
+}
+
+/**
+ * The semesters a member may buy right now: the one running today (if any),
+ * plus the next one to start after it — or, in a break with nothing running,
+ * just the next one. There is no pro rata, so this is only ever the choice of
+ * *which* semester, never a price difference; at most two, soonest first.
+ */
+export function sellableSemesters<T extends SemesterWindow & { is_active: boolean }>(
+  all: T[],
+  now: string,
+): T[] {
+  const today = clubLocalDate(new Date(now), CLUB_TIME_ZONE);
+  const active = [...all]
+    .filter((s) => s.is_active)
+    .sort((a, b) => (a.starts_on < b.starts_on ? -1 : a.starts_on > b.starts_on ? 1 : 0));
+  const current = active.find((s) => s.starts_on <= today && today <= s.ends_on) ?? null;
+  const next = active.find((s) => s.starts_on > today && s !== current) ?? null;
+  return [current, next].filter((s): s is T => s !== null);
 }
 
 // ---- Member: start a membership ----
@@ -950,6 +1056,9 @@ export const startMembershipSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional()
       .or(z.literal("")),
+    // Only meaningful for a semester-basis plan; the server requires it there
+    // and ignores it otherwise. The `club_semesters.code` of the chosen term.
+    semester_code: z.string().trim().max(16).optional().or(z.literal("")),
     hp: z.string().max(0).optional(), // honeypot — must stay empty
   })
   .refine((d) => !d.is_student || Boolean(d.uts_student_number && d.uts_student_number.trim()), {
@@ -975,6 +1084,7 @@ export const savePlanSchema = z.object({
   student_price_cents: z.number().int().min(0).max(1_000_000).nullable(),
   duration_days: z.number().int().positive().max(3650).nullable(),
   session_credits: z.number().int().positive().max(1000).nullable(),
+  period_basis: z.enum(membershipPeriodBases),
   is_active: z.boolean(),
   sort_order: z.number().int().min(0).max(1000),
 });
@@ -1025,6 +1135,8 @@ export const managerAgentActions = [
   "list_invoices",
   "edit_invoice",
   "file_waiver",
+  "list_semesters",
+  "save_semester",
   "list_kb_sections",
   "save_kb_section",
   "delete_kb_section",

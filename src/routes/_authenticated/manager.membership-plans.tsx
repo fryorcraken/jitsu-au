@@ -73,6 +73,7 @@ function PlansPage() {
           student_price_cents: plan.student_price_cents,
           duration_days: plan.duration_days,
           session_credits: plan.session_credits,
+          period_basis: plan.period_basis,
           is_active: plan.is_active,
           sort_order: plan.sort_order,
         },
@@ -103,9 +104,14 @@ function PlansPage() {
               Edit prices and availability. These drive the pricing page and the member signup.
             </p>
           </div>
-          <Button asChild variant="outline">
-            <Link to="/manager/memberships">Back to memberships</Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link to="/manager/semesters">Semesters</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/manager/memberships">Back to memberships</Link>
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -198,6 +204,26 @@ function PlansPage() {
                     />
                   </div>
                 </div>
+                {plan.kind === "period" && (
+                  <div>
+                    <Label htmlFor={`pb-${plan.id}`} className="text-xs">
+                      Period basis
+                    </Label>
+                    <select
+                      id={`pb-${plan.id}`}
+                      value={plan.period_basis}
+                      onChange={(e) =>
+                        patch(plan.id, { period_basis: e.target.value as typeof plan.period_basis })
+                      }
+                      className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                    >
+                      <option value="rolling">Rolling (duration in days from payment)</option>
+                      <option value="semester">
+                        Semester (dates come from the chosen semester)
+                      </option>
+                    </select>
+                  </div>
+                )}
                 <Button size="sm" disabled={savingId === plan.id} onClick={() => onSave(plan)}>
                   {savingId === plan.id ? "Saving..." : "Save"}
                 </Button>
