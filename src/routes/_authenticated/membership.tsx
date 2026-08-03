@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import {
   computeMembershipPrice,
   formatCents,
+  insuranceSelection,
   isUtsStudent,
   sellableSemesters,
   type LifecycleStatus,
@@ -34,7 +35,7 @@ export const Route = createFileRoute("/_authenticated/membership")({
 });
 
 type Plan = Awaited<ReturnType<typeof listMembershipPlans>>[number];
-type Semester = Awaited<ReturnType<typeof listSemesters>>[number];
+type Window = Awaited<ReturnType<typeof listSemesters>>[number];
 type Mine = Awaited<ReturnType<typeof getMyMemberships>>;
 
 // The words are this page's own: a member reads "On trial", a manager reads
@@ -108,12 +109,15 @@ function MembershipPage() {
   const start = useServerFn(startMembership);
 
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [semesters, setSemesters] = useState<Semester[]>([]);
+  const [semesters, setSemesters] = useState<Window[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
   const [loading, setLoading] = useState(true);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [semesterCode, setSemesterCode] = useState<string | null>(null);
+  // The insurance checkbox is not raw state: it starts from the rules in
+  // `insuranceSelection` and is only editable while the member has cover.
+  const [insuranceTicked, setInsuranceTicked] = useState<boolean | null>(null);
   const [pendingCode, setPendingCode] = useState<string | null>(null);
 
   // A non-empty UTS student number is what makes someone a student; there is no
@@ -121,12 +125,30 @@ function MembershipPage() {
   // rule the server uses for authoritative pricing, so the two can't disagree.
   const isStudent = isUtsStudent(studentNumber);
 
-  // At most two: the semester running now (if any) plus the next one to start.
+  // At most two: the window running now (if any) plus the next one to start.
   // No pro rata either way -- this is only ever a choice of which, not a price.
   const offeredSemesters = useMemo(
     () => sellableSemesters(semesters, new Date().toISOString()),
     [semesters],
   );
+
+  // The member's current insurance cover: the latest ends_at across ACTIVE
+  // insurance memberships. Pending insurance invoices are a promise, not
+  // cover, so they never feed this.
+  const insuranceEndsAt = useMemo(() => {
+    const ends = (mine?.memberships ?? [])
+      .filter((m) => m.kind === "insurance" && m.status === "active" && m.ends_at)
+      .map((m) => m.ends_at!)
+      .sort();
+    return ends.length ? ends[ends.length - 1] : null;
+  }, [mine]);
+
+  const insuranceRules = useMemo(
+    () => insuranceSelection({ insuranceEndsAt, now: new Date().toISOString() }),
+    [insuranceEndsAt],
+  );
+  const insurancePlan = plans.find((p) => p.kind === "insurance") ?? null;
+  const insuranceIncluded = insuranceTicked ?? insuranceRules.preselect;
 
   const reload = useMemo(
     () => () => {
@@ -148,7 +170,7 @@ function MembershipPage() {
       .finally(() => setLoading(false));
   }, [reload]);
 
-  // Default the picker to the first offered semester once the list loads, so a
+  // Default the picker to the first offered window once the list loads, so a
   // member who never touches the picker still buys a valid one.
   useEffect(() => {
     if (semesterCode || offeredSemesters.length === 0) return;
@@ -164,10 +186,12 @@ function MembershipPage() {
           is_student: isStudent,
           uts_student_number: studentNumber.trim(),
           session_date: plan.kind === "session" ? sessionDate : "",
-          semester_code: plan.period_basis === "semester" ? (semesterCode ?? "") : "",
+          semester_code: plan.kind === "period" ? (semesterCode ?? "") : "",
+          include_insurance: plan.kind !== "insurance" ? insuranceIncluded : false,
           hp: "",
         },
       });
+      setInsuranceTicked(null);
       await reload();
       if (res.activated) {
         toast.success("You're all set. Your membership is active.");
@@ -191,6 +215,9 @@ function MembershipPage() {
 
   const lifecycle = mine?.lifecycle ?? "lead";
   const status = LIFECYCLE_COPY[lifecycle];
+
+  const trainingPlans = plans.filter((p) => p.kind === "period" || p.kind === "session");
+  const otherPlans = plans.filter((p) => p.kind === "trial" || p.kind === "insurance");
 
   return (
     <>
@@ -288,7 +315,7 @@ function MembershipPage() {
             <div>
               <h2 className="text-2xl font-bold">Choose a plan</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                UTS students pay a discounted rate. Just add your student number.
+                Pay per class, or get a membership for the whole window.
               </p>
             </div>
             <div className="rounded-lg border bg-card p-3">
@@ -309,9 +336,39 @@ function MembershipPage() {
             </div>
           </div>
 
+          {insurancePlan && trainingPlans.length > 0 && (
+            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border bg-card p-4">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4"
+                checked={insuranceIncluded}
+                disabled={!insuranceRules.canDeselect}
+                onChange={(e) => setInsuranceTicked(e.target.checked)}
+              />
+              <span>
+                <span className="text-sm font-medium">
+                  Yearly insurance ({formatCents(
+                    computeMembershipPrice(insurancePlan, isStudent),
+                  )}
+                  ) {insuranceIncluded ? "included" : "not included"}
+                </span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  {insuranceRules.canDeselect
+                    ? `Required to train. Your cover runs to ${formatDateOnly(insuranceEndsAt)}, so you can leave it off this time.`
+                    : "Required to train, so it comes with your plan. It covers you and your club affiliation for a year."}
+                </span>
+              </span>
+            </label>
+          )}
+
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {plans.map((plan) => {
-              const price = computeMembershipPrice(plan, isStudent);
+            {trainingPlans.map((plan) => {
+              const planPrice = computeMembershipPrice(plan, isStudent);
+              const insurancePrice =
+                insuranceIncluded && insurancePlan
+                  ? computeMembershipPrice(insurancePlan, isStudent)
+                  : 0;
+              const price = planPrice + insurancePrice;
               const discounted =
                 isStudent &&
                 plan.student_price_cents != null &&
@@ -326,12 +383,17 @@ function MembershipPage() {
                     <span className="text-3xl font-bold tracking-tight">{formatCents(price)}</span>
                     {discounted && (
                       <span className="text-sm text-muted-foreground line-through">
-                        {formatCents(plan.public_price_cents)}
+                        {formatCents(plan.public_price_cents + insurancePrice)}
                       </span>
                     )}
                     {discounted && (
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                         Student rate
+                      </span>
+                    )}
+                    {insurancePrice > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {formatCents(planPrice)} + {formatCents(insurancePrice)} insurance
                       </span>
                     )}
                   </div>
@@ -340,12 +402,6 @@ function MembershipPage() {
                       <li className="flex items-center gap-2">
                         <Check className="h-4 w-4 text-primary" />
                         {plan.session_credits} session{plan.session_credits === 1 ? "" : "s"}
-                      </li>
-                    )}
-                    {plan.period_basis !== "semester" && plan.duration_days != null && (
-                      <li className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-primary" />
-                        Valid {plan.duration_days} days
                       </li>
                     )}
                   </ul>
@@ -363,13 +419,13 @@ function MembershipPage() {
                       />
                     </div>
                   )}
-                  {plan.period_basis === "semester" && (
+                  {plan.kind === "period" && (
                     <div className="mt-4 space-y-2">
-                      <Label className="text-xs">Which semester?</Label>
+                      <Label className="text-xs">Which membership window?</Label>
                       {offeredSemesters.length === 0 ? (
                         <p className="text-xs text-muted-foreground">
-                          No semester is open for enrolment right now. Check back soon, or train
-                          casually in the meantime.
+                          No membership window is open for enrolment right now. Check back soon,
+                          or train casually in the meantime.
                         </p>
                       ) : (
                         <div className="space-y-1.5">
@@ -380,17 +436,13 @@ function MembershipPage() {
                             >
                               <input
                                 type="radio"
-                                name={`semester-${plan.code}`}
+                                name={`window-${plan.code}`}
                                 value={s.code}
                                 checked={semesterCode === s.code}
                                 onChange={() => setSemesterCode(s.code)}
                               />
                               <span>
-                                {s.name}
-                                <span className="text-muted-foreground">
-                                  {" "}
-                                  ({formatDateOnly(s.starts_on)} to {formatDateOnly(s.ends_on)})
-                                </span>
+                                {formatDateOnly(s.starts_on)} to {formatDateOnly(s.ends_on)}
                               </span>
                             </label>
                           ))}
@@ -398,7 +450,7 @@ function MembershipPage() {
                       )}
                       <p className="text-xs text-muted-foreground">
                         Same price whichever you pick, and however far in it starts. Prefer to pay
-                        as you go instead? Choose a casual class below.
+                        as you go instead? Choose a casual class.
                       </p>
                     </div>
                   )}
@@ -406,21 +458,65 @@ function MembershipPage() {
                     className="mt-6"
                     disabled={
                       pendingCode !== null ||
-                      (plan.period_basis === "semester" &&
-                        (!semesterCode || offeredSemesters.length === 0))
+                      (plan.kind === "period" && (!semesterCode || offeredSemesters.length === 0))
                     }
                     onClick={() => choose(plan)}
                   >
-                    {pendingCode === plan.code
-                      ? "Starting..."
-                      : price === 0
-                        ? "Start free"
-                        : "Choose & pay by transfer"}
+                    {pendingCode === plan.code ? "Starting..." : "Choose & pay by transfer"}
                   </Button>
                 </div>
               );
             })}
           </div>
+
+          {otherPlans.length > 0 && (
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold">Also available</h3>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                {otherPlans.map((plan) => {
+                  const price = computeMembershipPrice(plan, isStudent);
+                  return (
+                    <div key={plan.code} className="flex flex-col rounded-2xl border bg-card p-6">
+                      <h4 className="text-base font-semibold">{plan.name}</h4>
+                      {plan.description && (
+                        <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
+                      )}
+                      <div className="mt-4 flex items-baseline gap-2">
+                        <span className="text-3xl font-bold tracking-tight">
+                          {formatCents(price)}
+                        </span>
+                      </div>
+                      <ul className="mt-4 space-y-1.5 text-sm text-muted-foreground">
+                        {plan.session_credits != null && (
+                          <li className="flex items-center gap-2">
+                            <Check className="h-4 w-4 text-primary" />
+                            {plan.session_credits} session{plan.session_credits === 1 ? "" : "s"}
+                          </li>
+                        )}
+                        {plan.kind === "insurance" && (
+                          <li className="flex items-center gap-2">
+                            <Check className="h-4 w-4 text-primary" />
+                            Cover for a year
+                          </li>
+                        )}
+                      </ul>
+                      <Button
+                        className="mt-6"
+                        disabled={pendingCode !== null}
+                        onClick={() => choose(plan)}
+                      >
+                        {pendingCode === plan.code
+                          ? "Starting..."
+                          : price === 0
+                            ? "Start free"
+                            : "Choose & pay by transfer"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <p className="text-sm text-muted-foreground">

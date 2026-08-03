@@ -629,8 +629,8 @@ async function handleFileWaiver(params: unknown, actingAs: string) {
   }
 }
 
-/** Project a semester row the way `list_semesters` returns it. */
-function projectAgentSemester(s: ClubSemesterRow) {
+/** Project a window row the way `list_membership_windows` returns it. */
+function projectAgentMembershipWindow(s: ClubSemesterRow) {
   return {
     code: s.code,
     name: s.name,
@@ -642,15 +642,15 @@ function projectAgentSemester(s: ClubSemesterRow) {
   };
 }
 
-// ---- action: list_semesters ----
-async function handleListSemesters() {
+// ---- action: list_membership_windows ----
+async function handleListMembershipWindows() {
   const db = await adminClient();
-  const semesters = await listSemesterRows(db);
-  return { count: semesters.length, semesters: semesters.map(projectAgentSemester) };
+  const windows = await listSemesterRows(db);
+  return { count: windows.length, windows: windows.map(projectAgentMembershipWindow) };
 }
 
-// ---- action: save_semester ----
-async function handleSaveSemester(params: unknown) {
+// ---- action: save_membership_window ----
+async function handleSaveMembershipWindow(params: unknown) {
   const input = saveSemesterSchema.parse(params);
   const db = await adminClient();
   try {
@@ -658,8 +658,8 @@ async function handleSaveSemester(params: unknown) {
   } catch (e) {
     throw new AgentError(
       422,
-      "save_semester_failed",
-      e instanceof Error ? e.message : "Could not save the semester.",
+      "save_membership_window_failed",
+      e instanceof Error ? e.message : "Could not save the membership window.",
     );
   }
 }
@@ -865,10 +865,10 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleEditInvoice(params, actingAs);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
-    case "list_semesters":
-      return handleListSemesters();
-    case "save_semester":
-      return handleSaveSemester(params);
+    case "list_membership_windows":
+      return handleListMembershipWindows();
+    case "save_membership_window":
+      return handleSaveMembershipWindow(params);
     case "list_kb_sections":
       return handleListKbSections();
     case "save_kb_section":

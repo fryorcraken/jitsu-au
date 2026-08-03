@@ -1,83 +1,116 @@
-# Google Drive integration for managers
+# Simplify memberships: casual class vs membership per window, plus a manager dashboard
 
-Let a manager connect their personal Google account so signed waiver PDFs are copied into a folder in **their** Google Drive, in addition to being stored in Lovable Cloud storage (nothing changes for members signing waivers).
+The pre-launch membership UX is too complicated: a "period basis" dropdown,
+a "duration (days)" field on the plan editor, and a whole separate "semesters"
+screen layered over the membership plan. Because nothing is live and existing
+data is test data, this redesign may be destructive.
 
-This uses Lovable's **App User Connector** for `google_drive` — each manager does their own OAuth consent; we never store Google credentials in code, and the connection is scoped to the signed-in manager.
+## Product model (what people see)
+
+- A member chooses between **Casual class** (pay per session) and **Membership**
+  (unlimited classes for a window of dates the club sets, e.g. 20 Jul – 16 Dec).
+  The membership card offers the current window and, once defined, the next one.
+- **Yearly insurance** stays, and becomes effectively mandatory when buying
+  anything. On the membership screen it is **pre-selected only when the member
+  has no current insurance, or theirs expires within 30 days**. It can be
+  deselected only if the member already holds an ongoing yearly insurance.
+  Enforced server-side too: no paid plan purchase without insurance cover.
+- Managers get a **dashboard as their default landing screen** (`/manager`),
+  with a **notifications** section. The first notification type: the latest
+  membership window ends within 30 days and no next window is defined
+  ("set the next membership window").
+- Managers edit membership windows on the **plans page** itself (folded in from
+  the deleted separate screen). `duration (days)` and `period basis` go away.
+- The pricing page shows the membership window dates as before.
+
+"1 month" means **30 days**, everywhere.
 
 ## User-facing behavior
 
-- On `/account` (for managers only), add a **Google Drive** card:
-  - If not connected: "Connect Google Drive" button + short explainer. Clicking opens the Google consent popup.
-  - If connected: shows the connected Google email, a "Disconnect" button, and an editable **Drive folder name** (default `UTS Jitsu Waivers`) where PDFs will be saved.
-- On `/manager/waivers`, add a per-row **Save to Drive** button (and a "Save all missing" bulk action) for managers whose Drive is connected. Rows show a small badge once uploaded.
-- New waivers submitted via `/waiver` automatically upload to the Drive of every connected manager, in the background — signing never blocks on Drive.
-- The member-facing waiver flow is unchanged.
-
-## Setup steps (one-time, done by you in chat)
-
-1. Run `connector_app_user--connect_client` for `google_drive`. You'll get a form to create/select a Google OAuth web client and confirm the redirect URI `https://connector-gateway.lovable.dev/api/v1/app-users/oauth2/callback`. This syncs `GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY` into the project.
-2. Confirm the client has **offline access** enabled (required to store a reusable connection key). If not, a workspace admin toggles it.
+- `/membership` shows: your status, then Casual class card, Membership card
+  (with current/next window radio options, dates shown), and the yearly
+  insurance as a checkbox addon with a price and clear reason text when forced.
+- Choosing membership buys the plan; if insurance is required/preselected and
+  left on, one bank-transfer reference covers the combined total.
+- Bank reconciliation activates every pending invoice that shares the matched
+  reference when a transfer covers the combined amount.
+- `/manager` dashboard: "Needs attention" notifications + quick links to the
+  manager areas. Managers land here after password sign-in.
+- `/manager/membership-plans` edits plans (name, prices, active) and, in the
+  membership plan card, the window list (add/edit window dates).
+- `/manager/semesters` is deleted; the sidebar gets a "Dashboard" entry first.
 
 ## Technical section
 
-### New/updated files
+### DB (destructive, nothing live; apply AFTER the code deploys)
 
-- `src/integrations/lovable/appUserConnector.ts` — server-only gateway helpers (`authorizeAppUserOAuth`, `callAsAppUser`, `disconnectAppUser`, `exchangeAppUserOAuthCode`) — verbatim from the Lovable knowledge card.
-- `src/integrations/lovable/appUserConnectorClient.ts` — browser-safe popup helper (`connectAppUser`) — verbatim.
-- `src/lib/connection-key-crypto.server.ts` — AES-256-GCM encrypt/decrypt using `APP_USER_CONNECTION_KEY_SECRET` (auto-provisioned by Lovable).
-- `src/lib/app-user-connections.server.ts` — `saveConnectionKeyForUser` / `getConnectionKeyForUser` / `deleteConnectionKeyForUser` reading `public.app_user_connections` via `supabaseAdmin`.
-- `src/lib/google-drive.functions.ts` — server functions, all `.middleware([requireSupabaseAuth])` and manager-gated via `has_role`:
-  - `startGoogleDriveConnect(targetOrigin)` → returns `authorizationUrl` (popup, `response_mode: "web_message"`, scopes: `userinfo.email`, `userinfo.profile`, `drive.file`).
-  - `saveGoogleDriveConnection({ connectionAPIKey })` → encrypt + upsert; also fetches `/oauth2/v2/userinfo` to cache the connected email.
-  - `getGoogleDriveStatus()` → `{ connected, email, folderName }`.
-  - `setDriveFolderName({ folderName })`.
-  - `disconnectGoogleDrive()` → gateway `disconnectAppUser` + row delete.
-  - `uploadWaiverToDrive({ waiverId })` — downloads the PDF from the `waivers` bucket via `supabaseAdmin`, ensures the target folder exists (search by name in `drive.file` scope, create if missing, cache folder id), and does a multipart upload via `callAsAppUser` to `/upload/drive/v3/files?uploadType=multipart`. Records success in `waiver_drive_uploads`.
-- `src/routes/_authenticated/account.tsx` — manager-only "Google Drive" card (connect / disconnect / folder name).
-- `src/routes/_authenticated/manager.waivers.tsx` — add "Save to Drive" per row + "Save all missing"; show badge.
-- `src/lib/waiver.functions.ts` — after successful waiver insert + PDF upload, enqueue Drive uploads for every connected manager (fire-and-forget; failures logged, don't affect the response).
+- Drop `membership_plans.duration_days` (trial/casual never used it; insurance
+  gets a fixed 365-day window in code; membership windows come from the window
+  rows) and `membership_plans.period_basis` (windowed membership is now the
+  only period product).
+- `club_semesters` stays as the physical store for membership windows
+  (renaming the table would leave generated types stale until Lovable resyncs,
+  which has burned this repo before). Product language calls them
+  "membership windows".
+- Migration goes in `supabase/lint/migration-drift-allowlist.txt` as a
+  contract-phase migration (apply after deploy), with the order documented in
+  the migration header.
+- `src/integrations/supabase/types.ts`: remove the two columns by hand.
 
-### DB migration
+### Code
 
-```sql
-create table public.app_user_connections (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null,
-  connector_id text not null,
-  connection_key_ciphertext text not null,
-  connected_email text,
-  metadata jsonb not null default '{}'::jsonb,   -- e.g. { folder_name, folder_id }
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, connector_id)
-);
-grant select, insert, update, delete on public.app_user_connections to service_role;
-alter table public.app_user_connections enable row level security;
+- `src/lib/validation.ts`: `savePlanSchema` loses `duration_days`/`period_basis`;
+  add `membershipWindowNotifications(windows, now)` (pure) and
+  `insuranceSelection({insuranceEndsAt, now, daysAhead=30})` (pure);
+  `startMembershipSchema` gains `include_insurance` (bool, default false).
+  All pure fns get vitest coverage in `src/lib/membership.test.ts`.
+- `src/lib/membership.functions.ts`:
+  - `activateMembershipRow`: period kind = windowed (requires `semester_id`),
+    insurance kind = paid + 365 days; trial/session unchanged.
+  - `startMembership`: accepts `include_insurance`; creates a second pending
+    insurance invoice with the SAME payment reference (single combined
+    transfer); refuses a paid purchase with no ongoing insurance cover when
+    insurance is not included; sends ONE combined payment email.
+  - `reconcileUnmatched`: after the existing exact single match, try a
+    group match — activate all pending invoices sharing one reference when the
+    transfer amount equals their sum.
+  - New `managerNotifications` server fn (manager-only) reading windows and
+    returning notifications via the pure fn.
+  - `listSemesterRows`/`saveSemester` keep working (agent API + plans page use
+    them).
+- `src/routes/_authenticated/membership.tsx`: rewrite the plan grid into
+  Casual / Membership / insurance-addon UI per the rules above.
+- `src/routes/_authenticated/manager.membership-plans.tsx`: drop duration and
+  period-basis inputs; mount the window editor inside the membership plan card.
+- New `src/routes/_authenticated/manager.index.tsx` — the dashboard with a
+  notifications card + quick links.
+- Delete `src/routes/_authenticated/manager.semesters.tsx`; move its editor
+  into `src/components/manager/MembershipWindowsEditor.tsx` for reuse.
+- `src/components/site/MemberLayout.tsx`: sidebar gains "Dashboard" first in
+  the manager group, loses "Semesters".
+- `src/components/site/SignInForms.tsx`: after password sign-in, managers go
+  to `/manager` (members still go to `/account`). Magic-link/OAuth landing
+  stays `/account` (managers still need their account page; noted).
+- `src/routes/pricing.tsx`: keep mechanics; copy calls them membership windows.
 
-create table public.waiver_drive_uploads (
-  id uuid primary key default gen_random_uuid(),
-  waiver_id uuid not null references public.waivers(id) on delete cascade,
-  manager_user_id uuid not null,
-  drive_file_id text not null,
-  drive_web_view_link text,
-  uploaded_at timestamptz not null default now(),
-  unique (waiver_id, manager_user_id)
-);
-grant select, insert, update, delete on public.waiver_drive_uploads to service_role;
-alter table public.waiver_drive_uploads enable row level security;
-```
+### Manager agent API (contract v6, breaking)
 
-No `anon`/`authenticated` grants — all access is via `supabaseAdmin` inside server functions that verify manager role.
+- `list_semesters`/`save_semester` are removed and replaced by
+  `list_membership_windows`/`save_membership_window` (same params).
+  All four sync points change together: `src/lib/validation.ts`
+  (`managerAgentActions`), `src/lib/manager-agent.ts` (manifest → version "6"
+  + `changes` entry with `breaking: true`), `src/routes/api/manager/agent.ts`,
+  `.claude/skills/uts-manager-agent/SKILL.md`. AGENTS.md action list updated.
 
-### Security notes
+### Docs
 
-- Connection keys (`lovack_*`) are encrypted at rest with `APP_USER_CONNECTION_KEY_SECRET`, keyed by `(user_id, connector_id)`.
-- Only `google_drive` scope requested is `drive.file` — the app can only see/modify files it created, not the manager's whole Drive.
-- All provider calls happen server-side; no Google tokens or connection keys reach the browser.
-- Both server functions and the UI gate on `has_role(auth.uid(), 'manager')`.
+- `docs/memberships.md` rewritten for the new model (windows, mandatory
+  insurance rules, dashboard notifications).
+- `docs/database.md` drops the two columns; window notes updated.
+- `AGENTS.md` agent-API section updated (action renames, version 6).
 
-### Out of scope (ask if you want it)
+### Out of scope (flag if you want it)
 
-- Sharing the Drive folder with other managers.
-- Backfilling existing waivers on first connect (only new signs auto-upload; managers can bulk-upload from `/manager/waivers`).
-- Google Docs/Sheets index of waivers.
+- Combining payment: no Stripe; bank transfer only, as today.
+- Auto-deriving windows from the UTS calendar (manager enters them).
+- Insurance renewal chaining (renewal runs 12 months from payment, like today).

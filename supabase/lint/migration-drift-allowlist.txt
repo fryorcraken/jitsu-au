@@ -14,3 +14,10 @@
 # (20260101000000). Blank lines and everything after '#' are ignored.
 # Say WHY each entry is here and what unblocks it. An empty list is the
 # healthy state.
+
+# Contract phase of the membership-windows UX simplification (drops
+# membership_plans.duration_days and .period_basis). Must land AFTER the
+# redesign code has deployed — the old build reads duration_days on
+# activation and writes both columns on plan save. Unblock: merge the PR,
+# confirm Lovable deployed the new build, then apply and remove this entry.
+20260803120000_membership_windows_contract

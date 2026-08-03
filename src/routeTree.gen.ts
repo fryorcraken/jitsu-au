@@ -36,6 +36,7 @@ import { Route as BlogIndexRouteImport } from './routes/blog/index'
 import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
 import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as KbSlugRouteImport } from './routes/kb/$slug'
+import { Route as AuthenticatedManagerIndexRouteImport } from './routes/_authenticated/manager.index'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenticated/manager.blog'
 import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_authenticated/manager.blog-comments'
@@ -45,7 +46,6 @@ import { Route as AuthenticatedManagerKbRouteImport } from './routes/_authentica
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
-import { Route as AuthenticatedManagerSemestersRouteImport } from './routes/_authenticated/manager.semesters'
 import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
 import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
@@ -194,6 +194,12 @@ const KbSlugRoute = KbSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => KbRouteRoute,
 } as any)
+const AuthenticatedManagerIndexRoute =
+  AuthenticatedManagerIndexRouteImport.update({
+    id: '/manager/',
+    path: '/manager/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerApiTokensRoute =
   AuthenticatedManagerApiTokensRouteImport.update({
     id: '/manager/api-tokens',
@@ -245,12 +251,6 @@ const AuthenticatedManagerReconciliationRoute =
   AuthenticatedManagerReconciliationRouteImport.update({
     id: '/manager/reconciliation',
     path: '/manager/reconciliation',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedManagerSemestersRoute =
-  AuthenticatedManagerSemestersRouteImport.update({
-    id: '/manager/semesters',
-    path: '/manager/semesters',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedManagerSettingsRoute =
@@ -363,7 +363,6 @@ export interface FileRoutesByFullPath {
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
-  '/manager/semesters': typeof AuthenticatedManagerSemestersRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
@@ -371,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
+  '/manager/': typeof AuthenticatedManagerIndexRoute
   '/manager/blog/$id': typeof AuthenticatedManagerBlogIdRoute
   '/manager/blog/new': typeof AuthenticatedManagerBlogNewRoute
   '/manager/users/$userId': typeof AuthenticatedManagerUsersUserIdRoute
@@ -413,7 +413,6 @@ export interface FileRoutesByTo {
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
-  '/manager/semesters': typeof AuthenticatedManagerSemestersRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
@@ -421,6 +420,7 @@ export interface FileRoutesByTo {
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
+  '/manager': typeof AuthenticatedManagerIndexRoute
   '/manager/blog/$id': typeof AuthenticatedManagerBlogIdRoute
   '/manager/blog/new': typeof AuthenticatedManagerBlogNewRoute
   '/manager/users/$userId': typeof AuthenticatedManagerUsersUserIdRoute
@@ -466,7 +466,6 @@ export interface FileRoutesById {
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
-  '/_authenticated/manager/semesters': typeof AuthenticatedManagerSemestersRoute
   '/_authenticated/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/_authenticated/manager/users': typeof AuthenticatedManagerUsersRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
@@ -474,6 +473,7 @@ export interface FileRoutesById {
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
+  '/_authenticated/manager/': typeof AuthenticatedManagerIndexRoute
   '/_authenticated/manager/blog_/$id': typeof AuthenticatedManagerBlogIdRoute
   '/_authenticated/manager/blog_/new': typeof AuthenticatedManagerBlogNewRoute
   '/_authenticated/manager/users_/$userId': typeof AuthenticatedManagerUsersUserIdRoute
@@ -519,7 +519,6 @@ export interface FileRouteTypes {
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
-    | '/manager/semesters'
     | '/manager/settings'
     | '/manager/users'
     | '/manager/waiver-template'
@@ -527,6 +526,7 @@ export interface FileRouteTypes {
     | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/api/verify-email/$token'
+    | '/manager/'
     | '/manager/blog/$id'
     | '/manager/blog/new'
     | '/manager/users/$userId'
@@ -569,7 +569,6 @@ export interface FileRouteTypes {
     | '/manager/membership-plans'
     | '/manager/memberships'
     | '/manager/reconciliation'
-    | '/manager/semesters'
     | '/manager/settings'
     | '/manager/users'
     | '/manager/waiver-template'
@@ -577,6 +576,7 @@ export interface FileRouteTypes {
     | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/api/verify-email/$token'
+    | '/manager'
     | '/manager/blog/$id'
     | '/manager/blog/new'
     | '/manager/users/$userId'
@@ -621,7 +621,6 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
-    | '/_authenticated/manager/semesters'
     | '/_authenticated/manager/settings'
     | '/_authenticated/manager/users'
     | '/_authenticated/manager/waiver-template'
@@ -629,6 +628,7 @@ export interface FileRouteTypes {
     | '/api/calendar/$token'
     | '/api/manager/agent'
     | '/api/verify-email/$token'
+    | '/_authenticated/manager/'
     | '/_authenticated/manager/blog_/$id'
     | '/_authenticated/manager/blog_/new'
     | '/_authenticated/manager/users_/$userId'
@@ -859,6 +859,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KbSlugRouteImport
       parentRoute: typeof KbRouteRoute
     }
+    '/_authenticated/manager/': {
+      id: '/_authenticated/manager/'
+      path: '/manager'
+      fullPath: '/manager/'
+      preLoaderRoute: typeof AuthenticatedManagerIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/api-tokens': {
       id: '/_authenticated/manager/api-tokens'
       path: '/manager/api-tokens'
@@ -920,13 +927,6 @@ declare module '@tanstack/react-router' {
       path: '/manager/reconciliation'
       fullPath: '/manager/reconciliation'
       preLoaderRoute: typeof AuthenticatedManagerReconciliationRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/manager/semesters': {
-      id: '/_authenticated/manager/semesters'
-      path: '/manager/semesters'
-      fullPath: '/manager/semesters'
-      preLoaderRoute: typeof AuthenticatedManagerSemestersRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/manager/settings': {
@@ -1035,11 +1035,11 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
-  AuthenticatedManagerSemestersRoute: typeof AuthenticatedManagerSemestersRoute
   AuthenticatedManagerSettingsRoute: typeof AuthenticatedManagerSettingsRoute
   AuthenticatedManagerUsersRoute: typeof AuthenticatedManagerUsersRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
   AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
+  AuthenticatedManagerIndexRoute: typeof AuthenticatedManagerIndexRoute
   AuthenticatedManagerBlogIdRoute: typeof AuthenticatedManagerBlogIdRoute
   AuthenticatedManagerBlogNewRoute: typeof AuthenticatedManagerBlogNewRoute
   AuthenticatedManagerUsersUserIdRoute: typeof AuthenticatedManagerUsersUserIdRoute
@@ -1060,12 +1060,12 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerMembershipsRoute: AuthenticatedManagerMembershipsRoute,
   AuthenticatedManagerReconciliationRoute:
     AuthenticatedManagerReconciliationRoute,
-  AuthenticatedManagerSemestersRoute: AuthenticatedManagerSemestersRoute,
   AuthenticatedManagerSettingsRoute: AuthenticatedManagerSettingsRoute,
   AuthenticatedManagerUsersRoute: AuthenticatedManagerUsersRoute,
   AuthenticatedManagerWaiverTemplateRoute:
     AuthenticatedManagerWaiverTemplateRoute,
   AuthenticatedManagerWaiversRoute: AuthenticatedManagerWaiversRoute,
+  AuthenticatedManagerIndexRoute: AuthenticatedManagerIndexRoute,
   AuthenticatedManagerBlogIdRoute: AuthenticatedManagerBlogIdRoute,
   AuthenticatedManagerBlogNewRoute: AuthenticatedManagerBlogNewRoute,
   AuthenticatedManagerUsersUserIdRoute: AuthenticatedManagerUsersUserIdRoute,
@@ -1122,13 +1122,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

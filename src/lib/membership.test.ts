@@ -4,7 +4,9 @@ import {
   computeMembershipPrice,
   deriveLifecycleStatus,
   formatCents,
+  insuranceSelection,
   matchesMembershipReference,
+  membershipWindowNotifications,
   normalizeRef,
   parseMoneyToCents,
   sanitizeSurname,
@@ -304,9 +306,7 @@ describe("savePlanSchema", () => {
     kind: "period" as const,
     public_price_cents: 44500,
     student_price_cents: 24500,
-    duration_days: 182,
     session_credits: null,
-    period_basis: "semester" as const,
     is_active: true,
     sort_order: 2,
   };
@@ -321,17 +321,6 @@ describe("savePlanSchema", () => {
 
   it("rejects an unknown kind", () => {
     expect(savePlanSchema.safeParse({ ...base, kind: "gold" }).success).toBe(false);
-  });
-
-  it("rejects an unknown period_basis", () => {
-    expect(savePlanSchema.safeParse({ ...base, period_basis: "termly" }).success).toBe(false);
-  });
-
-  it("accepts a rolling plan (e.g. the yearly insurance membership)", () => {
-    expect(
-      savePlanSchema.safeParse({ ...base, code: "insurance_yearly", period_basis: "rolling" })
-        .success,
-    ).toBe(true);
   });
 });
 
@@ -455,6 +444,89 @@ describe("sellableSemesters", () => {
     expect(sellableSemesters(all, "2026-06-28T10:00:00.000Z").map((s) => s.code)).toContain(
       "2026-s1",
     );
+  });
+});
+
+describe("insuranceSelection", () => {
+  const NOW = "2026-08-03T10:00:00.000Z";
+
+  it("preselects and forbids deselect when there is no cover at all", () => {
+    const sel = insuranceSelection({ insuranceEndsAt: null, now: NOW });
+    expect(sel).toEqual({ preselect: true, canDeselect: false });
+  });
+
+  it("treats lapsed cover like none at all", () => {
+    const sel = insuranceSelection({ insuranceEndsAt: "2026-01-01T00:00:00Z", now: NOW });
+    expect(sel).toEqual({ preselect: true, canDeselect: false });
+  });
+
+  it("leaves the tick alone and deselectable when cover runs well past the window", () => {
+    const sel = insuranceSelection({ insuranceEndsAt: "2026-12-31T00:00:00Z", now: NOW });
+    expect(sel).toEqual({ preselect: false, canDeselect: true });
+  });
+
+  it("preselects but does not force when cover lapses inside the 30-day window", () => {
+    const sel = insuranceSelection({ insuranceEndsAt: "2026-08-20T00:00:00Z", now: NOW });
+    expect(sel).toEqual({ preselect: true, canDeselect: true });
+  });
+
+  it("honours a custom horizon the same way", () => {
+    const sel = insuranceSelection({
+      insuranceEndsAt: "2026-08-20T00:00:00Z",
+      now: NOW,
+      daysAhead: 60,
+    });
+    expect(sel.preselect).toBe(true);
+  });
+});
+
+describe("membershipWindowNotifications", () => {
+  const w = (name: string, ends_on: string, is_active = true) => ({
+    name,
+    ends_on,
+    starts_on: "2026-01-01",
+    is_active,
+  });
+  const NOW = "2026-08-03T10:00:00.000Z";
+
+  it("asks for the first window when none exists", () => {
+    const n = membershipWindowNotifications([], NOW);
+    expect(n).toHaveLength(1);
+    expect(n[0].type).toBe("define_membership_window");
+    expect(n[0].title).toMatch(/set up/i);
+  });
+
+  it("asks for the next window when the latest one ends inside 30 days", () => {
+    const n = membershipWindowNotifications([w("Semester 2 2026", "2026-08-20")], NOW);
+    expect(n).toHaveLength(1);
+    expect(n[0].title).toContain("Semester 2 2026");
+  });
+
+  it("stays quiet while a still-running window plus its successor are both defined", () => {
+    // Current window ends soon, but the successor pushes the horizon out.
+    const n = membershipWindowNotifications(
+      [w("Semester 2 2026", "2026-08-20"), w("Semester 1 2027", "2027-06-15")],
+      NOW,
+    );
+    expect(n).toEqual([]);
+  });
+
+  it("stays quiet when the latest window ends well past 30 days away", () => {
+    expect(membershipWindowNotifications([w("Semester 2 2026", "2026-12-16")], NOW)).toEqual([]);
+  });
+
+  it("treats an already-ended latest window as urgent", () => {
+    const n = membershipWindowNotifications([w("Semester 1 2026", "2026-06-12")], NOW);
+    expect(n).toHaveLength(1);
+  });
+
+  it("ignores retired (inactive) windows when judging the latest end", () => {
+    const n = membershipWindowNotifications(
+      [w("Semester 2 2026", "2026-08-20", false)],
+      NOW,
+    );
+    expect(n).toHaveLength(1);
+    expect(n[0].title).toMatch(/set up/i);
   });
 });
 

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listAllMembershipPlans, saveMembershipPlan } from "@/lib/membership.functions";
+import { MembershipWindowsEditor } from "@/components/manager/MembershipWindowsEditor";
 import type { MembershipPlanRow } from "@/lib/membership-types";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
@@ -71,9 +72,7 @@ function PlansPage() {
           kind: plan.kind,
           public_price_cents: plan.public_price_cents,
           student_price_cents: plan.student_price_cents,
-          duration_days: plan.duration_days,
           session_credits: plan.session_credits,
-          period_basis: plan.period_basis,
           is_active: plan.is_active,
           sort_order: plan.sort_order,
         },
@@ -105,9 +104,6 @@ function PlansPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button asChild variant="outline">
-              <Link to="/manager/semesters">Semesters</Link>
-            </Button>
             <Button asChild variant="outline">
               <Link to="/manager/memberships">Back to memberships</Link>
             </Button>
@@ -153,7 +149,7 @@ function PlansPage() {
                     />
                   </div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-4">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div>
                     <Label className="text-xs">Public price ($)</Label>
                     <Input
@@ -178,19 +174,6 @@ function PlansPage() {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Duration (days)</Label>
-                    <Input
-                      inputMode="numeric"
-                      placeholder="none"
-                      value={plan.duration_days ?? ""}
-                      onChange={(e) => {
-                        const n = e.target.value.trim();
-                        patch(plan.id, { duration_days: n === "" ? null : Number(n) });
-                      }}
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
                     <Label className="text-xs">Session credits</Label>
                     <Input
                       inputMode="numeric"
@@ -204,26 +187,6 @@ function PlansPage() {
                     />
                   </div>
                 </div>
-                {plan.kind === "period" && (
-                  <div>
-                    <Label htmlFor={`pb-${plan.id}`} className="text-xs">
-                      Period basis
-                    </Label>
-                    <select
-                      id={`pb-${plan.id}`}
-                      value={plan.period_basis}
-                      onChange={(e) =>
-                        patch(plan.id, { period_basis: e.target.value as typeof plan.period_basis })
-                      }
-                      className="mt-1 flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                    >
-                      <option value="rolling">Rolling (duration in days from payment)</option>
-                      <option value="semester">
-                        Semester (dates come from the chosen semester)
-                      </option>
-                    </select>
-                  </div>
-                )}
                 <Button size="sm" disabled={savingId === plan.id} onClick={() => onSave(plan)}>
                   {savingId === plan.id ? "Saving..." : "Save"}
                 </Button>
@@ -231,6 +194,19 @@ function PlansPage() {
             </Card>
           ))}
         </div>
+
+        {plans.some((p) => p.kind === "period") && (
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-2xl font-bold">Membership windows</h2>
+              <p className="text-sm text-muted-foreground">
+                The dates a `period` membership runs for. Members pick the current or next window
+                when they join.
+              </p>
+            </div>
+            <MembershipWindowsEditor />
+          </div>
+        )}
       </section>
     </>
   );

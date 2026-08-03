@@ -2,12 +2,12 @@
 name: uts-manager-agent
 description: >-
   Perform UTS Jitsu manager actions (list members and their status, edit an
-  invoice's details, file a scanned paper waiver, manage the club's semester
+  invoice's details, file a scanned paper waiver, manage the club's membership
   dates, publish and reorder the club's knowledge base and read members'
   comments on it) against the live site via its manager agent HTTP API. Use when
   a club manager asks an agent to look up members/invoices, correct invoice
   details (price, payment reference, notes, status), migrate/bulk-file waivers
-  the club holds on paper, add or edit a semester's start/end dates, or edit a
+  the club holds on paper, add or edit a membership window's start/end dates, or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them. Requires the UTS_MANAGER_API_URL and
   UTS_MANAGER_API_KEY environment variables.
@@ -121,9 +121,9 @@ call decorates an invoice with (`plan_code`, `plan_name`, `semester_code`,
 `created_at`, `member_name`, `member_email`): send only `id` plus the field(s)
 you're actually changing, never a listed invoice echoed back wholesale.
 `semester_code`/`semester_name` are set only when the invoice is for the
-semester-anchored plan — see `list_semesters` below for what they mean and
+period membership plan — see `list_membership_windows` below for what they mean and
 how the dates get onto an invoice in the first place; they are not editable
-here (moving one person's dates is a semester correction, not an invoice edit).
+here (moving one person's dates is a window correction, not an invoice edit).
 
 ```bash
 scripts/agent.sh edit_invoice '{"id":"<uuid>","price_cents":24500,"notes":"student rate applied"}'
@@ -162,45 +162,47 @@ audit log with who made it and each field's old and new value.
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
 
-### `list_semesters` / `save_semester` — the club's semester dates
+### `list_membership_windows` / `save_membership_window` — the club's membership windows
 
-The `semester` membership plan does **not** run for a fixed number of days from
-payment. It runs for a fixed **semester**: a from/to date the club sets itself,
-aligned with the UTS teaching calendar but not identical to it, and it moves by
-about a week every year. `club_semesters` is where those dates live; a member
-picks one of them (the semester running now, or the next one to start) when
-they buy, and their membership runs exactly that semester's dates, full price
-regardless of when in it they join — there is no pro rata.
+The period membership plan does **not** run for a fixed number of days from
+payment. It runs for a fixed **membership window**: a from/to date span the club
+sets itself, aligned with the UTS teaching calendar but not identical to it,
+and it moves by about a week every year. `club_semesters` is where those dates
+live physically; a member picks one of them (the window running now, or the
+next one to start) when they buy, and their membership runs exactly that
+window's dates, full price regardless of when in it they join — there is no pro
+rata.
 
 ```bash
-scripts/agent.sh list_semesters '{}'
+scripts/agent.sh list_membership_windows '{}'
 ```
 
-Returns every semester (including retired ones), each with `code`
+Returns every window (including retired ones), each with `code`
 (`<year>-s<1|2>`, e.g. `2026-s1`), `name`, `year`, `half`, `starts_on`,
 `ends_on` (inclusive — the last day of training), and `is_active`.
 
 ```bash
-scripts/agent.sh save_semester '{
+scripts/agent.sh save_membership_window '{
   "year": 2027, "half": 1, "name": "Semester 1 2027",
   "starts_on": "2027-02-01", "ends_on": "2027-06-26"
 }'
 ```
 
-`save_semester` upserts by **(year, half)** — `code` is always derived from
-them, never taken as an input, so it can never disagree with the dates. An
-unknown (year, half) creates a semester; a known one updates its name and
-dates in place. `name`, `starts_on` and `ends_on` are **required on every
-call** (a semester is saved as a whole row, not patched field by field);
-`is_active` may be omitted to leave it unchanged (defaults to `true` on
-create). The club only sells two semesters a year — there is no summer term —
-so `half` is `1` or `2`, nothing else.
+`save_membership_window` upserts by **(year, half)** — `code` is always derived
+from them, never taken as an input, so it can never disagree with the dates. An
+unknown (year, half) creates a window; a known one updates its name and dates in
+place. `name`, `starts_on` and `ends_on` are **required on every call** (a
+window is saved as a whole row, not patched field by field); `is_active` may be
+omitted to leave it unchanged (defaults to `true` on create). The club only
+sells two windows a year — there is no summer term — so `half` is `1` or `2`,
+nothing else.
 
 > [!TIP]
-> Add next year's semesters before enrolments open for them, and check
-> `list_semesters` shows exactly two live (non-overlapping) dates a member
-> could be buying into at any moment — the server refuses two semesters whose
-> dates overlap, so a mistake here surfaces as a save error, not a live bug.
+> Add next year's windows before enrolments open for them, and check
+> `list_membership_windows` shows exactly two live (non-overlapping) dates a
+> member could be buying into at any moment — the server refuses two windows
+> whose dates overlap, so a mistake here surfaces as a save error, not a live
+> bug.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 

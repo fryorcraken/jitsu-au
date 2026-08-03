@@ -7,9 +7,12 @@ import {
   DEFAULT_INVOICE_INSTRUCTIONS,
   formatCents,
   importBankStatementSchema,
+  INSURANCE_YEAR_DAYS,
   isUtsStudent,
   matchesMembershipReference,
   matchTransactionSchema,
+  membershipWindowNotifications,
+  normalizeRef,
   greetingName,
   nameWithPreferred,
   profileFullName,
@@ -126,11 +129,11 @@ function dedupeHash(row: {
 
 /** Human-readable validity/credit summary for a plan (used in emails/UI). */
 function validityLabel(plan: MembershipPlanRow, semester?: ClubSemesterRow | null): string {
-  if (plan.period_basis === "semester" && semester)
+  if (plan.kind === "period" && semester)
     return `${semester.name}, until ${formatDateOnly(semester.ends_on)}.`;
   if (plan.session_credits)
     return `${plan.session_credits} session${plan.session_credits === 1 ? "" : "s"} included.`;
-  if (plan.duration_days) return `Valid for ${plan.duration_days} days.`;
+  if (plan.kind === "insurance") return "Cover for a year from the payment date.";
   return "";
 }
 
@@ -172,30 +175,34 @@ async function activateMembershipRow(
   const now = new Date();
   const nowIso = now.toISOString();
 
-  // A semester-anchored plan runs for the semester's own dates, full price
-  // regardless of when in it the member joins -- never "now + duration_days".
-  // `startMembership` requires and validates `semester_id` before a
-  // semester-basis plan's row is even inserted, so a missing one here means
-  // the row was created some other way; fail loudly rather than silently
-  // falling back to a rolling window nobody asked for.
+  // Each kind computes its dates its own way, with no manager-editable
+  // duration knob: a `period` (membership) plan runs exactly the window the
+  // member picked at purchase, an `insurance` plan runs a fixed year from
+  // payment, and `trial`/`session` plans end with their credits, not a date.
+  //
+  // `startMembership` requires and validates `semester_id` before a `period`
+  // plan's row is even inserted, so a missing one here means the row was
+  // created some other way; fail loudly rather than silently falling back to
+  // a rolling window nobody asked for.
   let semester: ClubSemesterRow | null = null;
   let startsAt = nowIso;
-  let endsAt: string | null = plan.duration_days
-    ? new Date(now.getTime() + plan.duration_days * 86_400_000).toISOString()
-    : null;
-  if (plan.period_basis === "semester") {
-    if (!membership.semester_id) throw new Error("This membership has no semester selected.");
+  let endsAt: string | null = null;
+  if (plan.kind === "period") {
+    if (!membership.semester_id)
+      throw new Error("This membership has no membership window selected.");
     const { data: sem, error: semErr } = await admin
       .from("club_semesters")
       .select("*")
       .eq("id", membership.semester_id)
       .maybeSingle();
     if (semErr) throw new Error(semErr.message);
-    if (!sem) throw new Error("The selected semester no longer exists.");
+    if (!sem) throw new Error("The selected membership window no longer exists.");
     semester = sem;
     const window = semesterMembershipWindow(sem);
     startsAt = window.starts_at;
     endsAt = window.ends_at;
+  } else if (plan.kind === "insurance") {
+    endsAt = new Date(now.getTime() + INSURANCE_YEAR_DAYS * 86_400_000).toISOString();
   }
 
   const patch: Partial<MembershipRow> = {
@@ -343,9 +350,7 @@ export const listMembershipPlans = createServerFn({ method: "GET" }).handler(asy
     kind: p.kind,
     public_price_cents: p.public_price_cents,
     student_price_cents: p.student_price_cents,
-    duration_days: p.duration_days,
     session_credits: p.session_credits,
-    period_basis: p.period_basis,
   }));
 });
 
@@ -509,21 +514,22 @@ export const startMembership = createServerFn({ method: "POST" })
       if (existing) throw new Error("You've already started your free trial.");
     }
 
-    // A semester-anchored plan requires the member to pick which semester —
-    // restricted to the same short list the purchase UI offers (the one
-    // running now, plus the next one), so a stale or made-up code can't buy a
-    // semester that isn't actually for sale. Resolved server-side rather than
-    // trusted from the client, same posture as `is_student` below.
+    // A window-anchored (`period`) plan requires the member to pick which
+    // membership window — restricted to the same short list the purchase UI
+    // offers (the one running now, plus the next one), so a stale or made-up
+    // code can't buy a window that isn't actually for sale. Resolved
+    // server-side rather than trusted from the client, same posture as
+    // `is_student` below.
     let semester: ClubSemesterRow | null = null;
-    if (plan.period_basis === "semester") {
+    if (plan.kind === "period") {
       const chosenCode = data.semester_code?.trim();
-      if (!chosenCode) throw new Error("Choose which semester you're joining for.");
+      if (!chosenCode) throw new Error("Choose which membership window you're joining for.");
       const allSemesters = await listSemesterRows(admin, { activeOnly: true });
       const offered = sellableSemesters(allSemesters, new Date().toISOString());
       semester = offered.find((s) => s.code === chosenCode) ?? null;
       if (!semester) {
         throw new Error(
-          "That semester isn't currently available to join. Refresh the page and try again.",
+          "That membership window isn't currently available to join. Refresh the page and try again.",
         );
       }
     }
@@ -534,6 +540,60 @@ export const startMembership = createServerFn({ method: "POST" })
     const utsStudentNumber = data.uts_student_number?.trim() || null;
     const isStudent = isUtsStudent(utsStudentNumber);
     const price = computeMembershipPrice(plan, isStudent);
+
+    // ---- Yearly insurance: required cover bundled into the purchase ----
+    //
+    // Every paid training product (session or period) needs current insurance
+    // cover. A member whose cover is ongoing may buy without adding it; a
+    // member with none gets it bundled as a second invoice on the same
+    // payment reference, so one transfer pays for both. The trial (free) and
+    // insurance itself never bundle. If the club has no insurance plan in the
+    // catalogue there is nothing to enforce, so the check drops away.
+    let insurancePlan: MembershipPlanRow | null = null;
+    let addInsurance = false;
+    if (plan.kind !== "trial" && plan.kind !== "insurance") {
+      const { data: insPlans, error: ipErr } = await admin
+        .from("membership_plans")
+        .select("*")
+        .eq("kind", "insurance");
+      if (ipErr) throw new Error(ipErr.message);
+      const insurancePlanIds = new Set((insPlans ?? []).map((p) => p.id));
+      insurancePlan = (insPlans ?? []).filter((p) => p.is_active).sort(
+        (a, b) => a.sort_order - b.sort_order,
+      )[0] ?? null;
+
+      let coverEndsAt: string | null = null;
+      if (insurancePlanIds.size > 0) {
+        // Cover the member already holds: an ACTIVE insurance membership whose
+        // ends_at is still ahead. A pending insurance invoice is a promise,
+        // not cover, and stays out.
+        const { data: coverRows, error: covErr } = await admin
+          .from("memberships")
+          .select("ends_at")
+          .eq("user_id", context.userId)
+          .eq("status", "active")
+          .in("plan_id", [...insurancePlanIds]);
+        if (covErr) throw new Error(covErr.message);
+        const nowIso = new Date().toISOString();
+        coverEndsAt =
+          (coverRows ?? [])
+            .map((r) => r.ends_at)
+            .filter((e): e is string => e != null && e > nowIso)
+            .sort()
+            .pop() ?? null;
+      }
+
+      // Refusing is the insurance plan existing plus cover missing plus the
+      // caller opting out: all three. A club with no insurance plan never
+      // blocks a purchase here, and `include_insurance` from a covered member
+      // is their own choice to renew early.
+      if (insurancePlan && !coverEndsAt && !data.include_insurance) {
+        throw new Error(
+          "Yearly insurance is required to train with us. Keep it selected and choose the plan again.",
+        );
+      }
+      addInsurance = Boolean(insurancePlan && (data.include_insurance || !coverEndsAt));
+    }
 
     // Resolve the member's name once: the surname drives the human-friendly
     // reference, and the full name is used in emails. Falls back gracefully when
@@ -615,26 +675,84 @@ export const startMembership = createServerFn({ method: "POST" })
       inserted = row;
     }
 
+    // The bundled insurance invoice rides on the SAME payment reference as the
+    // plan invoice, so a member with no cover pays one transfer for both and
+    // reconciliation activates them together. A pending insurance invoice from
+    // an earlier attempt is reused with its reference and price refreshed to
+    // this purchase — an unpaid row holds no decisions to preserve.
+    let insuranceInvoice: MembershipRow | null = null;
+    if (addInsurance && insurancePlan) {
+      const insurancePrice = computeMembershipPrice(insurancePlan, isStudent);
+      const { data: existingIns, error: eiErr } = await admin
+        .from("memberships")
+        .select("*")
+        .eq("user_id", context.userId)
+        .eq("plan_id", insurancePlan.id)
+        .eq("status", "pending")
+        .limit(1)
+        .maybeSingle();
+      if (eiErr) throw new Error(eiErr.message);
+      if (existingIns) {
+        const { data: updated, error: uErr } = await admin
+          .from("memberships")
+          .update({
+            payment_reference: inserted.payment_reference,
+            price_cents: insurancePrice,
+          })
+          .eq("id", existingIns.id)
+          .select("*")
+          .single();
+        if (uErr || !updated) throw new Error(uErr?.message || "Could not create membership.");
+        insuranceInvoice = updated;
+      } else {
+        const { data: row, error: insErr } = await admin
+          .from("memberships")
+          .insert({
+            user_id: context.userId,
+            plan_id: insurancePlan.id,
+            status: "pending",
+            is_student: isStudent,
+            uts_student_number: utsStudentNumber,
+            price_cents: insurancePrice,
+            payment_reference: inserted.payment_reference,
+            payment_method: "bank_transfer",
+            session_date: null,
+            semester_id: null,
+          })
+          .select("*")
+          .single();
+        if (insErr || !row) throw new Error(insErr?.message || "Could not create membership.");
+        insuranceInvoice = row;
+      }
+    }
+
     // Free plans (the trial) activate immediately; paid plans await a transfer.
     if (price === 0) {
       await activateMembershipRow(admin, inserted, plan, { paymentMethod: "manual" });
-      return { ok: true as const, activated: true, reference: null as string | null };
+      if (!insuranceInvoice) {
+        return { ok: true as const, activated: true, reference: null as string | null };
+      }
     }
 
-    // Email the member their bank-transfer instructions + notify managers. The
-    // email lives on the auth user (the one email store).
+    // Email the member their bank-transfer instructions + notify managers. A
+    // bundle gets ONE email with the combined amount and both plan names — the
+    // member does not care that it lands as two invoices on our side.
     try {
       const emails = await emailsByUserId(admin, [context.userId]);
       const email = emails.get(context.userId) ?? null;
       if (email) {
+        const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
+        const planName = insuranceInvoice
+          ? `${plan.name} + ${insurancePlan!.name}`
+          : plan.name;
         const { sendMembershipPaymentEmail } = await import("./membership-email.server");
         await sendMembershipPaymentEmail({
           membershipId: inserted.id,
           memberName: who ? profileFullName(who) : "",
           memberGreetingName: who ? greetingName(who) : "",
           memberEmail: email,
-          planName: plan.name,
-          amount: formatCents(price),
+          planName,
+          amount: formatCents(totalCents),
           reference: inserted.payment_reference,
           admin,
         });
@@ -643,7 +761,11 @@ export const startMembership = createServerFn({ method: "POST" })
       console.error("[startMembership] failed to send payment email:", e);
     }
 
-    return { ok: true as const, activated: false, reference: inserted.payment_reference };
+    return {
+      ok: true as const,
+      activated: price === 0,
+      reference: inserted.payment_reference,
+    };
   });
 
 // ---- Manager: create / update a plan ----
@@ -661,9 +783,7 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
       kind: data.kind,
       public_price_cents: data.public_price_cents,
       student_price_cents: data.student_price_cents,
-      duration_days: data.duration_days,
       session_credits: data.session_credits,
-      period_basis: data.period_basis,
       is_active: data.is_active,
       sort_order: data.sort_order,
     };
@@ -683,11 +803,12 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
   });
 
 /**
- * Create or update a club semester. Upserts by (year, half) -- the code is
- * always derived here, never taken from the caller, so it can never disagree
- * with the DB's own CHECK tying `code` to `year`/`half`. Shared by the manager
- * server function below and the manager agent's `save_semester` action, so a
- * manager and an agent go through the exact same write.
+ * Create or update a club semester (membership window). Upserts by (year, half)
+ * -- the code is always derived here, never taken from the caller, so it can
+ * never disagree with the DB's own CHECK tying `code` to `year`/`half`. Shared
+ * by the manager server function below and the manager agent's
+ * `save_membership_window` action, so a manager and an agent go through the
+ * exact same write.
  */
 export async function saveSemester(
   admin: MembershipClient,
@@ -743,6 +864,19 @@ export const saveMembershipSemester = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
     return saveSemester(admin, data);
+  });
+
+// ---- Manager: dashboard notifications ----
+//
+// The dashboard's "needs attention" list. The rules live in pure functions
+// (validation.ts, unit-tested); this handler is only auth + data fetch.
+export const managerNotifications = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context as { supabase: MembershipClient; userId: string });
+    const admin = await adminClient();
+    const windows = await listSemesterRows(admin);
+    return membershipWindowNotifications(windows, new Date().toISOString());
   });
 
 // ---- Manager: club settings (invoice payment instructions) ----
@@ -1167,13 +1301,75 @@ export async function reconcileUnmatched(
         console.warn(
           `[reconcile] transaction ${txn.id} matched ${hits.length} pending memberships; leaving for manual match`,
         );
+        continue;
+      }
+      // Bundle match: a purchase with bundled insurance lands as TWO invoices
+      // sharing one payment reference, settled with ONE combined transfer. No
+      // single invoice's price equals such an amount, but every invoice
+      // carrying the reference belongs to the one transaction, so the group
+      // is unambiguous by construction.
+      const refGroups = new Map<string, MembershipRow[]>();
+      for (const m of pendingList) {
+        if (!remaining.has(m.id)) continue;
+        if (!normalizeRef(haystack).includes(normalizeRef(m.payment_reference))) continue;
+        const group = refGroups.get(m.payment_reference) ?? [];
+        group.push(m);
+        refGroups.set(m.payment_reference, group);
+      }
+      const bundles = [...refGroups.values()].filter(
+        (group) =>
+          group.length > 1 &&
+          group.reduce((sum, m) => sum + m.price_cents, 0) === txn.amount_cents,
+      );
+      if (bundles.length !== 1) {
+        if (bundles.length > 1) {
+          console.warn(
+            `[reconcile] transaction ${txn.id} matched ${bundles.length} bundles; leaving for manual match`,
+          );
+        }
+        continue;
+      }
+      const group = bundles[0];
+      // Activate every invoice in the bundle. One failure must not abort the
+      // others (same per-row rule as the single match below), and only a fully
+      // activated bundle marks the transaction matched: leaving a half-paid
+      // bundle for the manager is better than silently losing one invoice.
+      let allActivated = true;
+      for (const hit of group) {
+        const plan = planById.get(hit.plan_id);
+        if (!plan) {
+          allActivated = false;
+          continue;
+        }
+        try {
+          await activateMembershipRow(admin, hit, plan, { paymentMethod: "bank_transfer" });
+          remaining.delete(hit.id);
+        } catch (e) {
+          allActivated = false;
+          console.error(
+            `[reconcile] bundle activation failed for membership ${hit.id} (transaction ${txn.id}); left for a manager to resolve:`,
+            e,
+          );
+        }
+      }
+      if (allActivated) {
+        await admin
+          .from("bank_transactions")
+          .update({
+            matched_membership_id: group[0].id,
+            matched_at: new Date().toISOString(),
+            status: "matched",
+          })
+          .eq("id", txn.id);
+        matched++;
       }
       continue;
     }
+
     const hit = hits[0];
     const plan = planById.get(hit.plan_id);
     if (!plan) continue;
-    // One bad invoice (e.g. a semester-basis row with no semester_id, which
+    // One bad invoice (e.g. a period row with no window selected, which
     // activateMembershipRow refuses rather than silently defaulting) must not
     // abort every other transaction in this statement. The bank_transactions
     // row this txn came from was already committed by importBankStatement

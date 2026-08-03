@@ -7,8 +7,8 @@ import {
   ClipboardCheck,
   CreditCard,
   FileText,
-  GraduationCap,
   KeyRound,
+  LayoutDashboard,
   LogOut,
   MessageSquare,
   Newspaper,
@@ -50,12 +50,13 @@ const memberNav: NavItem[] = [
 ];
 
 const managerNav: NavItem[] = [
-  // First: the highest-frequency manager screen, used at the door every class.
+  // First: the manager's home — where they land and where the attention queue lives.
+  { to: "/manager", label: "Dashboard", icon: LayoutDashboard },
+  // Then: the highest-frequency manager screen, used at the door every class.
   { to: "/manager/check-in", label: "Check in", icon: ClipboardCheck },
   { to: "/manager/users", label: "Users", icon: Users },
   { to: "/manager/memberships", label: "Memberships", icon: CreditCard },
-  { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
-  { to: "/manager/semesters", label: "Semesters", icon: GraduationCap },
+  { to: "/manager/membership-plans", label: "Plans & windows", icon: ScrollText },
   { to: "/manager/waivers", label: "Signed waivers", icon: FileText },
   { to: "/manager/waiver-template", label: "Waiver template", icon: FileText },
   // "editor" in the label because the member group above already has a
@@ -70,6 +71,9 @@ const managerNav: NavItem[] = [
 ];
 
 function isActivePath(pathname: string, to: string) {
+  // The dashboard is every manager page's prefix, so prefix matching would
+  // light it up on all of them. It is active on its own path only.
+  if (to === "/manager") return pathname === to;
   return pathname === to || pathname.startsWith(`${to}/`);
 }
 

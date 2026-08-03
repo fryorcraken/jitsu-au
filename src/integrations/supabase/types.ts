@@ -910,12 +910,10 @@ export type Database = {
           code: string
           created_at: string
           description: string | null
-          duration_days: number | null
           id: string
           is_active: boolean
           kind: string
           name: string
-          period_basis: string
           public_price_cents: number
           session_credits: number | null
           sort_order: number
@@ -925,12 +923,10 @@ export type Database = {
           code: string
           created_at?: string
           description?: string | null
-          duration_days?: number | null
           id?: string
           is_active?: boolean
           kind: string
           name: string
-          period_basis?: string
           public_price_cents: number
           session_credits?: number | null
           sort_order?: number
@@ -940,12 +936,10 @@ export type Database = {
           code?: string
           created_at?: string
           description?: string | null
-          duration_days?: number | null
           id?: string
           is_active?: boolean
           kind?: string
           name?: string
-          period_basis?: string
           public_price_cents?: number
           session_credits?: number | null
           sort_order?: number
