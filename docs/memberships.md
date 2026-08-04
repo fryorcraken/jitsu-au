@@ -21,12 +21,12 @@ waiver and the club's free trial was assigned automatically.
 
 ## Plans
 
-| Plan                | Kind        | Runs                                     | What it buys                             |
-| -------------------- | ----------- | ----------------------------------------- | ----------------------------------------- |
-| `trial_2_session`   | `trial`     | neither (ends with its credits)           | Two free classes, ever, no expiry.        |
-| `casual_session`    | `session`   | neither (tied to a session date)          | One class.                                |
-| `semester_2_2026`, … | `period`    | fixed dates (`starts_on`/`ends_on`)       | Unlimited classes for that training period. |
-| `insurance_yearly`  | `insurance` | rolling (`duration_days`)                 | Club affiliation & insurance, 12 months from pay. |
+| Plan                 | Kind        | Runs                                | What it buys                                      |
+| -------------------- | ----------- | ----------------------------------- | ------------------------------------------------- |
+| `trial_2_session`    | `trial`     | neither (ends with its credits)     | Two free classes, ever, no expiry.                |
+| `casual_session`     | `session`   | neither (tied to a session date)    | One class.                                        |
+| `semester_2_2026`, … | `period`    | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.       |
+| `insurance_yearly`   | `insurance` | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from pay. |
 
 Each dated training period is **its own plan**, not a shared plan pointing at
 a separate table of windows: "Semester 2 2026" and "Semester 1 2027" are two
@@ -90,10 +90,10 @@ own), and reconciliation, activation and cancellation follow the same
 
 ## Manager screens & the manager agent API
 
-| Manager UI                  | Manager agent actions                            | What it does                                       |
-| ---------------------------- | ------------------------------------------------- | --------------------------------------------------- |
-| `/manager/membership-plans` | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan.      |
-| `/manager/memberships`      | `list_invoices` / `edit_invoice`                 | See and correct invoices.                           |
+| Manager UI                  | Manager agent actions                            | What it does                                   |
+| --------------------------- | ------------------------------------------------ | ---------------------------------------------- |
+| `/manager/membership-plans` | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan. |
+| `/manager/memberships`      | `list_invoices` / `edit_invoice`                 | See and correct invoices.                      |
 
 Per this repo's standing rule (`AGENTS.md`, "Manager agent API"), the agent
 actions mirror what a manager can do in the UI — see the skill file for the

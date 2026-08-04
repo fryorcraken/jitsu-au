@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Pill } from "@/components/site/StatusPill";
 import { lifecycleClass } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import {
@@ -18,6 +19,7 @@ import {
   type LifecycleStatus,
 } from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
+import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
 import { getMyMemberships, listMembershipPlans, startMembership } from "@/lib/membership.functions";
 import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
@@ -197,6 +199,10 @@ function MembershipPage() {
     plans.filter((p) => p.kind === "period" || p.kind === "session"),
     new Date().toISOString(),
   );
+  // Club-local, not UTC: a plan's own starts_on is a club-calendar day, so
+  // "has this one started" is judged by the same calendar the plan's dates
+  // are written in.
+  const today = clubLocalDate(new Date(), CLUB_TIME_ZONE);
   const otherPlans = plans.filter((p) => p.kind === "trial" || p.kind === "insurance");
 
   return (
@@ -294,7 +300,7 @@ function MembershipPage() {
             <div>
               <h2 className="text-2xl font-bold">Choose a plan</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Pay per class, or get a membership for the whole window.
+                Pay per class, or get a membership for the whole training period.
               </p>
             </div>
             <div className="rounded-lg border bg-card p-3">
@@ -331,7 +337,7 @@ function MembershipPage() {
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
                   {insuranceRules.canDeselect
-                    ? `Required to train. Your cover runs to ${formatDateOnly(insuranceEndsAt)}, so you can leave it off this time.`
+                    ? `Required to train. Your cover runs to ${insuranceEndsAt ? new Date(insuranceEndsAt).toLocaleDateString("en-AU") : ""}, so you can leave it off this time.`
                     : "Required to train, so it comes with your plan. It covers you and your club affiliation for a year."}
                 </span>
               </span>
@@ -357,9 +363,27 @@ function MembershipPage() {
                 isStudent &&
                 plan.student_price_cents != null &&
                 plan.student_price_cents < plan.public_price_cents;
+              // A pre-sale dated plan (offered ahead of its own starts_on, so
+              // members can join before it begins) looks identical to one
+              // already running unless the card says which it is.
+              const hasStarted =
+                plan.kind !== "period" || !plan.starts_on || plan.starts_on <= today;
               return (
                 <div key={plan.code} className="flex flex-col rounded-2xl border bg-card p-6">
-                  <h3 className="text-lg font-semibold">{plan.name}</h3>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-lg font-semibold">{plan.name}</h3>
+                    {plan.kind === "period" && plan.starts_on && (
+                      <Pill
+                        label={hasStarted ? "On now" : `Starts ${formatDateOnly(plan.starts_on)}`}
+                        preserveCase
+                        className={
+                          hasStarted
+                            ? "bg-primary/10 text-primary"
+                            : "bg-muted text-muted-foreground"
+                        }
+                      />
+                    )}
+                  </div>
                   {plan.description && (
                     <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
                   )}
@@ -406,7 +430,7 @@ function MembershipPage() {
                   {plan.kind === "period" && plan.starts_on && plan.ends_on && (
                     <p className="mt-4 text-xs text-muted-foreground">
                       {formatDateOnly(plan.starts_on)} to {formatDateOnly(plan.ends_on)}. Same price
-                      however far into it you join — there's no pro rata. Prefer to pay as you go
+                      however far into it you join, and there's no pro rata. Prefer to pay as you go
                       instead? Choose a casual class.
                     </p>
                   )}
@@ -415,7 +439,11 @@ function MembershipPage() {
                     disabled={pendingCode !== null}
                     onClick={() => choose(plan)}
                   >
-                    {pendingCode === plan.code ? "Starting..." : "Choose & pay by transfer"}
+                    {pendingCode === plan.code
+                      ? "Starting..."
+                      : hasStarted
+                        ? "Choose & pay by transfer"
+                        : `Join from ${formatDateOnly(plan.starts_on)}`}
                   </Button>
                 </div>
               );

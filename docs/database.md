@@ -51,20 +51,20 @@ function on the service-role client, which bypasses both grants and RLS.
 `supabase/lint/client-grants-expected.txt` pins this list and
 `.github/workflows/migration-drift.yml` checks it against the live database.
 
-| Table                    | Role            | Privilege | Why                                                                                         |
-| ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------------------- |
-| `interest_registrations` | `anon`+`auth`   | `INSERT`  | `submitInterest` — the public interest form                                                 |
-| `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                                   |
-| `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                                 |
+| Table                    | Role            | Privilege | Why                                                                                                                                                                                               |
+| ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `interest_registrations` | `anon`+`auth`   | `INSERT`  | `submitInterest` — the public interest form                                                                                                                                                       |
+| `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                                                                                                                                         |
+| `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                                                                                                                                       |
 | `membership_plans`       | `authenticated` | `SELECT`  | `listMembershipPlans` — the member purchase screen (`/membership`). The public pricing page (`/pricing`) is hand-written copy and does not read this table — see the "Membership ledger" section. |
-| `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser             |
-| `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)              |
-| `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                                   |
-| `event_rsvps`            | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                              |
-| `calendar_feed_tokens`   | `authenticated` | `SELECT`  | a person reads their own feed-token row                                                     |
-| `blog_posts`             | `anon`+`auth`   | `SELECT`  | `listPublishedBlogPosts`/`getBlogPostBySlug` — the public blog                              |
-| `blog_comments`          | `anon`+`auth`   | `SELECT`  | `listComments` — visible comments on a published post                                       |
-| `blog_comment_upvotes`   | `authenticated` | `SELECT`  | a person reads their own upvotes, to show a comment as already upvoted                      |
+| `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser                                                                                                                   |
+| `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)                                                                                                                    |
+| `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                                                                                                                                         |
+| `event_rsvps`            | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                                                                                                                                    |
+| `calendar_feed_tokens`   | `authenticated` | `SELECT`  | a person reads their own feed-token row                                                                                                                                                           |
+| `blog_posts`             | `anon`+`auth`   | `SELECT`  | `listPublishedBlogPosts`/`getBlogPostBySlug` — the public blog                                                                                                                                    |
+| `blog_comments`          | `anon`+`auth`   | `SELECT`  | `listComments` — visible comments on a published post                                                                                                                                             |
+| `blog_comment_upvotes`   | `authenticated` | `SELECT`  | a person reads their own upvotes, to show a comment as already upvoted                                                                                                                            |
 
 Every other table grants the client roles **nothing**.
 
