@@ -1,11 +1,12 @@
 -- Membership plans carry their own dates and price: contract phase.
 --
 -- Drops the machinery the redesign in 20260804000000_membership_plans_own_dates
--- replaced: `club_semesters`, `memberships.semester_id`, and
--- `membership_plans.period_basis`. Every remaining plan now discriminates its
--- own duration via `starts_on`/`ends_on` XOR `duration_days` XOR neither, so
--- there is nothing left to look up in a second table and nothing left for
--- `period_basis` to discriminate.
+-- replaced: `club_semesters` and `memberships.semester_id`. Every remaining
+-- plan now discriminates its own duration via `starts_on`/`ends_on` XOR
+-- `duration_days` XOR neither, so there is nothing left to look up in a
+-- second table. (`membership_plans.period_basis` needs no DROP here — an
+-- earlier, separately-applied migration already removed it; see the EXPAND
+-- migration's header for that history.)
 --
 -- Also revokes `membership_plans`'s anon SELECT grant: the public pricing page
 -- (`/pricing`) is deliberately decoupled from the live catalogue in this same
@@ -37,7 +38,6 @@
 
 REVOKE SELECT ON public.membership_plans FROM anon;
 
-ALTER TABLE public.membership_plans DROP COLUMN period_basis;
 ALTER TABLE public.memberships DROP COLUMN semester_id;
 DROP TABLE public.club_semesters;
 
