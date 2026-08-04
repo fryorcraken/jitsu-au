@@ -121,19 +121,13 @@ export type _InterestColumns = RequireColumns<
   "sms_whatsapp_consent"
 >;
 
-// ---- club_semesters: the club's membership windows (its own fixed dates) ----
-export type _ClubSemesterColumns = RequireColumns<
-  Tables["club_semesters"]["Row"],
-  "code" | "name" | "year" | "half" | "starts_on" | "ends_on" | "is_active"
->;
-
-// ---- memberships: which membership window a `period` invoice is for ----
-// `activateMembershipRow` resolves this column for every `period` plan, with
-// no kind discriminator anywhere else to fall back on — if it went missing,
-// those activations would fail rather than pick a wrong default.
-export type _MembershipSemesterIdColumn = RequireColumns<
-  Tables["memberships"]["Row"],
-  "semester_id"
+// ---- membership_plans: a plan's own window (dated XOR rolling XOR neither) ----
+// `activateMembershipRow` resolves a plan's dates from these three columns
+// alone (via `planMembershipWindow`), with no second table to fall back on —
+// if one went missing, activation would fail rather than pick a wrong default.
+export type _MembershipPlanOwnDatesColumns = RequireColumns<
+  Tables["membership_plans"]["Row"],
+  "starts_on" | "ends_on" | "duration_days"
 >;
 
 // ---- email_verification_tokens: proof that someone can read an address ----

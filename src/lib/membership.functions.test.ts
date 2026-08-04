@@ -183,8 +183,10 @@ function fakeReconcileAdmin(reads: {
   txns?: Result;
   pending?: Result;
   plans?: Result;
-  semester?: Result;
   count?: { count: number | null; error: { message: string } | null };
+  // Forces the `memberships` row with this id to fail its activation update,
+  // so a per-row failure can be exercised without a second table to break.
+  brokenActivationId?: string;
 }) {
   const updates: { table: string; patch: Record<string, unknown> }[] = [];
 
@@ -202,16 +204,19 @@ function fakeReconcileAdmin(reads: {
         if (table === "memberships") return { eq: () => Promise.resolve(reads.pending ?? ok([])) };
         if (table === "membership_plans")
           return { in: () => Promise.resolve(reads.plans ?? ok([PAID_PLAN])) };
-        if (table === "club_semesters")
-          return { eq: () => ({ maybeSingle: () => Promise.resolve(reads.semester ?? ok(null)) }) };
         if (table === "profiles")
           return { eq: () => ({ maybeSingle: () => Promise.resolve(ok(null)) }) };
         throw new Error(`unexpected select on ${table}`);
       },
-      update: (patch: Record<string, unknown>) => {
-        updates.push({ table, patch });
-        return { eq: () => Promise.resolve(ok(null)) };
-      },
+      update: (patch: Record<string, unknown>) => ({
+        eq: (col: string, val: unknown) => {
+          if (col === "id" && val === reads.brokenActivationId) {
+            return Promise.resolve(fails("constraint violation"));
+          }
+          updates.push({ table, patch });
+          return Promise.resolve(ok(null));
+        },
+      }),
       upsert: () => Promise.resolve(ok(null)),
     }),
   };
@@ -267,50 +272,45 @@ describe("reconcileUnmatched", () => {
     );
   });
 
-  // The case an earlier version of this change would have failed: a `period`
-  // plan must activate with the CHOSEN WINDOW's dates, never a rolling guess.
-  const SEMESTER_PLAN = {
-    id: "plan-semester",
-    code: "membership",
-    name: "Membership",
+  // The case an earlier version of this change would have failed: a dated
+  // `period` plan must activate with ITS OWN dates, never a rolling guess —
+  // and there is no second table to look them up in any more.
+  const DATED_PLAN = {
+    id: "plan-semester-2-2026",
+    code: "semester_2_2026",
+    name: "Semester 2 2026",
     kind: "period",
     is_active: true,
     session_credits: null,
     price_cents: 44500,
-  };
-  const SEMESTER = {
-    id: "sem-2026-s2",
-    code: "2026-s2",
-    name: "Semester 2 2026",
     starts_on: "2026-07-20",
     ends_on: "2026-11-22",
+    duration_days: null,
   };
-  const SEMESTER_REFERENCE = buildPaymentReference("Jones", "user-2", undefined, SEMESTER.code);
-  const PENDING_SEMESTER = {
+  const DATED_REFERENCE = buildPaymentReference("Jones", "user-2", undefined, DATED_PLAN.starts_on);
+  const PENDING_DATED = {
     id: "mem-2",
     user_id: "user-2",
-    plan_id: SEMESTER_PLAN.id,
-    semester_id: SEMESTER.id,
+    plan_id: DATED_PLAN.id,
     status: "pending",
-    payment_reference: SEMESTER_REFERENCE,
+    payment_reference: DATED_REFERENCE,
     price_cents: 44500,
     payment_method: "bank_transfer",
   };
-  const SEMESTER_TXN = {
+  const DATED_TXN = {
     id: "txn-2",
     status: "unmatched",
     // Banks reformat references, same as TXN above; the match normalizes both.
-    description: `OSKO PAYMENT ${SEMESTER_REFERENCE.toLowerCase()}`,
+    description: `OSKO PAYMENT ${DATED_REFERENCE.toLowerCase()}`,
     reference: null,
     amount_cents: 44500,
   };
 
-  it("activates a period plan with the chosen membership window's dates, not a rolling window", async () => {
+  it("activates a dated plan with the plan's own dates, not a rolling window", async () => {
     const fake = fakeReconcileAdmin({
-      txns: ok([SEMESTER_TXN]),
-      pending: ok([PENDING_SEMESTER]),
-      plans: ok([SEMESTER_PLAN]),
-      semester: ok(SEMESTER),
+      txns: ok([DATED_TXN]),
+      pending: ok([PENDING_DATED]),
+      plans: ok([DATED_PLAN]),
     });
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
     const activation = fake.updates.find(
@@ -324,33 +324,69 @@ describe("reconcileUnmatched", () => {
     expect(activation!.patch.ends_at).toBe("2026-11-22T12:59:59.000Z");
   });
 
-  // A `period` row with no semester_id (activateMembershipRow refuses it
-  // rather than silently defaulting to a rolling window) must not abort every
-  // OTHER transaction in the same statement import. Without a per-row guard
-  // around the activation call, this one bad invoice would throw out of the
-  // whole loop, leaving PENDING's transaction unprocessed too even though
-  // nothing is wrong with it.
-  it("does not let one broken invoice's activation failure block the rest of the import", async () => {
-    const BROKEN_SEMESTER_REFERENCE = buildPaymentReference(
-      "Broken",
-      "user-3",
-      undefined,
-      undefined,
+  it("activates a rolling plan from the payment instant for duration_days", async () => {
+    const ROLLING_PLAN = {
+      id: "plan-insurance-yearly",
+      code: "insurance_yearly",
+      name: "Yearly insurance",
+      kind: "insurance",
+      is_active: true,
+      session_credits: null,
+      price_cents: 6000,
+      starts_on: null,
+      ends_on: null,
+      duration_days: 365,
+    };
+    const ROLLING_REFERENCE = buildPaymentReference("Ada", "user-6");
+    const PENDING_ROLLING = {
+      id: "mem-6",
+      user_id: "user-6",
+      plan_id: ROLLING_PLAN.id,
+      status: "pending",
+      payment_reference: ROLLING_REFERENCE,
+      price_cents: 6000,
+      payment_method: "bank_transfer",
+    };
+    const ROLLING_TXN = {
+      id: "txn-6",
+      status: "unmatched",
+      description: `OSKO PAYMENT ${ROLLING_REFERENCE.toLowerCase()}`,
+      reference: null,
+      amount_cents: 6000,
+    };
+    const fake = fakeReconcileAdmin({
+      txns: ok([ROLLING_TXN]),
+      pending: ok([PENDING_ROLLING]),
+      plans: ok([ROLLING_PLAN]),
+    });
+    await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
+    const activation = fake.updates.find(
+      (u) => u.table === "memberships" && u.patch.status === "active",
     );
+    expect(activation).toBeTruthy();
+    expect(activation!.patch.ends_at).not.toBeNull();
+  });
+
+  // One bad invoice's activation failing (e.g. a constraint the update itself
+  // trips) must not abort every OTHER transaction in the same statement.
+  // Without a per-row guard around the activation call, this one bad invoice
+  // would throw out of the whole loop, leaving PENDING's transaction
+  // unprocessed too even though nothing is wrong with it.
+  it("does not let one broken invoice's activation failure block the rest of the import", async () => {
+    const BROKEN_REFERENCE = buildPaymentReference("Broken", "user-3", undefined, undefined);
     const BROKEN_PENDING = {
       id: "mem-3",
       user_id: "user-3",
-      plan_id: SEMESTER_PLAN.id,
-      semester_id: null, // never set -- e.g. a row from before this code existed
+      plan_id: DATED_PLAN.id,
       status: "pending",
-      payment_reference: BROKEN_SEMESTER_REFERENCE,
+      payment_reference: BROKEN_REFERENCE,
       price_cents: 44500,
       payment_method: "bank_transfer",
     };
     const BROKEN_TXN = {
       id: "txn-3",
       status: "unmatched",
-      description: `OSKO PAYMENT ${BROKEN_SEMESTER_REFERENCE.toLowerCase()}`,
+      description: `OSKO PAYMENT ${BROKEN_REFERENCE.toLowerCase()}`,
       reference: null,
       amount_cents: 44500,
     };
@@ -358,9 +394,8 @@ describe("reconcileUnmatched", () => {
     const fake = fakeReconcileAdmin({
       txns: ok([TXN, BROKEN_TXN]),
       pending: ok([PENDING, BROKEN_PENDING]),
-      plans: ok([PAID_PLAN, SEMESTER_PLAN]),
-      // No `semester` reply needed -- activateMembershipRow throws on the
-      // missing semester_id before it ever reads club_semesters.
+      plans: ok([PAID_PLAN, DATED_PLAN]),
+      brokenActivationId: "mem-3",
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -398,6 +433,9 @@ describe("reconcileUnmatched", () => {
       is_active: true,
       session_credits: null,
       price_cents: 6000,
+      starts_on: null,
+      ends_on: null,
+      duration_days: 365,
     };
     const insuranceRow = {
       id: "mem-5",

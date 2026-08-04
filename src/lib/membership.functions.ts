@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   buildPaymentReference,
@@ -7,31 +6,27 @@ import {
   DEFAULT_INVOICE_INSTRUCTIONS,
   formatCents,
   importBankStatementSchema,
-  INSURANCE_YEAR_DAYS,
   isUtsStudent,
   haystackContainsRef,
   matchesMembershipReference,
   matchTransactionSchema,
-  membershipWindowNotifications,
+  sellableWindowNotifications,
   normalizeRef,
   greetingName,
   nameWithPreferred,
+  planMembershipWindow,
   profileFullName,
   saveClubSettingsSchema,
-  saveSemesterSchema,
   savePlanSchema,
-  sellableSemesters,
-  semesterMembershipWindow,
+  sellablePlans,
   setMembershipStatusSchema,
   startMembershipSchema,
 } from "@/lib/validation";
-import type { MembershipPlanKind, MembershipStatus, SaveSemesterInput } from "@/lib/validation";
+import type { MembershipPlanKind, MembershipStatus, SavePlanInput } from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
 import type {
   BankTransactionRow,
-  ClubSemesterRow,
   MembershipClient,
-  MembershipDatabase,
   MembershipPlanRow,
   MembershipRow,
 } from "@/lib/membership-types";
@@ -83,25 +78,6 @@ async function clubUserEmailRows(
   }));
 }
 
-// Public/anon reads. Mirrors the pattern in waiver.functions.ts but typed with
-// the memberships-aware Database so `.from("membership_plans")` type-checks.
-function serverSupabase(): MembershipClient {
-  const url = process.env.SUPABASE_URL!;
-  const key = process.env.SUPABASE_PUBLISHABLE_KEY!;
-  return createClient<MembershipDatabase>(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false, storage: undefined },
-    global: {
-      fetch: (input, init) => {
-        const h = new Headers(init?.headers);
-        if (key.startsWith("sb_") && h.get("Authorization") === `Bearer ${key}`)
-          h.delete("Authorization");
-        h.set("apikey", key);
-        return fetch(input, { ...init, headers: h });
-      },
-    },
-  });
-}
-
 /** Load the service-role client. */
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -129,17 +105,16 @@ function dedupeHash(row: {
 }
 
 /** Human-readable validity/credit summary for a plan (used in emails/UI). */
-function validityLabel(plan: MembershipPlanRow, semester?: ClubSemesterRow | null): string {
-  if (plan.kind === "period" && semester)
-    return `${semester.name}, until ${formatDateOnly(semester.ends_on)}.`;
+function validityLabel(plan: MembershipPlanRow): string {
+  if (plan.ends_on) return `${plan.name}, until ${formatDateOnly(plan.ends_on)}.`;
   if (plan.session_credits)
     return `${plan.session_credits} session${plan.session_credits === 1 ? "" : "s"} included.`;
   if (plan.kind === "insurance") return "Cover for a year from the payment date.";
   return "";
 }
 
-/** Client-safe projection of a membership joined with its plan (and semester, if any). */
-function projectMembership(m: MembershipRow, plan?: MembershipPlanRow, semester?: ClubSemesterRow) {
+/** Client-safe projection of a membership joined with its plan. */
+function projectMembership(m: MembershipRow, plan?: MembershipPlanRow) {
   return {
     id: m.id,
     plan_code: plan?.code ?? null,
@@ -155,8 +130,6 @@ function projectMembership(m: MembershipRow, plan?: MembershipPlanRow, semester?
     ends_at: m.ends_at,
     sessions_remaining: m.sessions_remaining,
     session_date: m.session_date,
-    semester_code: semester?.code ?? null,
-    semester_name: semester?.name ?? null,
     created_at: m.created_at,
   };
 }
@@ -173,38 +146,14 @@ async function activateMembershipRow(
   plan: MembershipPlanRow,
   opts: { paymentMethod: MembershipRow["payment_method"]; sendEmail?: boolean },
 ): Promise<void> {
-  const now = new Date();
-  const nowIso = now.toISOString();
+  const nowIso = new Date().toISOString();
 
-  // Each kind computes its dates its own way, with no manager-editable
-  // duration knob: a `period` (membership) plan runs exactly the window the
-  // member picked at purchase, an `insurance` plan runs a fixed year from
-  // payment, and `trial`/`session` plans end with their credits, not a date.
-  //
-  // `startMembership` requires and validates `semester_id` before a `period`
-  // plan's row is even inserted, so a missing one here means the row was
-  // created some other way; fail loudly rather than silently falling back to
-  // a rolling window nobody asked for.
-  let semester: ClubSemesterRow | null = null;
-  let startsAt = nowIso;
-  let endsAt: string | null = null;
-  if (plan.kind === "period") {
-    if (!membership.semester_id)
-      throw new Error("This membership has no membership window selected.");
-    const { data: sem, error: semErr } = await admin
-      .from("club_semesters")
-      .select("*")
-      .eq("id", membership.semester_id)
-      .maybeSingle();
-    if (semErr) throw new Error(semErr.message);
-    if (!sem) throw new Error("The selected membership window no longer exists.");
-    semester = sem;
-    const window = semesterMembershipWindow(sem);
-    startsAt = window.starts_at;
-    endsAt = window.ends_at;
-  } else if (plan.kind === "insurance") {
-    endsAt = new Date(now.getTime() + INSURANCE_YEAR_DAYS * 86_400_000).toISOString();
-  }
+  // The plan resolves its own dates — a dated plan runs exactly the window it
+  // was set up with, a rolling plan (yearly insurance) runs from this instant,
+  // and trial/casual plans end with their credits, not a date. No branch on
+  // `plan.kind` here: `planMembershipWindow` reads `starts_on`/`ends_on`/
+  // `duration_days` directly, so a brand-new plan shape needs no new code path.
+  const { starts_at: startsAt, ends_at: endsAt } = planMembershipWindow(plan, nowIso);
 
   const patch: Partial<MembershipRow> = {
     status: "active",
@@ -263,7 +212,7 @@ async function activateMembershipRow(
           memberGreetingName,
           memberEmail: email,
           planName: plan.name,
-          validity: validityLabel(plan, semester),
+          validity: validityLabel(plan),
         });
       }
     } catch (e) {
@@ -335,57 +284,40 @@ export async function assignTrialMembership(userId: string): Promise<void> {
   await activateMembershipRow(admin, inserted, plan, { paymentMethod: "manual", sendEmail: false });
 }
 
-// ---- Public: list active plans ----
-export const listMembershipPlans = createServerFn({ method: "GET" }).handler(async () => {
-  const supabase = serverSupabase();
-  const { data, error } = await supabase
-    .from("membership_plans")
-    .select("*")
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((p) => ({
-    code: p.code,
-    name: p.name,
-    description: p.description,
-    kind: p.kind,
-    public_price_cents: p.public_price_cents,
-    student_price_cents: p.student_price_cents,
-    session_credits: p.session_credits,
-  }));
-});
-
-/**
- * All semesters, soonest-starting first, optionally restricted to active
- * ones. Exported (unlike most helpers here) so the manager agent route can
- * call it directly, the same way it imports `filePaperWaiver` from
- * `waiver.functions.ts` -- a plain shared function, not a `createServerFn`.
- */
-export async function listSemesterRows(
-  client: MembershipClient,
-  opts: { activeOnly?: boolean } = {},
-): Promise<ClubSemesterRow[]> {
-  let query = client.from("club_semesters").select("*").order("starts_on", { ascending: true });
-  if (opts.activeOnly) query = query.eq("is_active", true);
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-// ---- Public: list active semesters (for the pricing page + purchase flow) ----
-export const listSemesters = createServerFn({ method: "GET" }).handler(async () => {
-  const supabase = serverSupabase();
-  const rows = await listSemesterRows(supabase, { activeOnly: true });
-  return rows.map((s) => ({
-    code: s.code,
-    name: s.name,
-    year: s.year,
-    half: s.half,
-    starts_on: s.starts_on,
-    ends_on: s.ends_on,
-    is_active: s.is_active,
-  }));
-});
+// ---- Member: list active plans ----
+//
+// Behind `requireSupabaseAuth` (RLS as the caller, not the service role):
+// `/membership` (inside the `_authenticated` group) is the only remaining
+// reader. The public pricing page is deliberately NOT driven by this
+// catalogue — with more than one dated plan on sale at once (e.g. this
+// semester and next), a marketing page cannot show a single price, so
+// `/pricing` is hand-written copy instead (see docs/memberships.md).
+export const listMembershipPlans = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("membership_plans")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((p) => ({
+      code: p.code,
+      name: p.name,
+      description: p.description,
+      kind: p.kind,
+      public_price_cents: p.public_price_cents,
+      student_price_cents: p.student_price_cents,
+      session_credits: p.session_credits,
+      starts_on: p.starts_on,
+      ends_on: p.ends_on,
+      duration_days: p.duration_days,
+      // Always true — the query above already filters to active plans, but
+      // `sellablePlans` (the same rule the purchase screen uses to drop a
+      // dated plan once it ends) is typed against a shape that carries it.
+      is_active: true as const,
+    }));
+  });
 
 // ---- Member: my memberships + lifecycle ----
 export const getMyMemberships = createServerFn({ method: "GET" })
@@ -397,7 +329,6 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const [
       { data: rows, error },
       { data: plans, error: plErr },
-      { data: semesters, error: semErr },
       { data: profile, error: prErr },
       { data: waiverRows, error: wErr },
       { count: sessionsAttended, error: cErr },
@@ -408,7 +339,6 @@ export const getMyMemberships = createServerFn({ method: "GET" })
         .eq("user_id", context.userId)
         .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("*"),
-      admin.from("club_semesters").select("*"),
       // The student number lives on the profile; used to prefill the student
       // rate on the membership page.
       admin
@@ -433,10 +363,6 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     if (plErr) throw new Error(plErr.message);
     if (wErr) throw new Error(wErr.message);
-    // The semester read is the exception, same posture as the profile prefill
-    // below: it only decorates which semester an invoice names, and the raw
-    // starts_at/ends_at already on the row are the source of truth either way.
-    if (semErr) console.error("[getMyMemberships] semester lookup failed:", semErr);
     // The profile is the exception: it supplies nothing but a prefill for the
     // student-number box, which the member can type themselves. Failing the
     // whole page over an empty prefill would cost them more than the prefill is
@@ -452,14 +378,7 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     const utsStudentNumber = profile?.uts_student_number ?? null;
 
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
-    const semesterById = new Map((semesters ?? []).map((s) => [s.id, s]));
-    const memberships = (rows ?? []).map((r) =>
-      projectMembership(
-        r,
-        planById.get(r.plan_id),
-        r.semester_id ? semesterById.get(r.semester_id) : undefined,
-      ),
-    );
+    const memberships = (rows ?? []).map((r) => projectMembership(r, planById.get(r.plan_id)));
     const lifecycle = deriveLifecycleStatus({
       hasApprovedWaiver,
       hasPendingWaiver,
@@ -491,10 +410,13 @@ export const startMembership = createServerFn({ method: "POST" })
       .from("membership_plans")
       .select("*")
       .eq("code", data.plan_code)
-      .eq("is_active", true)
       .maybeSingle();
     if (planErr) throw new Error(planErr.message);
-    if (!plan) throw new Error("That plan is not available.");
+    // Covers a deactivated plan and a dated plan whose `ends_on` has already
+    // passed — the same rule the purchase screen uses to decide which cards to
+    // show, so a stale page can't buy something no longer on sale.
+    if (!plan || !sellablePlans([plan], new Date().toISOString()).length)
+      throw new Error("That plan is not currently available. Refresh the page and try again.");
 
     // One free trial per member.
     //
@@ -513,26 +435,6 @@ export const startMembership = createServerFn({ method: "POST" })
         .maybeSingle();
       if (exErr) throw new Error(exErr.message);
       if (existing) throw new Error("You've already started your free trial.");
-    }
-
-    // A window-anchored (`period`) plan requires the member to pick which
-    // membership window — restricted to the same short list the purchase UI
-    // offers (the one running now, plus the next one), so a stale or made-up
-    // code can't buy a window that isn't actually for sale. Resolved
-    // server-side rather than trusted from the client, same posture as
-    // `is_student` below.
-    let semester: ClubSemesterRow | null = null;
-    if (plan.kind === "period") {
-      const chosenCode = data.semester_code?.trim();
-      if (!chosenCode) throw new Error("Choose which membership window you're joining for.");
-      const allSemesters = await listSemesterRows(admin, { activeOnly: true });
-      const offered = sellableSemesters(allSemesters, new Date().toISOString());
-      semester = offered.find((s) => s.code === chosenCode) ?? null;
-      if (!semester) {
-        throw new Error(
-          "That membership window isn't currently available to join. Refresh the page and try again.",
-        );
-      }
     }
 
     // Student status is derived server-side from the number's presence, so the
@@ -623,15 +525,15 @@ export const startMembership = createServerFn({ method: "POST" })
       surname,
       context.userId,
       sessionDate || undefined,
-      semester?.code,
+      plan.starts_on ?? undefined,
     );
 
     // Idempotency: reuse an existing pending enrollment for the same plan (and
-    // session, for casual, or semester, for a semester plan) rather than
-    // creating duplicate rows / re-notifying on a repeated "Choose". Without the
-    // semester filter, buying semester 2 while a semester 1 invoice was still
-    // pending would silently reuse the semester 1 row and charge for the wrong
-    // one. The email send below is also idempotency-keyed.
+    // session, for casual) rather than creating duplicate rows / re-notifying on
+    // a repeated "Choose". A dated plan needs no extra filter here any more: a
+    // different window IS a different plan_id now, so filtering on plan_id
+    // alone already tells "Semester 2 2026" and "Semester 1 2027" apart. The
+    // email send below is also idempotency-keyed.
     const pendingBase = admin
       .from("memberships")
       .select("*")
@@ -642,11 +544,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // no pending enrollment, insert a duplicate invoice and re-send the payment
     // email for one the member already has.
     const { data: existingPending, error: pendErr } = await (
-      sessionDate
-        ? pendingBase.eq("session_date", sessionDate)
-        : semester
-          ? pendingBase.eq("semester_id", semester.id)
-          : pendingBase
+      sessionDate ? pendingBase.eq("session_date", sessionDate) : pendingBase
     )
       .limit(1)
       .maybeSingle();
@@ -666,7 +564,6 @@ export const startMembership = createServerFn({ method: "POST" })
         payment_reference: reference,
         payment_method: "bank_transfer",
         session_date: sessionDate,
-        semester_id: semester?.id ?? null,
       };
       const { data: row, error: insErr } = await admin
         .from("memberships")
@@ -721,7 +618,6 @@ export const startMembership = createServerFn({ method: "POST" })
             payment_reference: inserted.payment_reference,
             payment_method: "bank_transfer",
             session_date: null,
-            semester_id: null,
           })
           .select("*")
           .single();
@@ -770,6 +666,48 @@ export const startMembership = createServerFn({ method: "POST" })
     };
   });
 
+/**
+ * Create or update a membership plan: insert when `input.id` is absent,
+ * update that row in place when present. `code` is supplied by the caller —
+ * unlike the old per-semester upsert, a plan's code is not derived from
+ * anything else, so there is no key to re-derive and check for drift. Shared
+ * by the manager server function below and the manager agent's
+ * `save_membership_plan` action, so a manager and an agent go through the
+ * exact same write.
+ */
+export async function saveMembershipPlanRow(
+  admin: MembershipClient,
+  input: SavePlanInput,
+): Promise<{ ok: true; id: string }> {
+  const values = {
+    code: input.code,
+    name: input.name,
+    description: input.description || null,
+    kind: input.kind,
+    public_price_cents: input.public_price_cents,
+    student_price_cents: input.student_price_cents,
+    duration_days: input.duration_days,
+    session_credits: input.session_credits,
+    is_active: input.is_active,
+    sort_order: input.sort_order,
+    starts_on: input.starts_on,
+    ends_on: input.ends_on,
+  };
+
+  if (input.id) {
+    const { error } = await admin.from("membership_plans").update(values).eq("id", input.id);
+    if (error) throw new Error(error.message);
+    return { ok: true, id: input.id };
+  }
+  const { data: created, error } = await admin
+    .from("membership_plans")
+    .insert(values)
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return { ok: true, id: created.id };
+}
+
 // ---- Manager: create / update a plan ----
 export const saveMembershipPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -777,96 +715,25 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
-
-    const values = {
-      code: data.code,
-      name: data.name,
-      description: data.description || null,
-      kind: data.kind,
-      public_price_cents: data.public_price_cents,
-      student_price_cents: data.student_price_cents,
-      session_credits: data.session_credits,
-      is_active: data.is_active,
-      sort_order: data.sort_order,
-    };
-
-    if (data.id) {
-      const { error } = await admin.from("membership_plans").update(values).eq("id", data.id);
-      if (error) throw new Error(error.message);
-      return { ok: true as const, id: data.id };
-    }
-    const { data: created, error } = await admin
-      .from("membership_plans")
-      .insert(values)
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    return { ok: true as const, id: created.id };
+    return saveMembershipPlanRow(admin, data);
   });
 
 /**
- * Create or update a club semester (membership window). Upserts by (year, half)
- * -- the code is always derived here, never taken from the caller, so it can
- * never disagree with the DB's own CHECK tying `code` to `year`/`half`. Shared
- * by the manager server function below and the manager agent's
- * `save_membership_window` action, so a manager and an agent go through the
- * exact same write.
+ * All plans, incl. inactive ones, sorted for display. Exported (unlike most
+ * helpers here) so the manager agent route can call it directly, the same
+ * way it imports `filePaperWaiver` from `waiver.functions.ts` -- a plain
+ * shared function, not a `createServerFn`.
  */
-export async function saveSemester(
+export async function listMembershipPlanRows(
   admin: MembershipClient,
-  input: SaveSemesterInput,
-): Promise<{ code: string; created: boolean }> {
-  const code = `${input.year}-s${input.half}`;
-  const { data: existing, error: findErr } = await admin
-    .from("club_semesters")
+): Promise<MembershipPlanRow[]> {
+  const { data, error } = await admin
+    .from("membership_plans")
     .select("*")
-    .eq("code", code)
-    .maybeSingle();
-  if (findErr) throw new Error(findErr.message);
-
-  if (!existing) {
-    const { error } = await admin.from("club_semesters").insert({
-      code,
-      name: input.name,
-      year: input.year,
-      half: input.half,
-      starts_on: input.starts_on,
-      ends_on: input.ends_on,
-      is_active: input.is_active ?? true,
-    });
-    if (error) throw new Error(error.message);
-    return { code, created: true };
-  }
-
-  const patch: Partial<ClubSemesterRow> = {
-    name: input.name,
-    starts_on: input.starts_on,
-    ends_on: input.ends_on,
-  };
-  if (input.is_active !== undefined) patch.is_active = input.is_active;
-  const { error } = await admin.from("club_semesters").update(patch).eq("code", code);
+    .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
-  return { code, created: false };
+  return data ?? [];
 }
-
-// ---- Manager: list all semesters (incl. inactive) ----
-export const listAllSemesters = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
-    const admin = await adminClient();
-    return listSemesterRows(admin);
-  });
-
-// ---- Manager: create / update a semester ----
-export const saveMembershipSemester = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => saveSemesterSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
-    const admin = await adminClient();
-    return saveSemester(admin, data);
-  });
 
 // ---- Manager: dashboard notifications ----
 //
@@ -877,8 +744,15 @@ export const managerNotifications = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
-    const windows = await listSemesterRows(admin);
-    return membershipWindowNotifications(windows, new Date().toISOString());
+    const plans = await listMembershipPlanRows(admin);
+    // Only dated plans (starts_on/ends_on both set) need a successor —
+    // an undated one (trial, casual, insurance) never runs out of training
+    // dates to sell.
+    const dated = plans.filter(
+      (p): p is MembershipPlanRow & { starts_on: string; ends_on: string } =>
+        p.starts_on != null && p.ends_on != null,
+    );
+    return sellableWindowNotifications(dated, new Date().toISOString());
   });
 
 // ---- Manager: club settings (invoice payment instructions) ----
@@ -923,12 +797,7 @@ export const listAllMembershipPlans = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
-    const { data, error } = await admin
-      .from("membership_plans")
-      .select("*")
-      .order("sort_order", { ascending: true });
-    if (error) throw new Error(error.message);
-    return data ?? [];
+    return listMembershipPlanRows(admin);
   });
 
 // ---- Manager: list memberships (with member name/email) ----
@@ -938,25 +807,16 @@ export const listMemberships = createServerFn({ method: "GET" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
 
-    const [
-      { data: rows, error },
-      { data: plans, error: plErr },
-      { data: semesters, error: semErr },
-    ] = await Promise.all([
+    const [{ data: rows, error }, { data: plans, error: plErr }] = await Promise.all([
       admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(500),
       admin.from("membership_plans").select("*"),
-      admin.from("club_semesters").select("*"),
     ]);
     if (error) throw new Error(error.message);
     // An errored plans read would render every invoice with no plan name and no
     // kind, which reads as "these invoices are for nothing" rather than as a
     // failure. Same for the profiles read below and the member names.
     if (plErr) throw new Error(plErr.message);
-    // The semester read is decoration only (which semester an invoice names);
-    // the raw starts_at/ends_at on the row are the source of truth either way.
-    if (semErr) console.error("[listMemberships] semester lookup failed:", semErr);
     const planById = new Map((plans ?? []).map((p) => [p.id, p]));
-    const semesterById = new Map((semesters ?? []).map((s) => [s.id, s]));
 
     // Resolve each member's display name from their profile and their email
     // from the auth user (the one email store).
@@ -979,11 +839,7 @@ export const listMemberships = createServerFn({ method: "GET" })
     }
 
     return (rows ?? []).map((r) => ({
-      ...projectMembership(
-        r,
-        planById.get(r.plan_id),
-        r.semester_id ? semesterById.get(r.semester_id) : undefined,
-      ),
+      ...projectMembership(r, planById.get(r.plan_id)),
       user_id: r.user_id,
       uts_student_number: r.uts_student_number,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,

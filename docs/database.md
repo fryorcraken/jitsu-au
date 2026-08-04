@@ -56,8 +56,7 @@ function on the service-role client, which bypasses both grants and RLS.
 | `interest_registrations` | `anon`+`auth`   | `INSERT`  | `submitInterest` — the public interest form                                                 |
 | `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                                   |
 | `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                                 |
-| `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                             |
-| `club_semesters`         | `anon`+`auth`   | `SELECT`  | `listSemesters` — the public pricing page and the member purchase flow (membership windows) |
+| `membership_plans`       | `authenticated` | `SELECT`  | `listMembershipPlans` — the member purchase screen (`/membership`). The public pricing page (`/pricing`) is hand-written copy and does not read this table — see the "Membership ledger" section. |
 | `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser             |
 | `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)              |
 | `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                                   |
@@ -417,53 +416,50 @@ waiver.
 
 ## Membership ledger
 
-See `docs/memberships.md` for the product flows (plan catalogue, the
-pick-a-semester purchase flow, no pro rata, staying a member through the
-break).
-
-### `club_semesters` — the club's fixed membership window dates
-
-`id` PK, `code` (unique, `<year>-s<1|2>`, e.g. `2026-s1`), `name`, `year`, `half`
-(`1|2`), `starts_on`, `ends_on` (inclusive — the last day of training),
-`is_active`, `created_at`. An exclusion constraint
-(`club_semesters_no_overlap`) forbids two windows' date ranges from
-overlapping, so "the window running today" is never ambiguous. These are the
-club's own dates: aligned with the UTS teaching calendar but entered by a
-manager, not derived from it, and they move by about a week every year. Product
-language calls them **membership windows**; the table keeps its physical name to
-avoid generated-type churn.
-**RLS:** anyone reads active windows; managers read all. Writes are
-service-role only, through the manager screen and the manager agent API.
+See `docs/memberships.md` for the product flows (plan catalogue, dated plans,
+no pro rata, staying a member through the break).
 
 ### `membership_plans` — manager-editable catalog
 
 `id` PK, `code` (unique), `name`, `description`, `kind`
 (`insurance|trial|session|period`), `public_price_cents`, `student_price_cents`,
-`session_credits`, `is_active`, `sort_order`, `created_at`. The `period` kind is
-a windowed membership: its dates come from the `club_semesters` row the member
-chose at purchase. The `insurance` kind gets a fixed 365-day window in code.
-The `trial` and `session` kinds use their own logic. `duration_days` and
-`period_basis` were dropped in `20260803120000_membership_windows_contract.sql`
-once every plan's activation logic no longer read them.
-**RLS:** anyone reads active plans; managers read all and write.
+`duration_days`, `session_credits`, `is_active`, `sort_order`, `starts_on`,
+`ends_on` (inclusive — the last day of training), `created_at`. A plan resolves
+its own window with no second table to look up: `starts_on`/`ends_on` both set
+means a fixed date range (e.g. "Semester 2 2026", 20 Jul – 16 Dec — everyone who
+buys it gets exactly those dates, full price regardless of when in it they
+join; there is no pro rata); `duration_days` set means a rolling window from
+payment (yearly insurance, 365 days); neither set means the plan ends with its
+session credits instead of a date (trial, casual class). Three CHECK
+constraints enforce this is mutually exclusive
+(`membership_plans_dates_paired`, `membership_plans_dates_order`,
+`membership_plans_dates_xor_duration`). Each training period the club sells is
+its own row — "Semester 2 2026" and "Semester 1 2027" can be priced
+differently — rather than a shared plan pointing at a separate table of
+windows; this table used to be paired with `club_semesters` and a
+`period_basis` discriminator, both dropped once every plan carried its own
+dates directly (`20260804010000_membership_plans_own_dates_contract.sql`).
+**RLS:** managers read all and write; `authenticated` reads active plans (the
+member purchase screen, `/membership`). There is deliberately no `anon` grant:
+the public pricing page (`/pricing`) is hand-written copy, not driven by this
+catalogue — a marketing page cannot show a single price once more than one
+dated plan is on sale at once.
 
 ### `memberships` — enrollment/billing records
 
 `id` PK, `user_id → auth.users(id) ON DELETE SET NULL`,
-`plan_id → membership_plans(id)`, `semester_id → club_semesters(id)` (set only
-for a `period` kind plan; which window the member picked at purchase), `status`
+`plan_id → membership_plans(id)`, `status`
 (`pending|active|expired|cancelled`), `is_student`, `uts_student_number`,
 `price_cents`, `payment_reference` (indexed; per-member, not unique),
 `payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
 Constraint: the student rate requires a `uts_student_number`. The `member` role
 is granted on paid activation. The member's display name/email come from their
-profile (via `user_id`). For a period plan, `starts_at`/`ends_at` are the chosen
-window's dates (`starts_on` at 00:00 and `ends_on` at 23:59:59, both
-Australia/Sydney) — full price applies regardless of when in the window the
-member joins; there is no pro rata. `sessions_remaining` is set at activation
-and spent by a **check-in** — see `session_checkins` below, the only writer
-that decrements it.
+profile (via `user_id`). For a dated plan, `starts_at`/`ends_at` are the plan's
+own dates (`starts_on` at 00:00 and `ends_on` at 23:59:59, both
+Australia/Sydney), computed once at activation and never touched again.
+`sessions_remaining` is set at activation and spent by a **check-in** — see
+`session_checkins` below, the only writer that decrements it.
 **RLS:** users read own; managers read/update all; direct member INSERT is
 revoked (all inserts go through the service-role `startMembership`).
 

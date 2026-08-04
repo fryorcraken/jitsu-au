@@ -17,7 +17,6 @@ type Tables = Database["public"]["Tables"];
 
 export type MembershipPlanRow = Tables["membership_plans"]["Row"];
 export type MembershipRow = Tables["memberships"]["Row"];
-export type ClubSemesterRow = Tables["club_semesters"]["Row"];
 export type BankTransactionRow = Tables["bank_transactions"]["Row"];
 export type ClubSettingRow = Tables["club_settings"]["Row"];
 export type ManagerApiTokenRow = Tables["manager_api_tokens"]["Row"];

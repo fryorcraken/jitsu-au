@@ -3,26 +3,9 @@ import { Check } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
-import { formatCents, sellableSemesters } from "@/lib/validation";
-import { formatDateOnly } from "@/lib/dates";
-import { listMembershipPlans, listSemesters } from "@/lib/membership.functions";
 import { buildPageMeta } from "@/lib/seo";
 
-type PlanSummary = Awaited<ReturnType<typeof listMembershipPlans>>[number];
-type SemesterSummary = Awaited<ReturnType<typeof listSemesters>>[number];
-
 export const Route = createFileRoute("/pricing")({
-  // Prices come from the manager-editable plan catalog (single source of truth).
-  // Fall back to an empty list on any error so the page still renders with the
-  // static copy. The explicit return type keeps both branches on one shape.
-  loader: async (): Promise<{ plans: PlanSummary[]; semesters: SemesterSummary[] }> => {
-    try {
-      const [plans, semesters] = await Promise.all([listMembershipPlans(), listSemesters()]);
-      return { plans, semesters };
-    } catch {
-      return { plans: [], semesters: [] };
-    }
-  },
   head: () => ({
     meta: buildPageMeta({
       title: "Pricing | UTS Jitsu",
@@ -36,17 +19,18 @@ export const Route = createFileRoute("/pricing")({
   component: Pricing,
 });
 
-type Rate = "student" | "public";
+// Hand-written marketing copy, deliberately NOT driven by the membership plan
+// catalogue: with more than one dated plan on sale at once (e.g. this
+// semester and next, priced differently), a live-catalogue price has no
+// single right answer to show a prospective member. Keep this in step with
+// the manager-editable prices by hand when they change — see
+// docs/memberships.md.
 type Tier = {
   title: string;
   price: string;
   period?: string;
   features: string[];
   highlight?: boolean;
-  // When set, the displayed price is taken from the plan catalog (falling back
-  // to the static `price` above if the plan is unavailable).
-  planCode?: string;
-  rate?: Rate;
 };
 
 const student: Tier[] = [
@@ -56,16 +40,12 @@ const student: Tier[] = [
     period: "per half-year",
     features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"],
     highlight: true,
-    planCode: "semester",
-    rate: "student",
   },
   {
     title: "Casual class",
     price: "$20",
     period: "per session",
     features: ["Any regular class", "Great for trying us out", "No commitment"],
-    planCode: "casual_session",
-    rate: "student",
   },
 ];
 
@@ -76,16 +56,12 @@ const public_: Tier[] = [
     period: "per half-year",
     features: ["Unlimited semester classes", "Grading fee included", "UTS academic calendar dates"],
     highlight: true,
-    planCode: "semester",
-    rate: "public",
   },
   {
     title: "Casual class",
     price: "$30",
     period: "per session",
     features: ["Any regular class", "Flexible, no commitment"],
-    planCode: "casual_session",
-    rate: "public",
   },
 ];
 
@@ -94,13 +70,11 @@ const extras = [
     title: "First two sessions",
     price: "Free",
     note: "All year long. No gear needed",
-    planCode: "trial_2_session",
   },
   {
     title: "Sydney Jitsu yearly membership",
     price: "$60",
     note: "Insurance & club affiliation",
-    planCode: "insurance_yearly",
   },
   { title: "Uniform (Gi + belt)", price: "$90", note: "Jacket, pants and belt" },
 ];
@@ -144,42 +118,6 @@ function TierCard({ tier }: { tier: Tier }) {
 }
 
 function Pricing() {
-  // `useLoaderData` widens to `any` for this route, so pin the shape explicitly.
-  const { plans, semesters }: { plans: PlanSummary[]; semesters: SemesterSummary[] } =
-    Route.useLoaderData();
-  const byCode = new Map(plans.map((p) => [p.code, p]));
-
-  // Prefer the live catalog price; fall back to the static copy on the tier.
-  const priceFor = (tier: Tier): string => {
-    if (!tier.planCode) return tier.price;
-    const plan = byCode.get(tier.planCode);
-    if (!plan) return tier.price;
-    const cents =
-      tier.rate === "student" && plan.student_price_cents != null
-        ? plan.student_price_cents
-        : plan.public_price_cents;
-    return formatCents(cents);
-  };
-  const extraPrice = (e: (typeof extras)[number]): string => {
-    if (!e.planCode) return e.price;
-    const plan = byCode.get(e.planCode);
-    if (!plan) return e.price;
-    return formatCents(plan.public_price_cents);
-  };
-
-  // The semester tier's third bullet names the actual dates on sale right now
-  // (the one running today, or the next to open) instead of a vague promise,
-  // while keeping the "UTS calendar" framing that motivated showing dates at
-  // all. Falls back to the static copy when no semester is configured yet.
-  const currentOrNextSemester = sellableSemesters(semesters, new Date().toISOString())[0] ?? null;
-  const semesterDatesLabel = currentOrNextSemester
-    ? `UTS calendar dates: ${formatDateOnly(currentOrNextSemester.starts_on)} to ${formatDateOnly(currentOrNextSemester.ends_on)}`
-    : null;
-  const featuresFor = (tier: Tier): string[] =>
-    tier.planCode === "semester" && semesterDatesLabel
-      ? [tier.features[0], tier.features[1], semesterDatesLabel]
-      : tier.features;
-
   return (
     <SiteLayout>
       <section className="mx-auto max-w-4xl px-4 py-16 md:py-20">
@@ -195,7 +133,7 @@ function Pricing() {
         <h2 className="text-2xl font-bold">For UTS students</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {student.map((t) => (
-            <TierCard key={t.title} tier={{ ...t, price: priceFor(t), features: featuresFor(t) }} />
+            <TierCard key={t.title} tier={t} />
           ))}
         </div>
       </section>
@@ -204,7 +142,7 @@ function Pricing() {
         <h2 className="text-2xl font-bold">For the general public</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {public_.map((t) => (
-            <TierCard key={t.title} tier={{ ...t, price: priceFor(t), features: featuresFor(t) }} />
+            <TierCard key={t.title} tier={t} />
           ))}
         </div>
       </section>
@@ -215,7 +153,7 @@ function Pricing() {
           {extras.map((e) => (
             <div key={e.title} className="rounded-xl border bg-card p-6">
               <h3 className="text-base font-semibold">{e.title}</h3>
-              <p className="mt-2 text-2xl font-bold text-primary">{extraPrice(e)}</p>
+              <p className="mt-2 text-2xl font-bold text-primary">{e.price}</p>
               <p className="mt-1 text-sm text-muted-foreground">{e.note}</p>
             </div>
           ))}
