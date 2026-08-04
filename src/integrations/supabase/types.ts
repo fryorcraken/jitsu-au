@@ -910,6 +910,8 @@ export type Database = {
           code: string
           created_at: string
           description: string | null
+          duration_days: number | null
+          ends_on: string | null
           id: string
           is_active: boolean
           kind: string
@@ -917,12 +919,15 @@ export type Database = {
           public_price_cents: number
           session_credits: number | null
           sort_order: number
+          starts_on: string | null
           student_price_cents: number | null
         }
         Insert: {
           code: string
           created_at?: string
           description?: string | null
+          duration_days?: number | null
+          ends_on?: string | null
           id?: string
           is_active?: boolean
           kind: string
@@ -930,12 +935,15 @@ export type Database = {
           public_price_cents: number
           session_credits?: number | null
           sort_order?: number
+          starts_on?: string | null
           student_price_cents?: number | null
         }
         Update: {
           code?: string
           created_at?: string
           description?: string | null
+          duration_days?: number | null
+          ends_on?: string | null
           id?: string
           is_active?: boolean
           kind?: string
@@ -943,6 +951,7 @@ export type Database = {
           public_price_cents?: number
           session_credits?: number | null
           sort_order?: number
+          starts_on?: string | null
           student_price_cents?: number | null
         }
         Relationships: []
