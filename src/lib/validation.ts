@@ -15,6 +15,7 @@ import { annotationVisibilities, articleVisibilities } from "./kb";
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
 // the same kind of module as this one (pure, no server imports).
 import { CLUB_TIME_ZONE, clubLocalDate, zonedWallTimeToUtc } from "./calendar";
+import { formatDateOnly } from "./dates";
 
 // ---- Pure helpers ----
 
@@ -782,14 +783,19 @@ export const membershipPlanKinds = ["insurance", "trial", "session", "period"] a
 export type MembershipPlanKind = (typeof membershipPlanKinds)[number];
 
 /**
- * How a `period` plan's `starts_at`/`ends_at` are computed: `rolling` (the
- * default; N days from activation — `insurance_yearly`, a genuine
- * 12-months-from-payment membership) or `semester` (the dates come from the
- * `club_semesters` row the member chose at purchase — the `semester` plan).
- * `duration_days` is meaningless for a `semester`-basis plan.
+ * The fixed length of a yearly insurance product, in days. There is no
+ * manager-editable duration field anywhere in the catalogue: a `period` plan
+ * runs the window the member picked at purchase, a `session` plan is tied to
+ * its class, a `trial` never expires, and insurance is always a year.
  */
-export const membershipPeriodBases = ["rolling", "semester"] as const;
-export type MembershipPeriodBasis = (typeof membershipPeriodBases)[number];
+export const INSURANCE_YEAR_DAYS = 365;
+
+/**
+ * The club's "one month": how far ahead the purchase screen nudges an
+ * insurance renewal and the manager dashboard pushes for a new membership
+ * window. Always 30 days, never a calendar month.
+ */
+export const RENEWAL_WINDOW_DAYS = 30;
 
 /** The lifecycle a person moves through as they join the club:
  * lead (registered interest only) -> applicant (signed the waiver) ->
@@ -880,6 +886,23 @@ export function matchesMembershipReference(
   const ref = normalizeRef(reference);
   if (!ref) return false;
   return normalizeRef(description).includes(ref) && amountCents === priceCents;
+}
+
+/**
+ * True when the haystack (a bank-statement line) contains the reference as a
+ * whole alphanumeric token, not merely as a substring. Splits the haystack on
+ * non-alphanumeric boundaries and normalizes each token, so `MEMSMITHAB12` does
+ * not match inside `MEMSMITHAB123`. Used for bundle matching where amount alone
+ * cannot disambiguate. Slightly stricter than `matchesMembershipReference` —
+ * a reference split by the member with spaces (e.g. "MEM SMITH AB12") will not
+ * match, which is acceptable because false negatives are safer than false
+ * positives in bundle grouping.
+ */
+export function haystackContainsRef(haystack: string, reference: string): boolean {
+  const ref = normalizeRef(reference);
+  if (!ref) return false;
+  const tokens = (haystack || "").toUpperCase().match(/[A-Z0-9]+/g) ?? [];
+  return tokens.some((t) => normalizeRef(t) === ref);
 }
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
@@ -1043,6 +1066,86 @@ export function sellableSemesters<T extends SemesterWindow & { is_active: boolea
   return [current, next].filter((s): s is T => s !== null);
 }
 
+// ---- Member: yearly insurance selection on the purchase screen ----
+
+/**
+ * What the purchase screen does with the yearly insurance add-on, derived
+ * from when the member's current cover ends (null = never had it):
+ *
+ * - `preselect`: tick the add-on when there is no ongoing cover, or the
+ *   cover runs out within `daysAhead` days. Never tick it a year out.
+ * - `canDeselect`: only a member whose cover is ongoing right now may untick
+ *   it. Nobody trains uninsured, so with nothing active the tick is forced.
+ *
+ * "Ongoing" compares against `ends_at` alone; a pending insurance invoice is
+ * not cover until it is paid. The server re-derives its own answer at
+ * purchase time — this shapes the screen, never grants permission.
+ */
+export function insuranceSelection(input: {
+  insuranceEndsAt: string | null;
+  now: string;
+  daysAhead?: number;
+}): { preselect: boolean; canDeselect: boolean } {
+  const days = input.daysAhead ?? RENEWAL_WINDOW_DAYS;
+  const nowMs = new Date(input.now).getTime();
+  const coverMs = input.insuranceEndsAt ? new Date(input.insuranceEndsAt).getTime() : null;
+  const ongoing = coverMs !== null && coverMs > nowMs;
+  const expiringSoon = coverMs !== null && coverMs <= nowMs + days * 86_400_000;
+  return { preselect: !ongoing || expiringSoon, canDeselect: ongoing };
+}
+
+// ---- Manager: dashboard notifications ----
+
+/**
+ * One item on the manager dashboard's "needs attention" list. Deliberately
+ * data-shaped, not copy-ready JSX: the pure function below is what turns
+ * club data into these, so tests pin the messages without rendering.
+ */
+export type ManagerNotification = {
+  type: "define_membership_window";
+  title: string;
+  body: string;
+  href: string;
+};
+
+/**
+ * The membership-window notifications: the plan is unsellable while no
+ * window is defined, and an expiring final window needs its successor set.
+ * Fires when no active window exists at all, or when the latest active
+ * window's `ends_on` is within `daysAhead` days (by the club calendar).
+ * A defined successor pushes `ends_on` past the horizon, so "nothing set
+ * after this one" falls out of the rule on its own.
+ */
+export function membershipWindowNotifications<
+  T extends SemesterWindow & { is_active: boolean; name: string },
+>(all: T[], now: string, daysAhead: number = RENEWAL_WINDOW_DAYS): ManagerNotification[] {
+  const today = clubLocalDate(new Date(now), CLUB_TIME_ZONE);
+  const horizon = addCalendarDays(today, daysAhead);
+  const active = all
+    .filter((s) => s.is_active)
+    .sort((a, b) => (a.ends_on < b.ends_on ? -1 : a.ends_on > b.ends_on ? 1 : 0));
+  if (active.length === 0) {
+    return [
+      {
+        type: "define_membership_window",
+        title: "Set up a membership window",
+        body: "Members cannot join as members until the club's training dates are set. Add them now on the plans page.",
+        href: "/manager/membership-plans",
+      },
+    ];
+  }
+  const latest = active[active.length - 1];
+  if (latest.ends_on > horizon) return [];
+  return [
+    {
+      type: "define_membership_window",
+      title: `The membership window ${latest.name} ends ${formatDateOnly(latest.ends_on)}`,
+      body: "Nothing is defined after it, so enrolments stop when it ends. Set the club's next training dates on the plans page.",
+      href: "/manager/membership-plans",
+    },
+  ];
+}
+
 // ---- Member: start a membership ----
 
 export const startMembershipSchema = z
@@ -1056,9 +1159,14 @@ export const startMembershipSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional()
       .or(z.literal("")),
-    // Only meaningful for a semester-basis plan; the server requires it there
-    // and ignores it otherwise. The `club_semesters.code` of the chosen term.
+    // Only meaningful for a window-anchored (`period`) plan; the server
+    // requires it there and ignores it otherwise. The window's
+    // `club_semesters.code`.
     semester_code: z.string().trim().max(16).optional().or(z.literal("")),
+    // Whether to add the yearly insurance to this purchase (second invoice,
+    // same payment reference). The server makes its own call from the
+    // member's current cover — a member with none cannot turn this off.
+    include_insurance: z.boolean().optional().default(false),
     hp: z.string().max(0).optional(), // honeypot — must stay empty
   })
   .refine((d) => !d.is_student || Boolean(d.uts_student_number && d.uts_student_number.trim()), {
@@ -1082,9 +1190,7 @@ export const savePlanSchema = z.object({
   kind: z.enum(membershipPlanKinds),
   public_price_cents: z.number().int().min(0).max(1_000_000),
   student_price_cents: z.number().int().min(0).max(1_000_000).nullable(),
-  duration_days: z.number().int().positive().max(3650).nullable(),
   session_credits: z.number().int().positive().max(1000).nullable(),
-  period_basis: z.enum(membershipPeriodBases),
   is_active: z.boolean(),
   sort_order: z.number().int().min(0).max(1000),
 });
@@ -1135,8 +1241,8 @@ export const managerAgentActions = [
   "list_invoices",
   "edit_invoice",
   "file_waiver",
-  "list_semesters",
-  "save_semester",
+  "list_membership_windows",
+  "save_membership_window",
   "list_kb_sections",
   "save_kb_section",
   "delete_kb_section",

@@ -381,7 +381,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("5");
+    expect(AGENT_MANIFEST.version).toBe("6");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it

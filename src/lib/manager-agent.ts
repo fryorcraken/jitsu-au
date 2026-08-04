@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "5",
+  version: "6",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "6",
+      // The semester concept was folded into "membership windows" (the period
+      // plan IS a windowed membership). Both semester actions were RENAMED with
+      // no aliases, so any client that cached them 400s on unknown_action.
+      breaking: true,
+      notes: [
+        "RENAMED, with no aliases: list_semesters -> list_membership_windows, save_semester -> save_membership_window. Same params, same response shape. The club's fixed training dates are now called membership windows: the period membership plan always runs exactly one chosen window.",
+        "Purchases on the site may now bundle the yearly insurance as a second invoice sharing the same payment reference (insurance is mandatory when a member has no current cover). list_invoices / edit_invoice show such pairs the same way as any other two invoices sharing a reference.",
+      ],
+    },
     {
       version: "5",
       // Purely additive: two new actions, and a decorative field on existing
@@ -318,21 +329,21 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
-      name: "list_semesters",
+      name: "list_membership_windows",
       method: "POST",
       summary:
-        "List the club's semesters (its own fixed training dates for each UTS half-year, e.g. '2026-s1' running 2 Feb to 27 Jun), newest-starting last. A `semester`-basis membership plan runs exactly a chosen semester's dates, full price regardless of when in it a member joins — there is no pro rata. Includes inactive (retired) semesters.",
+        "List the club's membership windows (its own fixed training-date spans, e.g. '2026-s2' running 20 Jul to 16 Dec), newest-starting last. A period-basis membership plan runs exactly a chosen window's dates, full price regardless of when in it a member joins — there is no pro rata. Includes inactive (retired) windows.",
       params: [],
     },
     {
-      name: "save_semester",
+      name: "save_membership_window",
       method: "POST",
       summary:
-        "Create or update a semester. Upserts by (year, half) — code is always derived as '<year>-s<half>', so it is never taken as an input and can never disagree with the dates. An unknown (year, half) creates it; a known one updates its name/dates in place (and is_active, if sent). name, starts_on and ends_on are required on every call, since a semester is saved as a whole row, not patched field-by-field.",
+        "Create or update a membership window. Upserts by (year, half) — code is always derived as '<year>-s<half>', so it is never taken as an input and can never disagree with the dates. An unknown (year, half) creates it; a known one updates its name/dates in place (and is_active, if sent). name, starts_on and ends_on are required on every call, since a window is saved as a whole row, not patched field-by-field. NOTE: if the latest window ends within 30 days and nothing is defined after it, the manager dashboard notifies managers — set the next one before then.",
       params: [
         { name: "year", required: true, description: "e.g. 2026." },
         { name: "half", required: true, description: "1 or 2." },
-        { name: "name", required: true, description: "What members see, e.g. 'Semester 1 2026'." },
+        { name: "name", required: true, description: "What members see, e.g. 'Semester 2 2026'." },
         {
           name: "starts_on",
           required: true,
@@ -342,13 +353,13 @@ export const AGENT_MANIFEST: {
           name: "ends_on",
           required: true,
           description:
-            "YYYY-MM-DD, the LAST day of training (inclusive) — must be on or after starts_on. A membership bought for this semester covers this whole day.",
+            "YYYY-MM-DD, the LAST day of training (inclusive) — must be on or after starts_on. A membership bought for this window covers this whole day.",
         },
         {
           name: "is_active",
           required: false,
           description:
-            "Whether members can currently buy this semester. Omit to leave unchanged (defaults to true on create).",
+            "Whether members can currently buy this window. Omit to leave unchanged (defaults to true on create).",
         },
       ],
     },

@@ -81,10 +81,22 @@ function PasswordSignIn({ redirect, email }: { redirect?: string; email: string 
     // Record the choice before sign-in so the session that follows is governed
     // by the "remember me" preference from the moment it is persisted.
     rememberSession(remember);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
     if (error) return toast.error(error.message);
     toast.success("Signed in");
+    // Managers land on their dashboard; an explicit `?redirect=` always wins.
+    if (!redirect && data.user?.id) {
+      const { data: roles } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", data.user.id)
+        .eq("role", "manager");
+      if ((roles ?? []).length > 0) {
+        window.location.href = "/manager";
+        return;
+      }
+    }
     navigate({ to: redirect ?? "/account" });
   }
 

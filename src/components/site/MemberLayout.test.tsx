@@ -94,6 +94,7 @@ describe("MemberLayout", () => {
       </MemberLayout>,
     );
 
+    expect(screen.getByRole("link", { name: /^dashboard$/i })).toHaveAttribute("href", "/manager");
     expect(screen.getByRole("link", { name: /check in/i })).toHaveAttribute(
       "href",
       "/manager/check-in",
@@ -124,9 +125,9 @@ describe("MemberLayout", () => {
       "href",
       "/manager/kb",
     );
-    expect(screen.getByRole("link", { name: /^semesters$/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^plans & windows$/i })).toHaveAttribute(
       "href",
-      "/manager/semesters",
+      "/manager/membership-plans",
     );
     // Member links remain available to managers too.
     expect(screen.getByRole("link", { name: /account/i })).toBeInTheDocument();

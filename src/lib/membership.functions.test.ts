@@ -33,7 +33,6 @@ const TRIAL_PLAN = {
   name: "Free trial",
   kind: "trial",
   is_active: true,
-  duration_days: 30,
   session_credits: null,
   price_cents: 0,
 };
@@ -148,7 +147,6 @@ const PAID_PLAN = {
   name: "Monthly",
   kind: "monthly",
   is_active: true,
-  duration_days: 30,
   session_credits: null,
   price_cents: 5000,
 };
@@ -269,20 +267,15 @@ describe("reconcileUnmatched", () => {
     );
   });
 
-  // The case an earlier version of this change would have failed: a
-  // semester-anchored plan must activate with the CHOSEN SEMESTER's dates, not
-  // "now + duration_days" (duration_days is even left non-null on this fixture,
-  // matching how the migration leaves it until the follow-up contract phase, to
-  // prove the code branches on period_basis rather than falling back to it).
+  // The case an earlier version of this change would have failed: a `period`
+  // plan must activate with the CHOSEN WINDOW's dates, never a rolling guess.
   const SEMESTER_PLAN = {
     id: "plan-semester",
-    code: "semester",
-    name: "One semester",
+    code: "membership",
+    name: "Membership",
     kind: "period",
     is_active: true,
-    duration_days: 182,
     session_credits: null,
-    period_basis: "semester",
     price_cents: 44500,
   };
   const SEMESTER = {
@@ -312,7 +305,7 @@ describe("reconcileUnmatched", () => {
     amount_cents: 44500,
   };
 
-  it("activates a semester-anchored plan with the chosen semester's dates, not now + duration_days", async () => {
+  it("activates a period plan with the chosen membership window's dates, not a rolling window", async () => {
     const fake = fakeReconcileAdmin({
       txns: ok([SEMESTER_TXN]),
       pending: ok([PENDING_SEMESTER]),
@@ -331,11 +324,11 @@ describe("reconcileUnmatched", () => {
     expect(activation!.patch.ends_at).toBe("2026-11-22T12:59:59.000Z");
   });
 
-  // A semester-basis row with no semester_id (activateMembershipRow refuses
-  // it rather than silently defaulting to a rolling window) must not abort
-  // every OTHER transaction in the same statement import. Without a per-row
-  // guard around the activation call, this one bad invoice would throw out of
-  // the whole loop, leaving PENDING's transaction unprocessed too even though
+  // A `period` row with no semester_id (activateMembershipRow refuses it
+  // rather than silently defaulting to a rolling window) must not abort every
+  // OTHER transaction in the same statement import. Without a per-row guard
+  // around the activation call, this one bad invoice would throw out of the
+  // whole loop, leaving PENDING's transaction unprocessed too even though
   // nothing is wrong with it.
   it("does not let one broken invoice's activation failure block the rest of the import", async () => {
     const BROKEN_SEMESTER_REFERENCE = buildPaymentReference(
@@ -380,5 +373,105 @@ describe("reconcileUnmatched", () => {
       (u) => u.table === "bank_transactions" && u.patch.status === "matched",
     );
     expect(matchedTxns).toHaveLength(1);
+  });
+
+  // A membership bought with bundled insurance lands as TWO invoices sharing
+  // one reference, settled by ONE transfer of the combined amount. Neither
+  // invoice's own price matches that amount, and leaving a bundle unpaid just
+  // because the member paid in one go would be the daily failure here.
+  it("activates both halves of a reference-sharing bundle from one combined transfer", async () => {
+    const bundleRef = buildPaymentReference("Nguyen", "user-4", undefined, undefined);
+    const membershipRow = {
+      id: "mem-4",
+      user_id: "user-4",
+      plan_id: PAID_PLAN.id,
+      status: "pending",
+      payment_reference: bundleRef,
+      price_cents: 5000,
+      payment_method: "bank_transfer",
+    };
+    const INSURANCE_PLAN = {
+      id: "plan-insurance",
+      code: "insurance_yearly",
+      name: "Yearly insurance",
+      kind: "insurance",
+      is_active: true,
+      session_credits: null,
+      price_cents: 6000,
+    };
+    const insuranceRow = {
+      id: "mem-5",
+      user_id: "user-4",
+      plan_id: INSURANCE_PLAN.id,
+      status: "pending",
+      payment_reference: bundleRef,
+      price_cents: 6000,
+      payment_method: "bank_transfer",
+    };
+    const BUNDLE_TXN = {
+      id: "txn-4",
+      status: "unmatched",
+      description: `OSKO PAYMENT ${bundleRef.toLowerCase()}`,
+      reference: null,
+      amount_cents: 11000, // 5000 + 6000, the combined bundle total
+    };
+
+    const fake = fakeReconcileAdmin({
+      txns: ok([BUNDLE_TXN]),
+      pending: ok([membershipRow, insuranceRow]),
+      plans: ok([PAID_PLAN, INSURANCE_PLAN]),
+    });
+    await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
+    const activations = fake.updates.filter(
+      (u) => u.table === "memberships" && u.patch.status === "active",
+    );
+    expect(activations).toHaveLength(2);
+    // Insurance activates on the fixed one-year window, not "here indefinitely".
+    const insuranceActivation = activations.find((u) => u.patch.ends_at != null);
+    expect(insuranceActivation).toBeTruthy();
+  });
+
+  // The same two invoices, but the member paid only the plan price: the bundle
+  // rule must NOT fire (the transfer doesn't cover both), and the single
+  // invoice match takes it.
+  it("does not bundle-match when the transfer only covers one invoice", async () => {
+    const bundleRef = buildPaymentReference("Nguyen", "user-4", undefined, undefined);
+    const membershipRow = {
+      id: "mem-4",
+      user_id: "user-4",
+      plan_id: PAID_PLAN.id,
+      status: "pending",
+      payment_reference: bundleRef,
+      price_cents: 5000,
+      payment_method: "bank_transfer",
+    };
+    const insuranceRow = {
+      id: "mem-5",
+      user_id: "user-4",
+      plan_id: "plan-insurance",
+      status: "pending",
+      payment_reference: bundleRef,
+      price_cents: 6000,
+      payment_method: "bank_transfer",
+    };
+    const PARTIAL_TXN = {
+      id: "txn-5",
+      status: "unmatched",
+      description: `OSKO PAYMENT ${bundleRef.toLowerCase()}`,
+      reference: null,
+      amount_cents: 5000, // covers the membership only
+    };
+
+    const fake = fakeReconcileAdmin({
+      txns: ok([PARTIAL_TXN]),
+      pending: ok([membershipRow, insuranceRow]),
+      plans: ok([PAID_PLAN]),
+    });
+    await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
+    // Exactly one invoice is activated (the membership), never the whole group.
+    const activations = fake.updates.filter(
+      (u) => u.table === "memberships" && u.patch.status === "active",
+    );
+    expect(activations).toHaveLength(1);
   });
 });

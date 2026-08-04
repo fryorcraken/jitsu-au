@@ -53,6 +53,20 @@ type Equals<A, B> =
  */
 type Expect<T extends true> = T;
 
+/**
+ * Fails to compile when `K` IS a key of `T`. Use to assert that a dropped
+ * column has not crept back into the generated types.
+ */
+type AssertAbsent<T, K> = K extends keyof T ? false : true;
+
+// ---- membership_plans: columns dropped by 20260803120000_membership_windows_contract.sql ----
+export type _MembershipPlansNoDurationDays = Expect<
+  AssertAbsent<Tables["membership_plans"]["Row"], "duration_days">
+>;
+export type _MembershipPlansNoPeriodBasis = Expect<
+  AssertAbsent<Tables["membership_plans"]["Row"], "period_basis">
+>;
+
 // ---- waivers: the approval workflow (the columns the outage was about) ----
 export type _WaiverApprovalColumns = RequireColumns<
   Tables["waivers"]["Row"],
@@ -107,23 +121,16 @@ export type _InterestColumns = RequireColumns<
   "sms_whatsapp_consent"
 >;
 
-// ---- club_semesters: the club's own fixed semester dates ----
+// ---- club_semesters: the club's membership windows (its own fixed dates) ----
 export type _ClubSemesterColumns = RequireColumns<
   Tables["club_semesters"]["Row"],
   "code" | "name" | "year" | "half" | "starts_on" | "ends_on" | "is_active"
 >;
 
-// ---- membership_plans: the rolling/semester discriminator ----
-// `semesterMembershipWindow`/`activateMembershipRow` branch on this column
-// directly, so if it went missing every `period` plan would silently fall back
-// to the rolling "now + duration_days" computation this column exists to
-// replace for a semester-anchored plan.
-export type _MembershipPlanPeriodBasisColumn = RequireColumns<
-  Tables["membership_plans"]["Row"],
-  "period_basis"
->;
-
-// ---- memberships: which semester a semester-anchored invoice is for ----
+// ---- memberships: which membership window a `period` invoice is for ----
+// `activateMembershipRow` resolves this column for every `period` plan, with
+// no kind discriminator anywhere else to fall back on — if it went missing,
+// those activations would fail rather than pick a wrong default.
 export type _MembershipSemesterIdColumn = RequireColumns<
   Tables["memberships"]["Row"],
   "semester_id"

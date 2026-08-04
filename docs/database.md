@@ -51,21 +51,21 @@ function on the service-role client, which bypasses both grants and RLS.
 `supabase/lint/client-grants-expected.txt` pins this list and
 `.github/workflows/migration-drift.yml` checks it against the live database.
 
-| Table                    | Role            | Privilege | Why                                                                             |
-| ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------- |
-| `interest_registrations` | `anon`+`auth`   | `INSERT`  | `submitInterest` — the public interest form                                     |
-| `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                       |
-| `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                     |
-| `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                 |
-| `club_semesters`         | `anon`+`auth`   | `SELECT`  | `listSemesters` — the public pricing page and the member purchase flow          |
-| `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser |
-| `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)  |
-| `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                       |
-| `event_rsvps`            | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                  |
-| `calendar_feed_tokens`   | `authenticated` | `SELECT`  | a person reads their own feed-token row                                         |
-| `blog_posts`             | `anon`+`auth`   | `SELECT`  | `listPublishedBlogPosts`/`getBlogPostBySlug` — the public blog                  |
-| `blog_comments`          | `anon`+`auth`   | `SELECT`  | `listComments` — visible comments on a published post                           |
-| `blog_comment_upvotes`   | `authenticated` | `SELECT`  | a person reads their own upvotes, to show a comment as already upvoted          |
+| Table                    | Role            | Privilege | Why                                                                                         |
+| ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------------------- |
+| `interest_registrations` | `anon`+`auth`   | `INSERT`  | `submitInterest` — the public interest form                                                 |
+| `contact_messages`       | `anon`+`auth`   | `INSERT`  | `submitContact` — the public contact form                                                   |
+| `waiver_templates`       | `anon`+`auth`   | `SELECT`  | `getCurrentWaiverTemplate` — the public waiver signing page                                 |
+| `membership_plans`       | `anon`+`auth`   | `SELECT`  | `listMembershipPlans` — the public pricing page                                             |
+| `club_semesters`         | `anon`+`auth`   | `SELECT`  | `listSemesters` — the public pricing page and the member purchase flow (membership windows) |
+| `user_roles`             | `authenticated` | `SELECT`  | `useRoles` (`src/hooks/useAuth.ts`) reads the caller's own roles in the browser             |
+| `waivers`                | `authenticated` | `SELECT`  | the waiver-PDF storage policy sub-selects this table as the caller (see below)              |
+| `calendar_events`        | `anon`+`auth`   | `SELECT`  | the public class schedule                                                                   |
+| `event_rsvps`            | `authenticated` | `SELECT`  | a person reads their own RSVPs                                                              |
+| `calendar_feed_tokens`   | `authenticated` | `SELECT`  | a person reads their own feed-token row                                                     |
+| `blog_posts`             | `anon`+`auth`   | `SELECT`  | `listPublishedBlogPosts`/`getBlogPostBySlug` — the public blog                              |
+| `blog_comments`          | `anon`+`auth`   | `SELECT`  | `listComments` — visible comments on a published post                                       |
+| `blog_comment_upvotes`   | `authenticated` | `SELECT`  | a person reads their own upvotes, to show a comment as already upvoted                      |
 
 Every other table grants the client roles **nothing**.
 
@@ -421,52 +421,46 @@ See `docs/memberships.md` for the product flows (plan catalogue, the
 pick-a-semester purchase flow, no pro rata, staying a member through the
 break).
 
-### `club_semesters` — the club's fixed semester dates
+### `club_semesters` — the club's fixed membership window dates
 
 `id` PK, `code` (unique, `<year>-s<1|2>`, e.g. `2026-s1`), `name`, `year`, `half`
 (`1|2`), `starts_on`, `ends_on` (inclusive — the last day of training),
 `is_active`, `created_at`. An exclusion constraint
-(`club_semesters_no_overlap`) forbids two semesters' date ranges from
-overlapping, so "the semester running today" is never ambiguous. These are the
+(`club_semesters_no_overlap`) forbids two windows' date ranges from
+overlapping, so "the window running today" is never ambiguous. These are the
 club's own dates: aligned with the UTS teaching calendar but entered by a
-manager, not derived from it, and they move by about a week every year.
-**RLS:** anyone reads active semesters; managers read all. Writes are
+manager, not derived from it, and they move by about a week every year. Product
+language calls them **membership windows**; the table keeps its physical name to
+avoid generated-type churn.
+**RLS:** anyone reads active windows; managers read all. Writes are
 service-role only, through the manager screen and the manager agent API.
 
 ### `membership_plans` — manager-editable catalog
 
 `id` PK, `code` (unique), `name`, `description`, `kind`
 (`insurance|trial|session|period`), `public_price_cents`, `student_price_cents`,
-`duration_days`, `session_credits`, `period_basis` (`rolling|semester`),
-`is_active`, `sort_order`, `created_at`. `period_basis` says how a `period`
-plan's dates are computed: `rolling` (the default; `duration_days` days from
-activation — this is `insurance_yearly`, a genuine 12-months-from-payment
-membership) or `semester` (the dates come from the `club_semesters` row the
-member chose at purchase; `duration_days` becomes unused). This is the
-`semester` plan. `period_basis` was added in `20260802110000_club_semesters.sql`
-without touching `duration_days`, on purpose: that migration is additive-only
-and shipped ahead of the code that reads `period_basis`, so clearing
-`duration_days` in the same statement would have handed out never-expiring
-semester memberships in the gap. `20260803010000_clear_semester_plan_duration.sql`
-clears it, once `activateMembershipRow` (`src/lib/membership.functions.ts`) no
-longer reads it for this plan.
+`session_credits`, `is_active`, `sort_order`, `created_at`. The `period` kind is
+a windowed membership: its dates come from the `club_semesters` row the member
+chose at purchase. The `insurance` kind gets a fixed 365-day window in code.
+The `trial` and `session` kinds use their own logic. `duration_days` and
+`period_basis` were dropped in `20260803120000_membership_windows_contract.sql`
+once every plan's activation logic no longer read them.
 **RLS:** anyone reads active plans; managers read all and write.
 
 ### `memberships` — enrollment/billing records
 
 `id` PK, `user_id → auth.users(id) ON DELETE SET NULL`,
 `plan_id → membership_plans(id)`, `semester_id → club_semesters(id)` (set only
-for a `period_basis = 'semester'` plan; which semester the member picked at
-purchase), `status` (`pending|active|expired|cancelled`), `is_student`,
-`uts_student_number`, `price_cents`, `payment_reference` (indexed; per-member,
-not unique), `payment_method` (`bank_transfer|stripe|manual`), `paid_at`,
-`starts_at`, `ends_at`, `sessions_remaining`, `session_date`, `notes`,
-`created_at`. Constraint: the student rate requires a `uts_student_number`.
-The `member` role is granted on paid activation. The member's display
-name/email come from their profile (via `user_id`). For a semester plan,
-`starts_at`/`ends_at` are the chosen semester's dates (`starts_on` at
-00:00 and `ends_on` at 23:59:59, both Australia/Sydney), not "now +
-duration_days" — full price applies regardless of when in the semester the
+for a `period` kind plan; which window the member picked at purchase), `status`
+(`pending|active|expired|cancelled`), `is_student`, `uts_student_number`,
+`price_cents`, `payment_reference` (indexed; per-member, not unique),
+`payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
+`ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
+Constraint: the student rate requires a `uts_student_number`. The `member` role
+is granted on paid activation. The member's display name/email come from their
+profile (via `user_id`). For a period plan, `starts_at`/`ends_at` are the chosen
+window's dates (`starts_on` at 00:00 and `ends_on` at 23:59:59, both
+Australia/Sydney) — full price applies regardless of when in the window the
 member joins; there is no pro rata. `sessions_remaining` is set at activation
 and spent by a **check-in** — see `session_checkins` below, the only writer
 that decrements it.
