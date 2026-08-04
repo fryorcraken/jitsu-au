@@ -134,6 +134,12 @@ const entryId = (slug: string) => `entry:${slug}`;
 const sectionId = (slug: string) => `section:${slug}`;
 const containerId = (slug: string) => `container:${slug}`;
 
+/** One entry, wherever in the list it currently is. Empty if it is not there. */
+function entriesNamed(groups: NavGroup[], slug: string): KbNavEntry[] {
+  const found = groups.flatMap((group) => group.entries).find((entry) => entry.slug === slug);
+  return found ? [found] : [];
+}
+
 /** The group a drag id belongs to, or null if the id is not in the list. */
 function containerOf(groups: NavGroup[], id: string): string | null {
   if (id.startsWith("container:")) return id.slice("container:".length);
@@ -1029,14 +1035,25 @@ function KnowledgeBaseManager() {
     const overIndex = entries.findIndex((e) => entryId(e.slug) === String(over.id));
     const settled =
       oldIndex === -1 || overIndex === -1 ? entries : arrayMove(entries, oldIndex, overIndex);
-    const at = settled.findIndex((e) => e.slug === slugMoved);
-    if (at === -1) {
-      setDragGroups(null);
-      return;
-    }
+    const found = settled.findIndex((e) => e.slug === slugMoved);
+    // The entry is missing from the section it was dropped on when the last
+    // drag-over and the drop disagreed about what was under the cursor. Landing
+    // it at the end of that section is a guess, but it is the RIGHT section, and
+    // it beats the alternative: a drop that silently does nothing, which is the
+    // failure this screen was reported for.
+    const at = found === -1 ? settled.length : found;
 
     setDragGroups(
-      current.map((group) => (group.slug === into ? { ...group, entries: settled } : group)),
+      current.map((group) =>
+        group.slug === into
+          ? {
+              ...group,
+              entries: found === -1 ? [...settled, ...entriesNamed(current, slugMoved)] : settled,
+            }
+          : found === -1
+            ? { ...group, entries: group.entries.filter((e) => e.slug !== slugMoved) }
+            : group,
+      ),
     );
     void commitPlacements(
       moveEntry(
@@ -1185,8 +1202,13 @@ function KnowledgeBaseManager() {
 
   if (loading) return <div className="p-8">Loading...</div>;
 
+  // The same `isSectionDirty` the discard prompt consults, so "there is nothing
+  // to save" and "there is nothing to lose" can never disagree.
   const sectionSaveDisabled =
-    saving || promoting || !sectionTitle.trim() || sectionTitle === sectionEdit?.title;
+    saving ||
+    promoting ||
+    !sectionTitle.trim() ||
+    !isSectionDirty({ title: sectionTitle }, sectionEdit);
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
@@ -1286,7 +1308,12 @@ function KnowledgeBaseManager() {
                             entry={entry}
                             row={articles.find((a) => a.slug === entry.slug)}
                             open={entry.slug === slug && !creating && !sectionEdit}
-                            disabled={saving || promoting || busy}
+                            // `ordering` is in here too: opening an article
+                            // mid-drop claims a newer request token, which
+                            // cancels the refresh the drop was waiting on and
+                            // leaves the list showing the old order over rows
+                            // that were already written.
+                            disabled={saving || promoting || busy || ordering}
                             dragDisabled={ordering}
                             onOpen={() => void openDocument(entry.slug)}
                           />
