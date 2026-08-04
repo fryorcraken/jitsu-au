@@ -59,6 +59,11 @@ vi.mock("@/lib/membership.functions", () => ({
   saveMembershipPlan: (...args: unknown[]) => saveMembershipPlan(...args),
 }));
 
+const toastError = vi.fn();
+vi.mock("sonner", () => ({
+  toast: { error: (m: string) => toastError(m), success: vi.fn() },
+}));
+
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: { id: "manager-1" }, session: null, loading: false }),
   useRoles: () => ({ roles: ["manager"], loading: false, isManager: true }),
@@ -88,17 +93,17 @@ describe("/manager/membership-plans", () => {
     expect(nameField).toHaveValue("Semester 1 2027");
   });
 
+  /** Each card and the Add form render the same four labels, so pick the
+   * radio belonging to one specific group. */
+  const radioIn = (group: string, label: RegExp) =>
+    screen.getAllByRole("radio", { name: label }).find((el) => el.getAttribute("name") === group)!;
+
   // The plan type used to be *derived* from whether the date fields were
   // filled in, while picking an option blanked all of them. So choosing
   // "Training period" immediately looked like "no dates set", the selection
   // snapped back to the credits option, and the date inputs never rendered:
   // two of the three choices were literally unclickable. The type is now the
   // plan's stored `kind`, which nothing else can overwrite.
-  /** Each card and the Add form render the same four labels, so pick the
-   * radio belonging to one specific group. */
-  const radioIn = (group: string, label: RegExp) =>
-    screen.getAllByRole("radio", { name: label }).find((el) => el.getAttribute("name") === group)!;
-
   describe("plan type picker", () => {
     it("selects Training period on the Add form and reveals its date fields", async () => {
       const user = userEvent.setup();
@@ -185,6 +190,36 @@ describe("/manager/membership-plans", () => {
     // The tick itself stays on and editable, so a manager can still tidy up.
     const ticks = screen.getAllByRole("checkbox", { name: /available to buy/i });
     expect(ticks.some((t) => t.getAttribute("data-state") === "checked")).toBe(true);
+  });
+
+  // A dateless training period activates to `ends_at: null` and still passes
+  // `sellablePlans`, i.e. a membership that never expires. That is exactly
+  // what the deleted "One semester" plan was, and "Duplicate" clears the
+  // dates, so it stays one careless click away without this guard.
+  it("refuses to add a training period with no dates", async () => {
+    const user = userEvent.setup();
+    render(<PlansPage />);
+    toastError.mockClear();
+    saveMembershipPlan.mockClear();
+
+    await user.type(
+      await screen.findByLabelText("Code", { selector: "#new-plan-code" }),
+      "semester_1_2027",
+    );
+    await user.type(
+      screen.getByLabelText("Name", { selector: "#new-plan-name" }),
+      "Semester 1 2027",
+    );
+    await user.type(
+      screen.getByLabelText("Public price ($)", { selector: "#new-plan-public-price" }),
+      "445",
+    );
+    await user.click(screen.getByRole("button", { name: "Add plan" }));
+
+    expect(toastError).toHaveBeenCalledWith(
+      "A training period needs both a start and an end date.",
+    );
+    expect(saveMembershipPlan).not.toHaveBeenCalled();
   });
 
   describe("Save button", () => {

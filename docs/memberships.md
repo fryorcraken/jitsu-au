@@ -38,6 +38,12 @@ says so. The database still permits any kind/date combination, so the manager
 agent API can write one; the manager screen flags such a row rather than
 hiding the values.
 
+The screen also refuses to save a training period with no dates, or yearly
+insurance with no day count. `savePlanSchema` allows both, but they activate
+to `ends_at: null` (`planMembershipWindow`) while still passing
+`sellablePlans` — a membership that never expires. The old generic
+`semester` plan was exactly that shape and has been deleted.
+
 Each dated training period is **its own plan**, not a shared plan pointing at
 a separate table of windows: "Semester 2 2026" and "Semester 1 2027" are two
 rows, each with its own price and its own dates, so next year's can cost more

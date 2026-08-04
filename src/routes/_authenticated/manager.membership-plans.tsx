@@ -144,21 +144,26 @@ function strandedDurationFields(p: DurationFields & { kind: string }): string[] 
  * A friendly pre-check mirroring `savePlanSchema`'s date refinements, so a
  * manager who fills in Starts and forgets Ends sees plain language instead of
  * a raw Zod issue array from the server. The type picker already makes the
- * dates/duration exclusion impossible to violate through the UI, so only the
- * "half-filled dates" and "end before start" cases can still happen here.
+ * dates/duration exclusion impossible to violate through the UI, so what is
+ * left is each type's own "you have to say when it ends" rule.
+ *
+ * Both rules below exist because `savePlanSchema` permits a plan with neither
+ * dates nor a duration, and for these two types that produces a membership
+ * with `ends_at: null` (see `planMembershipWindow`) that is still sellable —
+ * i.e. one that never expires. That is what the deleted "One semester" plan
+ * was, and "Duplicate" clears the dates, so it stays easy to recreate by
+ * accident without this.
  */
 function durationFieldsError(f: DurationFields & { kind: string }): string | null {
   const spec = planTypeOf(f.kind);
   if (spec.dates) {
-    if (Boolean(f.starts_on) !== Boolean(f.ends_on)) {
-      return "Set both a start and an end date, or neither.";
+    if (!f.starts_on || !f.ends_on) {
+      return "A training period needs both a start and an end date.";
     }
-    if (f.starts_on && f.ends_on && f.ends_on < f.starts_on) {
+    if (f.ends_on < f.starts_on) {
       return "End date must be on or after the start date.";
     }
   }
-  // Without this a rolling plan would have no end at all: no dates to fall
-  // off, and no day count to expire on.
   if (spec.duration && !f.duration_days) {
     return "Set how many days it runs from payment.";
   }
