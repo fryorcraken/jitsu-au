@@ -10,8 +10,8 @@ import { z } from "zod";
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
 import { annotationVisibilities, articleVisibilities } from "./kb";
-// Semester windows are computed in the club's own timezone (a semester's last
-// day must cover that evening's class, not cut off at UTC midnight), so this
+// A dated plan's window is computed in the club's own timezone (its last day
+// must cover that evening's class, not cut off at UTC midnight), so this
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
 // the same kind of module as this one (pure, no server imports).
 import { CLUB_TIME_ZONE, clubLocalDate, zonedWallTimeToUtc } from "./calendar";
@@ -783,14 +783,6 @@ export const membershipPlanKinds = ["insurance", "trial", "session", "period"] a
 export type MembershipPlanKind = (typeof membershipPlanKinds)[number];
 
 /**
- * The fixed length of a yearly insurance product, in days. There is no
- * manager-editable duration field anywhere in the catalogue: a `period` plan
- * runs the window the member picked at purchase, a `session` plan is tied to
- * its class, a `trial` never expires, and insurance is always a year.
- */
-export const INSURANCE_YEAR_DAYS = 365;
-
-/**
  * The club's "one month": how far ahead the purchase screen nudges an
  * insurance renewal and the manager dashboard pushes for a new membership
  * window. Always 30 days, never a calendar month.
@@ -948,20 +940,22 @@ export function sessionDateTag(sessionDate: string): string {
   return `${Number(m[3])}${month}`;
 }
 
-/** Format a `club_semesters.code` like "2026-s1" as a compact tag: "S126". */
-export function semesterCodeTag(semesterCode: string): string {
-  const m = /^(\d{4})-s([12])$/.exec(semesterCode.trim());
+/** Format a plan's `starts_on` (YYYY-MM-DD) as a compact window tag: "JUL26". */
+export function planWindowTag(startsOn: string): string {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(startsOn.trim());
   if (!m) return "";
-  return `S${m[2]}${m[1].slice(2)}`;
+  const month = MONTHS[Number(m[2]) - 1] ?? "";
+  return `${month}${m[1].slice(2)}`;
 }
 
 /**
  * Build a member's bank transfer reference: compact, uppercase, alphanumeric,
  * <= 18 chars (the Australian pay-anyone limit). Stable per member.
- *   - period / insurance / trial: `MEM<SURNAME><CODE>`          e.g. MEMNGUYEN7Q
- *   - semester-anchored (semesterCode set): `MEM<SURNAME><CODE><SemTag>`
- *     e.g. MEMNGUYEN7QS126 (keeps the MEM prefix -- unlike casual sessions,
- *     this still is not per-session; the tag only tells two semesters apart
+ *   - undated plan (insurance/trial, or a dated plan with no tag needed):
+ *     `MEM<SURNAME><CODE>`                                        e.g. MEMNGUYEN7Q
+ *   - dated plan (windowStartsOn set): `MEM<SURNAME><CODE><WindowTag>`
+ *     e.g. MEMNGUYEN7QJUL26 (keeps the MEM prefix -- unlike casual sessions,
+ *     this still is not per-session; the tag only tells two dated plans apart
  *     when both have a pending invoice at once).
  *   - per-session (sessionDate set): `<SURNAME><CODE><Day><Mon>` e.g. NGUYEN7Q7DEC
  *     (no MEM prefix — the session date already identifies the payment).
@@ -970,13 +964,13 @@ export function buildPaymentReference(
   surname: string,
   userId: string,
   sessionDate?: string,
-  semesterCode?: string,
+  windowStartsOn?: string,
 ): string {
   const code = stableCode(userId);
   const datePart = sessionDate
     ? sessionDateTag(sessionDate)
-    : semesterCode
-      ? semesterCodeTag(semesterCode)
+    : windowStartsOn
+      ? planWindowTag(windowStartsOn)
       : "";
   const prefix = sessionDate ? "" : "MEM";
   const assemble = (sur: string) => `${prefix}${sur}${code}${datePart}`;
@@ -991,34 +985,14 @@ export function buildPaymentReference(
   return ref.slice(0, 18);
 }
 
-// ---- Club semesters ----
+// ---- A plan's own window ----
 
-/** A club semester as read from `club_semesters` (or projected from it). */
-export type SemesterWindow = {
-  starts_on: string; // YYYY-MM-DD
-  ends_on: string; // YYYY-MM-DD, inclusive
+/** A plan's own duration, as read from `membership_plans` (or projected from it). */
+export type PlanWindow = {
+  starts_on: string | null; // YYYY-MM-DD
+  ends_on: string | null; // YYYY-MM-DD, inclusive
+  duration_days: number | null;
 };
-
-/** Manager: create or update a semester. Upserts by (year, half) — the code is
- * always derived server-side (`${year}-s${half}`), never taken from the caller,
- * so it can never drift from the pair the DB's own CHECK constraint ties it to.
- * `name`/dates are required on every save (semesters are edited as a whole row,
- * not patched field-by-field); `is_active` is the one field that may be
- * omitted to mean "leave it as it is". */
-export const saveSemesterSchema = z
-  .object({
-    year: z.number().int().min(2020).max(2100),
-    half: z.union([z.literal(1), z.literal(2)]),
-    name: z.string().trim().min(1).max(120),
-    starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD."),
-    ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD."),
-    is_active: z.boolean().optional(),
-  })
-  .refine((d) => d.ends_on >= d.starts_on, {
-    message: "End date must be on or after the start date.",
-    path: ["ends_on"],
-  });
-export type SaveSemesterInput = z.infer<typeof saveSemesterSchema>;
 
 /** `dateStr` (YYYY-MM-DD) plus `days` calendar days, as a new YYYY-MM-DD string. */
 function addCalendarDays(dateStr: string, days: number): string {
@@ -1028,42 +1002,56 @@ function addCalendarDays(dateStr: string, days: number): string {
 }
 
 /**
- * The absolute instants a semester-anchored membership runs for: 00:00
- * Australia/Sydney on `starts_on`, through 23:59:59 Australia/Sydney on
- * `ends_on` inclusive (one second before the next day's midnight), so the
- * final evening's class is covered rather than cut off at UTC midnight.
+ * The absolute instants a plan's membership runs for, resolved from the plan
+ * alone — no second table to look up, and no branch on the plan's `kind`:
+ *   - a dated plan (`starts_on`/`ends_on` set): 00:00 Australia/Sydney on
+ *     `starts_on` through 23:59:59 Australia/Sydney on `ends_on` inclusive
+ *     (one second before the next day's midnight, so the final evening's
+ *     class is covered rather than cut off at UTC midnight). Every member who
+ *     buys this plan gets exactly those instants, whenever in the window they
+ *     join — there is no pro rata.
+ *   - a rolling plan (`duration_days` set): `now` through `now + duration_days`
+ *     (this is how yearly insurance has always worked).
+ *   - neither: `ends_at` is null — the plan ends with its session credits
+ *     instead of a date (the free trial, casual classes).
+ * A plan never has both set (a DB CHECK enforces it), so these are exhaustive.
  */
-export function semesterMembershipWindow(semester: SemesterWindow): {
-  starts_at: string;
-  ends_at: string;
-} {
-  const starts_at = zonedWallTimeToUtc(semester.starts_on, "00:00", CLUB_TIME_ZONE).toISOString();
-  const nextDayMidnightMs = zonedWallTimeToUtc(
-    addCalendarDays(semester.ends_on, 1),
-    "00:00",
-    CLUB_TIME_ZONE,
-  ).getTime();
-  const ends_at = new Date(nextDayMidnightMs - 1000).toISOString();
-  return { starts_at, ends_at };
+export function planMembershipWindow(
+  plan: PlanWindow,
+  now: string,
+): { starts_at: string; ends_at: string | null } {
+  if (plan.starts_on && plan.ends_on) {
+    const starts_at = zonedWallTimeToUtc(plan.starts_on, "00:00", CLUB_TIME_ZONE).toISOString();
+    const nextDayMidnightMs = zonedWallTimeToUtc(
+      addCalendarDays(plan.ends_on, 1),
+      "00:00",
+      CLUB_TIME_ZONE,
+    ).getTime();
+    const ends_at = new Date(nextDayMidnightMs - 1000).toISOString();
+    return { starts_at, ends_at };
+  }
+  if (plan.duration_days) {
+    const ends_at = new Date(
+      new Date(now).getTime() + plan.duration_days * 86_400_000,
+    ).toISOString();
+    return { starts_at: now, ends_at };
+  }
+  return { starts_at: now, ends_at: null };
 }
 
 /**
- * The semesters a member may buy right now: the one running today (if any),
- * plus the next one to start after it — or, in a break with nothing running,
- * just the next one. There is no pro rata, so this is only ever the choice of
- * *which* semester, never a price difference; at most two, soonest first.
+ * The plans a member may buy right now: an undated plan (trial, casual,
+ * insurance) is always sellable while active; a dated plan drops off on its
+ * own once its `ends_on` has passed, with no manager step required to retire
+ * it. There is no pro rata, so a still-sellable dated plan is exactly as good
+ * a buy on its first day as its last.
  */
-export function sellableSemesters<T extends SemesterWindow & { is_active: boolean }>(
+export function sellablePlans<T extends PlanWindow & { is_active: boolean }>(
   all: T[],
   now: string,
 ): T[] {
   const today = clubLocalDate(new Date(now), CLUB_TIME_ZONE);
-  const active = [...all]
-    .filter((s) => s.is_active)
-    .sort((a, b) => (a.starts_on < b.starts_on ? -1 : a.starts_on > b.starts_on ? 1 : 0));
-  const current = active.find((s) => s.starts_on <= today && today <= s.ends_on) ?? null;
-  const next = active.find((s) => s.starts_on > today && s !== current) ?? null;
-  return [current, next].filter((s): s is T => s !== null);
+  return all.filter((p) => p.is_active && (!p.ends_on || p.ends_on >= today));
 }
 
 // ---- Member: yearly insurance selection on the purchase screen ----
@@ -1109,15 +1097,17 @@ export type ManagerNotification = {
 };
 
 /**
- * The membership-window notifications: the plan is unsellable while no
- * window is defined, and an expiring final window needs its successor set.
- * Fires when no active window exists at all, or when the latest active
- * window's `ends_on` is within `daysAhead` days (by the club calendar).
- * A defined successor pushes `ends_on` past the horizon, so "nothing set
- * after this one" falls out of the rule on its own.
+ * The membership-window notifications: training is unsellable while no dated
+ * plan is defined, and an expiring final one needs its successor set. Fires
+ * when no active dated plan exists at all, or when the latest active one's
+ * `ends_on` is within `daysAhead` days (by the club calendar). A defined
+ * successor pushes `ends_on` past the horizon, so "nothing set after this
+ * one" falls out of the rule on its own. Callers pass only the plans that
+ * actually carry dates (`starts_on`/`ends_on` both set) — an undated plan
+ * (trial, casual, insurance) never needs a successor.
  */
-export function membershipWindowNotifications<
-  T extends SemesterWindow & { is_active: boolean; name: string },
+export function sellableWindowNotifications<
+  T extends { starts_on: string; ends_on: string; is_active: boolean; name: string },
 >(all: T[], now: string, daysAhead: number = RENEWAL_WINDOW_DAYS): ManagerNotification[] {
   const today = clubLocalDate(new Date(now), CLUB_TIME_ZONE);
   const horizon = addCalendarDays(today, daysAhead);
@@ -1159,10 +1149,6 @@ export const startMembershipSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional()
       .or(z.literal("")),
-    // Only meaningful for a window-anchored (`period`) plan; the server
-    // requires it there and ignores it otherwise. The window's
-    // `club_semesters.code`.
-    semester_code: z.string().trim().max(16).optional().or(z.literal("")),
     // Whether to add the yearly insurance to this purchase (second invoice,
     // same payment reference). The server makes its own call from the
     // member's current cover — a member with none cannot turn this off.
@@ -1177,23 +1163,54 @@ export type StartMembershipInput = z.infer<typeof startMembershipSchema>;
 
 // ---- Manager: create / edit a plan ----
 
-export const savePlanSchema = z.object({
-  id: z.string().uuid().optional(),
-  code: z
-    .string()
-    .trim()
-    .min(1)
-    .max(64)
-    .regex(/^[a-z0-9_]+$/, "Use lowercase letters, digits and underscores only."),
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(500).optional().or(z.literal("")),
-  kind: z.enum(membershipPlanKinds),
-  public_price_cents: z.number().int().min(0).max(1_000_000),
-  student_price_cents: z.number().int().min(0).max(1_000_000).nullable(),
-  session_credits: z.number().int().positive().max(1000).nullable(),
-  is_active: z.boolean(),
-  sort_order: z.number().int().min(0).max(1000),
-});
+/**
+ * A plan's own window fields, on the save form: a fixed date range XOR a
+ * rolling duration XOR neither (mirrors the `membership_plans` CHECK
+ * constraints — see the `_membership_plans_own_dates` migration). `id`
+ * absent means create a new plan; present means update that one. `code` is
+ * still supplied by the caller (unlike the old per-semester upsert, a plan's
+ * code is not derived from anything else), so adding a plan is exactly
+ * "fill in the form" with no server-side derivation to keep in sync.
+ */
+export const savePlanSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    code: z
+      .string()
+      .trim()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9_]+$/, "Use lowercase letters, digits and underscores only."),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(500).optional().or(z.literal("")),
+    kind: z.enum(membershipPlanKinds),
+    public_price_cents: z.number().int().min(0).max(1_000_000),
+    student_price_cents: z.number().int().min(0).max(1_000_000).nullable(),
+    duration_days: z.number().int().positive().max(3650).nullable(),
+    session_credits: z.number().int().positive().max(1000).nullable(),
+    is_active: z.boolean(),
+    sort_order: z.number().int().min(0).max(1000),
+    starts_on: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.")
+      .nullable(),
+    ends_on: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.")
+      .nullable(),
+  })
+  .refine((d) => Boolean(d.starts_on) === Boolean(d.ends_on), {
+    message: "Set both a start and an end date, or neither.",
+    path: ["ends_on"],
+  })
+  .refine((d) => !d.starts_on || !d.ends_on || d.ends_on >= d.starts_on, {
+    message: "End date must be on or after the start date.",
+    path: ["ends_on"],
+  })
+  .refine((d) => !(d.starts_on && d.duration_days), {
+    message: "A plan can't have both a date range and a rolling duration.",
+    path: ["duration_days"],
+  });
 export type SavePlanInput = z.infer<typeof savePlanSchema>;
 
 // ---- Manager: set a membership's status ----
@@ -1241,8 +1258,8 @@ export const managerAgentActions = [
   "list_invoices",
   "edit_invoice",
   "file_waiver",
-  "list_membership_windows",
-  "save_membership_window",
+  "list_membership_plans",
+  "save_membership_plan",
   "list_kb_sections",
   "save_kb_section",
   "delete_kb_section",

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Pill } from "@/components/site/StatusPill";
 import { lifecycleClass } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import {
@@ -14,16 +15,12 @@ import {
   formatCents,
   insuranceSelection,
   isUtsStudent,
-  sellableSemesters,
+  sellablePlans,
   type LifecycleStatus,
 } from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
-import {
-  getMyMemberships,
-  listMembershipPlans,
-  listSemesters,
-  startMembership,
-} from "@/lib/membership.functions";
+import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
+import { getMyMemberships, listMembershipPlans, startMembership } from "@/lib/membership.functions";
 import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
@@ -35,7 +32,6 @@ export const Route = createFileRoute("/_authenticated/membership")({
 });
 
 type Plan = Awaited<ReturnType<typeof listMembershipPlans>>[number];
-type Window = Awaited<ReturnType<typeof listSemesters>>[number];
 type Mine = Awaited<ReturnType<typeof getMyMemberships>>;
 
 // The words are this page's own: a member reads "On trial", a manager reads
@@ -104,17 +100,14 @@ function CodeOfConductNudge() {
 function MembershipPage() {
   const navigate = useNavigate();
   const fetchPlans = useServerFn(listMembershipPlans);
-  const fetchSemesters = useServerFn(listSemesters);
   const fetchMine = useServerFn(getMyMemberships);
   const start = useServerFn(startMembership);
 
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [semesters, setSemesters] = useState<Window[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
   const [loading, setLoading] = useState(true);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [semesterCode, setSemesterCode] = useState<string | null>(null);
   // The insurance checkbox is not raw state: it starts from the rules in
   // `insuranceSelection` and is only editable while the member has cover.
   const [insuranceTicked, setInsuranceTicked] = useState<boolean | null>(null);
@@ -124,13 +117,6 @@ function MembershipPage() {
   // separate "I'm a student" flag. It unlocks the discounted student rate. Same
   // rule the server uses for authoritative pricing, so the two can't disagree.
   const isStudent = isUtsStudent(studentNumber);
-
-  // At most two: the window running now (if any) plus the next one to start.
-  // No pro rata either way -- this is only ever a choice of which, not a price.
-  const offeredSemesters = useMemo(
-    () => sellableSemesters(semesters, new Date().toISOString()),
-    [semesters],
-  );
 
   // The member's current insurance cover: the latest ends_at across ACTIVE
   // insurance memberships. Pending insurance invoices are a promise, not
@@ -152,16 +138,15 @@ function MembershipPage() {
 
   const reload = useMemo(
     () => () => {
-      return Promise.all([fetchPlans(), fetchSemesters(), fetchMine()]).then(([p, s, m]) => {
+      return Promise.all([fetchPlans(), fetchMine()]).then(([p, m]) => {
         setPlans(p);
-        setSemesters(s);
         setMine(m);
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
         if (m.uts_student_number) setStudentNumber(m.uts_student_number);
       });
     },
-    [fetchPlans, fetchSemesters, fetchMine],
+    [fetchPlans, fetchMine],
   );
 
   useEffect(() => {
@@ -169,13 +154,6 @@ function MembershipPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load memberships"))
       .finally(() => setLoading(false));
   }, [reload]);
-
-  // Default the picker to the first offered window once the list loads, so a
-  // member who never touches the picker still buys a valid one.
-  useEffect(() => {
-    if (semesterCode || offeredSemesters.length === 0) return;
-    setSemesterCode(offeredSemesters[0].code);
-  }, [offeredSemesters, semesterCode]);
 
   async function choose(plan: Plan) {
     setPendingCode(plan.code);
@@ -186,7 +164,6 @@ function MembershipPage() {
           is_student: isStudent,
           uts_student_number: studentNumber.trim(),
           session_date: plan.kind === "session" ? sessionDate : "",
-          semester_code: plan.kind === "period" ? (semesterCode ?? "") : "",
           include_insurance: plan.kind !== "insurance" ? insuranceIncluded : false,
           hp: "",
         },
@@ -216,7 +193,16 @@ function MembershipPage() {
   const lifecycle = mine?.lifecycle ?? "lead";
   const status = LIFECYCLE_COPY[lifecycle];
 
-  const trainingPlans = plans.filter((p) => p.kind === "period" || p.kind === "session");
+  // A dated plan drops off this list on its own once its `ends_on` passes —
+  // there is no manager step to retire it, and no pro rata either way.
+  const trainingPlans = sellablePlans(
+    plans.filter((p) => p.kind === "period" || p.kind === "session"),
+    new Date().toISOString(),
+  );
+  // Club-local, not UTC: a plan's own starts_on is a club-calendar day, so
+  // "has this one started" is judged by the same calendar the plan's dates
+  // are written in.
+  const today = clubLocalDate(new Date(), CLUB_TIME_ZONE);
   const otherPlans = plans.filter((p) => p.kind === "trial" || p.kind === "insurance");
 
   return (
@@ -279,7 +265,6 @@ function MembershipPage() {
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {m.semester_name ? `${m.semester_name}, ` : ""}
                           {m.ends_at
                             ? new Date(m.ends_at).toLocaleDateString("en-AU")
                             : m.sessions_remaining != null
@@ -315,7 +300,7 @@ function MembershipPage() {
             <div>
               <h2 className="text-2xl font-bold">Choose a plan</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Pay per class, or get a membership for the whole window.
+                Pay per class, or get a membership for the whole training period.
               </p>
             </div>
             <div className="rounded-lg border bg-card p-3">
@@ -352,11 +337,18 @@ function MembershipPage() {
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
                   {insuranceRules.canDeselect
-                    ? `Required to train. Your cover runs to ${formatDateOnly(insuranceEndsAt)}, so you can leave it off this time.`
+                    ? `Required to train. Your cover runs to ${insuranceEndsAt ? new Date(insuranceEndsAt).toLocaleDateString("en-AU") : ""}, so you can leave it off this time.`
                     : "Required to train, so it comes with your plan. It covers you and your club affiliation for a year."}
                 </span>
               </span>
             </label>
+          )}
+
+          {!trainingPlans.some((p) => p.kind === "period") && (
+            <p className="mt-4 text-sm text-muted-foreground">
+              No membership is open for enrolment right now. Check back soon, or train casually in
+              the meantime.
+            </p>
           )}
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -371,9 +363,27 @@ function MembershipPage() {
                 isStudent &&
                 plan.student_price_cents != null &&
                 plan.student_price_cents < plan.public_price_cents;
+              // A pre-sale dated plan (offered ahead of its own starts_on, so
+              // members can join before it begins) looks identical to one
+              // already running unless the card says which it is.
+              const hasStarted =
+                plan.kind !== "period" || !plan.starts_on || plan.starts_on <= today;
               return (
                 <div key={plan.code} className="flex flex-col rounded-2xl border bg-card p-6">
-                  <h3 className="text-lg font-semibold">{plan.name}</h3>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-lg font-semibold">{plan.name}</h3>
+                    {plan.kind === "period" && plan.starts_on && (
+                      <Pill
+                        label={hasStarted ? "On now" : `Starts ${formatDateOnly(plan.starts_on)}`}
+                        preserveCase
+                        className={
+                          hasStarted
+                            ? "bg-primary/10 text-primary"
+                            : "bg-muted text-muted-foreground"
+                        }
+                      />
+                    )}
+                  </div>
                   {plan.description && (
                     <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>
                   )}
@@ -417,50 +427,23 @@ function MembershipPage() {
                       />
                     </div>
                   )}
-                  {plan.kind === "period" && (
-                    <div className="mt-4 space-y-2">
-                      <Label className="text-xs">Which membership window?</Label>
-                      {offeredSemesters.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          No membership window is open for enrolment right now. Check back soon, or
-                          train casually in the meantime.
-                        </p>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {offeredSemesters.map((s) => (
-                            <label
-                              key={s.code}
-                              className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
-                            >
-                              <input
-                                type="radio"
-                                name={`window-${plan.code}`}
-                                value={s.code}
-                                checked={semesterCode === s.code}
-                                onChange={() => setSemesterCode(s.code)}
-                              />
-                              <span>
-                                {formatDateOnly(s.starts_on)} to {formatDateOnly(s.ends_on)}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Same price whichever you pick, and however far in it starts. Prefer to pay
-                        as you go instead? Choose a casual class.
-                      </p>
-                    </div>
+                  {plan.kind === "period" && plan.starts_on && plan.ends_on && (
+                    <p className="mt-4 text-xs text-muted-foreground">
+                      {formatDateOnly(plan.starts_on)} to {formatDateOnly(plan.ends_on)}. Same price
+                      however far into it you join, and there's no pro rata. Prefer to pay as you go
+                      instead? Choose a casual class.
+                    </p>
                   )}
                   <Button
                     className="mt-6"
-                    disabled={
-                      pendingCode !== null ||
-                      (plan.kind === "period" && (!semesterCode || offeredSemesters.length === 0))
-                    }
+                    disabled={pendingCode !== null}
                     onClick={() => choose(plan)}
                   >
-                    {pendingCode === plan.code ? "Starting..." : "Choose & pay by transfer"}
+                    {pendingCode === plan.code
+                      ? "Starting..."
+                      : hasStarted
+                        ? "Choose & pay by transfer"
+                        : `Join from ${formatDateOnly(plan.starts_on)}`}
                   </Button>
                 </div>
               );

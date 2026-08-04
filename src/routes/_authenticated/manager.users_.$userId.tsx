@@ -544,14 +544,7 @@ function ManagerUserPage() {
               <tbody>
                 {memberships.map((m) => (
                   <tr key={m.id} className="border-t">
-                    <td className="px-3 py-2 font-medium">
-                      {m.plan_name ?? "—"}
-                      {m.semester_name && (
-                        <div className="text-xs font-normal text-muted-foreground">
-                          {m.semester_name}
-                        </div>
-                      )}
-                    </td>
+                    <td className="px-3 py-2 font-medium">{m.plan_name ?? "—"}</td>
                     <td className="px-3 py-2">
                       <Pill label={m.status} className={membershipClass(m.status)} />
                     </td>

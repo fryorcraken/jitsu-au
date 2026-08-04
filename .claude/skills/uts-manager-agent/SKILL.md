@@ -116,14 +116,13 @@ a mistaken note), `payment_reference`, `payment_method`
 (`bank_transfer | stripe | manual`), `status` (`pending | cancelled | expired`).
 Any other key is rejected, naming itself in the error — so a typo like `price`
 doesn't get silently ignored. This includes the read-only fields a `list_*`
-call decorates an invoice with (`plan_code`, `plan_name`, `semester_code`,
-`semester_name`, `price`, `is_student`, `paid_at`, `starts_at`, `ends_at`,
-`created_at`, `member_name`, `member_email`): send only `id` plus the field(s)
-you're actually changing, never a listed invoice echoed back wholesale.
-`semester_code`/`semester_name` are set only when the invoice is for the
-period membership plan — see `list_membership_windows` below for what they mean and
-how the dates get onto an invoice in the first place; they are not editable
-here (moving one person's dates is a window correction, not an invoice edit).
+call decorates an invoice with (`plan_code`, `plan_name`, `price`, `is_student`,
+`paid_at`, `starts_at`, `ends_at`, `created_at`, `member_name`,
+`member_email`): send only `id` plus the field(s) you're actually changing,
+never a listed invoice echoed back wholesale. `plan_name` already names the
+dated period an invoice is for (e.g. "Semester 2 2026", since each period is
+its own plan — see `list_membership_plans` below); it is not editable here
+(moving one person's dates is a plan correction, not an invoice edit).
 
 ```bash
 scripts/agent.sh edit_invoice '{"id":"<uuid>","price_cents":24500,"notes":"student rate applied"}'
@@ -162,47 +161,48 @@ audit log with who made it and each field's old and new value.
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
 
-### `list_membership_windows` / `save_membership_window` — the club's membership windows
+### `list_membership_plans` / `save_membership_plan` — the plan catalogue
 
-The period membership plan does **not** run for a fixed number of days from
-payment. It runs for a fixed **membership window**: a from/to date span the club
-sets itself, aligned with the UTS teaching calendar but not identical to it,
-and it moves by about a week every year. `club_semesters` is where those dates
-live physically; a member picks one of them (the window running now, or the
-next one to start) when they buy, and their membership runs exactly that
-window's dates, full price regardless of when in it they join — there is no pro
-rata.
+A plan is what the club sells, and it carries everything about itself: name,
+price, and how it runs. A **dated** plan (`starts_on`/`ends_on` both set) runs
+exactly those dates for anyone who buys it, full price regardless of when in
+it they join — there is no pro rata. A **rolling** plan (`duration_days` set,
+e.g. yearly insurance) runs that many days from payment. Neither set means the
+plan ends with its session credits instead of a date (the free trial, casual
+class). Each dated training period is its **own plan row** — "Semester 2 2026"
+and "Semester 1 2027" are two plans, each with its own price — not a shared
+plan pointing at a separate table of windows.
 
 ```bash
-scripts/agent.sh list_membership_windows '{}'
+scripts/agent.sh list_membership_plans '{}'
 ```
 
-Returns every window (including retired ones), each with `code`
-(`<year>-s<1|2>`, e.g. `2026-s1`), `name`, `year`, `half`, `starts_on`,
-`ends_on` (inclusive — the last day of training), and `is_active`.
+Returns every plan (including inactive/retired ones), each with `id`, `code`,
+`name`, `description`, `kind`, `public_price_cents`, `student_price_cents`,
+`duration_days`, `session_credits`, `is_active`, `sort_order`, `starts_on`,
+`ends_on`.
 
 ```bash
-scripts/agent.sh save_membership_window '{
-  "year": 2027, "half": 1, "name": "Semester 1 2027",
+scripts/agent.sh save_membership_plan '{
+  "code": "semester_1_2027", "name": "Semester 1 2027",
+  "kind": "period", "public_price_cents": 46000, "student_price_cents": 25500,
+  "duration_days": null, "session_credits": null, "is_active": true, "sort_order": 2,
   "starts_on": "2027-02-01", "ends_on": "2027-06-26"
 }'
 ```
 
-`save_membership_window` upserts by **(year, half)** — `code` is always derived
-from them, never taken as an input, so it can never disagree with the dates. An
-unknown (year, half) creates a window; a known one updates its name and dates in
-place. `name`, `starts_on` and `ends_on` are **required on every call** (a
-window is saved as a whole row, not patched field by field); `is_active` may be
-omitted to leave it unchanged (defaults to `true` on create). The club only
-sells two windows a year — there is no summer term — so `half` is `1` or `2`,
-nothing else.
+Pass `id` to update an existing plan in place; omit it to create a new one.
+`starts_on`/`ends_on` and `duration_days` are mutually exclusive — sending both
+is refused. Setting up a new training period is a new plan with its own price
+and dates, not a second date range on an existing one.
 
 > [!TIP]
-> Add next year's windows before enrolments open for them, and check
-> `list_membership_windows` shows exactly two live (non-overlapping) dates a
-> member could be buying into at any moment — the server refuses two windows
-> whose dates overlap, so a mistake here surfaces as a save error, not a live
-> bug.
+> Add next year's plan before enrolments open for it, and check
+> `list_membership_plans` shows exactly the dated plans a member could be
+> buying into at any moment. There is no overlap check across plans (unlike
+> the old separate windows table) — a plan whose dates overlap another's is a
+> product decision a manager can make deliberately (e.g. running two prices
+> side by side briefly), not an error.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 

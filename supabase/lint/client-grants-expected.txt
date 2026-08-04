@@ -27,16 +27,25 @@
 # before any intended GRANT, or it will show up here as seven unexpected
 # privileges per role.
 
-# The public funnel. These five run in *server* functions that build their own
+# The public funnel. These run in *server* functions that build their own
 # client from SUPABASE_PUBLISHABLE_KEY with no user session, so PostgREST
 # resolves them to `anon` and they need real grants — they are not service-role
 # calls, despite running on the server. Grepping for the shared browser client
 # does not find them. RLS narrows each: the intake tables are insert-only (and
 # the handlers deliberately skip `.select()` so nothing can be read back), the
-# template read is `is_current = true`, the plans/semesters read is
-# `is_active = true`. `club_semesters`'s reader is `listSemesters`
-# (membership.functions.ts), used by the pricing page and the member purchase
-# flow.
+# template read is `is_current = true`.
+#
+# `membership_plans:anon:*` and `club_semesters:*` are STALE as of the
+# "membership plans carry their own dates" change: `listMembershipPlans` moved
+# behind `requireSupabaseAuth` (the public pricing page no longer reads the
+# catalogue — see docs/memberships.md), and `club_semesters` is dropped
+# outright. Both still show up here because this file pins the LIVE ACL, and
+# the migration that revokes/drops them
+# (20260804010000_membership_plans_own_dates_contract.sql) is deliberately
+# unapplied until after this code deploys (see docs/database-changes.md). Once
+# that migration is applied, remove all three lines in the same step — not
+# before, or the very next push-to-main run fails on a grant this file no
+# longer lists but the live database still holds.
 interest_registrations:anon:INSERT
 interest_registrations:authenticated:INSERT
 contact_messages:anon:INSERT

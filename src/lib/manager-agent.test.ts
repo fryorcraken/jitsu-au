@@ -302,16 +302,24 @@ describe("projectInvoice", () => {
     ends_at: null,
     sessions_remaining: null,
     session_date: null,
+    // Still a required column in the generated type: `memberships.semester_id`
+    // drops in the CONTRACT migration, which hasn't shipped yet (see
+    // docs/database-changes.md's expand/contract split). Remove this field
+    // when that migration lands and types.ts is regenerated.
     semester_id: null,
     notes: null,
     created_at: "2026-07-22T00:00:00Z",
   };
-  const plan = { id: "plan-1", code: "semester", name: "One semester" } as MembershipPlanRow;
+  const plan = {
+    id: "plan-1",
+    code: "semester_2_2026",
+    name: "Semester 2 2026",
+  } as MembershipPlanRow;
 
   it("formats the price and carries the plan code", () => {
     const p = projectInvoice(membership, plan);
     expect(p.price).toBe("$245");
-    expect(p.plan_code).toBe("semester");
+    expect(p.plan_code).toBe("semester_2_2026");
     expect(p.id).toBe("abc");
   });
 
@@ -320,17 +328,6 @@ describe("projectInvoice", () => {
     expect(p.plan_code).toBeNull();
     expect(p.plan_name).toBeNull();
     expect(p.sessions_allowed).toBeNull();
-  });
-
-  it("carries the semester when given one, and null otherwise", () => {
-    expect(projectInvoice(membership, plan).semester_code).toBeNull();
-    expect(projectInvoice(membership, plan).semester_name).toBeNull();
-    const withSemester = projectInvoice(membership, plan, {
-      code: "2026-s2",
-      name: "Semester 2 2026",
-    });
-    expect(withSemester.semester_code).toBe("2026-s2");
-    expect(withSemester.semester_name).toBe("Semester 2 2026");
   });
 
   it("exposes the plan's session allowance and this invoice's own remaining balance", () => {
@@ -381,7 +378,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("6");
+    expect(AGENT_MANIFEST.version).toBe("7");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it

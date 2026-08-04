@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "6",
+  version: "7",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,20 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "7",
+      // A membership window is no longer a concept separate from the plan
+      // that sells it: each dated training period is now its own
+      // membership_plans row, carrying its own price, starts_on and ends_on.
+      // The two actions that managed the old separate table are renamed with
+      // no aliases, so any client that cached them 400s on unknown_action.
+      breaking: true,
+      notes: [
+        "RENAMED, with no aliases: list_membership_windows -> list_membership_plans, save_membership_window -> save_membership_plan. list_membership_plans returns every plan the club sells (dated and undated alike), not just the club's training windows.",
+        "save_membership_plan creates or updates a plan directly: code, name, price, kind, and either starts_on/ends_on (a fixed date range) or duration_days (a rolling window from payment) — never both. There is no year/half upsert key any more: code is supplied by the caller like any other plan field, and an unknown code creates a new plan.",
+        "list_invoices / edit_invoice's returned invoice, and each invoice inside list_users, no longer carry semester_code / semester_name — the invoice's plan_name already names the period it was bought for (e.g. 'Semester 2 2026'), since a dated period is now a plan in its own right rather than a separate table an invoice points at.",
+      ],
+    },
     {
       version: "6",
       // The semester concept was folded into "membership windows" (the period
@@ -329,37 +343,78 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
-      name: "list_membership_windows",
+      name: "list_membership_plans",
       method: "POST",
       summary:
-        "List the club's membership windows (its own fixed training-date spans, e.g. '2026-s2' running 20 Jul to 16 Dec), newest-starting last. A period-basis membership plan runs exactly a chosen window's dates, full price regardless of when in it a member joins — there is no pro rata. Includes inactive (retired) windows.",
+        "List every plan the club sells (trial, casual, each dated training period, yearly insurance), sorted for display. A dated plan (starts_on/ends_on both set) runs exactly those dates for anyone who buys it, full price regardless of when in it they join — there is no pro rata. A rolling plan (duration_days set, e.g. yearly insurance) runs that many days from payment. Neither set means the plan ends with its session credits instead of a date (trial, casual class). Includes inactive (retired) plans.",
       params: [],
     },
     {
-      name: "save_membership_window",
+      name: "save_membership_plan",
       method: "POST",
       summary:
-        "Create or update a membership window. Upserts by (year, half) — code is always derived as '<year>-s<half>', so it is never taken as an input and can never disagree with the dates. An unknown (year, half) creates it; a known one updates its name/dates in place (and is_active, if sent). name, starts_on and ends_on are required on every call, since a window is saved as a whole row, not patched field-by-field. NOTE: if the latest window ends within 30 days and nothing is defined after it, the manager dashboard notifies managers — set the next one before then.",
+        "Create or update a membership plan. Pass id to update an existing plan in place; omit it to create a new one. A plan may set starts_on/ends_on (a fixed date range) OR duration_days (a rolling window from payment) but never both — sending both is refused. Setting up a new training period is a new plan with its own price and dates, not a second date range on an existing one. NOTE: if the latest dated plan ends within 30 days and nothing is defined after it, the manager dashboard notifies managers — set the next one before then.",
       params: [
-        { name: "year", required: true, description: "e.g. 2026." },
-        { name: "half", required: true, description: "1 or 2." },
-        { name: "name", required: true, description: "What members see, e.g. 'Semester 2 2026'." },
         {
-          name: "starts_on",
-          required: true,
-          description: "YYYY-MM-DD, the first day of training.",
+          name: "id",
+          required: false,
+          description: "The plan's UUID, to update it. Omit to create a new plan.",
         },
         {
-          name: "ends_on",
+          name: "code",
           required: true,
           description:
-            "YYYY-MM-DD, the LAST day of training (inclusive) — must be on or after starts_on. A membership bought for this window covers this whole day.",
+            "Stable key, e.g. 'semester_2_2027'. Lowercase letters, digits and underscores only.",
+        },
+        { name: "name", required: true, description: "What members see, e.g. 'Semester 2 2027'." },
+        { name: "description", required: false, description: "Shown under the plan's name." },
+        {
+          name: "kind",
+          required: true,
+          description: "insurance | trial | session | period.",
+        },
+        {
+          name: "public_price_cents",
+          required: true,
+          description: "The general-public price, in integer cents.",
+        },
+        {
+          name: "student_price_cents",
+          required: false,
+          description: "The UTS student price, in integer cents. Null/omit for no student rate.",
+        },
+        {
+          name: "duration_days",
+          required: false,
+          description:
+            "Rolling window: this many days from payment (e.g. 365 for yearly insurance). Mutually exclusive with starts_on/ends_on.",
+        },
+        {
+          name: "session_credits",
+          required: false,
+          description: "Classes this plan grants (e.g. 2 for the free trial). Null for no credits.",
         },
         {
           name: "is_active",
+          required: true,
+          description: "Whether members can currently buy this plan.",
+        },
+        {
+          name: "sort_order",
+          required: true,
+          description: "Lower sorts first on the member purchase screen.",
+        },
+        {
+          name: "starts_on",
           required: false,
           description:
-            "Whether members can currently buy this window. Omit to leave unchanged (defaults to true on create).",
+            "YYYY-MM-DD, the first day of training. Requires ends_on. Mutually exclusive with duration_days.",
+        },
+        {
+          name: "ends_on",
+          required: false,
+          description:
+            "YYYY-MM-DD, the LAST day of training (inclusive) — must be on or after starts_on. A membership bought for this plan covers this whole day.",
         },
       ],
     },
@@ -746,18 +801,12 @@ export function invoiceEditAudit(opts: {
 }
 
 /** Client-safe projection of an invoice (membership) joined with its plan. */
-export function projectInvoice(
-  m: MembershipRow,
-  plan?: MembershipPlanRow,
-  semester?: { code: string; name: string },
-) {
+export function projectInvoice(m: MembershipRow, plan?: MembershipPlanRow) {
   return {
     id: m.id,
     user_id: m.user_id,
     plan_code: plan?.code ?? null,
     plan_name: plan?.name ?? null,
-    semester_code: semester?.code ?? null,
-    semester_name: semester?.name ?? null,
     status: m.status,
     price_cents: m.price_cents,
     price: formatCents(m.price_cents),

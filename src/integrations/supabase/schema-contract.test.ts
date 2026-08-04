@@ -59,10 +59,13 @@ type Expect<T extends true> = T;
  */
 type AssertAbsent<T, K> = K extends keyof T ? false : true;
 
-// ---- membership_plans: columns dropped by 20260803120000_membership_windows_contract.sql ----
-export type _MembershipPlansNoDurationDays = Expect<
-  AssertAbsent<Tables["membership_plans"]["Row"], "duration_days">
->;
+// ---- membership_plans: period_basis stays dropped, duration_days came back ----
+// `20260803120000_membership_windows_contract.sql` dropped both `duration_days`
+// and `period_basis` when the `semester` plan ran on `club_semesters` instead.
+// `20260804000000_membership_plans_own_dates.sql` re-added `duration_days`
+// (see its header for why) as the rolling half of a plan's own window, so only
+// `period_basis` stays asserted absent — see `_MembershipPlanOwnDatesColumns`
+// below for the pin on the reinstated column.
 export type _MembershipPlansNoPeriodBasis = Expect<
   AssertAbsent<Tables["membership_plans"]["Row"], "period_basis">
 >;
@@ -121,19 +124,13 @@ export type _InterestColumns = RequireColumns<
   "sms_whatsapp_consent"
 >;
 
-// ---- club_semesters: the club's membership windows (its own fixed dates) ----
-export type _ClubSemesterColumns = RequireColumns<
-  Tables["club_semesters"]["Row"],
-  "code" | "name" | "year" | "half" | "starts_on" | "ends_on" | "is_active"
->;
-
-// ---- memberships: which membership window a `period` invoice is for ----
-// `activateMembershipRow` resolves this column for every `period` plan, with
-// no kind discriminator anywhere else to fall back on — if it went missing,
-// those activations would fail rather than pick a wrong default.
-export type _MembershipSemesterIdColumn = RequireColumns<
-  Tables["memberships"]["Row"],
-  "semester_id"
+// ---- membership_plans: a plan's own window (dated XOR rolling XOR neither) ----
+// `activateMembershipRow` resolves a plan's dates from these three columns
+// alone (via `planMembershipWindow`), with no second table to fall back on —
+// if one went missing, activation would fail rather than pick a wrong default.
+export type _MembershipPlanOwnDatesColumns = RequireColumns<
+  Tables["membership_plans"]["Row"],
+  "starts_on" | "ends_on" | "duration_days"
 >;
 
 // ---- email_verification_tokens: proof that someone can read an address ----

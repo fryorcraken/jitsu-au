@@ -7,7 +7,7 @@ import {
   resolveCoverage,
 } from "./checkin";
 import type { CoverageCandidate } from "./checkin";
-import { semesterMembershipWindow } from "./validation";
+import { planMembershipWindow } from "./validation";
 
 /** The class being checked in to, and the instant coverage is resolved at. */
 const AT = "2026-08-05T08:00:00.000Z";
@@ -123,13 +123,16 @@ describe("resolveCoverage", () => {
     expect(resolveCoverage({ memberships: [future], at: AT }).coverage).toBe("none");
   });
 
-  // Exercises the actual dates activateMembershipRow writes for a semester
-  // plan (semesterMembershipWindow), not hand-picked ISO strings -- a fencepost
-  // error in that window (e.g. ending at UTC midnight instead of 23:59:59
-  // Sydney) would cut off the last day's evening class, and this is what would
-  // catch it.
+  // Exercises the actual dates activateMembershipRow writes for a dated plan
+  // (planMembershipWindow), not hand-picked ISO strings -- a fencepost error
+  // in that window (e.g. ending at UTC midnight instead of 23:59:59 Sydney)
+  // would cut off the last day's evening class, and this is what would catch
+  // it.
   it("covers a semester's final evening class and not the day before it starts", () => {
-    const window = semesterMembershipWindow({ starts_on: "2026-07-20", ends_on: "2026-11-22" });
+    const window = planMembershipWindow(
+      { starts_on: "2026-07-20", ends_on: "2026-11-22", duration_days: null },
+      "2026-01-01T00:00:00.000Z",
+    );
     const semesterMembership = semester({ starts_at: window.starts_at, ends_at: window.ends_at });
 
     const lastEveningClass = "2026-11-22T09:00:00.000Z"; // 20:00 AEDT on the last day
