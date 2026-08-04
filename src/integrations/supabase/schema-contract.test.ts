@@ -59,10 +59,13 @@ type Expect<T extends true> = T;
  */
 type AssertAbsent<T, K> = K extends keyof T ? false : true;
 
-// ---- membership_plans: columns dropped by 20260803120000_membership_windows_contract.sql ----
-export type _MembershipPlansNoDurationDays = Expect<
-  AssertAbsent<Tables["membership_plans"]["Row"], "duration_days">
->;
+// ---- membership_plans: period_basis stays dropped, duration_days came back ----
+// `20260803120000_membership_windows_contract.sql` dropped both `duration_days`
+// and `period_basis` when the `semester` plan ran on `club_semesters` instead.
+// `20260804000000_membership_plans_own_dates.sql` re-added `duration_days`
+// (see its header for why) as the rolling half of a plan's own window, so only
+// `period_basis` stays asserted absent — see `_MembershipPlanOwnDatesColumns`
+// below for the pin on the reinstated column.
 export type _MembershipPlansNoPeriodBasis = Expect<
   AssertAbsent<Tables["membership_plans"]["Row"], "period_basis">
 >;
