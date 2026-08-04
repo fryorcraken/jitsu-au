@@ -437,8 +437,10 @@ constraints enforce this is mutually exclusive
 its own row — "Semester 2 2026" and "Semester 1 2027" can be priced
 differently — rather than a shared plan pointing at a separate table of
 windows; this table used to be paired with `club_semesters` and a
-`period_basis` discriminator, both dropped once every plan carried its own
-dates directly (`20260804010000_membership_plans_own_dates_contract.sql`).
+`period_basis` discriminator. `period_basis` was already dropped
+(`20260803120000_membership_windows_contract.sql`); `club_semesters` and
+`memberships.semester_id` drop once every plan carries its own dates directly
+(`20260804010000_membership_plans_own_dates_contract.sql`).
 **RLS:** managers read all and write; `authenticated` reads active plans (the
 member purchase screen, `/membership`). There is deliberately no `anon` grant:
 the public pricing page (`/pricing`) is hand-written copy, not driven by this
