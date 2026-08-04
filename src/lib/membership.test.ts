@@ -9,6 +9,8 @@ import {
   matchesMembershipReference,
   normalizeRef,
   parseMoneyToCents,
+  planEditPayload,
+  planEditsDiffer,
   planMembershipWindow,
   sanitizeSurname,
   saveClubSettingsSchema,
@@ -579,5 +581,62 @@ describe("saveClubSettingsSchema", () => {
       invoice_payment_instructions: "x".repeat(5001),
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("planEditPayload / planEditsDiffer", () => {
+  const plan = () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    code: "2026-s2",
+    name: "Semester 2 2026",
+    description: "Unlimited classes",
+    kind: "period",
+    public_price_cents: 44500,
+    student_price_cents: 24500,
+    duration_days: null,
+    session_credits: null,
+    is_active: true,
+    sort_order: 2,
+    starts_on: "2026-07-20",
+    ends_on: "2026-12-16",
+  });
+
+  it("passes the editable fields through and normalises a null description", () => {
+    expect(planEditPayload({ ...plan(), description: null })).toEqual({
+      ...plan(),
+      description: "",
+    });
+  });
+
+  it("omits id when creating rather than sending an undefined one", () => {
+    const { id: _id, ...rest } = plan();
+    expect("id" in planEditPayload(rest)).toBe(false);
+  });
+
+  it("reports no difference for an untouched copy", () => {
+    expect(planEditsDiffer(plan(), plan())).toBe(false);
+  });
+
+  it("ignores fields a save does not carry, so they cannot fake a change", () => {
+    // `created_at` rides along on the row but is never sent.
+    const withExtra = { ...plan(), created_at: "2026-01-01T00:00:00Z" };
+    expect(planEditsDiffer(withExtra, plan())).toBe(false);
+  });
+
+  it.each([
+    ["name", { name: "Semester 2 2026 (revised)" }],
+    ["price", { public_price_cents: 45000 }],
+    ["kind", { kind: "session" }],
+    ["dates", { ends_on: "2026-12-20" }],
+    ["availability", { is_active: false }],
+    ["credits", { session_credits: 10 }],
+  ])("reports a difference when the %s changes", (_label, patch) => {
+    expect(planEditsDiffer({ ...plan(), ...patch }, plan())).toBe(true);
+  });
+
+  it("treats an empty-string description as equal to a null one", () => {
+    expect(planEditsDiffer({ ...plan(), description: "" }, { ...plan(), description: null })).toBe(
+      false,
+    );
   });
 });

@@ -1119,7 +1119,7 @@ export function sellableWindowNotifications<
       {
         type: "define_membership_window",
         title: "Set up a membership window",
-        body: "Members cannot join as members until the club's training dates are set. Add them now on the plans page.",
+        body: "Members cannot join as members until the club's training dates are set. Add them now on the membership plans page.",
         href: "/manager/membership-plans",
       },
     ];
@@ -1130,7 +1130,7 @@ export function sellableWindowNotifications<
     {
       type: "define_membership_window",
       title: `The membership window ${latest.name} ends ${formatDateOnly(latest.ends_on)}`,
-      body: "Nothing is defined after it, so enrolments stop when it ends. Set the club's next training dates on the plans page.",
+      body: "Nothing is defined after it, so enrolments stop when it ends. Set the club's next training dates on the membership plans page.",
       href: "/manager/membership-plans",
     },
   ];
@@ -1212,6 +1212,59 @@ export const savePlanSchema = z
     path: ["duration_days"],
   });
 export type SavePlanInput = z.infer<typeof savePlanSchema>;
+
+/**
+ * The editable half of a plan, as the manager screen holds it in state. Kept
+ * structural (rather than importing `MembershipPlanRow`) so this module stays
+ * free of the generated Supabase types; the row satisfies it, and so does the
+ * "Add a plan" form once its price is known.
+ */
+export type PlanEditFields = {
+  id?: string;
+  code: string;
+  name: string;
+  description: string | null;
+  kind: string;
+  public_price_cents: number;
+  student_price_cents: number | null;
+  duration_days: number | null;
+  session_credits: number | null;
+  is_active: boolean;
+  sort_order: number;
+  starts_on: string | null;
+  ends_on: string | null;
+};
+
+/**
+ * Exactly what a save would send for this plan. The manager screen uses it for
+ * both the request body and its "has anything changed?" check, so a greyed-out
+ * Save button means precisely "the request would be identical" rather than an
+ * approximation that can drift from the payload beside it.
+ */
+export function planEditPayload(p: PlanEditFields): SavePlanInput {
+  return {
+    ...(p.id ? { id: p.id } : {}),
+    code: p.code,
+    name: p.name,
+    description: p.description || "",
+    kind: p.kind as MembershipPlanKind,
+    public_price_cents: p.public_price_cents,
+    student_price_cents: p.student_price_cents,
+    duration_days: p.duration_days,
+    session_credits: p.session_credits,
+    is_active: p.is_active,
+    sort_order: p.sort_order,
+    starts_on: p.starts_on,
+    ends_on: p.ends_on,
+  };
+}
+
+/** Whether saving `edited` would send anything different from `saved`.
+ * Compares the serialised payloads, so a field the save does not carry (say
+ * `created_at`) can never make a card look dirty. */
+export function planEditsDiffer(edited: PlanEditFields, saved: PlanEditFields): boolean {
+  return JSON.stringify(planEditPayload(edited)) !== JSON.stringify(planEditPayload(saved));
+}
 
 // ---- Manager: set a membership's status ----
 
