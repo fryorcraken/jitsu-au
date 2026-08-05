@@ -98,11 +98,11 @@ export function nextPosition(siblings: Orderable[]): number {
 }
 
 /**
- * Move one item up or down its list, and report the rows whose position that
- * changes.
+ * Move one item to a new index in its list, and report the rows whose position
+ * that changes.
  *
  * The whole list is renumbered in steps of ten and only the rows that actually
- * moved are returned, which is what makes the arrows reliable rather than
+ * moved are returned, which is what makes dragging reliable rather than
  * usually-right: positions default to 0, so a knowledge base nobody has ordered
  * yet has every entry tied on the same number, and a "swap these two numbers"
  * implementation would swap 0 for 0 and appear to do nothing. Renumbering breaks
@@ -113,27 +113,114 @@ export function nextPosition(siblings: Orderable[]): number {
  * (`buildKbNav`), and a second, slightly different sort here would move whatever
  * this function thinks is above rather than what the manager can see is above.
  *
- * `direction` is -1 for up and 1 for down. Moving the first item up or the last
- * one down returns nothing, so the caller can disable the arrow without a second
- * definition of "first".
+ * Dropping something back where it already was returns nothing, so a drag that
+ * goes nowhere writes nothing.
  */
-export function reorder<T extends Orderable>(
+export function moveSection<T extends Orderable>(
   items: T[],
   slug: string,
-  direction: -1 | 1,
+  toIndex: number,
 ): Orderable[] {
-  const ordered = items;
-  const from = ordered.findIndex((item) => item.slug === slug);
-  const to = from + direction;
-  if (from === -1 || to < 0 || to >= ordered.length) return [];
+  const from = items.findIndex((item) => item.slug === slug);
+  if (from === -1) return [];
+  const to = clamp(toIndex, items.length - 1);
 
-  const moved = ordered.slice();
-  [moved[from], moved[to]] = [moved[to], moved[from]];
+  const moved = items.slice();
+  moved.splice(to, 0, ...moved.splice(from, 1));
 
   const before = new Map(items.map((item) => [item.slug, item.position]));
   return moved
     .map((item, index) => ({ slug: item.slug, position: (index + 1) * POSITION_STEP }))
     .filter((item) => before.get(item.slug) !== item.position);
+}
+
+/** Where one entry ends up: which section, and where in it. */
+export type Placement = { slug: string; section: string; position: number };
+
+/** A section's entries, in the order they are shown. `slug` is "" for none. */
+export type EntryGroup = { slug: string; entries: Orderable[] };
+
+/**
+ * Move an entry to a place in the reading order, possibly in another section,
+ * and report every row that has to be written.
+ *
+ * Cross-section is the case worth having, and the reason this is not
+ * `moveSection` with an extra argument: taking an entry OUT of a section leaves
+ * a gap behind it, so both lists are renumbered, and a manager dragging the
+ * middle article of "Start here" into "Belts" changes rows in two sections at
+ * once. Returning only what changed keeps that to the two or three writes it
+ * really is rather than the whole knowledge base.
+ *
+ * `toSection` is "" for the catch-all "Everything else" group, matching the ""
+ * that `save_kb_article` reads as "in no section". A `toSection` that is not in
+ * `groups` is treated as an empty section, which is what makes an empty section
+ * (only the manager screen shows them) a place you can drop something.
+ */
+export function moveEntry(
+  groups: EntryGroup[],
+  slug: string,
+  toSection: string,
+  toIndex: number,
+): Placement[] {
+  const from = groups.find((group) => group.entries.some((entry) => entry.slug === slug));
+  if (!from) return [];
+  const entry = from.entries.find((e) => e.slug === slug) as Orderable;
+
+  const before = new Map<string, { section: string; position: number }>();
+  for (const group of groups) {
+    for (const row of group.entries) {
+      before.set(row.slug, { section: group.slug, position: row.position });
+    }
+  }
+
+  const source = from.entries.filter((e) => e.slug !== slug);
+  // Same section: insert into the list the entry has ALREADY been taken out of,
+  // so an index the caller read off the rendered list still means the slot the
+  // manager dropped onto. Re-reading it from the untouched list would put a
+  // downward move one place short of where it was let go.
+  const target =
+    from.slug === toSection
+      ? source
+      : (groups.find((group) => group.slug === toSection)?.entries.slice() ?? []);
+
+  target.splice(clamp(toIndex, target.length), 0, entry);
+
+  const renumber = (list: Orderable[], section: string): Placement[] =>
+    list.map((row, index) => ({
+      slug: row.slug,
+      section,
+      position: (index + 1) * POSITION_STEP,
+    }));
+
+  const next =
+    from.slug === toSection
+      ? renumber(target, toSection)
+      : [...renumber(source, from.slug), ...renumber(target, toSection)];
+
+  return next.filter((row) => {
+    const was = before.get(row.slug);
+    return !was || was.section !== row.section || was.position !== row.position;
+  });
+}
+
+/** An index that lands inside the list, wherever a drop reported it. */
+function clamp(index: number, max: number): number {
+  return Math.max(0, Math.min(index, max));
+}
+
+/** What the section editor holds, and what the stored section holds. */
+export type SectionDraft = { title: string };
+
+/**
+ * Whether the section editor holds work a save would keep.
+ *
+ * Field by field rather than a stringify, for the same reason `isArticleDirty`
+ * is: it is one field today, and a comparison that quietly starts covering
+ * whatever else gets added is a comparison nobody chose.
+ */
+export function isSectionDirty(draft: SectionDraft, stored: SectionDraft | null): boolean {
+  if (!stored) return Boolean(draft.title.trim());
+  return draft.title !== stored.title;
 }
 
 /**

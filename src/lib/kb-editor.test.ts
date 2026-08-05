@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   isArticleDirty,
+  isSectionDirty,
+  moveEntry,
+  moveSection,
   nextPosition,
-  reorder,
   slugFromTitle,
   wideningVisibility,
 } from "./kb-editor";
@@ -132,22 +134,22 @@ describe("nextPosition", () => {
   });
 });
 
-describe("reorder", () => {
+describe("moveSection", () => {
   const list = [
     { slug: "a", position: 10 },
     { slug: "b", position: 20 },
     { slug: "c", position: 30 },
   ];
 
-  it("swaps an entry with the one above it", () => {
-    expect(reorder(list, "b", -1)).toEqual([
+  it("moves a section up", () => {
+    expect(moveSection(list, "b", 0)).toEqual([
       { slug: "b", position: 10 },
       { slug: "a", position: 20 },
     ]);
   });
 
-  it("swaps an entry with the one below it", () => {
-    expect(reorder(list, "b", 1)).toEqual([
+  it("moves a section down", () => {
+    expect(moveSection(list, "b", 2)).toEqual([
       { slug: "c", position: 20 },
       { slug: "b", position: 30 },
     ]);
@@ -155,26 +157,31 @@ describe("reorder", () => {
 
   it("returns only the rows that actually moved", () => {
     // "c" stays at 30, so it is not written.
-    expect(reorder(list, "a", 1).map((m) => m.slug)).toEqual(["b", "a"]);
+    expect(moveSection(list, "a", 1).map((m) => m.slug)).toEqual(["b", "a"]);
   });
 
-  it("does nothing at either end", () => {
-    expect(reorder(list, "a", -1)).toEqual([]);
-    expect(reorder(list, "c", 1)).toEqual([]);
-    expect(reorder(list, "missing", 1)).toEqual([]);
+  it("writes nothing for a drop that goes nowhere", () => {
+    expect(moveSection(list, "a", 0)).toEqual([]);
+    expect(moveSection(list, "c", 2)).toEqual([]);
+    expect(moveSection(list, "missing", 0)).toEqual([]);
+  });
+
+  it("keeps an index past either end inside the list", () => {
+    expect(moveSection(list, "a", 99).map((m) => m.slug)).toEqual(["b", "c", "a"]);
+    expect(moveSection(list, "c", -3).map((m) => m.slug)).toEqual(["c", "a", "b"]);
   });
 
   // The case a "swap the two numbers" implementation gets wrong: a knowledge
   // base nobody has ordered yet has everything on 0, so swapping positions
-  // swaps 0 for 0 and the arrow appears to be broken. Renumbering breaks the
-  // tie on the first click.
+  // swaps 0 for 0 and the drag appears to be broken. Renumbering breaks the
+  // tie on the first move.
   it("breaks a tie when nothing has been ordered yet", () => {
     const unordered = [
       { slug: "a", position: 0 },
       { slug: "b", position: 0 },
       { slug: "c", position: 0 },
     ];
-    expect(reorder(unordered, "c", -1)).toEqual([
+    expect(moveSection(unordered, "c", 1)).toEqual([
       { slug: "a", position: 10 },
       { slug: "c", position: 20 },
       { slug: "b", position: 30 },
@@ -191,6 +198,130 @@ describe("reorder", () => {
     ];
     // "earlier" is already on 10 and stays there, so the only write is the row
     // that had to move out of its way.
-    expect(reorder(shown, "earlier", -1)).toEqual([{ slug: "later", position: 20 }]);
+    expect(moveSection(shown, "earlier", 0)).toEqual([{ slug: "later", position: 20 }]);
+  });
+});
+
+describe("moveEntry", () => {
+  const groups = () => [
+    {
+      slug: "start",
+      entries: [
+        { slug: "welcome", position: 10 },
+        { slug: "house-rules", position: 20 },
+        { slug: "kit", position: 30 },
+      ],
+    },
+    { slug: "belts", entries: [{ slug: "syllabus", position: 10 }] },
+    { slug: "empty", entries: [] },
+    { slug: "", entries: [{ slug: "stray", position: 10 }] },
+  ];
+
+  it("moves an entry within its own section", () => {
+    expect(moveEntry(groups(), "kit", "start", 0)).toEqual([
+      { slug: "kit", section: "start", position: 10 },
+      { slug: "welcome", section: "start", position: 20 },
+      { slug: "house-rules", section: "start", position: 30 },
+    ]);
+  });
+
+  it("moves an entry into another section, closing the gap behind it", () => {
+    // Both lists are rewritten: "kit" lands in "belts", and "start" renumbers
+    // around the hole it left.
+    expect(moveEntry(groups(), "house-rules", "belts", 0)).toEqual([
+      { slug: "kit", section: "start", position: 20 },
+      { slug: "house-rules", section: "belts", position: 10 },
+      { slug: "syllabus", section: "belts", position: 20 },
+    ]);
+  });
+
+  it("moves an entry into a section with nothing in it", () => {
+    expect(moveEntry(groups(), "syllabus", "empty", 0)).toEqual([
+      { slug: "syllabus", section: "empty", position: 10 },
+    ]);
+  });
+
+  // "Everything else" is a real drop target, not a state an entry can only fall
+  // into by having its section deleted.
+  it("moves an entry out of every section", () => {
+    expect(moveEntry(groups(), "syllabus", "", 0)).toEqual([
+      { slug: "syllabus", section: "", position: 10 },
+      { slug: "stray", section: "", position: 20 },
+    ]);
+  });
+
+  it("moves an entry out of the catch-all group into a section", () => {
+    expect(moveEntry(groups(), "stray", "belts", 1)).toEqual([
+      { slug: "stray", section: "belts", position: 20 },
+    ]);
+  });
+
+  it("returns only the rows that actually moved", () => {
+    // "welcome" is already first and stays on 10, so it is not written.
+    expect(moveEntry(groups(), "kit", "start", 1)).toEqual([
+      { slug: "kit", section: "start", position: 20 },
+      { slug: "house-rules", section: "start", position: 30 },
+    ]);
+  });
+
+  it("writes nothing for a drop that goes nowhere", () => {
+    expect(moveEntry(groups(), "house-rules", "start", 1)).toEqual([]);
+    expect(moveEntry(groups(), "missing", "start", 0)).toEqual([]);
+  });
+
+  // The index is read off the list as RENDERED, which still has the dragged
+  // entry in it. Dropping "welcome" at the last slot has to leave it last.
+  it("reads a same-section index against the list the entry has left", () => {
+    expect(moveEntry(groups(), "welcome", "start", 2).map((m) => m.slug)).toEqual([
+      "house-rules",
+      "kit",
+      "welcome",
+    ]);
+  });
+
+  it("breaks a tie when nothing has been ordered yet", () => {
+    const unordered = [
+      {
+        slug: "start",
+        entries: [
+          { slug: "a", position: 0 },
+          { slug: "b", position: 0 },
+        ],
+      },
+    ];
+    expect(moveEntry(unordered, "b", "start", 0)).toEqual([
+      { slug: "b", section: "start", position: 10 },
+      { slug: "a", section: "start", position: 20 },
+    ]);
+  });
+
+  // A drop onto a section this screen does not know about is an empty section
+  // rather than a no-op: the manager screen keeps empty sections visible, and a
+  // drag onto one that silently did nothing is the bug this replaced.
+  it("treats an unknown section as an empty one", () => {
+    expect(moveEntry(groups(), "syllabus", "brand-new", 0)).toEqual([
+      { slug: "syllabus", section: "brand-new", position: 10 },
+    ]);
+  });
+});
+
+describe("isSectionDirty", () => {
+  it("is clean against the stored name", () => {
+    expect(isSectionDirty({ title: "Start here" }, { title: "Start here" })).toBe(false);
+  });
+
+  it("is dirty once the name is edited", () => {
+    expect(isSectionDirty({ title: "Start here!" }, { title: "Start here" })).toBe(true);
+  });
+
+  // Whitespace is a real edit against a stored name: the manager typed it, and
+  // the save trims it, so silently calling it clean would drop the correction.
+  it("counts a whitespace-only difference as an edit", () => {
+    expect(isSectionDirty({ title: "Start here " }, { title: "Start here" })).toBe(true);
+  });
+
+  it("has nothing to lose with nothing typed", () => {
+    expect(isSectionDirty({ title: "   " }, null)).toBe(false);
+    expect(isSectionDirty({ title: "New" }, null)).toBe(true);
   });
 });
