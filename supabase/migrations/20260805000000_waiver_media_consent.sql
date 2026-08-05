@@ -178,7 +178,7 @@ $md$,
     },
     {
       "id": "media",
-      "label": "I consent to photographs/video being taken for promotional use (without identifying my/the minor's name).",
+      "label": "I consent to photographs/video of me (or the minor) being taken for promotional use, without identifying my (or the minor's) name.",
       "required": false
     },
     {
