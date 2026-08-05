@@ -79,7 +79,7 @@ function ManagerMembershipsPage() {
               <Link to="/manager/reconciliation">Reconcile bank statement</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link to="/manager/membership-plans">Edit plans</Link>
+              <Link to="/manager/membership-plans">Membership plans</Link>
             </Button>
             <Button asChild variant="outline">
               <Link to="/manager/settings">Settings</Link>

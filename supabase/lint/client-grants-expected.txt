@@ -35,27 +35,18 @@
 # the handlers deliberately skip `.select()` so nothing can be read back), the
 # template read is `is_current = true`.
 #
-# `membership_plans:anon:*` and `club_semesters:*` are STALE as of the
-# "membership plans carry their own dates" change: `listMembershipPlans` moved
-# behind `requireSupabaseAuth` (the public pricing page no longer reads the
-# catalogue — see docs/memberships.md), and `club_semesters` is dropped
-# outright. Both still show up here because this file pins the LIVE ACL, and
-# the migration that revokes/drops them
-# (20260804010000_membership_plans_own_dates_contract.sql) is deliberately
-# unapplied until after this code deploys (see docs/database-changes.md). Once
-# that migration is applied, remove all three lines in the same step — not
-# before, or the very next push-to-main run fails on a grant this file no
-# longer lists but the live database still holds.
+# `membership_plans` keeps only its `authenticated` grant: the member purchase
+# screen reads the catalogue through `requireSupabaseAuth`, while the public
+# pricing page is hand-written copy that does not read it at all (see
+# docs/memberships.md). The `anon` grant, and `club_semesters` entirely, went
+# with 20260804010000_membership_plans_own_dates_contract.sql.
 interest_registrations:anon:INSERT
 interest_registrations:authenticated:INSERT
 contact_messages:anon:INSERT
 contact_messages:authenticated:INSERT
 waiver_templates:anon:SELECT
 waiver_templates:authenticated:SELECT
-membership_plans:anon:SELECT
 membership_plans:authenticated:SELECT
-club_semesters:anon:SELECT
-club_semesters:authenticated:SELECT
 
 # Not for any browser code: the storage policy "Owners can read their own waiver
 # PDF" sub-selects public.waivers, and an RLS policy expression runs with the

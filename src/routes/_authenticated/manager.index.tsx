@@ -99,8 +99,8 @@ function ManagerDashboard() {
             },
             {
               to: "/manager/membership-plans",
-              title: "Plans & windows",
-              blurb: "Prices, availability, training windows.",
+              title: "Membership plans",
+              blurb: "Prices, dates and availability.",
             },
             { to: "/manager/users", title: "Users", blurb: "Everyone in the funnel." },
             { to: "/manager/waivers", title: "Signed waivers", blurb: "Approvals and uploads." },

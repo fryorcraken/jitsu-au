@@ -412,6 +412,15 @@ function MembershipPage() {
                         {plan.session_credits} session{plan.session_credits === 1 ? "" : "s"}
                       </li>
                     )}
+                    {/* No credit cap on a training period means unlimited mat
+                        time for its dates, which is the main thing being
+                        bought. Saying nothing at all read as an omission. */}
+                    {plan.session_credits == null && plan.kind === "period" && (
+                      <li className="flex items-center gap-2">
+                        <Check className="h-4 w-4 text-primary" />
+                        Unlimited classes
+                      </li>
+                    )}
                   </ul>
                   {plan.kind === "session" && (
                     <div className="mt-4">

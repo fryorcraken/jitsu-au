@@ -14,11 +14,3 @@
 # (20260101000000). Blank lines and everything after '#' are ignored.
 # Say WHY each entry is here and what unblocks it. An empty list is the
 # healthy state.
-
-# Contract phase of "membership plans carry their own dates" (drops
-# club_semesters, memberships.semester_id, and membership_plans's anon
-# grant). Must land AFTER the redesign code has deployed — the old build
-# reads club_semesters/semester_id directly on activation and the old
-# /pricing loader reads membership_plans as anon. Unblock: merge the PR,
-# confirm Lovable deployed the new build, then apply and remove this entry.
-20260804010000_membership_plans_own_dates_contract
