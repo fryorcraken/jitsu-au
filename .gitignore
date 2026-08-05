@@ -36,3 +36,4 @@ dist-ssr
 
 # Output of scripts/pr-screenshots.mjs (uploaded as a CI artifact, never committed)
 screenshots/
+screenshots-*/

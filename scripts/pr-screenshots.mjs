@@ -200,9 +200,32 @@ async function shoot(browser, baseUrl, viewport, path) {
     // typeface mid-run and makes every diff look like a change.
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ path: file, fullPage: true, animations: "disabled", caret: "hide" });
-    return { path, viewport: viewport.name, status, ok: status < 400, file };
+
+    // A page that failed still answers 200: both the router's error boundary
+    // and its 404 render inside a normal response (src/routes/__root.tsx), so
+    // the status code alone would call a site-wide "This page didn't load" a
+    // clean run. The boundaries carry data-page-state for exactly this.
+    const state = await page.evaluate(
+      () => document.querySelector("[data-page-state]")?.getAttribute("data-page-state") ?? null,
+    );
+
+    return {
+      path,
+      viewport: viewport.name,
+      status,
+      ok: status < 400 && state === null,
+      state,
+      file,
+    };
   } catch (error) {
-    return { path, viewport: viewport.name, status: 0, ok: false, error: String(error) };
+    return {
+      path,
+      viewport: viewport.name,
+      status: 0,
+      ok: false,
+      state: null,
+      error: String(error),
+    };
   } finally {
     await context.close();
   }
@@ -219,7 +242,9 @@ function writeSummary(results) {
     const states = VIEWPORTS.map((viewport) => {
       const shot = shots[viewport.name];
       if (!shot) return "—";
-      return shot.ok ? `${shot.status}` : `❌ ${shot.error ? "error" : shot.status}`;
+      if (shot.ok) return `${shot.status}`;
+      if (shot.state) return `❌ ${shot.state} page`;
+      return `❌ ${shot.error ? "did not load" : shot.status}`;
     });
     return `| \`${path}\` | ${states.join(" | ")} |`;
   });
@@ -241,9 +266,14 @@ function writeContactSheet(results) {
       const figures = VIEWPORTS.map((viewport) => {
         const shot = shots[viewport.name];
         if (!shot?.ok) {
-          return `<figure><figcaption>${viewport.name} — failed</figcaption><pre>${escapeHtml(
-            shot?.error ?? `HTTP ${shot?.status ?? "?"}`,
-          )}</pre></figure>`;
+          const reason = shot?.state
+            ? `rendered the ${shot.state} page`
+            : (shot?.error ?? `HTTP ${shot?.status ?? "?"}`);
+          const src = `${viewport.name}/${slugFor(path)}.png`;
+          const image = shot?.file
+            ? `<a href="${src}"><img src="${src}" alt="${escapeHtml(path)} at ${viewport.name} width"></a>`
+            : "";
+          return `<figure><figcaption>${viewport.name} — failed: ${escapeHtml(reason)}</figcaption>${image}</figure>`;
         }
         const src = `${viewport.name}/${slugFor(path)}.png`;
         return `<figure><figcaption>${viewport.name}</figcaption><a href="${src}"><img src="${src}" alt="${escapeHtml(path)} at ${viewport.name} width"></a></figure>`;
@@ -311,7 +341,11 @@ try {
       const result = await shoot(browser, server.baseUrl, viewport, path);
       results.push(result);
       console.log(
-        `[screenshots] ${viewport.name.padEnd(7)} ${path.padEnd(20)} ${result.ok ? `ok (${result.status})` : `FAILED ${result.error ?? result.status}`}`,
+        `[screenshots] ${viewport.name.padEnd(7)} ${path.padEnd(20)} ${
+          result.ok
+            ? `ok (${result.status})`
+            : `FAILED ${result.state ? `${result.state} page` : (result.error ?? result.status)}`
+        }`,
       );
     }
   }
