@@ -27,8 +27,15 @@
 // every public route as well as a screenshot run.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { cp } from "node:fs/promises";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,7 +101,9 @@ function repairTracedTslib() {
       console.warn(`[screenshots] no installed tslib@${version} to repair ${entry} with`);
       continue;
     }
-    cpSyncish(source, traced);
+    // Synchronous on purpose: the server is spawned the moment this returns,
+    // and an unawaited copy would race the first SSR request that needs it.
+    cpSync(source, traced, { recursive: true, force: true });
   }
 }
 
@@ -128,11 +137,6 @@ function findInstalledPackage(name, version) {
   return undefined;
 }
 
-/** `cp -R src/. dest/` without pulling in a dependency. */
-function cpSyncish(source, dest) {
-  return cp(source, dest, { recursive: true, force: true });
-}
-
 /** Start the built server and resolve once it answers, or throw with its log. */
 async function startServer() {
   if (EXTERNAL_BASE_URL) return { baseUrl: EXTERNAL_BASE_URL, stop: () => {} };
@@ -142,7 +146,7 @@ async function startServer() {
       `No server build at ${SERVER_ENTRY}. Run \`NITRO_PRESET=node-server bun run build\` first.`,
     );
   }
-  await repairTracedTslib();
+  repairTracedTslib();
 
   const log = [];
   const child = spawn("node", [SERVER_ENTRY], {
