@@ -354,8 +354,13 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   linking to it. The repo is private, so images cannot be embedded in the
   comment — reviewers download the artifact. The job needs the
   `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` repository secrets and
-  skips itself with a notice when they are absent. A page that fails to render
-  fails the job, so this doubles as a smoke test of every public route.
+  skips itself with a notice when they are absent. A page that returns an error
+  status, or that renders the router's error/404 boundary (both arrive inside an
+  ordinary 200, which is why those boundaries carry `data-page-state`), fails
+  the job. **It does not catch a route that handles its own loader error** and
+  renders a card in place of its content — `/blog` and `/waiver` do exactly
+  that, so a green run means every route rendered, not that every route has its
+  data.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see Schema drift).

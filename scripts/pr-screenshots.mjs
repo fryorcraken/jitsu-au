@@ -23,8 +23,10 @@
 // and an `index.html` contact sheet so the downloaded artifact opens as one
 // scrollable page instead of a folder of files.
 //
-// Exits non-zero if a page fails to render, which makes this a smoke test of
-// every public route as well as a screenshot run.
+// Exits non-zero if a page fails to render — an error status, or the app's own
+// error/404 boundary claiming the page (see isShotOk in pr-screenshots-report).
+// That catches a route that blew up, NOT a route that caught its own loader
+// error and rendered a card in place of its content, as /blog does.
 
 import { spawn } from "node:child_process";
 import {
@@ -36,12 +38,19 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 
 import { PUBLIC_PAGES } from "../src/lib/seo.ts";
+import {
+  buildContactSheet,
+  buildSummaryTable,
+  failureReason,
+  isShotOk,
+  slugFor,
+} from "./pr-screenshots-report.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -94,8 +103,11 @@ function repairTracedTslib() {
     if (!entry.startsWith("tslib@")) continue;
     const version = entry.slice("tslib@".length);
     const traced = join(tracedRoot, entry);
-    if (existsSync(join(traced, "modules/index.js"))) continue;
 
+    // Copy unconditionally rather than probing for one known-missing file:
+    // the version matches exactly, so overwriting the traced stub with the
+    // real package cannot change what the server runs, and a stub missing
+    // some *other* file would slip past a targeted check.
     const source = findInstalledPackage("tslib", version);
     if (!source) {
       console.warn(`[screenshots] no installed tslib@${version} to repair ${entry} with`);
@@ -127,11 +139,20 @@ function findInstalledPackage(name, version) {
     }
 
     // Nested copies live under <root>/<pkg>/node_modules; one level of fan-out
-    // is enough for the transitive tslib installs bun produces.
+    // is enough for the transitive tslib installs bun produces. A scope
+    // directory holds no package of its own, so descend through it — otherwise
+    // a copy nested under @scope/pkg is invisible.
     if (root !== join(REPO_ROOT, "node_modules")) continue;
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-      roots.push(join(root, entry.name, "node_modules"));
+      if (!entry.name.startsWith("@")) {
+        roots.push(join(root, entry.name, "node_modules"));
+        continue;
+      }
+      for (const scoped of readdirSync(join(root, entry.name), { withFileTypes: true })) {
+        if (!scoped.isDirectory()) continue;
+        roots.push(join(root, entry.name, scoped.name, "node_modules"));
+      }
     }
   }
   return undefined;
@@ -148,6 +169,16 @@ async function startServer() {
   }
   repairTracedTslib();
 
+  // Something already on the port would answer the health check below within a
+  // millisecond, while the child we just spawned takes hundreds to bind, fail
+  // with EADDRINUSE and set exitCode. The run would then quietly photograph a
+  // previous build. Refuse rather than guess whose server it is.
+  if (await isPortAnswering()) {
+    throw new Error(
+      `Something is already serving http://${HOST}:${PORT}. Stop it, or set PR_SCREENSHOTS_PORT.`,
+    );
+  }
+
   const log = [];
   const child = spawn("node", [SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -160,6 +191,10 @@ async function startServer() {
   const baseUrl = `http://${HOST}:${PORT}`;
   const stop = () => child.kill("SIGTERM");
   const deadline = Date.now() + 60_000;
+  // Kept so the timeout can say what kept failing. A server that boots and
+  // then 500s every request — the tslib breakage this script repairs — is the
+  // likeliest failure here, and "did not come up" alone would misname it.
+  let lastReason = "no response yet";
 
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
@@ -169,18 +204,29 @@ async function startServer() {
       const response = await fetch(baseUrl, { redirect: "manual" });
       // A 500 here is the SSR error page, not a healthy server.
       if (response.status < 500) return { baseUrl, stop };
-      throw new Error(`GET / returned ${response.status}`);
-    } catch {
-      await new Promise((r) => setTimeout(r, 500));
+      lastReason = `GET / returned ${response.status}`;
+    } catch (error) {
+      lastReason = String(error);
     }
+    await new Promise((r) => setTimeout(r, 500));
   }
   stop();
-  throw new Error(`Server did not come up on ${baseUrl} within 60s:\n${log.join("")}`);
+  throw new Error(
+    `Server did not answer on ${baseUrl} within 60s (last attempt: ${lastReason}):\n${log.join("")}`,
+  );
 }
 
-/** "/" -> "home", "/manager/kb" -> "manager-kb". */
-function slugFor(path) {
-  return path === "/" ? "home" : path.replace(/^\//, "").replace(/\//g, "-");
+/** True if anything at all is already serving the port we are about to take. */
+async function isPortAnswering() {
+  try {
+    await fetch(`http://${HOST}:${PORT}`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(2_000),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function shoot(browser, baseUrl, viewport, path) {
@@ -213,155 +259,64 @@ async function shoot(browser, baseUrl, viewport, path) {
       () => document.querySelector("[data-page-state]")?.getAttribute("data-page-state") ?? null,
     );
 
-    return {
-      path,
-      viewport: viewport.name,
-      status,
-      ok: status < 400 && state === null,
-      state,
-      file,
-    };
+    return { path, viewport: viewport.name, status, state, file };
   } catch (error) {
-    return {
-      path,
-      viewport: viewport.name,
-      status: 0,
-      ok: false,
-      state: null,
-      error: String(error),
-    };
+    return { path, viewport: viewport.name, status: 0, state: null, error: String(error) };
   } finally {
     await context.close();
   }
 }
 
 function writeSummary(results) {
-  const byPath = new Map();
-  for (const result of results) {
-    if (!byPath.has(result.path)) byPath.set(result.path, {});
-    byPath.get(result.path)[result.viewport] = result;
-  }
-
-  const rows = [...byPath.entries()].map(([path, shots]) => {
-    const states = VIEWPORTS.map((viewport) => {
-      const shot = shots[viewport.name];
-      if (!shot) return "—";
-      if (shot.ok) return `${shot.status}`;
-      if (shot.state) return `❌ ${shot.state} page`;
-      return `❌ ${shot.error ? "did not load" : shot.status}`;
-    });
-    return `| \`${path}\` | ${states.join(" | ")} |`;
-  });
-
-  const header = `| Page | ${VIEWPORTS.map((v) => `${v.name} (${v.width}px)`).join(" | ")} |`;
-  const divider = `| --- | ${VIEWPORTS.map(() => "---").join(" | ")} |`;
-  writeFileSync(join(OUT_DIR, "summary.md"), [header, divider, ...rows].join("\n") + "\n");
+  writeFileSync(join(OUT_DIR, "summary.md"), buildSummaryTable(results, VIEWPORTS));
 }
 
 function writeContactSheet(results) {
-  const byPath = new Map();
-  for (const result of results) {
-    if (!byPath.has(result.path)) byPath.set(result.path, {});
-    byPath.get(result.path)[result.viewport] = result;
-  }
+  writeFileSync(join(OUT_DIR, "index.html"), buildContactSheet(results, VIEWPORTS));
+}
 
-  const sections = [...byPath.entries()]
-    .map(([path, shots]) => {
-      const figures = VIEWPORTS.map((viewport) => {
-        const shot = shots[viewport.name];
-        if (!shot?.ok) {
-          const reason = shot?.state
-            ? `rendered the ${shot.state} page`
-            : (shot?.error ?? `HTTP ${shot?.status ?? "?"}`);
-          const src = `${viewport.name}/${slugFor(path)}.png`;
-          const image = shot?.file
-            ? `<a href="${src}"><img src="${src}" alt="${escapeHtml(path)} at ${viewport.name} width"></a>`
-            : "";
-          return `<figure><figcaption>${viewport.name} — failed: ${escapeHtml(reason)}</figcaption>${image}</figure>`;
-        }
-        const src = `${viewport.name}/${slugFor(path)}.png`;
-        return `<figure><figcaption>${viewport.name}</figcaption><a href="${src}"><img src="${src}" alt="${escapeHtml(path)} at ${viewport.name} width"></a></figure>`;
-      }).join("\n");
-      return `<section><h2>${escapeHtml(path)}</h2><div class="shots">${figures}</div></section>`;
-    })
-    .join("\n");
-
-  writeFileSync(
-    join(OUT_DIR, "index.html"),
-    `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UTS Jitsu — PR screenshots</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { margin: 0 auto; padding: 2rem 1.5rem 4rem; max-width: 1400px;
-         font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; }
-  h1 { font-size: 1.4rem; }
-  section { margin: 2.5rem 0; border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-            padding-top: 1rem; }
-  h2 { font-size: 1.1rem; font-family: ui-monospace, monospace; }
-  .shots { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; }
-  figure { margin: 0; flex: 1 1 320px; min-width: 280px; }
-  figure:last-child { flex: 0 1 390px; }
-  figcaption { font-size: 0.8rem; opacity: 0.7; margin-bottom: 0.4rem; }
-  img { width: 100%; height: auto; border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-        border-radius: 6px; }
-  pre { white-space: pre-wrap; font-size: 0.8rem; }
-</style>
-</head>
-<body>
-<h1>UTS Jitsu — public pages on this branch</h1>
-<p>Full-page screenshots of the production build. Click an image for the original.</p>
-${sections}
-</body>
-</html>
-`,
+// `PR_SCREENSHOTS_OUT` is wiped before every run, so refuse anything that is
+// not a fresh directory below the repo: an absolute path, `.`, or `src` would
+// delete working files instead.
+if (OUT_DIR === REPO_ROOT || !OUT_DIR.startsWith(REPO_ROOT + sep)) {
+  console.error(
+    `[screenshots] refusing to empty ${OUT_DIR}: PR_SCREENSHOTS_OUT must name a directory below ${REPO_ROOT}`,
   );
+  process.exit(1);
 }
-
-function escapeHtml(value) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 rmSync(OUT_DIR, { recursive: true, force: true });
 for (const viewport of VIEWPORTS) mkdirSync(join(OUT_DIR, viewport.name), { recursive: true });
 
-const server = await startServer();
-
-const browser = await chromium.launch({
-  executablePath: CHROMIUM_PATH || undefined,
-});
-
 const results = [];
+let server;
+let browser;
+
 try {
+  server = await startServer();
+  browser = await chromium.launch({ executablePath: CHROMIUM_PATH || undefined });
+
   for (const viewport of VIEWPORTS) {
     for (const path of paths) {
       const result = await shoot(browser, server.baseUrl, viewport, path);
       results.push(result);
       console.log(
         `[screenshots] ${viewport.name.padEnd(7)} ${path.padEnd(20)} ${
-          result.ok
-            ? `ok (${result.status})`
-            : `FAILED ${result.state ? `${result.state} page` : (result.error ?? result.status)}`
+          isShotOk(result) ? `ok (${result.status})` : `FAILED ${failureReason(result)}`
         }`,
       );
     }
   }
 } finally {
-  await browser.close();
-  server.stop();
+  // Both are set one at a time and either can throw, so tear down whatever
+  // exists rather than assuming a complete startup.
+  await browser?.close();
+  server?.stop();
 }
 
 writeSummary(results);
 writeContactSheet(results);
 
-const failed = results.filter((result) => !result.ok);
+const failed = results.filter((result) => !isShotOk(result));
 console.log(`[screenshots] ${results.length - failed.length}/${results.length} pages captured`);
 if (failed.length > 0) {
   console.error(`[screenshots] ${failed.length} page(s) failed to render`);

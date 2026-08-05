@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -27,4 +27,26 @@ describe("failure-boundary markers", () => {
     expect(root).toContain('data-page-state="error"');
     expect(root).toContain('data-page-state="not-found"');
   });
+
+  // Every route defers to the root boundaries today. One that declares its own
+  // would render unmarked, and the screenshot run would call a broken page a
+  // clean one — the exact false pass the marker exists to prevent.
+  it("has no route declaring an unmarked boundary of its own", () => {
+    const offenders = routeFiles(resolve(__dirname, "../routes")).filter((file) => {
+      const source = readFileSync(file, "utf8");
+      const declaresBoundary = /^\s*(errorComponent|notFoundComponent):/m.test(source);
+      return declaresBoundary && !source.includes("data-page-state");
+    });
+
+    expect(offenders).toEqual([]);
+  });
 });
+
+function routeFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return routeFiles(full);
+    if (!entry.name.endsWith(".tsx") || entry.name.includes(".test.")) return [];
+    return [full];
+  });
+}

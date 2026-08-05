@@ -46,7 +46,9 @@ jobs:
       SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
       SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
       # Pinned so the browser Playwright downloads matches the driver that
-      # drives it. Bump both by bumping this one line.
+      # drives it. Bump both by bumping this one line — but not to a release
+      # under a day old: bunfig.toml's minimumReleaseAge would refuse to
+      # resolve it, and the job fails on a confusing install error.
       PLAYWRIGHT_VERSION: 1.62.1
     steps:
       - uses: actions/checkout@v7
@@ -115,10 +117,18 @@ jobs:
             if [ -f screenshots/summary.md ]; then
               cat screenshots/summary.md
             else
-              echo '_No screenshots were produced — see the job log._'
+              echo '_The run never reached the pages — see the job log._'
             fi
             echo 'PR_SCREENSHOTS_EOF'
           } >> "$GITHUB_ENV"
+          # A missing summary means the script died before photographing
+          # anything (no server, no browser), which is a different thing to
+          # tell a reviewer than "a page is broken".
+          if [ -f screenshots/summary.md ]; then
+            echo "SCREENSHOTS_CAPTURED=true" >> "$GITHUB_ENV"
+          else
+            echo "SCREENSHOTS_CAPTURED=false" >> "$GITHUB_ENV"
+          fi
 
       - name: Comment on the pull request
         if: steps.config.outputs.ready == 'true'
@@ -131,20 +141,33 @@ jobs:
             const marker = "<!-- pr-screenshots -->";
             const summary = process.env.SCREENSHOT_SUMMARY ?? "";
             const failed = process.env.SHOTS_OUTCOME === "failure";
-            const heading = failed
-              ? "### 📸 Page screenshots — some pages failed to render"
-              : "### 📸 Page screenshots";
+            // A failure with no summary file never got as far as the pages, so
+            // it is a broken run, not a broken page. Saying "some pages failed
+            // to render" would send a reviewer hunting a bug that isn't there.
+            const captured = process.env.SCREENSHOTS_CAPTURED === "true";
 
             // Falls back to the run itself if the upload step produced no URL.
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const artifactUrl = process.env.ARTIFACT_URL || runUrl;
 
+            const heading = !failed
+              ? "### 📸 Page screenshots"
+              : captured
+                ? "### 📸 Page screenshots — some pages failed to render"
+                : "### 📸 Page screenshots — the run failed before photographing anything";
+
+            const intro = captured
+              ? [
+                  `[**Download the screenshots**](${artifactUrl}) (zip, kept 14 days).`,
+                  "Unzip it and open `index.html` to see every page at desktop and phone width on one page.",
+                ]
+              : [`[**See the job log**](${runUrl}) for what went wrong.`];
+
             const body = [
               marker,
               heading,
               "",
-              `[**Download the screenshots**](${artifactUrl}) (zip, kept 14 days).`,
-              "Unzip it and open `index.html` to see every page at desktop and phone width on one page.",
+              ...intro,
               "",
               summary.trim(),
               "",
@@ -178,8 +201,12 @@ jobs:
       # A page that 500s is a real breakage, not a screenshot problem, so the
       # job goes red — but only after the comment above has gone out saying
       # which page it was.
-      - name: Fail if any page did not render
+      - name: Fail if the run did not come back clean
         if: steps.config.outputs.ready == 'true' && steps.shots.outcome == 'failure'
         run: |
-          echo "::error title=PR screenshots::One or more public pages failed to render. See the job log above."
+          if [ "$SCREENSHOTS_CAPTURED" = "true" ]; then
+            echo "::error title=PR screenshots::One or more public pages failed to render. See the job log above."
+          else
+            echo "::error title=PR screenshots::The screenshot run failed before it photographed any page. See the job log above."
+          fi
           exit 1
