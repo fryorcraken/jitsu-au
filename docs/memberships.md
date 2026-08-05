@@ -38,11 +38,19 @@ says so. The database still permits any kind/date combination, so the manager
 agent API can write one; the manager screen flags such a row rather than
 hiding the values.
 
-The screen also refuses to save a training period with no dates, or yearly
-insurance with no day count. `savePlanSchema` allows both, but they activate
-to `ends_at: null` (`planMembershipWindow`) while still passing
-`sellablePlans` — a membership that never expires. The old generic
-`semester` plan was exactly that shape and has been deleted.
+The screen also refuses to save a plan that could never end: a training period
+with no dates, yearly insurance with no day count, or a casual/trial plan with
+no session credits. `savePlanSchema` allows all three, but they activate to
+`ends_at: null` (`planMembershipWindow`) while still passing `sellablePlans`,
+so the membership never expires. For the two credit kinds it is worse:
+`resolveCoverage` matches no tier at all (`docs/check-in.md`), so the member
+is sold something that covers no class either. The old generic `semester` plan
+was exactly that shape and is deleted by
+`20260805000000_delete_generic_semester_plan.sql`.
+
+The guard only applies to a shape a manager is actually changing: a row that
+arrived malformed (written through the manager agent API, which the database
+still permits) can still be renamed or taken off sale without fixing it first.
 
 Each dated training period is **its own plan**, not a shared plan pointing at
 a separate table of windows: "Semester 2 2026" and "Semester 1 2027" are two

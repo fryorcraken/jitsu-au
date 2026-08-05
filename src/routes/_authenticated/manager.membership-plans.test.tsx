@@ -7,7 +7,7 @@
 // dispatching to the DOM node it first found, so if the card remounts under
 // it, only the first keystroke reaches the (now-detached) old node and the
 // rest are lost.
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -54,8 +54,20 @@ const ENDED_PLAN = {
   is_active: true,
 };
 
+/** The shape the new migration deletes: a training period that never got its
+ * dates. Reachable today via the manager agent API, which the DB still allows. */
+const MALFORMED_PLAN = {
+  ...PLAN,
+  id: "plan-3",
+  code: "semester",
+  name: "One semester",
+  starts_on: null,
+  ends_on: null,
+  is_active: true,
+};
+
 vi.mock("@/lib/membership.functions", () => ({
-  listAllMembershipPlans: vi.fn().mockResolvedValue([PLAN, ENDED_PLAN]),
+  listAllMembershipPlans: vi.fn().mockResolvedValue([PLAN, ENDED_PLAN, MALFORMED_PLAN]),
   saveMembershipPlan: (...args: unknown[]) => saveMembershipPlan(...args),
 }));
 
@@ -165,6 +177,34 @@ describe("/manager/membership-plans", () => {
       ).toBeNull();
     });
 
+    it("does not call blank credits unlimited on a credit-run plan, where it would never run out", async () => {
+      const user = userEvent.setup();
+      render(<PlansPage />);
+      await screen.findByLabelText("Name", { selector: "#plan-plan-1-name" });
+
+      await user.click(radioIn("plan-plan-1-plan-type", /casual class/i));
+
+      expect(
+        screen.getByLabelText("Session credits", { selector: "#plan-plan-1-credits" }),
+      ).toHaveAttribute("placeholder", "how many classes");
+    });
+
+    it("refuses to save a credit-run plan with no credits", async () => {
+      const user = userEvent.setup();
+      render(<PlansPage />);
+      await screen.findByLabelText("Name", { selector: "#plan-plan-1-name" });
+      toastError.mockClear();
+      saveMembershipPlan.mockClear();
+
+      // period (dates, no credits) -> session clears the dates, leaving a plan
+      // that would never expire AND match no check-in coverage tier.
+      await user.click(radioIn("plan-plan-1-plan-type", /casual class/i));
+      await user.click(screen.getAllByRole("button", { name: "Save" })[0]);
+
+      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/never run out/i));
+      expect(saveMembershipPlan).not.toHaveBeenCalled();
+    });
+
     it("labels blank session credits as unlimited rather than none", async () => {
       render(<PlansPage />);
 
@@ -187,9 +227,13 @@ describe("/manager/membership-plans", () => {
         ),
       ),
     ).toBeInTheDocument();
-    // The tick itself stays on and editable, so a manager can still tidy up.
-    const ticks = screen.getAllByRole("checkbox", { name: /available to buy/i });
-    expect(ticks.some((t) => t.getAttribute("data-state") === "checked")).toBe(true);
+    // The ended card's OWN tick stays on and editable, so a manager can still
+    // tidy up. Asserting "some tick is checked" would pass on the active plan.
+    const endedCard = document.querySelector('[data-plan="plan-2"]') as HTMLElement;
+    expect(within(endedCard).getByRole("checkbox", { name: /available to buy/i })).toHaveAttribute(
+      "data-state",
+      "checked",
+    );
   });
 
   // A dateless training period activates to `ends_at: null` and still passes
@@ -222,9 +266,31 @@ describe("/manager/membership-plans", () => {
     expect(saveMembershipPlan).not.toHaveBeenCalled();
   });
 
+  // A row can arrive malformed (written by the manager agent API, or predating
+  // these rules). Holding the shape guard over an edit that does not touch the
+  // shape would trap a manager: the obvious remedy, taking it off sale, would
+  // itself be refused.
+  it("lets an already-malformed plan be taken off sale without fixing its shape first", async () => {
+    const user = userEvent.setup();
+    render(<PlansPage />);
+    await screen.findByLabelText("Name", { selector: "#plan-plan-3-name" });
+    toastError.mockClear();
+    saveMembershipPlan.mockClear();
+
+    const card = () => document.querySelector('[data-plan="plan-3"]') as HTMLElement;
+    await user.click(within(card()).getByRole("checkbox", { name: /available to buy/i }));
+    // Unticking moves the card into the collapsed "Not on sale" section, which
+    // remounts it — so re-query rather than reusing the detached node.
+    await user.click(within(card()).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(saveMembershipPlan).toHaveBeenCalled());
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   describe("Save button", () => {
     it("is greyed out until something changes, and again once saved", async () => {
       const user = userEvent.setup();
+      saveMembershipPlan.mockClear();
       render(<PlansPage />);
 
       const nameField = await screen.findByLabelText("Name", { selector: "#plan-plan-1-name" });

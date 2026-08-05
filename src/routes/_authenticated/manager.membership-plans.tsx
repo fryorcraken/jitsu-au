@@ -9,9 +9,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listAllMembershipPlans, saveMembershipPlan } from "@/lib/membership.functions";
 import {
+  PLAN_TYPE_KINDS,
+  PLAN_TYPES,
   planEditPayload,
   planEditsDiffer,
+  planShapeError,
+  planShapeUnchanged,
+  planTypeOf,
+  planTypePatch,
+  strandedPlanFields,
   type MembershipPlanKind,
+  type PlanShapeFields,
   type SavePlanInput,
 } from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
@@ -28,147 +36,23 @@ export const Route = createFileRoute("/_authenticated/manager/membership-plans")
 
 /** Cents <-> dollar-string helpers for the price inputs. */
 const toDollars = (cents: number | null) => (cents == null ? "" : String(cents / 100));
+/** Whole-number inputs (session credits, days from payment). A bare
+ * `Number()` yields NaN on a typo like "1e", which `JSON.stringify` then puts
+ * on the wire as `null` — silently wiping a stored value. Unparseable input
+ * reads as blank instead. */
+const toCount = (raw: string): number | null => {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+
 const toCents = (dollars: string): number | null => {
   const t = dollars.trim();
   if (t === "") return null;
   const n = Number(t);
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 };
-
-/**
- * What a plan is, in a manager's words. This one choice replaces both the old
- * "Kind" dropdown (which showed raw enum values like `period`) and the
- * separate "Runs" picker beside it. In practice the two always agreed, and
- * asking twice let them disagree.
- *
- * The selected option is the plan's stored `kind`. Deriving it from the date
- * fields instead — as the old "Runs" picker did — made two of its three
- * options unselectable: switching blanked the very fields the derivation read
- * back, so the choice snapped straight to "until credits run out" and the
- * dates could never be entered.
- *
- * `dates`/`duration`/`credits` drive which inputs show; `defaults` is applied
- * over the previous type's fields on switch, so a leftover date cannot linger
- * on a plan that runs on class credits.
- *
- * The database deliberately does NOT tie `kind` to the date columns (see
- * `savePlanSchema`), so the manager agent API can still write any
- * combination. Only this screen is opinionated, and a row that disagrees is
- * surfaced rather than silently dropped.
- */
-type DurationFields = {
-  starts_on: string | null;
-  ends_on: string | null;
-  duration_days: number | null;
-};
-
-type PlanTypeSpec = {
-  label: string;
-  blurb: string;
-  dates: boolean;
-  duration: boolean;
-  credits: boolean;
-  defaults: DurationFields;
-};
-
-const BLANK_DURATION: DurationFields = { starts_on: null, ends_on: null, duration_days: null };
-
-/** Keyed by kind, so adding one to the enum fails the typecheck here rather
- * than silently rendering no option for it. Listed in display order. */
-const PLAN_TYPES: Record<MembershipPlanKind, PlanTypeSpec> = {
-  period: {
-    label: "Training period",
-    blurb: "Everyone who buys it trains between the same two dates.",
-    dates: true,
-    duration: false,
-    credits: true,
-    defaults: BLANK_DURATION,
-  },
-  insurance: {
-    label: "Yearly insurance",
-    blurb: "Runs a set number of days from the day they pay.",
-    dates: false,
-    duration: true,
-    credits: false,
-    defaults: { starts_on: null, ends_on: null, duration_days: 365 },
-  },
-  session: {
-    label: "Casual class or class pack",
-    blurb: "No end date. It ends when its classes run out.",
-    dates: false,
-    duration: false,
-    credits: true,
-    defaults: BLANK_DURATION,
-  },
-  trial: {
-    label: "Free trial",
-    blurb: "The free introductory classes. One per person.",
-    dates: false,
-    duration: false,
-    credits: true,
-    defaults: BLANK_DURATION,
-  },
-};
-
-const PLAN_TYPE_KINDS = Object.keys(PLAN_TYPES) as MembershipPlanKind[];
-
-/** Falls back to `period` so a row carrying an unexpected kind still renders
- * an editable card instead of crashing the whole screen. */
-const planTypeOf = (kind: string): PlanTypeSpec =>
-  PLAN_TYPES[kind as MembershipPlanKind] ?? PLAN_TYPES.period;
-
-/** The full patch for switching a plan to `kind`: the new type's duration
- * defaults, plus clearing session credits when the new type has no use for
- * them (insurance never counts as mat time, so credits there are inert). */
-function planTypePatch(kind: MembershipPlanKind) {
-  const spec = PLAN_TYPES[kind];
-  return {
-    kind,
-    ...spec.defaults,
-    ...(spec.credits ? {} : { session_credits: null }),
-  };
-}
-
-/** Duration values stored on a plan whose own type never reads them. Only
- * reachable for a row written by the manager agent API or by hand, but those
- * values would otherwise be invisible here and silently preserved on save. */
-function strandedDurationFields(p: DurationFields & { kind: string }): string[] {
-  const spec = planTypeOf(p.kind);
-  const out: string[] = [];
-  if (!spec.dates && (p.starts_on || p.ends_on)) out.push("start and end dates");
-  if (!spec.duration && p.duration_days) out.push("days from payment");
-  return out;
-}
-
-/**
- * A friendly pre-check mirroring `savePlanSchema`'s date refinements, so a
- * manager who fills in Starts and forgets Ends sees plain language instead of
- * a raw Zod issue array from the server. The type picker already makes the
- * dates/duration exclusion impossible to violate through the UI, so what is
- * left is each type's own "you have to say when it ends" rule.
- *
- * Both rules below exist because `savePlanSchema` permits a plan with neither
- * dates nor a duration, and for these two types that produces a membership
- * with `ends_at: null` (see `planMembershipWindow`) that is still sellable —
- * i.e. one that never expires. That is what the deleted "One semester" plan
- * was, and "Duplicate" clears the dates, so it stays easy to recreate by
- * accident without this.
- */
-function durationFieldsError(f: DurationFields & { kind: string }): string | null {
-  const spec = planTypeOf(f.kind);
-  if (spec.dates) {
-    if (!f.starts_on || !f.ends_on) {
-      return "A training period needs both a start and an end date.";
-    }
-    if (f.ends_on < f.starts_on) {
-      return "End date must be on or after the start date.";
-    }
-  }
-  if (spec.duration && !f.duration_days) {
-    return "Set how many days it runs from payment.";
-  }
-  return null;
-}
 
 /** The plan-type picker and whichever duration fields that type uses, shared
  * by an existing plan's card and the "Add a plan" form so the two can never
@@ -180,16 +64,20 @@ function PlanTypeFields({
   onFieldChange,
 }: {
   idPrefix: string;
-  fields: DurationFields & { kind: string };
+  fields: PlanShapeFields;
   onKindChange: (kind: MembershipPlanKind) => void;
-  onFieldChange: (patch: Partial<DurationFields>) => void;
+  /** Never carries `kind` — only the type picker changes that, via
+   * `onKindChange`, which also applies the new kind's defaults. */
+  onFieldChange: (patch: Partial<Omit<PlanShapeFields, "kind">>) => void;
 }) {
   const spec = planTypeOf(fields.kind);
-  const stranded = strandedDurationFields(fields);
+  const stranded = strandedPlanFields(fields);
   return (
     <div className="space-y-3">
-      <div>
-        <Label className="text-xs">What kind of plan is this?</Label>
+      {/* A real fieldset/legend, so a screen reader announces the four radios
+          as one named group rather than four unlabelled controls. */}
+      <fieldset>
+        <legend className="text-xs font-medium">What kind of plan is this?</legend>
         <div className="mt-1.5 space-y-2">
           {PLAN_TYPE_KINDS.map((kind) => (
             <label key={kind} className="flex items-start gap-2 text-sm">
@@ -209,7 +97,7 @@ function PlanTypeFields({
             </label>
           ))}
         </div>
-      </div>
+      </fieldset>
       {stranded.length > 0 && (
         <p className="text-xs text-amber-600 dark:text-amber-500">
           This plan also has {stranded.join(" and ")} stored, which a {spec.label.toLowerCase()}{" "}
@@ -221,6 +109,7 @@ function PlanTypeFields({
               onFieldChange({
                 ...(spec.dates ? {} : { starts_on: null, ends_on: null }),
                 ...(spec.duration ? {} : { duration_days: null }),
+                ...(spec.credits ? {} : { session_credits: null }),
               })
             }
           >
@@ -265,10 +154,7 @@ function PlanTypeFields({
             id={`${idPrefix}-duration`}
             inputMode="numeric"
             value={fields.duration_days ?? ""}
-            onChange={(e) => {
-              const n = e.target.value.trim();
-              onFieldChange({ duration_days: n === "" ? null : Number(n) });
-            }}
+            onChange={(e) => onFieldChange({ duration_days: toCount(e.target.value) })}
             className="mt-1 max-w-[10rem]"
           />
         </div>
@@ -306,7 +192,10 @@ function PlanCard({
 }) {
   const spec = planTypeOf(plan.kind);
   return (
-    <Card>
+    // `data-plan` scopes a card's own controls: every card renders the same
+    // labels, so tests (and anyone inspecting the DOM) need a stable handle
+    // that does not depend on styling classes or DOM order.
+    <Card data-plan={plan.id}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-lg">{plan.name}</CardTitle>
@@ -390,12 +279,12 @@ function PlanCard({
               <Input
                 id={`plan-${plan.id}-credits`}
                 inputMode="numeric"
-                placeholder="unlimited"
+                // Blank means "unlimited" only when the dates still bound it.
+                // For a credit-run plan a blank never runs out AND covers no
+                // class, so it must not be advertised as unlimited.
+                placeholder={spec.creditsRequired ? "how many classes" : "unlimited"}
                 value={plan.session_credits ?? ""}
-                onChange={(e) => {
-                  const n = e.target.value.trim();
-                  onPatch(plan.id, { session_credits: n === "" ? null : Number(n) });
-                }}
+                onChange={(e) => onPatch(plan.id, { session_credits: toCount(e.target.value) })}
                 className="mt-1"
               />
             </div>
@@ -551,9 +440,15 @@ function PlansPage() {
    * would throw away whatever another card had mid-edit but unsaved, since
    * every card shares the same `plans` array. */
   async function onSave(plan: MembershipPlanRow) {
-    const durationError = durationFieldsError(plan);
-    if (durationError) {
-      toast.error(durationError);
+    // Only hold a manager to the shape rules for a shape they are actually
+    // changing. A row that arrived malformed (written by the manager agent
+    // API, or predating these rules) must stay renameable and, above all,
+    // takeable off sale — refusing the one edit that retires it would trap
+    // them into fixing it first.
+    const stored = baseline[plan.id];
+    const shapeError = planShapeError(plan);
+    if (shapeError && !(stored && planShapeUnchanged(plan, stored))) {
+      toast.error(shapeError);
       return;
     }
     setSavingId(plan.id);
@@ -608,9 +503,9 @@ function PlansPage() {
       toast.error("Set a public price.");
       return;
     }
-    const durationError = durationFieldsError(newPlan);
-    if (durationError) {
-      toast.error(durationError);
+    const shapeError = planShapeError(newPlan);
+    if (shapeError) {
+      toast.error(shapeError);
       return;
     }
     setCreating(true);
@@ -626,10 +521,20 @@ function PlansPage() {
       toast.success("Plan added");
       setNewPlan(emptyNewPlan());
       setCopiedFrom(null);
+      // Refetch to pick up the new row, but keep any card the manager has
+      // edited and not yet saved. Overwriting those would discard their work,
+      // and re-baselining them would grey Save out afterwards, leaving a card
+      // that looks saved while actually holding the server's values.
+      const unsaved = new Map(plans.filter(isDirty).map((p) => [p.id, p]));
       await fetchAll()
         .then((d) => {
-          setPlans(d as MembershipPlanRow[]);
-          setBaseline(baselineOf(d as MembershipPlanRow[]));
+          const fresh = d as MembershipPlanRow[];
+          setPlans(fresh.map((row) => unsaved.get(row.id) ?? row));
+          setBaseline((prev) =>
+            Object.fromEntries(
+              fresh.map((row) => [row.id, unsaved.has(row.id) ? (prev[row.id] ?? row) : row]),
+            ),
+          );
         })
         .catch(() => {});
     } catch (e) {
@@ -801,12 +706,13 @@ function PlansPage() {
                   <Input
                     id="new-plan-credits"
                     inputMode="numeric"
-                    placeholder="unlimited"
+                    placeholder={
+                      planTypeOf(newPlan.kind).creditsRequired ? "how many classes" : "unlimited"
+                    }
                     value={newPlan.session_credits ?? ""}
-                    onChange={(e) => {
-                      const n = e.target.value.trim();
-                      setNewPlan((s) => ({ ...s, session_credits: n === "" ? null : Number(n) }));
-                    }}
+                    onChange={(e) =>
+                      setNewPlan((s) => ({ ...s, session_credits: toCount(e.target.value) }))
+                    }
                     className="mt-1"
                   />
                 </div>

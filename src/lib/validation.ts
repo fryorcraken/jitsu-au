@@ -1118,7 +1118,7 @@ export function sellableWindowNotifications<
     return [
       {
         type: "define_membership_window",
-        title: "Set up a membership window",
+        title: "Set up the club's training dates",
         body: "Members cannot join as members until the club's training dates are set. Add them now on the membership plans page.",
         href: "/manager/membership-plans",
       },
@@ -1129,7 +1129,7 @@ export function sellableWindowNotifications<
   return [
     {
       type: "define_membership_window",
-      title: `The membership window ${latest.name} ends ${formatDateOnly(latest.ends_on)}`,
+      title: `The training period ${latest.name} ends ${formatDateOnly(latest.ends_on)}`,
       body: "Nothing is defined after it, so enrolments stop when it ends. Set the club's next training dates on the membership plans page.",
       href: "/manager/membership-plans",
     },
@@ -1180,7 +1180,12 @@ export const savePlanSchema = z
       .trim()
       .min(1)
       .max(64)
-      .regex(/^[a-z0-9_]+$/, "Use lowercase letters, digits and underscores only."),
+      // Hyphens are permitted because the club's own dated plans use them:
+      // the codes were copied from `club_semesters` ('2026-s1', '2026-s2'),
+      // whose CHECK constraint mandated that form. Without hyphens here the
+      // manager screen could not save those plans at all — it renders no Code
+      // field, so it echoes the stored code back and the server rejected it.
+      .regex(/^[a-z0-9_-]+$/, "Use lowercase letters, digits, underscores and hyphens only."),
     name: z.string().trim().min(1).max(120),
     description: z.string().trim().max(500).optional().or(z.literal("")),
     kind: z.enum(membershipPlanKinds),
@@ -1212,6 +1217,161 @@ export const savePlanSchema = z
     path: ["duration_days"],
   });
 export type SavePlanInput = z.infer<typeof savePlanSchema>;
+
+// ---- Manager: what kind of plan this is, and what that implies ----
+
+/**
+ * What a plan is, in a manager's words, and what that kind implies about the
+ * rest of the form. One choice replaces the old "Kind" dropdown (raw enum
+ * values) and the separate "Runs" picker: in practice the two always agreed,
+ * and asking twice let them disagree.
+ *
+ * These live here rather than in the route so they are unit-testable without
+ * rendering the screen (see CLAUDE.md, "Where to add tests") — the rules below
+ * decide whether a plan can ever expire, which is worth pinning directly.
+ */
+export type PlanTypeSpec = {
+  label: string;
+  blurb: string;
+  /** Which inputs the form shows for this kind. */
+  dates: boolean;
+  duration: boolean;
+  credits: boolean;
+  /**
+   * Credits are the only thing that ends this kind, so a blank one is a plan
+   * that never expires — not "unlimited". Only a dated kind can read a blank
+   * as unlimited, because its dates still bound it.
+   */
+  creditsRequired: boolean;
+  /** Applied over the previous kind's duration fields on switch. */
+  defaults: { starts_on: null; ends_on: null; duration_days: number | null };
+};
+
+/** Keyed by kind, so adding one to the enum fails the typecheck here rather
+ * than silently rendering no option for it. Listed in display order. */
+export const PLAN_TYPES: Record<MembershipPlanKind, PlanTypeSpec> = {
+  period: {
+    label: "Training period",
+    blurb: "Everyone who buys it trains between the same two dates.",
+    dates: true,
+    duration: false,
+    credits: true,
+    creditsRequired: false,
+    defaults: { starts_on: null, ends_on: null, duration_days: null },
+  },
+  insurance: {
+    label: "Yearly insurance",
+    blurb: "Runs a set number of days from the day they pay.",
+    dates: false,
+    duration: true,
+    credits: false,
+    creditsRequired: false,
+    defaults: { starts_on: null, ends_on: null, duration_days: 365 },
+  },
+  session: {
+    label: "Casual class or class pack",
+    blurb: "No end date. It ends when its classes run out.",
+    dates: false,
+    duration: false,
+    credits: true,
+    creditsRequired: true,
+    defaults: { starts_on: null, ends_on: null, duration_days: null },
+  },
+  trial: {
+    label: "Free trial",
+    blurb: "The free introductory classes. One per person.",
+    dates: false,
+    duration: false,
+    credits: true,
+    creditsRequired: true,
+    defaults: { starts_on: null, ends_on: null, duration_days: null },
+  },
+};
+
+export const PLAN_TYPE_KINDS = Object.keys(PLAN_TYPES) as MembershipPlanKind[];
+
+/** Falls back to `period` so a row carrying an unexpected kind still renders
+ * an editable card instead of crashing the whole screen. */
+export const planTypeOf = (kind: string): PlanTypeSpec =>
+  PLAN_TYPES[kind as MembershipPlanKind] ?? PLAN_TYPES.period;
+
+/** The fields whose meaning depends on the plan's kind. */
+export type PlanShapeFields = {
+  kind: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  duration_days: number | null;
+  session_credits: number | null;
+};
+
+/** The full patch for switching a plan to `kind`: the new kind's duration
+ * defaults, plus clearing session credits when the new kind has no use for
+ * them (insurance never counts as mat time, so credits there are inert). */
+export function planTypePatch(kind: MembershipPlanKind) {
+  const spec = PLAN_TYPES[kind];
+  return {
+    kind,
+    ...spec.defaults,
+    ...(spec.credits ? {} : { session_credits: null }),
+  };
+}
+
+/** Values stored on a plan whose own kind never reads them. Only reachable for
+ * a row written by the manager agent API or by hand, but they would otherwise
+ * be invisible on the screen and silently preserved on save. */
+export function strandedPlanFields(p: PlanShapeFields): string[] {
+  const spec = planTypeOf(p.kind);
+  const out: string[] = [];
+  if (!spec.dates && (p.starts_on || p.ends_on)) out.push("start and end dates");
+  if (!spec.duration && p.duration_days) out.push("days from payment");
+  if (!spec.credits && p.session_credits) out.push("session credits");
+  return out;
+}
+
+/**
+ * Whether this plan could ever end, phrased for a manager. `savePlanSchema`
+ * permits a plan with no dates, no duration and no credits, but such a plan
+ * activates to `ends_at: null` (`planMembershipWindow`) while still passing
+ * `sellablePlans` — a membership that never expires. Worse, for a credit kind
+ * `resolveCoverage` then matches no tier at all (`hasCredits` is false and the
+ * `period` tier filters on kind), so the member is sold something that covers
+ * no class and never lapses.
+ *
+ * The deleted generic `semester` plan was exactly this shape, and "Duplicate"
+ * clears the dates on purpose, so it stays easy to recreate by accident.
+ */
+export function planShapeError(p: PlanShapeFields): string | null {
+  const spec = planTypeOf(p.kind);
+  if (spec.dates) {
+    if (!p.starts_on || !p.ends_on) {
+      return "A training period needs both a start and an end date.";
+    }
+    if (p.ends_on < p.starts_on) {
+      return "End date must be on or after the start date.";
+    }
+  }
+  if (spec.duration && !p.duration_days) {
+    return "Set how many days it runs from payment.";
+  }
+  if (spec.creditsRequired && !p.session_credits) {
+    return `Say how many classes a ${spec.label.toLowerCase()} includes. Left blank it would never run out, and it would cover no class either.`;
+  }
+  return null;
+}
+
+/** Whether two plans agree on every kind-dependent field. Lets the screen
+ * accept an edit that leaves an already-malformed row no worse (renaming it,
+ * or taking it off sale) instead of trapping a manager who cannot save the
+ * one change that retires it. */
+export function planShapeUnchanged(a: PlanShapeFields, b: PlanShapeFields): boolean {
+  return (
+    a.kind === b.kind &&
+    a.starts_on === b.starts_on &&
+    a.ends_on === b.ends_on &&
+    a.duration_days === b.duration_days &&
+    a.session_credits === b.session_credits
+  );
+}
 
 /**
  * The editable half of a plan, as the manager screen holds it in state. Kept
@@ -1250,14 +1410,20 @@ export function planEditPayload(p: PlanEditFields): SavePlanInput {
     kind: p.kind as MembershipPlanKind,
     public_price_cents: p.public_price_cents,
     student_price_cents: p.student_price_cents,
-    duration_days: p.duration_days,
-    session_credits: p.session_credits,
+    duration_days: finiteOrNull(p.duration_days),
+    session_credits: finiteOrNull(p.session_credits),
     is_active: p.is_active,
     sort_order: p.sort_order,
     starts_on: p.starts_on,
     ends_on: p.ends_on,
   };
 }
+
+/** A numeric input parsed with `Number()` yields NaN on a typo ("1e"), and
+ * `JSON.stringify(NaN)` is `null` — so without this an unparseable keystroke
+ * both compares equal to a stored null (greying Save out with no explanation)
+ * and, from a non-null baseline, silently wipes the stored value on save. */
+const finiteOrNull = (n: number | null) => (n != null && Number.isFinite(n) ? n : null);
 
 /** Whether saving `edited` would send anything different from `saved`.
  * Compares the serialised payloads, so a field the save does not carry (say
