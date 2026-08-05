@@ -287,7 +287,22 @@ function KnowledgeBaseManager() {
    * not a stress case.
    */
   const seq = useRef(0);
-  const claim = () => ++seq.current;
+  /**
+   * Take the token, and with it the screen.
+   *
+   * Clearing `busy` HERE is what makes the contract safe rather than merely
+   * documented. An overtaken load deliberately does not clear it on the way out
+   * (`if (!stale(token)) setBusy(false)`), because it cannot know whether the
+   * request that displaced it wants a spinner of its own — so the duty falls on
+   * the new claimer, and a claimer that forgets leaves every button on the
+   * screen disabled until the page is reloaded. Doing it in `claim` itself
+   * means no caller can forget: the two that do want the list frozen set it
+   * again on the next line.
+   */
+  const claim = () => {
+    setBusy(false);
+    return ++seq.current;
+  };
   const stale = (token: number) => seq.current !== token;
 
   const draft = {
@@ -438,12 +453,6 @@ function KnowledgeBaseManager() {
     // says nothing. Everything it has is already in the list row.
     if (summary?.link_path) {
       claim();
-      // This claim overtook whatever load was in flight, and an overtaken load
-      // leaves clearing `busy` to whoever claimed next (see the `finally`
-      // below). Skipping it here left every button in the list disabled until
-      // the page was reloaded, which is the "clicking things does nothing" this
-      // screen was reported for. Same contract in `startNew` and `openSection`.
-      setBusy(false);
       setCreating(false);
       setSlug(next);
       setKind("link");
@@ -559,9 +568,6 @@ function KnowledgeBaseManager() {
     const what = nextKind === "link" ? "add a link" : "start a new article";
     if (unsaved && !window.confirm(`Discard your unsaved changes and ${what}?`)) return;
     claim();
-    // See the link-entry branch of `openDocument`: this claim owns clearing a
-    // `busy` the load it just overtook left behind.
-    setBusy(false);
     setSectionEdit(null);
     setCreating(true);
     setKind(nextKind);
@@ -594,9 +600,6 @@ function KnowledgeBaseManager() {
       return;
     }
     claim();
-    // See the link-entry branch of `openDocument`: this claim owns clearing a
-    // `busy` the load it just overtook left behind.
-    setBusy(false);
     setPreview(null);
     setSectionEdit({ slug: row.slug, title: row.title });
     setSectionTitle(row.title);
@@ -960,14 +963,17 @@ function KnowledgeBaseManager() {
     const overIndex = target?.entries.findIndex((e) => entryId(e.slug) === String(over.id)) ?? -1;
     const at = overIndex === -1 ? (target?.entries.length ?? 0) : overIndex;
 
-    setDragGroups(
-      current.map((group) => {
+    // The updater form, not `current`: `pointermove` is a continuous-priority
+    // event, so two drag-overs can be handled before React commits the first,
+    // and the second would otherwise compute from the pre-move arrangement.
+    setDragGroups((prev) =>
+      (prev ?? current).map((group) => {
         if (group.slug === from) {
           return { ...group, entries: group.entries.filter((e) => e.slug !== slugMoved) };
         }
         if (group.slug === to) {
-          const entries = group.entries.slice();
-          entries.splice(at, 0, entry);
+          const entries = group.entries.filter((e) => e.slug !== slugMoved);
+          entries.splice(Math.min(at, entries.length), 0, entry);
           return { ...group, entries };
         }
         return group;
@@ -991,7 +997,15 @@ function KnowledgeBaseManager() {
       // one of the entries inside it. All three mean the same thing: that
       // section's place in the sidebar.
       const overSection = containerOf(structure, String(over.id));
-      const to = named.findIndex((group) => group.slug === overSection);
+      // "Everything else" is always rendered last and is not a section anyone
+      // made, so it is not in `named` and cannot be a destination. Dragging a
+      // section onto it means "put this last", which is the natural gesture for
+      // moving a section to the bottom. Reading it as "no match" made that drag
+      // silently do nothing.
+      const to =
+        overSection === ""
+          ? named.length - 1
+          : named.findIndex((group) => group.slug === overSection);
       if (from === -1 || to === -1) {
         setDragGroups(null);
         return;
@@ -1207,6 +1221,8 @@ function KnowledgeBaseManager() {
   const sectionSaveDisabled =
     saving ||
     promoting ||
+    busy ||
+    ordering ||
     !sectionTitle.trim() ||
     !isSectionDirty({ title: sectionTitle }, sectionEdit);
 
@@ -1225,7 +1241,7 @@ function KnowledgeBaseManager() {
           <Button
             type="button"
             variant="outline"
-            disabled={saving || promoting || busy}
+            disabled={saving || promoting || busy || ordering}
             onClick={() => startNew("article")}
           >
             <Plus className="mr-1.5 h-4 w-4" />
@@ -1238,7 +1254,7 @@ function KnowledgeBaseManager() {
           <Button
             type="button"
             variant="outline"
-            disabled={saving || promoting || busy}
+            disabled={saving || promoting || busy || ordering}
             onClick={() => startNew("link")}
           >
             <Link2 className="mr-1.5 h-4 w-4" />
@@ -1291,22 +1307,28 @@ function KnowledgeBaseManager() {
                   strategy={verticalListSortingStrategy}
                 >
                   <div className="space-y-4">
-                    {groups.map((group) => (
+                    {groups.map((group, groupIndex) => (
                       <SectionGroup
                         key={group.slug || "unsectioned"}
                         group={group}
                         open={sectionEdit?.slug === group.slug}
+                        disabled={saving || promoting || busy || ordering}
                         dragDisabled={ordering}
+                        sectionIndex={groupIndex + 1}
+                        sectionCount={groups.filter((g) => g.slug !== "").length}
                         onOpen={() => {
                           const row = sections.find((s) => s.slug === group.slug);
                           if (row) openSection(row);
                         }}
                       >
-                        {group.entries.map((entry) => (
+                        {group.entries.map((entry, entryIndex) => (
                           <EntryRow
                             key={entry.slug}
                             entry={entry}
                             row={articles.find((a) => a.slug === entry.slug)}
+                            index={entryIndex + 1}
+                            count={group.entries.length}
+                            sectionTitle={group.title}
                             open={entry.slug === slug && !creating && !sectionEdit}
                             // `ordering` is in here too: opening an article
                             // mid-drop claims a newer request token, which
@@ -1354,7 +1376,7 @@ function KnowledgeBaseManager() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={saving || promoting || busy || !newSectionTitle.trim()}
+                    disabled={saving || promoting || busy || ordering || !newSectionTitle.trim()}
                     onClick={() => void onAddSection()}
                   >
                     Add
@@ -1413,7 +1435,7 @@ function KnowledgeBaseManager() {
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={saving || promoting || busy}
+                  disabled={saving || promoting || busy || ordering}
                   onClick={() => {
                     const row = sections.find((s) => s.slug === sectionEdit.slug);
                     if (row) void onDeleteSection(row);
@@ -1619,10 +1641,16 @@ function KnowledgeBaseManager() {
                   // article and pressing Save published an identical version,
                   // bumped the number every member's comments are pinned
                   // against, and told them the article had changed.
+                  // `ordering` matters here beyond tidiness: a save sends
+                  // `section` and `position` straight from component state, and
+                  // a drop's writes have not landed in that state yet. Saving
+                  // mid-drop would publish a version carrying the OLD placement
+                  // and silently undo the move the manager just made.
                   disabled={
                     saving ||
                     promoting ||
                     busy ||
+                    ordering ||
                     !dirty ||
                     (kind === "link"
                       ? !navTitle.trim() || !linkPath.trim()
@@ -1864,11 +1892,16 @@ const announcements = {
  */
 function DragHandle({
   label,
+  where,
+  disabled,
   attributes,
   listeners,
   className,
 }: {
   label: string;
+  /** "item 2 of 5 in Start here", so the label says where it currently is. */
+  where: string;
+  disabled: boolean;
   attributes: DraggableAttributes;
   listeners: DraggableSyntheticListeners;
   className?: string;
@@ -1876,9 +1909,15 @@ function DragHandle({
   return (
     <button
       type="button"
-      aria-label={`Reorder ${label}`}
+      // The position is part of the label because a screen reader user has no
+      // other way to know where the thing they are about to pick up currently
+      // sits, and dnd-kit's own instructions assume the app supplies it.
+      aria-label={`Reorder ${label}, ${where}`}
+      // Held back while a drop's writes are in flight, or space does nothing
+      // and says nothing.
+      disabled={disabled}
       className={cn(
-        "shrink-0 cursor-grab touch-none rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing",
+        "shrink-0 cursor-grab touch-none rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:cursor-default disabled:opacity-40",
         className,
       )}
       {...attributes}
@@ -1900,13 +1939,20 @@ function DragHandle({
 function SectionGroup({
   group,
   open,
+  disabled,
   dragDisabled,
+  sectionIndex,
+  sectionCount,
   onOpen,
   children,
 }: {
   group: NavGroup;
   open: boolean;
+  disabled: boolean;
   dragDisabled: boolean;
+  /** 1-based place among the real sections, for the handle's label. */
+  sectionIndex: number;
+  sectionCount: number;
   onOpen: () => void;
   children: React.ReactNode;
 }) {
@@ -1938,7 +1984,13 @@ function SectionGroup({
     >
       <div className="flex items-center gap-1">
         {group.slug !== "" && (
-          <DragHandle label={group.title} attributes={attributes} listeners={listeners} />
+          <DragHandle
+            label={group.title}
+            where={`section ${sectionIndex} of ${sectionCount}`}
+            disabled={dragDisabled}
+            attributes={attributes}
+            listeners={listeners}
+          />
         )}
         {group.slug === "" ? (
           <span className="flex-1 truncate px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1948,9 +2000,13 @@ function SectionGroup({
           <button
             type="button"
             onClick={onOpen}
+            // Opening a section claims a request token, so it is held back
+            // while a load or a drop's writes are in flight, exactly like every
+            // entry in the list.
+            disabled={disabled}
             aria-current={open}
             className={cn(
-              "min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted hover:text-foreground",
+              "min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60 disabled:hover:bg-transparent",
               open && "bg-muted text-foreground",
             )}
           >
@@ -1985,6 +2041,9 @@ function EntryRow({
   open,
   disabled,
   dragDisabled,
+  index,
+  count,
+  sectionTitle,
   onOpen,
 }: {
   entry: KbNavEntry;
@@ -1992,6 +2051,10 @@ function EntryRow({
   open: boolean;
   disabled: boolean;
   dragDisabled: boolean;
+  /** 1-based place in its section, for the handle's label. */
+  index: number;
+  count: number;
+  sectionTitle: string;
   onOpen: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -2008,6 +2071,8 @@ function EntryRow({
     >
       <DragHandle
         label={entry.title}
+        where={`item ${index} of ${count} in ${sectionTitle}`}
+        disabled={dragDisabled}
         attributes={attributes}
         listeners={listeners}
         className="mt-1.5"
