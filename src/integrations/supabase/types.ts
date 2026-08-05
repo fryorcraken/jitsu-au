@@ -398,42 +398,6 @@ export type Database = {
         }
         Relationships: []
       }
-      club_semesters: {
-        Row: {
-          code: string
-          created_at: string
-          ends_on: string
-          half: number
-          id: string
-          is_active: boolean
-          name: string
-          starts_on: string
-          year: number
-        }
-        Insert: {
-          code: string
-          created_at?: string
-          ends_on: string
-          half: number
-          id?: string
-          is_active?: boolean
-          name: string
-          starts_on: string
-          year: number
-        }
-        Update: {
-          code?: string
-          created_at?: string
-          ends_on?: string
-          half?: number
-          id?: string
-          is_active?: boolean
-          name?: string
-          starts_on?: string
-          year?: number
-        }
-        Relationships: []
-      }
       club_settings: {
         Row: {
           key: string
@@ -968,7 +932,6 @@ export type Database = {
           payment_reference: string
           plan_id: string
           price_cents: number
-          semester_id: string | null
           session_date: string | null
           sessions_remaining: number | null
           starts_at: string | null
@@ -987,7 +950,6 @@ export type Database = {
           payment_reference: string
           plan_id: string
           price_cents: number
-          semester_id?: string | null
           session_date?: string | null
           sessions_remaining?: number | null
           starts_at?: string | null
@@ -1006,7 +968,6 @@ export type Database = {
           payment_reference?: string
           plan_id?: string
           price_cents?: number
-          semester_id?: string | null
           session_date?: string | null
           sessions_remaining?: number | null
           starts_at?: string | null
@@ -1020,13 +981,6 @@ export type Database = {
             columns: ["plan_id"]
             isOneToOne: false
             referencedRelation: "membership_plans"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "memberships_semester_id_fkey"
-            columns: ["semester_id"]
-            isOneToOne: false
-            referencedRelation: "club_semesters"
             referencedColumns: ["id"]
           },
         ]
