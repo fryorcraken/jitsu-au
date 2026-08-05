@@ -11,22 +11,46 @@ A **plan** is what the club sells (free trial, casual class, a dated training
 period, yearly insurance), and it carries everything about itself: its price
 and how long it runs. A **membership** is one person's enrolment against a
 plan: pending until paid, then active with a `starts_at`/`ends_at` window. A
-plan runs one of three ways: a **fixed date range** (everyone who buys it gets
-exactly those dates, the same for everyone regardless of when in it they
-joined), a **rolling window** (N days from the moment payment clears, e.g.
-yearly insurance), or **neither** (it ends with its session credits instead of
-a date — the free trial, casual classes). There is no self-serve sign-up: a
-membership only exists because someone bought one, or a manager approved a
-waiver and the club's free trial was assigned automatically.
+plan's **kind** decides how it ends, and the manager screen asks for it as a
+single plain-language question ("what kind of plan is this?"): a **training
+period** runs between fixed dates (everyone who buys it gets exactly those
+dates, regardless of when in it they joined), **yearly insurance** runs N days
+from the moment payment clears, and a **casual class** or the **free trial**
+ends with its session credits instead of on a date. There is no self-serve
+sign-up: a membership only exists because someone bought one, or a manager
+approved a waiver and the club's free trial was assigned automatically.
 
 ## Plans
 
-| Plan                 | Kind        | Runs                                | What it buys                                      |
-| -------------------- | ----------- | ----------------------------------- | ------------------------------------------------- |
-| `trial_2_session`    | `trial`     | neither (ends with its credits)     | Two free classes, ever, no expiry.                |
-| `casual_session`     | `session`   | neither (tied to a session date)    | One class.                                        |
-| `semester_2_2026`, … | `period`    | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.       |
-| `insurance_yearly`   | `insurance` | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from pay. |
+| Plan               | Kind        | Shown to managers as       | Runs                                | What it buys                                      |
+| ------------------ | ----------- | -------------------------- | ----------------------------------- | ------------------------------------------------- |
+| `trial_2_session`  | `trial`     | Free trial                 | ends with its credits               | Two free classes, ever, no expiry.                |
+| `casual_session`   | `session`   | Casual class or class pack | ends with its credits               | One class, tied to a session date.                |
+| `2026-s2`, …       | `period`    | Training period            | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.       |
+| `insurance_yearly` | `insurance` | Yearly insurance           | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from pay. |
+
+The kind is the **only** control over how a plan runs: picking one on
+`/manager/membership-plans` shows just that kind's fields and clears the
+others, so a plan can never carry both a date range and a rolling duration
+(which `savePlanSchema` rejects anyway). A `period` plan with no session
+credits means unlimited classes for its dates, and the member purchase screen
+says so. The database still permits any kind/date combination, so the manager
+agent API can write one; the manager screen flags such a row rather than
+hiding the values.
+
+The screen also refuses to save a plan that could never end: a training period
+with no dates, yearly insurance with no day count, or a casual/trial plan with
+no session credits. `savePlanSchema` allows all three, but they activate to
+`ends_at: null` (`planMembershipWindow`) while still passing `sellablePlans`,
+so the membership never expires. For the two credit kinds it is worse:
+`resolveCoverage` matches no tier at all (`docs/check-in.md`), so the member
+is sold something that covers no class either. The old generic `semester` plan
+was exactly that shape and is deleted by
+`20260805000000_delete_generic_semester_plan.sql`.
+
+The guard only applies to a shape a manager is actually changing: a row that
+arrived malformed (written through the manager agent API, which the database
+still permits) can still be renamed or taken off sale without fixing it first.
 
 Each dated training period is **its own plan**, not a shared plan pointing at
 a separate table of windows: "Semester 2 2026" and "Semester 1 2027" are two

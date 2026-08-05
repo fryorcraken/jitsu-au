@@ -125,7 +125,7 @@ describe("MemberLayout", () => {
       "href",
       "/manager/kb",
     );
-    expect(screen.getByRole("link", { name: /^plans & windows$/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^membership plans$/i })).toHaveAttribute(
       "href",
       "/manager/membership-plans",
     );

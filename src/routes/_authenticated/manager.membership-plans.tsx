@@ -8,7 +8,20 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listAllMembershipPlans, saveMembershipPlan } from "@/lib/membership.functions";
-import { membershipPlanKinds, type MembershipPlanKind, type SavePlanInput } from "@/lib/validation";
+import {
+  PLAN_TYPE_KINDS,
+  PLAN_TYPES,
+  planEditPayload,
+  planEditsDiffer,
+  planShapeError,
+  planShapeUnchanged,
+  planTypeOf,
+  planTypePatch,
+  strandedPlanFields,
+  type MembershipPlanKind,
+  type PlanShapeFields,
+  type SavePlanInput,
+} from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
 import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
 import type { MembershipPlanRow } from "@/lib/membership-types";
@@ -23,6 +36,17 @@ export const Route = createFileRoute("/_authenticated/manager/membership-plans")
 
 /** Cents <-> dollar-string helpers for the price inputs. */
 const toDollars = (cents: number | null) => (cents == null ? "" : String(cents / 100));
+/** Whole-number inputs (session credits, days from payment). A bare
+ * `Number()` yields NaN on a typo like "1e", which `JSON.stringify` then puts
+ * on the wire as `null` — silently wiping a stored value. Unparseable input
+ * reads as blank instead. */
+const toCount = (raw: string): number | null => {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+
 const toCents = (dollars: string): number | null => {
   const t = dollars.trim();
   if (t === "") return null;
@@ -30,95 +54,70 @@ const toCents = (dollars: string): number | null => {
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 };
 
-const selectClass =
-  "h-9 rounded-md border border-input bg-background px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
-
-/** The three mutually exclusive ways a plan can run, as an explicit choice
- * rather than three fields that grey each other out — a manager picks one,
- * and only its fields show. Switching modes blanks all three underlying
- * fields, since a leftover date or day-count from the previous mode has no
- * meaning once the mode has changed. */
-type DurationMode = "dated" | "rolling" | "none";
-type DurationFields = {
-  starts_on: string | null;
-  ends_on: string | null;
-  duration_days: number | null;
-};
-
-function durationModeOf(p: DurationFields): DurationMode {
-  if (p.starts_on || p.ends_on) return "dated";
-  if (p.duration_days) return "rolling";
-  return "none";
-}
-
-const BLANK_DURATION: DurationFields = { starts_on: null, ends_on: null, duration_days: null };
-
-/**
- * A friendly pre-check mirroring `savePlanSchema`'s date refinements, so a
- * manager who fills in Starts and forgets Ends sees plain language instead of
- * a raw Zod issue array from the server. The mode picker below already makes
- * the dates/duration exclusion impossible to violate through the UI, so only
- * the "half-filled dates" and "end before start" cases can still happen here.
- */
-function durationFieldsError(f: DurationFields): string | null {
-  if (Boolean(f.starts_on) !== Boolean(f.ends_on)) {
-    return "Set both a start and an end date, or neither.";
-  }
-  if (f.starts_on && f.ends_on && f.ends_on < f.starts_on) {
-    return "End date must be on or after the start date.";
-  }
-  return null;
-}
-
-/** The Runs picker + its mode-specific fields, shared by an existing plan's
- * card and the "Add a plan" form so the two can never drift apart. */
-function DurationModeFields({
+/** The plan-type picker and whichever duration fields that type uses, shared
+ * by an existing plan's card and the "Add a plan" form so the two can never
+ * drift apart. */
+function PlanTypeFields({
   idPrefix,
   fields,
-  onModeChange,
+  onKindChange,
   onFieldChange,
 }: {
   idPrefix: string;
-  fields: DurationFields;
-  onModeChange: (mode: DurationMode) => void;
-  onFieldChange: (patch: Partial<DurationFields>) => void;
+  fields: PlanShapeFields;
+  onKindChange: (kind: MembershipPlanKind) => void;
+  /** Never carries `kind` — only the type picker changes that, via
+   * `onKindChange`, which also applies the new kind's defaults. */
+  onFieldChange: (patch: Partial<Omit<PlanShapeFields, "kind">>) => void;
 }) {
-  const mode = durationModeOf(fields);
+  const spec = planTypeOf(fields.kind);
+  const stranded = strandedPlanFields(fields);
   return (
     <div className="space-y-3">
-      <div>
-        <Label className="text-xs">Runs</Label>
-        <div className="mt-1.5 space-y-1.5">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name={`${idPrefix}-runs`}
-              checked={mode === "dated"}
-              onChange={() => onModeChange("dated")}
-            />
-            Between two dates
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name={`${idPrefix}-runs`}
-              checked={mode === "rolling"}
-              onChange={() => onModeChange("rolling")}
-            />
-            For a number of days from payment
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name={`${idPrefix}-runs`}
-              checked={mode === "none"}
-              onChange={() => onModeChange("none")}
-            />
-            Until its session credits run out
-          </label>
+      {/* A real fieldset/legend, so a screen reader announces the four radios
+          as one named group rather than four unlabelled controls. */}
+      <fieldset>
+        <legend className="text-xs font-medium">What kind of plan is this?</legend>
+        <div className="mt-1.5 space-y-2">
+          {PLAN_TYPE_KINDS.map((kind) => (
+            <label key={kind} className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                className="mt-1"
+                name={`${idPrefix}-plan-type`}
+                checked={fields.kind === kind}
+                onChange={() => onKindChange(kind)}
+              />
+              <span>
+                {PLAN_TYPES[kind].label}
+                <span className="block text-xs text-muted-foreground">
+                  {PLAN_TYPES[kind].blurb}
+                </span>
+              </span>
+            </label>
+          ))}
         </div>
-      </div>
-      {mode === "dated" && (
+      </fieldset>
+      {stranded.length > 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-500">
+          This plan also has {stranded.join(" and ")} stored, which a {spec.label.toLowerCase()}{" "}
+          plan ignores.{" "}
+          <button
+            type="button"
+            className="underline hover:no-underline"
+            onClick={() =>
+              onFieldChange({
+                ...(spec.dates ? {} : { starts_on: null, ends_on: null }),
+                ...(spec.duration ? {} : { duration_days: null }),
+                ...(spec.credits ? {} : { session_credits: null }),
+              })
+            }
+          >
+            Clear them
+          </button>
+        </p>
+      )}
+      {spec.dates && (
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label htmlFor={`${idPrefix}-starts`} className="text-xs">
@@ -146,7 +145,7 @@ function DurationModeFields({
           </div>
         </div>
       )}
-      {mode === "rolling" && (
+      {spec.duration && (
         <div>
           <Label htmlFor={`${idPrefix}-duration`} className="text-xs">
             Days from payment
@@ -155,10 +154,7 @@ function DurationModeFields({
             id={`${idPrefix}-duration`}
             inputMode="numeric"
             value={fields.duration_days ?? ""}
-            onChange={(e) => {
-              const n = e.target.value.trim();
-              onFieldChange({ duration_days: n === "" ? null : Number(n) });
-            }}
+            onChange={(e) => onFieldChange({ duration_days: toCount(e.target.value) })}
             className="mt-1 max-w-[10rem]"
           />
         </div>
@@ -176,19 +172,30 @@ function DurationModeFields({
  */
 function PlanCard({
   plan,
+  ended = false,
+  dirty,
   savingId,
   onPatch,
   onSave,
   onDuplicate,
 }: {
   plan: MembershipPlanRow;
+  /** Its end date has passed, so the site refuses to sell it whatever the
+   * "Available to buy" tick says. Explained on the card, because a ticked box
+   * under a "Not on sale" heading otherwise reads as a contradiction. */
+  ended?: boolean;
+  dirty: boolean;
   savingId: string | null;
   onPatch: (id: string, patch: Partial<MembershipPlanRow>) => void;
   onSave: (plan: MembershipPlanRow) => void;
   onDuplicate: (plan: MembershipPlanRow) => void;
 }) {
+  const spec = planTypeOf(plan.kind);
   return (
-    <Card>
+    // `data-plan` scopes a card's own controls: every card renders the same
+    // labels, so tests (and anyone inspecting the DOM) need a stable handle
+    // that does not depend on styling classes or DOM order.
+    <Card data-plan={plan.id}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-lg">{plan.name}</CardTitle>
@@ -197,12 +204,17 @@ function PlanCard({
               checked={plan.is_active}
               onCheckedChange={(v) => onPatch(plan.id, { is_active: v === true })}
             />
-            On sale
+            Available to buy
           </label>
         </div>
         <p className="text-xs text-muted-foreground">
-          <code>{plan.code}</code> · {plan.kind}
+          <code>{plan.code}</code> · {spec.label}
         </p>
+        {ended && (
+          <p className="text-xs text-muted-foreground">
+            Ended {formatDateOnly(plan.ends_on)}, so it is not for sale whatever this is set to.
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -231,7 +243,7 @@ function PlanCard({
             />
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className={`grid gap-3 ${spec.credits ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
           <div>
             <Label htmlFor={`plan-${plan.id}-public-price`} className="text-xs">
               Public price ($)
@@ -259,31 +271,33 @@ function PlanCard({
               className="mt-1"
             />
           </div>
-          <div>
-            <Label htmlFor={`plan-${plan.id}-credits`} className="text-xs">
-              Session credits
-            </Label>
-            <Input
-              id={`plan-${plan.id}-credits`}
-              inputMode="numeric"
-              placeholder="none"
-              value={plan.session_credits ?? ""}
-              onChange={(e) => {
-                const n = e.target.value.trim();
-                onPatch(plan.id, { session_credits: n === "" ? null : Number(n) });
-              }}
-              className="mt-1"
-            />
-          </div>
+          {spec.credits && (
+            <div>
+              <Label htmlFor={`plan-${plan.id}-credits`} className="text-xs">
+                Session credits
+              </Label>
+              <Input
+                id={`plan-${plan.id}-credits`}
+                inputMode="numeric"
+                // Blank means "unlimited" only when the dates still bound it.
+                // For a credit-run plan a blank never runs out AND covers no
+                // class, so it must not be advertised as unlimited.
+                placeholder={spec.creditsRequired ? "how many classes" : "unlimited"}
+                value={plan.session_credits ?? ""}
+                onChange={(e) => onPatch(plan.id, { session_credits: toCount(e.target.value) })}
+                className="mt-1"
+              />
+            </div>
+          )}
         </div>
-        <DurationModeFields
+        <PlanTypeFields
           idPrefix={`plan-${plan.id}`}
           fields={plan}
-          onModeChange={() => onPatch(plan.id, BLANK_DURATION)}
+          onKindChange={(kind) => onPatch(plan.id, planTypePatch(kind))}
           onFieldChange={(patch) => onPatch(plan.id, patch)}
         />
         <div className="flex gap-2">
-          <Button size="sm" disabled={savingId === plan.id} onClick={() => onSave(plan)}>
+          <Button size="sm" disabled={!dirty || savingId === plan.id} onClick={() => onSave(plan)}>
             {savingId === plan.id ? "Saving..." : "Save"}
           </Button>
           <Button size="sm" variant="outline" onClick={() => onDuplicate(plan)}>
@@ -301,6 +315,7 @@ function PlanCard({
 function NotOnSaleRow({
   plan,
   ended,
+  dirty,
   savingId,
   onPatch,
   onSave,
@@ -308,6 +323,7 @@ function NotOnSaleRow({
 }: {
   plan: MembershipPlanRow;
   ended: boolean;
+  dirty: boolean;
   savingId: string | null;
   onPatch: (id: string, patch: Partial<MembershipPlanRow>) => void;
   onSave: (plan: MembershipPlanRow) => void;
@@ -325,6 +341,8 @@ function NotOnSaleRow({
         <div className="pt-4">
           <PlanCard
             plan={plan}
+            ended={ended}
+            dirty={dirty}
             savingId={savingId}
             onPatch={onPatch}
             onSave={onSave}
@@ -356,6 +374,9 @@ type NewPlanForm = {
   is_active: boolean;
 };
 
+const baselineOf = (rows: MembershipPlanRow[]): Record<string, MembershipPlanRow> =>
+  Object.fromEntries(rows.map((r) => [r.id, r]));
+
 const emptyNewPlan = (): NewPlanForm => ({
   code: "",
   name: "",
@@ -379,6 +400,9 @@ function PlansPage() {
   const save = useServerFn(saveMembershipPlan);
 
   const [plans, setPlans] = useState<MembershipPlanRow[]>([]);
+  /** The last-saved copy of each plan, keyed by id, so a card can tell whether
+   * it still matches the database and grey its Save button out when it does. */
+  const [baseline, setBaseline] = useState<Record<string, MembershipPlanRow>>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [newPlan, setNewPlan] = useState<NewPlanForm>(emptyNewPlan);
@@ -392,7 +416,10 @@ function PlansPage() {
   useEffect(() => {
     if (!isManager) return;
     fetchAll()
-      .then((data) => setPlans(data as MembershipPlanRow[]))
+      .then((data) => {
+        setPlans(data as MembershipPlanRow[]);
+        setBaseline(baselineOf(data as MembershipPlanRow[]));
+      })
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load plans"))
       .finally(() => setLoading(false));
   }, [isManager, fetchAll]);
@@ -401,35 +428,38 @@ function PlansPage() {
     setPlans((prev) => prev.map((pl) => (pl.id === id ? { ...pl, ...p } : pl)));
   }
 
+  /** A plan with no baseline yet (only possible mid-load) counts as dirty, so
+   * a transient gap can never leave a manager unable to save real edits. */
+  function isDirty(plan: MembershipPlanRow) {
+    const saved = baseline[plan.id];
+    return !saved || planEditsDiffer(plan, saved);
+  }
+
   /** Save one plan and fold the confirmed row back into local state.
    * Deliberately NOT a full `reload()`: refetching every plan after one save
    * would throw away whatever another card had mid-edit but unsaved, since
    * every card shares the same `plans` array. */
   async function onSave(plan: MembershipPlanRow) {
-    const durationError = durationFieldsError(plan);
-    if (durationError) {
-      toast.error(durationError);
+    // Only hold a manager to the shape rules for a shape they are actually
+    // changing. A row that arrived malformed (written by the manager agent
+    // API, or predating these rules) must stay renameable and, above all,
+    // takeable off sale — refusing the one edit that retires it would trap
+    // them into fixing it first.
+    const stored = baseline[plan.id];
+    const shapeError = planShapeError(plan);
+    if (shapeError && !(stored && planShapeUnchanged(plan, stored))) {
+      toast.error(shapeError);
       return;
     }
     setSavingId(plan.id);
     try {
-      const data: SavePlanInput = {
-        id: plan.id,
-        code: plan.code,
-        name: plan.name,
-        description: plan.description || "",
-        kind: plan.kind as MembershipPlanKind,
-        public_price_cents: plan.public_price_cents,
-        student_price_cents: plan.student_price_cents,
-        duration_days: plan.duration_days,
-        session_credits: plan.session_credits,
-        is_active: plan.is_active,
-        sort_order: plan.sort_order,
-        starts_on: plan.starts_on,
-        ends_on: plan.ends_on,
-      };
+      const data: SavePlanInput = planEditPayload(plan);
       await save({ data });
-      setPlans((prev) => prev.map((pl) => (pl.id === plan.id ? { ...pl, ...data } : pl)));
+      const saved = { ...plan, ...data };
+      setPlans((prev) => prev.map((pl) => (pl.id === plan.id ? saved : pl)));
+      // Re-baseline off the same object the list now holds, so the card goes
+      // straight back to "no unsaved changes" and Save greys out again.
+      setBaseline((prev) => ({ ...prev, [plan.id]: saved }));
       toast.success(`Saved ${plan.name}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
@@ -468,37 +498,44 @@ function PlansPage() {
       toast.error("Give the plan a code and a name.");
       return;
     }
-    if (newPlan.public_price_cents == null) {
+    const publicPrice = newPlan.public_price_cents;
+    if (publicPrice == null) {
       toast.error("Set a public price.");
       return;
     }
-    const durationError = durationFieldsError(newPlan);
-    if (durationError) {
-      toast.error(durationError);
+    const shapeError = planShapeError(newPlan);
+    if (shapeError) {
+      toast.error(shapeError);
       return;
     }
     setCreating(true);
     try {
-      const data: SavePlanInput = {
+      const data: SavePlanInput = planEditPayload({
+        ...newPlan,
         code: newPlan.code.trim(),
         name: newPlan.name.trim(),
         description: newPlan.description.trim(),
-        kind: newPlan.kind,
-        public_price_cents: newPlan.public_price_cents,
-        student_price_cents: newPlan.student_price_cents,
-        duration_days: newPlan.duration_days,
-        session_credits: newPlan.session_credits,
-        is_active: newPlan.is_active,
-        sort_order: newPlan.sort_order,
-        starts_on: newPlan.starts_on,
-        ends_on: newPlan.ends_on,
-      };
+        public_price_cents: publicPrice,
+      });
       await save({ data });
       toast.success("Plan added");
       setNewPlan(emptyNewPlan());
       setCopiedFrom(null);
+      // Refetch to pick up the new row, but keep any card the manager has
+      // edited and not yet saved. Overwriting those would discard their work,
+      // and re-baselining them would grey Save out afterwards, leaving a card
+      // that looks saved while actually holding the server's values.
+      const unsaved = new Map(plans.filter(isDirty).map((p) => [p.id, p]));
       await fetchAll()
-        .then((d) => setPlans(d as MembershipPlanRow[]))
+        .then((d) => {
+          const fresh = d as MembershipPlanRow[];
+          setPlans(fresh.map((row) => unsaved.get(row.id) ?? row));
+          setBaseline((prev) =>
+            Object.fromEntries(
+              fresh.map((row) => [row.id, unsaved.has(row.id) ? (prev[row.id] ?? row) : row]),
+            ),
+          );
+        })
         .catch(() => {});
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not add the plan");
@@ -529,7 +566,7 @@ function PlansPage() {
       <section className="mx-auto max-w-4xl space-y-6 px-4 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-black">Plans</h1>
+            <h1 className="text-3xl font-black">Membership plans</h1>
             <p className="text-sm text-muted-foreground">
               Edit prices, dates and availability. These drive the member signup, and the public
               pricing page is written by hand and does not read this list.
@@ -543,9 +580,9 @@ function PlansPage() {
         </div>
 
         <p className="text-xs text-muted-foreground">
-          A plan runs between two dates (everyone who buys it gets exactly those dates), for a
-          number of days from payment (like yearly insurance), or until its session credits run out
-          instead of on a date (the free trial, casual classes). Never more than one at once.
+          Every plan is one of four kinds, and the kind decides how it ends: a training period runs
+          between two dates, yearly insurance runs a set number of days from payment, and a casual
+          class or free trial runs until its classes are used up.
         </p>
 
         <div className="space-y-4">
@@ -553,6 +590,7 @@ function PlansPage() {
             <PlanCard
               key={plan.id}
               plan={plan}
+              dirty={isDirty(plan)}
               savingId={savingId}
               onPatch={patch}
               onSave={onSave}
@@ -589,41 +627,17 @@ function PlansPage() {
             )}
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="new-plan-code" className="text-xs">
-                  Code
-                </Label>
-                <Input
-                  id="new-plan-code"
-                  placeholder="semester_2_2027"
-                  value={newPlan.code}
-                  onChange={(e) => setNewPlan((s) => ({ ...s, code: e.target.value }))}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="new-plan-kind" className="text-xs">
-                  Kind
-                </Label>
-                <select
-                  id="new-plan-kind"
-                  value={newPlan.kind}
-                  onChange={(e) =>
-                    setNewPlan((s) => ({
-                      ...s,
-                      kind: e.target.value as MembershipPlanKind,
-                    }))
-                  }
-                  className={`mt-1 w-full ${selectClass}`}
-                >
-                  {membershipPlanKinds.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <Label htmlFor="new-plan-code" className="text-xs">
+                Code
+              </Label>
+              <Input
+                id="new-plan-code"
+                placeholder="semester_2_2027"
+                value={newPlan.code}
+                onChange={(e) => setNewPlan((s) => ({ ...s, code: e.target.value }))}
+                className="mt-1"
+              />
             </div>
             <div>
               <Label htmlFor="new-plan-name" className="text-xs">
@@ -650,7 +664,11 @@ function PlansPage() {
                 className="mt-1"
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div
+              className={`grid gap-3 ${
+                planTypeOf(newPlan.kind).credits ? "sm:grid-cols-3" : "sm:grid-cols-2"
+              }`}
+            >
               <div>
                 <Label htmlFor="new-plan-public-price" className="text-xs">
                   Public price ($)
@@ -680,27 +698,30 @@ function PlansPage() {
                   className="mt-1"
                 />
               </div>
-              <div>
-                <Label htmlFor="new-plan-credits" className="text-xs">
-                  Session credits
-                </Label>
-                <Input
-                  id="new-plan-credits"
-                  inputMode="numeric"
-                  placeholder="none"
-                  value={newPlan.session_credits ?? ""}
-                  onChange={(e) => {
-                    const n = e.target.value.trim();
-                    setNewPlan((s) => ({ ...s, session_credits: n === "" ? null : Number(n) }));
-                  }}
-                  className="mt-1"
-                />
-              </div>
+              {planTypeOf(newPlan.kind).credits && (
+                <div>
+                  <Label htmlFor="new-plan-credits" className="text-xs">
+                    Session credits
+                  </Label>
+                  <Input
+                    id="new-plan-credits"
+                    inputMode="numeric"
+                    placeholder={
+                      planTypeOf(newPlan.kind).creditsRequired ? "how many classes" : "unlimited"
+                    }
+                    value={newPlan.session_credits ?? ""}
+                    onChange={(e) =>
+                      setNewPlan((s) => ({ ...s, session_credits: toCount(e.target.value) }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+              )}
             </div>
-            <DurationModeFields
+            <PlanTypeFields
               idPrefix="new-plan"
               fields={newPlan}
-              onModeChange={() => setNewPlan((s) => ({ ...s, ...BLANK_DURATION }))}
+              onKindChange={(kind) => setNewPlan((s) => ({ ...s, ...planTypePatch(kind) }))}
               onFieldChange={(p) => setNewPlan((s) => ({ ...s, ...p }))}
             />
             <label className="flex items-center gap-2 text-sm">
@@ -708,7 +729,7 @@ function PlansPage() {
                 checked={newPlan.is_active}
                 onCheckedChange={(v) => setNewPlan((s) => ({ ...s, is_active: v === true }))}
               />
-              On sale immediately
+              Available to buy immediately
             </label>
             <Button size="sm" disabled={creating} onClick={onCreate}>
               {creating ? "Adding..." : "Add plan"}
@@ -725,6 +746,7 @@ function PlansPage() {
                   key={plan.id}
                   plan={plan}
                   ended={isEnded(plan)}
+                  dirty={isDirty(plan)}
                   savingId={savingId}
                   onPatch={patch}
                   onSave={onSave}

@@ -9,6 +9,12 @@ import {
   matchesMembershipReference,
   normalizeRef,
   parseMoneyToCents,
+  planEditPayload,
+  planEditsDiffer,
+  planShapeError,
+  planShapeUnchanged,
+  planTypePatch,
+  strandedPlanFields,
   planMembershipWindow,
   sanitizeSurname,
   saveClubSettingsSchema,
@@ -323,6 +329,22 @@ describe("savePlanSchema", () => {
     expect(savePlanSchema.safeParse(base).success).toBe(true);
   });
 
+  // The club's own dated plans use hyphens: their codes were copied from
+  // `club_semesters`, whose CHECK mandated '^[0-9]{4}-s[12]$'. The manager
+  // screen renders no Code field, so it echoes the stored code back on every
+  // save — a hyphen-rejecting regex made those plans unsaveable outright.
+  it("accepts the club's hyphenated semester codes", () => {
+    for (const code of ["2026-s1", "2026-s2"]) {
+      expect(savePlanSchema.safeParse({ ...base, code }).success).toBe(true);
+    }
+  });
+
+  it("still rejects codes with spaces, capitals or punctuation", () => {
+    for (const code of ["Semester 1", "2026 s1", "2026.s1", "SEMESTER"]) {
+      expect(savePlanSchema.safeParse({ ...base, code }).success).toBe(false);
+    }
+  });
+
   it("accepts a well-formed rolling plan", () => {
     const rolling = {
       ...base,
@@ -579,5 +601,216 @@ describe("saveClubSettingsSchema", () => {
       invoice_payment_instructions: "x".repeat(5001),
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("planEditPayload / planEditsDiffer", () => {
+  const plan = () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    code: "2026-s2",
+    name: "Semester 2 2026",
+    description: "Unlimited classes",
+    kind: "period",
+    public_price_cents: 44500,
+    student_price_cents: 24500,
+    duration_days: null,
+    session_credits: null,
+    is_active: true,
+    sort_order: 2,
+    starts_on: "2026-07-20",
+    ends_on: "2026-12-16",
+  });
+
+  it("passes the editable fields through and normalises a null description", () => {
+    expect(planEditPayload({ ...plan(), description: null })).toEqual({
+      ...plan(),
+      description: "",
+    });
+  });
+
+  it("omits id when creating rather than sending an undefined one", () => {
+    const { id: _id, ...rest } = plan();
+    expect("id" in planEditPayload(rest)).toBe(false);
+  });
+
+  it("reports no difference for an untouched copy", () => {
+    expect(planEditsDiffer(plan(), plan())).toBe(false);
+  });
+
+  it("ignores fields a save does not carry, so they cannot fake a change", () => {
+    // `created_at` rides along on the row but is never sent.
+    const withExtra = { ...plan(), created_at: "2026-01-01T00:00:00Z" };
+    expect(planEditsDiffer(withExtra, plan())).toBe(false);
+  });
+
+  it.each([
+    ["name", { name: "Semester 2 2026 (revised)" }],
+    ["price", { public_price_cents: 45000 }],
+    ["kind", { kind: "session" }],
+    ["dates", { ends_on: "2026-12-20" }],
+    ["availability", { is_active: false }],
+    ["credits", { session_credits: 10 }],
+  ])("reports a difference when the %s changes", (_label, patch) => {
+    expect(planEditsDiffer({ ...plan(), ...patch }, plan())).toBe(true);
+  });
+
+  it("treats an empty-string description as equal to a null one", () => {
+    expect(planEditsDiffer({ ...plan(), description: "" }, { ...plan(), description: null })).toBe(
+      false,
+    );
+  });
+});
+
+describe("planShapeError", () => {
+  const shape = (over: Record<string, unknown> = {}) => ({
+    kind: "period",
+    starts_on: "2026-02-02",
+    ends_on: "2026-06-12",
+    duration_days: null,
+    session_credits: null,
+    ...over,
+  });
+
+  it("accepts each kind in its intended shape", () => {
+    expect(planShapeError(shape())).toBeNull();
+    expect(
+      planShapeError(
+        shape({ kind: "insurance", starts_on: null, ends_on: null, duration_days: 365 }),
+      ),
+    ).toBeNull();
+    expect(
+      planShapeError(
+        shape({ kind: "session", starts_on: null, ends_on: null, session_credits: 1 }),
+      ),
+    ).toBeNull();
+    expect(
+      planShapeError(shape({ kind: "trial", starts_on: null, ends_on: null, session_credits: 2 })),
+    ).toBeNull();
+  });
+
+  // Each of these activates to `ends_at: null` while still passing
+  // `sellablePlans`, i.e. a membership that never expires. For the two credit
+  // kinds it is worse: `resolveCoverage` matches no tier, so it also covers
+  // no class. This is the shape the deleted generic `semester` plan had.
+  it("rejects a training period with no dates", () => {
+    expect(planShapeError(shape({ starts_on: null, ends_on: null }))).toMatch(/start and an end/i);
+    expect(planShapeError(shape({ ends_on: null }))).toMatch(/start and an end/i);
+  });
+
+  it("rejects insurance with no day count", () => {
+    expect(planShapeError(shape({ kind: "insurance", starts_on: null, ends_on: null }))).toMatch(
+      /how many days/i,
+    );
+  });
+
+  it("rejects a credit-run plan with no credits, which would cover no class", () => {
+    for (const kind of ["session", "trial"]) {
+      expect(
+        planShapeError(shape({ kind, starts_on: null, ends_on: null, session_credits: null })),
+      ).toMatch(/never run out/i);
+    }
+  });
+
+  it("rejects an end date before the start date", () => {
+    expect(planShapeError(shape({ ends_on: "2026-01-01" }))).toMatch(/on or after/i);
+  });
+
+  it("treats a single-day period as valid", () => {
+    expect(planShapeError(shape({ starts_on: "2026-02-02", ends_on: "2026-02-02" }))).toBeNull();
+  });
+});
+
+describe("planShapeUnchanged", () => {
+  const a = {
+    kind: "period",
+    starts_on: "2026-02-02",
+    ends_on: "2026-06-12",
+    duration_days: null,
+    session_credits: null,
+  };
+
+  it("is true for an identical shape, so an unrelated edit stays saveable", () => {
+    expect(planShapeUnchanged({ ...a }, { ...a })).toBe(true);
+  });
+
+  it.each(["kind", "starts_on", "ends_on", "duration_days", "session_credits"])(
+    "is false when %s differs",
+    (field) => {
+      expect(planShapeUnchanged({ ...a, [field]: "changed" }, a)).toBe(false);
+    },
+  );
+});
+
+describe("planTypePatch", () => {
+  it("gives insurance a 365-day default and drops any dates", () => {
+    expect(planTypePatch("insurance")).toEqual({
+      kind: "insurance",
+      starts_on: null,
+      ends_on: null,
+      duration_days: 365,
+      session_credits: null,
+    });
+  });
+
+  it("clears the duration fields when switching to a dated or credit kind", () => {
+    expect(planTypePatch("period")).toEqual({
+      kind: "period",
+      starts_on: null,
+      ends_on: null,
+      duration_days: null,
+    });
+    expect(planTypePatch("session")).toEqual({
+      kind: "session",
+      starts_on: null,
+      ends_on: null,
+      duration_days: null,
+    });
+  });
+});
+
+describe("strandedPlanFields", () => {
+  it("finds values a kind never reads, including credits on insurance", () => {
+    expect(
+      strandedPlanFields({
+        kind: "insurance",
+        starts_on: "2026-02-02",
+        ends_on: "2026-06-12",
+        duration_days: 365,
+        session_credits: 5,
+      }),
+    ).toEqual(["start and end dates", "session credits"]);
+  });
+
+  it("finds a rolling duration left on a training period", () => {
+    expect(
+      strandedPlanFields({
+        kind: "period",
+        starts_on: "2026-02-02",
+        ends_on: "2026-06-12",
+        duration_days: 90,
+        session_credits: null,
+      }),
+    ).toEqual(["days from payment"]);
+  });
+
+  it("is empty for a well-formed plan of each kind", () => {
+    expect(
+      strandedPlanFields({
+        kind: "period",
+        starts_on: "2026-02-02",
+        ends_on: "2026-06-12",
+        duration_days: null,
+        session_credits: null,
+      }),
+    ).toEqual([]);
+    expect(
+      strandedPlanFields({
+        kind: "trial",
+        starts_on: null,
+        ends_on: null,
+        duration_days: null,
+        session_credits: 2,
+      }),
+    ).toEqual([]);
   });
 });
