@@ -107,7 +107,13 @@ export function deriveExcerpt(bodyMd: string, maxLength: number = EXCERPT_MAX_LE
   if (text.length <= maxLength) return text;
   const cut = text.slice(0, maxLength);
   const lastSpace = cut.lastIndexOf(" ");
-  const head = (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[\s,;:.!?-]+$/, "");
+  // No space to cut at means one word longer than the whole budget, so cut
+  // mid-word — one character short, to leave room for the ellipsis and keep
+  // the result inside `maxLength` either way.
+  const head = (lastSpace > 0 ? cut.slice(0, lastSpace) : cut.slice(0, maxLength - 1)).replace(
+    /[\s,;:.!?-]+$/,
+    "",
+  );
   return `${head}…`;
 }
 

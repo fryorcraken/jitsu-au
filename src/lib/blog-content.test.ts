@@ -118,6 +118,12 @@ describe("deriveExcerpt", () => {
     expect(excerpt.length).toBeLessThanOrEqual(14);
   });
 
+  it("stays within the limit when the first word is longer than the whole budget", () => {
+    const excerpt = deriveExcerpt("Supercalifragilisticexpialidocious", 10);
+    expect(excerpt).toBe("Supercali…");
+    expect(excerpt.length).toBe(10);
+  });
+
   it("does not cut a body that fits", () => {
     const body = "Short enough.";
     expect(deriveExcerpt(body)).toBe(body);
