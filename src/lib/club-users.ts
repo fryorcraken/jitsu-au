@@ -155,6 +155,40 @@ export function profileUserIds(profiles: Pick<ClubUserProfile, "user_id">[]): st
   return [...new Set(profiles.map((p) => p.user_id))];
 }
 
+/** The name parts a person is displayed by when all a screen has is their id. */
+export type PersonNameRow = {
+  user_id: string;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  preferred_name: string | null;
+};
+
+/**
+ * Label people by id, for the places that store a bare `user_id` and have to
+ * show a human: who approved a waiver, who filed one.
+ *
+ * The name wins; the email is the fallback for somebody with no profile row (a
+ * manager account that never signed a waiver has none). Anyone who resolves to
+ * neither is simply absent from the map — the caller decides what an
+ * unresolvable id reads as, rather than being handed a raw uuid to render.
+ */
+export function personLabelsById(input: {
+  profiles: PersonNameRow[];
+  emails: { user_id: string; email: string }[];
+}): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const e of input.emails) {
+    const email = (e.email || "").trim();
+    if (email) labels.set(e.user_id, email);
+  }
+  for (const p of input.profiles) {
+    const name = nameWithPreferred(p).trim();
+    if (name) labels.set(p.user_id, name);
+  }
+  return labels;
+}
+
 /**
  * Aggregate profiles + emails + waivers + memberships + roles + leads into one
  * row per person, sorted by name (A–Z). A lead whose email already belongs to
