@@ -988,6 +988,7 @@ export type Database = {
       profiles: {
         Row: {
           address: string | null
+          belt_size: string | null
           created_at: string
           date_of_birth: string | null
           display_name: string | null
@@ -995,6 +996,7 @@ export type Database = {
           emergency_contact_phone: string | null
           emergency_contact_relationship: string | null
           first_name: string
+          gi_size: string | null
           guardian_name: string | null
           guardian_relationship: string | null
           is_minor: boolean
@@ -1010,6 +1012,7 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          belt_size?: string | null
           created_at?: string
           date_of_birth?: string | null
           display_name?: string | null
@@ -1017,6 +1020,7 @@ export type Database = {
           emergency_contact_phone?: string | null
           emergency_contact_relationship?: string | null
           first_name: string
+          gi_size?: string | null
           guardian_name?: string | null
           guardian_relationship?: string | null
           is_minor?: boolean
@@ -1032,6 +1036,7 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          belt_size?: string | null
           created_at?: string
           date_of_birth?: string | null
           display_name?: string | null
@@ -1039,6 +1044,7 @@ export type Database = {
           emergency_contact_phone?: string | null
           emergency_contact_relationship?: string | null
           first_name?: string
+          gi_size?: string | null
           guardian_name?: string | null
           guardian_relationship?: string | null
           is_minor?: boolean
