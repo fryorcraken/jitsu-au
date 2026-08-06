@@ -189,31 +189,30 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (checkinRows.length >= CHECKINS_LIMIT)
       console.warn(`[getClubUser] check-ins capped at ${CHECKINS_LIMIT}; older ones truncated`);
     const eventIds = [...new Set(checkinRows.map((c) => c.event_id))];
-    const { data: events } = eventIds.length
-      ? await admin.from("calendar_events").select("id, title, starts_at").in("id", eventIds)
-      : { data: [] };
-    const eventById = new Map((events ?? []).map((e) => [e.id, e]));
 
     // Who approved each waiver. `waivers.approved_by` is a bare user id, and
     // the approver is a manager, who may well have no `profiles` row of their
     // own — so resolve the name where there is one and fall back to the login
     // address, the same two sources the memberships list uses for member names.
-    // A second round-trip because the ids only exist once the waivers are read.
-    const approverIds = [...new Set(waiverRows.map((w) => w.approved_by).filter(Boolean))].filter(
-      (id): id is string => typeof id === "string",
+    const approverIds = [...new Set(waiverRows.map((w) => w.approved_by))].filter(
+      (id): id is string => Boolean(id),
     );
-    const [approverProfiles, approverEmails] = approverIds.length
-      ? await Promise.all([
-          admin
+
+    // Everything whose keys only exist once the first round came back, in one
+    // second round rather than one round each.
+    const [{ data: events }, approverProfiles, approverEmails] = await Promise.all([
+      eventIds.length
+        ? admin.from("calendar_events").select("id, title, starts_at").in("id", eventIds)
+        : { data: [] },
+      approverIds.length
+        ? admin
             .from("profiles")
             .select("user_id, first_name, middle_name, last_name, preferred_name")
-            .in("user_id", approverIds),
-          userEmails(admin, approverIds),
-        ])
-      : [
-          { data: [], error: null },
-          { data: [], error: null },
-        ];
+            .in("user_id", approverIds)
+        : { data: [], error: null },
+      approverIds.length ? userEmails(admin, approverIds) : { data: [], error: null },
+    ]);
+    const eventById = new Map((events ?? []).map((e) => [e.id, e]));
     // Non-fatal, like the person's own email lookup above: an unresolved
     // approver shows as "—" next to a real approval date, which is the honest
     // reading. Taking the page down over it would block the decision it exists
