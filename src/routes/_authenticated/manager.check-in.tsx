@@ -383,7 +383,6 @@ function CheckInPage() {
             <thead className="bg-muted/50 text-left">
               <tr>
                 <th className="px-3 py-2">Person</th>
-                <th className="px-3 py-2">Email</th>
                 <th className="px-3 py-2">What pays for it</th>
                 <th className="px-3 py-2" />
               </tr>
@@ -391,7 +390,7 @@ function CheckInPage() {
             <tbody>
               {matches.length === 0 && (
                 <tr>
-                  <td className="px-3 py-6 text-muted-foreground" colSpan={4}>
+                  <td className="px-3 py-6 text-muted-foreground" colSpan={3}>
                     {search.trim()
                       ? "Nobody by that name has a waiver on file."
                       : "Everyone is checked in."}
@@ -400,8 +399,15 @@ function CheckInPage() {
               )}
               {matches.slice(0, MATCH_LIMIT).map((r) => (
                 <tr key={r.user_id} className="border-t">
-                  <td className="px-3 py-2 font-medium">{r.name ?? "Unknown"}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.email ?? "—"}</td>
+                  <td className="px-3 py-2 font-medium">
+                    <Link
+                      className="hover:underline"
+                      to="/manager/users/$userId"
+                      params={{ userId: r.user_id }}
+                    >
+                      {r.name ?? "Unknown"}
+                    </Link>
+                  </td>
                   <td className="px-3 py-2">
                     <Pill
                       label={coveragePreviewLabel(r)}
