@@ -50,10 +50,6 @@ export const InterestConfirmationEmail = ({
         <Button style={button} href={waiverUrl}>
           Sign my waiver
         </Button>
-        <Text style={text}>
-          Not ready? No problem. Just turn up to any beginners class (Mon or Wed) and we&apos;ll
-          sort it at the gym.
-        </Text>
         <Text style={footer}>
           You&apos;re receiving this because you registered your interest at {siteName}.
         </Text>
