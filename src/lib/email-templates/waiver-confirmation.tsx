@@ -72,14 +72,14 @@ export const WaiverConfirmationEmail = ({
         </Text>
         {/* Told about, deliberately NOT linked. The knowledge base is signed-in
             only, and nobody reading this email can sign in yet: their account is
-            created locked and a manager approving the waiver is what sends the
-            sign-in link. A link here would land a brand-new person on a sign-in
-            screen they have no password for, which reads as the club being
-            broken on their first click. */}
+            created locked, and a manager approving the waiver is what opens it.
+            A link here would land a brand-new person on a sign-in screen they
+            have no account for, which reads as the club being broken on their
+            first click. */}
         <Text style={text}>
-          Once you&apos;re approved you&apos;ll get a link to sign in, and your member area has our
-          knowledge base in it: what happens in your first session, how our belts and grading work,
-          and how the club runs.
+          Once you&apos;re approved we&apos;ll email you to say your account is open, and your
+          member area has our knowledge base in it: what happens in your first session, how our
+          belts and grading work, and how the club runs.
         </Text>
         {codeOfConductUrl ? (
           <>
@@ -97,7 +97,7 @@ export const WaiverConfirmationEmail = ({
           <>
             <Text style={text}>
               One last thing. Tap below so we know we can reach you at this address. That&apos;s
-              where your approval and sign-in link will go.
+              where your approval will go, and it becomes your login.
             </Text>
             <Button style={button} href={verifyUrl}>
               Confirm your email address
