@@ -175,12 +175,20 @@ describe("resolveCoverage", () => {
     expect(resolveCoverage({ memberships: [malformed], at: AT }).coverage).toBe("none");
   });
 
-  // The point of all of it: an uncovered check-in from a class someone really
-  // attended can be attached to the trial they were given afterwards.
-  it("lets a later-granted trial be attached to an earlier class", () => {
-    const granted = trial({ starts_at: "2026-08-09T02:00:00.000Z", ends_at: null });
-    const rows = attachableMemberships([granted], AT);
-    expect(rows[0]).toMatchObject({ usable: true, reason: null });
+  // An unlimited plan is never a balance, however many credits are hung off it:
+  // the period tier spends nothing, so treating an undated one as a balance
+  // would hand out free unlimited cover of every class ever held, unwarned. The
+  // database permits this shape -- savePlanSchema and the manager agent API do
+  // not run planShapeError -- so only this guard stops it.
+  it("does not let an undated period plan carrying credits cover an earlier class", () => {
+    const unlimitedWithCredits = semester({
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: null,
+      sessions_remaining: 5,
+    });
+    const d = resolveCoverage({ memberships: [unlimitedWithCredits], at: AT });
+    expect(d.coverage).toBe("none");
+    expect(d.warnings).toContain("not_started");
   });
 
   // Exercises the actual dates activateMembershipRow writes for a dated plan
@@ -315,6 +323,14 @@ describe("attachableMemberships", () => {
     expect(by("spent")).toMatchObject({ usable: false, reason: "no credits left" });
     expect(by("cancelled")).toMatchObject({ usable: false, reason: "cancelled" });
     expect(by("old")).toMatchObject({ usable: false, reason: "not valid for this class" });
+  });
+
+  // The point of all of it: an uncovered check-in from a class someone really
+  // attended can be attached to the trial they were given afterwards.
+  it("lets a later-granted trial be attached to an earlier class", () => {
+    const granted = trial({ starts_at: "2026-08-09T02:00:00.000Z", ends_at: null });
+    const rows = attachableMemberships([granted], AT);
+    expect(rows[0]).toMatchObject({ usable: true, reason: null });
   });
 
   it("says when a DATED membership starts after the class rather than just refusing it", () => {

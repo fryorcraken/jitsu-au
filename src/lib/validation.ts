@@ -1055,12 +1055,10 @@ function addCalendarDays(dateStr: string, days: number): string {
  *     (this is how yearly insurance has always worked).
  *   - neither: 00:00 Australia/Sydney on the day of `now`, and `ends_at` is
  *     null — the plan ends with its session credits instead of a date (the free
- *     trial, casual classes). Snapped to the start of the day for the same
- *     reason the dated branch is: coverage is resolved against the CLASS's start
- *     instant, so a credit granted at 18:05 that kept the raw instant would not
- *     pay for the 18:00 class it was granted for. A whole-day grain is the
- *     coarsest thing that cannot be beaten by the clock, and credits — not
- *     dates — are what limit these plans anyway.
+ *     trial, casual classes). The day grain matches the dated branch and keeps
+ *     the row readable as "granted on this day"; nothing enforces it, since a
+ *     credit balance is not date-gated at check-in (see `isOpenBalance` in
+ *     src/lib/checkin.ts). Credits, not dates, are what limit these plans.
  * A plan never has both set (a DB CHECK enforces it), so these are exhaustive.
  */
 export function planMembershipWindow(

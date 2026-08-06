@@ -1689,10 +1689,12 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       // first approval (one per person, ever; skipped for later approvals).
       // Best-effort like provisioning — re-approving retries it.
       //
-      // Dated from the waiver's OWN signing time, not from this approval. The
-      // waiver has to be signed before anyone trains, but it is often signed at
-      // the gym and approved hours or days later; running the trial from the
-      // approval would leave the very class it was signed for uncovered.
+      // Dated from the waiver's OWN signing time, not from this approval, so
+      // the row records when the entitlement was really earned: a form filled
+      // in at the gym may not be approved until hours or days later. Nothing
+      // reads that date as a limit — a credit balance is not date-gated at
+      // check-in (src/lib/checkin.ts `isOpenBalance`) — so approving late
+      // cannot cost anyone a session either way.
       try {
         const { assignTrialMembership } = await import("./membership.functions");
         await assignTrialMembership(waiver.user_id, waiver.signed_at);

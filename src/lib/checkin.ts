@@ -64,11 +64,20 @@ function endsAtMs(m: CoverageCandidate): number | null {
  * balance. So `starts_at` is not consulted for them at all, and a credit can pay
  * for a class held before the membership row existed.
  *
- * Keyed off `sessions_remaining`, NOT `kind`: a plan carrying neither dates nor
- * credits (the malformed shape docs/memberships.md warns about) has no
- * entitlement to spend and must not become a pass that covers everything ever.
+ * Credits are what make it a balance, so that is what this reads — a future
+ * credit pack under some new kind works with no change here. Two shapes are
+ * excluded, and both are shapes the database still permits because
+ * `savePlanSchema` and the manager agent API do not run `planShapeError`:
+ *   - **A `period` plan is never a balance**, however many credits are hung off
+ *     it. Its dates ARE the entitlement, and the period tier spends nothing, so
+ *     an undated one treated as a balance would cover every class the club has
+ *     ever held, free and unwarned.
+ *   - **Neither dates nor credits** is the malformed shape
+ *     docs/memberships.md warns about. There is nothing to spend, so there is
+ *     nothing to pay with.
  */
 function isOpenBalance(m: CoverageCandidate): boolean {
+  if (m.kind === "period") return false;
   return m.ends_at === null && m.sessions_remaining !== null;
 }
 
