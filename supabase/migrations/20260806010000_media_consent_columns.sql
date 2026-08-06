@@ -32,17 +32,18 @@ COMMENT ON COLUMN public.waivers.media_consent IS
   'Media/promotional-photo consent as ticked on this submission. NULL = the template signed had no media acknowledgement. Frozen; the signed PDF is the evidence.';
 
 -- The club's current answer. Seeded from the approved submission, and
--- changeable afterwards BY THE MEMBER on /account as well as by a manager: a
--- photo consent that cannot be withdrawn without signing a whole new waiver is
--- not a consent, and one only somebody else can withdraw is the wrong way round.
+-- changeable afterwards only by the member themselves on /account: a photo
+-- consent that cannot be withdrawn without signing a whole new waiver is not a
+-- consent, and one only somebody else could withdraw would be the wrong way
+-- round. A manager cannot set this directly; the person page only displays it.
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS media_consent BOOLEAN;
 
--- Who last set it and when, so "No" is never ambiguous between three different
--- facts: one ticked on a signed waiver, one the member set later on /account,
--- and one a manager recorded on their behalf. Both NULL means the value came
--- straight from an approved waiver and nobody has touched it since; otherwise
--- media_consent_updated_by = user_id says the member did it themselves.
+-- Who last set it and when, so "No" is never ambiguous between two different
+-- facts: one ticked on a signed waiver, or one the member set later on
+-- /account. Both NULL means the value came straight from an approved waiver
+-- and the member has not touched it since; otherwise media_consent_updated_by
+-- = user_id, because the member is the only one who can ever set it by hand.
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS media_consent_updated_at TIMESTAMPTZ;
 
@@ -50,10 +51,10 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS media_consent_updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
 
 COMMENT ON COLUMN public.profiles.media_consent IS
-  'The club''s current media/promotional-photo consent for this person. NULL = never asked. Set by waiver approval, or by a manager recording a change.';
+  'The club''s current media/promotional-photo consent for this person. NULL = never asked. Set by waiver approval, or by the member themselves on /account. Managers cannot set this directly.';
 
 COMMENT ON COLUMN public.profiles.media_consent_updated_by IS
-  'Who last changed media_consent by hand: equal to user_id when the member did it themselves on /account, otherwise the manager who recorded it. NULL when the value came from an approved waiver and has not been overridden.';
+  'Who last changed media_consent by hand: always equal to user_id, since only the member themselves can set it by hand (on /account). NULL when the value came from an approved waiver and has not been overridden.';
 
 -- No grant or RLS change: these are columns on existing tables, which inherit
 -- the table's policies and privileges. profiles is already owner-read /
