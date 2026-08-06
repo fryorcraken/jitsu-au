@@ -227,8 +227,35 @@ export const createBlogPost = createServerFn({ method: "POST" })
       .select("id, slug")
       .single();
     if (error) throw new Error(error.message);
+    if (data.status === "published") {
+      await announcePost(row.id, row.slug, data.title, context.userId);
+    }
     return row;
   });
+
+/**
+ * Tell everybody a post went live. Best-effort and swallowed: a post is
+ * published and must never fail because the announcement did.
+ *
+ * Safe to call more than once for the same post. The unique index behind
+ * `notifications` absorbs the repeat, which is what makes an
+ * unpublish/republish round trip announce a post exactly once, and is why
+ * `blog_posts` carries no `announced_at` column.
+ */
+async function announcePost(
+  postId: string,
+  slug: string,
+  title: string,
+  actorId: string,
+): Promise<void> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { notifyNewBlogPost } = await import("@/lib/notification-events.server");
+    await notifyNewBlogPost(supabaseAdmin, { postId, slug, title, actorId });
+  } catch (e) {
+    console.error("[blog] failed to announce a published post:", e);
+  }
+}
 
 export const updateBlogPost = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -265,6 +292,13 @@ export const updateBlogPost = createServerFn({ method: "POST" })
       })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
+    // Announce on the transition INTO published, not on every save of a
+    // published post: editing a typo is not news. The unique index makes a
+    // repeat harmless anyway, so this is about not doing the work rather than
+    // about correctness.
+    if (data.status === "published" && existing.status !== "published") {
+      await announcePost(data.id, slug, data.title, context.userId);
+    }
     // `slug` and `excerpt` both come back because the server may have resolved
     // either one (a slug collision, or an excerpt derived from the body): the
     // edit page uses them as the new baseline so the form isn't left reading

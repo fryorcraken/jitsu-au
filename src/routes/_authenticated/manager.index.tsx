@@ -1,12 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
-import { toast } from "sonner";
+import { useEffect } from "react";
 import { BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { managerNotifications } from "@/lib/membership.functions";
-import type { ManagerNotification } from "@/lib/validation";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/")({
@@ -20,27 +16,10 @@ function ManagerDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
-  const fetchNotifications = useServerFn(managerNotifications);
-
-  const [notifications, setNotifications] = useState<ManagerNotification[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
-
-  useEffect(() => {
-    if (!isManager) return;
-    fetchNotifications()
-      .then((data) => {
-        setNotifications(data);
-        setLoading(false);
-      })
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to load notifications");
-        setLoading(false);
-      });
-  }, [isManager, fetchNotifications]);
 
   return (
     <>
@@ -52,35 +31,24 @@ function ManagerDashboard() {
           </p>
         </div>
 
+        {/* The attention list itself now lives on /notifications, alongside
+            comment activity, so a manager has one queue rather than two. This
+            card is the signpost to it and deliberately keeps no copy of the
+            items: two places rendering the same list is how they drift. */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <BellRing className="h-5 w-5" />
               Needs attention
             </CardTitle>
-            <CardDescription>Things only a manager can fix.</CardDescription>
+            <CardDescription>
+              Things only a manager can fix, plus new comments, all on one page.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
-            {!loading && notifications.length === 0 && (
-              <p className="text-sm text-muted-foreground">All quiet. Nothing needs doing.</p>
-            )}
-            <div className="space-y-3">
-              {notifications.map((n, i) => (
-                <div
-                  key={`${n.type}-${i}`}
-                  className="flex flex-wrap items-start justify-between gap-3 rounded-lg border bg-card p-4"
-                >
-                  <div>
-                    <p className="font-medium">{n.title}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
-                  </div>
-                  <Button asChild size="sm" variant="outline">
-                    <Link to={n.href}>Fix it</Link>
-                  </Button>
-                </div>
-              ))}
-            </div>
+            <Button asChild>
+              <Link to="/notifications">Open notifications</Link>
+            </Button>
           </CardContent>
         </Card>
 

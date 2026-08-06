@@ -958,6 +958,91 @@ service role only.
 
 ---
 
+## Notifications
+
+The `/notifications` page, the sidebar badge and the emails behind them. The
+product spec is **`docs/notifications.md`**. Added by
+`20260806030000_notifications.sql`.
+
+One table drives both the in-app list and the email, which is why there is no
+separate outbox: `read_at` is the in-app state and `emailed_at` is the delivery
+state. The manager "needs attention" items are **not** stored here at all: they
+are derived live from `membership_plans` by `sellableWindowNotifications`, and
+clear by being fixed.
+
+### `notifications`
+
+| Column         | Type          | Null | Notes                                                                              |
+| -------------- | ------------- | ---- | ---------------------------------------------------------------------------------- |
+| `id`           | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                       |
+| `user_id`      | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The recipient.                   |
+| `kind`         | `text`        | no   | `reply\|thread_activity\|new_blog_post\|blog_comment\|kb_comment`.                 |
+| `subject_type` | `text`        | no   | `blog_comment\|kb_annotation\|blog_post`.                                          |
+| `subject_id`   | `uuid`        | no   | What happened. **No FK**: it points at three tables, and must outlive its subject. |
+| `actor_id`     | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who did it.                        |
+| `title`        | `text`        | no   | 1–200 chars. Frozen at write time.                                                 |
+| `body`         | `text`        | yes  | ≤ 500 chars. A preview of the comment (`commentPreview`).                          |
+| `href`         | `text`        | no   | Site-relative (`CHECK href LIKE '/%'`); the sender prefixes the origin.            |
+| `read_at`      | `timestamptz` | yes  | NULL = unread. Drives the badge.                                                   |
+| `emailed_at`   | `timestamptz` | yes  | NULL = not yet considered for email.                                               |
+| `created_at`   | `timestamptz` | no   | Default `now()`.                                                                   |
+
+`UNIQUE (user_id, kind, subject_id)`, plus indexes on `(user_id, created_at
+DESC)`, a partial `(user_id) WHERE read_at IS NULL` for the badge, and a partial
+`(created_at) WHERE emailed_at IS NULL` for the digest sweep.
+
+**The unique index is the idempotency guard**, and it is why `blog_posts` needs
+no `announced_at` column: a post unpublished and republished cannot produce a
+second announcement, because the second insert collides. `published_at` could
+not have carried that, since it is deliberately never cleared.
+
+**Titles are frozen, not joined.** A notification is a record of a moment, the
+same call `waivers` makes about its person fields. Rendering from a live join
+would also mean every list read re-checks article visibility, and one missed
+check leaks a members-only passage.
+
+**RLS:** owner-scoped SELECT and UPDATE, with deliberately no manager policy —
+the same call `kb_article_reads` makes. Reading other people's notifications
+would be reading who replied to whom. No client grants, so every read and write
+runs through a server function on the service role and
+`client-grants-expected.txt` needs no entry.
+
+### `notification_preferences`
+
+`user_id → profiles(user_id) ON DELETE CASCADE` PK, four **nullable** booleans
+(`reply_to_me`, `thread_activity`, `new_blog_post`, `manager_comment_alerts`),
+`created_at`, `updated_at`.
+
+**Nullable is the design, not an oversight.** NULL means "never chose" and hands
+that switch to `NOTIFICATION_DEFAULTS` in `src/lib/notifications.ts`. A
+`NOT NULL DEFAULT` could not express it: changing a club default later would
+then move either nobody or everybody, including people who deliberately switched
+it off. `manager_comment_alerts` is only consulted for somebody holding the
+`manager` role, re-checked at send time rather than trusted from whenever the
+row was written.
+
+These govern **email only**. Every notification row is written regardless.
+
+**RLS:** owner-scoped SELECT, defence in depth; no client grants.
+
+### `notification_tokens`
+
+`user_id → profiles(user_id) ON DELETE CASCADE` PK, `token` (raw, unique, **NOT
+NULL**), `token_hash` (unique), `token_prefix`, `created_at`. Powers the
+settings link at `/email-settings/<token>` in every email footer.
+
+The raw token is stored for the same reason `calendar_feed_tokens` stores one:
+the server has to put this link into an email it composes later, which a one-way
+hash cannot do. Unlike that table, `token` is NOT NULL here, because a row whose
+raw token had gone missing would be a footer link that cannot be built.
+
+**RLS:** enabled with **no policy at all**, deliberately. This is a credential
+granting signed-out access to somebody's email settings; `authenticated` has no
+grant and no reason to read even its own row, since the page it powers is
+reached from a link rather than by looking the token up.
+
+---
+
 ## Knowledge base
 
 Versioned markdown pages members read and annotate, served at `/kb/<slug>`,

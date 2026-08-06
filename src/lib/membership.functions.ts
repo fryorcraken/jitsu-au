@@ -11,6 +11,7 @@ import {
   matchesMembershipReference,
   matchTransactionSchema,
   sellableWindowNotifications,
+  type ManagerNotification,
   normalizeRef,
   greetingName,
   nameWithPreferred,
@@ -735,25 +736,33 @@ export async function listMembershipPlanRows(
   return data ?? [];
 }
 
-// ---- Manager: dashboard notifications ----
+// ---- Manager: the "needs attention" list ----
 //
-// The dashboard's "needs attention" list. The rules live in pure functions
-// (validation.ts, unit-tested); this handler is only auth + data fetch.
-export const managerNotifications = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
-    const admin = await adminClient();
-    const plans = await listMembershipPlanRows(admin);
-    // Only dated plans (starts_on/ends_on both set) need a successor —
-    // an undated one (trial, casual, insurance) never runs out of training
-    // dates to sell.
-    const dated = plans.filter(
-      (p): p is MembershipPlanRow & { starts_on: string; ends_on: string } =>
-        p.starts_on != null && p.ends_on != null,
-    );
-    return sellableWindowNotifications(dated, new Date().toISOString());
-  });
+// Standing problems only a manager can fix. Derived on every call and never
+// stored, which is what makes them clear by being FIXED rather than by being
+// dismissed — see docs/notifications.md.
+//
+// A plain exported function rather than a `createServerFn`, the same shape as
+// `listMembershipPlanRows` above: its one caller is `listMyNotifications` in
+// `notifications.functions.ts`, which already has the caller's identity and
+// has checked the manager role. Two server functions deriving this list would
+// be two places for the rule to drift.
+//
+// The rules themselves live in pure functions (validation.ts, unit-tested);
+// this is only the data fetch.
+export async function managerAttentionItems(
+  admin: MembershipClient,
+): Promise<ManagerNotification[]> {
+  const plans = await listMembershipPlanRows(admin);
+  // Only dated plans (starts_on/ends_on both set) need a successor —
+  // an undated one (trial, casual, insurance) never runs out of training
+  // dates to sell.
+  const dated = plans.filter(
+    (p): p is MembershipPlanRow & { starts_on: string; ends_on: string } =>
+      p.starts_on != null && p.ends_on != null,
+  );
+  return sellableWindowNotifications(dated, new Date().toISOString());
+}
 
 // ---- Manager: club settings (invoice payment instructions) ----
 export const getClubSettings = createServerFn({ method: "GET" })
