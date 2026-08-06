@@ -706,7 +706,7 @@ RSVPs — and upvote a comment once (no downvote). Product spec:
 | `id`               | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                            |
 | `slug`             | `text`        | no   | `UNIQUE`. Lowercase/hyphenated, 1–200 chars.                                                            |
 | `title`            | `text`        | no   | 1–200 chars.                                                                                            |
-| `excerpt`          | `text`        | yes  | ≤ 500 chars. Shown on the list page.                                                                    |
+| `excerpt`          | `text`        | yes  | ≤ 500 chars. Shown on the list page. Derived from `body_md` on save when left blank (`deriveExcerpt`).  |
 | `body_md`          | `text`        | no   | 1–50,000 chars. Markdown; a `[[video:<url>]]` line embeds a video.                                      |
 | `cover_image_path` | `text`        | yes  | Object path in the `blog-media` Storage bucket.                                                         |
 | `status`           | `text`        | no   | `draft\|published`. Default `draft`.                                                                    |

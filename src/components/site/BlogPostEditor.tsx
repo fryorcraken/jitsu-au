@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { uploadBlogImage } from "@/lib/blog.functions";
-import { extractYouTubeId, splitBlogContent } from "@/lib/blog-content";
+import { deriveExcerpt, extractYouTubeId, splitBlogContent } from "@/lib/blog-content";
 import { blogMarkdownComponents } from "@/lib/blog-markdown";
 import { BlogVideoBlock } from "@/components/site/BlogVideoBlock";
 import { defaultBlogSlug, slugify } from "@/lib/slug";
@@ -277,6 +277,9 @@ export function BlogPostEditor({
 
   const previewSlug = slug.trim() || defaultBlogSlug(title) || "your-post-title";
   const videoUrlIsYouTube = Boolean(videoUrl.trim() && extractYouTubeId(videoUrl.trim()));
+  // What the server will store if the excerpt is left blank. Memoised because
+  // it re-derives from the whole body, which changes on every keystroke.
+  const derivedExcerpt = useMemo(() => deriveExcerpt(body), [body]);
 
   const formFields = (
     <div className="space-y-4">
@@ -312,8 +315,16 @@ export function BlogPostEditor({
           onChange={(e) => setExcerpt(e.target.value)}
           rows={2}
           maxLength={500}
+          placeholder="Leave blank to use the opening of the post"
           className="mt-1.5"
         />
+        {!excerpt.trim() && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {derivedExcerpt
+              ? `Blank, so the blog list will show: ${derivedExcerpt}`
+              : "Blank, so the blog list will show the opening of the post once you write one."}
+          </p>
+        )}
       </div>
       <div>
         <Label htmlFor="post-cover-image">Cover image</Label>

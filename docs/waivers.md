@@ -316,8 +316,11 @@ For one person there is a user page (`/manager/users/:userId`, reached from the
 directory), which is where a review normally happens: the profile (the club's
 current record), their memberships, and every submission they ever made, newest
 first. Each submission is a collapsible panel holding the frozen submission in
-full, the signing record (IP + browser context), Approve / Unapprove, and the
-signed PDF embedded inline. The submissions themselves load with the page; the
+full, the signing record (IP + browser context), when it was approved and by
+whom, Approve / Unapprove, and the signed PDF embedded inline. The approver is
+shown by name, or by their login address if they have no profile of their own;
+an approval recorded before the club started keeping that (or one whose
+approver's account is gone) reads as unknown rather than as nobody. The submissions themselves load with the page; the
 PDFs do not, since each needs a short-lived signed URL, so one is signed when a
 panel is opened or its PDF button is used, and re-signed once it goes stale.
 Exactly one panel opens by itself: the newest

@@ -54,24 +54,32 @@ severities of moderation, not the same action.
    embedded player; any other link renders as a plain "Watch the video ↗"
    link. Photos are inserted as ordinary Markdown images pointing at the
    `blog-media` Storage bucket.
-8. **A comment's body is plain text**, not Markdown — no formatting, no
+8. **An excerpt is optional, and a blank one is derived from the body.** It is
+   what the blog list shows under a post's title and what the post page uses as
+   its meta description, so leaving it blank should not leave either empty.
+   `deriveExcerpt` takes the post's prose (headings, images, code, tables and
+   video lines dropped; links reduced to their text) and cuts it at a word
+   boundary. A post with no prose at all, one that is only a video, still
+   stores no excerpt: the list and the meta description each have their own
+   fallback for that.
+9. **A comment's body is plain text**, not Markdown — no formatting, no
    embedded photos or videos in comments. This is a deliberate scope line for
    now (see Future features).
-9. **A commenter's display name is their own choice, not their legal name.**
-   `profiles.display_name` is an optional override a person sets in their
-   account settings; when unset, the name shown is derived — first (or
-   preferred) name plus last initial (`commentDisplayName` in
-   `src/lib/validation.ts`), e.g. "Jane L." — never their full name pulled
-   from waiver data onto a public comment. Every person has a `profiles` row
-   with a non-blank `first_name` (NOT NULL, and `ensure_profile` seeds one for
-   an auth user created any other way), so the derived name is always
-   something. The bare word "Member" is what `ensure_profile` seeds when an
-   auth user arrives with no name on it at all — a dashboard-created or invited
-   account — and it stays until that person sets a display name. It is never
-   seeded from their email address: this name is public, and part of an email
-   address is not something they chose to publish. The name is resolved live at
-   read time, so changing it later re-labels their past comments too (it isn't
-   frozen at post time, unlike a waiver's evidence fields).
+10. **A commenter's display name is their own choice, not their legal name.**
+    `profiles.display_name` is an optional override a person sets in their
+    account settings; when unset, the name shown is derived — first (or
+    preferred) name plus last initial (`commentDisplayName` in
+    `src/lib/validation.ts`), e.g. "Jane L." — never their full name pulled
+    from waiver data onto a public comment. Every person has a `profiles` row
+    with a non-blank `first_name` (NOT NULL, and `ensure_profile` seeds one for
+    an auth user created any other way), so the derived name is always
+    something. The bare word "Member" is what `ensure_profile` seeds when an
+    auth user arrives with no name on it at all — a dashboard-created or invited
+    account — and it stays until that person sets a display name. It is never
+    seeded from their email address: this name is public, and part of an email
+    address is not something they chose to publish. The name is resolved live at
+    read time, so changing it later re-labels their past comments too (it isn't
+    frozen at post time, unlike a waiver's evidence fields).
 
 ## Flows
 
@@ -111,7 +119,12 @@ the same styled way the public page renders it. Saving with no slug set
 derives one from the title, prefixed with today's date in `YYYY-MM-DD-`
 format (`defaultBlogSlug` in `src/lib/slug.ts`; a manually typed slug is
 still normalized with `slugify` on blur, with no date prefix added) and
-resolves a collision by appending `-2`, `-3`, and so on.
+resolves a collision by appending `-2`, `-3`, and so on. An excerpt left
+blank is filled the same way, from the post's own opening (`deriveExcerpt`
+in `src/lib/blog-content.ts`): the composer shows the text it would use
+under the field and updates it as the body is typed, so what gets stored is
+what the manager was shown. Both the resolved slug and the resolved excerpt
+come back from the save and become the form's new baseline.
 `published_at` is stamped the first time a post goes live and **never changes
 again** — not on a later edit, and not on an unpublish/republish round trip —
 so a post's publish date and its position in the public list (sorted by
