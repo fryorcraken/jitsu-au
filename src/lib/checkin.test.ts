@@ -118,24 +118,29 @@ describe("resolveCoverage", () => {
     expect(d.warnings).toContain("credits_exhausted");
   });
 
-  it("does not cover with a membership that has not started yet, and says so", () => {
-    const future = membership({ starts_at: "2026-09-01T00:00:00.000Z" });
+  it("does not cover with a DATED membership that has not started yet, and says so", () => {
+    const future = semester({
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: "2026-12-14T00:00:00.000Z",
+    });
     const d = resolveCoverage({ memberships: [future], at: AT });
     expect(d.coverage).toBe("none");
     expect(d.warnings).toContain("not_started");
   });
 
-  // The trial runs from the START OF THE DAY its waiver was signed, not from the
-  // instant a manager approved it (assignTrialMembership -> planMembershipWindow).
-  // A waiver has to be signed before anyone trains, but it is often signed at the
-  // gym and approved later, so the raw approval instant lands after the very
-  // class it was signed for. Exercises the real activation dates rather than
-  // hand-picked ISO strings.
-  it("covers the class its waiver was signed for, whenever it was approved", () => {
-    const signedAtTheDoor = "2026-08-05T08:05:00.000Z"; // 18:05 Sydney, class started 18:00
+  // Someone having trained is a fact that already happened; paperwork catching up
+  // afterwards cannot unmake it. A waiver signed at the door after the class
+  // started, or filed from paper days later, still has to be payable by the
+  // credits it earned -- so a credit balance is gated by its balance and by
+  // nothing else. Exercises the real activation dates rather than hand-picked
+  // ISO strings.
+  it.each([
+    ["signed at the door, after the class began", "2026-08-05T08:05:00.000Z"],
+    ["approved days after the class", "2026-08-09T02:00:00.000Z"],
+  ])("covers a class the credits were earned at, %s", (_label, grantedAt) => {
     const window = planMembershipWindow(
       { starts_on: null, ends_on: null, duration_days: null },
-      signedAtTheDoor,
+      grantedAt,
     );
     const d = resolveCoverage({ memberships: [trial({ ...window })], at: AT });
     expect(d.coverage).toBe("trial");
@@ -158,17 +163,24 @@ describe("resolveCoverage", () => {
     expect(d.warnings).not.toContain("not_started");
   });
 
-  // The other half of that rule: no waiver, no mat time. Signing the day AFTER a
-  // class cannot pay for it, however generous the day-grain start is.
-  it("does not cover a class held before its waiver was signed", () => {
-    const signedTheNextDay = "2026-08-06T12:13:20.000Z";
-    const window = planMembershipWindow(
-      { starts_on: null, ends_on: null, duration_days: null },
-      signedTheNextDay,
-    );
-    const d = resolveCoverage({ memberships: [trial({ ...window })], at: AT });
-    expect(d.coverage).toBe("none");
-    expect(d.warnings).toContain("not_started");
+  // The balance rule is keyed off credits, not `kind`. A plan with neither dates
+  // nor credits (the malformed shape docs/memberships.md warns about) has no
+  // entitlement to spend, so it must not turn into an everything-covers pass.
+  it("does not let an undated, credit-less membership cover an earlier class", () => {
+    const malformed = semester({
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: null,
+      sessions_remaining: null,
+    });
+    expect(resolveCoverage({ memberships: [malformed], at: AT }).coverage).toBe("none");
+  });
+
+  // The point of all of it: an uncovered check-in from a class someone really
+  // attended can be attached to the trial they were given afterwards.
+  it("lets a later-granted trial be attached to an earlier class", () => {
+    const granted = trial({ starts_at: "2026-08-09T02:00:00.000Z", ends_at: null });
+    const rows = attachableMemberships([granted], AT);
+    expect(rows[0]).toMatchObject({ usable: true, reason: null });
   });
 
   // Exercises the actual dates activateMembershipRow writes for a dated plan
@@ -305,9 +317,15 @@ describe("attachableMemberships", () => {
     expect(by("old")).toMatchObject({ usable: false, reason: "not valid for this class" });
   });
 
-  it("says when a membership starts after the class rather than just refusing it", () => {
+  it("says when a DATED membership starts after the class rather than just refusing it", () => {
     const rows = attachableMemberships(
-      [membership({ id: "later", starts_at: "2026-09-01T00:00:00.000Z" })],
+      [
+        semester({
+          id: "later",
+          starts_at: "2026-09-01T00:00:00.000Z",
+          ends_at: "2026-12-14T00:00:00.000Z",
+        }),
+      ],
       AT,
     );
     expect(rows[0]).toMatchObject({ usable: false, reason: "starts after this class" });

@@ -53,18 +53,36 @@ function endsAtMs(m: CoverageCandidate): number | null {
 }
 
 /**
- * Active, but the class ran before this membership began. Kept as its own
- * predicate because it is also a DIAGNOSIS: a manager staring at "No cover"
- * needs to be told the membership starts later, not left to work it out.
+ * A membership whose entitlement is a BALANCE, not a window: no end date, and a
+ * count of credits. The free trial and a casual pass are exactly this — "two
+ * free classes, ever, no expiry".
  *
- * For the free trial this is what enforces "no waiver, no mat time" — the trial
- * begins on the day its waiver was SIGNED (`assignTrialMembership`), so a class
- * held before the person signed anything is correctly uncovered, however long
- * the manager took to approve it afterwards.
+ * **No date gates these.** Someone having trained is a fact that already
+ * happened, and paperwork catching up afterwards cannot unmake it: a waiver
+ * signed at the door after the class started, or filed from paper a week later,
+ * must still be payable by the credits it earned. What limits a balance is the
+ * balance. So `starts_at` is not consulted for them at all, and a credit can pay
+ * for a class held before the membership row existed.
+ *
+ * Keyed off `sessions_remaining`, NOT `kind`: a plan carrying neither dates nor
+ * credits (the malformed shape docs/memberships.md warns about) has no
+ * entitlement to spend and must not become a pass that covers everything ever.
+ */
+function isOpenBalance(m: CoverageCandidate): boolean {
+  return m.ends_at === null && m.sessions_remaining !== null;
+}
+
+/**
+ * Active, dated, and the class ran before the window it was bought for. Only
+ * ever asked of a DATED membership — a training period is a range of days, so
+ * the range IS what was purchased. Kept as its own predicate because it is also
+ * a DIAGNOSIS: a manager staring at "No cover" should be told the membership
+ * starts later, not left to work it out.
  */
 function startsAfter(m: CoverageCandidate, atMs: number): boolean {
   return (
     m.status === "active" &&
+    !isOpenBalance(m) &&
     Boolean(m.starts_at) &&
     new Date(m.starts_at as string).getTime() > atMs
   );
@@ -75,6 +93,9 @@ function startsAfter(m: CoverageCandidate, atMs: number): boolean {
  * is no expiry job anywhere in this app, so a semester that finished in June
  * still reads `status = 'active'` today. Trusting the status alone would keep
  * covering classes for months after the money ran out.
+ *
+ * Dates are asked only of a membership that was SOLD as a range of days. A
+ * credit balance is never gated on one — see `isOpenBalance`.
  */
 function isLive(m: CoverageCandidate, atMs: number): boolean {
   if (m.status !== "active") return false;
