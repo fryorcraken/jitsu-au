@@ -17,7 +17,7 @@ export function renderErrorPage(): string {
     </style>
   </head>
   <body>
-    <div class="card">
+    <div class="card" data-page-state="error">
       <h1>This page didn't load</h1>
       <p>Something went wrong on our end. You can try refreshing or head back home.</p>
       <div class="actions">

@@ -347,6 +347,20 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   Linux with Bun for every PR and pushes to `main`. It installs via
   `bash scripts/bun-install.sh` (see Lock file strategy below), not a plain
   `bun install`.
+- **PR screenshots:** `.github/workflows/pr-screenshots.yml` builds the branch,
+  runs `scripts/pr-screenshots.mjs` over every page in `PUBLIC_PAGES` (plus
+  `/waiver` and `/auth`) at desktop and phone widths, uploads the PNGs plus an
+  `index.html` contact sheet as an artifact, and posts one sticky PR comment
+  linking to it. The repo is private, so images cannot be embedded in the
+  comment — reviewers download the artifact. The job needs the
+  `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` repository secrets and
+  skips itself with a notice when they are absent. A page that returns an error
+  status, or that renders the router's error/404 boundary (both arrive inside an
+  ordinary 200, which is why those boundaries carry `data-page-state`), fails
+  the job. **It does not catch a route that handles its own loader error** and
+  renders a card in place of its content — `/blog` and `/waiver` do exactly
+  that, so a green run means every route rendered, not that every route has its
+  data.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see Schema drift).
