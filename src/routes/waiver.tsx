@@ -13,6 +13,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CheckCircle2, Download } from "lucide-react";
 import { SignaturePad, type SignaturePadHandle } from "@/components/site/SignaturePad";
+import { GI_SIZE_HINT, GiSizeSelect } from "@/components/site/KitSizeSelect";
+import { type GiSize, isGiSize } from "@/lib/kit-sizes";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { WaiverDocument } from "@/components/site/WaiverDocument";
 import {
@@ -74,6 +76,7 @@ type Prefill = {
   phone?: string | null;
   uts_student_number?: string | null;
   sms_whatsapp_consent?: boolean | null;
+  gi_size?: string | null;
   emergency_contact_name?: string | null;
   emergency_contact_relationship?: string | null;
   emergency_contact_phone?: string | null;
@@ -134,6 +137,9 @@ function Waiver() {
   const [email, setEmail] = useState(search.email ?? "");
   const [address, setAddress] = useState("");
   const [utsStudentNumber, setUtsStudentNumber] = useState("");
+  // Equipment sizing, not part of the waiver. Optional, and it goes straight
+  // onto the profile rather than onto the signed document.
+  const [giSize, setGiSize] = useState<GiSize | "">("");
   // SMS/WhatsApp consent is a checkbox here (page 2). It defaults to checked
   // only when the phone number was already collected on the previous page —
   // i.e. the person already gave us their number (and saw the consent note)
@@ -203,6 +209,7 @@ function Waiver() {
         if (typeof r.sms_whatsapp_consent === "boolean") setSmsConsent(r.sms_whatsapp_consent);
         if (r.address) setAddress(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
+        if (r.gi_size && isGiSize(r.gi_size)) setGiSize(r.gi_size);
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);
         if (r.emergency_contact_relationship) setEcRelationship(r.emergency_contact_relationship);
         if (r.emergency_contact_phone) setEcPhone(r.emergency_contact_phone);
@@ -270,6 +277,7 @@ function Waiver() {
       setAddress(draft.address);
       setUtsStudentNumber(draft.utsStudentNumber);
       setSmsConsent(draft.smsConsent);
+      setGiSize(isGiSize(draft.giSize) ? draft.giSize : "");
       setEcName(draft.ecName);
       setEcRelationship(draft.ecRelationship);
       setEcPhone(draft.ecPhone);
@@ -321,6 +329,7 @@ function Waiver() {
       address,
       utsStudentNumber,
       smsConsent,
+      giSize,
       ecName,
       ecRelationship,
       ecPhone,
@@ -346,6 +355,7 @@ function Waiver() {
       address,
       utsStudentNumber,
       smsConsent,
+      giSize,
       ecName,
       ecRelationship,
       ecPhone,
@@ -438,6 +448,7 @@ function Waiver() {
             phone,
             email,
             uts_student_number: utsStudentNumber,
+            gi_size: giSize,
             sms_whatsapp_consent: smsConsent,
             emergency_contact_name: ecName,
             emergency_contact_relationship: ecRelationship,
@@ -808,6 +819,17 @@ function Waiver() {
                 <p className="mt-1.5 text-xs text-muted-foreground">
                   UTS students train at a discounted rate. Add your number here and the student rate
                   applies when you join.
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="gi_size">
+                  Gi size <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <GiSizeSelect id="gi_size" value={giSize} onChange={setGiSize} className="mt-1.5" />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  The number in brackets is the height the gi is cut for. {GI_SIZE_HINT} This is
+                  just so we can order kit that fits, and it is not part of the waiver. You can
+                  change it any time from your account.
                 </p>
               </div>
             </fieldset>

@@ -57,6 +57,14 @@ system. (The contact form stores a message, not a person.)
    needs each submission also stores the signer's real IP and signing context
    (browser user agent, language, and the browser-reported timezone, screen and
    platform).
+   The form also asks, optionally, for a **gi size**, and that one is NOT part
+   of the waiver: it is equipment sizing rather than something anybody is
+   declaring, so no `waivers` column holds it, it is not on the PDF, and it goes
+   straight onto the profile. Leaving it blank writes nothing, so signing again
+   never wipes a size on file, and it seeds a belt size only when there is none
+   (the two kids' gi sizes have no belt counterpart and take the shortest belt).
+   Both sizes are editable afterwards on `/account` and by a manager.
+
 4. **Waivers are accepted at any time, without limit.** Resubmitting after a
    mistake is never blocked, before or after approval.
 5. **The active waiver is the latest approved one.** Older approved waivers are
@@ -83,6 +91,14 @@ system. (The contact form stores a message, not a person.)
    captured on a waiver is part of that frozen submission (evidence), not a
    live record. There is no self-serve email change; a future manager action
    changes it in the one place it lives.
+
+   A member can keep some of that record current themselves on `/account`: what
+   they go by, their kit sizes, and their contact and emergency-contact details.
+   That never rewrites a waiver, which keeps what was typed at the time. It does
+   mean approval and self-service can both write the contact fields, and
+   approval wins whenever it runs, so a manager working through a backlog of
+   older waivers can undo a correction a member made since.
+
 9. **No self-serve sign-up.** Logins are created locked by waiver submission
    and unlocked by approval. The auth page only signs people in (password or
    magic link, with `shouldCreateUser: false`; a locked login cannot sign in).

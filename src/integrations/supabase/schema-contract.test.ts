@@ -107,7 +107,8 @@ export type _TemplateColumns = RequireColumns<
   "acknowledgements" | "body_md" | "created_at" | "id" | "is_current" | "title" | "version"
 >;
 
-// ---- profiles: the fields waiver approval copies across ----
+// ---- profiles: the fields waiver approval copies across, plus the two the
+// club's kit sizing lives in (which approval deliberately does NOT touch) ----
 export type _ProfileColumns = RequireColumns<
   Tables["profiles"]["Row"],
   | "user_id"
@@ -116,6 +117,8 @@ export type _ProfileColumns = RequireColumns<
   | "uts_student_number"
   | "sms_whatsapp_consent"
   | "emergency_contact_relationship"
+  | "gi_size"
+  | "belt_size"
 >;
 
 // ---- interest_registrations: the consent flag the public form writes ----

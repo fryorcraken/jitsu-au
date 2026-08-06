@@ -1,13 +1,22 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Pill } from "@/components/site/StatusPill";
+import {
+  BELT_SIZE_HINT,
+  BeltSizeSelect,
+  GI_SIZE_HINT,
+  GiSizeSelect,
+} from "@/components/site/KitSizeSelect";
+import type { BeltSize, GiSize } from "@/lib/kit-sizes";
+import { isBeltSize, isGiSize } from "@/lib/kit-sizes";
 import { formatDate } from "@/lib/dates";
 import { waiverClass } from "@/lib/status-colours";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -26,8 +35,9 @@ import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 import { requestMyEmailVerification } from "@/lib/email-verification.functions";
 import { isEmailVerified } from "@/lib/email-verification";
-import { updateMyDisplayName } from "@/lib/profile.functions";
+import { updateMyProfile } from "@/lib/profile.functions";
 import { commentDisplayName } from "@/lib/validation";
+import type { UpdateMyProfileInput } from "@/lib/validation";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({
@@ -93,11 +103,50 @@ function EmailVerificationNote({
   );
 }
 
+/** A group heading, so eight cards stop reading as one undifferentiated stack. */
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="pt-4 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+      {children}
+    </h2>
+  );
+}
+
+type Profile = Awaited<ReturnType<typeof getMyProfile>>;
+
 function AccountPage() {
   const { user } = useAuth();
   const { roles, isManager } = useRoles(user?.id);
+  const fetchProfile = useServerFn(getMyProfile);
+
+  // Fetched once here rather than per card: the three editable cards below all
+  // read the same row, and three identical round trips would only give them
+  // three chances to disagree about what is on file.
+  const [profile, setProfile] = useState<Profile>(null);
+  const [loading, setLoading] = useState(true);
+  // A failed fetch is NOT "you have no details". Conflating the two renders the
+  // cards editable and empty, and one Save then writes those blanks over a
+  // record that was there all along. Tracked separately so the page can say the
+  // honest thing and offer a retry instead.
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadFailed(false);
+    fetchProfile()
+      .then((p) => setProfile(p))
+      .catch(() => {
+        setProfile(null);
+        setLoadFailed(true);
+      })
+      .finally(() => setLoading(false));
+  }, [fetchProfile]);
+
+  useEffect(load, [load]);
 
   if (!user) return null;
+
+  const details = { profile, loading, onSaved: setProfile };
 
   return (
     <section className="mx-auto max-w-2xl space-y-6 px-4 py-12">
@@ -140,73 +189,200 @@ function AccountPage() {
         </CardContent>
       </Card>
 
-      <DisplayNameCard />
+      <SectionHeading>Your details</SectionHeading>
+
+      {loadFailed ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>We couldn't load your details</CardTitle>
+            <CardDescription>
+              Nothing has changed, and nothing is lost. This is usually a dropped connection, so try
+              again in a moment.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={load}>Try again</Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <AboutYouCard {...details} />
+
+          <KitSizingCard {...details} />
+
+          <ContactCard {...details} />
+        </>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Your legal name and date of birth are not editable here, because a signed waiver records
+        them as they were given. Ask us and we will correct them. Your email is your login, so a
+        manager changes that one too.
+      </p>
+
+      <SectionHeading>Your records</SectionHeading>
 
       <WaiversCard />
 
       <CodeOfConductCard />
 
-      {isManager && <GoogleDriveCard />}
+      <SectionHeading>Sign-in</SectionHeading>
 
       <ChangePasswordCard />
+
+      {isManager && (
+        <>
+          <SectionHeading>Manager tools</SectionHeading>
+          <GoogleDriveCard />
+        </>
+      )}
     </section>
   );
 }
 
+/** What every editable card on this page is handed. */
+type DetailsCardProps = {
+  profile: Profile;
+  loading: boolean;
+  /** Called with the saved row so the page's copy of the profile stays true. */
+  onSaved: (profile: Profile) => void;
+};
+
 /**
- * The name shown on this person's blog and document comments. `getMyProfile`
- * doubles as the source for the derived-name placeholder
- * (`commentDisplayName`), so the field shows exactly what will be used if the
- * manager clears it.
+ * The shared save path for the three editable cards: send only this card's
+ * keys, fold them back into the page's profile, and say so.
+ *
+ * Returns the `busy` flag and a `save` the card calls with its own patch, so
+ * each card owns its fields and nothing else.
  */
-function DisplayNameCard() {
-  const fetchProfile = useServerFn(getMyProfile);
-  const save = useServerFn(updateMyDisplayName);
-  const [profile, setProfile] = useState<Awaited<ReturnType<typeof getMyProfile>>>(null);
-  const [displayName, setDisplayName] = useState("");
-  const [loading, setLoading] = useState(true);
+function useDetailsSave({ profile, onSaved }: Pick<DetailsCardProps, "profile" | "onSaved">) {
+  const update = useServerFn(updateMyProfile);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    fetchProfile()
-      .then((p) => {
-        setProfile(p);
-        setDisplayName(p?.display_name ?? "");
-      })
-      .catch(() => setProfile(null))
-      .finally(() => setLoading(false));
-  }, [fetchProfile]);
-
-  const placeholder = profile ? commentDisplayName(profile) : "";
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function save(patch: UpdateMyProfileInput, message: string, failure: string) {
     setBusy(true);
     try {
-      const trimmed = displayName.trim();
-      await save({ data: { display_name: trimmed || null } });
-      toast.success(trimmed ? "Display name updated" : "Display name reset");
+      await update({ data: patch });
+      if (profile) onSaved({ ...profile, ...patch } as Profile);
+      toast.success(message);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save your display name");
+      toast.error(err instanceof Error ? err.message : failure);
     } finally {
       setBusy(false);
     }
   }
 
+  return { busy, save };
+}
+
+/**
+ * The buttons under every editable card.
+ *
+ * Save stays disabled until something actually differs from what is stored, so
+ * the button tells the member whether they have unsaved work rather than
+ * inviting a no-op write. Revert only appears once there is something to
+ * revert: before this, the only way out of a half-typed change was reloading
+ * the page, which is not an affordance anybody should have to guess.
+ */
+function CardActions({
+  dirty,
+  busy,
+  onRevert,
+}: {
+  dirty: boolean;
+  busy: boolean;
+  onRevert: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button type="submit" disabled={busy || !dirty}>
+        {busy ? "Saving..." : "Save"}
+      </Button>
+      {dirty && !busy ? (
+        <Button type="button" variant="outline" onClick={onRevert}>
+          Revert
+        </Button>
+      ) : null}
+      {dirty ? <span className="text-xs text-muted-foreground">Unsaved changes</span> : null}
+    </div>
+  );
+}
+
+/**
+ * What the club calls this person, and what other members see next to their
+ * comments. `commentDisplayName` doubles as the placeholder, so the field shows
+ * exactly what will be used if they clear it.
+ */
+function AboutYouCard({ profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save } = useDetailsSave({ profile, onSaved });
+  const [preferredName, setPreferredName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  // What is on file for the fields THIS card owns. Memoised on those values
+  // alone, not on the whole `profile` object: saving any card replaces that
+  // object, and resetting on its identity would silently wipe whatever the
+  // member had typed into the other two cards but not yet saved.
+  const stored = useMemo(
+    () => ({
+      preferredName: profile?.preferred_name ?? "",
+      displayName: profile?.display_name ?? "",
+    }),
+    [profile?.preferred_name, profile?.display_name],
+  );
+
+  const revert = useMemo(
+    () => () => {
+      setPreferredName(stored.preferredName);
+      setDisplayName(stored.displayName);
+    },
+    [stored],
+  );
+
+  useEffect(revert, [revert]);
+
+  const dirty = preferredName !== stored.preferredName || displayName !== stored.displayName;
+
+  const placeholder = profile ? commentDisplayName(profile) : "";
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const name = displayName.trim();
+    await save(
+      {
+        preferred_name: preferredName.trim() || null,
+        display_name: name || null,
+      },
+      "Saved",
+      "Could not save those names",
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Display name</CardTitle>
+        <CardTitle>About you</CardTitle>
         <CardDescription>
-          Shown on your blog and document comments. Leave blank to use{" "}
-          {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
+          What we call you in person, and the name other members see on your comments.
         </CardDescription>
       </CardHeader>
       <CardContent>
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading...</p>
         ) : (
-          <form onSubmit={onSubmit} className="space-y-3">
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="preferred-name">Preferred name</Label>
+              <Input
+                id="preferred-name"
+                value={preferredName}
+                onChange={(e) => setPreferredName(e.target.value)}
+                maxLength={60}
+                className="mt-1.5"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                What you go by, if it is not your first name. We use it to greet you.
+              </p>
+            </div>
             <div>
               <Label htmlFor="display-name">Display name</Label>
               <Input
@@ -215,11 +391,272 @@ function DisplayNameCard() {
                 onChange={(e) => setDisplayName(e.target.value)}
                 maxLength={60}
                 placeholder={placeholder}
+                className="mt-1.5"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Shown on your blog and document comments. Leave blank to use{" "}
+                {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
+              </p>
+            </div>
+            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
+          </form>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Gi and belt sizes. Kept apart from the contact card because it is the one
+ * group here a manager reads in bulk (ordering kit), and because it is the only
+ * one a waiver never overwrites.
+ */
+function KitSizingCard({ profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save } = useDetailsSave({ profile, onSaved });
+  const [giSize, setGiSize] = useState<GiSize | "">("");
+  const [beltSize, setBeltSize] = useState<BeltSize | "">("");
+
+  // See AboutYouCard: keyed on this card's own fields, never on `profile`.
+  const stored = useMemo(() => {
+    const gi = profile?.gi_size ?? "";
+    const belt = profile?.belt_size ?? "";
+    return {
+      giSize: (isGiSize(gi) ? gi : "") as GiSize | "",
+      beltSize: (isBeltSize(belt) ? belt : "") as BeltSize | "",
+    };
+  }, [profile?.gi_size, profile?.belt_size]);
+
+  const revert = useMemo(
+    () => () => {
+      setGiSize(stored.giSize);
+      setBeltSize(stored.beltSize);
+    },
+    [stored],
+  );
+
+  useEffect(revert, [revert]);
+
+  const dirty = giSize !== stored.giSize || beltSize !== stored.beltSize;
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await save(
+      { gi_size: giSize || null, belt_size: beltSize || null },
+      "Sizes saved",
+      "Could not save your sizes",
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Kit sizing</CardTitle>
+        <CardDescription>
+          So we can order the right gi and belt for you, and hand you the right loan gear. Both are
+          optional.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : (
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="gi-size">Gi size</Label>
+              <GiSizeSelect
+                id="gi-size"
+                value={giSize}
+                onChange={setGiSize}
+                disabled={busy}
+                className="mt-1.5"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                The number in brackets is the height the gi is cut for. {GI_SIZE_HINT}
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="belt-size">Belt size</Label>
+              <BeltSizeSelect
+                id="belt-size"
+                value={beltSize}
+                onChange={setBeltSize}
+                disabled={busy}
+                className="mt-1.5"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">{BELT_SIZE_HINT}</p>
+            </div>
+            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
+          </form>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * How the club reaches this person, and who it calls if something happens.
+ *
+ * The warning in the description is not boilerplate: approving a waiver still
+ * promotes that submission's contact fields onto the profile
+ * (`waiverToProfileFields`), so a correction made here can be overwritten later
+ * by a manager working through a backlog of older waivers.
+ */
+function ContactCard({ profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save } = useDetailsSave({ profile, onSaved });
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
+  const [ecName, setEcName] = useState("");
+  const [ecRelationship, setEcRelationship] = useState("");
+  const [ecPhone, setEcPhone] = useState("");
+
+  // See AboutYouCard: keyed on this card's own fields, never on `profile`.
+  const stored = useMemo(
+    () => ({
+      phone: profile?.phone ?? "",
+      address: profile?.address ?? "",
+      smsConsent: profile?.sms_whatsapp_consent ?? false,
+      ecName: profile?.emergency_contact_name ?? "",
+      ecRelationship: profile?.emergency_contact_relationship ?? "",
+      ecPhone: profile?.emergency_contact_phone ?? "",
+    }),
+    [
+      profile?.phone,
+      profile?.address,
+      profile?.sms_whatsapp_consent,
+      profile?.emergency_contact_name,
+      profile?.emergency_contact_relationship,
+      profile?.emergency_contact_phone,
+    ],
+  );
+
+  const revert = useMemo(
+    () => () => {
+      setPhone(stored.phone);
+      setAddress(stored.address);
+      setSmsConsent(stored.smsConsent);
+      setEcName(stored.ecName);
+      setEcRelationship(stored.ecRelationship);
+      setEcPhone(stored.ecPhone);
+    },
+    [stored],
+  );
+
+  useEffect(revert, [revert]);
+
+  const dirty =
+    phone !== stored.phone ||
+    address !== stored.address ||
+    smsConsent !== stored.smsConsent ||
+    ecName !== stored.ecName ||
+    ecRelationship !== stored.ecRelationship ||
+    ecPhone !== stored.ecPhone;
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await save(
+      {
+        phone: phone.trim(),
+        address: address.trim(),
+        sms_whatsapp_consent: smsConsent,
+        emergency_contact_name: ecName.trim(),
+        emergency_contact_relationship: ecRelationship.trim(),
+        emergency_contact_phone: ecPhone.trim(),
+      },
+      "Contact details saved",
+      "Could not save your contact details",
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Contact</CardTitle>
+        <CardDescription>
+          How we reach you, and who we call if something happens in class. Saving here updates our
+          current record straight away. It does not change a waiver you have already signed, which
+          keeps what you typed at the time.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : (
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="account-phone">Mobile</Label>
+              <Input
+                id="account-phone"
+                type="tel"
+                required
+                maxLength={30}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="mt-1.5"
+              />
+              <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={smsConsent}
+                  onCheckedChange={(v) => setSmsConsent(v === true)}
+                  className="mt-0.5"
+                  aria-label="Consent to SMS or WhatsApp contact"
+                />
+                <span>
+                  I agree to be contacted by SMS or WhatsApp, and added to club WhatsApp groups.
+                </span>
+              </label>
+            </div>
+            <div>
+              <Label htmlFor="account-address">Address</Label>
+              <Input
+                id="account-address"
+                required
+                maxLength={300}
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="mt-1.5"
               />
             </div>
-            <Button type="submit" disabled={busy}>
-              {busy ? "Saving..." : "Save"}
-            </Button>
+
+            <fieldset className="space-y-4 rounded-md border p-4">
+              <legend className="px-1 text-sm font-medium">Emergency contact</legend>
+              <div>
+                <Label htmlFor="account-ec-name">Name</Label>
+                <Input
+                  id="account-ec-name"
+                  required
+                  maxLength={120}
+                  value={ecName}
+                  onChange={(e) => setEcName(e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label htmlFor="account-ec-relationship">Relationship</Label>
+                <Input
+                  id="account-ec-relationship"
+                  required
+                  maxLength={80}
+                  value={ecRelationship}
+                  onChange={(e) => setEcRelationship(e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label htmlFor="account-ec-phone">Mobile</Label>
+                <Input
+                  id="account-ec-phone"
+                  type="tel"
+                  required
+                  maxLength={30}
+                  value={ecPhone}
+                  onChange={(e) => setEcPhone(e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+            </fieldset>
+
+            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
           </form>
         )}
       </CardContent>

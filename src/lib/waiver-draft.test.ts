@@ -24,6 +24,7 @@ const blank: WaiverDraft = {
   address: "",
   utsStudentNumber: "",
   smsConsent: false,
+  giSize: "",
   ecName: "",
   ecRelationship: "",
   ecPhone: "",
@@ -47,6 +48,7 @@ const filled: WaiverDraft = {
   email: "ada@example.com",
   address: "1 Broadway, Ultimo NSW",
   smsConsent: true,
+  giSize: "4",
   ecName: "Charles Babbage",
   ecRelationship: "Colleague",
   ecPhone: "0400000001",
@@ -71,6 +73,21 @@ describe("serializeDraft / parseDraft", () => {
     // person has no way to tell. Starting clean is the honest failure.
     const stale = JSON.stringify({ ...filled, version: WAIVER_DRAFT_VERSION - 1 });
     expect(parseDraft(stale)).toBeNull();
+  });
+
+  it("restores a draft saved before an optional field existed, rather than binning it", () => {
+    // `giSize` was added without bumping the version, on purpose. A draft that
+    // predates it is not a stale shape: the field is optional, and restoring it
+    // as "" says exactly what is true, that nobody chose a size. Bumping would
+    // have thrown away every half-filled waiver, signature included, over a
+    // field none of them had.
+    const { giSize: _omitted, ...withoutGiSize } = filled;
+    const older = JSON.stringify({ ...withoutGiSize, version: WAIVER_DRAFT_VERSION });
+    const restored = parseDraft(older);
+    expect(restored).not.toBeNull();
+    expect(restored?.giSize).toBe("");
+    expect(restored?.firstName).toBe("Ada");
+    expect(restored?.signatureImage).toBe(filled.signatureImage);
   });
 
   it("ignores malformed or empty storage", () => {

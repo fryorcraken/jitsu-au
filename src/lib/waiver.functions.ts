@@ -24,6 +24,7 @@ import {
   waiverToProfileFields,
 } from "@/lib/validation";
 import type { PaperWaiverUploadInput, SignerMeta } from "@/lib/validation";
+import { beltSizeForGiSize, type GiSize } from "@/lib/kit-sizes";
 import {
   missingRequiredAcks,
   parseTemplateAcks,
@@ -161,7 +162,76 @@ type PersonSeed = {
   last_name: string;
   preferred_name: string | null;
   phone: string | null;
+  /** Optional kit sizing. Only ever seeds a person being created right now. */
+  gi_size?: string | null;
+  belt_size?: string | null;
 };
+
+/**
+ * Write the optional gi size a waiver submission carried onto the signer's
+ * profile.
+ *
+ * Sizing is equipment, not part of the waiver: no `waivers` column holds it and
+ * it never reaches the PDF. It lives only on the profile, so it is written here.
+ *
+ * ⚠️ `identityProven` is the security boundary, and it is not optional.
+ * `/waiver` is public and unauthenticated, and `resolvePersonId` resolves ANY
+ * email the club already knows to that existing person — its contract is that
+ * "resubmission is always allowed and never modifies the existing person".
+ * Without this gate anyone could POST a submission carrying a member's address
+ * and rewrite that member's record, with no login and no manager step. So an
+ * existing person's size moves only when the submitter is demonstrably them:
+ * signed in as them (already checked against the submitted address), or holding
+ * a link we emailed to that address. A brand-new person is handled by
+ * `PersonSeed` in `resolvePersonId` instead, where there is nothing to
+ * overwrite.
+ *
+ * Two further rules, both about not destroying something deliberate:
+ *
+ * - A BLANK size writes nothing at all. Leaving an optional field empty means
+ *   "nothing to say", so re-signing never clears a size already on file.
+ * - The belt is filled in from the gi size ONLY when the record carries no
+ *   sizing whatsoever. Once either size is set, a null belt is a belt somebody
+ *   cleared on purpose, and a later waiver must not quietly put it back.
+ *
+ * Takes `admin` as a parameter rather than lazy-importing it, for the same
+ * reason `signStoredPdf` and `filePaperWaiver` do: the createServerFn handler
+ * around it cannot run under the test runner, and this can.
+ */
+export async function applyWaiverGiSize(
+  admin: SupabaseClient<Database>,
+  opts: { userId: string; giSize: string | null | undefined; identityProven: boolean },
+): Promise<"written" | "skipped"> {
+  if (!opts.giSize) return "skipped";
+  if (!opts.identityProven) return "skipped";
+
+  // This read decides whether the belt gets filled in, so a FAILED read must
+  // not read as "no sizing on file" — that would let a transient error put back
+  // a belt somebody cleared. Throw rather than guess; the caller swallows it.
+  const { data: current, error: readErr } = await admin
+    .from("profiles")
+    .select("gi_size, belt_size")
+    .eq("user_id", opts.userId)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (!current) throw new Error("No profile to write that size to.");
+
+  const neverSized = current.gi_size == null && current.belt_size == null;
+  const { data: updated, error: writeErr } = await admin
+    .from("profiles")
+    .update({
+      gi_size: opts.giSize,
+      ...(neverSized ? { belt_size: beltSizeForGiSize(opts.giSize as GiSize) } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", opts.userId)
+    .select("user_id");
+  if (writeErr) throw new Error(writeErr.message);
+  // PostgREST reports no error when the filter matched nothing, so "no rows"
+  // would otherwise be indistinguishable from a successful write.
+  if (!updated || updated.length === 0) throw new Error("No profile to write that size to.");
+  return "written";
+}
 
 /**
  * The person (auth user) an incoming waiver belongs to, creating them if this
@@ -347,6 +417,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           // This retry didn't mint a token itself; the original attempt's
           // confirmation email already carries the working link.
           code_of_conduct_url: null,
+          // Nor does it re-apply the gi size. This return sits above the point
+          // where the email is normalized and identity is established, so
+          // `applyWaiverGiSize` has neither the person nor the proof it needs,
+          // and hoisting that work above the duplicate check would be a lot of
+          // machinery for a best-effort field. If the original attempt's size
+          // write failed, the size is simply not set, and the member or a
+          // manager sets it on /account. Deliberate, not an oversight.
         };
       }
     }
@@ -457,6 +534,12 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
             last_name: data.last_name,
             preferred_name: data.preferred_name || null,
             phone: data.phone || null,
+            // Only reached when this email is NEW to the club, so there is no
+            // existing record for these to overwrite. An existing person's
+            // sizes are handled further down, and only with proof of identity.
+            ...(data.gi_size
+              ? { gi_size: data.gi_size, belt_size: beltSizeForGiSize(data.gi_size) }
+              : {}),
           },
         });
 
@@ -571,6 +654,19 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // legally exists. Throwing would tell the person who just signed that it
     // failed, and the reliable thing they do next is sign again. So a failure
     // here comes back as `pdf_ready: false` and the page says so plainly.
+
+    // The optional gi size the form collected, onto the signer's profile.
+    // Extracted so it is reachable from a unit test (see applyWaiverGiSize);
+    // best-effort here because a size must never cost somebody a signature.
+    try {
+      await applyWaiverGiSize(admin, {
+        userId,
+        giSize: data.gi_size,
+        identityProven: Boolean(callerId || emailProven),
+      });
+    } catch (e) {
+      console.error("waiver: could not save gi size", e);
+    }
 
     /**
      * Tell the member and the managers, with or without a copy.

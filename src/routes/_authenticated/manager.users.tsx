@@ -210,6 +210,11 @@ function ManagerUsersPage() {
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Roles</th>
                     <th className="px-3 py-2">UTS student</th>
+                    {/* Size codes off the club's charts, for ordering kit. The
+                        full label with the measurement is on the detail page;
+                        a directory column only has room for the code. */}
+                    <th className="px-3 py-2">Gi</th>
+                    <th className="px-3 py-2">Belt</th>
                     <th className="px-3 py-2">Waiver</th>
                     <th className="px-3 py-2">Sessions</th>
                     <th className="px-3 py-2">Latest membership</th>
@@ -274,6 +279,8 @@ function ManagerUsersPage() {
                       <td className="px-3 py-2">
                         {r.is_uts_student ? (r.uts_student_number ?? "Yes") : "No"}
                       </td>
+                      <td className="px-3 py-2">{r.gi_size ?? "—"}</td>
+                      <td className="px-3 py-2">{r.belt_size ?? "—"}</td>
                       <td className="px-3 py-2">{formatDate(r.waiver_signed_at)}</td>
                       {/* Classes trained, whatever paid for them. Not the same
                           as credits used, which lives on the membership. */}

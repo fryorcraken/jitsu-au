@@ -10,6 +10,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   deriveWaiverListStatuses,
   managerEmailChangeSchema,
+  managerKitSizesSchema,
   nameWithPreferred,
   normalizeEmail,
 } from "@/lib/validation";
@@ -233,6 +234,8 @@ export const getClubUser = createServerFn({ method: "POST" })
         guardian_name: profile.guardian_name,
         guardian_relationship: profile.guardian_relationship,
         sms_whatsapp_consent: profile.sms_whatsapp_consent,
+        gi_size: profile.gi_size,
+        belt_size: profile.belt_size,
         updated_at: profile.updated_at,
       },
       memberships: membershipRows.map((m) => ({
@@ -431,4 +434,39 @@ export const resendClubUserVerification = createServerFn({ method: "POST" })
     });
     if (!sent) throw new Error("We couldn't send that email just now. Try again shortly.");
     return { ok: true as const, alreadyVerified: false, email: got.user.email };
+  });
+
+// ---- Manager: correct a person's kit sizes ----
+//
+// Sizing is equipment, not evidence: nothing on a signed waiver records it, so
+// unlike the fields below it on the detail page there is no frozen submission to
+// disagree with. A manager corrects it because they measured somebody, or
+// because the gi that arrived did not fit.
+//
+// Both sides are nullable, so this is also how a wrong size gets cleared rather
+// than replaced with a guess.
+export const setClubUserKitSizes = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => managerKitSizesSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context as { supabase: MembershipClient; userId: string });
+
+    const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
+    const { data: updated, error } = await admin
+      .from("profiles")
+      .update({
+        gi_size: data.gi_size,
+        belt_size: data.belt_size,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", data.userId)
+      .select("user_id");
+    if (error) throw new Error(error.message);
+    // PostgREST reports no error when the filter matched nothing. A lead has no
+    // profile row (`aggregateClubUsers` synthesises those rows), so without this
+    // the screen would say "Sizes updated." over a write that never landed.
+    if (!updated || updated.length === 0) {
+      throw new Error("That person has no profile record to hold sizes.");
+    }
+    return { ok: true as const, gi_size: data.gi_size, belt_size: data.belt_size };
   });
