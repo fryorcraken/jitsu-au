@@ -471,7 +471,8 @@ function KitSizingCard({ profile, loading, onSaved }: DetailsCardProps) {
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                The number in brackets is the height the gi is cut for. {GI_SIZE_HINT}
+                The number in brackets is the wearer's height that gi size is cut for.{" "}
+                {GI_SIZE_HINT}
               </p>
             </div>
             <div>
