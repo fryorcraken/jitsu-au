@@ -562,24 +562,6 @@ export const waiverApprovalSchema = z.object({
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 
-// ---- Manager: record a change to someone's media consent ----
-//
-// The one person field a manager may write directly. Everything else on the
-// profile card is read-only and only ever arrives by approving a waiver,
-// because a detail a manager retyped would be the club's word for what the
-// person wrote. This is different: it is not a claim about what was signed
-// (the PDF keeps that, untouched), it is the club acting on a request made
-// afterwards -- "stop using my photo" -- which cannot wait for a whole new
-// waiver to be signed and approved.
-//
-// `null` is allowed so a manager can put a record back to "not asked" after
-// setting a value in error, rather than being stuck choosing yes or no.
-export const setMediaConsentSchema = z.object({
-  user_id: z.string().uuid(),
-  media_consent: z.boolean().nullable(),
-});
-export type SetMediaConsentInput = z.infer<typeof setMediaConsentSchema>;
-
 // ---- Code of conduct ----
 //
 // Deliberately small next to `waiverSubmitSchema`. The signer is a person the

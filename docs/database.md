@@ -256,9 +256,13 @@ inside the waiver PDF), and no `full_name`.
   (`assignTrialMembership`, one per person ever, activation email suppressed).
   `media_consent` is the one field the patch can OMIT rather than set: a
   submission carrying NULL was signed on a template that never asked, and must
-  not erase a consent the club already holds. When it does carry one, the freshly
-  signed answer wins and the two `media_consent_updated_*` columns are cleared
-  with it, since the value no longer came from a manager.
+  not erase a consent the club already holds. When it does carry one, and that
+  submission is actually newer than whatever set the profile's current answer
+  (`supersedesMediaConsent`, guarding against approving out of chronological
+  order — an old ticked box must never overwrite a withdrawal made more
+  recently on `/account`), the freshly signed answer wins and the two
+  `media_consent_updated_*` columns are cleared with it, since the value no
+  longer came from whoever set it by hand.
 - Waiver submission again, for the optional **gi size** the form collects
   (`submitWaiverWithPdf`). It is equipment sizing, not part of the waiver: no
   `waivers` column holds it and it is not on the PDF, so it is written straight
@@ -272,19 +276,20 @@ inside the waiver PDF), and no `full_name`.
   number, medical notes, minor/guardian fields or email. `media_consent` is the
   one field here that is NOT nullable: null means "the club has never asked",
   which is a fact about the club's records rather than an answer a member can
-  give, so only a manager can restore it. Saving it also stamps the two
-  `media_consent_updated_*` columns with the MEMBER's own id, which is what lets
-  the manager page tell their own change apart from one a manager recorded. ⚠️ Its contact fields OVERLAP
-  with `waiverToProfileFields`, so a manager approving an older waiver can
-  overwrite a correction made here; `/account` says so on the card.
+  give, so nothing can restore it once it is set (there is no manager path back
+  to NULL either — see below). Saving it also stamps the two
+  `media_consent_updated_*` columns with the MEMBER's own id, which is what
+  lets the person page tell their own change apart from one a manager recorded
+  before that write path existed. ⚠️ Its contact fields OVERLAP with
+  `waiverToProfileFields`, so a manager approving an older waiver can overwrite
+  a correction made here; `/account` says so on the card.
 - A manager, from a person's detail page (`setClubUserKitSizes`): `gi_size` and
-  `belt_size` only, either of which may be set to NULL to clear it.
-- Manager media-consent change (`setClubUserMediaConsent`): the manager half of
-  the field above, and the only path that can set it back to NULL. Unlike the kit sizes above it, media consent IS
-  on the waiver, so a value here can disagree with a signed document and the
-  page has to say which it is showing. It records a decision made after signing
-  ("stop using my photo"), which cannot wait on a new waiver being signed and
-  approved. It never touches the `waivers` row or its PDF.
+  `belt_size` only, either of which may be set to NULL to clear it. There is no
+  equivalent for `media_consent`: the person page shows the club's current
+  answer and its provenance, but a manager cannot set or clear it there. The
+  only writers are the member themselves, above, and waiver approval, above —
+  a manager who is told about a photo request in person points the member at
+  `/account` rather than acting on it directly.
 - `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
   revoked from PUBLIC/anon/authenticated): inserts the profile row for every new
   auth user, however created. Pure id attachment — no email matching, so nothing
