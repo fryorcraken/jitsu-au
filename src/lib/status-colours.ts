@@ -45,7 +45,7 @@ const MEMBERSHIP: Record<MembershipStatus, string> = {
 
 // Verified means someone opened a link we sent to that address. Amber rather
 // than red: an unverified address is a thing to notice before emailing someone
-// a sign-in link, not a fault.
+// their account details, not a fault.
 const VERIFICATION: Record<VerificationLabel, string> = {
   verified: "bg-green-100 text-green-800",
   unverified: "bg-amber-100 text-amber-800",

@@ -53,7 +53,8 @@ export const Route = createFileRoute("/_authenticated/account")({
  *
  * `email_confirmed_at` is already on the session user, so this needs no server
  * round trip to render. Most people reading this page arrived by clicking a
- * sign-in link, which is itself the proof, so for them it is just reassurance.
+ * sign-in link they requested, which is itself the proof, so for them it is
+ * just reassurance.
  */
 function EmailVerificationNote({
   email,

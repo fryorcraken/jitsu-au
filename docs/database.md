@@ -171,7 +171,7 @@ store) + a **`profiles` row keyed by that user id** (the person fields; no
 email column anywhere in `public`). An applicant is a **locked** auth user
 (banned, no credentials) created at first waiver submission; a manager's
 **approval** copies the submission's details onto the profile, lifts the ban,
-and emails a sign-in link (see `docs/waivers.md`). A waiver is a **frozen
+and emails them that their account is active (see `docs/waivers.md`). A waiver is a **frozen
 submission**: exactly what was typed, the signed PDF, template version, real
 signer IP and signing context, and its approval state.
 
@@ -253,7 +253,7 @@ inside the waiver PDF), and no `full_name`.
   `interest_registrations`.)
 - Manager approval (`setWaiverApproval`): copies the approved submission's
   person fields onto the profile (`waiverToProfileFields`); on first approval
-  lifts the ban, sends a sign-in email, and assigns the free trial
+  lifts the ban, sends the account-activated email, and assigns the free trial
   (`assignTrialMembership`, one per person ever, activation email suppressed).
   That trial's `starts_at` is the start of the club day the waiver was **signed**
   (`signed_at`), not the approval instant, so approving late does not uncover the
