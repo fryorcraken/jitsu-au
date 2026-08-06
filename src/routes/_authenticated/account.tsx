@@ -18,7 +18,8 @@ import {
 import type { BeltSize, GiSize } from "@/lib/kit-sizes";
 import { isBeltSize, isGiSize } from "@/lib/kit-sizes";
 import { formatDate } from "@/lib/dates";
-import { waiverClass } from "@/lib/status-colours";
+import { mediaConsentClass, waiverClass } from "@/lib/status-colours";
+import { mediaConsentLabel } from "@/lib/waiver-acknowledgements";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { connectAppUser } from "@/integrations/lovable/appUserConnectorClient";
 import {
@@ -677,27 +678,39 @@ function ContactCard({ profile, loading, onSaved }: DetailsCardProps) {
  *
  * The member owns this one. A photo consent only a manager could withdraw would
  * be the wrong way round -- they are the person in the photograph.
+ *
+ * Two explicit buttons rather than a checkbox: a checkbox collapses "I was
+ * asked and said no" and "nobody has asked me" into the same unticked box, and
+ * the whole point of this card is letting someone actively refuse, not just
+ * abstain. There is no "clear back to not asked" button here -- only a manager
+ * can put a record back to that state (see the mirrored card on their user
+ * page), because "not asked" stops being true the moment a member looks at
+ * this control.
  */
 function MediaConsentCard({ profile, loading, onSaved }: DetailsCardProps) {
   const { busy, save } = useDetailsSave({ profile, onSaved });
-  const [consent, setConsent] = useState(false);
 
-  // `null` on file means nobody has ever asked. The box shows unticked, which
-  // is the safe reading, and the copy below says which of the two it is so an
-  // untouched record does not masquerade as a refusal they gave.
-  const asked = profile?.media_consent !== null && profile?.media_consent !== undefined;
-  const stored = useMemo(() => profile?.media_consent === true, [profile?.media_consent]);
+  // `null` on file means nobody has ever asked, or a manager cleared it back to
+  // that. The status badge and explainer below always reflect THIS (the
+  // record on file), not the button the member has clicked but not yet saved,
+  // so a selection they have not saved never reads as already recorded.
+  const stored: boolean | null = useMemo(
+    () =>
+      profile?.media_consent === true || profile?.media_consent === false
+        ? profile.media_consent
+        : null,
+    [profile?.media_consent],
+  );
+  const [consent, setConsent] = useState<boolean | null>(null);
 
   const revert = useMemo(() => () => setConsent(stored), [stored]);
   useEffect(revert, [revert]);
 
-  // An unasked record is dirty as soon as the card loads only if they tick it;
-  // saving an untouched, still-unticked box would turn "never asked" into a
-  // recorded "no" they never actually gave.
-  const dirty = consent !== stored;
+  const dirty = consent !== null && consent !== stored;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (consent === null) return;
     await save({ media_consent: consent }, "Saved", "Could not save that");
   }
 
@@ -706,9 +719,9 @@ function MediaConsentCard({ profile, loading, onSaved }: DetailsCardProps) {
       <CardHeader>
         <CardTitle>Photos and video</CardTitle>
         <CardDescription>
-          We sometimes photograph or film classes to promote the club. You can change your mind here
-          any time, and it applies from the moment you save. It does not rewrite a waiver you have
-          already signed, which keeps what you ticked at the time.
+          We sometimes photograph or film classes to promote the club. Tell us whether we can use
+          photos or video of you, and change your mind here any time. It does not rewrite a waiver
+          you have already signed, which keeps what you ticked at the time.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -716,24 +729,41 @@ function MediaConsentCard({ profile, loading, onSaved }: DetailsCardProps) {
           <p className="text-sm text-muted-foreground">Loading...</p>
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
-            <label className="flex items-start gap-2 text-sm">
-              <Checkbox
-                checked={consent}
-                onCheckedChange={(v) => setConsent(v === true)}
-                className="mt-0.5"
-                aria-label="Consent to photos and video being used to promote the club"
+            <div className="flex flex-wrap items-center gap-2">
+              {/* preserveCase: "Not asked" is a sentence, not an enum value. */}
+              <Pill
+                label={mediaConsentLabel(stored)}
+                className={mediaConsentClass(stored)}
+                preserveCase
               />
-              <span>
-                I agree to photographs and video of me being used to promote the club. My name is
-                never published alongside them.
+              <span className="text-sm text-muted-foreground">
+                {stored === true
+                  ? "We can use photos and video of you to promote the club. Your name is never published alongside them."
+                  : stored === false
+                    ? "We will not use any photo or video of you."
+                    : "You have not told us either way yet. Until you do, we will ask before using anything you are in."}
               </span>
-            </label>
-            {!asked ? (
-              <p className="text-xs text-muted-foreground">
-                You have not told us either way yet. Until you do, we will ask before using anything
-                you are in.
-              </p>
-            ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={consent === true ? "default" : "outline"}
+                aria-pressed={consent === true}
+                onClick={() => setConsent(true)}
+              >
+                Yes, I consent
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={consent === false ? "default" : "outline"}
+                aria-pressed={consent === false}
+                onClick={() => setConsent(false)}
+              >
+                No, I don't consent
+              </Button>
+            </div>
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />
           </form>
         )}

@@ -7,6 +7,7 @@ import {
   blogPostClass,
   coverageClass,
   lifecycleClass,
+  mediaConsentClass,
   membershipClass,
   verificationClass,
   waiverClass,
@@ -106,6 +107,33 @@ describe("status colours", () => {
 
   it("does not treat a draft post as a fault", () => {
     expect(blogPostClass("draft")).toBe(NEUTRAL_STATUS_CLASS);
+  });
+
+  it("badges media consent by its three real states", () => {
+    // Green for yes, and it must never share a colour with either "no" or
+    // "not asked" -- those two carry different meanings (a refusal to honour
+    // versus a gap to close) and must not read the same either.
+    expect(mediaConsentClass(true)).toContain("green");
+    expect(mediaConsentClass(false)).toContain("red");
+    expect(mediaConsentClass(null)).toContain("amber");
+    const colours = new Set([
+      mediaConsentClass(true),
+      mediaConsentClass(false),
+      mediaConsentClass(null),
+    ]);
+    expect(colours.size).toBe(3);
+  });
+
+  it("treats an unset media consent the same as an explicit not-asked", () => {
+    // `undefined` shows up wherever the caller has an optional/missing field
+    // rather than a column that is genuinely NULL; both mean "never asked".
+    expect(mediaConsentClass(undefined)).toBe(mediaConsentClass(null));
+  });
+
+  it("does not read a withdrawn media consent as a mere gap", () => {
+    // An explicit "no" must stop a manager the way an uncovered check-in does,
+    // not blend into the same amber used for "nobody has asked yet".
+    expect(mediaConsentClass(false)).not.toContain("amber");
   });
 });
 

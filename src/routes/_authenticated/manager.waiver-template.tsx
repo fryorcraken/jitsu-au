@@ -20,7 +20,12 @@ import type { AcknowledgementDef } from "@/lib/validation";
 import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
-import { isDirty, meaningfulAcks, versionLabel } from "@/lib/waiver-template-editor";
+import {
+  hasMediaAcknowledgement,
+  isDirty,
+  meaningfulAcks,
+  versionLabel,
+} from "@/lib/waiver-template-editor";
 import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
@@ -142,6 +147,10 @@ function EditorPage() {
 
   const liveVersion = templates.find((t) => t.is_current)?.version ?? null;
 
+  // Checked against the raw acks so clearing the media row's label trips this
+  // immediately, before `meaningfulAcks` would silently drop the row on save.
+  const mediaAckMissing = !hasMediaAcknowledgement(acks);
+
   function selectVersion(template: TemplateVersion) {
     if (template.id === selectedId) return;
     if (dirty && !window.confirm("Discard your unsaved changes and open this version?")) return;
@@ -196,6 +205,16 @@ function EditorPage() {
   const preview = useMemo(() => applyPlaceholders(body, SAMPLE), [body]);
 
   async function onSave() {
+    // Belt and braces: the Save button is already disabled for this, but a
+    // rejected server call after the fact is a worse experience than catching
+    // it here, and the server-side guard in `promoteWaiverTemplate` is what
+    // actually protects the data either way.
+    if (mediaAckMissing) {
+      toast.error(
+        "The media consent acknowledgement needs wording before this can be saved. Add it back or restore its label.",
+      );
+      return;
+    }
     setSaving(true);
     try {
       const cleanAcks = meaningfulAcks(acks);
@@ -281,6 +300,12 @@ function EditorPage() {
                 Statements the signer ticks. Labels support {"{{placeholder}}"} tokens. Required
                 ones block submission until accepted.
               </p>
+              {mediaAckMissing ? (
+                <p className="text-sm font-medium text-destructive">
+                  This template needs a media consent acknowledgement with real wording before it
+                  can be saved. Add one back, or restore the wording on the existing one.
+                </p>
+              ) : null}
               {acks.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No acknowledgements.</p>
               ) : (
@@ -340,7 +365,7 @@ function EditorPage() {
                 })
               )}
             </div>
-            <Button onClick={onSave} disabled={saving || !title || !body}>
+            <Button onClick={onSave} disabled={saving || !title || !body || mediaAckMissing}>
               {saving ? "Saving..." : "Save as new version"}
             </Button>
           </div>

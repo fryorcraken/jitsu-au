@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isDirty, meaningfulAcks, versionLabel } from "./waiver-template-editor";
+import {
+  hasMediaAcknowledgement,
+  isDirty,
+  meaningfulAcks,
+  versionLabel,
+} from "./waiver-template-editor";
 import type { AcknowledgementDef } from "./validation";
+import { MEDIA_ACK_ID } from "./waiver-acknowledgements";
 
 const ack = (over: Partial<AcknowledgementDef> = {}): AcknowledgementDef => ({
   id: "risk",
@@ -57,6 +63,36 @@ describe("isDirty", () => {
     // A serialize-and-compare check would call this an edit.
     const reordered = { required: true, label: "I accept the risks.", id: "risk" };
     expect(isDirty({ ...stored, acknowledgements: [reordered] }, stored)).toBe(false);
+  });
+});
+
+describe("hasMediaAcknowledgement", () => {
+  const media = ack({ id: MEDIA_ACK_ID, label: "I consent to being photographed." });
+
+  it("is true when the media item is present with a real label", () => {
+    expect(hasMediaAcknowledgement([ack(), media])).toBe(true);
+  });
+
+  // The guard trips when a manager clears the media row's label to nothing,
+  // even though the id is still in the list -- this is what would otherwise
+  // be silently dropped by `meaningfulAcks` on save.
+  it("trips when the media item's label is cleared", () => {
+    expect(hasMediaAcknowledgement([ack(), { ...media, label: "" }])).toBe(false);
+    expect(hasMediaAcknowledgement([ack(), { ...media, label: "   " }])).toBe(false);
+  });
+
+  // Rewording the label or flipping required must keep working: the source
+  // PR explicitly wanted the media item's wording to stay editable.
+  it("stays true when only wording or required-ness changes", () => {
+    expect(hasMediaAcknowledgement([{ ...media, label: "New wording." }])).toBe(true);
+    expect(hasMediaAcknowledgement([{ ...media, required: false }])).toBe(true);
+  });
+
+  // A version from before the media-consent feature existed has no such item
+  // at all, and loading + re-saving it unchanged must trip the guard too.
+  it("trips when the media item is missing entirely (a pre-media version)", () => {
+    expect(hasMediaAcknowledgement([ack()])).toBe(false);
+    expect(hasMediaAcknowledgement([])).toBe(false);
   });
 });
 

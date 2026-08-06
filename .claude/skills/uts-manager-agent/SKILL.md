@@ -470,7 +470,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"5"`), and its
+- The manifest's `version` tells generations apart (currently `"8"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

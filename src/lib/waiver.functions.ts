@@ -38,6 +38,8 @@ import {
   WaiverFilingIncompleteError,
   toDuplicateRefs,
 } from "@/lib/waiver-duplicates";
+import { supersedesMediaConsent } from "@/lib/waiver-approval";
+import { hasMediaAcknowledgement } from "@/lib/waiver-template-editor";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 
@@ -908,7 +910,7 @@ export async function promoteWaiverTemplate(
 ): Promise<{ version: number }> {
   const { data: target, error: tErr } = await admin
     .from("waiver_templates")
-    .select("id, version, is_current")
+    .select("id, version, is_current, acknowledgements")
     .eq("id", id)
     .maybeSingle();
   if (tErr) throw new Error(tErr.message);
@@ -916,6 +918,17 @@ export async function promoteWaiverTemplate(
   // target must never cost the club its live waiver.
   if (!target) throw new Error("That waiver version no longer exists.");
   if (target.is_current) return { version: target.version };
+  // A template can only go live carrying the media-consent acknowledgement.
+  // This is the one place every promotion passes through -- `saveWaiverTemplate`
+  // ends by calling this on the version it just inserted -- so it also catches
+  // a manager loading and re-saving a version from before the feature existed,
+  // not just a direct promote of an old stored one. See
+  // `hasMediaAcknowledgement` for what counts as still carrying it.
+  if (!hasMediaAcknowledgement(parseTemplateAcks(target.acknowledgements))) {
+    throw new Error(
+      "This version has no media consent acknowledgement (or its wording is blank), so making it live would stop the club recording who agreed to photos. Add it back before making this version live.",
+    );
+  }
 
   const { data: previous, error: pErr } = await admin
     .from("waiver_templates")
@@ -1542,18 +1555,45 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       //
       // `waiverToProfileFields` omits `media_consent` entirely when this
       // submission never asked, so approving an older waiver cannot erase a
-      // consent the club already holds. When it DOES carry one, that freshly
-      // signed answer supersedes any earlier manager override, so the
-      // override's provenance is cleared with it -- otherwise the page would
-      // keep crediting a manager for a value the member has since signed.
+      // consent the club already holds. When it DOES carry one, that answer
+      // only supersedes the profile's existing one when this waiver is
+      // actually newer -- approving out of chronological order (every pending
+      // waiver can be approved any time, and re-approval after an unapprove
+      // is possible) must not let an old ticked box silently overwrite a
+      // withdrawal the member made more recently on /account. See
+      // `supersedesMediaConsent` in waiver-approval.ts.
       const patch = waiverToProfileFields(waiver);
+      const { media_consent: waiverMediaConsent, ...patchWithoutMediaConsent } = patch;
+      let mediaConsentPatch: {
+        media_consent?: boolean;
+        media_consent_updated_at?: null;
+        media_consent_updated_by?: null;
+      } = {};
+      if ("media_consent" in patch) {
+        const { data: currentProfile, error: cpErr } = await admin
+          .from("profiles")
+          .select("media_consent_updated_at")
+          .eq("user_id", waiver.user_id)
+          .maybeSingle();
+        if (cpErr) throw new Error(cpErr.message);
+        if (
+          supersedesMediaConsent({
+            waiverSignedAt: waiver.signed_at,
+            profileMediaConsentUpdatedAt: currentProfile?.media_consent_updated_at ?? null,
+          })
+        ) {
+          mediaConsentPatch = {
+            media_consent: waiverMediaConsent,
+            media_consent_updated_at: null,
+            media_consent_updated_by: null,
+          };
+        }
+      }
       const { error: pErr } = await admin
         .from("profiles")
         .update({
-          ...patch,
-          ...("media_consent" in patch
-            ? { media_consent_updated_at: null, media_consent_updated_by: null }
-            : {}),
+          ...patchWithoutMediaConsent,
+          ...mediaConsentPatch,
           updated_at: approvedAt!,
         })
         .eq("user_id", waiver.user_id);

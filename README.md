@@ -1,6 +1,6 @@
 # Jitsu Club Management
 
-I want to build a solution for my martial art club. This includes a public landing page with relevant information. The current page is utsjitsu.com.au. content from there can be re-used. It needs to include information about club, classes and martial art, as well as some CTA buttons: register interest, sign waiver, contact us. 
+I want to build a solution for my martial art club. This includes a public landing page with relevant information. The current page is utsjitsu.com.au. content from there can be re-used. It needs to include information about club, classes and martial art, as well as some CTA buttons: register interest, sign waiver, contact us.
 
 Then, we want a membership management system. This includes storing waiver information and other member details, setting membership, using stripe to collect payments.
 

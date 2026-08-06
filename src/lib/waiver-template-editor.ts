@@ -2,6 +2,7 @@
 // are unit-testable — same reason `waiver-approval.ts` exists. No React, no
 // toasts, no server calls.
 import type { AcknowledgementDef } from "./validation";
+import { MEDIA_ACK_ID } from "./waiver-acknowledgements";
 
 /** What the editor holds right now, and what a stored version holds. */
 export type TemplateDraft = {
@@ -40,6 +41,25 @@ export function isDirty(draft: TemplateDraft, stored: TemplateDraft | null): boo
   return a.some(
     (ack, i) => ack.id !== b[i].id || ack.label !== b[i].label || ack.required !== b[i].required,
   );
+}
+
+/**
+ * Whether an acknowledgement list still carries a valid media-consent item.
+ *
+ * "Valid" means present with a non-blank label, not merely present: a manager
+ * can select the media row's Textarea and clear it without touching the id,
+ * and `meaningfulAcks` would drop that row silently on save (same as any other
+ * abandoned blank row), taking the media acknowledgement -- and the club's
+ * ability to record photo consent -- with it. Checking the raw, un-cleaned
+ * list here catches that before the drop happens, so the guard trips on the
+ * edit that causes the loss rather than after it.
+ *
+ * Also false for a template that never had the item at all (every version
+ * predating the media-consent feature), so loading an old version and saving
+ * it unchanged is refused too, not just an edit that removes it.
+ */
+export function hasMediaAcknowledgement(acks: AcknowledgementDef[]): boolean {
+  return acks.some((a) => a.id === MEDIA_ACK_ID && a.label.trim().length > 0);
 }
 
 /**
