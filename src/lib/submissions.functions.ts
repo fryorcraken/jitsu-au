@@ -53,7 +53,6 @@ export const submitInterest = createServerFn({ method: "POST" })
       email: data.email,
       phone: data.phone || null,
       sms_whatsapp_consent: Boolean(data.phone && data.phone.trim()),
-      experience: data.experience || null,
       message: data.message || null,
       client_submission_id: submissionId,
     });
@@ -80,7 +79,6 @@ export const submitInterest = createServerFn({ method: "POST" })
         name: data.name,
         email: data.email,
         phone: data.phone || null,
-        experience: data.experience || null,
         message: data.message || null,
         admin: supabaseAdmin,
       });

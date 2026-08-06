@@ -7,7 +7,6 @@ interface InterestNotificationEmailProps {
   name: string;
   email: string;
   phone?: string | null;
-  experience?: string | null;
   message?: string | null;
   /** Manager dashboard where the funnel of leads/members is reviewed. */
   dashboardUrl: string;
@@ -19,7 +18,6 @@ export const InterestNotificationEmail = ({
   name,
   email,
   phone,
-  experience,
   message,
   dashboardUrl,
 }: InterestNotificationEmailProps) => (
@@ -44,8 +42,6 @@ export const InterestNotificationEmail = ({
           </Link>
           <br />
           <strong>Phone:</strong> {phone || "(not given)"}
-          <br />
-          <strong>Experience:</strong> {experience || "(not given)"}
           <br />
           <strong>Note:</strong> {message || "(none)"}
         </Text>

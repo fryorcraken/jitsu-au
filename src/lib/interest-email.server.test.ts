@@ -57,7 +57,6 @@ describe("sendInterestEmails", () => {
       name: "Ada Lovelace",
       email: "ada@example.com",
       phone: "0400000000",
-      experience: null,
       message: null,
       admin,
     });
