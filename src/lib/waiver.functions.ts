@@ -168,6 +168,8 @@ type PersonSeed = {
   /** Optional kit sizing. Only ever seeds a person being created right now. */
   gi_size?: string | null;
   belt_size?: string | null;
+  /** Optional previous martial arts experience. Same "new person only" rule. */
+  martial_arts_experience?: string | null;
 };
 
 /**
@@ -233,6 +235,35 @@ export async function applyWaiverGiSize(
   // PostgREST reports no error when the filter matched nothing, so "no rows"
   // would otherwise be indistinguishable from a successful write.
   if (!updated || updated.length === 0) throw new Error("No profile to write that size to.");
+  return "written";
+}
+
+/**
+ * Write the optional previous martial arts experience a waiver submission
+ * carried onto the signer's profile.
+ *
+ * Moved here from the "Start your free trial" lead form: it's useful context
+ * for an instructor meeting someone for the first time, not anything the
+ * person is declaring or agreeing to. Same treatment as `applyWaiverGiSize`:
+ * no `waivers` column holds it, it never reaches the PDF, and it lives only on
+ * the profile — see that function's doc comment for why `identityProven`
+ * gates every write, and why a blank value writes nothing at all.
+ */
+export async function applyWaiverMartialArtsExperience(
+  admin: SupabaseClient<Database>,
+  opts: { userId: string; experience: string | null | undefined; identityProven: boolean },
+): Promise<"written" | "skipped"> {
+  const trimmed = (opts.experience ?? "").trim();
+  if (!trimmed) return "skipped";
+  if (!opts.identityProven) return "skipped";
+
+  const { data: updated, error: writeErr } = await admin
+    .from("profiles")
+    .update({ martial_arts_experience: trimmed, updated_at: new Date().toISOString() })
+    .eq("user_id", opts.userId)
+    .select("user_id");
+  if (writeErr) throw new Error(writeErr.message);
+  if (!updated || updated.length === 0) throw new Error("No profile to write that experience to.");
   return "written";
 }
 
@@ -543,6 +574,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
             ...(data.gi_size
               ? { gi_size: data.gi_size, belt_size: beltSizeForGiSize(data.gi_size) }
               : {}),
+            ...(data.martial_arts_experience?.trim()
+              ? { martial_arts_experience: data.martial_arts_experience.trim() }
+              : {}),
           },
         });
 
@@ -677,6 +711,18 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       });
     } catch (e) {
       console.error("waiver: could not save gi size", e);
+    }
+
+    // The optional previous martial arts experience the form collected, onto
+    // the signer's profile. Same best-effort treatment as gi size above.
+    try {
+      await applyWaiverMartialArtsExperience(admin, {
+        userId,
+        experience: data.martial_arts_experience,
+        identityProven: Boolean(callerId || emailProven),
+      });
+    } catch (e) {
+      console.error("waiver: could not save martial arts experience", e);
     }
 
     /**

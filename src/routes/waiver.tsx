@@ -77,6 +77,7 @@ type Prefill = {
   uts_student_number?: string | null;
   sms_whatsapp_consent?: boolean | null;
   gi_size?: string | null;
+  martial_arts_experience?: string | null;
   emergency_contact_name?: string | null;
   emergency_contact_relationship?: string | null;
   emergency_contact_phone?: string | null;
@@ -140,6 +141,9 @@ function Waiver() {
   // Equipment sizing, not part of the waiver. Optional, and it goes straight
   // onto the profile rather than onto the signed document.
   const [giSize, setGiSize] = useState<GiSize | "">("");
+  // Optional previous martial arts experience, also not part of the waiver
+  // (see the fieldset below): straight onto the profile, for instructors.
+  const [martialArtsExperience, setMartialArtsExperience] = useState("");
   // SMS/WhatsApp consent is a checkbox here (page 2). It defaults to checked
   // only when the phone number was already collected on the previous page —
   // i.e. the person already gave us their number (and saw the consent note)
@@ -210,6 +214,7 @@ function Waiver() {
         if (r.address) setAddress(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.gi_size && isGiSize(r.gi_size)) setGiSize(r.gi_size);
+        if (r.martial_arts_experience) setMartialArtsExperience(r.martial_arts_experience);
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);
         if (r.emergency_contact_relationship) setEcRelationship(r.emergency_contact_relationship);
         if (r.emergency_contact_phone) setEcPhone(r.emergency_contact_phone);
@@ -278,6 +283,7 @@ function Waiver() {
       setUtsStudentNumber(draft.utsStudentNumber);
       setSmsConsent(draft.smsConsent);
       setGiSize(isGiSize(draft.giSize) ? draft.giSize : "");
+      setMartialArtsExperience(draft.martialArtsExperience);
       setEcName(draft.ecName);
       setEcRelationship(draft.ecRelationship);
       setEcPhone(draft.ecPhone);
@@ -330,6 +336,7 @@ function Waiver() {
       utsStudentNumber,
       smsConsent,
       giSize,
+      martialArtsExperience,
       ecName,
       ecRelationship,
       ecPhone,
@@ -356,6 +363,7 @@ function Waiver() {
       utsStudentNumber,
       smsConsent,
       giSize,
+      martialArtsExperience,
       ecName,
       ecRelationship,
       ecPhone,
@@ -449,6 +457,7 @@ function Waiver() {
             email,
             uts_student_number: utsStudentNumber,
             gi_size: giSize,
+            martial_arts_experience: martialArtsExperience,
             sms_whatsapp_consent: smsConsent,
             emergency_contact_name: ecName,
             emergency_contact_relationship: ecRelationship,
@@ -830,6 +839,24 @@ function Waiver() {
                   The number in brackets is the wearer's height that gi size is cut for.{" "}
                   {GI_SIZE_HINT} This is just so we can order kit that fits, and it is not part of
                   the waiver. You can change it any time from your account.
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="martial_arts_experience">
+                  Previous martial arts experience{" "}
+                  <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="martial_arts_experience"
+                  maxLength={500}
+                  value={martialArtsExperience}
+                  onChange={(e) => setMartialArtsExperience(e.target.value)}
+                  placeholder="e.g. total beginner, 2 years BJJ..."
+                  className="mt-1.5"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  So your instructors know a bit about you before your first class. This is not part
+                  of the waiver.
                 </p>
               </div>
             </fieldset>

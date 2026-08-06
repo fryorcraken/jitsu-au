@@ -83,7 +83,6 @@ export interface InterestEmailParams {
   name: string;
   email: string;
   phone?: string | null;
-  experience?: string | null;
   message?: string | null;
   /** Service-role client, used to resolve manager recipients. */
   admin: AdminClient;
@@ -100,7 +99,6 @@ export async function sendInterestEmails({
   name,
   email,
   phone,
-  experience,
   message,
   admin,
 }: InterestEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
@@ -141,7 +139,6 @@ export async function sendInterestEmails({
     name,
     email,
     phone,
-    experience,
     message,
     dashboardUrl: MANAGER_DASHBOARD_URL,
   });

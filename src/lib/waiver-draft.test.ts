@@ -25,6 +25,7 @@ const blank: WaiverDraft = {
   utsStudentNumber: "",
   smsConsent: false,
   giSize: "",
+  martialArtsExperience: "",
   ecName: "",
   ecRelationship: "",
   ecPhone: "",
@@ -49,6 +50,7 @@ const filled: WaiverDraft = {
   address: "1 Broadway, Ultimo NSW",
   smsConsent: true,
   giSize: "4",
+  martialArtsExperience: "2 years BJJ",
   ecName: "Charles Babbage",
   ecRelationship: "Colleague",
   ecPhone: "0400000001",
@@ -88,6 +90,16 @@ describe("serializeDraft / parseDraft", () => {
     expect(restored?.giSize).toBe("");
     expect(restored?.firstName).toBe("Ada");
     expect(restored?.signatureImage).toBe(filled.signatureImage);
+  });
+
+  it("restores a draft saved before martialArtsExperience existed, rather than binning it", () => {
+    // Same reasoning as the giSize case above: added without a version bump.
+    const { martialArtsExperience: _omitted, ...withoutExperience } = filled;
+    const older = JSON.stringify({ ...withoutExperience, version: WAIVER_DRAFT_VERSION });
+    const restored = parseDraft(older);
+    expect(restored).not.toBeNull();
+    expect(restored?.martialArtsExperience).toBe("");
+    expect(restored?.firstName).toBe("Ada");
   });
 
   it("ignores malformed or empty storage", () => {

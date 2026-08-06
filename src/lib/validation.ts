@@ -377,7 +377,6 @@ export const interestSchema = z.object({
   name: z.string().trim().min(1).max(121),
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
-  experience: z.string().trim().max(500).optional().or(z.literal("")),
   message: z.string().trim().max(1000).optional().or(z.literal("")),
   hp: z.string().max(0).optional(), // honeypot — must stay empty
 });
@@ -422,6 +421,11 @@ export const waiverSubmitSchema = z
     // handler writes it straight onto their profile, and a blank one writes
     // nothing at all, so re-signing never clears a size already on file.
     gi_size: z.enum(giSizes).optional().or(z.literal("")),
+    // Optional previous martial arts experience, moved here from the "Start
+    // your free trial" lead form. Same treatment as gi_size: NOT part of the
+    // waiver (no `waivers` column, never on the PDF), just context for
+    // instructors, so the handler writes it straight onto the profile.
+    martial_arts_experience: z.string().trim().max(500).optional().or(z.literal("")),
     // The emergency contact. For a participant under 18 this person IS the
     // parent/guardian who signs, which is why the relationship is required for
     // everyone and reused as the "relationship to minor" on the document.
