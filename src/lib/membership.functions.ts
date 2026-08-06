@@ -192,7 +192,7 @@ async function activateMembershipRow(
   // Confirmation email (best-effort — never fail activation on a send error).
   // The email lives on the auth user (the one email store); the name on the
   // profile. Suppressed via opts.sendEmail for the auto-assigned trial, whose
-  // approval already emails a sign-in link.
+  // approval already emails them that their account is active.
   if (membership.user_id && opts.sendEmail !== false) {
     try {
       const [{ data: profile }, emails] = await Promise.all([

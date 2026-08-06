@@ -1133,7 +1133,7 @@ export const listWaivers = createServerFn({ method: "GET" })
 //
 // What it deliberately does NOT do:
 //   - approve anything. Approval promotes the details onto the profile, unlocks
-//     the login, emails a sign-in link and assigns the trial (docs/waivers.md
+//     the login, emails the account-activated notice and assigns the trial (docs/waivers.md
 //     rule 6). Those are the same consequences whatever the waiver arrived on,
 //     so a manager takes that step by hand, from the same button as always.
 //   - email anybody. Nobody just pressed submit: the signer is not sitting at a
@@ -1557,7 +1557,7 @@ export const uploadPaperWaiver = createServerFn({ method: "POST" })
 // Approval is the promotion step: the approved submission's details are copied
 // onto the person's profile (the club's current record), and if they are still
 // a locked applicant (banned auth user, no credentials) the ban is lifted and
-// they're emailed a sign-in link to set up access (applicant -> visitor).
+// they're emailed to say their account is active (applicant -> visitor).
 // Unapprove only reverts the waiver's status; the profile and login are left
 // as they are.
 export const setWaiverApproval = createServerFn({ method: "POST" })
@@ -1646,10 +1646,20 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       if (pErr) throw new Error(pErr.message);
 
       // Provision access on FIRST approval: an applicant's auth user is banned
-      // (no login). Lift the ban and email a sign-in link. Skipped for people
-      // who can already log in, so re-approvals don't spam sign-in emails.
-      // Best-effort — a hiccup must not undo the approval; re-approving
-      // retries it (the user is still banned).
+      // (no login). Lift the ban and tell them their account is open. Skipped
+      // for people who can already log in, so re-approvals don't spam them.
+      // Best-effort — a hiccup must not undo the approval. A failed UNBAN is
+      // retried by re-approving (they are still locked, so this block runs
+      // again); a failed SEND is not, since the unban above already went
+      // through. That person has an account and has not been told, and the
+      // fix is a word out of band: nothing in the email was single-use, so
+      // they can sign in at /auth whenever they hear.
+      //
+      // The email deliberately carries no sign-in link: it names the address
+      // their login is keyed on and sends them to /auth to ask for a link
+      // themselves. A magic link nobody requested expires in an hour, so it is
+      // usually dead by the time it is read, and this email needs to stay good
+      // for as long as it takes a new member to get round to it.
       try {
         const { data: got, error: getErr } = await admin.auth.admin.getUserById(waiver.user_id);
         if (getErr) throw getErr;
@@ -1663,15 +1673,12 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
           // The canonical email lives on the auth user.
           const authEmail = got.user?.email;
           if (authEmail) {
-            const { getRequestHeader } = await import("@tanstack/react-start/server");
-            const origin = getRequestHeader("origin") || "https://jitsu.au";
-            // Magic-link sign-in email (rendered by the Lovable auth-email
-            // webhook). The user always exists here, so never auto-create.
-            const { error: otpErr } = await serverSupabase().auth.signInWithOtp({
-              email: authEmail,
-              options: { emailRedirectTo: `${origin}/account`, shouldCreateUser: false },
+            const { sendAccountActivatedEmail } = await import("./waiver-email.server");
+            await sendAccountActivatedEmail({
+              waiverId: waiver.id,
+              memberGreetingName: greetingName(waiver),
+              memberEmail: authEmail,
             });
-            if (otpErr) throw otpErr;
           }
         }
       } catch (e) {

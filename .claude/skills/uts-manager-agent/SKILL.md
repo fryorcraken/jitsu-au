@@ -244,7 +244,8 @@ scripts/agent.sh file_waiver '{
 >
 > - **It never approves, emails, or verifies.** Filing is not approving:
 >   approval is what promotes the record onto the person's profile, unlocks
->   their login, **emails them a sign-in link**, and **assigns the free trial**.
+>   their login, **emails them that their account is active**, and **assigns
+>   the free trial**.
 >   `file_waiver` does none of that — every row lands pending, exactly like a
 >   manager's own upload. Approving hundreds of migrated people would email all
 >   of them and hand out that many trials; that decision belongs to the manager

@@ -94,8 +94,8 @@ driven directly by the bundled skill.
     agent-filed waiver and a manager's own upload are identical. Always lands
     **pending**: it never approves, emails anyone, or marks the email verified
     — approving is a separate, deliberate manager action because it promotes
-    the record, unlocks the login, emails a sign-in link and assigns the free
-    trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is the
+    the record, unlocks the login, emails them that their account is active and
+    assigns the free trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is the
     token's owner, or the `AGENT_ENV_KEY_UPLOADER` sentinel for the break-glass
     env key, which has no owner to resolve. Filing a waiver the person already
     has for the same `signed_on` is refused with `409 duplicate_waiver` (the

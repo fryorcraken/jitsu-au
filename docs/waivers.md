@@ -12,7 +12,8 @@ their email (the only place any email lives) plus a **profile** carrying their
 person fields. A waiver is a **frozen submission**: exactly what was typed, the
 signed PDF, and the signer's IP and browser context. Nothing becomes official
 until a **manager approves** a submission: approval copies its details onto the
-profile, unlocks the login, emails a sign-in link, and assigns the free trial.
+profile, unlocks the login, emails them that their account is active, and
+assigns the free trial.
 The **active waiver** is the latest approved one; everything else is history.
 
 ## The funnel
@@ -26,8 +27,8 @@ records, never stored.
    record (their email, no way to sign in) plus a profile, with the
    submission(s) pending a manager's review.
 3. **Visitor** — a manager approved their waiver: details promoted onto the
-   profile, login unlocked (sign-in link emailed), and the free trial assigned
-   automatically on the first approval.
+   profile, login unlocked (account-activated email sent), and the free trial
+   assigned automatically on the first approval.
 4. **Member** — holds an active paid membership (semester, yearly insurance,
    or a paid casual session).
 5. **Lapsed** — their trial or membership ended and nothing is active: the
@@ -88,11 +89,16 @@ system. (The contact form stores a message, not a person.)
    stored.
 6. **Approval promotes, unlocks, and assigns the trial.** Approving a waiver
    copies its details onto the profile; on the person's first approval it also
-   lifts the ban on their login, emails them a sign-in link, and assigns the
-   club's free trial (one per person, ever — no activation email, they already
-   got the sign-in one). Approving a newer waiver later refreshes the profile
-   again (no repeat sign-in email, no second trial). Unapprove only reverts
-   the waiver's status; profile, login and trial stay as they are.
+   lifts the ban on their login, emails them to say their account is active,
+   and assigns the club's free trial (one per person, ever — no membership
+   activation email, the account one covers it). That email carries **no
+   sign-in link**: it names the address their login is keyed on and sends them
+   to `/auth` to request a link themselves. An unrequested magic link expires
+   in an hour, so it is usually dead by the time it is read, while this one
+   still works whenever they get to it. Approving a newer waiver later
+   refreshes the profile again (no repeat activation email, no second trial).
+   Unapprove only reverts the waiver's status; profile, login and trial stay
+   as they are.
 7. **Full name is never stored**; it is composed from first/middle/last. The
    optional **preferred name** is stored separately (on the submission and, once
    approved, on the profile). One rule governs it everywhere: **address a person
@@ -279,14 +285,17 @@ would only mean "a manager believed this".
 
 It gates **nothing**. An unverified person can sign, be approved, be assigned a
 membership, and train. The badge exists so a manager can see the risk at the
-moment it matters (approval emails a sign-in link to that address), not to put a
+moment it matters (approval emails their account details to that address, and
+it is the address they sign in with), not to put a
 wall at the door.
 
 How people get verified, in descending order of how many it catches:
 
 - **Signing in with a login link.** Supabase stamps the confirmation natively, so
   nearly everyone who becomes an active member is verified without anyone doing
-  anything. Same for password resets.
+  anything. Same for password resets. The activation email no longer carries a
+  link, so this now happens on the link they request themselves at `/auth`,
+  one step later and just as reliably.
 - **The waiver link in their interest confirmation email.** That link carries an
   unguessable token (`?vt=`); the name/email params alone prove nothing, since
   the in-app success screen builds the same URL. Opening it verifies them, and
@@ -438,8 +447,8 @@ exists. The button stays because the next seeded draft needs it.
 
 ### Visitor or member uses the member area
 
-Login exists only via approval (sign-in link email; magic link or password
-thereafter). They see: the waiver form prefilled from their profile, their
+Login exists only via approval (account-activated email, then a magic link they
+request at `/auth`, or a password they set). They see: the waiver form prefilled from their profile, their
 waiver history with the active one marked and PDFs downloadable, and
 memberships (buying a paid plan makes a visitor a member).
 

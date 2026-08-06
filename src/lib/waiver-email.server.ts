@@ -1,4 +1,6 @@
-// Server-only helper for the transactional emails sent when a waiver is signed.
+// Server-only helper for the transactional emails sent as a waiver moves
+// through its life: signed (confirmation + manager prompt), then approved
+// (the account-activated email that hands the member their access).
 //
 // This module pulls in server-only dependencies (the Lovable send API, the
 // React-email renderer, the service-role admin client's types) so it must never
@@ -10,6 +12,7 @@ import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { buildCodeOfConductUrl } from "@/lib/code-of-conduct";
+import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
 
@@ -24,6 +27,31 @@ const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where waivers are reviewed and approved. */
 export const WAIVER_REVIEW_URL = `${SITE_URL}/manager/waivers`;
+
+/**
+ * Where a newly activated member goes to get in for the first time.
+ *
+ * Every one of these is a plain page URL with nothing single-use in it, which
+ * is the point of this email: it is as valid a week from now as it is on
+ * arrival.
+ *
+ * `/kb` and `/membership` need a session, and a signed-out reader clicking
+ * either is bounced to `/auth`. They do NOT come back to the page they
+ * clicked: the sign-in page passes its `redirect` to the password form only,
+ * while the magic-link form (the sole route in for someone who has never set a
+ * password, which is everyone reading this) hardcodes `/account`. So these
+ * links are safe but blunt, landing a new member on their account page with
+ * the knowledge base and membership one click away. Worth linking anyway: the
+ * alternative is naming pages and making them go looking.
+ */
+const ACTIVATION_LINKS = {
+  signInUrl: `${SITE_URL}/auth`,
+  kbUrl: `${SITE_URL}/kb`,
+  codeOfConductUrl: `${SITE_URL}/code-of-conduct`,
+  membershipUrl: `${SITE_URL}/membership`,
+  blogUrl: `${SITE_URL}/blog`,
+  contactUrl: `${SITE_URL}/contact`,
+} as const;
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -231,4 +259,71 @@ export async function sendWaiverEmails({
   }
 
   return { sent, skipped: false };
+}
+
+export interface AccountActivatedEmailParams {
+  /** The approved waiver, used to key idempotency so a retry cannot double-send. */
+  waiverId: string;
+  /** What to call them to their face: preferred name, else first name. */
+  memberGreetingName: string;
+  /** The address their login is keyed on, taken from the auth user. */
+  memberEmail: string;
+}
+
+/**
+ * Tell someone their account is open, now that a manager has approved their
+ * first waiver and their login has been unlocked.
+ *
+ * Sent in place of the magic link this step used to fire off. The link was
+ * unrequested (odd to receive) and single-use with an hour on it (broken by
+ * the time most people read their email), and it left the club with no way to
+ * say anything else at the one moment a new member is paying attention. This
+ * says the account is open, names the address to sign in with, and points at
+ * the rest of the member area.
+ *
+ * Best-effort, like every other send here: a failure is logged, never thrown.
+ * The approval it follows is already committed, and losing this email must not
+ * roll back a member's access.
+ *
+ * Note what a failure leaves behind: the ban is lifted before this is called,
+ * so someone whose email did not go out has a working account and no idea it
+ * exists. Re-approving will NOT resend (the caller only emails while they are
+ * still locked). Recovering that person means telling them out of band, and
+ * they can sign in from `/auth` with no help from us, which is precisely
+ * because this email never carried a link only we could mint.
+ */
+export async function sendAccountActivatedEmail({
+  waiverId,
+  memberGreetingName,
+  memberEmail,
+}: AccountActivatedEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
+    console.warn("[waiver-email] LOVABLE_API_KEY not set — skipping account activated email");
+    return { sent: false, skipped: true };
+  }
+
+  const el = React.createElement(AccountActivatedEmail, {
+    siteName: SITE_NAME,
+    siteUrl: SITE_URL,
+    memberName: memberGreetingName,
+    loginEmail: memberEmail,
+    ...ACTIVATION_LINKS,
+  });
+
+  try {
+    await sendOne({
+      apiKey,
+      sendUrl: process.env.LOVABLE_SEND_URL,
+      to: memberEmail,
+      subject: `Your ${SITE_NAME} account is active`,
+      html: await render(el),
+      text: await render(el, { plainText: true }),
+      idempotencyKey: `account-activated-${waiverId}`,
+    });
+    return { sent: true, skipped: false };
+  } catch (e) {
+    console.error(`[waiver-email] failed to email activated member ${memberEmail}:`, e);
+    return { sent: false, skipped: false };
+  }
 }
