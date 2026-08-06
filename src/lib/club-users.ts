@@ -17,7 +17,12 @@ import {
   nameWithPreferred,
   normalizeEmail,
 } from "./validation";
-import type { LifecycleStatus, MembershipPlanKind, MembershipStatus } from "./validation";
+import type {
+  LifecycleStatus,
+  MembershipPlanKind,
+  MembershipStatus,
+  PersonNameParts,
+} from "./validation";
 
 /** Max interest-registration (lead) rows the directory pulls in one page. */
 export const LEADS_LIMIT = 2000;
@@ -156,13 +161,7 @@ export function profileUserIds(profiles: Pick<ClubUserProfile, "user_id">[]): st
 }
 
 /** The name parts a person is displayed by when all a screen has is their id. */
-export type PersonNameRow = {
-  user_id: string;
-  first_name: string | null;
-  middle_name: string | null;
-  last_name: string | null;
-  preferred_name: string | null;
-};
+export type PersonNameRow = PersonNameParts & { user_id: string };
 
 /**
  * Label people by id, for the places that store a bare `user_id` and have to
