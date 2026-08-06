@@ -44,6 +44,12 @@ In order, highest first:
 - **Yearly insurance never covers a class.** It buys affiliation and cover, not
   mat time.
 - A **pending** membership never covers anything: the money has not landed.
+- A membership that **had not begun** when the class ran covers nothing either.
+  For the free trial this is the "no waiver, no mat time" rule: the trial starts
+  at the beginning of the day its waiver was **signed**, never the day a manager
+  approved it. Someone can sign at the door minutes after a class starts and
+  still be covered for it, but a class held the day _before_ they signed is not
+  covered, however quickly the approval follows.
 
 Between two memberships in the same tier, the one that **runs out soonest** is
 used, so nothing expires unspent.
@@ -102,8 +108,15 @@ people in to a class that did not run.
 5. **Never refuse someone at the door.** No cover is a flag, not a rejection.
 6. **Coverage is resolved against the class's start time**, not the current time,
    so a manager checking people in ten minutes late (or fixing yesterday's roster
-   this morning) gets the same answer they would have got at the door.
-7. **Sessions attended is not credits used.** It counts classes trained,
+   this morning) gets the same answer they would have got at the door. This is
+   why memberships that begin on a day are dated to the **start** of that day:
+   measured to the minute, a trial signed at 18:05 would miss the 18:00 class it
+   was signed for, purely because of the order the paperwork happened in.
+7. **No cover always says why.** "Nothing covers this class" is a dead end;
+   "a membership starts after this class" or "waiting on a payment" is something
+   a manager can act on. Every reason coverage resolution knows is surfaced on
+   the roster and in the attach list, rather than logged and swallowed.
+8. **Sessions attended is not credits used.** It counts classes trained,
    including uncovered ones. How many credits a membership has left is a separate
    number and lives on the membership.
 

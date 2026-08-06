@@ -255,6 +255,9 @@ inside the waiver PDF), and no `full_name`.
   person fields onto the profile (`waiverToProfileFields`); on first approval
   lifts the ban, sends the account-activated email, and assigns the free trial
   (`assignTrialMembership`, one per person ever, activation email suppressed).
+  That trial's `starts_at` is the start of the club day the waiver was **signed**
+  (`signed_at`), not the approval instant, so approving late does not uncover the
+  class it was signed for (`docs/check-in.md`).
   `media_consent` is the one field the patch can OMIT rather than set: a
   submission carrying NULL was signed on a template that never asked, and must
   not erase a consent the club already holds. When it does carry one, and that

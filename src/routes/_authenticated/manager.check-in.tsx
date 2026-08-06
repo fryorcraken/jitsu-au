@@ -45,6 +45,7 @@ const WARNING_TEXT: Record<string, string> = {
   credits_exhausted: "a membership has no sessions left",
   payment_pending: "waiting on a payment",
   coverage_race: "another check-in took the session first",
+  not_started: "a membership starts after this class",
 };
 
 const selectClass =
@@ -69,11 +70,14 @@ function fmtTime(iso: string): string {
   });
 }
 
+// `no_cover` is dropped when something more specific explains it, since the row
+// already carries a red "No cover" pill. When it is all we have, say it anyway:
+// a bare dash under "No cover" is what makes an uncovered check-in impossible to
+// diagnose from this screen.
 function Warnings({ codes }: { codes: string[] }) {
-  const text = codes
-    .filter((c) => c !== "no_cover")
-    .map((c) => WARNING_TEXT[c] ?? c)
-    .join("; ");
+  const explained = codes.filter((c) => c !== "no_cover");
+  const shown = explained.length ? explained : codes;
+  const text = shown.map((c) => WARNING_TEXT[c] ?? c).join("; ");
   if (!text) return <span className="text-muted-foreground">—</span>;
   return <span className="text-xs text-muted-foreground">{text}</span>;
 }
@@ -410,6 +414,14 @@ function CheckInPage() {
                       className={coverageClass(r.coverage)}
                       preserveCase
                     />
+                    {/* Only when nothing pays for it: "No cover" on its own is a
+                        dead end, and this is the row a manager is looking at
+                        while the person stands in front of them. */}
+                    {r.coverage === "none" && (
+                      <div className="mt-1">
+                        <Warnings codes={r.warnings} />
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button
