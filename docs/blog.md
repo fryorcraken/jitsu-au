@@ -108,8 +108,10 @@ formatting toolbar (bold/italic/heading/list/link), an "Insert image" button
 cover-image uploader, a status picker (draft/published) that warns before
 saving a currently-published post back to draft, and a live preview rendered
 the same styled way the public page renders it. Saving with no slug set
-derives one from the title (`slugify` in `src/lib/slug.ts`, normalized
-on blur too) and resolves a collision by appending `-2`, `-3`, and so on.
+derives one from the title, prefixed with today's date in `YYYY-MM-DD-`
+format (`defaultBlogSlug` in `src/lib/slug.ts`; a manually typed slug is
+still normalized with `slugify` on blur, with no date prefix added) and
+resolves a collision by appending `-2`, `-3`, and so on.
 `published_at` is stamped the first time a post goes live and **never changes
 again** — not on a later edit, and not on an unpublish/republish round trip —
 so a post's publish date and its position in the public list (sorted by

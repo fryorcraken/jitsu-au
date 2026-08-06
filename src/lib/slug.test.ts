@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { slugify, uniqueSlug } from "./slug";
+import { defaultBlogSlug, slugify, uniqueSlug } from "./slug";
 
 describe("slugify", () => {
   it("lowercases and hyphenates spaces", () => {
@@ -20,6 +20,18 @@ describe("slugify", () => {
 
   it("returns an empty string for a title with no alphanumeric characters", () => {
     expect(slugify("!!!")).toBe("");
+  });
+});
+
+describe("defaultBlogSlug", () => {
+  const now = new Date("2026-08-06T03:00:00.000Z");
+
+  it("prefixes the slugified title with today's date", () => {
+    expect(defaultBlogSlug("Hello World", now)).toBe("2026-08-06-hello-world");
+  });
+
+  it("returns an empty string for a title with no alphanumeric characters", () => {
+    expect(defaultBlogSlug("!!!", now)).toBe("");
   });
 });
 

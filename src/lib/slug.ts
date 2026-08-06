@@ -17,6 +17,19 @@ export function slugify(title: string): string {
 }
 
 /**
+ * The default slug for a new blog post: today's date (`YYYY-MM-DD`) prefixed
+ * onto the slugified title, so a post's URL reads chronologically even before
+ * anyone sets a slug by hand. Empty when the title has no usable characters,
+ * same as `slugify`, so callers can still treat that as "could not derive a
+ * slug" rather than publish a bare date.
+ */
+export function defaultBlogSlug(title: string, now: Date = new Date()): string {
+  const base = slugify(title);
+  if (!base) return base;
+  return `${now.toISOString().slice(0, 10)}-${base}`;
+}
+
+/**
  * The first candidate slug (`base`, `base-2`, `base-3`, ...) not already in
  * `taken`. Pure so collision resolution is unit-testable without a database.
  */

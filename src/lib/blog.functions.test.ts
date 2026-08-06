@@ -26,24 +26,32 @@ function fakeAdmin(existingSlugs: string[]) {
 }
 
 describe("resolvePostSlug", () => {
-  it("derives a slug from the title when none is given", async () => {
+  const now = new Date("2026-07-31T00:00:00.000Z");
+
+  it("derives a slug from the title, prefixed with today's date, when none is given", async () => {
     const admin = fakeAdmin([]);
-    expect(await resolvePostSlug(admin, "Hello World", undefined)).toBe("hello-world");
+    expect(await resolvePostSlug(admin, "Hello World", undefined, undefined, now)).toBe(
+      "2026-07-31-hello-world",
+    );
   });
 
-  it("uses the manager's own slug when given", async () => {
+  it("uses the manager's own slug when given, with no date prefix added", async () => {
     const admin = fakeAdmin([]);
-    expect(await resolvePostSlug(admin, "Hello World", "custom-url")).toBe("custom-url");
+    expect(await resolvePostSlug(admin, "Hello World", "custom-url", undefined, now)).toBe(
+      "custom-url",
+    );
   });
 
   it("resolves a collision against another post's slug", async () => {
-    const admin = fakeAdmin(["hello-world"]);
-    expect(await resolvePostSlug(admin, "Hello World", undefined)).toBe("hello-world-2");
+    const admin = fakeAdmin(["2026-07-31-hello-world"]);
+    expect(await resolvePostSlug(admin, "Hello World", undefined, undefined, now)).toBe(
+      "2026-07-31-hello-world-2",
+    );
   });
 
   it("throws when the title has no usable characters and no slug was given", async () => {
     const admin = fakeAdmin([]);
-    await expect(resolvePostSlug(admin, "!!!", undefined)).rejects.toThrow();
+    await expect(resolvePostSlug(admin, "!!!", undefined, undefined, now)).rejects.toThrow();
   });
 });
 
