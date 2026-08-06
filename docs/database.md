@@ -234,6 +234,7 @@ never stored.
 | `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                                   |
 | `gi_size`                        | `text`        | yes  | Gi size code (`profiles_gi_size_check`: `000`…`7`). Equipment sizing, never on a waiver. Chart: `src/lib/kit-sizes.ts`.                            |
 | `belt_size`                      | `text`        | yes  | Belt size code (`profiles_belt_size_check`: `0`…`7` — the belt chart has no `000`/`00`). Same module owns both lists.                              |
+| `martial_arts_experience`        | `text`        | yes  | Free text, ≤500 chars (`profiles_martial_arts_experience_check`). Collected on `/waiver`, never on a waiver submission or the PDF — context for instructors, not a declaration. |
 | `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
 | `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
 
@@ -257,6 +258,11 @@ inside the waiver PDF), and no `full_name`.
   here. A blank one writes nothing, so re-signing never clears a size on file,
   and `belt_size` is only ever SEEDED (`beltSizeForGiSize`, which sends the two
   kids' gi sizes to belt `0`) so a size somebody chose deliberately survives.
+- Waiver submission again, for the optional **previous martial arts
+  experience** the form collects (`submitWaiverWithPdf` /
+  `applyWaiverMartialArtsExperience`). Same treatment as gi size: not part of
+  the waiver, no `waivers` column, not on the PDF, written straight here, and a
+  blank value writes nothing so re-signing never clears one on file.
 - The member themselves, from `/account` (`updateMyProfile`): `display_name`,
   `preferred_name`, `phone`, `address`, `sms_whatsapp_consent`, the three
   `emergency_contact_*` fields, `gi_size` and `belt_size`. The schema is

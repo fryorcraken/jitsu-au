@@ -506,6 +506,84 @@ describe("applyWaiverGiSize", () => {
   });
 });
 
+describe("applyWaiverMartialArtsExperience", () => {
+  const PERSON = "u1";
+
+  it("refuses to touch an existing person without proof the submitter is them", async () => {
+    // Same security boundary as applyWaiverGiSize: /waiver is public and
+    // unauthenticated, so nothing may be written without proof of identity.
+    const { admin, patches } = fakeProfilesAdmin({});
+    const { applyWaiverMartialArtsExperience } = await import("./waiver.functions");
+
+    const result = await applyWaiverMartialArtsExperience(admin, {
+      userId: PERSON,
+      experience: "2 years BJJ",
+      identityProven: false,
+    });
+
+    expect(result).toBe("skipped");
+    expect(patches).toHaveLength(0);
+  });
+
+  it("writes the trimmed experience when the submitter is proven to be that person", async () => {
+    const { admin, patches } = fakeProfilesAdmin({});
+    const { applyWaiverMartialArtsExperience } = await import("./waiver.functions");
+
+    const result = await applyWaiverMartialArtsExperience(admin, {
+      userId: PERSON,
+      experience: "  total beginner  ",
+      identityProven: true,
+    });
+
+    expect(result).toBe("written");
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toMatchObject({ martial_arts_experience: "total beginner" });
+    expect(patches[0].updated_at).toEqual(expect.any(String));
+  });
+
+  it("writes nothing at all for a blank value, so re-signing never clears one", async () => {
+    const { admin, patches } = fakeProfilesAdmin({});
+    const { applyWaiverMartialArtsExperience } = await import("./waiver.functions");
+
+    for (const blank of ["", "   ", null, undefined]) {
+      expect(
+        await applyWaiverMartialArtsExperience(admin, {
+          userId: PERSON,
+          experience: blank,
+          identityProven: true,
+        }),
+      ).toBe("skipped");
+    }
+    expect(patches).toHaveLength(0);
+  });
+
+  it("does not report success when the update matched no rows", async () => {
+    const { admin } = fakeProfilesAdmin({ updatedRows: [] });
+    const { applyWaiverMartialArtsExperience } = await import("./waiver.functions");
+
+    await expect(
+      applyWaiverMartialArtsExperience(admin, {
+        userId: PERSON,
+        experience: "2 years BJJ",
+        identityProven: true,
+      }),
+    ).rejects.toThrow(/No profile/);
+  });
+
+  it("surfaces a write error", async () => {
+    const { admin } = fakeProfilesAdmin({ writeError: "violates check constraint" });
+    const { applyWaiverMartialArtsExperience } = await import("./waiver.functions");
+
+    await expect(
+      applyWaiverMartialArtsExperience(admin, {
+        userId: PERSON,
+        experience: "2 years BJJ",
+        identityProven: true,
+      }),
+    ).rejects.toThrow("violates check constraint");
+  });
+});
+
 describe("filePaperWaiver", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});

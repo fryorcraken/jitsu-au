@@ -1,14 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckCircle2, ChevronDown, FileSignature } from "lucide-react";
+import { CheckCircle2, FileSignature } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import { composeFullName } from "@/lib/validation";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
@@ -33,7 +32,6 @@ type Captured = { firstName: string; lastName: string; email: string; phone: str
 
 function RegisterInterest() {
   const submit = useServerFn(submitInterest);
-  const [showNote, setShowNote] = useState(false);
   const [done, setDone] = useState<Captured | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
   const send = useResilientSubmit<{ ok: true; duplicate: boolean }>(INTAKE_SUBMIT);
@@ -70,7 +68,6 @@ function RegisterInterest() {
             name: composeFullName(firstName, "", lastName),
             email,
             phone,
-            experience: String(fd.get("experience") || ""),
             message: String(fd.get("message") || ""),
             hp: String(fd.get("hp") || ""),
           },
@@ -202,42 +199,15 @@ function RegisterInterest() {
           </div>
 
           <div>
-            <button
-              type="button"
-              onClick={() => setShowNote((v) => !v)}
-              aria-expanded={showNote}
-              aria-controls="note-fields"
-              className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
-            >
-              <ChevronDown
-                className={cn("h-4 w-4 transition-transform", showNote && "rotate-180")}
-              />
-              Add a note (optional)
-            </button>
-            {showNote && (
-              <div id="note-fields" className="mt-5 space-y-5">
-                <div>
-                  <Label htmlFor="experience">Martial arts experience (optional)</Label>
-                  <Input
-                    id="experience"
-                    name="experience"
-                    maxLength={500}
-                    placeholder="e.g. total beginner, 2 years BJJ..."
-                    className="mt-1.5"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="message">Anything else? (optional)</Label>
-                  <Textarea
-                    id="message"
-                    name="message"
-                    maxLength={1000}
-                    rows={4}
-                    className="mt-1.5"
-                  />
-                </div>
-              </div>
-            )}
+            <Label htmlFor="message">Got a question, or anything you'd like us to know?</Label>
+            <Textarea
+              id="message"
+              name="message"
+              maxLength={1000}
+              rows={4}
+              placeholder="Ask us anything, or leave a note (optional)"
+              className="mt-1.5"
+            />
           </div>
 
           <Button type="submit" size="lg" disabled={send.busy} className="w-full">

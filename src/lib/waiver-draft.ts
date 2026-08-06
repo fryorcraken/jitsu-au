@@ -56,6 +56,8 @@ export type WaiverDraft = {
   smsConsent: boolean;
   /** A gi size code, or "" for not chosen. Optional on the form, so "" is normal. */
   giSize: string;
+  /** Previous martial arts experience, or "" for not given. Optional on the form. */
+  martialArtsExperience: string;
   ecName: string;
   ecRelationship: string;
   ecPhone: string;
@@ -148,6 +150,8 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     // Bumping here would bin every half-filled waiver, signature included, over
     // a field nobody had filled in.
     giSize: text(draft.giSize),
+    // Same reasoning as `giSize`: added without a version bump.
+    martialArtsExperience: text(draft.martialArtsExperience),
     ecName: text(draft.ecName),
     ecRelationship: text(draft.ecRelationship),
     ecPhone: text(draft.ecPhone),
@@ -181,6 +185,7 @@ export function draftHasContent(draft: WaiverDraft | null): boolean {
     draft.ecName,
     draft.ecPhone,
     draft.medical,
+    draft.martialArtsExperience,
     draft.signatureName,
     draft.signatureImage,
   ].some((v) => v.trim() !== "");

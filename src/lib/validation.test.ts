@@ -763,6 +763,23 @@ describe("waiverSubmitSchema", () => {
     expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
   });
 
+  it("accepts optional previous martial arts experience, and rejects an oversized one", () => {
+    // Moved onto the waiver from the "Start your free trial" form: optional
+    // either way, so a walk-in signer who skips it is still a valid waiver.
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, martial_arts_experience: "2 years BJJ" })
+        .success,
+    ).toBe(true);
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, martial_arts_experience: "" }).success,
+    ).toBe(true);
+    expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    expect(
+      waiverSubmitSchema.safeParse({ ...validAdult, martial_arts_experience: "x".repeat(501) })
+        .success,
+    ).toBe(false);
+  });
+
   it("accepts an optional client_submission_id and rejects a malformed one", () => {
     // The key that makes retrying a waiver safe. It must never be required (an
     // older cached client sends none), and it must never be accepted in a shape

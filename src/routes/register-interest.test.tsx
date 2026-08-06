@@ -116,6 +116,28 @@ describe("/register-interest", () => {
     expect(second.data.client_submission_id).toBe(first.data.client_submission_id);
   });
 
+  it("shows the note field straight away, with no collapsed state to open first", async () => {
+    render(<RegisterInterest />);
+
+    // Used to be behind a "Add a note" toggle that had to be clicked open.
+    expect(screen.queryByRole("button", { name: /add a note/i })).not.toBeInTheDocument();
+    const note = screen.getByLabelText(/got a question/i);
+    expect(note).toBeVisible();
+    expect(note).not.toBeRequired();
+  });
+
+  it("submits without a note filled in", async () => {
+    submitInterest.mockResolvedValue({ ok: true, duplicate: false });
+    const user = userEvent.setup();
+    render(<RegisterInterest />);
+
+    await fillAndSubmit(user);
+
+    expect(await screen.findByText(/You're on the list/i)).toBeInTheDocument();
+    const sent = submitInterest.mock.calls[0][0] as { data: { message: string } };
+    expect(sent.data.message).toBe("");
+  });
+
   it("disables the button while a send is in flight", async () => {
     let release: (v: unknown) => void = () => {};
     submitInterest.mockImplementation(() => new Promise((resolve) => (release = resolve)));

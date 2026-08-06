@@ -57,13 +57,16 @@ system. (The contact form stores a message, not a person.)
    needs each submission also stores the signer's real IP and signing context
    (browser user agent, language, and the browser-reported timezone, screen and
    platform).
-   The form also asks, optionally, for a **gi size**, and that one is NOT part
-   of the waiver: it is equipment sizing rather than something anybody is
-   declaring, so no `waivers` column holds it, it is not on the PDF, and it goes
-   straight onto the profile. Leaving it blank writes nothing, so signing again
-   never wipes a size on file, and it seeds a belt size only when there is none
-   (the two kids' gi sizes have no belt counterpart and take the shortest belt).
-   Both sizes are editable afterwards on `/account` and by a manager.
+   The form also asks, optionally, for a **gi size** and **previous martial
+   arts experience**, and neither is part of the waiver: the gi size is
+   equipment sizing and the experience is context for instructors, not
+   anything being declared, so no `waivers` column holds either, neither is on
+   the PDF, and both go straight onto the profile. Leaving either blank writes
+   nothing, so signing again never wipes one already on file, and the gi size
+   seeds a belt size only when there is none (the two kids' gi sizes have no
+   belt counterpart and take the shortest belt). Gi and belt size are editable
+   afterwards on `/account` and by a manager; martial arts experience is not
+   (only re-signing the waiver updates it).
 
 4. **Waivers are accepted at any time, without limit.** Resubmitting after a
    mistake is never blocked, before or after approval.
