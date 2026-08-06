@@ -24,6 +24,8 @@ function profile(over: Partial<ClubUserProfile> = {}): ClubUserProfile {
     preferred_name: null,
     phone: "0400 000 000",
     uts_student_number: null,
+    gi_size: null,
+    belt_size: null,
     created_at: "2026-01-01T00:00:00Z",
     ...over,
   };
@@ -107,6 +109,21 @@ describe("aggregateClubUsers", () => {
     expect(u.name).toBe("Ada Lovelace");
     expect(u.email).toBe("ada@example.com");
     expect(u.phone).toBe("222");
+  });
+
+  it("carries kit sizes through to the row, and leaves a lead's empty", () => {
+    const users = aggregate({
+      profiles: [profile({ user_id: "u1", gi_size: "4", belt_size: "3" })],
+      leads: [lead()],
+    });
+    const person = users.find((u) => u.user_id === "u1")!;
+    expect(person.gi_size).toBe("4");
+    expect(person.belt_size).toBe("3");
+    // A lead has given us an email and nothing else, so there is no profile to
+    // hold a size and nothing to show but a blank.
+    const l = users.find((u) => u.user_id === null)!;
+    expect(l.gi_size).toBeNull();
+    expect(l.belt_size).toBeNull();
   });
 
   it("carries the email confirmation stamp through to the row", () => {

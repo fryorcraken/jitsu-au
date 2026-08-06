@@ -232,6 +232,8 @@ never stored.
 | `guardian_name`                  | `text`        | yes  |                                                                                                                                                    |
 | `guardian_relationship`          | `text`        | yes  |                                                                                                                                                    |
 | `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                                   |
+| `gi_size`                        | `text`        | yes  | Gi size code (`profiles_gi_size_check`: `000`…`7`). Equipment sizing, never on a waiver. Chart: `src/lib/kit-sizes.ts`.                            |
+| `belt_size`                      | `text`        | yes  | Belt size code (`profiles_belt_size_check`: `0`…`7` — the belt chart has no `000`/`00`). Same module owns both lists.                              |
 | `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
 | `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
 
@@ -249,6 +251,21 @@ inside the waiver PDF), and no `full_name`.
   person fields onto the profile (`waiverToProfileFields`); on first approval
   lifts the ban, sends a sign-in email, and assigns the free trial
   (`assignTrialMembership`, one per person ever, activation email suppressed).
+- Waiver submission again, for the optional **gi size** the form collects
+  (`submitWaiverWithPdf`). It is equipment sizing, not part of the waiver: no
+  `waivers` column holds it and it is not on the PDF, so it is written straight
+  here. A blank one writes nothing, so re-signing never clears a size on file,
+  and `belt_size` is only ever SEEDED (`beltSizeForGiSize`, which sends the two
+  kids' gi sizes to belt `0`) so a size somebody chose deliberately survives.
+- The member themselves, from `/account` (`updateMyProfile`): `display_name`,
+  `preferred_name`, `phone`, `address`, `sms_whatsapp_consent`, the three
+  `emergency_contact_*` fields, `gi_size` and `belt_size`. The schema is
+  `.strict()`, so it cannot reach the legal name, date of birth, student number,
+  medical notes, minor/guardian fields or email. ⚠️ Its contact fields OVERLAP
+  with `waiverToProfileFields`, so a manager approving an older waiver can
+  overwrite a correction made here; `/account` says so on the card.
+- A manager, from a person's detail page (`setClubUserKitSizes`): `gi_size` and
+  `belt_size` only, either of which may be set to NULL to clear it.
 - `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
   revoked from PUBLIC/anon/authenticated): inserts the profile row for every new
   auth user, however created. Pure id attachment — no email matching, so nothing

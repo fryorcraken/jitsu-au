@@ -9,6 +9,15 @@ import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Pill } from "@/components/site/StatusPill";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
+import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
+import {
+  type BeltSize,
+  type GiSize,
+  formatBeltSize,
+  formatGiSize,
+  isBeltSize,
+  isGiSize,
+} from "@/lib/kit-sizes";
 import {
   ROLE_CLASS,
   coverageClass,
@@ -31,6 +40,7 @@ import {
   getClubUser,
   resendClubUserVerification,
   setClubUserEmail,
+  setClubUserKitSizes,
 } from "@/lib/club-user.functions";
 import { attachCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
@@ -213,6 +223,134 @@ function EmailCard({
         Changing this moves their login too. Signed waivers keep the address as it was typed, as
         evidence, so an older submission below can legitimately show a different one.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The person's gi and belt sizes, and the way a manager corrects them.
+ *
+ * Unlike everything in the Profile card above it, no waiver records sizing, so
+ * there is no frozen submission for a correction here to disagree with and
+ * nothing an approval will later overwrite. That is why this is editable and
+ * the rest of the profile is not.
+ *
+ * Same inline-edit shape as `EmailCard`: a read row with a button, swapped for
+ * a form on demand, so the page has one editing idiom rather than two.
+ */
+function KitSizesCard({
+  userId,
+  giSize,
+  beltSize,
+  onChanged,
+}: {
+  userId: string;
+  giSize: string | null;
+  beltSize: string | null;
+  onChanged: () => void;
+}) {
+  const saveSizes = useServerFn(setClubUserKitSizes);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const storedGi = giSize && isGiSize(giSize) ? giSize : "";
+  const storedBelt = beltSize && isBeltSize(beltSize) ? beltSize : "";
+  const [giDraft, setGiDraft] = useState<GiSize | "">(storedGi);
+  const [beltDraft, setBeltDraft] = useState<BeltSize | "">(storedBelt);
+
+  // Follow the record while the form is closed, so opening it always starts
+  // from what is actually stored. A `useState` initialiser only runs on mount,
+  // so without this the draft would still hold whatever the page loaded first
+  // after a reload picked up somebody else's change.
+  useEffect(() => {
+    if (editing) return;
+    setGiDraft(storedGi);
+    setBeltDraft(storedBelt);
+  }, [editing, storedGi, storedBelt]);
+
+  const dirty = giDraft !== storedGi || beltDraft !== storedBelt;
+
+  function reset() {
+    setGiDraft(storedGi);
+    setBeltDraft(storedBelt);
+    setEditing(false);
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await saveSizes({
+        data: { userId, gi_size: giDraft || null, belt_size: beltDraft || null },
+      });
+      toast.success("Sizes updated.");
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update those sizes.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border p-4">
+      <h2 className="mb-3 text-lg font-bold">Kit sizing</h2>
+      <p className="mb-3 text-sm text-muted-foreground">
+        For ordering a gi and belt, and for sizing loan gear. Members can set these themselves, and
+        signing a waiver offers a gi size. No waiver records them, so approving one never changes
+        what is here.
+      </p>
+
+      {editing ? (
+        <form onSubmit={save} className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[14rem] flex-1">
+              <Label htmlFor="member-gi-size">Gi size</Label>
+              <GiSizeSelect
+                id="member-gi-size"
+                value={giDraft}
+                onChange={setGiDraft}
+                disabled={busy}
+                emptyLabel="Not on file"
+                className="mt-1.5"
+              />
+            </div>
+            <div className="min-w-[14rem] flex-1">
+              <Label htmlFor="member-belt-size">Belt size</Label>
+              <BeltSizeSelect
+                id="member-belt-size"
+                value={beltDraft}
+                onChange={setBeltDraft}
+                disabled={busy}
+                emptyLabel="Not on file"
+                className="mt-1.5"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">{BELT_SIZE_HINT}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={busy || !dirty}>
+              {busy ? "Saving..." : "Save"}
+            </Button>
+            <Button type="button" variant="outline" disabled={busy} onClick={reset}>
+              Cancel
+            </Button>
+            {dirty ? <span className="text-xs text-muted-foreground">Unsaved changes</span> : null}
+          </div>
+        </form>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm">
+            Gi <strong>{formatGiSize(giSize) ?? "—"}</strong>
+          </span>
+          <span className="text-sm">
+            Belt <strong>{formatBeltSize(beltSize) ?? "—"}</strong>
+          </span>
+          <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
+            Change sizes
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -468,7 +606,9 @@ function ManagerUserPage() {
       <div className="rounded-lg border p-4">
         <h2 className="mb-3 text-lg font-bold">Profile</h2>
         <p className="mb-3 text-sm text-muted-foreground">
-          The club's current record. Approving a waiver copies that submission's details here.
+          The club's current record. Approving a waiver copies that submission's details here. The
+          two sizes are the exception: no waiver carries them, so they are only ever set by the
+          member or by you, in the card below.
         </p>
         <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Preferred name" value={profile.preferred_name} />
@@ -491,9 +631,18 @@ function ManagerUserPage() {
             label="SMS / WhatsApp consent"
             value={profile.sms_whatsapp_consent ? "Yes" : "No"}
           />
+          <Field label="Gi size" value={formatGiSize(profile.gi_size)} />
+          <Field label="Belt size" value={formatBeltSize(profile.belt_size)} />
           <Field label="Record updated" value={formatDateTime(profile.updated_at)} />
         </dl>
       </div>
+
+      <KitSizesCard
+        userId={userId}
+        giSize={profile.gi_size}
+        beltSize={profile.belt_size}
+        onChanged={() => void load(false)}
+      />
 
       {/* House rules. Read-only on purpose: a manager cannot tick this on
           somebody's behalf, for the same reason there is no "mark as verified"

@@ -10,6 +10,10 @@ import { z } from "zod";
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
 import { annotationVisibilities, articleVisibilities } from "./kb";
+// Same idea for the gi/belt size charts: `kit-sizes.ts` owns the two code sets
+// (and the CHECK constraints on `profiles` mirror them), so the wire schemas
+// below enumerate them from there rather than repeating the lists.
+import { beltSizes, giSizes } from "./kit-sizes";
 // A dated plan's window is computed in the club's own timezone (its last day
 // must cover that evening's class, not cut off at UTC midnight), so this
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
@@ -390,6 +394,12 @@ export const waiverSubmitSchema = z
     // Consent to be contacted by SMS/WhatsApp and added to club WhatsApp groups.
     // Optional (not required to submit); defaults to no consent.
     sms_whatsapp_consent: z.boolean().optional().default(false),
+    // Optional gi size. NOT part of the waiver: it is never written to the
+    // `waivers` row and never printed on the PDF, because it is equipment
+    // sizing rather than anything the person is declaring or agreeing to. The
+    // handler writes it straight onto their profile, and a blank one writes
+    // nothing at all, so re-signing never clears a size already on file.
+    gi_size: z.enum(giSizes).optional().or(z.literal("")),
     // The emergency contact. For a participant under 18 this person IS the
     // parent/guardian who signs, which is why the relationship is required for
     // everyone and reused as the "relationship to minor" on the document.
@@ -2196,10 +2206,63 @@ export type BlockCommenterInput = z.infer<typeof blockCommenterSchema>;
 export const unblockCommenterSchema = z.object({ user_id: z.string().uuid() });
 export type UnblockCommenterInput = z.infer<typeof unblockCommenterSchema>;
 
-// ---- Account: display name (shown on blog comments) ----
+// ---- Account: the details a member maintains themselves ----
 
-/** `display_name: null` clears the override, reverting to the derived name. */
-export const updateDisplayNameSchema = z.object({
-  display_name: z.string().trim().min(1).max(60).nullable(),
+/**
+ * The patch `/account` sends when somebody edits their own record.
+ *
+ * Every key is optional because the page saves one card at a time, and each
+ * card sends only its own fields. An absent key means "leave it alone"; an
+ * explicit `null` on a nullable field means "clear it". The handler tells the
+ * two apart by checking for `undefined`, so nothing here may use `.nullish()`,
+ * which would collapse the distinction.
+ *
+ * What is deliberately NOT here, and cannot be reached through it: the legal
+ * name, date of birth, UTS student number, medical notes, the minor/guardian
+ * fields, and the email. Those are either evidence a waiver froze, a thing that
+ * changes what somebody pays, or the person's identity — see the note at the
+ * foot of `routes/_authenticated/account.tsx`. String bounds mirror
+ * `waiverSubmitSchema` field for field so the two write paths cannot disagree
+ * about what fits in a column.
+ */
+export const updateMyProfileSchema = z
+  .object({
+    // `null` clears the override and reverts to the derived name
+    // (`commentDisplayName`). `""` is rejected: blanking the box is expressed
+    // as null by the caller, not as an empty string in the column.
+    // Nullable below means "the member may clear this". Kit sizes and the two
+    // names can be cleared, because an absent one is a real state the app renders
+    // (a derived comment name, no size on file). The contact fields cannot: the
+    // club has to be able to reach somebody and to call someone if they get
+    // hurt, so those are editable but not erasable, which is also why the form
+    // marks them required.
+    display_name: z.string().trim().min(1).max(60).nullable().optional(),
+    // Same shape as `display_name` above: `null` clears it, `""` is rejected,
+    // so "no preferred name" has exactly one representation in the column.
+    preferred_name: z.string().trim().min(1).max(60).nullable().optional(),
+    phone: z.string().trim().min(1).max(30).optional(),
+    address: z.string().trim().min(1).max(300).optional(),
+    sms_whatsapp_consent: z.boolean().optional(),
+    emergency_contact_name: z.string().trim().min(1).max(120).optional(),
+    emergency_contact_relationship: z.string().trim().min(1).max(80).optional(),
+    emergency_contact_phone: z.string().trim().min(1).max(30).optional(),
+    gi_size: z.enum(giSizes).nullable().optional(),
+    belt_size: z.enum(beltSizes).nullable().optional(),
+  })
+  // Unknown keys are an attempt to write a field this path does not own (a
+  // legal name, a date of birth), not a harmless extra. Rejecting beats
+  // stripping: a caller that thought it was saving `first_name` should hear
+  // that it was not.
+  .strict()
+  .refine((patch) => Object.values(patch).some((v) => v !== undefined), {
+    message: "Nothing to update.",
+  });
+export type UpdateMyProfileInput = z.infer<typeof updateMyProfileSchema>;
+
+/** Manager: correct somebody's kit sizes from their detail page. */
+export const managerKitSizesSchema = z.object({
+  userId: z.string().uuid(),
+  gi_size: z.enum(giSizes).nullable(),
+  belt_size: z.enum(beltSizes).nullable(),
 });
-export type UpdateDisplayNameInput = z.infer<typeof updateDisplayNameSchema>;
+export type ManagerKitSizesInput = z.infer<typeof managerKitSizesSchema>;

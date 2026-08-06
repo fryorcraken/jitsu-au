@@ -335,6 +335,177 @@ const validInput: PaperWaiverUploadInput = {
   confirm_duplicate: false,
 };
 
+/**
+ * A profiles-table stub for `applyWaiverGiSize`: one read chain and one write
+ * chain, recording every patch so a test can assert what was (and was not)
+ * written. `row: null` is "no profile"; `readError`/`writeError` force the
+ * failure paths; `updatedRows` forces the zero-rows-matched case.
+ */
+function fakeProfilesAdmin(opts: {
+  row?: { gi_size: string | null; belt_size: string | null } | null;
+  readError?: string;
+  writeError?: string;
+  updatedRows?: unknown[];
+}) {
+  const patches: Record<string, unknown>[] = [];
+  const admin = {
+    from(_table: string) {
+      return {
+        select(_cols: string) {
+          return {
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: opts.row === undefined ? { gi_size: null, belt_size: null } : opts.row,
+                error: opts.readError ? { message: opts.readError } : null,
+              }),
+            }),
+          };
+        },
+        update(patch: Record<string, unknown>) {
+          patches.push(patch);
+          return {
+            eq: () => ({
+              select: async () => ({
+                data: opts.updatedRows ?? [{ user_id: "u1" }],
+                error: opts.writeError ? { message: opts.writeError } : null,
+              }),
+            }),
+          };
+        },
+      };
+    },
+  };
+  return { admin: admin as unknown as SupabaseClient<Database>, patches };
+}
+
+describe("applyWaiverGiSize", () => {
+  const PERSON = "u1";
+
+  it("refuses to touch an existing person without proof the submitter is them", async () => {
+    // THE security boundary. /waiver is public and unauthenticated, and
+    // resolvePersonId resolves any known email to that existing person, so
+    // without this anyone could POST a member's address and rewrite their
+    // record. Nothing may be written, and nothing may be read either.
+    const { admin, patches } = fakeProfilesAdmin({ row: { gi_size: "2", belt_size: "2" } });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    const result = await applyWaiverGiSize(admin, {
+      userId: PERSON,
+      giSize: "7",
+      identityProven: false,
+    });
+
+    expect(result).toBe("skipped");
+    expect(patches).toHaveLength(0);
+  });
+
+  it("writes the size when the submitter is proven to be that person", async () => {
+    const { admin, patches } = fakeProfilesAdmin({ row: { gi_size: "2", belt_size: "3" } });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    const result = await applyWaiverGiSize(admin, {
+      userId: PERSON,
+      giSize: "5",
+      identityProven: true,
+    });
+
+    expect(result).toBe("written");
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toMatchObject({ gi_size: "5" });
+    // A record that already carries sizing keeps the belt it has.
+    expect(patches[0]).not.toHaveProperty("belt_size");
+    expect(patches[0].updated_at).toEqual(expect.any(String));
+  });
+
+  it("writes nothing at all for a blank size, so re-signing never clears one", async () => {
+    const { admin, patches } = fakeProfilesAdmin({ row: { gi_size: "4", belt_size: "4" } });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    for (const blank of ["", null, undefined]) {
+      expect(
+        await applyWaiverGiSize(admin, { userId: PERSON, giSize: blank, identityProven: true }),
+      ).toBe("skipped");
+    }
+    expect(patches).toHaveLength(0);
+  });
+
+  it("fills in the belt only when the record carries no sizing at all", async () => {
+    const { admin, patches } = fakeProfilesAdmin({ row: { gi_size: null, belt_size: null } });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    await applyWaiverGiSize(admin, { userId: PERSON, giSize: "3", identityProven: true });
+
+    expect(patches[0]).toMatchObject({ gi_size: "3", belt_size: "3" });
+  });
+
+  it("sends a kids' gi size to the shortest belt the club stocks", async () => {
+    const { admin, patches } = fakeProfilesAdmin({ row: { gi_size: null, belt_size: null } });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    await applyWaiverGiSize(admin, { userId: PERSON, giSize: "000", identityProven: true });
+
+    // There is no 000 or 00 belt on the club's chart.
+    expect(patches[0]).toMatchObject({ gi_size: "000", belt_size: "0" });
+  });
+
+  it("never puts back a belt somebody cleared on purpose", async () => {
+    // gi set, belt null = deliberately cleared on /account, NOT "never sized".
+    const { admin, patches } = fakeProfilesAdmin({ row: { gi_size: "4", belt_size: null } });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    await applyWaiverGiSize(admin, { userId: PERSON, giSize: "5", identityProven: true });
+
+    expect(patches[0]).toMatchObject({ gi_size: "5" });
+    expect(patches[0]).not.toHaveProperty("belt_size");
+  });
+
+  it("refuses to guess when the read fails, rather than re-seeding a belt", async () => {
+    const { admin, patches } = fakeProfilesAdmin({ readError: "connection reset" });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    await expect(
+      applyWaiverGiSize(admin, { userId: PERSON, giSize: "5", identityProven: true }),
+    ).rejects.toThrow("connection reset");
+    expect(patches).toHaveLength(0);
+  });
+
+  it("throws when there is no profile row to write to", async () => {
+    const { admin, patches } = fakeProfilesAdmin({ row: null });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    await expect(
+      applyWaiverGiSize(admin, { userId: PERSON, giSize: "5", identityProven: true }),
+    ).rejects.toThrow(/No profile/);
+    expect(patches).toHaveLength(0);
+  });
+
+  it("does not report success when the update matched no rows", async () => {
+    // PostgREST returns no error when the filter matched nothing, so without
+    // checking the returned rows this would claim to have written.
+    const { admin } = fakeProfilesAdmin({
+      row: { gi_size: null, belt_size: null },
+      updatedRows: [],
+    });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    await expect(
+      applyWaiverGiSize(admin, { userId: PERSON, giSize: "5", identityProven: true }),
+    ).rejects.toThrow(/No profile/);
+  });
+
+  it("surfaces a write error", async () => {
+    const { admin } = fakeProfilesAdmin({
+      row: { gi_size: null, belt_size: null },
+      writeError: "violates check constraint",
+    });
+    const { applyWaiverGiSize } = await import("./waiver.functions");
+
+    await expect(
+      applyWaiverGiSize(admin, { userId: PERSON, giSize: "5", identityProven: true }),
+    ).rejects.toThrow("violates check constraint");
+  });
+});
+
 describe("filePaperWaiver", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});

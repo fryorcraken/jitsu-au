@@ -54,6 +54,8 @@ export type WaiverDraft = {
   address: string;
   utsStudentNumber: string;
   smsConsent: boolean;
+  /** A gi size code, or "" for not chosen. Optional on the form, so "" is normal. */
+  giSize: string;
   ecName: string;
   ecRelationship: string;
   ecPhone: string;
@@ -139,6 +141,13 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     address: text(draft.address),
     utsStudentNumber: text(draft.utsStudentNumber),
     smsConsent: draft.smsConsent === true,
+    // Deliberately does NOT bump WAIVER_DRAFT_VERSION: `giSize` is a new
+    // optional field, and a draft written before it existed restores with "",
+    // which is exactly what "did not choose one" means. The version bump is for
+    // renames and removals, where a silent half-restore would lose something.
+    // Bumping here would bin every half-filled waiver, signature included, over
+    // a field nobody had filled in.
+    giSize: text(draft.giSize),
     ecName: text(draft.ecName),
     ecRelationship: text(draft.ecRelationship),
     ecPhone: text(draft.ecPhone),

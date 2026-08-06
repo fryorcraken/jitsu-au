@@ -43,7 +43,8 @@ import {
   setCurrentTemplateSchema,
   splitFullName,
   stopRepeatingSchema,
-  updateDisplayNameSchema,
+  updateMyProfileSchema,
+  managerKitSizesSchema,
   waiverApprovalSchema,
   waiverPrefillSearchSchema,
   greetingName,
@@ -205,17 +206,88 @@ describe("blogCommentSchema", () => {
   });
 });
 
-describe("blockCommenterSchema / updateDisplayNameSchema", () => {
+describe("blockCommenterSchema", () => {
   it("requires a valid user id to block someone", () => {
     expect(() => blockCommenterSchema.parse({ user_id: "not-a-uuid" })).toThrow();
   });
+});
 
+describe("updateMyProfileSchema", () => {
+  // These two carried over from `updateDisplayNameSchema`, which this replaced.
+  // They are the interesting half of the display-name contract: null and blank
+  // are NOT the same thing, and the handler tells them apart.
   it("allows clearing a display name override with null", () => {
-    expect(updateDisplayNameSchema.parse({ display_name: null }).display_name).toBeNull();
+    expect(updateMyProfileSchema.parse({ display_name: null }).display_name).toBeNull();
   });
 
   it("rejects a blank (non-null) display name", () => {
-    expect(() => updateDisplayNameSchema.parse({ display_name: "" })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ display_name: "" })).toThrow();
+  });
+
+  it("keeps an absent key distinct from an explicit null", () => {
+    // "leave it alone" vs "clear it". The handler filters on `undefined`, so
+    // collapsing these (with .nullish(), say) would make one impossible.
+    const patch = updateMyProfileSchema.parse({ gi_size: null });
+    expect(patch.gi_size).toBeNull();
+    expect("display_name" in patch).toBe(false);
+  });
+
+  it("saves one card's fields at a time", () => {
+    expect(updateMyProfileSchema.parse({ gi_size: "4", belt_size: "3" })).toEqual({
+      gi_size: "4",
+      belt_size: "3",
+    });
+  });
+
+  it("rejects an empty patch", () => {
+    expect(() => updateMyProfileSchema.parse({})).toThrow();
+  });
+
+  it("refuses fields this path does not own, rather than dropping them", () => {
+    // A caller that thought it was saving a legal name should hear that it was
+    // not. The schema is .strict() for exactly this.
+    expect(() => updateMyProfileSchema.parse({ first_name: "Ada" })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ date_of_birth: "1990-01-01" })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ medical_notes: "None" })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ uts_student_number: "12345678" })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ is_minor: true })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ email: "ada@example.com" })).toThrow();
+  });
+
+  it("rejects a size that is not on the club's chart", () => {
+    expect(() => updateMyProfileSchema.parse({ gi_size: "8" })).toThrow();
+    // The belt chart is the shorter of the two: there is no 000 belt.
+    expect(() => updateMyProfileSchema.parse({ belt_size: "000" })).toThrow();
+    expect(updateMyProfileSchema.parse({ gi_size: "000" }).gi_size).toBe("000");
+  });
+
+  it("bounds the contact fields the same way the waiver does", () => {
+    expect(() => updateMyProfileSchema.parse({ phone: "x".repeat(31) })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ address: "x".repeat(301) })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ emergency_contact_name: "" })).toThrow();
+    expect(() => updateMyProfileSchema.parse({ emergency_contact_relationship: "" })).toThrow();
+  });
+});
+
+describe("managerKitSizesSchema", () => {
+  it("takes a person and both sizes, either of which may be cleared", () => {
+    expect(
+      managerKitSizesSchema.parse({
+        userId: "11111111-1111-4111-8111-111111111111",
+        gi_size: "5",
+        belt_size: null,
+      }),
+    ).toEqual({
+      userId: "11111111-1111-4111-8111-111111111111",
+      gi_size: "5",
+      belt_size: null,
+    });
+  });
+
+  it("requires a real user id", () => {
+    expect(() =>
+      managerKitSizesSchema.parse({ userId: "nope", gi_size: null, belt_size: null }),
+    ).toThrow();
   });
 });
 
@@ -254,6 +326,15 @@ describe("waiverToProfileFields", () => {
       email: "ada@example.com",
     } as never);
     expect(patch).toEqual(fields);
+  });
+
+  it("does not carry kit sizes, which no waiver records", () => {
+    // Sizing lives only on the profile, so approving a waiver must leave it
+    // alone. If these ever appeared here, approving an old waiver would undo a
+    // size a member or manager had since corrected.
+    const patch = waiverToProfileFields({ gi_size: "4", belt_size: "3" } as never);
+    expect("gi_size" in patch).toBe(false);
+    expect("belt_size" in patch).toBe(false);
   });
 });
 

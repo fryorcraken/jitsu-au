@@ -38,6 +38,8 @@ export type ClubUserProfile = {
   preferred_name: string | null;
   phone: string | null;
   uts_student_number: string | null;
+  gi_size: string | null;
+  belt_size: string | null;
   created_at: string;
 };
 
@@ -132,6 +134,9 @@ export type ClubUser = {
   waiver_signed_at: string | null;
   is_uts_student: boolean;
   uts_student_number: string | null;
+  /** Kit sizing, as size codes off the club's charts. Null when never given. */
+  gi_size: string | null;
+  belt_size: string | null;
   latest_plan_name: string | null;
   latest_membership_status: MembershipStatus | null;
   membership_count: number;
@@ -257,6 +262,8 @@ export function aggregateClubUsers(input: {
       waiver_signed_at: approvedSignedAt,
       is_uts_student,
       uts_student_number,
+      gi_size: p.gi_size,
+      belt_size: p.belt_size,
       latest_plan_name: latest ? (planById.get(latest.plan_id)?.name ?? null) : null,
       latest_membership_status: latest ? (latest.status as MembershipStatus) : null,
       membership_count: ms.length,
@@ -290,6 +297,9 @@ export function aggregateClubUsers(input: {
       waiver_signed_at: null,
       is_uts_student: false,
       uts_student_number: null,
+      // A lead has given us nothing but an email: no profile, no sizes.
+      gi_size: null,
+      belt_size: null,
       latest_plan_name: null,
       latest_membership_status: null,
       membership_count: 0,

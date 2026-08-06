@@ -867,7 +867,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
       admin
         .from("profiles")
         .select(
-          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, created_at",
+          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at",
         )
         .limit(5000),
       admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
