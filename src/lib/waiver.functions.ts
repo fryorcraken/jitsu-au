@@ -248,15 +248,6 @@ export async function applyWaiverGiSize(
  * no `waivers` column holds it, it never reaches the PDF, and it lives only on
  * the profile — see that function's doc comment for why `identityProven`
  * gates every write, and why a blank value writes nothing at all.
- *
- * ⚠️ `martial_arts_experience` (20260806020000_profile_martial_arts_experience.sql)
- * is additive schema that has not gone live and been regenerated into
- * `types.ts` yet (see docs/database-changes.md), so the generated `Update`
- * type does not know this column exists. The cast below is scaffolding for
- * that gap, not a real type hole: `patch`'s actual shape is a subset of the
- * live table regardless of what the stale generated type says, so the cast
- * only tells the compiler what is already true. Delete it once the migration
- * is live and types are regenerated.
  */
 export async function applyWaiverMartialArtsExperience(
   admin: SupabaseClient<Database>,
@@ -266,10 +257,9 @@ export async function applyWaiverMartialArtsExperience(
   if (!trimmed) return "skipped";
   if (!opts.identityProven) return "skipped";
 
-  const patch = { martial_arts_experience: trimmed, updated_at: new Date().toISOString() };
   const { data: updated, error: writeErr } = await admin
     .from("profiles")
-    .update(patch as Database["public"]["Tables"]["profiles"]["Update"])
+    .update({ martial_arts_experience: trimmed, updated_at: new Date().toISOString() })
     .eq("user_id", opts.userId)
     .select("user_id");
   if (writeErr) throw new Error(writeErr.message);
@@ -317,19 +307,12 @@ async function resolvePersonId(
 
   // Seed the fresh applicant profile (created by the ensure_profile trigger)
   // with the basics. Best-effort field seed, keyed insert-safe.
-  //
-  // The cast is scaffolding for `martial_arts_experience`
-  // (20260806020000_profile_martial_arts_experience.sql): additive schema that
-  // has not gone live and been regenerated into `types.ts` yet (see
-  // docs/database-changes.md), so the generated `Insert` type does not know
-  // this column exists yet. Delete the cast once the migration is live and
-  // types are regenerated.
-  const seedPayload = { user_id: created.user.id, ...opts.seed };
-  await admin
-    .from("profiles")
-    .upsert(seedPayload as Database["public"]["Tables"]["profiles"]["Insert"], {
+  await admin.from("profiles").upsert(
+    { user_id: created.user.id, ...opts.seed },
+    {
       onConflict: "user_id",
-    });
+    },
+  );
   return created.user.id;
 }
 
