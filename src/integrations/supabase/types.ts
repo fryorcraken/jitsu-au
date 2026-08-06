@@ -1001,6 +1001,7 @@ export type Database = {
           guardian_relationship: string | null
           is_minor: boolean
           last_name: string | null
+          martial_arts_experience: string | null
           media_consent: boolean | null
           media_consent_updated_at: string | null
           media_consent_updated_by: string | null
@@ -1028,6 +1029,7 @@ export type Database = {
           guardian_relationship?: string | null
           is_minor?: boolean
           last_name?: string | null
+          martial_arts_experience?: string | null
           media_consent?: boolean | null
           media_consent_updated_at?: string | null
           media_consent_updated_by?: string | null
@@ -1055,6 +1057,7 @@ export type Database = {
           guardian_relationship?: string | null
           is_minor?: boolean
           last_name?: string | null
+          martial_arts_experience?: string | null
           media_consent?: boolean | null
           media_consent_updated_at?: string | null
           media_consent_updated_by?: string | null
