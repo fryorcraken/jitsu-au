@@ -14,6 +14,7 @@ const PROPS = {
   codeOfConductUrl: "https://jitsu.au/code-of-conduct",
   membershipUrl: "https://jitsu.au/membership",
   blogUrl: "https://jitsu.au/blog",
+  contactUrl: "https://jitsu.au/contact",
 };
 
 // react-dom/server splits interpolated text with <!-- --> markers, so compare
@@ -81,6 +82,15 @@ describe("AccountActivatedEmail", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
     // A passing mention: no "What's waiting" style heading introduces it.
     expect(text).not.toMatch(/The knowledge base\./);
+  });
+
+  // Every email here goes out from noreply@ with no reply-to header, so the
+  // "just reply" sign-off other templates use would swallow the one message
+  // that matters most: a new member saying they cannot get in.
+  it("offers a route back that actually reaches the club", async () => {
+    const html = await renderHtml();
+    expect(html).toContain('href="https://jitsu.au/contact"');
+    expect(visibleText(html)).not.toMatch(/reply to this email/i);
   });
 
   it("greets someone with no name on file without leaving a gap", async () => {

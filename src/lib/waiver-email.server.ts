@@ -33,9 +33,16 @@ export const WAIVER_REVIEW_URL = `${SITE_URL}/manager/waivers`;
  *
  * Every one of these is a plain page URL with nothing single-use in it, which
  * is the point of this email: it is as valid a week from now as it is on
- * arrival. `/kb` and `/membership` bounce a signed-out visitor to the sign-in
- * page and carry them back afterwards, so they are safe to link even though
- * the reader cannot be signed in yet.
+ * arrival.
+ *
+ * `/kb` and `/membership` need a session, and a signed-out reader clicking
+ * either is bounced to `/auth`. They do NOT come back to the page they
+ * clicked: the sign-in page passes its `redirect` to the password form only,
+ * while the magic-link form (the sole route in for someone who has never set a
+ * password, which is everyone reading this) hardcodes `/account`. So these
+ * links are safe but blunt, landing a new member on their account page with
+ * the knowledge base and membership one click away. Worth linking anyway: the
+ * alternative is naming pages and making them go looking.
  */
 const ACTIVATION_LINKS = {
   signInUrl: `${SITE_URL}/auth`,
@@ -43,6 +50,7 @@ const ACTIVATION_LINKS = {
   codeOfConductUrl: `${SITE_URL}/code-of-conduct`,
   membershipUrl: `${SITE_URL}/membership`,
   blogUrl: `${SITE_URL}/blog`,
+  contactUrl: `${SITE_URL}/contact`,
 } as const;
 
 type AdminClient = SupabaseClient<Database>;

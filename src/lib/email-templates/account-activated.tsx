@@ -29,6 +29,15 @@ interface AccountActivatedEmailProps {
   codeOfConductUrl: string;
   membershipUrl: string;
   blogUrl: string;
+  /**
+   * The contact form, offered instead of "reply to this email".
+   *
+   * Everything here is sent from `noreply@`, with no reply-to header, so a
+   * reply goes nowhere. That is a small thing to get wrong in most emails and
+   * a large one here: this is the email a person reads when they cannot get
+   * in, and the reply we invited would be their attempt to say so.
+   */
+  contactUrl: string;
 }
 
 /**
@@ -52,6 +61,7 @@ export const AccountActivatedEmail = ({
   codeOfConductUrl,
   membershipUrl,
   blogUrl,
+  contactUrl,
 }: AccountActivatedEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -111,8 +121,11 @@ export const AccountActivatedEmail = ({
           how the club runs.
         </Text>
         <Text style={footer}>
-          See you on the mat. Reply to this email if anything looks off, or if you can&apos;t get
-          in.
+          See you on the mat. If anything looks off, or you can&apos;t get in,{" "}
+          <Link href={contactUrl} style={link}>
+            get in touch
+          </Link>{" "}
+          and we&apos;ll sort it out.
         </Text>
       </Container>
     </Body>

@@ -2,8 +2,7 @@
 //
 // Approving is not a repaint: `setWaiverApproval` copies the submission onto
 // the profile, lifts the applicant's login ban, emails them that their account
-// is active and
-// assigns the free trial. The refresh that follows only decides what the screen
+// is active, and assigns the free trial. The refresh that follows only decides what the screen
 // shows. Running them in one try/catch reported a refresh that failed as an
 // approval that failed, which is the one message that makes a manager click
 // Approve again on work that already went through.
