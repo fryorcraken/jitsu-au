@@ -30,7 +30,7 @@ import {
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm";
 
-/** Shown under a gi picker. Sizes are cut for a height, so nobody is exactly one. */
+/** Shown under a gi picker. Sizes are cut for a wearer's height, so nobody is exactly one. */
 export const GI_SIZE_HINT = "Round up or down depending on your body build.";
 
 /**
@@ -54,7 +54,7 @@ export function GiSizeSelect({
   onChange,
   disabled,
   className,
-  emptyLabel = "Not sure / prefer not to say",
+  emptyLabel = "Not set",
 }: BaseProps & {
   value: GiSize | "";
   onChange: (value: GiSize | "") => void;
@@ -83,7 +83,7 @@ export function BeltSizeSelect({
   onChange,
   disabled,
   className,
-  emptyLabel = "Not sure / prefer not to say",
+  emptyLabel = "Not set",
 }: BaseProps & {
   value: BeltSize | "";
   onChange: (value: BeltSize | "") => void;
