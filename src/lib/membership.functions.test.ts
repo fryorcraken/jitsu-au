@@ -110,10 +110,11 @@ describe("assignTrialMembership", () => {
     expect(fake.updates[0]).toMatchObject({ status: "active" });
   });
 
-  // A waiver must be signed before anyone trains, but it is often signed at the
-  // gym and approved hours or days later. Dating the trial from the approval
-  // would leave the very class it was signed for uncovered, so it runs from the
-  // start of the SIGNING day (00:00 Sydney on 5 Aug = 4 Aug 14:00 UTC).
+  // The trial records when the entitlement was earned, not when a manager got
+  // round to approving it: a form filled in at the gym may be approved hours or
+  // days later. So it runs from the start of the SIGNING day (00:00 Sydney on
+  // 5 Aug = 4 Aug 14:00 UTC). Coverage does not depend on this -- a credit
+  // balance is not date-gated -- but the row should still say something true.
   it("runs the trial from the day the waiver was signed, not the day it was approved", async () => {
     const fake = fakeAdmin({});
     await assignTrial(fake);
