@@ -290,8 +290,22 @@ Two ways in, both doing the same thing to the same data.
 ### On the site: `/manager/kb`
 
 The same shape as the waiver template editor, so there is one editor to learn
-and not two: articles down the side, the markdown body in the middle, a live
-preview underneath, and "Save as new version" publishing what you wrote.
+and not two: the reading order down the left, the markdown body in the main
+window, a live preview underneath, and "Save as new version" publishing what you
+wrote.
+
+**The reading order is the navigation for this screen.** It is on the left
+because that is what it is for: picking what to edit, and arranging what members
+read. Everything that CHANGES a thing (its title, its text, its settings,
+deleting it) happens in the main window, so a click in the list can never be
+destructive and a manager can always see what they are about to edit.
+
+**Save is disabled until there is something to save.** Opening an article and
+pressing Save used to publish an identical version: it bumped the number every
+member's comments are pinned against and told readers the article had been
+updated when not a word of it had changed. A change note on its own does not
+count as an edit, because it describes a save rather than being part of the
+article.
 
 What is here that the waiver template does not have:
 
@@ -315,16 +329,33 @@ the narrower audience first, so a failure leaves the old text under it rather
 than publishing the new text to the audience it was being taken away from. Either
 way the failure direction is "fewer people can read it".
 
-**The reading order is editable here too.** The list down the side is not a flat
-alphabetical index next to a separate ordering panel: it IS the sidebar a member
-sees, sections and all, and it is edited in place.
+**The reading order is arranged here too.** The list is not a flat alphabetical
+index next to a separate ordering panel: it IS the sidebar a member sees,
+sections and all, and it is rearranged by dragging.
 
-- **Up/down arrows** on an entry move it inside its section, and on a section
-  heading move the whole section. An arrow at the end of a list is disabled
-  rather than doing nothing.
-- **The section select** on the left moves an article between sections, and puts
-  it at the END of the one it lands in. Anywhere else would look like the select
-  was also shuffling the order.
+- **Drag an entry by its handle** to move it up or down its section, into
+  another section, into a section that is still empty, or into "Everything
+  else". Dragging a section heading moves the whole section. It works with a
+  mouse, with a finger, and from the keyboard: the handle is a real focusable
+  button, and dnd-kit's keyboard sensor is the only way to reorder without a
+  pointer now that the arrows are gone.
+- **A drop saves immediately.** `moveEntry` renumbers the affected section (both
+  of them, on a cross-section move) in tens and returns only the rows that
+  actually changed, so a move is two or three placement writes rather than a
+  rewrite of the whole structure. The list holds the dropped arrangement until
+  the refreshed rows land, so it never snaps back for the length of a round trip.
+- **Moving something writes no new version**, so rearranging the knowledge base
+  never tells a reader an article was updated. This is why dragging is the only
+  way to move one: the old section select applied on Save, which published a new
+  version for what was really just a move.
+- **There is no section picker in the details view.** Where an entry sits is
+  shown by where it sits in the list, and changed by dragging it there.
+- **"Everything else" is always shown here**, empty or not, because on this
+  screen it is somewhere you can drop something. The reader's sidebar still hides
+  it when empty (`buildKbNav`'s `keepEmpty` is manager-only).
+- **Clicking a section name opens it in the main window**, where it is renamed
+  and deleted. Its URL key is shown but fixed: every article in the section
+  refers to it by that key, so changing it would unfile all of them.
 - **New section** takes a name; positions are handed out in tens so there is
   always room to slot something between two others. Deleting a section keeps its
   articles, dropping them into "Everything else", and the confirmation says how
@@ -332,8 +363,6 @@ sees, sections and all, and it is edited in place.
 - **New link** creates a link entry: a name for the sidebar and a path on this
   site. An existing link entry can be turned back into an article, and the
   editor says the link is only replaced when you save.
-- Moving something writes **no new version**, so reordering the knowledge base
-  never tells every reader an article was updated.
 
 Everything here does the same thing to the same data as the agent API, through
 the same code (`kb-admin.ts`). Neither is the "real" one.

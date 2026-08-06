@@ -11,7 +11,34 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
-import { ChevronDown, ChevronUp, ExternalLink, Link2, Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, GripVertical, Link2, Plus, Trash2 } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCorners,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type {
+  DragEndEvent,
+  DragOverEvent,
+  DragStartEvent,
+  DraggableAttributes,
+  DraggableSyntheticListeners,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,14 +68,17 @@ import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
 import type { ArticleVisibility } from "@/lib/kb";
 import { buildKbNav, UNSECTIONED_TITLE } from "@/lib/kb-nav";
-import type { KbNavSection } from "@/lib/kb-nav";
+import type { KbNavEntry } from "@/lib/kb-nav";
 import {
   isArticleDirty,
+  isSectionDirty,
+  moveEntry,
+  moveSection,
   nextPosition,
-  reorder,
   slugFromTitle,
   wideningVisibility,
 } from "@/lib/kb-editor";
+import type { Placement } from "@/lib/kb-editor";
 import { versionLabel } from "@/lib/waiver-template-editor";
 import { formatDate } from "@/lib/dates";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -92,14 +122,34 @@ const VISIBILITY_LABEL: Record<ArticleVisibility, string> = {
 const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /**
- * "In no section", as a Select value.
- *
- * A sentinel rather than "", because the underlying Radix select treats an
- * empty value as "nothing is chosen" and refuses to render an item with one.
- * The wire format is still "", which is what `save_kb_article` reads as "take
- * this out of every section".
+ * A section as the reading order panel holds it. `slug` is "" for the catch-all
+ * "Everything else" group, matching the "" that `save_kb_article` reads as "in
+ * no section" — so a drop target and a wire value are never two different
+ * things.
  */
-const NO_SECTION = "__none__";
+type NavGroup = { slug: string; title: string; entries: KbNavEntry[] };
+
+/** Drag ids, namespaced so a section and an article can share a slug. */
+const entryId = (slug: string) => `entry:${slug}`;
+const sectionId = (slug: string) => `section:${slug}`;
+const containerId = (slug: string) => `container:${slug}`;
+
+/** One entry, wherever in the list it currently is. Empty if it is not there. */
+function entriesNamed(groups: NavGroup[], slug: string): KbNavEntry[] {
+  const found = groups.flatMap((group) => group.entries).find((entry) => entry.slug === slug);
+  return found ? [found] : [];
+}
+
+/** The group a drag id belongs to, or null if the id is not in the list. */
+function containerOf(groups: NavGroup[], id: string): string | null {
+  if (id.startsWith("container:")) return id.slice("container:".length);
+  // A section HEADING resolves to its own section, so an entry let go over the
+  // heading lands in the section under it rather than nowhere.
+  if (id.startsWith("section:")) return id.slice("section:".length);
+  if (!id.startsWith("entry:")) return null;
+  const slug = id.slice("entry:".length);
+  return groups.find((g) => g.entries.some((e) => e.slug === slug))?.slug ?? null;
+}
 
 function KnowledgeBaseManager() {
   const navigate = useNavigate();
@@ -135,6 +185,16 @@ function KnowledgeBaseManager() {
   const [navTitle, setNavTitle] = useState("");
   const [linkPath, setLinkPath] = useState("");
   const [newSectionTitle, setNewSectionTitle] = useState("");
+  /**
+   * The section open in the main window, as it is STORED, or null when the main
+   * window is showing an article or a link entry.
+   *
+   * A section is edited in the same place an article is, rather than through a
+   * pencil in the list, so the reading order does one job: getting around, and
+   * arranging. `sectionTitle` is the draft against this baseline.
+   */
+  const [sectionEdit, setSectionEdit] = useState<{ slug: string; title: string } | null>(null);
+  const [sectionTitle, setSectionTitle] = useState("");
   /** The version as stored, to compare the editor against. */
   const [stored, setStored] = useState<{
     title: string;
@@ -195,6 +255,27 @@ function KnowledgeBaseManager() {
   const [busy, setBusy] = useState(false);
 
   /**
+   * The arrangement a drag is producing, held while it is in flight and until
+   * the refreshed lists come back.
+   *
+   * Kept apart from `busy` on purpose. `busy` disables every entry in the list,
+   * which is right for a load the manager is waiting on and wrong for a drop:
+   * it would make the second drag of two dead on arrival, and the list snap
+   * back under the cursor between them.
+   */
+  const [dragGroups, setDragGroups] = useState<NavGroup[] | null>(null);
+  const [dragging, setDragging] = useState<{ id: string; label: string } | null>(null);
+  /**
+   * A drop's writes are in flight, so nothing can be picked up.
+   *
+   * Short-lived, and it has to exist: a second drag started mid-commit would
+   * take its "before" from a list the first drop has not been saved into yet,
+   * and the two would compute positions against different pictures of the same
+   * section.
+   */
+  const [ordering, setOrdering] = useState(false);
+
+  /**
    * Which request is allowed to write to state.
    *
    * Every load, save and publish takes a token before it starts and drops its
@@ -206,7 +287,22 @@ function KnowledgeBaseManager() {
    * not a stress case.
    */
   const seq = useRef(0);
-  const claim = () => ++seq.current;
+  /**
+   * Take the token, and with it the screen.
+   *
+   * Clearing `busy` HERE is what makes the contract safe rather than merely
+   * documented. An overtaken load deliberately does not clear it on the way out
+   * (`if (!stale(token)) setBusy(false)`), because it cannot know whether the
+   * request that displaced it wants a spinner of its own — so the duty falls on
+   * the new claimer, and a claimer that forgets leaves every button on the
+   * screen disabled until the page is reloaded. Doing it in `claim` itself
+   * means no caller can forget: the two that do want the list frozen set it
+   * again on the next line.
+   */
+  const claim = () => {
+    setBusy(false);
+    return ++seq.current;
+  };
   const stale = (token: number) => seq.current !== token;
 
   const draft = {
@@ -220,6 +316,15 @@ function KnowledgeBaseManager() {
     link_path: linkPath,
   };
   const dirty = isArticleDirty(draft, stored);
+  /**
+   * The work the VISIBLE editor would lose, which is what every "discard your
+   * unsaved changes?" prompt is really asking about.
+   *
+   * There are two editors sharing the main window now, so consulting the
+   * article's `dirty` alone would let a half-renamed section be thrown away
+   * without a word, and would warn about an article the manager cannot see.
+   */
+  const unsaved = sectionEdit ? isSectionDirty({ title: sectionTitle }, sectionEdit) : dirty;
   const liveVersion = versions.find((v) => v.is_current)?.version ?? null;
 
   /**
@@ -232,40 +337,50 @@ function KnowledgeBaseManager() {
    * arrows start moving something other than what they point at. Drafts are
    * included, because this is the screen that writes them.
    */
-  const structure: KbNavSection[] = useMemo(
-    () =>
-      buildKbNav(
-        sections,
-        articles.map((a) => ({
-          slug: a.slug,
-          title: entryLabel(a),
-          link_path: a.link_path,
-          section_slug: a.section || null,
-          position: a.position,
-          visibility: a.visibility,
-        })),
-        // Empty sections stay visible HERE and nowhere else: this is the screen
-        // that fills them, and one that vanished the moment it was created
-        // would be a button with no result.
-        { keepEmpty: true },
-      ),
-    [sections, articles],
-  );
+  const structure: NavGroup[] = useMemo(() => {
+    const nav = buildKbNav(
+      sections,
+      articles.map((a) => ({
+        slug: a.slug,
+        title: entryLabel(a),
+        link_path: a.link_path,
+        section_slug: a.section || null,
+        position: a.position,
+        visibility: a.visibility,
+      })),
+      // Empty sections stay visible HERE and nowhere else: this is the screen
+      // that fills them, and one that vanished the moment it was created
+      // would be a button with no result.
+      { keepEmpty: true },
+    );
+    const groups: NavGroup[] = nav.map((group) => ({
+      slug: group.slug ?? "",
+      title: group.title,
+      entries: group.entries,
+    }));
+    // "Everything else" is always here, empty or not, because on this screen it
+    // is somewhere you can DROP something. The reader's sidebar hides it when
+    // empty (a heading with nothing under it is noise), but a manager dragging
+    // an article out of every section needs a target to drag it to.
+    if (!groups.some((group) => group.slug === "")) {
+      groups.push({ slug: "", title: UNSECTIONED_TITLE, entries: [] });
+    }
+    return groups;
+  }, [sections, articles]);
 
-  /** Everything already filed in a section, for working out where a new entry goes. */
+  /** What the list shows: the arrangement a drag is producing, or the stored one. */
+  const groups = dragGroups ?? structure;
+
   /**
-   * Everything already filed in a section, for working out where a new entry
+   * Everything already filed in a section, for working out where a NEW entry
    * goes.
    *
-   * `exclude` leaves an entry out, and which entry that is matters: an article
-   * being MOVED must not count its own position among its new neighbours, but
-   * an article being CREATED has no position yet and must not knock the open
-   * article out of the count — that would propose a position already taken and
-   * leave the two tied, resolved by whichever title sorts first.
+   * Only creation needs this now. Moving an existing entry is a drag, and
+   * `moveEntry` works out the whole affected section rather than one number.
    */
-  const siblingsOf = (sectionSlug: string, exclude?: string) =>
+  const siblingsOf = (sectionSlug: string) =>
     articles
-      .filter((a) => (a.section || "") === sectionSlug && a.slug !== exclude)
+      .filter((a) => (a.section || "") === sectionSlug)
       .map((a) => ({ slug: a.slug, position: a.position }));
 
   useEffect(() => {
@@ -317,10 +432,14 @@ function KnowledgeBaseManager() {
     // failed: then the click is a retry, and swallowing it leaves the only
     // way out of that state a page reload.
     const retrying = next === slug && !creating && (failed.article || failed.versions);
-    if (!opts.force && !retrying && next === slug && !creating) return;
-    if (dirty && !window.confirm("Discard your unsaved changes and open this?")) {
+    // A section open in the main window means this click is a real navigation
+    // even when `slug` already names this article, so the early return above
+    // would leave the click doing nothing.
+    if (!opts.force && !retrying && next === slug && !creating && !sectionEdit) return;
+    if (unsaved && !window.confirm("Discard your unsaved changes and open this?")) {
       return;
     }
+    setSectionEdit(null);
 
     // `opts.articles` overrides the state for the one caller (the mount
     // effect) that cannot trust its own closure's `articles` to be current —
@@ -447,8 +566,9 @@ function KnowledgeBaseManager() {
 
   function startNew(nextKind: EntryKind) {
     const what = nextKind === "link" ? "add a link" : "start a new article";
-    if (dirty && !window.confirm(`Discard your unsaved changes and ${what}?`)) return;
+    if (unsaved && !window.confirm(`Discard your unsaved changes and ${what}?`)) return;
     claim();
+    setSectionEdit(null);
     setCreating(true);
     setKind(nextKind);
     setSlug("");
@@ -473,18 +593,16 @@ function KnowledgeBaseManager() {
     setFailed({ article: false, versions: false, feedback: false });
   }
 
-  /**
-   * Move an entry into a section, and to the end of it.
-   *
-   * Carrying its old position across would drop it wherever that number happens
-   * to land among its new neighbours, which from the manager's side looks like
-   * the section select also shuffling the order. The end is the one position
-   * that is predictable, and the arrows are two clicks away.
-   */
-  function onSectionChange(value: string) {
-    const nextSection = value === NO_SECTION ? "" : value;
-    setSection(nextSection);
-    setPosition(nextPosition(siblingsOf(nextSection, creating ? undefined : slug)));
+  /** Open a section in the main window, where it is renamed and deleted. */
+  function openSection(row: SectionRow) {
+    if (sectionEdit?.slug === row.slug) return;
+    if (unsaved && !window.confirm("Discard your unsaved changes and open this section?")) {
+      return;
+    }
+    claim();
+    setPreview(null);
+    setSectionEdit({ slug: row.slug, title: row.title });
+    setSectionTitle(row.title);
   }
 
   /**
@@ -555,7 +673,7 @@ function KnowledgeBaseManager() {
       }
       if (/^\/kb($|\/)/.test(linkPath.trim())) {
         toast.error(
-          "A link cannot point back into the knowledge base. Use the section and the arrows to order articles.",
+          "A link cannot point back into the knowledge base. Drag articles in the list to order them.",
         );
         return;
       }
@@ -765,59 +883,209 @@ function KnowledgeBaseManager() {
   }
 
   /**
-   * Move an entry up or down inside its section.
+   * Write the rows a drop moved.
    *
-   * `reorder` renumbers the section and returns only the rows that moved, so
-   * this is normally two placement saves. Placement saves write no version, so
-   * reordering the knowledge base never tells a reader an article was updated.
+   * Placement saves write no VERSION, which is the whole reason dragging is the
+   * only way to move an article: it means rearranging the reading order never
+   * tells a member their article was updated, and never bumps the number their
+   * comments are pinned against.
    *
-   * The writes are sequential rather than parallel: they are two rows of the
-   * same list, and a half-applied pair is much easier to reason about (and to
-   * repeat) than two overlapping saves whose order decided the result.
+   * The writes are sequential rather than parallel: they are rows of the same
+   * list, and a half-applied set is much easier to reason about (and to repeat)
+   * than several overlapping saves whose order decided the result.
    */
-  async function onMoveEntry(
-    entries: { slug: string; position: number }[],
-    target: string,
-    direction: -1 | 1,
-  ) {
-    const moves = reorder(entries, target, direction);
-    if (!moves.length) return;
+  async function commitPlacements(moves: Placement[]) {
+    if (!moves.length) {
+      setDragGroups(null);
+      return;
+    }
     const token = claim();
-    setBusy(true);
+    setOrdering(true);
     try {
       for (const move of moves) {
-        await save({ data: { slug: move.slug, position: move.position } });
+        await save({ data: { slug: move.slug, section: move.section, position: move.position } });
       }
-      // The entry on screen is one of the rows that just moved, so its baseline
-      // has to move with it or the screen reads as having unsaved changes.
+      // The entry on screen may be one of the rows that just moved, so its
+      // baseline has to move with it or the editor reads as having unsaved
+      // changes it cannot show.
       const mine = moves.find((m) => m.slug === slug);
       if (mine && !stale(token)) {
+        setSection(mine.section);
         setPosition(mine.position);
-        setStored((prev) => (prev ? { ...prev, position: mine.position } : prev));
+        setStored((prev) =>
+          prev ? { ...prev, section: mine.section, position: mine.position } : prev,
+        );
       }
       await refreshStructure(token);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not move that");
     } finally {
-      setBusy(false);
+      setOrdering(false);
+      // Cleared only now, so the list holds the dropped arrangement until the
+      // refreshed rows land. Clearing it any earlier snaps everything back to
+      // the old order for the length of a round trip, which reads as the drag
+      // having failed.
+      setDragGroups(null);
     }
   }
 
-  /** Move a whole section up or down the sidebar. */
-  async function onMoveSection(target: string, direction: -1 | 1) {
-    const moves = reorder(
-      structure
-        .filter((s) => s.slug !== null)
-        .map((s) => ({
-          slug: s.slug as string,
-          position: sections.find((row) => row.slug === s.slug)?.position ?? 0,
-        })),
-      target,
-      direction,
+  function onDragStart(event: DragStartEvent) {
+    const id = String(event.active.id);
+    const label =
+      (event.active.data.current?.label as string | undefined) ?? id.replace(/^[^:]+:/, "");
+    setDragGroups(structure);
+    setDragging({ id, label });
+  }
+
+  /**
+   * Carry an entry into the section it is currently over, so the list shows
+   * where it would land.
+   *
+   * Without this a cross-section drag looks like nothing until the drop, and a
+   * manager cannot see whether they are about to file the article into "Belts"
+   * or the section under it.
+   */
+  function onDragOver(event: DragOverEvent) {
+    const { active, over } = event;
+    if (!over || active.data.current?.type !== "entry") return;
+    const current = dragGroups ?? structure;
+    const from = containerOf(current, String(active.id));
+    const to = containerOf(current, String(over.id));
+    if (from === null || to === null || from === to) return;
+
+    const slugMoved = String(active.id).slice("entry:".length);
+    const entry = current
+      .find((group) => group.slug === from)
+      ?.entries.find((e) => e.slug === slugMoved);
+    if (!entry) return;
+
+    const target = current.find((group) => group.slug === to);
+    const overIndex = target?.entries.findIndex((e) => entryId(e.slug) === String(over.id)) ?? -1;
+    const at = overIndex === -1 ? (target?.entries.length ?? 0) : overIndex;
+
+    // The updater form, not `current`: `pointermove` is a continuous-priority
+    // event, so two drag-overs can be handled before React commits the first,
+    // and the second would otherwise compute from the pre-move arrangement.
+    setDragGroups((prev) =>
+      (prev ?? current).map((group) => {
+        if (group.slug === from) {
+          return { ...group, entries: group.entries.filter((e) => e.slug !== slugMoved) };
+        }
+        if (group.slug === to) {
+          const entries = group.entries.filter((e) => e.slug !== slugMoved);
+          entries.splice(Math.min(at, entries.length), 0, entry);
+          return { ...group, entries };
+        }
+        return group;
+      }),
     );
-    if (!moves.length) return;
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    setDragging(null);
+    if (!over) {
+      setDragGroups(null);
+      return;
+    }
+
+    if (active.data.current?.type === "section") {
+      const named = structure.filter((group) => group.slug !== "");
+      const target = String(active.id).slice("section:".length);
+      const from = named.findIndex((group) => group.slug === target);
+      // The drop may have landed on another heading, on a section's body, or on
+      // one of the entries inside it. All three mean the same thing: that
+      // section's place in the sidebar.
+      const overSection = containerOf(structure, String(over.id));
+      // "Everything else" is always rendered last and is not a section anyone
+      // made, so it is not in `named` and cannot be a destination. Dragging a
+      // section onto it means "put this last", which is the natural gesture for
+      // moving a section to the bottom. Reading it as "no match" made that drag
+      // silently do nothing.
+      const to =
+        overSection === ""
+          ? named.length - 1
+          : named.findIndex((group) => group.slug === overSection);
+      if (from === -1 || to === -1) {
+        setDragGroups(null);
+        return;
+      }
+      const moves = moveSection(
+        named.map((group) => ({
+          slug: group.slug,
+          position: sections.find((row) => row.slug === group.slug)?.position ?? 0,
+        })),
+        target,
+        to,
+      );
+      if (!moves.length) {
+        setDragGroups(null);
+        return;
+      }
+      // "Everything else" is not in `named` and is always last, so it is put
+      // back on the end rather than reordered with the rest.
+      setDragGroups([
+        ...arrayMove(named, from, to),
+        ...structure.filter((group) => group.slug === ""),
+      ]);
+      void commitSectionOrder(moves);
+      return;
+    }
+
+    const current = dragGroups ?? structure;
+    const slugMoved = String(active.id).slice("entry:".length);
+    const into = containerOf(current, String(over.id));
+    if (into === null) {
+      setDragGroups(null);
+      return;
+    }
+
+    // The arrangement `onDragOver` has been building already has the entry in
+    // its new section, so the final index is read off THAT rather than
+    // recomputed from the drop coordinates.
+    const target = current.find((group) => group.slug === into);
+    const entries = target?.entries ?? [];
+    const oldIndex = entries.findIndex((e) => e.slug === slugMoved);
+    const overIndex = entries.findIndex((e) => entryId(e.slug) === String(over.id));
+    const settled =
+      oldIndex === -1 || overIndex === -1 ? entries : arrayMove(entries, oldIndex, overIndex);
+    const found = settled.findIndex((e) => e.slug === slugMoved);
+    // The entry is missing from the section it was dropped on when the last
+    // drag-over and the drop disagreed about what was under the cursor. Landing
+    // it at the end of that section is a guess, but it is the RIGHT section, and
+    // it beats the alternative: a drop that silently does nothing, which is the
+    // failure this screen was reported for.
+    const at = found === -1 ? settled.length : found;
+
+    setDragGroups(
+      current.map((group) =>
+        group.slug === into
+          ? {
+              ...group,
+              entries: found === -1 ? [...settled, ...entriesNamed(current, slugMoved)] : settled,
+            }
+          : found === -1
+            ? { ...group, entries: group.entries.filter((e) => e.slug !== slugMoved) }
+            : group,
+      ),
+    );
+    void commitPlacements(
+      moveEntry(
+        structure.map((group) => ({
+          slug: group.slug,
+          entries: group.entries.map((e) => ({ slug: e.slug, position: e.position })),
+        })),
+        slugMoved,
+        into,
+        at,
+      ),
+    );
+  }
+
+  /** Write the sections a section drag moved. */
+  async function commitSectionOrder(moves: { slug: string; position: number }[]) {
     const token = claim();
-    setBusy(true);
+    setOrdering(true);
     try {
       for (const move of moves) {
         await saveSection({ data: { slug: move.slug, position: move.position } });
@@ -826,7 +1094,11 @@ function KnowledgeBaseManager() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not move that section");
     } finally {
-      setBusy(false);
+      setOrdering(false);
+      // See `commitPlacements`: the dropped arrangement stays on screen until
+      // the refreshed rows land, so the list does not snap back for the length
+      // of a round trip.
+      setDragGroups(null);
     }
   }
 
@@ -858,21 +1130,30 @@ function KnowledgeBaseManager() {
     }
   }
 
-  async function onRenameSection(target: SectionRow) {
-    const name = window.prompt("What should this section be called?", target.title)?.trim();
-    if (!name || name === target.title) return;
+  async function onSaveSection() {
+    if (!sectionEdit) return;
+    const name = sectionTitle.trim();
+    if (!name) {
+      toast.error("Give the section a name.");
+      return;
+    }
     const token = claim();
-    setBusy(true);
+    setSaving(true);
     try {
       // The slug is NOT changed with the title. It is the handle the agent API
       // and every article's `section` refer to, so renaming a heading must not
       // silently unfile everything in it.
-      await saveSection({ data: { slug: target.slug, title: name } });
+      await saveSection({ data: { slug: sectionEdit.slug, title: name } });
+      toast.success(`Renamed the section to "${name}"`);
+      if (!stale(token)) {
+        setSectionEdit({ slug: sectionEdit.slug, title: name });
+        setSectionTitle(name);
+      }
       await refreshStructure(token);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not rename that section");
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
@@ -901,6 +1182,10 @@ function KnowledgeBaseManager() {
         setSection("");
         setStored((prev) => (prev ? { ...prev, section: "" } : prev));
       }
+      // The main window was showing the section that no longer exists, so it
+      // goes back to whatever article was last open rather than sitting on a
+      // form that can only fail.
+      if (!stale(token) && sectionEdit?.slug === target.slug) setSectionEdit(null);
       await refreshStructure(token);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete that section");
@@ -914,7 +1199,32 @@ function KnowledgeBaseManager() {
     [kind, navTitle, title],
   );
 
+  /**
+   * How the reading order can be dragged.
+   *
+   * The keyboard sensor is not a nicety: it is the ONLY way to reorder without a
+   * mouse now that the up/down arrows are gone, so a grab handle that could not
+   * be tabbed to and driven with the arrow keys would have taken the feature
+   * away from anyone who used them. The pointer sensor waits for 4px of travel
+   * so a plain click on a handle is still a click.
+   */
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
   if (loading) return <div className="p-8">Loading...</div>;
+
+  // The same `isSectionDirty` the discard prompt consults, so "there is nothing
+  // to save" and "there is nothing to lose" can never disagree.
+  const sectionSaveDisabled =
+    saving ||
+    promoting ||
+    busy ||
+    ordering ||
+    !sectionTitle.trim() ||
+    !isSectionDirty({ title: sectionTitle }, sectionEdit);
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
@@ -931,7 +1241,7 @@ function KnowledgeBaseManager() {
           <Button
             type="button"
             variant="outline"
-            disabled={saving || promoting || busy}
+            disabled={saving || promoting || busy || ordering}
             onClick={() => startNew("article")}
           >
             <Plus className="mr-1.5 h-4 w-4" />
@@ -944,7 +1254,7 @@ function KnowledgeBaseManager() {
           <Button
             type="button"
             variant="outline"
-            disabled={saving || promoting || busy}
+            disabled={saving || promoting || busy || ordering}
             onClick={() => startNew("link")}
           >
             <Link2 className="mr-1.5 h-4 w-4" />
@@ -956,249 +1266,21 @@ function KnowledgeBaseManager() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-        <div className="space-y-4">
-          {/* Also shown when there is no slug yet, not only in `creating` mode.
-              On an empty club the screen opens with `creating` false and no
-              slug, and without this the manager types a title and body, hits
-              Save, and is told to give it a URL key with no field to type one
-              into. */}
-          {(creating || !slug) && (
-            <div>
-              <Label htmlFor="slug">URL key</Label>
-              <Input
-                id="slug"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder={proposedSlug || "house-rules"}
-                maxLength={100}
-                className="mt-1.5 font-mono text-sm"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                The permanent address: /kb/{slug || proposedSlug || "house-rules"}. Lowercase
-                letters, numbers and single hyphens. Leave it blank to use the{" "}
-                {kind === "link" ? "name" : "title"}.
-              </p>
-            </div>
-          )}
-
-          {kind === "link" ? (
-            <div className="space-y-4 rounded-lg border p-4">
-              <p className="text-sm text-muted-foreground">
-                A sidebar entry pointing at a page this site already has, so the club keeps one copy
-                of it rather than two. It reads in order with everything else, it holds no text of
-                its own, and it takes no comments.
-              </p>
-              <div>
-                <Label htmlFor="link-label">Name in the sidebar</Label>
-                <Input
-                  id="link-label"
-                  value={navTitle}
-                  onChange={(e) => setNavTitle(e.target.value)}
-                  maxLength={100}
-                  placeholder="Your first session"
-                  className="mt-1.5"
-                />
-              </div>
-              <div>
-                <Label htmlFor="link-path">Where it goes</Label>
-                <Input
-                  id="link-path"
-                  value={linkPath}
-                  onChange={(e) => setLinkPath(e.target.value)}
-                  maxLength={200}
-                  placeholder="/first-class"
-                  className="mt-1.5 font-mono text-sm"
-                />
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  A path on this site, e.g. /first-class or /faq. Not a full web address, and not
-                  another /kb page: order those with the section and the arrows instead.
-                </p>
-              </div>
-              {stored?.link_path && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={saving || busy}
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        "Turn this link into an article? It keeps its place in the reading order, and you write its text here. The link is only replaced when you save.",
-                      )
-                    ) {
-                      return;
-                    }
-                    setKind("article");
-                    setLinkPath("");
-                  }}
-                >
-                  Turn this into an article
-                </Button>
-              )}
-            </div>
-          ) : (
-            <>
-              <div>
-                <Label htmlFor="title">Title</Label>
-                <Input
-                  id="title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  maxLength={200}
-                  className="mt-1.5"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="body">Body (Markdown)</Label>
-                <Textarea
-                  id="body"
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  rows={22}
-                  className="mt-1.5 font-mono text-sm"
-                />
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Members comment paragraph by paragraph. Editing the words of a paragraph detaches
-                  its comments, which are then shown as being about earlier wording. Adding or
-                  moving paragraphs elsewhere leaves other comments where they are.
-                </p>
-              </div>
-            </>
-          )}
-
-          <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
-            {kind === "article" && (
-              <>
-                <div>
-                  <Label htmlFor="visibility">Who can read it</Label>
-                  <Select
-                    value={visibility}
-                    onValueChange={(v) => setVisibility(v as ArticleVisibility)}
-                  >
-                    <SelectTrigger id="visibility" className="mt-1.5">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {articleVisibilities.map((v) => (
-                        <SelectItem key={v} value={v}>
-                          {VISIBILITY_LABEL[v]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={annotationsEnabled}
-                      onCheckedChange={(v) => setAnnotationsEnabled(v === true)}
-                    />
-                    Accept comments
-                  </label>
-                </div>
-              </>
-            )}
-
-            {/* Where it sits in the reading order. This is the part members
-                actually experience: the sidebar, the index page and the
-                previous/next links all come from the section and the position,
-                so it is one thing to maintain rather than three. */}
-            <div>
-              <Label htmlFor="section">Section</Label>
-              <Select value={section || NO_SECTION} onValueChange={onSectionChange}>
-                <SelectTrigger id="section" className="mt-1.5">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {sections.map((s) => (
-                    <SelectItem key={s.slug} value={s.slug}>
-                      {s.title}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value={NO_SECTION}>{UNSECTIONED_TITLE}</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Moving it puts it at the end of that section. Use the arrows in the list to place
-                it.
-              </p>
-            </div>
-
-            {kind === "article" && (
-              <div>
-                <Label htmlFor="nav-title">Sidebar label (optional)</Label>
-                <Input
-                  id="nav-title"
-                  value={navTitle}
-                  onChange={(e) => setNavTitle(e.target.value)}
-                  maxLength={100}
-                  placeholder={title || "Shorter than the title"}
-                  className="mt-1.5"
-                />
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  For when the title is long: "Syllabus" in the sidebar, the full heading on the
-                  page. Blank uses the title.
-                </p>
-              </div>
-            )}
-            {kind === "article" && (
-              <div className="sm:col-span-2">
-                <Label htmlFor="change-note">What changed (optional)</Label>
-                <Input
-                  id="change-note"
-                  value={changeNote}
-                  onChange={(e) => setChangeNote(e.target.value)}
-                  maxLength={500}
-                  placeholder="Added the hygiene section"
-                  className="mt-1.5"
-                />
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Shown to readers whose comments were written against an earlier version.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Button
-              onClick={onSave}
-              disabled={
-                saving ||
-                promoting ||
-                busy ||
-                (kind === "link" ? !navTitle || !linkPath : !title || !body)
-              }
-            >
-              {saving
-                ? "Saving..."
-                : kind === "link"
-                  ? creating
-                    ? "Add the link"
-                    : "Save the link"
-                  : creating
-                    ? "Create and publish"
-                    : "Save as new version"}
-            </Button>
-            {busy && <span className="text-xs text-muted-foreground">Loading...</span>}
-            {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
-          </div>
-        </div>
-
-        <aside className="space-y-4">
-          {/* The sidebar a member sees, editable in place.
-              Deliberately NOT a flat alphabetical list beside a separate
-              "order" panel: the order IS the product, so the list a manager
-              picks an article from should be the one they can see is wrong. */}
+      {/* The reading order goes FIRST, and on the left, because it is the
+          navigation for this screen: it is how a manager picks what to edit, and
+          it is the order members walk. Stacked on a narrow screen it stays
+          first, rather than being buried under a 22-row textarea. */}
+      <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+        <aside className="lg:sticky lg:top-24 lg:max-h-[calc(100vh-8rem)] lg:self-start lg:overflow-y-auto">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Reading order</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-xs text-muted-foreground">
-                What a new member reads, top to bottom. The arrows move an entry within its section;
-                the section select on the left moves it between them.
+                What a new member reads, top to bottom. Click an entry to edit it, or drag one by
+                its handle to move it up, down, or into another section. Moving something never
+                tells members it was updated.
               </p>
 
               {articles.length === 0 && sections.length === 0 && (
@@ -1207,114 +1289,69 @@ function KnowledgeBaseManager() {
                 </p>
               )}
 
-              {structure.map((group) => {
-                const sectionRow = sections.find((s) => s.slug === group.slug) ?? null;
-                const orderableSections = structure.filter((s) => s.slug !== null);
-                const sectionIndex = orderableSections.findIndex((s) => s.slug === group.slug);
-                return (
-                  <div key={group.slug ?? "unsectioned"} className="space-y-1.5">
-                    <div className="flex items-center gap-1">
-                      <span className="flex-1 truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {group.title}
-                      </span>
-                      {sectionRow && (
-                        <>
-                          <MoveButtons
-                            label={group.title}
-                            disabled={saving || promoting || busy}
-                            canUp={sectionIndex > 0}
-                            canDown={sectionIndex < orderableSections.length - 1}
-                            onMove={(direction) => void onMoveSection(sectionRow.slug, direction)}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCorners}
+                modifiers={[restrictToVerticalAxis]}
+                accessibility={{ announcements }}
+                onDragStart={onDragStart}
+                onDragOver={onDragOver}
+                onDragEnd={onDragEnd}
+                onDragCancel={() => {
+                  setDragging(null);
+                  setDragGroups(null);
+                }}
+              >
+                <SortableContext
+                  items={groups.filter((g) => g.slug !== "").map((g) => sectionId(g.slug))}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="space-y-4">
+                    {groups.map((group, groupIndex) => (
+                      <SectionGroup
+                        key={group.slug || "unsectioned"}
+                        group={group}
+                        open={sectionEdit?.slug === group.slug}
+                        disabled={saving || promoting || busy || ordering}
+                        dragDisabled={ordering}
+                        sectionIndex={groupIndex + 1}
+                        sectionCount={groups.filter((g) => g.slug !== "").length}
+                        onOpen={() => {
+                          const row = sections.find((s) => s.slug === group.slug);
+                          if (row) openSection(row);
+                        }}
+                      >
+                        {group.entries.map((entry, entryIndex) => (
+                          <EntryRow
+                            key={entry.slug}
+                            entry={entry}
+                            row={articles.find((a) => a.slug === entry.slug)}
+                            index={entryIndex + 1}
+                            count={group.entries.length}
+                            sectionTitle={group.title}
+                            open={entry.slug === slug && !creating && !sectionEdit}
+                            // `ordering` is in here too: opening an article
+                            // mid-drop claims a newer request token, which
+                            // cancels the refresh the drop was waiting on and
+                            // leaves the list showing the old order over rows
+                            // that were already written.
+                            disabled={saving || promoting || busy || ordering}
+                            dragDisabled={ordering}
+                            onOpen={() => void openDocument(entry.slug)}
                           />
-                          <button
-                            type="button"
-                            aria-label={`Rename ${group.title}`}
-                            disabled={saving || promoting || busy}
-                            onClick={() => void onRenameSection(sectionRow)}
-                            className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Delete ${group.title}`}
-                            disabled={saving || promoting || busy}
-                            onClick={() => void onDeleteSection(sectionRow)}
-                            className="rounded p-1 text-muted-foreground hover:text-destructive disabled:opacity-40"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-
-                    {group.entries.length === 0 && (
-                      <p className="px-2.5 text-xs text-muted-foreground">
-                        Empty, so members do not see it. File something into it with the section
-                        picker on the left.
-                      </p>
-                    )}
-
-                    {group.entries.map((entry, index) => {
-                      const row = articles.find((a) => a.slug === entry.slug);
-                      const open = entry.slug === slug && !creating;
-                      return (
-                        <div key={entry.slug} className="flex items-start gap-1">
-                          <button
-                            type="button"
-                            // Disabled while a write is in flight. The request
-                            // token already makes a late result harmless, but
-                            // letting the manager switch articles mid-save
-                            // invites them to watch the screen change under a
-                            // save they thought applied here.
-                            disabled={saving || promoting || busy}
-                            onClick={() => void openDocument(entry.slug)}
-                            aria-current={open}
-                            className={cn(
-                              "disabled:opacity-60",
-                              "flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border px-2.5 py-1.5 text-left text-sm hover:bg-muted",
-                              open && "border-primary bg-muted",
-                            )}
-                          >
-                            <span className="flex items-center gap-1.5">
-                              <span className="min-w-0 flex-1 truncate font-medium">
-                                {entry.title}
-                              </span>
-                              {entry.link_path && (
-                                <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-                              )}
-                              {row?.visibility === "managers" && (
-                                <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
-                                  Draft
-                                </Badge>
-                              )}
-                            </span>
-                            <span className="truncate font-mono text-[11px] text-muted-foreground">
-                              {entry.link_path ?? `/kb/${entry.slug}`}
-                            </span>
-                            {!entry.link_path && (
-                              <span className="text-[11px] text-muted-foreground">
-                                {row?.version == null
-                                  ? "No published version"
-                                  : `Version ${row.version} of ${row.versions}`}
-                              </span>
-                            )}
-                          </button>
-                          <MoveButtons
-                            label={entry.title}
-                            disabled={saving || promoting || busy}
-                            canUp={index > 0}
-                            canDown={index < group.entries.length - 1}
-                            onMove={(direction) =>
-                              void onMoveEntry(group.entries, entry.slug, direction)
-                            }
-                          />
-                        </div>
-                      );
-                    })}
+                        ))}
+                      </SectionGroup>
+                    ))}
                   </div>
-                );
-              })}
+                </SortableContext>
+                <DragOverlay>
+                  {dragging && (
+                    <div className="rounded-md border border-primary bg-background px-2.5 py-1.5 text-sm font-medium shadow-lg">
+                      {dragging.label}
+                    </div>
+                  )}
+                </DragOverlay>
+              </DndContext>
 
               <div className="border-t pt-3">
                 <Label htmlFor="new-section" className="text-xs">
@@ -1339,20 +1376,304 @@ function KnowledgeBaseManager() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={saving || promoting || busy || !newSectionTitle.trim()}
+                    disabled={saving || promoting || busy || ordering || !newSectionTitle.trim()}
                     onClick={() => void onAddSection()}
                   >
                     Add
                   </Button>
                 </div>
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  A section with nothing in it is not shown to members.
+                  A section with nothing in it is not shown to members. Click a section name to
+                  rename or delete it.
                 </p>
               </div>
             </CardContent>
           </Card>
+        </aside>
 
-          {!creating && failed.versions && (
+        <div className="space-y-4">
+          {sectionEdit ? (
+            /* A section, edited in the same window an article is, so titles,
+               settings and deletion all live in one place and the list on the
+               left does nothing but navigate and arrange. */
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-xl font-bold">Section</h2>
+                <p className="text-sm text-muted-foreground">
+                  A heading in the sidebar. Drag it in the list to move the whole section, and drag
+                  entries into it to fill it.
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="section-title">Name</Label>
+                <Input
+                  id="section-title"
+                  value={sectionTitle}
+                  onChange={(e) => setSectionTitle(e.target.value)}
+                  maxLength={100}
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label htmlFor="section-slug">URL key</Label>
+                <Input
+                  id="section-slug"
+                  value={sectionEdit.slug}
+                  readOnly
+                  disabled
+                  className="mt-1.5 font-mono text-sm"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Fixed. Every article in this section refers to it by this key, so changing it
+                  would unfile all of them.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={() => void onSaveSection()} disabled={sectionSaveDisabled}>
+                  {saving ? "Saving..." : "Save the name"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={saving || promoting || busy || ordering}
+                  onClick={() => {
+                    const row = sections.find((s) => s.slug === sectionEdit.slug);
+                    if (row) void onDeleteSection(row);
+                  }}
+                >
+                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  Delete this section
+                </Button>
+                {unsaved && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Also shown when there is no slug yet, not only in `creating` mode.
+                  On an empty club the screen opens with `creating` false and no
+                  slug, and without this the manager types a title and body, hits
+                  Save, and is told to give it a URL key with no field to type one
+                  into. */}
+              {(creating || !slug) && (
+                <div>
+                  <Label htmlFor="slug">URL key</Label>
+                  <Input
+                    id="slug"
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value)}
+                    placeholder={proposedSlug || "house-rules"}
+                    maxLength={100}
+                    className="mt-1.5 font-mono text-sm"
+                  />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    The permanent address: /kb/{slug || proposedSlug || "house-rules"}. Lowercase
+                    letters, numbers and single hyphens. Leave it blank to use the{" "}
+                    {kind === "link" ? "name" : "title"}.
+                  </p>
+                </div>
+              )}
+
+              {kind === "link" ? (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <p className="text-sm text-muted-foreground">
+                    A sidebar entry pointing at a page this site already has, so the club keeps one
+                    copy of it rather than two. It reads in order with everything else, it holds no
+                    text of its own, and it takes no comments.
+                  </p>
+                  <div>
+                    <Label htmlFor="link-label">Name in the sidebar</Label>
+                    <Input
+                      id="link-label"
+                      value={navTitle}
+                      onChange={(e) => setNavTitle(e.target.value)}
+                      maxLength={100}
+                      placeholder="Your first session"
+                      className="mt-1.5"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="link-path">Where it goes</Label>
+                    <Input
+                      id="link-path"
+                      value={linkPath}
+                      onChange={(e) => setLinkPath(e.target.value)}
+                      maxLength={200}
+                      placeholder="/first-class"
+                      className="mt-1.5 font-mono text-sm"
+                    />
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      A path on this site, e.g. /first-class or /faq. Not a full web address, and
+                      not another /kb page: drag those into place in the list instead.
+                    </p>
+                  </div>
+                  {stored?.link_path && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={saving || busy}
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            "Turn this link into an article? It keeps its place in the reading order, and you write its text here. The link is only replaced when you save.",
+                          )
+                        ) {
+                          return;
+                        }
+                        setKind("article");
+                        setLinkPath("");
+                      }}
+                    >
+                      Turn this into an article
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <Label htmlFor="title">Title</Label>
+                    <Input
+                      id="title"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      maxLength={200}
+                      className="mt-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="body">Body (Markdown)</Label>
+                    <Textarea
+                      id="body"
+                      value={body}
+                      onChange={(e) => setBody(e.target.value)}
+                      rows={22}
+                      className="mt-1.5 font-mono text-sm"
+                    />
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Members comment paragraph by paragraph. Editing the words of a paragraph
+                      detaches its comments, which are then shown as being about earlier wording.
+                      Adding or moving paragraphs elsewhere leaves other comments where they are.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* No section picker here. Where an entry sits in the reading order
+                  is shown by where it sits in the list on the left, and changed by
+                  dragging it there — one place, and the same one members see.
+                  Choosing a section here used to take effect only on Save, which
+                  published a new VERSION for what was really just a move and told
+                  every member the article had been updated. */}
+              <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
+                {kind === "article" && (
+                  <>
+                    <div>
+                      <Label htmlFor="visibility">Who can read it</Label>
+                      <Select
+                        value={visibility}
+                        onValueChange={(v) => setVisibility(v as ArticleVisibility)}
+                      >
+                        <SelectTrigger id="visibility" className="mt-1.5">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {articleVisibilities.map((v) => (
+                            <SelectItem key={v} value={v}>
+                              {VISIBILITY_LABEL[v]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={annotationsEnabled}
+                          onCheckedChange={(v) => setAnnotationsEnabled(v === true)}
+                        />
+                        Accept comments
+                      </label>
+                    </div>
+                    <div>
+                      <Label htmlFor="nav-title">Sidebar label (optional)</Label>
+                      <Input
+                        id="nav-title"
+                        value={navTitle}
+                        onChange={(e) => setNavTitle(e.target.value)}
+                        maxLength={100}
+                        placeholder={title || "Shorter than the title"}
+                        className="mt-1.5"
+                      />
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        For when the title is long: "Syllabus" in the sidebar, the full heading on
+                        the page. Blank uses the title.
+                      </p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="change-note">What changed (optional)</Label>
+                      <Input
+                        id="change-note"
+                        value={changeNote}
+                        onChange={(e) => setChangeNote(e.target.value)}
+                        maxLength={500}
+                        placeholder="Added the hygiene section"
+                        className="mt-1.5"
+                      />
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        Shown to readers whose comments were written against an earlier version.
+                      </p>
+                    </div>
+                  </>
+                )}
+                {kind === "link" && (
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    A link entry has no text of its own, so there is nothing else to set. Drag it in
+                    the list to place it.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={onSave}
+                  // `!dirty` is the point of this: without it, opening an
+                  // article and pressing Save published an identical version,
+                  // bumped the number every member's comments are pinned
+                  // against, and told them the article had changed.
+                  // `ordering` matters here beyond tidiness: a save sends
+                  // `section` and `position` straight from component state, and
+                  // a drop's writes have not landed in that state yet. Saving
+                  // mid-drop would publish a version carrying the OLD placement
+                  // and silently undo the move the manager just made.
+                  disabled={
+                    saving ||
+                    promoting ||
+                    busy ||
+                    ordering ||
+                    !dirty ||
+                    (kind === "link"
+                      ? !navTitle.trim() || !linkPath.trim()
+                      : !title.trim() || !body.trim())
+                  }
+                >
+                  {saving
+                    ? "Saving..."
+                    : kind === "link"
+                      ? creating
+                        ? "Add the link"
+                        : "Save the link"
+                      : creating
+                        ? "Create and publish"
+                        : "Save as new version"}
+                </Button>
+                {busy && <span className="text-xs text-muted-foreground">Loading...</span>}
+                {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
+              </div>
+            </>
+          )}
+
+          {!sectionEdit && !creating && failed.versions && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Versions</CardTitle>
@@ -1362,14 +1683,13 @@ function KnowledgeBaseManager() {
                     article has no history, which is a confident wrong answer
                     about the one panel that can undo an edit. */}
                 <p className="text-sm text-muted-foreground">
-                  The version list could not be loaded. Click this article in the list above to try
-                  again.
+                  The version list could not be loaded. Click this article in the list to try again.
                 </p>
               </CardContent>
             </Card>
           )}
 
-          {!creating && !failed.versions && versions.length > 0 && (
+          {!sectionEdit && !creating && !failed.versions && versions.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Versions</CardTitle>
@@ -1429,7 +1749,7 @@ function KnowledgeBaseManager() {
             </Card>
           )}
 
-          {!creating && (
+          {!sectionEdit && !creating && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Feedback</CardTitle>
@@ -1448,7 +1768,7 @@ function KnowledgeBaseManager() {
                   // been dealt with.
                   <p className="text-sm text-muted-foreground">
                     The comments could not be loaded, so this is not the full picture. Click this
-                    article in the list above to try again.
+                    article in the list to try again.
                   </p>
                 ) : feedback.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No open comments.</p>
@@ -1482,86 +1802,317 @@ function KnowledgeBaseManager() {
               </CardContent>
             </Card>
           )}
-        </aside>
-      </div>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-base">
-            {preview ? `Version ${preview.version}: ${preview.title}` : "Preview"}
-          </CardTitle>
-          {preview && (
-            <div className="flex items-center gap-2">
-              {/* Said plainly, because the panel now shows text that is NOT
-                  what members are reading, and nothing else on the page says
-                  so. */}
-              <span className="text-xs text-muted-foreground">
-                Not live. Members are reading version {liveVersion ?? "none"}.
-              </span>
-              <Button type="button" size="sm" variant="outline" onClick={() => setPreview(null)}>
-                Back to the editor
-              </Button>
-            </div>
+          {!sectionEdit && (
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                <CardTitle className="text-base">
+                  {preview ? `Version ${preview.version}: ${preview.title}` : "Preview"}
+                </CardTitle>
+                {preview && (
+                  <div className="flex items-center gap-2">
+                    {/* Said plainly, because the panel now shows text that is NOT
+                        what members are reading, and nothing else on the page says
+                        so. */}
+                    <span className="text-xs text-muted-foreground">
+                      Not live. Members are reading version {liveVersion ?? "none"}.
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setPreview(null)}
+                    >
+                      Back to the editor
+                    </Button>
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent>
+                {/* The same component map and plugins the reader uses, so the preview
+                    is what a member will see rather than an approximation of it. It
+                    used to carry `prose` classes instead, which this repo has no
+                    Tailwind typography plugin for, so the preview was unstyled and a
+                    table in it rendered as pipes. */}
+                <div className="max-w-none text-sm">
+                  <ReactMarkdown components={kbMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
+                    {(preview ? preview.body_md : body) || "_Nothing to preview yet._"}
+                  </ReactMarkdown>
+                </div>
+              </CardContent>
+            </Card>
           )}
-        </CardHeader>
-        <CardContent>
-          {/* The same component map and plugins the reader uses, so the preview
-              is what a member will see rather than an approximation of it. It
-              used to carry `prose` classes instead, which this repo has no
-              Tailwind typography plugin for, so the preview was unstyled and a
-              table in it rendered as pipes. */}
-          <div className="max-w-none text-sm">
-            <ReactMarkdown components={kbMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
-              {(preview ? preview.body_md : body) || "_Nothing to preview yet._"}
-            </ReactMarkdown>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </section>
   );
 }
 
 /**
- * The up/down pair, next to a section or an entry.
+ * What a screen reader is told while something is being dragged.
  *
- * One component for both so the two never drift apart, and because the end of a
- * list is the case worth getting right: an arrow that is disabled says "this is
- * already the first thing a member reads", where one that silently does nothing
- * leaves a manager clicking it.
+ * Spelled out rather than left to dnd-kit's defaults, which announce raw ids
+ * ("entry:house-rules was moved over droppable area container:belts"). Somebody
+ * driving this from the keyboard is getting the whole picture from these
+ * sentences, so they say the same things the visible list does.
  */
-function MoveButtons({
+const announcements = {
+  onDragStart: ({ active }: { active: { data: { current?: Record<string, unknown> } } }) =>
+    `Picked up ${String(active.data.current?.label ?? "item")}. Use the arrow keys to move it, space to drop it, escape to cancel.`,
+  onDragOver: ({
+    active,
+    over,
+  }: {
+    active: { data: { current?: Record<string, unknown> } };
+    over: { data: { current?: Record<string, unknown> } } | null;
+  }) =>
+    over
+      ? `${String(active.data.current?.label ?? "Item")} is over ${String(over.data.current?.label ?? "another position")}.`
+      : `${String(active.data.current?.label ?? "Item")} is not over a droppable position.`,
+  onDragEnd: ({
+    active,
+    over,
+  }: {
+    active: { data: { current?: Record<string, unknown> } };
+    over: { data: { current?: Record<string, unknown> } } | null;
+  }) =>
+    over
+      ? `Dropped ${String(active.data.current?.label ?? "item")} onto ${String(over.data.current?.label ?? "the new position")}.`
+      : `Dropped ${String(active.data.current?.label ?? "item")} back where it was.`,
+  onDragCancel: ({ active }: { active: { data: { current?: Record<string, unknown> } } }) =>
+    `Cancelled. ${String(active.data.current?.label ?? "Item")} is back where it was.`,
+};
+
+/**
+ * The three-line handle that picks something up.
+ *
+ * A real focusable button rather than a decorative icon on a draggable row: it
+ * is the keyboard's way in, and it keeps the rest of the row a plain click that
+ * opens the thing.
+ */
+function DragHandle({
   label,
+  where,
   disabled,
-  canUp,
-  canDown,
-  onMove,
+  attributes,
+  listeners,
+  className,
 }: {
   label: string;
+  /** "item 2 of 5 in Start here", so the label says where it currently is. */
+  where: string;
   disabled: boolean;
-  canUp: boolean;
-  canDown: boolean;
-  onMove: (direction: -1 | 1) => void;
+  attributes: DraggableAttributes;
+  listeners: DraggableSyntheticListeners;
+  className?: string;
 }) {
   return (
-    <span className="flex shrink-0 flex-col">
+    <button
+      type="button"
+      // The position is part of the label because a screen reader user has no
+      // other way to know where the thing they are about to pick up currently
+      // sits, and dnd-kit's own instructions assume the app supplies it.
+      aria-label={`Reorder ${label}, ${where}`}
+      // Held back while a drop's writes are in flight, or space does nothing
+      // and says nothing.
+      disabled={disabled}
+      className={cn(
+        "shrink-0 cursor-grab touch-none rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:cursor-default disabled:opacity-40",
+        className,
+      )}
+      {...attributes}
+      {...listeners}
+    >
+      <GripVertical className="h-4 w-4" />
+    </button>
+  );
+}
+
+/**
+ * One section in the reading order: a draggable heading, and a droppable body.
+ *
+ * The body is a drop target in its own right so an EMPTY section is somewhere an
+ * article can be dragged to. Without it a manager can create a section and then
+ * have no way to put the first thing in it, which is the same dead end the old
+ * "file it with the picker on the left" note was papering over.
+ */
+function SectionGroup({
+  group,
+  open,
+  disabled,
+  dragDisabled,
+  sectionIndex,
+  sectionCount,
+  onOpen,
+  children,
+}: {
+  group: NavGroup;
+  open: boolean;
+  disabled: boolean;
+  dragDisabled: boolean;
+  /** 1-based place among the real sections, for the handle's label. */
+  sectionIndex: number;
+  sectionCount: number;
+  onOpen: () => void;
+  children: React.ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortableRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: sectionId(group.slug),
+    // "Everything else" is not a section anyone made, so there is nothing to
+    // rename, delete, or move: it is always last, holding whatever is filed
+    // nowhere.
+    disabled: group.slug === "" || dragDisabled,
+    data: { type: "section", label: group.title },
+  });
+  const { setNodeRef: setDroppableRef } = useDroppable({
+    id: containerId(group.slug),
+    data: { type: "container", label: group.title },
+  });
+
+  return (
+    <div
+      ref={setSortableRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn("space-y-1.5", isDragging && "opacity-50")}
+    >
+      <div className="flex items-center gap-1">
+        {group.slug !== "" && (
+          <DragHandle
+            label={group.title}
+            where={`section ${sectionIndex} of ${sectionCount}`}
+            disabled={dragDisabled}
+            attributes={attributes}
+            listeners={listeners}
+          />
+        )}
+        {group.slug === "" ? (
+          <span className="flex-1 truncate px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {group.title}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onOpen}
+            // Opening a section claims a request token, so it is held back
+            // while a load or a drop's writes are in flight, exactly like every
+            // entry in the list.
+            disabled={disabled}
+            aria-current={open}
+            className={cn(
+              "min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60 disabled:hover:bg-transparent",
+              open && "bg-muted text-foreground",
+            )}
+          >
+            {group.title}
+          </button>
+        )}
+      </div>
+
+      <div ref={setDroppableRef} className="space-y-1.5">
+        {group.entries.length === 0 && (
+          <p className="rounded-md border border-dashed px-2.5 py-2 text-xs text-muted-foreground">
+            {group.slug === ""
+              ? "Anything filed in no section lands here. Drag something in to take it out of every section."
+              : "Empty, so members do not see it. Drag an entry in here to fill it."}
+          </p>
+        )}
+        <SortableContext
+          items={group.entries.map((entry) => entryId(entry.slug))}
+          strategy={verticalListSortingStrategy}
+        >
+          {children}
+        </SortableContext>
+      </div>
+    </div>
+  );
+}
+
+/** One entry in the reading order: drag it by the handle, click it to edit it. */
+function EntryRow({
+  entry,
+  row,
+  open,
+  disabled,
+  dragDisabled,
+  index,
+  count,
+  sectionTitle,
+  onOpen,
+}: {
+  entry: KbNavEntry;
+  row: ArticleSummary | undefined;
+  open: boolean;
+  disabled: boolean;
+  dragDisabled: boolean;
+  /** 1-based place in its section, for the handle's label. */
+  index: number;
+  count: number;
+  sectionTitle: string;
+  onOpen: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: entryId(entry.slug),
+    disabled: dragDisabled,
+    data: { type: "entry", label: entry.title },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn("flex items-start gap-1", isDragging && "opacity-50")}
+    >
+      <DragHandle
+        label={entry.title}
+        where={`item ${index} of ${count} in ${sectionTitle}`}
+        disabled={dragDisabled}
+        attributes={attributes}
+        listeners={listeners}
+        className="mt-1.5"
+      />
       <button
         type="button"
-        aria-label={`Move ${label} up`}
-        disabled={disabled || !canUp}
-        onClick={() => onMove(-1)}
-        className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+        // Disabled while a write is in flight. The request token already makes a
+        // late result harmless, but letting the manager switch articles mid-save
+        // invites them to watch the screen change under a save they thought
+        // applied here. Dragging is deliberately NOT covered by this: a drop
+        // commits on its own and does not take the screen away.
+        disabled={disabled}
+        onClick={onOpen}
+        aria-current={open}
+        className={cn(
+          "disabled:opacity-60",
+          "flex min-w-0 flex-1 flex-col gap-0.5 rounded-md border px-2.5 py-1.5 text-left text-sm hover:bg-muted",
+          open && "border-primary bg-muted",
+        )}
       >
-        <ChevronUp className="h-3.5 w-3.5" />
+        <span className="flex items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate font-medium">{entry.title}</span>
+          {entry.link_path && <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />}
+          {row?.visibility === "managers" && (
+            <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
+              Draft
+            </Badge>
+          )}
+        </span>
+        <span className="truncate font-mono text-[11px] text-muted-foreground">
+          {entry.link_path ?? `/kb/${entry.slug}`}
+        </span>
+        {!entry.link_path && (
+          <span className="text-[11px] text-muted-foreground">
+            {row?.version == null
+              ? "No published version"
+              : `Version ${row.version} of ${row.versions}`}
+          </span>
+        )}
       </button>
-      <button
-        type="button"
-        aria-label={`Move ${label} down`}
-        disabled={disabled || !canDown}
-        onClick={() => onMove(1)}
-        className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-      >
-        <ChevronDown className="h-3.5 w-3.5" />
-      </button>
-    </span>
+    </div>
   );
 }

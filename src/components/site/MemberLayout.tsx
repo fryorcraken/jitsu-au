@@ -56,7 +56,7 @@ const managerNav: NavItem[] = [
   { to: "/manager/check-in", label: "Check in", icon: ClipboardCheck },
   { to: "/manager/users", label: "Users", icon: Users },
   { to: "/manager/memberships", label: "Memberships", icon: CreditCard },
-  { to: "/manager/membership-plans", label: "Plans & windows", icon: ScrollText },
+  { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
   { to: "/manager/waivers", label: "Signed waivers", icon: FileText },
   { to: "/manager/waiver-template", label: "Waiver template", icon: FileText },
   // "editor" in the label because the member group above already has a
