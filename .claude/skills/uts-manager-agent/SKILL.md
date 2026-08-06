@@ -215,7 +215,10 @@ as the waiver's PDF, and lands the row **pending**.
 but the shape is: `first_name`, `middle_name` (optional), `last_name`,
 `preferred_name` (optional), `date_of_birth` (`YYYY-MM-DD`), `address`, `phone`,
 `email`, `uts_student_number` (optional), `sms_whatsapp_consent` (optional,
-default false), `emergency_contact_name`, `emergency_contact_relationship`
+default false), `media_consent` (optional tri-state: `true`, `false`, or omit
+when the form has no photo/video consent box — omit rather than guessing, since
+`false` records a refusal the club never received),
+`emergency_contact_name`, `emergency_contact_relationship`
 (required if the participant was under 18 on `signed_on`, else optional),
 `emergency_contact_phone`, `medical_notes` (optional), `signed_on`
 (`YYYY-MM-DD` — the date on the paper, not today), `template_version` (optional
@@ -467,7 +470,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"5"`), and its
+- The manifest's `version` tells generations apart (currently `"8"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

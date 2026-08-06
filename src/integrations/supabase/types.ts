@@ -1001,6 +1001,9 @@ export type Database = {
           guardian_relationship: string | null
           is_minor: boolean
           last_name: string | null
+          media_consent: boolean | null
+          media_consent_updated_at: string | null
+          media_consent_updated_by: string | null
           medical_notes: string | null
           middle_name: string | null
           phone: string | null
@@ -1025,6 +1028,9 @@ export type Database = {
           guardian_relationship?: string | null
           is_minor?: boolean
           last_name?: string | null
+          media_consent?: boolean | null
+          media_consent_updated_at?: string | null
+          media_consent_updated_by?: string | null
           medical_notes?: string | null
           middle_name?: string | null
           phone?: string | null
@@ -1049,6 +1055,9 @@ export type Database = {
           guardian_relationship?: string | null
           is_minor?: boolean
           last_name?: string | null
+          media_consent?: boolean | null
+          media_consent_updated_at?: string | null
+          media_consent_updated_by?: string | null
           medical_notes?: string | null
           middle_name?: string | null
           phone?: string | null
@@ -1232,6 +1241,7 @@ export type Database = {
           id: string
           is_minor: boolean
           last_name: string
+          media_consent: boolean | null
           medical_notes: string | null
           middle_name: string | null
           pdf_path: string | null
@@ -1263,6 +1273,7 @@ export type Database = {
           id?: string
           is_minor?: boolean
           last_name: string
+          media_consent?: boolean | null
           medical_notes?: string | null
           middle_name?: string | null
           pdf_path?: string | null
@@ -1294,6 +1305,7 @@ export type Database = {
           id?: string
           is_minor?: boolean
           last_name?: string
+          media_consent?: boolean | null
           medical_notes?: string | null
           middle_name?: string | null
           pdf_path?: string | null

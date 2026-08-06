@@ -65,6 +65,19 @@ system. (The contact form stores a message, not a person.)
    (the two kids' gi sizes have no belt counterpart and take the shortest belt).
    Both sizes are editable afterwards on `/account` and by a manager.
 
+   **One acknowledgement is also a column.** The media/photo consent tick
+   (`media` — the only acknowledgement id the code reads by name) is copied to
+   `waivers.media_consent` at submission, and from there onto the profile at
+   approval. Same test as `medical_notes`: an acknowledgement the club has to
+   _act_ on, rather than produce as evidence, cannot live only in a PDF —
+   nobody opens forty of them before posting a photo. It differs from the gi
+   size above in that it IS part of the waiver: the signer agrees to it on the
+   document, the tick still renders in the PDF, and that remains the record of
+   what was agreed. The column is a derived working copy, never the other way
+   round. Every other acknowledgement stays PDF-only, and the template editor
+   refuses to delete the `media` item so a routine reword cannot silently stop
+   the capture.
+
 4. **Waivers are accepted at any time, without limit.** Resubmitting after a
    mistake is never blocked, before or after approval.
 5. **The active waiver is the latest approved one.** Older approved waivers are
@@ -183,8 +196,14 @@ five yes/no health answers stay on it and are never retyped, exactly as they
 live only inside the PDF of an online submission (rule 3). What the manager does
 type is what the club needs as data rather than as evidence: the person fields
 (which approval promotes onto the profile), anything an instructor needs to hand
-(the medical details box), the date written on the paper, and which version of
-the form it is when they can tell.
+(the medical details box), media consent, the date written on the paper, and
+which version of the form it is when they can tell.
+
+Media consent is the one tick a filing manager reads off the paper, because it
+is a column on both sides (rule 3). It is three-state and defaults to **the form
+did not ask**, which is what most paper on file will be: a manager must never be
+made to choose a yes or a no on behalf of somebody who was never asked, and a
+`false` recorded that way would read as a refusal the club never received.
 
 Attach a PDF, or a photo of each page, or any mix of the two: several files are
 joined into one document in the order shown, so the waiver has the single PDF
@@ -327,6 +346,49 @@ Exactly one panel opens by itself: the newest
 submission, and only while it is still pending, because that is the one waiting
 on a decision. Older submissions and approved ones (active or superseded) start
 collapsed; a manager can open any of them by hand.
+
+### Media consent
+
+The person page carries a **Media consent** card between the profile and the
+code of conduct: a green Yes, a red No, or an amber **Not asked**, with a line
+saying what that means for using a photo. It answers the question an instructor
+with a camera actually has, without opening a single PDF. The card is
+**read-only** there: a manager can see the club's current answer and where it
+came from, but cannot set or change it from this page.
+
+Not asked is its own state, not a quiet no. Everyone who signed before the media
+question existed is in it, and folding them into "No" would both invent a
+refusal and hide the fact that they still need asking.
+
+**The member owns this one.** A photo consent only somebody else could withdraw
+would be the wrong way round, so `/account` carries a **Photos and video** card
+of its own, and changing it there takes effect the moment they save. The only
+other way it moves is automatic: approving a waiver that asks about photos
+copies over what was ticked on it (subject to a chronology guard — an older
+submission approved out of order can never overwrite a withdrawal the member
+made more recently on `/account`; see `docs/database.md`). If someone tells an
+instructor in the hall that they want their photo taken down, the answer is to
+point them at `/account`, not to change it on their behalf: nothing on the
+person page writes it, which is different from kit sizes, the one field a
+manager still corrects there directly. The rest of that card grid is read-only
+for the same underlying reason: it arrives solely by approving a waiver, on the
+same principle as the code of conduct below it, a detail a manager retyped
+would only be the club's word for what somebody else wrote.
+
+Nobody, member or manager, can put a record back to **not asked** once it has
+an answer. That state exists only for someone the club genuinely has never
+asked, whether because they signed before the question existed or have never
+touched the `/account` card.
+
+That makes provenance part of the answer, and the card states it: a value from
+an approved waiver says so, one the member set on their own account says so,
+and one a manager recorded before this page stopped allowing that says who and
+when. Three different facts wear the same "No" — one ticked on a signed
+document, one the member chose later, one a manager recorded on their behalf,
+historically — and the page never blurs them. Approving a newer waiver that
+asks about photos replaces whatever is set here with what was ticked on it, and
+clears any existing attribution with it. Approving one that never asked changes
+nothing — a consent already on file is not erased by an older form.
 
 ### Manager changes the waiver text
 

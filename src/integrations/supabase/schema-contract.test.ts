@@ -93,6 +93,9 @@ export type _WaiverSubmissionColumns = RequireColumns<
   | "email"
   | "uts_student_number"
   | "sms_whatsapp_consent"
+  // The media-consent tick, promoted out of the PDF so the club can answer
+  // "can we photograph this person" without opening one.
+  | "media_consent"
   | "signer_ip"
   | "signer_meta"
   | "user_id"
@@ -116,6 +119,11 @@ export type _ProfileColumns = RequireColumns<
   | "preferred_name"
   | "uts_student_number"
   | "sms_whatsapp_consent"
+  // Live media consent, plus the provenance that tells a manager-recorded
+  // withdrawal apart from one the member ticked when they signed.
+  | "media_consent"
+  | "media_consent_updated_at"
+  | "media_consent_updated_by"
   | "emergency_contact_relationship"
   | "gi_size"
   | "belt_size"

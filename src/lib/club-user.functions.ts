@@ -269,6 +269,13 @@ export const getClubUser = createServerFn({ method: "POST" })
         sms_whatsapp_consent: profile.sms_whatsapp_consent,
         gi_size: profile.gi_size,
         belt_size: profile.belt_size,
+        // Three-state: null means nobody has ever asked this person, which the
+        // screen shows as "Not asked" rather than folding it into a "No" the
+        // club never actually received. The two provenance fields are non-null
+        // only when a manager set the value by hand after the fact.
+        media_consent: profile.media_consent,
+        media_consent_updated_at: profile.media_consent_updated_at,
+        media_consent_updated_by: profile.media_consent_updated_by,
         updated_at: profile.updated_at,
       },
       memberships: membershipRows.map((m) => ({
@@ -315,6 +322,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         address: w.address,
         uts_student_number: w.uts_student_number,
         sms_whatsapp_consent: w.sms_whatsapp_consent,
+        media_consent: w.media_consent,
         emergency_contact_name: w.emergency_contact_name,
         emergency_contact_relationship: w.emergency_contact_relationship,
         emergency_contact_phone: w.emergency_contact_phone,

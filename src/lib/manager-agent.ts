@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "7",
+  version: "8",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,15 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "8",
+      // Purely additive: one new optional param on an existing action. Nothing
+      // already working starts failing or means something different.
+      breaking: false,
+      notes: [
+        "file_waiver: accepts media_consent, the same as sms_whatsapp_consent — true, false, or omitted if the paper form never asked about photo/video use. Omit rather than guessing; a false records a refusal the club never received.",
+      ],
+    },
     {
       version: "7",
       // A membership window is no longer a concept separate from the plan
@@ -293,6 +302,12 @@ export const AGENT_MANIFEST: {
           name: "sms_whatsapp_consent",
           required: false,
           description: "Whether they ticked SMS/WhatsApp consent on the form. Default false.",
+        },
+        {
+          name: "media_consent",
+          required: false,
+          description:
+            "Whether they ticked photo/video consent on the form: true, false, or omitted if the form never asked. Omit rather than guessing — false records a refusal the club never received.",
         },
         { name: "emergency_contact_name", required: true, description: "As written on the form." },
         {

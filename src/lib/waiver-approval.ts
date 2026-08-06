@@ -97,3 +97,35 @@ function reason(e: unknown): string | undefined {
   const message = e.message.trim();
   return message || undefined;
 }
+
+// ---- Promoting a waiver's media consent answer onto the profile ----
+//
+// Approving a waiver can happen out of chronological order: Approve is
+// available on every pending waiver, and a waiver can be unapproved and
+// re-approved later, so "the latest thing a manager clicked Approve on" is
+// not the same as "the most recently signed answer". Without this check, an
+// old paper waiver that had the photo box ticked could silently overwrite a
+// consent the member explicitly withdrew more recently on /account, wiping
+// the record that they ever withdrew it.
+
+/**
+ * Whether an approved waiver's media-consent answer should supersede what is
+ * currently on the profile.
+ *
+ * Only a waiver that is actually newer than the profile's current answer may
+ * overwrite it: the profile's `media_consent_updated_at` being `null` means
+ * nothing has set a provenance yet (so any signed answer wins), otherwise the
+ * waiver's `signed_at` must be strictly later. A tie (the same instant) does
+ * not supersede, since it cannot represent an answer given after the one
+ * already on the profile.
+ */
+export function supersedesMediaConsent({
+  waiverSignedAt,
+  profileMediaConsentUpdatedAt,
+}: {
+  waiverSignedAt: string;
+  profileMediaConsentUpdatedAt: string | null;
+}): boolean {
+  if (profileMediaConsentUpdatedAt === null) return true;
+  return new Date(waiverSignedAt).getTime() > new Date(profileMediaConsentUpdatedAt).getTime();
+}

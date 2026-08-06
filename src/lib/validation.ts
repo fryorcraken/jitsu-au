@@ -141,6 +141,13 @@ export type WaiverPersonFields = {
   phone: string;
   uts_student_number: string | null;
   sms_whatsapp_consent: boolean;
+  /**
+   * Media/promotional-photo consent as ticked on this submission. `null` when
+   * the template signed had no media acknowledgement, i.e. they were never
+   * asked -- which is not the same as declining. Derived from the
+   * acknowledgement ticks by `mediaConsentFromAnswers`, not sent by the client.
+   */
+  media_consent: boolean | null;
   emergency_contact_name: string;
   /** How the emergency contact is related. For a minor this IS the guardian. */
   emergency_contact_relationship: string | null;
@@ -152,11 +159,24 @@ export type WaiverPersonFields = {
 };
 
 /**
+ * The patch shape approval writes onto `profiles`.
+ *
+ * Every field is copied across verbatim except `media_consent`, which is
+ * *omitted* rather than set when the submission carries `null`. Approving a
+ * waiver signed on a template that never asked about photos must not erase a
+ * consent the club already holds -- a patch with `media_consent: null` in it
+ * would do exactly that.
+ */
+export type WaiverProfilePatch = Omit<WaiverPersonFields, "media_consent"> & {
+  media_consent?: boolean;
+};
+
+/**
  * The profile patch a manager's approval applies: the approved submission's
  * person fields become the club's current record of that person. Pure so the
  * promotion mapping is unit-testable; the caller adds `updated_at`.
  */
-export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields {
+export function waiverToProfileFields(w: WaiverPersonFields): WaiverProfilePatch {
   return {
     first_name: w.first_name,
     middle_name: w.middle_name,
@@ -167,6 +187,8 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverPersonFields
     phone: w.phone,
     uts_student_number: w.uts_student_number,
     sms_whatsapp_consent: w.sms_whatsapp_consent,
+    // Omitted, not nulled, when this submission never asked -- see the patch type.
+    ...(w.media_consent === null ? {} : { media_consent: w.media_consent }),
     emergency_contact_name: w.emergency_contact_name,
     emergency_contact_relationship: w.emergency_contact_relationship,
     emergency_contact_phone: w.emergency_contact_phone,
@@ -675,6 +697,11 @@ export const paperWaiverUploadSchema = z
     email: z.string().trim().email().max(255),
     uts_student_number: z.string().trim().max(20).optional().or(z.literal("")),
     sms_whatsapp_consent: z.boolean().optional().default(false),
+    // Three-state, unlike the consent above. A paper form that predates the
+    // media question was never asked it, and the filing manager must be able to
+    // say so rather than pick a yes or a no on the signer's behalf. Omitted
+    // means exactly that, so old bulk filings keep working unchanged.
+    media_consent: z.boolean().nullish().default(null),
     emergency_contact_name: z.string().trim().min(1).max(120),
     // Optional here, unlike the online form: older paper forms did not ask for
     // it, and a manager must not have to invent one to file a real document.
@@ -2244,6 +2271,11 @@ export const updateMyProfileSchema = z
     phone: z.string().trim().min(1).max(30).optional(),
     address: z.string().trim().min(1).max(300).optional(),
     sms_whatsapp_consent: z.boolean().optional(),
+    // Deliberately NOT nullable, unlike the kit sizes and the two names. The
+    // column's null means "the club has never asked this person", which stops
+    // being true the moment they look at the control -- so a member can answer
+    // yes or no, and only a manager can put a record back to unasked.
+    media_consent: z.boolean().optional(),
     emergency_contact_name: z.string().trim().min(1).max(120).optional(),
     emergency_contact_relationship: z.string().trim().min(1).max(80).optional(),
     emergency_contact_phone: z.string().trim().min(1).max(30).optional(),

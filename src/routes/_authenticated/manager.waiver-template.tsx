@@ -20,7 +20,13 @@ import type { AcknowledgementDef } from "@/lib/validation";
 import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
-import { isDirty, meaningfulAcks, versionLabel } from "@/lib/waiver-template-editor";
+import {
+  hasMediaAcknowledgement,
+  isDirty,
+  meaningfulAcks,
+  versionLabel,
+} from "@/lib/waiver-template-editor";
+import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
@@ -141,6 +147,10 @@ function EditorPage() {
 
   const liveVersion = templates.find((t) => t.is_current)?.version ?? null;
 
+  // Checked against the raw acks so clearing the media row's label trips this
+  // immediately, before `meaningfulAcks` would silently drop the row on save.
+  const mediaAckMissing = !hasMediaAcknowledgement(acks);
+
   function selectVersion(template: TemplateVersion) {
     if (template.id === selectedId) return;
     if (dirty && !window.confirm("Discard your unsaved changes and open this version?")) return;
@@ -195,6 +205,16 @@ function EditorPage() {
   const preview = useMemo(() => applyPlaceholders(body, SAMPLE), [body]);
 
   async function onSave() {
+    // Belt and braces: the Save button is already disabled for this, but a
+    // rejected server call after the fact is a worse experience than catching
+    // it here, and the server-side guard in `promoteWaiverTemplate` is what
+    // actually protects the data either way.
+    if (mediaAckMissing) {
+      toast.error(
+        "The media consent acknowledgement needs wording before this can be saved. Add it back or restore its label.",
+      );
+      return;
+    }
     setSaving(true);
     try {
       const cleanAcks = meaningfulAcks(acks);
@@ -280,42 +300,72 @@ function EditorPage() {
                 Statements the signer ticks. Labels support {"{{placeholder}}"} tokens. Required
                 ones block submission until accepted.
               </p>
+              {mediaAckMissing ? (
+                <p className="text-sm font-medium text-destructive">
+                  This template needs a media consent acknowledgement with real wording before it
+                  can be saved. Add one back, or restore the wording on the existing one.
+                </p>
+              ) : null}
               {acks.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No acknowledgements.</p>
               ) : (
-                acks.map((ack) => (
-                  <div key={ack.id} className="flex items-start gap-2">
-                    <Textarea
-                      value={ack.label}
-                      onChange={(e) => updateAck(ack.id, { label: e.target.value })}
-                      rows={2}
-                      maxLength={500}
-                      placeholder="I understand that…"
-                      className="text-sm"
-                    />
-                    <div className="flex flex-col items-center gap-1 pt-1">
-                      <label className="flex items-center gap-1 text-xs">
-                        <Checkbox
-                          checked={ack.required}
-                          onCheckedChange={(v) => updateAck(ack.id, { required: v === true })}
+                acks.map((ack) => {
+                  // Media consent is the one acknowledgement the rest of the
+                  // app reads by name: its tick is what fills in a person's
+                  // media consent on their manager page. Rewording it is fine
+                  // and expected; deleting it is not, because a template
+                  // without it silently stops recording the answer and every
+                  // waiver signed afterwards reads as "not asked".
+                  const isMedia = ack.id === MEDIA_ACK_ID;
+                  return (
+                    <div key={ack.id} className="flex items-start gap-2">
+                      <div className="flex-1 space-y-1">
+                        <Textarea
+                          value={ack.label}
+                          onChange={(e) => updateAck(ack.id, { label: e.target.value })}
+                          rows={2}
+                          maxLength={500}
+                          placeholder="I understand that…"
+                          className="text-sm"
                         />
-                        Required
-                      </label>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Remove acknowledgement"
-                        onClick={() => removeAck(ack.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                        {isMedia ? (
+                          <p className="text-xs text-muted-foreground">
+                            This one also fills in each person's media consent on their manager
+                            page. Reword it freely, but leave it on the form or the club stops
+                            recording who agreed to photos.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-col items-center gap-1 pt-1">
+                        <label className="flex items-center gap-1 text-xs">
+                          <Checkbox
+                            checked={ack.required}
+                            onCheckedChange={(v) => updateAck(ack.id, { required: v === true })}
+                          />
+                          Required
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Remove acknowledgement"
+                          disabled={isMedia}
+                          title={
+                            isMedia
+                              ? "Media consent feeds each person's record, so it cannot be removed here."
+                              : undefined
+                          }
+                          onClick={() => removeAck(ack.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
-            <Button onClick={onSave} disabled={saving || !title || !body}>
+            <Button onClick={onSave} disabled={saving || !title || !body || mediaAckMissing}>
               {saving ? "Saving..." : "Save as new version"}
             </Button>
           </div>

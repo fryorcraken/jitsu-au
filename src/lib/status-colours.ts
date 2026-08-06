@@ -121,3 +121,17 @@ export function blogPostClass(status: string): string {
 export function blogCommentClass(status: string): string {
   return BLOG_COMMENT[status as BlogCommentStatus] ?? NEUTRAL_STATUS_CLASS;
 }
+
+/**
+ * Colour for media/promotional-photo consent (`true` / `false` / not asked).
+ *
+ * A withdrawal is red because publishing a photo of someone who said no is the
+ * mistake this badge exists to prevent, and it should stop a manager reading
+ * quickly. Not-asked is amber, not neutral: it is a gap to close, and treating
+ * it as a quiet "no" is how people never get asked.
+ */
+export function mediaConsentClass(value: boolean | null | undefined): string {
+  if (value === true) return "bg-green-100 text-green-800";
+  if (value === false) return "bg-red-100 text-red-800";
+  return "bg-amber-100 text-amber-800";
+}

@@ -313,4 +313,48 @@ describe("/account", () => {
       within(card("Contact")).getByText(/does not change a waiver you have already signed/i),
     ).toBeInTheDocument();
   });
+
+  it("keeps the media consent Save button disabled until a choice is made", async () => {
+    await renderLoaded();
+    expect(within(card("Photos and video")).getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("lets a member record an explicit yes for media consent", async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    const consentCard = within(card("Photos and video"));
+    await user.click(consentCard.getByRole("button", { name: "Yes, I consent" }));
+    await user.click(consentCard.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    expect(updateMyProfile).toHaveBeenCalledWith({ data: { media_consent: true } });
+  });
+
+  it("lets a member record an explicit no for media consent, distinct from never having answered", async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    const consentCard = within(card("Photos and video"));
+    await user.click(consentCard.getByRole("button", { name: "No, I don't consent" }));
+    await user.click(consentCard.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    expect(updateMyProfile).toHaveBeenCalledWith({ data: { media_consent: false } });
+  });
+
+  it("reverts an unsaved media consent choice back to what is on file, and saves nothing", async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    const consentCard = within(card("Photos and video"));
+    await user.click(consentCard.getByRole("button", { name: "Yes, I consent" }));
+    expect(consentCard.getByRole("button", { name: "Revert" })).toBeInTheDocument();
+
+    await user.click(consentCard.getByRole("button", { name: "Revert" }));
+
+    expect(consentCard.queryByRole("button", { name: "Revert" })).toBeNull();
+    expect(consentCard.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(updateMyProfile).not.toHaveBeenCalled();
+  });
 });

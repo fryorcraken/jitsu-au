@@ -54,7 +54,14 @@ describe("promoteWaiverTemplate", () => {
   it("promotes, clearing the old live version first", async () => {
     const { admin, calls } = fakeClient((op, all) => {
       if (op.verb === "select" && all.filter((c) => c.verb === "select").length === 1)
-        return ok({ id: "v2", version: 2, is_current: false });
+        return ok({
+          id: "v2",
+          version: 2,
+          is_current: false,
+          acknowledgements: [
+            { id: "media", label: "I consent to being photographed.", required: false },
+          ],
+        });
       if (op.verb === "select") return ok({ id: "v1" });
       return ok(null);
     });
@@ -79,11 +86,53 @@ describe("promoteWaiverTemplate", () => {
     expect(updates(calls)).toHaveLength(0);
   });
 
+  // The guard that stops a template silently losing photo-consent capture: see
+  // `hasMediaAcknowledgement` in waiver-template-editor.ts. `saveWaiverTemplate`
+  // ends by promoting the version it just inserted, so this single check also
+  // covers a manager saving a template whose media item was cleared or never
+  // existed, not just a direct promote of an old stored version.
+  it("refuses to promote a version with no media consent acknowledgement, without clearing anything", async () => {
+    const { admin, calls } = fakeClient(() =>
+      ok({
+        id: "v2",
+        version: 2,
+        is_current: false,
+        acknowledgements: [{ id: "risk", label: "I accept the risks.", required: true }],
+      }),
+    );
+    await expect(promoteWaiverTemplate(admin, "v2")).rejects.toThrow(
+      "no media consent acknowledgement",
+    );
+    expect(clears(calls)).toBe(0);
+  });
+
+  it("refuses to promote a version whose media item's label is blank", async () => {
+    const { admin, calls } = fakeClient(() =>
+      ok({
+        id: "v2",
+        version: 2,
+        is_current: false,
+        acknowledgements: [{ id: "media", label: "   ", required: false }],
+      }),
+    );
+    await expect(promoteWaiverTemplate(admin, "v2")).rejects.toThrow(
+      "no media consent acknowledgement",
+    );
+    expect(clears(calls)).toBe(0);
+  });
+
   it("puts the previous version back when the promotion fails", async () => {
     const { admin, calls } = fakeClient((op, all) => {
       const selects = all.filter((c) => c.verb === "select").length;
       if (op.verb === "select" && selects === 1)
-        return ok({ id: "v2", version: 2, is_current: false });
+        return ok({
+          id: "v2",
+          version: 2,
+          is_current: false,
+          acknowledgements: [
+            { id: "media", label: "I consent to being photographed.", required: false },
+          ],
+        });
       if (op.verb === "select" && selects === 2) return ok({ id: "v1" });
       // The post-failure re-read: nothing is live, so this is a real failure
       // rather than another manager having won the race.
@@ -105,7 +154,14 @@ describe("promoteWaiverTemplate", () => {
     const { admin } = fakeClient((op, all) => {
       const selects = all.filter((c) => c.verb === "select").length;
       if (op.verb === "select" && selects === 1)
-        return ok({ id: "v2", version: 2, is_current: false });
+        return ok({
+          id: "v2",
+          version: 2,
+          is_current: false,
+          acknowledgements: [
+            { id: "media", label: "I consent to being photographed.", required: false },
+          ],
+        });
       if (op.verb === "select" && selects === 2) return ok({ id: "v1" });
       if (op.verb === "select") return ok({ id: "v3" });
       if (op.patch?.is_current === true)
@@ -124,7 +180,14 @@ describe("promoteWaiverTemplate", () => {
     const { admin } = fakeClient((op, all) => {
       const selects = all.filter((c) => c.verb === "select").length;
       if (op.verb === "select" && selects === 1)
-        return ok({ id: "v2", version: 2, is_current: false });
+        return ok({
+          id: "v2",
+          version: 2,
+          is_current: false,
+          acknowledgements: [
+            { id: "media", label: "I consent to being photographed.", required: false },
+          ],
+        });
       if (op.verb === "select" && selects === 2) return ok({ id: "v1" });
       if (op.verb === "select") return ok(null);
       // The clear succeeds — that is what opens the gap. Both writes that could

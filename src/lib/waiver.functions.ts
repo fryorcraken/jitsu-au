@@ -26,6 +26,7 @@ import {
 import type { PaperWaiverUploadInput, SignerMeta } from "@/lib/validation";
 import { beltSizeForGiSize, type GiSize } from "@/lib/kit-sizes";
 import {
+  mediaConsentFromAnswers,
   missingRequiredAcks,
   parseTemplateAcks,
   resolveAcknowledgements,
@@ -37,6 +38,8 @@ import {
   WaiverFilingIncompleteError,
   toDuplicateRefs,
 } from "@/lib/waiver-duplicates";
+import { supersedesMediaConsent } from "@/lib/waiver-approval";
+import { hasMediaAcknowledgement } from "@/lib/waiver-template-editor";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 
@@ -588,8 +591,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // The waiver row is the frozen submission: exactly what was typed
     // (including the email as submitted), plus provenance (template version,
     // signer IP, signing context) and timestamps. Signatures and
-    // acknowledgements live inside the PDF only. Resubmission is always
-    // allowed; managers pick which submission to approve.
+    // acknowledgements live inside the PDF only, with one exception below:
+    // media consent is also copied to a column, because the club has to act on
+    // it. Resubmission is always allowed; managers pick which submission to
+    // approve.
     const { data: inserted, error: insErr } = await admin
       .from("waivers")
       .insert({
@@ -605,6 +610,12 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         email,
         uts_student_number: data.uts_student_number?.trim() || null,
         sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+        // Read off the acknowledgement the signer actually ticked on the
+        // document, never off a separate client field: the column and the PDF
+        // must agree, and only the PDF is evidence. Null while the live
+        // template has no media item, which is the state until a manager
+        // promotes the draft version that adds one.
+        media_consent: mediaConsentFromAnswers(ackDefs, answers),
         emergency_contact_name: data.emergency_contact_name,
         emergency_contact_relationship: data.emergency_contact_relationship,
         emergency_contact_phone: data.emergency_contact_phone,
@@ -899,7 +910,7 @@ export async function promoteWaiverTemplate(
 ): Promise<{ version: number }> {
   const { data: target, error: tErr } = await admin
     .from("waiver_templates")
-    .select("id, version, is_current")
+    .select("id, version, is_current, acknowledgements")
     .eq("id", id)
     .maybeSingle();
   if (tErr) throw new Error(tErr.message);
@@ -907,6 +918,17 @@ export async function promoteWaiverTemplate(
   // target must never cost the club its live waiver.
   if (!target) throw new Error("That waiver version no longer exists.");
   if (target.is_current) return { version: target.version };
+  // A template can only go live carrying the media-consent acknowledgement.
+  // This is the one place every promotion passes through -- `saveWaiverTemplate`
+  // ends by calling this on the version it just inserted -- so it also catches
+  // a manager loading and re-saving a version from before the feature existed,
+  // not just a direct promote of an old stored one. See
+  // `hasMediaAcknowledgement` for what counts as still carrying it.
+  if (!hasMediaAcknowledgement(parseTemplateAcks(target.acknowledgements))) {
+    throw new Error(
+      "This version has no media consent acknowledgement (or its wording is blank), so making it live would stop the club recording who agreed to photos. Add it back before making this version live.",
+    );
+  }
 
   const { data: previous, error: pErr } = await admin
     .from("waiver_templates")
@@ -1302,6 +1324,10 @@ export async function filePaperWaiver(
     email,
     uts_student_number: data.uts_student_number?.trim() || null,
     sms_whatsapp_consent: data.sms_whatsapp_consent ?? false,
+    // Taken from the filing manager, not derived: there are no acknowledgement
+    // ticks to read on a paper form, only a box on a page they are looking at.
+    // Null when the paper predates the question.
+    media_consent: data.media_consent ?? null,
     emergency_contact_name: data.emergency_contact_name,
     emergency_contact_relationship: data.emergency_contact_relationship || null,
     emergency_contact_phone: data.emergency_contact_phone,
@@ -1526,9 +1552,50 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       }
 
       // Promote: the approved submission becomes the person's record.
+      //
+      // `waiverToProfileFields` omits `media_consent` entirely when this
+      // submission never asked, so approving an older waiver cannot erase a
+      // consent the club already holds. When it DOES carry one, that answer
+      // only supersedes the profile's existing one when this waiver is
+      // actually newer -- approving out of chronological order (every pending
+      // waiver can be approved any time, and re-approval after an unapprove
+      // is possible) must not let an old ticked box silently overwrite a
+      // withdrawal the member made more recently on /account. See
+      // `supersedesMediaConsent` in waiver-approval.ts.
+      const patch = waiverToProfileFields(waiver);
+      const { media_consent: waiverMediaConsent, ...patchWithoutMediaConsent } = patch;
+      let mediaConsentPatch: {
+        media_consent?: boolean;
+        media_consent_updated_at?: null;
+        media_consent_updated_by?: null;
+      } = {};
+      if ("media_consent" in patch) {
+        const { data: currentProfile, error: cpErr } = await admin
+          .from("profiles")
+          .select("media_consent_updated_at")
+          .eq("user_id", waiver.user_id)
+          .maybeSingle();
+        if (cpErr) throw new Error(cpErr.message);
+        if (
+          supersedesMediaConsent({
+            waiverSignedAt: waiver.signed_at,
+            profileMediaConsentUpdatedAt: currentProfile?.media_consent_updated_at ?? null,
+          })
+        ) {
+          mediaConsentPatch = {
+            media_consent: waiverMediaConsent,
+            media_consent_updated_at: null,
+            media_consent_updated_by: null,
+          };
+        }
+      }
       const { error: pErr } = await admin
         .from("profiles")
-        .update({ ...waiverToProfileFields(waiver), updated_at: approvedAt! })
+        .update({
+          ...patchWithoutMediaConsent,
+          ...mediaConsentPatch,
+          updated_at: approvedAt!,
+        })
         .eq("user_id", waiver.user_id);
       if (pErr) throw new Error(pErr.message);
 
