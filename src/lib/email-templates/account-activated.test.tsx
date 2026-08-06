@@ -57,13 +57,30 @@ describe("AccountActivatedEmail", () => {
   it("invites them into the rest of the member area", async () => {
     const html = await renderHtml();
     const text = visibleText(html);
-    expect(text).toContain("knowledge base");
     expect(text).toContain("code of conduct");
     expect(text).toMatch(/invoices/i);
     expect(text).toContain("blog");
-    for (const url of [PROPS.kbUrl, PROPS.codeOfConductUrl, PROPS.membershipUrl, PROPS.blogUrl]) {
+    expect(text).toContain("knowledge base");
+    for (const url of [PROPS.codeOfConductUrl, PROPS.membershipUrl, PROPS.blogUrl, PROPS.kbUrl]) {
       expect(html).toContain(`href="${url}"`);
     }
+  });
+
+  // Deliberate running order, not incidental. The code of conduct is the one
+  // thing this email asks of them, so it leads; the membership is what they
+  // will come back for; the blog is the invitation to stick around. The
+  // knowledge base is mentioned last and without a heading of its own, because
+  // it is the biggest thing back there and would swamp the two that matter on
+  // day one.
+  it("keeps the code of conduct first and the knowledge base a passing mention", async () => {
+    const text = visibleText(await renderHtml());
+    const order = ["code of conduct", "membership", "blog", "knowledge base"].map((phrase) =>
+      text.toLowerCase().indexOf(phrase),
+    );
+    expect(order).not.toContain(-1);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // A passing mention: no "What's waiting" style heading introduces it.
+    expect(text).not.toMatch(/The knowledge base\./);
   });
 
   it("greets someone with no name on file without leaving a gap", async () => {

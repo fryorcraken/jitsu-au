@@ -78,13 +78,6 @@ export const AccountActivatedEmail = ({
         </Text>
         <Text style={h2}>What&apos;s waiting for you</Text>
         <Text style={item}>
-          <Link href={kbUrl} style={itemLink}>
-            The knowledge base
-          </Link>
-          . What happens in your first session, how our belts and grading work, and how the club
-          runs. Worth a read before you turn up.
-        </Text>
-        <Text style={item}>
           <Link href={codeOfConductUrl} style={itemLink}>
             The code of conduct
           </Link>
@@ -103,6 +96,19 @@ export const AccountActivatedEmail = ({
           </Link>
           . Club news and write-ups, and you can join the conversation in the comments once
           you&apos;re signed in.
+        </Text>
+        {/* The knowledge base gets a passing mention rather than a slot of its
+            own. It is the biggest thing in the member area and the easiest to
+            over-sell here: a new member has two jobs in this email, agreeing to
+            the code of conduct and knowing where their membership lives, and a
+            fourth heading competing with those buries both. */}
+        <Text style={item}>
+          There&apos;s also our{" "}
+          <Link href={kbUrl} style={itemLink}>
+            knowledge base
+          </Link>{" "}
+          when you want it: what happens in your first session, how our belts and grading work, and
+          how the club runs.
         </Text>
         <Text style={footer}>
           See you on the mat. Reply to this email if anything looks off, or if you can&apos;t get
