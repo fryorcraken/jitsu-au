@@ -143,6 +143,21 @@ describe("resolveCoverage", () => {
     expect(d.warnings).not.toContain("not_started");
   });
 
+  // Pre-buying the next training period is normal (`sellablePlans` offers a plan
+  // before its start date), so holding a membership that begins later is not by
+  // itself worth saying. Warned about beside a green pill it is noise, and it
+  // would be frozen into `session_checkins.warnings` for good.
+  it("does not warn about a later membership when something already covers the class", () => {
+    const nextPeriod = semester({
+      id: "next",
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: "2026-12-14T00:00:00.000Z",
+    });
+    const d = resolveCoverage({ memberships: [nextPeriod, trial()], at: AT });
+    expect(d.coverage).toBe("trial");
+    expect(d.warnings).not.toContain("not_started");
+  });
+
   // The other half of that rule: no waiver, no mat time. Signing the day AFTER a
   // class cannot pay for it, however generous the day-grain start is.
   it("does not cover a class held before its waiver was signed", () => {

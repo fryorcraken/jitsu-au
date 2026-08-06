@@ -149,7 +149,6 @@ export function resolveCoverage(input: {
     warnings.push("credits_exhausted");
   if (input.memberships.some((m) => m.status === "pending" && m.price_cents > 0))
     warnings.push("payment_pending");
-  if (input.memberships.some((m) => startsAfter(m, atMs))) warnings.push("not_started");
 
   const tiers: { source: CoverageSource; pool: CoverageCandidate[] }[] = [
     { source: "trial", pool: live.filter((m) => m.kind === "trial" && hasCredits(m)) },
@@ -195,6 +194,12 @@ export function resolveCoverage(input: {
     };
   }
 
+  // Purely a DIAGNOSIS of "no cover", which is why it is pushed here and not up
+  // with the others: holding a membership that starts later is perfectly normal
+  // (pre-buying next training period does exactly that), so saying so beside a
+  // green covered pill — and freezing it into `session_checkins.warnings` — would
+  // be noise. It only ever earns its place when nothing paid for the class.
+  if (input.memberships.some((m) => startsAfter(m, atMs))) warnings.push("not_started");
   warnings.push("no_cover");
   return {
     membership_id: null,

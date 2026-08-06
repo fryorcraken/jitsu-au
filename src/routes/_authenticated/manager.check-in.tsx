@@ -408,6 +408,14 @@ function CheckInPage() {
                       className={coverageClass(r.coverage)}
                       preserveCase
                     />
+                    {/* Only when nothing pays for it: "No cover" on its own is a
+                        dead end, and this is the row a manager is looking at
+                        while the person stands in front of them. */}
+                    {r.coverage === "none" && (
+                      <div className="mt-1">
+                        <Warnings codes={r.warnings} />
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button
