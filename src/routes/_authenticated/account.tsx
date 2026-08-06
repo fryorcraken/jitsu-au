@@ -211,6 +211,8 @@ function AccountPage() {
           <KitSizingCard {...details} />
 
           <ContactCard {...details} />
+
+          <MediaConsentCard {...details} />
         </>
       )}
 
@@ -657,6 +659,81 @@ function ContactCard({ profile, loading, onSaved }: DetailsCardProps) {
               </div>
             </fieldset>
 
+            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
+          </form>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Whether the club may use photos and video of this member.
+ *
+ * Its own card rather than a line in Contact: that card is about how to reach
+ * somebody, and burying a consent decision under a phone number is how people
+ * end up never having made one. It also needs room to say that changing it here
+ * takes effect now, without contradicting the waiver they signed.
+ *
+ * The member owns this one. A photo consent only a manager could withdraw would
+ * be the wrong way round -- they are the person in the photograph.
+ */
+function MediaConsentCard({ profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save } = useDetailsSave({ profile, onSaved });
+  const [consent, setConsent] = useState(false);
+
+  // `null` on file means nobody has ever asked. The box shows unticked, which
+  // is the safe reading, and the copy below says which of the two it is so an
+  // untouched record does not masquerade as a refusal they gave.
+  const asked = profile?.media_consent !== null && profile?.media_consent !== undefined;
+  const stored = useMemo(() => profile?.media_consent === true, [profile?.media_consent]);
+
+  const revert = useMemo(() => () => setConsent(stored), [stored]);
+  useEffect(revert, [revert]);
+
+  // An unasked record is dirty as soon as the card loads only if they tick it;
+  // saving an untouched, still-unticked box would turn "never asked" into a
+  // recorded "no" they never actually gave.
+  const dirty = consent !== stored;
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await save({ media_consent: consent }, "Saved", "Could not save that");
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Photos and video</CardTitle>
+        <CardDescription>
+          We sometimes photograph or film classes to promote the club. You can change your mind here
+          any time, and it applies from the moment you save. It does not rewrite a waiver you have
+          already signed, which keeps what you ticked at the time.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : (
+          <form onSubmit={onSubmit} className="space-y-4">
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox
+                checked={consent}
+                onCheckedChange={(v) => setConsent(v === true)}
+                className="mt-0.5"
+                aria-label="Consent to photos and video being used to promote the club"
+              />
+              <span>
+                I agree to photographs and video of me being used to promote the club. My name is
+                never published alongside them.
+              </span>
+            </label>
+            {!asked ? (
+              <p className="text-xs text-muted-foreground">
+                You have not told us either way yet. Until you do, we will ask before using anything
+                you are in.
+              </p>
+            ) : null}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />
           </form>
         )}

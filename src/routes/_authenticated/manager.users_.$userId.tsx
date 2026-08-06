@@ -22,10 +22,12 @@ import {
   ROLE_CLASS,
   coverageClass,
   lifecycleClass,
+  mediaConsentClass,
   membershipClass,
   verificationClass,
   waiverClass,
 } from "@/lib/status-colours";
+import { mediaConsentLabel } from "@/lib/waiver-acknowledgements";
 import { cn } from "@/lib/utils";
 import {
   deriveExpandedWaivers,
@@ -41,6 +43,7 @@ import {
   resendClubUserVerification,
   setClubUserEmail,
   setClubUserKitSizes,
+  setClubUserMediaConsent,
 } from "@/lib/club-user.functions";
 import { attachCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
@@ -74,6 +77,124 @@ function Field({ label, value }: { label: string; value: string | null | undefin
     <div>
       <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
       <dd className="whitespace-pre-wrap break-words">{value || "—"}</dd>
+    </div>
+  );
+}
+
+/**
+ * Media consent: the club's live answer to "can we photograph this person and
+ * use it", with the one control on this page that writes a person field.
+ *
+ * It gets its own card rather than a row in the read-only Profile grid for two
+ * reasons. It is the thing an instructor with a camera actually needs to find
+ * in a hurry, and it is the only value here that can move without a new waiver
+ * being signed — so it needs somewhere to say where the current answer came
+ * from, which a two-line <Field> has no room for.
+ */
+function MediaConsentCard({
+  userId,
+  value,
+  updatedAt,
+  setBy,
+  onChanged,
+}: {
+  userId: string;
+  value: boolean | null;
+  updatedAt: string | null;
+  /** Who last set it by hand: this person themselves, a manager, or nobody. */
+  setBy: string | null;
+  onChanged: () => void;
+}) {
+  const setConsent = useServerFn(setClubUserMediaConsent);
+  const [busy, setBusy] = useState(false);
+
+  async function apply(next: boolean | null) {
+    setBusy(true);
+    try {
+      await setConsent({ data: { user_id: userId, media_consent: next } });
+      toast.success(
+        next === true
+          ? "Recorded: they consent to photos and video."
+          : next === false
+            ? "Recorded: no photos or video of this person."
+            : "Cleared. Their media consent is back to not asked.",
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save that.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border p-4">
+      <h2 className="mb-1 text-lg font-bold">Media consent</h2>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {/* preserveCase: "Not asked" is a sentence, not an enum value, and the
+            default capitalize would render it "Not Asked". */}
+        <Pill label={mediaConsentLabel(value)} className={mediaConsentClass(value)} preserveCase />
+        <span className="text-sm text-muted-foreground">
+          {value === true
+            ? "Photos and video of them may be used to promote the club, without naming them."
+            : value === false
+              ? "Do not use photos or video of them in anything public."
+              : "Nobody has recorded an answer. Ask them before using any photo."}
+        </span>
+      </div>
+
+      {/* Where the current answer came from. Three different facts wear the same
+          "No": one the member ticked when they signed, one they set themselves
+          on /account afterwards, and one a manager recorded on their behalf.
+          Only the first is in a signed PDF, so the page never blurs them.
+
+          `setBy === userId` is what separates the member's own change from a
+          manager's -- both paths stamp the actor's id into the same column.
+
+          No branch claims a waiver exists: a profile can predate any submission
+          (the ensure_profile trigger gives every auth user one), so "their
+          signed waiver shows..." would be a statement the card cannot back up. */}
+      <p className="mb-3 text-xs text-muted-foreground">
+        {setBy === userId
+          ? `They set this themselves on ${formatDateTime(updatedAt)}, from their account page.`
+          : setBy
+            ? `Set by a manager on ${formatDateTime(updatedAt)}, not read off a waiver.`
+            : value === null
+              ? "Nothing recorded yet."
+              : "From their approved waiver."}
+      </p>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || value === true}
+          onClick={() => void apply(true)}
+        >
+          They consent
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || value === false}
+          onClick={() => void apply(false)}
+        >
+          Withdraw consent
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy || value === null}
+          onClick={() => void apply(null)}
+        >
+          Clear
+        </Button>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Use this when someone tells you in person. They can also change it themselves on their
+        account page. Approving a newer waiver that asks about photos replaces whatever is set here
+        with what they ticked on it.
+      </p>
     </div>
   );
 }
@@ -644,6 +765,14 @@ function ManagerUserPage() {
         onChanged={() => void load(false)}
       />
 
+      <MediaConsentCard
+        userId={userId}
+        value={profile.media_consent}
+        updatedAt={profile.media_consent_updated_at}
+        setBy={profile.media_consent_updated_by}
+        onChanged={() => void load(false)}
+      />
+
       {/* House rules. Read-only on purpose: a manager cannot tick this on
           somebody's behalf, for the same reason there is no "mark as verified"
           button — an agreement a manager recorded would only mean "a manager
@@ -882,6 +1011,11 @@ function ManagerUserPage() {
                         label="SMS / WhatsApp consent"
                         value={w.sms_whatsapp_consent ? "Yes" : "No"}
                       />
+                      {/* What was ticked on THIS submission, frozen. The card
+                          above is the club's live answer, which a manager may
+                          have moved since; the two disagreeing is meaningful,
+                          not a bug. */}
+                      <Field label="Media consent" value={mediaConsentLabel(w.media_consent)} />
                       <Field label="Approved" value={formatDateTime(w.approved_at)} />
                     </dl>
 

@@ -234,6 +234,9 @@ never stored.
 | `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                                   |
 | `gi_size`                        | `text`        | yes  | Gi size code (`profiles_gi_size_check`: `000`…`7`). Equipment sizing, never on a waiver. Chart: `src/lib/kit-sizes.ts`.                            |
 | `belt_size`                      | `text`        | yes  | Belt size code (`profiles_belt_size_check`: `0`…`7` — the belt chart has no `000`/`00`). Same module owns both lists.                              |
+| `media_consent`                  | `boolean`     | yes  | Media/promotional-photo consent, live. Three-state: NULL = never asked, and NOT the same as `false`.                                               |
+| `media_consent_updated_at`       | `timestamptz` | yes  | When `media_consent` was last set by hand, by the member or a manager. NULL when it came from an approved waiver.                                  |
+| `media_consent_updated_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who set it. Equal to `user_id` when the member did it themselves, else a manager; NULL from a waiver. |
 | `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
 | `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
 
@@ -251,6 +254,11 @@ inside the waiver PDF), and no `full_name`.
   person fields onto the profile (`waiverToProfileFields`); on first approval
   lifts the ban, sends a sign-in email, and assigns the free trial
   (`assignTrialMembership`, one per person ever, activation email suppressed).
+  `media_consent` is the one field the patch can OMIT rather than set: a
+  submission carrying NULL was signed on a template that never asked, and must
+  not erase a consent the club already holds. When it does carry one, the freshly
+  signed answer wins and the two `media_consent_updated_*` columns are cleared
+  with it, since the value no longer came from a manager.
 - Waiver submission again, for the optional **gi size** the form collects
   (`submitWaiverWithPdf`). It is equipment sizing, not part of the waiver: no
   `waivers` column holds it and it is not on the PDF, so it is written straight
@@ -258,14 +266,25 @@ inside the waiver PDF), and no `full_name`.
   and `belt_size` is only ever SEEDED (`beltSizeForGiSize`, which sends the two
   kids' gi sizes to belt `0`) so a size somebody chose deliberately survives.
 - The member themselves, from `/account` (`updateMyProfile`): `display_name`,
-  `preferred_name`, `phone`, `address`, `sms_whatsapp_consent`, the three
-  `emergency_contact_*` fields, `gi_size` and `belt_size`. The schema is
-  `.strict()`, so it cannot reach the legal name, date of birth, student number,
-  medical notes, minor/guardian fields or email. ⚠️ Its contact fields OVERLAP
+  `preferred_name`, `phone`, `address`, `sms_whatsapp_consent`, `media_consent`,
+  the three `emergency_contact_*` fields, `gi_size` and `belt_size`. The schema
+  is `.strict()`, so it cannot reach the legal name, date of birth, student
+  number, medical notes, minor/guardian fields or email. `media_consent` is the
+  one field here that is NOT nullable: null means "the club has never asked",
+  which is a fact about the club's records rather than an answer a member can
+  give, so only a manager can restore it. Saving it also stamps the two
+  `media_consent_updated_*` columns with the MEMBER's own id, which is what lets
+  the manager page tell their own change apart from one a manager recorded. ⚠️ Its contact fields OVERLAP
   with `waiverToProfileFields`, so a manager approving an older waiver can
   overwrite a correction made here; `/account` says so on the card.
 - A manager, from a person's detail page (`setClubUserKitSizes`): `gi_size` and
   `belt_size` only, either of which may be set to NULL to clear it.
+- Manager media-consent change (`setClubUserMediaConsent`): the manager half of
+  the field above, and the only path that can set it back to NULL. Unlike the kit sizes above it, media consent IS
+  on the waiver, so a value here can disagree with a signed document and the
+  page has to say which it is showing. It records a decision made after signing
+  ("stop using my photo"), which cannot wait on a new waiver being signed and
+  approved. It never touches the `waivers` row or its PDF.
 - `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
   revoked from PUBLIC/anon/authenticated): inserts the profile row for every new
   auth user, however created. Pure id attachment — no email matching, so nothing
@@ -327,6 +346,7 @@ above do not exist as far as the compiler is concerned. See the warning under
 | `email`                          | `text`        | no   | As submitted (normalized). Part of the frozen record.                                                                                                                                                           |
 | `uts_student_number`             | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
 | `sms_whatsapp_consent`           | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
+| `media_consent`                  | `boolean`     | yes  | The media/photo consent tick, as submitted. NULL when the template signed had no media acknowledgement. Derived server-side from the ticks, never sent by the client. Frozen; a later withdrawal never edits it. |
 | `emergency_contact_name`         | `text`        | no   | As submitted.                                                                                                                                                                                                   |
 | `emergency_contact_relationship` | `text`        | yes  | As submitted. How the contact is related; for a minor, the "relationship to minor" on the signed document.                                                                                                      |
 | `emergency_contact_phone`        | `text`        | no   | As submitted.                                                                                                                                                                                                   |
@@ -347,7 +367,11 @@ above do not exist as far as the compiler is concerned. See the warning under
 
 **Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks,
 and the five yes/no **health declaration** answers — all
-captured inside the PDF only. The displayed **pending / active /
+captured inside the PDF only. **One exception:** the `media` acknowledgement is
+also copied to `media_consent` above, on the same test that gives
+`medical_notes` a column — the club has to act on it week to week, and nobody
+opens forty PDFs before posting a photo. The PDF is still the record of what was
+agreed; the column is a derived copy. The displayed **pending / active /
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
 person, the latest approved waiver is active.
 

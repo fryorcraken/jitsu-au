@@ -13,6 +13,7 @@ import {
   managerKitSizesSchema,
   nameWithPreferred,
   normalizeEmail,
+  setMediaConsentSchema,
 } from "@/lib/validation";
 import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-conduct";
 import type { MembershipClient } from "@/lib/membership-types";
@@ -236,6 +237,13 @@ export const getClubUser = createServerFn({ method: "POST" })
         sms_whatsapp_consent: profile.sms_whatsapp_consent,
         gi_size: profile.gi_size,
         belt_size: profile.belt_size,
+        // Three-state: null means nobody has ever asked this person, which the
+        // screen shows as "Not asked" rather than folding it into a "No" the
+        // club never actually received. The two provenance fields are non-null
+        // only when a manager set the value by hand after the fact.
+        media_consent: profile.media_consent,
+        media_consent_updated_at: profile.media_consent_updated_at,
+        media_consent_updated_by: profile.media_consent_updated_by,
         updated_at: profile.updated_at,
       },
       memberships: membershipRows.map((m) => ({
@@ -282,6 +290,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         address: w.address,
         uts_student_number: w.uts_student_number,
         sms_whatsapp_consent: w.sms_whatsapp_consent,
+        media_consent: w.media_consent,
         emergency_contact_name: w.emergency_contact_name,
         emergency_contact_relationship: w.emergency_contact_relationship,
         emergency_contact_phone: w.emergency_contact_phone,
@@ -469,4 +478,54 @@ export const setClubUserKitSizes = createServerFn({ method: "POST" })
       throw new Error("That person has no profile record to hold sizes.");
     }
     return { ok: true as const, gi_size: data.gi_size, belt_size: data.belt_size };
+  });
+
+// ---- Manager: record a change to someone's media consent ----
+//
+// One of the two person fields on this page a manager can write, and the only
+// one a waiver has anything to say about. The rest of the card is read-only and
+// arrives solely by approving a waiver, because a detail a manager retyped
+// would be the club's word for what somebody else wrote. (Kit sizes escape that
+// rule by never being on a waiver at all -- see `setClubUserKitSizes` above.)
+//
+// This one is different again. It is not a claim about what was signed --
+// the waiver row and its PDF are untouched, and still say exactly what was
+// ticked on the day -- it is the club recording a decision made afterwards.
+// Someone asking for their photo to come down cannot be made to sign a fresh
+// waiver and wait for it to be approved, so the live record has to be able to
+// move on its own. That is also why the change is attributed: a "No" set here
+// is a different fact from a "No" the member ticked, and the screen says which.
+export const setClubUserMediaConsent = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => setMediaConsentSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const managerId = (context as { userId: string }).userId;
+    await requireManager(context as { supabase: MembershipClient; userId: string });
+
+    const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+
+    // `.select()` so an id that matches nobody is an error rather than a
+    // success toast over zero rows changed: PostgREST reports no error for an
+    // UPDATE that touched nothing, and silently doing nothing is the worst
+    // outcome for a control whose whole job is honouring "take my photo down".
+    const { data: updated, error } = await admin
+      .from("profiles")
+      .update({
+        media_consent: data.media_consent,
+        media_consent_updated_at: now,
+        media_consent_updated_by: managerId,
+        updated_at: now,
+      })
+      .eq("user_id", data.user_id)
+      .select("user_id");
+    if (error) throw new Error(error.message);
+    if (!updated || updated.length === 0) throw new Error("User not found.");
+
+    return {
+      ok: true as const,
+      media_consent: data.media_consent,
+      media_consent_updated_at: now,
+      media_consent_updated_by: managerId,
+    };
   });

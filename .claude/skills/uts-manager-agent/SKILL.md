@@ -215,7 +215,10 @@ as the waiver's PDF, and lands the row **pending**.
 but the shape is: `first_name`, `middle_name` (optional), `last_name`,
 `preferred_name` (optional), `date_of_birth` (`YYYY-MM-DD`), `address`, `phone`,
 `email`, `uts_student_number` (optional), `sms_whatsapp_consent` (optional,
-default false), `emergency_contact_name`, `emergency_contact_relationship`
+default false), `media_consent` (optional tri-state: `true`, `false`, or omit
+when the form has no photo/video consent box — omit rather than guessing, since
+`false` records a refusal the club never received),
+`emergency_contact_name`, `emergency_contact_relationship`
 (required if the participant was under 18 on `signed_on`, else optional),
 `emergency_contact_phone`, `medical_notes` (optional), `signed_on`
 (`YYYY-MM-DD` — the date on the paper, not today), `template_version` (optional

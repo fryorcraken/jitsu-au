@@ -294,6 +294,12 @@ export const AGENT_MANIFEST: {
           required: false,
           description: "Whether they ticked SMS/WhatsApp consent on the form. Default false.",
         },
+        {
+          name: "media_consent",
+          required: false,
+          description:
+            "Whether they ticked photo/video consent on the form: true, false, or omitted if the form never asked. Omit rather than guessing — false records a refusal the club never received.",
+        },
         { name: "emergency_contact_name", required: true, description: "As written on the form." },
         {
           name: "emergency_contact_relationship",

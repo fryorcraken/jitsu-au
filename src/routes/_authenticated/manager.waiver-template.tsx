@@ -21,6 +21,7 @@ import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { isDirty, meaningfulAcks, versionLabel } from "@/lib/waiver-template-editor";
+import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
@@ -283,36 +284,60 @@ function EditorPage() {
               {acks.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No acknowledgements.</p>
               ) : (
-                acks.map((ack) => (
-                  <div key={ack.id} className="flex items-start gap-2">
-                    <Textarea
-                      value={ack.label}
-                      onChange={(e) => updateAck(ack.id, { label: e.target.value })}
-                      rows={2}
-                      maxLength={500}
-                      placeholder="I understand that…"
-                      className="text-sm"
-                    />
-                    <div className="flex flex-col items-center gap-1 pt-1">
-                      <label className="flex items-center gap-1 text-xs">
-                        <Checkbox
-                          checked={ack.required}
-                          onCheckedChange={(v) => updateAck(ack.id, { required: v === true })}
+                acks.map((ack) => {
+                  // Media consent is the one acknowledgement the rest of the
+                  // app reads by name: its tick is what fills in a person's
+                  // media consent on their manager page. Rewording it is fine
+                  // and expected; deleting it is not, because a template
+                  // without it silently stops recording the answer and every
+                  // waiver signed afterwards reads as "not asked".
+                  const isMedia = ack.id === MEDIA_ACK_ID;
+                  return (
+                    <div key={ack.id} className="flex items-start gap-2">
+                      <div className="flex-1 space-y-1">
+                        <Textarea
+                          value={ack.label}
+                          onChange={(e) => updateAck(ack.id, { label: e.target.value })}
+                          rows={2}
+                          maxLength={500}
+                          placeholder="I understand that…"
+                          className="text-sm"
                         />
-                        Required
-                      </label>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Remove acknowledgement"
-                        onClick={() => removeAck(ack.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                        {isMedia ? (
+                          <p className="text-xs text-muted-foreground">
+                            This one also fills in each person's media consent on their manager
+                            page. Reword it freely, but leave it on the form or the club stops
+                            recording who agreed to photos.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-col items-center gap-1 pt-1">
+                        <label className="flex items-center gap-1 text-xs">
+                          <Checkbox
+                            checked={ack.required}
+                            onCheckedChange={(v) => updateAck(ack.id, { required: v === true })}
+                          />
+                          Required
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Remove acknowledgement"
+                          disabled={isMedia}
+                          title={
+                            isMedia
+                              ? "Media consent feeds each person's record, so it cannot be removed here."
+                              : undefined
+                          }
+                          onClick={() => removeAck(ack.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
             <Button onClick={onSave} disabled={saving || !title || !body}>

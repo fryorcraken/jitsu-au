@@ -36,9 +36,19 @@ export const updateMyProfile = createServerFn({ method: "POST" })
     if (Object.keys(patch).length === 0) return { ok: true as const, fields: [] as string[] };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const now = new Date().toISOString();
+    // Media consent carries its own provenance, because the person page has to
+    // tell a withdrawal the member made apart from one a manager recorded on
+    // their behalf. Stamping the member's own id here is what makes the first
+    // case distinguishable at all: `media_consent_updated_by === user_id` means
+    // they set it themselves.
+    const provenance =
+      patch.media_consent === undefined
+        ? {}
+        : { media_consent_updated_at: now, media_consent_updated_by: context.userId };
     const { data: updated, error } = await supabaseAdmin
       .from("profiles")
-      .update({ ...patch, updated_at: new Date().toISOString() })
+      .update({ ...patch, ...provenance, updated_at: now })
       .eq("user_id", context.userId)
       .select("user_id");
     if (error) throw new Error(error.message);
