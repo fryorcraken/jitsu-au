@@ -163,6 +163,7 @@ function Waiver() {
 
   const sigPadRef = useRef<SignaturePadHandle | null>(null);
   const gSigPadRef = useRef<SignaturePadHandle | null>(null);
+  const healthQuestionRefs = useRef<Partial<Record<HealthQuestionId, HTMLDivElement | null>>>({});
 
   const fullName = useMemo(
     () =>
@@ -539,8 +540,15 @@ function Waiver() {
    * instead of the plain sentence they get here.
    */
   function readyToSend(): boolean {
-    if (missingHealthAnswers(health).length > 0) {
+    const missingHealth = missingHealthAnswers(health);
+    if (missingHealth.length > 0) {
       toast.error("Please answer yes or no to every health question.");
+      const firstMissing = missingHealth[0];
+      healthQuestionRefs.current[firstMissing.id]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      document.getElementById(`${firstMissing.id}_yes`)?.focus();
       return false;
     }
     if (anyHealthConcern(health) && !medical.trim()) {
@@ -914,7 +922,13 @@ function Waiver() {
                 Please answer all five. Your instructors read these before you train.
               </p>
               {healthQuestions.map((q) => (
-                <div key={q.id} className="space-y-2">
+                <div
+                  key={q.id}
+                  ref={(el) => {
+                    healthQuestionRefs.current[q.id] = el;
+                  }}
+                  className="space-y-2"
+                >
                   <p className="text-sm">{q.question}</p>
                   <RadioGroup
                     className="flex gap-6"
