@@ -275,8 +275,14 @@ export interface AccountActivatedEmailParams {
  *
  * Best-effort, like every other send here: a failure is logged, never thrown.
  * The approval it follows is already committed, and losing this email must not
- * roll back a member's access. Re-approving retries it while they are still
- * locked.
+ * roll back a member's access.
+ *
+ * Note what a failure leaves behind: the ban is lifted before this is called,
+ * so someone whose email did not go out has a working account and no idea it
+ * exists. Re-approving will NOT resend (the caller only emails while they are
+ * still locked). Recovering that person means telling them out of band, and
+ * they can sign in from `/auth` with no help from us, which is precisely
+ * because this email never carried a link only we could mint.
  */
 export async function sendAccountActivatedEmail({
   waiverId,

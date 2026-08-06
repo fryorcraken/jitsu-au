@@ -1648,8 +1648,12 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       // Provision access on FIRST approval: an applicant's auth user is banned
       // (no login). Lift the ban and tell them their account is open. Skipped
       // for people who can already log in, so re-approvals don't spam them.
-      // Best-effort — a hiccup must not undo the approval; re-approving
-      // retries it (the user is still banned).
+      // Best-effort — a hiccup must not undo the approval. A failed UNBAN is
+      // retried by re-approving (they are still locked, so this block runs
+      // again); a failed SEND is not, since the unban above already went
+      // through. That person has an account and has not been told, and the
+      // fix is a word out of band: nothing in the email was single-use, so
+      // they can sign in at /auth whenever they hear.
       //
       // The email deliberately carries no sign-in link: it names the address
       // their login is keyed on and sends them to /auth to ask for a link
