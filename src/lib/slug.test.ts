@@ -33,6 +33,22 @@ describe("defaultBlogSlug", () => {
   it("returns an empty string for a title with no alphanumeric characters", () => {
     expect(defaultBlogSlug("!!!", now)).toBe("");
   });
+
+  it("truncates a near-max-length title so the date-prefixed slug still fits blog_posts' 200-char limit", () => {
+    const title = "a".repeat(200);
+    const slug = defaultBlogSlug(title, now);
+    expect(slug.length).toBe(200);
+    expect(slug).toBe(`2026-08-06-${"a".repeat(189)}`);
+  });
+
+  it("trims a trailing hyphen left by truncation, rather than producing an invalid slug", () => {
+    // Slugified title is 190 chars with a hyphen right where the 189-char
+    // truncation point falls, so a naive slice would end in "-".
+    const title = `${"a".repeat(188)} b`;
+    const slug = defaultBlogSlug(title, now);
+    expect(slug.endsWith("-")).toBe(false);
+    expect(slug).toBe(`2026-08-06-${"a".repeat(188)}`);
+  });
 });
 
 describe("uniqueSlug", () => {

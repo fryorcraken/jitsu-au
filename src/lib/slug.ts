@@ -16,17 +16,26 @@ export function slugify(title: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** Matches `blog_posts`' `char_length(slug) BETWEEN 1 AND 200` CHECK
+ * constraint (`supabase/migrations/20260731100000_blog_posts.sql`). */
+const BLOG_SLUG_MAX_LENGTH = 200;
+
 /**
  * The default slug for a new blog post: today's date (`YYYY-MM-DD`) prefixed
  * onto the slugified title, so a post's URL reads chronologically even before
  * anyone sets a slug by hand. Empty when the title has no usable characters,
  * same as `slugify`, so callers can still treat that as "could not derive a
- * slug" rather than publish a bare date.
+ * slug" rather than publish a bare date. The title alone can be as long as
+ * the slug's own DB limit (both cap at 200), so the slugified title is
+ * truncated to make room for the date prefix — otherwise a near-max-length
+ * title would produce a slug the database rejects.
  */
 export function defaultBlogSlug(title: string, now: Date = new Date()): string {
   const base = slugify(title);
   if (!base) return base;
-  return `${now.toISOString().slice(0, 10)}-${base}`;
+  const prefix = `${now.toISOString().slice(0, 10)}-`;
+  const truncatedBase = base.slice(0, BLOG_SLUG_MAX_LENGTH - prefix.length).replace(/-+$/g, "");
+  return `${prefix}${truncatedBase}`;
 }
 
 /**
