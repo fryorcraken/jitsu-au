@@ -443,9 +443,15 @@ describe("planMembershipWindow", () => {
     expect(w.ends_at).toBe("2027-05-01T00:00:00.000Z");
   });
 
-  it("has no expiry at all with neither dates nor a duration", () => {
+  // Undated plans (the free trial, casual classes) run from the START OF THE
+  // CLUB DAY, not from the instant they were granted. Coverage is resolved
+  // against the class's start time, so a credit granted at 18:05 that kept the
+  // raw instant would not pay for the 18:00 class it was granted for -- which is
+  // exactly the trial-at-the-door case. NOW is 10:00 Sydney on 1 May, so the
+  // day's midnight is the previous afternoon in UTC.
+  it("runs an undated plan from the start of the club day, with no expiry", () => {
     const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: null }, NOW);
-    expect(w.starts_at).toBe(NOW);
+    expect(w.starts_at).toBe("2026-04-30T14:00:00.000Z");
     expect(w.ends_at).toBeNull();
   });
 });

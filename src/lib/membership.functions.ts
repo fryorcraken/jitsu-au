@@ -144,16 +144,27 @@ async function activateMembershipRow(
   admin: MembershipClient,
   membership: MembershipRow,
   plan: MembershipPlanRow,
-  opts: { paymentMethod: MembershipRow["payment_method"]; sendEmail?: boolean },
+  opts: {
+    paymentMethod: MembershipRow["payment_method"];
+    sendEmail?: boolean;
+    /**
+     * The instant the membership should be treated as beginning from, when that
+     * is not "right now". Only the auto-assigned trial passes one: it runs from
+     * the day its waiver was SIGNED, not the day a manager got round to
+     * approving it. `paid_at` still records the real clock.
+     */
+    effectiveFrom?: string;
+  },
 ): Promise<void> {
   const nowIso = new Date().toISOString();
+  const fromIso = opts.effectiveFrom ?? nowIso;
 
   // The plan resolves its own dates — a dated plan runs exactly the window it
   // was set up with, a rolling plan (yearly insurance) runs from this instant,
   // and trial/casual plans end with their credits, not a date. No branch on
   // `plan.kind` here: `planMembershipWindow` reads `starts_on`/`ends_on`/
   // `duration_days` directly, so a brand-new plan shape needs no new code path.
-  const { starts_at: startsAt, ends_at: endsAt } = planMembershipWindow(plan, nowIso);
+  const { starts_at: startsAt, ends_at: endsAt } = planMembershipWindow(plan, fromIso);
 
   const patch: Partial<MembershipRow> = {
     status: "active",
@@ -227,8 +238,15 @@ async function activateMembershipRow(
  * silently if they ever had a trial membership or no trial plan exists. The
  * activation email is suppressed — the approval already sends their sign-in
  * link. Not a server function: a server-side helper for the approval flow.
+ *
+ * `signedAt` is the waiver's own signing time, and the trial runs from the start
+ * of that day (`planMembershipWindow`) rather than from this instant. The rule
+ * it encodes: a waiver must be signed BEFORE someone steps on the mat, but a
+ * manager may not approve it until hours or days later — often it is signed at
+ * the gym, at the door. Dating the trial from the approval would leave the class
+ * they signed for uncovered, which is the wrong end of the process to measure.
  */
-export async function assignTrialMembership(userId: string): Promise<void> {
+export async function assignTrialMembership(userId: string, signedAt: string): Promise<void> {
   const admin = await adminClient();
 
   // Every read throws rather than returning early: "the query failed" and "this
@@ -281,7 +299,11 @@ export async function assignTrialMembership(userId: string): Promise<void> {
     .select("*")
     .single();
   if (error || !inserted) throw new Error(error?.message || "Could not create trial membership.");
-  await activateMembershipRow(admin, inserted, plan, { paymentMethod: "manual", sendEmail: false });
+  await activateMembershipRow(admin, inserted, plan, {
+    paymentMethod: "manual",
+    sendEmail: false,
+    effectiveFrom: signedAt,
+  });
 }
 
 // ---- Member: list active plans ----

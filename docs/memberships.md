@@ -29,6 +29,15 @@ approved a waiver and the club's free trial was assigned automatically.
 | `2026-s2`, …       | `period`    | Training period            | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.       |
 | `insurance_yearly` | `insurance` | Yearly insurance           | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from pay. |
 
+A plan that ends with its credits rather than on a date still has to start
+somewhere, and it starts at **00:00 Australia/Sydney on the day it was granted**
+rather than at the instant it was granted. Check-in resolves cover against the
+class's own start time (`docs/check-in.md`), so the finer grain would mean a
+trial handed out at 18:05 could not pay for the 18:00 class it was handed out
+for. The auto-assigned trial goes one step further and dates itself from the day
+its **waiver was signed**, not the day a manager approved it: signing has to
+happen before someone trains, approving does not.
+
 The kind is the **only** control over how a plan runs: picking one on
 `/manager/membership-plans` shows just that kind's fields and clears the
 others, so a plan can never carry both a date range and a rolling duration

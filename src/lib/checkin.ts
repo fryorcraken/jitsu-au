@@ -53,6 +53,24 @@ function endsAtMs(m: CoverageCandidate): number | null {
 }
 
 /**
+ * Active, but the class ran before this membership began. Kept as its own
+ * predicate because it is also a DIAGNOSIS: a manager staring at "No cover"
+ * needs to be told the membership starts later, not left to work it out.
+ *
+ * For the free trial this is what enforces "no waiver, no mat time" — the trial
+ * begins on the day its waiver was SIGNED (`assignTrialMembership`), so a class
+ * held before the person signed anything is correctly uncovered, however long
+ * the manager took to approve it afterwards.
+ */
+function startsAfter(m: CoverageCandidate, atMs: number): boolean {
+  return (
+    m.status === "active" &&
+    Boolean(m.starts_at) &&
+    new Date(m.starts_at as string).getTime() > atMs
+  );
+}
+
+/**
  * Is this membership live at instant `atMs`? Active status is not enough: there
  * is no expiry job anywhere in this app, so a semester that finished in June
  * still reads `status = 'active'` today. Trusting the status alone would keep
@@ -60,7 +78,7 @@ function endsAtMs(m: CoverageCandidate): number | null {
  */
 function isLive(m: CoverageCandidate, atMs: number): boolean {
   if (m.status !== "active") return false;
-  if (m.starts_at && new Date(m.starts_at).getTime() > atMs) return false;
+  if (startsAfter(m, atMs)) return false;
   const ends = endsAtMs(m);
   return ends === null || ends >= atMs;
 }
@@ -131,6 +149,7 @@ export function resolveCoverage(input: {
     warnings.push("credits_exhausted");
   if (input.memberships.some((m) => m.status === "pending" && m.price_cents > 0))
     warnings.push("payment_pending");
+  if (input.memberships.some((m) => startsAfter(m, atMs))) warnings.push("not_started");
 
   const tiers: { source: CoverageSource; pool: CoverageCandidate[] }[] = [
     { source: "trial", pool: live.filter((m) => m.kind === "trial" && hasCredits(m)) },
@@ -230,6 +249,7 @@ export function coveragePreviewLabel(input: {
  * when attaching it would resolve to nothing.
  */
 export function attachableMemberships(candidates: CoverageCandidate[], at: string) {
+  const atMs = new Date(at).getTime();
   return candidates.map((m) => {
     const decision = resolveCoverage({ memberships: candidates, at, only: m.id });
     return {
@@ -245,7 +265,9 @@ export function attachableMemberships(candidates: CoverageCandidate[], at: strin
             ? m.status
             : m.sessions_remaining === 0
               ? "no credits left"
-              : "not valid for this class",
+              : startsAfter(m, atMs)
+                ? "starts after this class"
+                : "not valid for this class",
     };
   });
 }

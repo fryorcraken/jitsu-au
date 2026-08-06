@@ -93,6 +93,12 @@ system. (The contact form stores a message, not a person.)
    got the sign-in one). Approving a newer waiver later refreshes the profile
    again (no repeat sign-in email, no second trial). Unapprove only reverts
    the waiver's status; profile, login and trial stay as they are.
+   **The trial is dated from the day the waiver was SIGNED, not the day it was
+   approved.** Signing has to happen before anyone steps on the mat, but a form
+   filled in at the gym may not be approved until hours or days later; dating
+   the trial from the approval would leave the very class it was signed for
+   uncovered at check-in. A manager can therefore take as long as they like
+   over approval without costing anyone a free session.
 7. **Full name is never stored**; it is composed from first/middle/last. The
    optional **preferred name** is stored separately (on the submission and, once
    approved, on the profile). One rule governs it everywhere: **address a person

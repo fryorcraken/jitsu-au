@@ -1681,9 +1681,14 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       // Approved = visitor = trial assigned: give them the free trial on
       // first approval (one per person, ever; skipped for later approvals).
       // Best-effort like provisioning — re-approving retries it.
+      //
+      // Dated from the waiver's OWN signing time, not from this approval. The
+      // waiver has to be signed before anyone trains, but it is often signed at
+      // the gym and approved hours or days later; running the trial from the
+      // approval would leave the very class it was signed for uncovered.
       try {
         const { assignTrialMembership } = await import("./membership.functions");
-        await assignTrialMembership(waiver.user_id);
+        await assignTrialMembership(waiver.user_id, waiver.signed_at);
       } catch (e) {
         console.error("[setWaiverApproval] trial assignment failed:", e);
       }

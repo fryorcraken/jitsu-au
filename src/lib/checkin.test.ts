@@ -118,9 +118,42 @@ describe("resolveCoverage", () => {
     expect(d.warnings).toContain("credits_exhausted");
   });
 
-  it("does not cover with a membership that has not started yet", () => {
+  it("does not cover with a membership that has not started yet, and says so", () => {
     const future = membership({ starts_at: "2026-09-01T00:00:00.000Z" });
-    expect(resolveCoverage({ memberships: [future], at: AT }).coverage).toBe("none");
+    const d = resolveCoverage({ memberships: [future], at: AT });
+    expect(d.coverage).toBe("none");
+    expect(d.warnings).toContain("not_started");
+  });
+
+  // The trial runs from the START OF THE DAY its waiver was signed, not from the
+  // instant a manager approved it (assignTrialMembership -> planMembershipWindow).
+  // A waiver has to be signed before anyone trains, but it is often signed at the
+  // gym and approved later, so the raw approval instant lands after the very
+  // class it was signed for. Exercises the real activation dates rather than
+  // hand-picked ISO strings.
+  it("covers the class its waiver was signed for, whenever it was approved", () => {
+    const signedAtTheDoor = "2026-08-05T08:05:00.000Z"; // 18:05 Sydney, class started 18:00
+    const window = planMembershipWindow(
+      { starts_on: null, ends_on: null, duration_days: null },
+      signedAtTheDoor,
+    );
+    const d = resolveCoverage({ memberships: [trial({ ...window })], at: AT });
+    expect(d.coverage).toBe("trial");
+    expect(d.sessions_remaining_after).toBe(1);
+    expect(d.warnings).not.toContain("not_started");
+  });
+
+  // The other half of that rule: no waiver, no mat time. Signing the day AFTER a
+  // class cannot pay for it, however generous the day-grain start is.
+  it("does not cover a class held before its waiver was signed", () => {
+    const signedTheNextDay = "2026-08-06T12:13:20.000Z";
+    const window = planMembershipWindow(
+      { starts_on: null, ends_on: null, duration_days: null },
+      signedTheNextDay,
+    );
+    const d = resolveCoverage({ memberships: [trial({ ...window })], at: AT });
+    expect(d.coverage).toBe("none");
+    expect(d.warnings).toContain("not_started");
   });
 
   // Exercises the actual dates activateMembershipRow writes for a dated plan
@@ -255,6 +288,14 @@ describe("attachableMemberships", () => {
     expect(by("spent")).toMatchObject({ usable: false, reason: "no credits left" });
     expect(by("cancelled")).toMatchObject({ usable: false, reason: "cancelled" });
     expect(by("old")).toMatchObject({ usable: false, reason: "not valid for this class" });
+  });
+
+  it("says when a membership starts after the class rather than just refusing it", () => {
+    const rows = attachableMemberships(
+      [membership({ id: "later", starts_at: "2026-09-01T00:00:00.000Z" })],
+      AT,
+    );
+    expect(rows[0]).toMatchObject({ usable: false, reason: "starts after this class" });
   });
 
   it("never claims a membership is usable when attaching it would cover nothing", () => {
