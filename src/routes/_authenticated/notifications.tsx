@@ -164,11 +164,18 @@ function NotificationsPage() {
               Nothing yet. Replies to your comments will show up here.
             </p>
           )}
+          {/* A plain anchor, not a router `Link`, for two reasons. These hrefs
+              carry a fragment (`/blog/<slug>#comment-<id>`) that `Link` expects
+              as a separate `hash` prop rather than inside `to`. And they come
+              out of the DATABASE, not the route table: a row written by an
+              older version of the app can name a path that no longer exists,
+              which an anchor turns into the router's own not-found page instead
+              of throwing on the notifications page itself. */}
           <div className="space-y-2">
             {data?.items.map((item) => (
-              <Link
+              <a
                 key={item.id}
-                to={item.href}
+                href={item.href}
                 className={
                   item.read_at === null
                     ? "block rounded-lg border border-primary/40 bg-accent/40 p-4 transition-colors hover:bg-accent"
@@ -180,7 +187,7 @@ function NotificationsPage() {
                   <span className="text-xs text-muted-foreground">{timeAgo(item.created_at)}</span>
                 </div>
                 {item.body && <p className="mt-1 text-sm text-muted-foreground">{item.body}</p>}
-              </Link>
+              </a>
             ))}
           </div>
         </CardContent>
