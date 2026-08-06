@@ -243,6 +243,19 @@ describe("updateMyProfileSchema", () => {
     expect(() => updateMyProfileSchema.parse({})).toThrow();
   });
 
+  it("lets a member answer the media-consent question either way", () => {
+    expect(updateMyProfileSchema.parse({ media_consent: true }).media_consent).toBe(true);
+    expect(updateMyProfileSchema.parse({ media_consent: false }).media_consent).toBe(false);
+  });
+
+  // The column's null means "the club has never asked this person", which is a
+  // statement about the club's records, not an answer a member can give. The
+  // moment they look at the control that has stopped being true, so only a
+  // manager can put a record back to unasked.
+  it("refuses to let a member set media consent back to not-asked", () => {
+    expect(() => updateMyProfileSchema.parse({ media_consent: null })).toThrow();
+  });
+
   it("refuses fields this path does not own, rather than dropping them", () => {
     // A caller that thought it was saving a legal name should hear that it was
     // not. The schema is .strict() for exactly this.
@@ -321,11 +334,25 @@ describe("waiverToProfileFields", () => {
     // Feed it a row with extra waiver-only keys; they must not leak through.
     const patch = waiverToProfileFields({
       ...fields,
+      media_consent: true,
       pdf_path: "x.pdf",
       signer_ip: "203.0.113.7",
       email: "ada@example.com",
     } as never);
-    expect(patch).toEqual(fields);
+    expect(patch).toEqual({ ...fields, media_consent: true });
+  });
+
+  it("carries a declined media consent through as false", () => {
+    const patch = waiverToProfileFields({ media_consent: false } as never);
+    expect(patch.media_consent).toBe(false);
+  });
+
+  // Approving a waiver signed before the media question existed must not erase
+  // a consent the club already holds. Setting the key to null would do exactly
+  // that, so the patch has to leave it out altogether.
+  it("omits media_consent entirely when the submission never asked", () => {
+    const patch = waiverToProfileFields({ media_consent: null } as never);
+    expect("media_consent" in patch).toBe(false);
   });
 
   it("does not carry kit sizes, which no waiver records", () => {
@@ -908,6 +935,16 @@ describe("waiverSubmitSchema", () => {
   it("accepts sms_whatsapp_consent when opted in", () => {
     const result = waiverSubmitSchema.safeParse({ ...validAdult, sms_whatsapp_consent: true });
     expect(result.success && result.data.sms_whatsapp_consent).toBe(true);
+  });
+
+  // Media consent is deliberately NOT a field on this schema: it is derived
+  // server-side from the acknowledgement the signer ticked on the document, so
+  // the column and the PDF can never disagree, and a crafted request cannot
+  // claim a consent the signed page does not show.
+  it("ignores a client-supplied media_consent", () => {
+    const result = waiverSubmitSchema.safeParse({ ...validAdult, media_consent: true });
+    expect(result.success).toBe(true);
+    expect(result.success && "media_consent" in result.data).toBe(false);
   });
 
   it("defaults is_minor to false when omitted", () => {
@@ -1661,6 +1698,15 @@ describe("paperWaiverUploadSchema", () => {
 
   it("defaults the SMS consent to no, so an unticked box is never consent", () => {
     expect(paperWaiverUploadSchema.parse(validAdult).sms_whatsapp_consent).toBe(false);
+    // Not false: a paper form with no photo box never asked the question, and a
+    // filing manager must not be made to record a refusal on someone's behalf.
+    expect(paperWaiverUploadSchema.parse(validAdult).media_consent).toBeNull();
+    expect(
+      paperWaiverUploadSchema.parse({ ...validAdult, media_consent: true }).media_consent,
+    ).toBe(true);
+    expect(
+      paperWaiverUploadSchema.parse({ ...validAdult, media_consent: false }).media_consent,
+    ).toBe(false);
   });
 });
 

@@ -325,6 +325,8 @@ const validInput: PaperWaiverUploadInput = {
   email: "Ada@Example.com",
   uts_student_number: "",
   sms_whatsapp_consent: false,
+  // A 2020 paper form, so the media question is not on it at all.
+  media_consent: null,
   emergency_contact_name: "Charles Babbage",
   emergency_contact_relationship: "Colleague",
   emergency_contact_phone: "0400000001",

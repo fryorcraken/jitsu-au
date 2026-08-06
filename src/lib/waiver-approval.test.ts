@@ -3,6 +3,7 @@ import {
   approvalFailureMessage,
   approvalRefreshFailureMessage,
   runApproval,
+  supersedesMediaConsent,
 } from "./waiver-approval";
 
 describe("runApproval", () => {
@@ -113,6 +114,48 @@ describe("approvalFailureMessage", () => {
 
   it("falls back rather than showing a blank toast", () => {
     expect(approvalFailureMessage(new Error("   "))).toBe("Failed to update approval");
+  });
+});
+
+describe("supersedesMediaConsent", () => {
+  // The regression this guards: a member withdraws consent on /account
+  // (setting media_consent_updated_at to now), and a manager later approves
+  // an OLDER pending waiver -- filed from a paper scan, say -- whose photo
+  // box was ticked. That approval must not resurrect the withdrawn consent.
+  it("does not supersede a more recent withdrawal with an older ticked waiver", () => {
+    expect(
+      supersedesMediaConsent({
+        waiverSignedAt: "2026-01-01T00:00:00.000Z",
+        profileMediaConsentUpdatedAt: "2026-06-01T00:00:00.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("supersedes when the waiver is genuinely newer than the profile's answer", () => {
+    expect(
+      supersedesMediaConsent({
+        waiverSignedAt: "2026-06-01T00:00:00.000Z",
+        profileMediaConsentUpdatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe(true);
+  });
+
+  it("supersedes when the profile has no answer yet", () => {
+    expect(
+      supersedesMediaConsent({
+        waiverSignedAt: "2026-01-01T00:00:00.000Z",
+        profileMediaConsentUpdatedAt: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not supersede on an exact tie", () => {
+    expect(
+      supersedesMediaConsent({
+        waiverSignedAt: "2026-01-01T00:00:00.000Z",
+        profileMediaConsentUpdatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe(false);
   });
 });
 

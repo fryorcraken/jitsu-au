@@ -104,6 +104,10 @@ function UploadPaperWaiverPage() {
   const [dob, setDob] = useState("");
   const [phone, setPhone] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
+  // Three-state, and it starts at "not asked" on purpose: most paper on file
+  // predates the media question, and a checkbox would make the manager choose
+  // a yes or a no on behalf of somebody who was never asked one.
+  const [mediaConsent, setMediaConsent] = useState<"unasked" | "yes" | "no">("unasked");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [studentNumber, setStudentNumber] = useState("");
@@ -194,6 +198,7 @@ function UploadPaperWaiverPage() {
           email,
           uts_student_number: studentNumber,
           sms_whatsapp_consent: smsConsent,
+          media_consent: mediaConsent === "unasked" ? null : mediaConsent === "yes",
           emergency_contact_name: contactName,
           emergency_contact_relationship: contactRelationship,
           emergency_contact_phone: contactPhone,
@@ -426,6 +431,24 @@ function UploadPaperWaiverPage() {
                 <span>They ticked consent to SMS or WhatsApp contact on the form.</span>
               </label>
             </div>
+          </div>
+
+          <div>
+            <Label htmlFor="media_consent">Media consent on the form</Label>
+            <select
+              id="media_consent"
+              value={mediaConsent}
+              onChange={(e) => setMediaConsent(e.target.value as "unasked" | "yes" | "no")}
+              className="mt-1.5 h-9 w-full rounded-md border border-input bg-background px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="unasked">The form did not ask</option>
+              <option value="yes">Ticked: they consent to photos and video</option>
+              <option value="no">Left unticked: they did not consent</option>
+            </select>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Whether the paper in front of you has a photo and video consent box, and what they did
+              with it. Leave it on the first option if the form has no such box.
+            </p>
           </div>
 
           <div>

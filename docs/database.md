@@ -212,31 +212,34 @@ first waiver submission; filled in by manager approval. The funnel phase (lead
 / applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
 never stored.
 
-| Column                           | Type          | Null | Notes                                                                                                                                              |
-| -------------------------------- | ------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                                        |
-| `first_name`                     | `text`        | no   | Non-blank (`profiles_first_name_not_blank`). Every person has a name to show; `ensure_profile` seeds one when the auth user arrives.               |
-| `middle_name`                    | `text`        | yes  |                                                                                                                                                    |
-| `last_name`                      | `text`        | yes  |                                                                                                                                                    |
-| `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`).                                  |
-| `display_name`                   | `text`        | yes  | 1–60 chars. What they've chosen to show on blog and document comments. NULL = derived (`commentDisplayName`): first/preferred name + last initial. |
-| `date_of_birth`                  | `date`        | yes  |                                                                                                                                                    |
-| `address`                        | `text`        | yes  |                                                                                                                                                    |
-| `phone`                          | `text`        | yes  |                                                                                                                                                    |
-| `uts_student_number`             | `text`        | yes  | Drives the student pricing rate.                                                                                                                   |
-| `emergency_contact_name`         | `text`        | yes  |                                                                                                                                                    |
-| `emergency_contact_relationship` | `text`        | yes  | How that contact is related. For a minor this person IS the guardian who signs.                                                                    |
-| `emergency_contact_phone`        | `text`        | yes  |                                                                                                                                                    |
-| `medical_notes`                  | `text`        | yes  | Details of anything declared on the health questions.                                                                                              |
-| `is_minor`                       | `boolean`     | no   | Default `false`.                                                                                                                                   |
-| `guardian_name`                  | `text`        | yes  |                                                                                                                                                    |
-| `guardian_relationship`          | `text`        | yes  |                                                                                                                                                    |
-| `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                                   |
-| `gi_size`                        | `text`        | yes  | Gi size code (`profiles_gi_size_check`: `000`…`7`). Equipment sizing, never on a waiver. Chart: `src/lib/kit-sizes.ts`.                            |
-| `belt_size`                      | `text`        | yes  | Belt size code (`profiles_belt_size_check`: `0`…`7` — the belt chart has no `000`/`00`). Same module owns both lists.                              |
+| Column                           | Type          | Null | Notes                                                                                                                                                  |
+| -------------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                                            |
+| `first_name`                     | `text`        | no   | Non-blank (`profiles_first_name_not_blank`). Every person has a name to show; `ensure_profile` seeds one when the auth user arrives.                    |
+| `middle_name`                    | `text`        | yes  |                                                                                                                                                         |
+| `last_name`                      | `text`        | yes  |                                                                                                                                                         |
+| `preferred_name`                 | `text`        | yes  | What they go by. NULL = none given; everything that addresses them falls back to the first name (`greetingName`).                                       |
+| `display_name`                   | `text`        | yes  | 1–60 chars. What they've chosen to show on blog and document comments. NULL = derived (`commentDisplayName`): first/preferred name + last initial.      |
+| `date_of_birth`                  | `date`        | yes  |                                                                                                                                                         |
+| `address`                        | `text`        | yes  |                                                                                                                                                         |
+| `phone`                          | `text`        | yes  |                                                                                                                                                         |
+| `uts_student_number`             | `text`        | yes  | Drives the student pricing rate.                                                                                                                        |
+| `emergency_contact_name`         | `text`        | yes  |                                                                                                                                                         |
+| `emergency_contact_relationship` | `text`        | yes  | How that contact is related. For a minor this person IS the guardian who signs.                                                                         |
+| `emergency_contact_phone`        | `text`        | yes  |                                                                                                                                                         |
+| `medical_notes`                  | `text`        | yes  | Details of anything declared on the health questions.                                                                                                   |
+| `is_minor`                       | `boolean`     | no   | Default `false`.                                                                                                                                        |
+| `guardian_name`                  | `text`        | yes  |                                                                                                                                                         |
+| `guardian_relationship`          | `text`        | yes  |                                                                                                                                                         |
+| `sms_whatsapp_consent`           | `boolean`     | no   | Default `false`.                                                                                                                                        |
+| `gi_size`                        | `text`        | yes  | Gi size code (`profiles_gi_size_check`: `000`…`7`). Equipment sizing, never on a waiver. Chart: `src/lib/kit-sizes.ts`.                                 |
+| `belt_size`                      | `text`        | yes  | Belt size code (`profiles_belt_size_check`: `0`…`7` — the belt chart has no `000`/`00`). Same module owns both lists.                                   |
 | `martial_arts_experience`        | `text`        | yes  | Free text, ≤500 chars (`profiles_martial_arts_experience_check`). Collected on `/waiver`, never on a waiver submission or the PDF — context for instructors, not a declaration. |
-| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
-| `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                   |
+| `media_consent`                  | `boolean`     | yes  | Media/promotional-photo consent, live. Three-state: NULL = never asked, and NOT the same as `false`.                                                    |
+| `media_consent_updated_at`       | `timestamptz` | yes  | When `media_consent` was last set by hand, by the member or a manager. NULL when it came from an approved waiver.                                       |
+| `media_consent_updated_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who set it. Equal to `user_id` when the member did it themselves, else a manager; NULL from a waiver.   |
+| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                        |
+| `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                        |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
@@ -252,6 +255,15 @@ inside the waiver PDF), and no `full_name`.
   person fields onto the profile (`waiverToProfileFields`); on first approval
   lifts the ban, sends a sign-in email, and assigns the free trial
   (`assignTrialMembership`, one per person ever, activation email suppressed).
+  `media_consent` is the one field the patch can OMIT rather than set: a
+  submission carrying NULL was signed on a template that never asked, and must
+  not erase a consent the club already holds. When it does carry one, and that
+  submission is actually newer than whatever set the profile's current answer
+  (`supersedesMediaConsent`, guarding against approving out of chronological
+  order — an old ticked box must never overwrite a withdrawal made more
+  recently on `/account`), the freshly signed answer wins and the two
+  `media_consent_updated_*` columns are cleared with it, since the value no
+  longer came from whoever set it by hand.
 - Waiver submission again, for the optional **gi size** the form collects
   (`submitWaiverWithPdf`). It is equipment sizing, not part of the waiver: no
   `waivers` column holds it and it is not on the PDF, so it is written straight
@@ -264,14 +276,26 @@ inside the waiver PDF), and no `full_name`.
   the waiver, no `waivers` column, not on the PDF, written straight here, and a
   blank value writes nothing so re-signing never clears one on file.
 - The member themselves, from `/account` (`updateMyProfile`): `display_name`,
-  `preferred_name`, `phone`, `address`, `sms_whatsapp_consent`, the three
-  `emergency_contact_*` fields, `gi_size` and `belt_size`. The schema is
-  `.strict()`, so it cannot reach the legal name, date of birth, student number,
-  medical notes, minor/guardian fields or email. ⚠️ Its contact fields OVERLAP
-  with `waiverToProfileFields`, so a manager approving an older waiver can
-  overwrite a correction made here; `/account` says so on the card.
+  `preferred_name`, `phone`, `address`, `sms_whatsapp_consent`, `media_consent`,
+  the three `emergency_contact_*` fields, `gi_size` and `belt_size`. The schema
+  is `.strict()`, so it cannot reach the legal name, date of birth, student
+  number, medical notes, minor/guardian fields or email. `media_consent` is the
+  one field here that is NOT nullable: null means "the club has never asked",
+  which is a fact about the club's records rather than an answer a member can
+  give, so nothing can restore it once it is set (there is no manager path back
+  to NULL either — see below). Saving it also stamps the two
+  `media_consent_updated_*` columns with the MEMBER's own id, which is what
+  lets the person page tell their own change apart from one a manager recorded
+  before that write path existed. ⚠️ Its contact fields OVERLAP with
+  `waiverToProfileFields`, so a manager approving an older waiver can overwrite
+  a correction made here; `/account` says so on the card.
 - A manager, from a person's detail page (`setClubUserKitSizes`): `gi_size` and
-  `belt_size` only, either of which may be set to NULL to clear it.
+  `belt_size` only, either of which may be set to NULL to clear it. There is no
+  equivalent for `media_consent`: the person page shows the club's current
+  answer and its provenance, but a manager cannot set or clear it there. The
+  only writers are the member themselves, above, and waiver approval, above —
+  a manager who is told about a photo request in person points the member at
+  `/account` rather than acting on it directly.
 - `ensure_profile()` trigger on `auth.users` INSERT (SECURITY DEFINER, EXECUTE
   revoked from PUBLIC/anon/authenticated): inserts the profile row for every new
   auth user, however created. Pure id attachment — no email matching, so nothing
@@ -319,41 +343,46 @@ above do not exist as far as the compiler is concerned. See the warning under
 
 ## `waivers` — frozen submissions
 
-| Column                           | Type          | Null | Notes                                                                                                                                                                                                           |
-| -------------------------------- | ------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                             | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                                                                                                    |
-| `user_id`                        | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The person (possibly-locked auth user) who submitted. Indexed.                                                                                                |
-| `first_name`                     | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `middle_name`                    | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
-| `last_name`                      | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `preferred_name`                 | `text`        | yes  | As submitted. Optional; fills the `{{preferred_name}}` template token (falling back to the first name).                                                                                                         |
-| `date_of_birth`                  | `date`        | no   | As submitted.                                                                                                                                                                                                   |
-| `address`                        | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `phone`                          | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `email`                          | `text`        | no   | As submitted (normalized). Part of the frozen record.                                                                                                                                                           |
-| `uts_student_number`             | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
-| `sms_whatsapp_consent`           | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
-| `emergency_contact_name`         | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `emergency_contact_relationship` | `text`        | yes  | As submitted. How the contact is related; for a minor, the "relationship to minor" on the signed document.                                                                                                      |
-| `emergency_contact_phone`        | `text`        | no   | As submitted.                                                                                                                                                                                                   |
-| `medical_notes`                  | `text`        | yes  | As submitted. Details of anything answered yes on the health declaration; required by validation once any answer is yes.                                                                                        |
-| `is_minor`                       | `boolean`     | no   | As submitted.                                                                                                                                                                                                   |
-| `guardian_name`                  | `text`        | yes  | As submitted (required for minors by validation).                                                                                                                                                               |
-| `guardian_relationship`          | `text`        | yes  | As submitted.                                                                                                                                                                                                   |
-| `pdf_path`                       | `text`        | yes  | The signed PDF in the `waivers` Storage bucket.                                                                                                                                                                 |
-| `template_version`               | `int`         | yes  | Which `waiver_templates.version` was signed.                                                                                                                                                                    |
-| `signer_ip`                      | `text`        | yes  | The signer's real IP (legal/forensic record). NULL for a scanned paper form, where nobody connected to sign.                                                                                                    |
-| `signer_meta`                    | `jsonb`       | no   | Default `'{}'`. Signing-context evidence: request headers (user agent, language, client hints) + browser-reported timezone/screen/viewport/platform/languages (`buildSignerMeta`). Never copied to the profile. |
-| `approval_status`                | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                                                                                                                                                         |
-| `approved_at`                    | `timestamptz` | yes  | NULL while pending.                                                                                                                                                                                             |
-| `approved_by`                    | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager.                                                                                                                                              |
-| `signed_at`                      | `timestamptz` | no   | When the waiver was signed.                                                                                                                                                                                     |
-| `client_submission_id`           | `uuid`        | yes  | The browser's per-form-fill idempotency key, behind a partial unique index. Looked up before any work so a retry cannot mint a second signed waiver. See "Public intake" below.                                 |
-| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                                                |
+| Column                           | Type          | Null | Notes                                                                                                                                                                                                            |
+| -------------------------------- | ------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                             | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                                                                                                     |
+| `user_id`                        | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The person (possibly-locked auth user) who submitted. Indexed.                                                                                                 |
+| `first_name`                     | `text`        | no   | As submitted.                                                                                                                                                                                                    |
+| `middle_name`                    | `text`        | yes  | As submitted.                                                                                                                                                                                                    |
+| `last_name`                      | `text`        | no   | As submitted.                                                                                                                                                                                                    |
+| `preferred_name`                 | `text`        | yes  | As submitted. Optional; fills the `{{preferred_name}}` template token (falling back to the first name).                                                                                                          |
+| `date_of_birth`                  | `date`        | no   | As submitted.                                                                                                                                                                                                    |
+| `address`                        | `text`        | no   | As submitted.                                                                                                                                                                                                    |
+| `phone`                          | `text`        | no   | As submitted.                                                                                                                                                                                                    |
+| `email`                          | `text`        | no   | As submitted (normalized). Part of the frozen record.                                                                                                                                                            |
+| `uts_student_number`             | `text`        | yes  | As submitted.                                                                                                                                                                                                    |
+| `sms_whatsapp_consent`           | `boolean`     | no   | As submitted.                                                                                                                                                                                                    |
+| `media_consent`                  | `boolean`     | yes  | The media/photo consent tick, as submitted. NULL when the template signed had no media acknowledgement. Derived server-side from the ticks, never sent by the client. Frozen; a later withdrawal never edits it. |
+| `emergency_contact_name`         | `text`        | no   | As submitted.                                                                                                                                                                                                    |
+| `emergency_contact_relationship` | `text`        | yes  | As submitted. How the contact is related; for a minor, the "relationship to minor" on the signed document.                                                                                                       |
+| `emergency_contact_phone`        | `text`        | no   | As submitted.                                                                                                                                                                                                    |
+| `medical_notes`                  | `text`        | yes  | As submitted. Details of anything answered yes on the health declaration; required by validation once any answer is yes.                                                                                         |
+| `is_minor`                       | `boolean`     | no   | As submitted.                                                                                                                                                                                                    |
+| `guardian_name`                  | `text`        | yes  | As submitted (required for minors by validation).                                                                                                                                                                |
+| `guardian_relationship`          | `text`        | yes  | As submitted.                                                                                                                                                                                                    |
+| `pdf_path`                       | `text`        | yes  | The signed PDF in the `waivers` Storage bucket.                                                                                                                                                                  |
+| `template_version`               | `int`         | yes  | Which `waiver_templates.version` was signed.                                                                                                                                                                     |
+| `signer_ip`                      | `text`        | yes  | The signer's real IP (legal/forensic record). NULL for a scanned paper form, where nobody connected to sign.                                                                                                     |
+| `signer_meta`                    | `jsonb`       | no   | Default `'{}'`. Signing-context evidence: request headers (user agent, language, client hints) + browser-reported timezone/screen/viewport/platform/languages (`buildSignerMeta`). Never copied to the profile.  |
+| `approval_status`                | `text`        | no   | Default `'pending'`; `CHECK IN ('pending','approved')`.                                                                                                                                                          |
+| `approved_at`                    | `timestamptz` | yes  | NULL while pending.                                                                                                                                                                                              |
+| `approved_by`                    | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Approving manager.                                                                                                                                               |
+| `signed_at`                      | `timestamptz` | no   | When the waiver was signed.                                                                                                                                                                                      |
+| `client_submission_id`           | `uuid`        | yes  | The browser's per-form-fill idempotency key, behind a partial unique index. Looked up before any work so a retry cannot mint a second signed waiver. See "Public intake" below.                                  |
+| `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                                                 |
 
 **Not stored:** `full_name`, signatures (typed or drawn), acknowledgement ticks,
 and the five yes/no **health declaration** answers — all
-captured inside the PDF only. The displayed **pending / active /
+captured inside the PDF only. **One exception:** the `media` acknowledgement is
+also copied to `media_consent` above, on the same test that gives
+`medical_notes` a column — the club has to act on it week to week, and nobody
+opens forty PDFs before posting a photo. The PDF is still the record of what was
+agreed; the column is a derived copy. The displayed **pending / active /
 superseded** status is derived in the app (`deriveWaiverListStatuses`): per
 person, the latest approved waiver is active.
 
