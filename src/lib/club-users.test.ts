@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateClubUsers,
+  personLabelsById,
   profileUserIds,
   type ClubUserEmail,
   type ClubUserLead,
@@ -8,6 +9,7 @@ import {
   type ClubUserPlan,
   type ClubUserProfile,
   type ClubUserWaiver,
+  type PersonNameRow,
 } from "./club-users";
 
 const plans: ClubUserPlan[] = [
@@ -87,6 +89,73 @@ describe("profileUserIds", () => {
   it("collects distinct user ids", () => {
     const ids = profileUserIds([{ user_id: "a" }, { user_id: "b" }, { user_id: "a" }]);
     expect(ids.sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("personLabelsById", () => {
+  function nameRow(over: Partial<PersonNameRow> = {}): PersonNameRow {
+    return {
+      user_id: "m1",
+      first_name: "Grace",
+      middle_name: null,
+      last_name: "Hopper",
+      preferred_name: null,
+      ...over,
+    };
+  }
+
+  it("labels a person by their name when they have a profile", () => {
+    const labels = personLabelsById({
+      profiles: [nameRow()],
+      emails: [{ user_id: "m1", email: "grace@example.com" }],
+    });
+    expect(labels.get("m1")).toBe("Grace Hopper");
+  });
+
+  it("quotes in a preferred name, like every other screen", () => {
+    const labels = personLabelsById({
+      profiles: [nameRow({ preferred_name: "Amazing" })],
+      emails: [],
+    });
+    expect(labels.get("m1")).toBe('Grace "Amazing" Hopper');
+  });
+
+  it("falls back to the login address for a manager with no profile row", () => {
+    const labels = personLabelsById({
+      profiles: [],
+      emails: [{ user_id: "m1", email: "grace@example.com" }],
+    });
+    expect(labels.get("m1")).toBe("grace@example.com");
+  });
+
+  it("falls back to the email when the profile has no name at all", () => {
+    const labels = personLabelsById({
+      profiles: [nameRow({ first_name: null, last_name: null })],
+      emails: [{ user_id: "m1", email: "grace@example.com" }],
+    });
+    expect(labels.get("m1")).toBe("grace@example.com");
+  });
+
+  it("omits anyone who resolves to neither a name nor an email", () => {
+    const labels = personLabelsById({
+      profiles: [nameRow({ first_name: null, last_name: null })],
+      emails: [{ user_id: "m1", email: "   " }],
+    });
+    expect(labels.has("m1")).toBe(false);
+  });
+
+  it("labels each id independently", () => {
+    const labels = personLabelsById({
+      profiles: [nameRow({ user_id: "m2", first_name: "Ada", last_name: "Lovelace" })],
+      emails: [
+        { user_id: "m1", email: "grace@example.com" },
+        { user_id: "m2", email: "ada@example.com" },
+      ],
+    });
+    expect([...labels.entries()].sort()).toEqual([
+      ["m1", "grace@example.com"],
+      ["m2", "Ada Lovelace"],
+    ]);
   });
 });
 

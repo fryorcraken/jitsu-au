@@ -17,7 +17,7 @@ import {
 } from "@/lib/validation";
 import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-conduct";
 import type { MembershipClient } from "@/lib/membership-types";
-import type { ClubUserEmail } from "@/lib/club-users";
+import { personLabelsById, type ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
 
 /** Max waiver / membership rows one person's page pulls. */
@@ -190,10 +190,43 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (checkinRows.length >= CHECKINS_LIMIT)
       console.warn(`[getClubUser] check-ins capped at ${CHECKINS_LIMIT}; older ones truncated`);
     const eventIds = [...new Set(checkinRows.map((c) => c.event_id))];
-    const { data: events } = eventIds.length
-      ? await admin.from("calendar_events").select("id, title, starts_at").in("id", eventIds)
-      : { data: [] };
+
+    // Who approved each waiver. `waivers.approved_by` is a bare user id, and
+    // the approver is a manager, who may well have no `profiles` row of their
+    // own — so resolve the name where there is one and fall back to the login
+    // address, the same two sources the memberships list uses for member names.
+    const approverIds = [...new Set(waiverRows.map((w) => w.approved_by))].filter(
+      (id): id is string => Boolean(id),
+    );
+
+    // Everything whose keys only exist once the first round came back, in one
+    // second round rather than one round each.
+    const [{ data: events }, approverProfiles, approverEmails] = await Promise.all([
+      eventIds.length
+        ? admin.from("calendar_events").select("id, title, starts_at").in("id", eventIds)
+        : { data: [] },
+      approverIds.length
+        ? admin
+            .from("profiles")
+            .select("user_id, first_name, middle_name, last_name, preferred_name")
+            .in("user_id", approverIds)
+        : { data: [], error: null },
+      approverIds.length ? userEmails(admin, approverIds) : { data: [], error: null },
+    ]);
     const eventById = new Map((events ?? []).map((e) => [e.id, e]));
+    // Non-fatal, like the person's own email lookup above: an unresolved
+    // approver shows as "—" next to a real approval date, which is the honest
+    // reading. Taking the page down over it would block the decision it exists
+    // to support.
+    if (approverProfiles.error)
+      console.error("[getClubUser] approver profile lookup failed:", approverProfiles.error);
+    if (approverEmails.error)
+      console.error("[getClubUser] approver email lookup failed:", approverEmails.error);
+    const approverLabels = personLabelsById({
+      profiles: approverProfiles.data ?? [],
+      emails: approverEmails.data ?? [],
+    });
+
     const planNameByMembership = new Map(
       membershipRows.map((m) => [m.id, planById.get(m.plan_id)?.name ?? null]),
     );
@@ -302,6 +335,10 @@ export const getClubUser = createServerFn({ method: "POST" })
         template_version: w.template_version,
         has_pdf: Boolean(w.pdf_path),
         approved_at: w.approved_at ?? null,
+        // Who signed off. Null both while pending and for an approval recorded
+        // before the column existed, so the screen shows it as unknown rather
+        // than claiming nobody approved it.
+        approved_by_name: w.approved_by ? (approverLabels.get(w.approved_by) ?? null) : null,
         signer_ip: w.signer_ip,
         signer_meta: w.signer_meta,
         status: statuses.get(w.id) ?? ("pending" as const),

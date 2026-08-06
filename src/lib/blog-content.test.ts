@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractYouTubeId, splitBlogContent } from "./blog-content";
+import {
+  deriveExcerpt,
+  EXCERPT_MAX_LENGTH,
+  extractYouTubeId,
+  splitBlogContent,
+} from "./blog-content";
 
 describe("splitBlogContent", () => {
   it("returns a single markdown block for plain text", () => {
@@ -57,5 +62,81 @@ describe("extractYouTubeId", () => {
 
   it("returns null for an unparseable URL", () => {
     expect(extractYouTubeId("not a url")).toBeNull();
+  });
+});
+
+describe("deriveExcerpt", () => {
+  it("uses the opening prose of the post", () => {
+    expect(deriveExcerpt("We ran a grading last Saturday.\n\nEveryone passed.")).toBe(
+      "We ran a grading last Saturday. Everyone passed.",
+    );
+  });
+
+  it("skips headings, which restate the title rather than open the post", () => {
+    expect(deriveExcerpt("# Grading day\n\nEveryone passed.")).toBe("Everyone passed.");
+  });
+
+  it("keeps a link's text and drops its URL", () => {
+    expect(deriveExcerpt("See the [timetable](https://jitsu.au/classes) for times.")).toBe(
+      "See the timetable for times.",
+    );
+  });
+
+  it("drops an image entirely rather than reading its alt text as prose", () => {
+    expect(
+      deriveExcerpt("![Two people training](https://example.com/a.png)\n\nWe train Mondays."),
+    ).toBe("We train Mondays.");
+  });
+
+  it("strips emphasis but leaves an underscore inside a word alone", () => {
+    expect(deriveExcerpt("A **big** _week_ for the snake_case club.")).toBe(
+      "A big week for the snake_case club.",
+    );
+  });
+
+  it("keeps list and blockquote text without their markers", () => {
+    expect(deriveExcerpt("- Gi\n- Mouthguard\n\n> Bring water.")).toBe(
+      "Gi Mouthguard Bring water.",
+    );
+  });
+
+  it("ignores fenced code, rules and table rows", () => {
+    expect(deriveExcerpt("```\nnpm install\n```\n\n---\n\n| a | b |\n\nReal words here.")).toBe(
+      "Real words here.",
+    );
+  });
+
+  it("skips video lines, which are not text", () => {
+    expect(deriveExcerpt("[[video:https://youtu.be/abc]]\n\nA throw from last week.")).toBe(
+      "A throw from last week.",
+    );
+  });
+
+  it("cuts at a word boundary and marks the cut", () => {
+    const excerpt = deriveExcerpt("alpha bravo charlie delta", 14);
+    expect(excerpt).toBe("alpha bravo…");
+    expect(excerpt.length).toBeLessThanOrEqual(14);
+  });
+
+  it("stays within the limit when the first word is longer than the whole budget", () => {
+    const excerpt = deriveExcerpt("Supercalifragilisticexpialidocious", 10);
+    expect(excerpt).toBe("Supercali…");
+    expect(excerpt.length).toBe(10);
+  });
+
+  it("does not cut a body that fits", () => {
+    const body = "Short enough.";
+    expect(deriveExcerpt(body)).toBe(body);
+    expect(deriveExcerpt("x".repeat(EXCERPT_MAX_LENGTH))).toHaveLength(EXCERPT_MAX_LENGTH);
+  });
+
+  it("returns an empty string when there is no prose to summarise", () => {
+    expect(deriveExcerpt("")).toBe("");
+    expect(deriveExcerpt("[[video:https://youtu.be/abc]]")).toBe("");
+    expect(deriveExcerpt("## Just a heading")).toBe("");
+  });
+
+  it("stays inside the 500-character excerpt column limit", () => {
+    expect(deriveExcerpt("word ".repeat(500)).length).toBeLessThanOrEqual(EXCERPT_MAX_LENGTH);
   });
 });

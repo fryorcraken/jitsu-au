@@ -1017,6 +1017,7 @@ function ManagerUserPage() {
                           not a bug. */}
                       <Field label="Media consent" value={mediaConsentLabel(w.media_consent)} />
                       <Field label="Approved" value={formatDateTime(w.approved_at)} />
+                      <Field label="Approved by" value={w.approved_by_name} />
                     </dl>
 
                     {!w.has_pdf ? (

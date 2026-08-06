@@ -57,4 +57,29 @@ describe("/manager/blog/new", () => {
 
     expect(screen.getByLabelText(/Body/)).toHaveValue("Some post content");
   });
+
+  it("previews the excerpt derived from the body while the field is blank", async () => {
+    const user = userEvent.setup();
+    render(<NewBlogPostPage />);
+
+    expect(screen.getByText(/once you write one/)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/Body/), "Everyone passed the grading.");
+
+    // Scoped to the hint's own wording: the live preview card renders the same
+    // sentence, so a bare text match would find either one.
+    expect(
+      screen.getByText(/blog list will show: Everyone passed the grading\./),
+    ).toBeInTheDocument();
+  });
+
+  it("drops the derived preview once the manager writes their own excerpt", async () => {
+    const user = userEvent.setup();
+    render(<NewBlogPostPage />);
+
+    await user.type(screen.getByLabelText(/Body/), "Everyone passed the grading.");
+    await user.type(screen.getByLabelText(/Excerpt/), "My own summary");
+
+    expect(screen.queryByText(/blog list will show/)).not.toBeInTheDocument();
+  });
 });
