@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CheckCircle2, Download } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import { SignaturePad, type SignaturePadHandle } from "@/components/site/SignaturePad";
 import { GI_SIZE_HINT, GiSizeSelect } from "@/components/site/KitSizeSelect";
 import { type GiSize, isGiSize } from "@/lib/kit-sizes";
@@ -233,6 +234,15 @@ function Waiver() {
   useEffect(() => {
     if (user?.email) setEmail(user.email);
   }, [user]);
+
+  // Lets someone on a shared/previously-signed-in device sign under a
+  // different address without leaving the page. Falls back to whatever
+  // prefill came in on the URL, since that's the address they were trying to
+  // sign under in the first place.
+  async function signOutToSignAsSomeoneElse() {
+    await supabase.auth.signOut();
+    setEmail(search.email ?? "");
+  }
 
   // Arriving from the link in an interest confirmation email is itself proof
   // that the address is real, so redeem it on open rather than waiting for a
@@ -797,8 +807,21 @@ function Waiver() {
                 />
                 {user && (
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    You're signed in, so the waiver uses your account email. To sign for someone
-                    else, log out first.
+                    You're signed in, so the waiver uses your account email.
+                    <br />
+                    Wrong email?{" "}
+                    <button
+                      type="button"
+                      onClick={signOutToSignAsSomeoneElse}
+                      className="underline hover:text-foreground"
+                    >
+                      Log out
+                    </button>{" "}
+                    to sign under a different address, or{" "}
+                    <Link to="/contact" className="underline hover:text-foreground">
+                      contact us
+                    </Link>{" "}
+                    to change the email on your account.
                   </p>
                 )}
               </div>
