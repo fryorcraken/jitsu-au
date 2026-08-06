@@ -19,6 +19,7 @@ import {
   NotificationDigestEmail,
   type DigestBlock,
 } from "@/lib/email-templates/notification-digest";
+import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
 import {
   digestSections,
@@ -305,9 +306,13 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
     return { considered: pending.length, recipients: byUser.size, sent: 0 };
   }
 
-  // Date in the club's own terms, so the idempotency key matches what a person
-  // would call "today" and a re-run after midnight UTC is still the same digest.
-  const day = now.toISOString().slice(0, 10);
+  // The club's date, not the UTC one. The schedule fires at 20:00 UTC, which is
+  // already tomorrow morning in Sydney, so a UTC key would label every digest
+  // with the previous day and a re-run either side of midnight UTC would mint
+  // two different keys for one morning's mail. `emailed_at` is the real guard;
+  // this key is the second belt, and a second belt that changes halfway through
+  // the window is not one.
+  const day = clubLocalDate(now, CLUB_TIME_ZONE);
   let sent = 0;
 
   for (const [userId, items] of byUser) {
