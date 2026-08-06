@@ -883,6 +883,7 @@ function ManagerUserPage() {
                         value={w.sms_whatsapp_consent ? "Yes" : "No"}
                       />
                       <Field label="Approved" value={formatDateTime(w.approved_at)} />
+                      <Field label="Approved by" value={w.approved_by_name} />
                     </dl>
 
                     {!w.has_pdf ? (

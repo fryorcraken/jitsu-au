@@ -827,9 +827,9 @@ function Waiver() {
                 </Label>
                 <GiSizeSelect id="gi_size" value={giSize} onChange={setGiSize} className="mt-1.5" />
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  The number in brackets is the height the gi is cut for. {GI_SIZE_HINT} This is
-                  just so we can order kit that fits, and it is not part of the waiver. You can
-                  change it any time from your account.
+                  The number in brackets is the wearer's height that gi size is cut for.{" "}
+                  {GI_SIZE_HINT} This is just so we can order kit that fits, and it is not part of
+                  the waiver. You can change it any time from your account.
                 </p>
               </div>
             </fieldset>
