@@ -14,6 +14,7 @@ import {
   uploadBlogImageSchema,
 } from "@/lib/validation";
 import { slugify, uniqueSlug } from "@/lib/slug";
+import { deriveExcerpt } from "@/lib/blog-content";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
 const BUCKET = "blog-media";
@@ -103,6 +104,19 @@ export function resolvePublishedAt(
   now: string,
 ): string | null {
   return existingPublishedAt ?? (newStatus === "published" ? now : null);
+}
+
+/**
+ * The excerpt to store: what the manager typed, or one derived from the body
+ * when they left the field blank. The composer previews the same derived text
+ * as they write, so what lands in the row is what they were shown.
+ *
+ * Null when there is nothing to derive either (a post that is only a video,
+ * say), which is what the blog list and the post page's meta description
+ * already fall back from. Exported for its test — plain, no server context.
+ */
+export function resolveExcerpt(excerpt: string | undefined, bodyMd: string): string | null {
+  return excerpt?.trim() || deriveExcerpt(bodyMd) || null;
 }
 
 // ---- Public: published posts ----
@@ -201,7 +215,7 @@ export const createBlogPost = createServerFn({ method: "POST" })
       .insert({
         slug,
         title: data.title,
-        excerpt: data.excerpt || null,
+        excerpt: resolveExcerpt(data.excerpt, data.body_md),
         body_md: data.body_md,
         cover_image_path: data.cover_image_path || null,
         status: data.status,
@@ -234,12 +248,13 @@ export const updateBlogPost = createServerFn({ method: "POST" })
       data.status,
       new Date().toISOString(),
     );
+    const excerpt = resolveExcerpt(data.excerpt, data.body_md);
     const { error } = await supabaseAdmin
       .from("blog_posts")
       .update({
         slug,
         title: data.title,
-        excerpt: data.excerpt || null,
+        excerpt,
         body_md: data.body_md,
         cover_image_path: data.cover_image_path || null,
         status: data.status,
@@ -248,7 +263,11 @@ export const updateBlogPost = createServerFn({ method: "POST" })
       })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
-    return { ok: true as const, slug };
+    // `slug` and `excerpt` both come back because the server may have resolved
+    // either one (a slug collision, or an excerpt derived from the body): the
+    // edit page uses them as the new baseline so the form isn't left reading
+    // as dirty, and showing something other than what was stored.
+    return { ok: true as const, slug, excerpt };
   });
 
 export const deleteBlogPost = createServerFn({ method: "POST" })

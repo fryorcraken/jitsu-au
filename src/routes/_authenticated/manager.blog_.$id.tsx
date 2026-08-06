@@ -62,17 +62,17 @@ function EditBlogPostPage() {
       });
       toast.success(value.status === "published" ? "Post published" : "Draft saved");
       // Reflect exactly what was saved as the new baseline — including the
-      // slug the server actually resolved (a collision, or a re-derivation
-      // when the field was cleared) — so the "unsaved changes" comparison in
-      // BlogPostEditor resets instead of reading as dirty right after a
-      // successful save.
+      // slug and excerpt the server actually resolved (a slug collision or a
+      // re-derivation when either field was cleared) — so the "unsaved
+      // changes" comparison in BlogPostEditor resets instead of reading as
+      // dirty right after a successful save.
       setPost((prev) =>
         prev
           ? {
               ...prev,
               title: value.title,
               slug: res.slug,
-              excerpt: value.excerpt || null,
+              excerpt: res.excerpt,
               body_md: value.body_md,
               cover_image_path: value.cover_image_path || null,
               cover_image_url: value.cover_image_url,

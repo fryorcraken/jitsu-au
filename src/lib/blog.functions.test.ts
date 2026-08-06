@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { resolvePostSlug, resolvePublishedAt } from "./blog.functions";
+import { resolveExcerpt, resolvePostSlug, resolvePublishedAt } from "./blog.functions";
 
 /**
  * A minimal chainable stub covering the one query shape `resolvePostSlug`
@@ -75,5 +75,24 @@ describe("resolvePublishedAt", () => {
     // would silently jump to the top of the public list on republish.
     expect(resolvePublishedAt(original, "draft", now)).toBe(original);
     expect(resolvePublishedAt(original, "published", now)).toBe(original);
+  });
+});
+
+describe("resolveExcerpt", () => {
+  it("keeps what the manager typed", () => {
+    expect(resolveExcerpt("Hand-written summary.", "Body text.")).toBe("Hand-written summary.");
+  });
+
+  it("derives one from the body when the field was left blank", () => {
+    expect(resolveExcerpt("", "# Grading day\n\nEveryone passed.")).toBe("Everyone passed.");
+    expect(resolveExcerpt(undefined, "Everyone passed.")).toBe("Everyone passed.");
+  });
+
+  it("treats a whitespace-only excerpt as blank rather than storing it", () => {
+    expect(resolveExcerpt("   ", "Everyone passed.")).toBe("Everyone passed.");
+  });
+
+  it("stores null when there is nothing to derive either", () => {
+    expect(resolveExcerpt("", "[[video:https://youtu.be/abc]]")).toBeNull();
   });
 });
