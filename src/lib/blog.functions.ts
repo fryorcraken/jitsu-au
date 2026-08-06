@@ -13,7 +13,7 @@ import {
   listBlogPostsSchema,
   uploadBlogImageSchema,
 } from "@/lib/validation";
-import { slugify, uniqueSlug } from "@/lib/slug";
+import { defaultBlogSlug, uniqueSlug } from "@/lib/slug";
 import { deriveExcerpt } from "@/lib/blog-content";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
@@ -59,18 +59,20 @@ function serverSupabase() {
 
 /**
  * Resolve the slug a post will be saved under: the manager's own, or one
- * derived from the title, made unique against every OTHER post's slug that
- * shares the same base (so "hello-world" collides into "hello-world-2", not a
- * database error). Exported for its test — plain, taking the admin client as
- * a parameter, unlike the `createServerFn` handlers around it.
+ * derived from the title and today's date (`defaultBlogSlug`), made unique
+ * against every OTHER post's slug that shares the same base (so
+ * "2026-08-06-hello-world" collides into "...-2", not a database error).
+ * Exported for its test — plain, taking the admin client and `now` as
+ * parameters, unlike the `createServerFn` handlers around it.
  */
 export async function resolvePostSlug(
   admin: SupabaseClient<Database>,
   title: string,
   provided: string | undefined,
   excludeId?: string,
+  now: Date = new Date(),
 ): Promise<string> {
-  const base = (provided || "").trim() || slugify(title);
+  const base = (provided || "").trim() || defaultBlogSlug(title, now);
   if (!base) {
     throw new Error("Could not turn that title into a URL. Set a URL slug by hand.");
   }

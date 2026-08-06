@@ -26,7 +26,7 @@ import { uploadBlogImage } from "@/lib/blog.functions";
 import { deriveExcerpt, extractYouTubeId, splitBlogContent } from "@/lib/blog-content";
 import { blogMarkdownComponents } from "@/lib/blog-markdown";
 import { BlogVideoBlock } from "@/components/site/BlogVideoBlock";
-import { slugify } from "@/lib/slug";
+import { defaultBlogSlug, slugify } from "@/lib/slug";
 import {
   blogImageMimeTypes,
   blogPostSchema,
@@ -275,7 +275,7 @@ export function BlogPostEditor({
     onSave(value);
   }
 
-  const previewSlug = slug.trim() || slugify(title) || "your-post-title";
+  const previewSlug = slug.trim() || defaultBlogSlug(title) || "your-post-title";
   const videoUrlIsYouTube = Boolean(videoUrl.trim() && extractYouTubeId(videoUrl.trim()));
   // What the server will store if the excerpt is left blank. Memoised because
   // it re-derives from the whole body, which changes on every keystroke.

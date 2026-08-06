@@ -2092,8 +2092,9 @@ const blogSlug = z
 
 /**
  * Manager: create or edit a post. `slug` is optional — when blank, the server
- * derives one from the title (`slugify` in `src/lib/slug.ts`) and resolves any
- * collision by appending `-2`, `-3`, etc.
+ * derives one from the title prefixed with today's date, `YYYY-MM-DD-...`
+ * (`defaultBlogSlug` in `src/lib/slug.ts`) and resolves any collision by
+ * appending `-2`, `-3`, etc.
  */
 export const blogPostSchema = z.object({
   id: z.string().uuid().optional(),
