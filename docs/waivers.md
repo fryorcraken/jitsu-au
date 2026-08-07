@@ -198,7 +198,7 @@ and a manager files the scan from `/manager/waivers` ("Upload a paper waiver").
 Managers only: nobody else can create a waiver on another person's behalf.
 
 The same filing runs through the manager agent API too (`file_waiver`,
-AGENTS.md), so a manager's own AI agent can file one from a script — the case
+docs/manager-agent-api.md), so a manager's own AI agent can file one from a script — the case
 this is for is migrating a backlog of paper records the club already holds, not
 a member filing their own. It is the identical function behind both entry
 points, so an agent-filed waiver and one uploaded through the form are the same

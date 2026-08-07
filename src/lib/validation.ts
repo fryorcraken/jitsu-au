@@ -1515,7 +1515,7 @@ export const matchTransactionSchema = z.object({
 });
 export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 
-// ---- Manager agent API (see src/lib/manager-agent.ts + AGENTS.md) ----
+// ---- Manager agent API (see src/lib/manager-agent.ts + docs/manager-agent-api.md) ----
 //
 // A small HTTP surface a manager's AI agent can drive (via MCP or a skill). The
 // action names below are the contract; keep them in sync with AGENT_MANIFEST in

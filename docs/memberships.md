@@ -127,6 +127,6 @@ own), and reconciliation, activation and cancellation follow the same
 | `/manager/membership-plans` | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan. |
 | `/manager/memberships`      | `list_invoices` / `edit_invoice`                 | See and correct invoices.                      |
 
-Per this repo's standing rule (`AGENTS.md`, "Manager agent API"), the agent
+Per this repo's standing rule (`docs/manager-agent-api.md`), the agent
 actions mirror what a manager can do in the UI — see the skill file for the
 full parameter list and worked examples.
