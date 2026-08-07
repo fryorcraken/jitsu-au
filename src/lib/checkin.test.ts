@@ -118,9 +118,77 @@ describe("resolveCoverage", () => {
     expect(d.warnings).toContain("credits_exhausted");
   });
 
-  it("does not cover with a membership that has not started yet", () => {
-    const future = membership({ starts_at: "2026-09-01T00:00:00.000Z" });
-    expect(resolveCoverage({ memberships: [future], at: AT }).coverage).toBe("none");
+  it("does not cover with a DATED membership that has not started yet, and says so", () => {
+    const future = semester({
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: "2026-12-14T00:00:00.000Z",
+    });
+    const d = resolveCoverage({ memberships: [future], at: AT });
+    expect(d.coverage).toBe("none");
+    expect(d.warnings).toContain("not_started");
+  });
+
+  // Someone having trained is a fact that already happened; paperwork catching up
+  // afterwards cannot unmake it. A waiver signed at the door after the class
+  // started, or filed from paper days later, still has to be payable by the
+  // credits it earned -- so a credit balance is gated by its balance and by
+  // nothing else. Exercises the real activation dates rather than hand-picked
+  // ISO strings.
+  it.each([
+    ["signed at the door, after the class began", "2026-08-05T08:05:00.000Z"],
+    ["approved days after the class", "2026-08-09T02:00:00.000Z"],
+  ])("covers a class the credits were earned at, %s", (_label, grantedAt) => {
+    const window = planMembershipWindow(
+      { starts_on: null, ends_on: null, duration_days: null },
+      grantedAt,
+    );
+    const d = resolveCoverage({ memberships: [trial({ ...window })], at: AT });
+    expect(d.coverage).toBe("trial");
+    expect(d.sessions_remaining_after).toBe(1);
+    expect(d.warnings).not.toContain("not_started");
+  });
+
+  // Pre-buying the next training period is normal (`sellablePlans` offers a plan
+  // before its start date), so holding a membership that begins later is not by
+  // itself worth saying. Warned about beside a green pill it is noise, and it
+  // would be frozen into `session_checkins.warnings` for good.
+  it("does not warn about a later membership when something already covers the class", () => {
+    const nextPeriod = semester({
+      id: "next",
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: "2026-12-14T00:00:00.000Z",
+    });
+    const d = resolveCoverage({ memberships: [nextPeriod, trial()], at: AT });
+    expect(d.coverage).toBe("trial");
+    expect(d.warnings).not.toContain("not_started");
+  });
+
+  // The balance rule is keyed off credits, not `kind`. A plan with neither dates
+  // nor credits (the malformed shape docs/memberships.md warns about) has no
+  // entitlement to spend, so it must not turn into an everything-covers pass.
+  it("does not let an undated, credit-less membership cover an earlier class", () => {
+    const malformed = semester({
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: null,
+      sessions_remaining: null,
+    });
+    expect(resolveCoverage({ memberships: [malformed], at: AT }).coverage).toBe("none");
+  });
+
+  // An unlimited plan is never a balance, however many credits are hung off it:
+  // the period tier spends nothing, so treating an undated one as a balance
+  // would hand out free unlimited cover of every class ever held, unwarned. The
+  // database permits this shape -- savePlanSchema and the manager agent API do
+  // not run planShapeError -- so only this guard stops it.
+  it("does not let an undated period plan carrying credits cover an earlier class", () => {
+    const unlimitedWithCredits = semester({
+      starts_at: "2026-09-01T00:00:00.000Z",
+      ends_at: null,
+      sessions_remaining: 5,
+    });
+    const d = resolveCoverage({ memberships: [unlimitedWithCredits], at: AT });
+    expect(d.coverage).toBe("none");
+    expect(d.warnings).toContain("not_started");
   });
 
   // Exercises the actual dates activateMembershipRow writes for a dated plan
@@ -255,6 +323,28 @@ describe("attachableMemberships", () => {
     expect(by("spent")).toMatchObject({ usable: false, reason: "no credits left" });
     expect(by("cancelled")).toMatchObject({ usable: false, reason: "cancelled" });
     expect(by("old")).toMatchObject({ usable: false, reason: "not valid for this class" });
+  });
+
+  // The point of all of it: an uncovered check-in from a class someone really
+  // attended can be attached to the trial they were given afterwards.
+  it("lets a later-granted trial be attached to an earlier class", () => {
+    const granted = trial({ starts_at: "2026-08-09T02:00:00.000Z", ends_at: null });
+    const rows = attachableMemberships([granted], AT);
+    expect(rows[0]).toMatchObject({ usable: true, reason: null });
+  });
+
+  it("says when a DATED membership starts after the class rather than just refusing it", () => {
+    const rows = attachableMemberships(
+      [
+        semester({
+          id: "later",
+          starts_at: "2026-09-01T00:00:00.000Z",
+          ends_at: "2026-12-14T00:00:00.000Z",
+        }),
+      ],
+      AT,
+    );
+    expect(rows[0]).toMatchObject({ usable: false, reason: "starts after this class" });
   });
 
   it("never claims a membership is usable when attaching it would cover nothing", () => {

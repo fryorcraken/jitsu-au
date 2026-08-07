@@ -40,7 +40,7 @@ describe("runApproval", () => {
 
   // The regression #70 was filed for. Before the split, this case produced
   // "Failed to update approval" even though the approval had committed: the
-  // profile was updated, the login unbanned, a sign-in link emailed and the
+  // profile was updated, the login unbanned, the activation email sent and the
   // free trial assigned. The manager's next move was to click Approve again.
   it("says the save worked when only the refresh fails", async () => {
     const outcome = await runApproval({

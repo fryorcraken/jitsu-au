@@ -85,10 +85,13 @@ vi.mock("@/integrations/supabase/client.server", () => ({
   },
 }));
 
-async function assignTrial(fake: ReturnType<typeof fakeAdmin>) {
+/** 18:05 Sydney on 5 Aug: signed at the door, minutes after the class began. */
+const SIGNED_AT = "2026-08-05T08:05:00.000Z";
+
+async function assignTrial(fake: ReturnType<typeof fakeAdmin>, signedAt = SIGNED_AT) {
   currentAdmin = fake.admin;
   const { assignTrialMembership } = await import("./membership.functions");
-  return assignTrialMembership("user-1");
+  return assignTrialMembership("user-1", signedAt);
 }
 
 describe("assignTrialMembership", () => {
@@ -105,6 +108,21 @@ describe("assignTrialMembership", () => {
     expect(fake.inserts).toHaveLength(1);
     expect(fake.inserts[0]).toMatchObject({ user_id: "user-1", plan_id: TRIAL_PLAN.id });
     expect(fake.updates[0]).toMatchObject({ status: "active" });
+  });
+
+  // The trial records when the entitlement was earned, not when a manager got
+  // round to approving it: a form filled in at the gym may be approved hours or
+  // days later. So it runs from the start of the SIGNING day (00:00 Sydney on
+  // 5 Aug = 4 Aug 14:00 UTC). Coverage does not depend on this -- a credit
+  // balance is not date-gated -- but the row should still say something true.
+  it("runs the trial from the day the waiver was signed, not the day it was approved", async () => {
+    const fake = fakeAdmin({});
+    await assignTrial(fake);
+    expect(fake.updates[0]).toMatchObject({
+      status: "active",
+      starts_at: "2026-08-04T14:00:00.000Z",
+      ends_at: null,
+    });
   });
 
   it("skips someone who has already had a trial", async () => {

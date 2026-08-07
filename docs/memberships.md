@@ -29,6 +29,14 @@ approved a waiver and the club's free trial was assigned automatically.
 | `2026-s2`, …       | `period`    | Training period            | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.       |
 | `insurance_yearly` | `insurance` | Yearly insurance           | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from pay. |
 
+A plan that ends with its credits carries a `starts_at` for the record, but
+**nothing reads it as a limit**: at check-in a credit balance covers any class
+until the credits run out, including one held before the membership existed
+(`docs/check-in.md`). Training is a fact that already happened, and late
+paperwork must not be able to unmake it. The auto-assigned trial still dates
+itself from the day its **waiver was signed** rather than the day a manager
+approved it, so the row reflects when the entitlement was really earned.
+
 The kind is the **only** control over how a plan runs: picking one on
 `/manager/membership-plans` shows just that kind's fields and clears the
 others, so a plan can never carry both a date range and a rolling duration

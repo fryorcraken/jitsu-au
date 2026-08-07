@@ -443,9 +443,15 @@ describe("planMembershipWindow", () => {
     expect(w.ends_at).toBe("2027-05-01T00:00:00.000Z");
   });
 
-  it("has no expiry at all with neither dates nor a duration", () => {
+  // Undated plans (the free trial, casual classes) run from the START OF THE
+  // CLUB DAY, so the row reads as "granted on this day" rather than at some
+  // arbitrary instant. Nothing enforces it -- a credit balance is not date-gated
+  // at check-in -- but the value is still pinned so the day grain does not drift
+  // back to a raw timestamp unnoticed. NOW is 10:00 Sydney on 1 May, so the
+  // day's midnight is the previous afternoon in UTC.
+  it("runs an undated plan from the start of the club day, with no expiry", () => {
     const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: null }, NOW);
-    expect(w.starts_at).toBe(NOW);
+    expect(w.starts_at).toBe("2026-04-30T14:00:00.000Z");
     expect(w.ends_at).toBeNull();
   });
 });

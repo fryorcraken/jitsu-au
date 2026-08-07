@@ -228,7 +228,7 @@ Core tables:
   i.e. banned/no-credentials) auth user + their profile, created at waiver
   submission (interest registrations are leads only — just rows). A **manager
   approving a waiver** copies the submission's details onto the profile, lifts
-  the ban, emails a sign-in link, and assigns the free trial. The funnel phase
+  the ban, emails them that their account is active, and assigns the free trial. The funnel phase
   (`lead | applicant | visitor | member | lapsed`) is always derived
   (`deriveLifecycleStatus`). There is no self-serve sign-up.
 - `waivers` — frozen submissions: the person fields **as submitted** (email

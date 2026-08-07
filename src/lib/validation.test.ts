@@ -1840,6 +1840,7 @@ describe("check-in schemas", () => {
       "membership_ended",
       "credits_exhausted",
       "payment_pending",
+      "not_started",
       "coverage_race",
     ]);
   });

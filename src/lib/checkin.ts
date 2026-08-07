@@ -53,14 +53,62 @@ function endsAtMs(m: CoverageCandidate): number | null {
 }
 
 /**
+ * A membership whose entitlement is a BALANCE, not a window: no end date, and a
+ * count of credits. The free trial and a casual pass are exactly this — "two
+ * free classes, ever, no expiry".
+ *
+ * **No date gates these.** Someone having trained is a fact that already
+ * happened, and paperwork catching up afterwards cannot unmake it: a waiver
+ * signed at the door after the class started, or filed from paper a week later,
+ * must still be payable by the credits it earned. What limits a balance is the
+ * balance. So `starts_at` is not consulted for them at all, and a credit can pay
+ * for a class held before the membership row existed.
+ *
+ * Credits are what make it a balance, so that is what this reads — a future
+ * credit pack under some new kind works with no change here. Two shapes are
+ * excluded, and both are shapes the database still permits because
+ * `savePlanSchema` and the manager agent API do not run `planShapeError`:
+ *   - **A `period` plan is never a balance**, however many credits are hung off
+ *     it. Its dates ARE the entitlement, and the period tier spends nothing, so
+ *     an undated one treated as a balance would cover every class the club has
+ *     ever held, free and unwarned.
+ *   - **Neither dates nor credits** is the malformed shape
+ *     docs/memberships.md warns about. There is nothing to spend, so there is
+ *     nothing to pay with.
+ */
+function isOpenBalance(m: CoverageCandidate): boolean {
+  if (m.kind === "period") return false;
+  return m.ends_at === null && m.sessions_remaining !== null;
+}
+
+/**
+ * Active, dated, and the class ran before the window it was bought for. Only
+ * ever asked of a DATED membership — a training period is a range of days, so
+ * the range IS what was purchased. Kept as its own predicate because it is also
+ * a DIAGNOSIS: a manager staring at "No cover" should be told the membership
+ * starts later, not left to work it out.
+ */
+function startsAfter(m: CoverageCandidate, atMs: number): boolean {
+  return (
+    m.status === "active" &&
+    !isOpenBalance(m) &&
+    Boolean(m.starts_at) &&
+    new Date(m.starts_at as string).getTime() > atMs
+  );
+}
+
+/**
  * Is this membership live at instant `atMs`? Active status is not enough: there
  * is no expiry job anywhere in this app, so a semester that finished in June
  * still reads `status = 'active'` today. Trusting the status alone would keep
  * covering classes for months after the money ran out.
+ *
+ * Dates are asked only of a membership that was SOLD as a range of days. A
+ * credit balance is never gated on one — see `isOpenBalance`.
  */
 function isLive(m: CoverageCandidate, atMs: number): boolean {
   if (m.status !== "active") return false;
-  if (m.starts_at && new Date(m.starts_at).getTime() > atMs) return false;
+  if (startsAfter(m, atMs)) return false;
   const ends = endsAtMs(m);
   return ends === null || ends >= atMs;
 }
@@ -176,6 +224,12 @@ export function resolveCoverage(input: {
     };
   }
 
+  // Purely a DIAGNOSIS of "no cover", which is why it is pushed here and not up
+  // with the others: holding a membership that starts later is perfectly normal
+  // (pre-buying next training period does exactly that), so saying so beside a
+  // green covered pill — and freezing it into `session_checkins.warnings` — would
+  // be noise. It only ever earns its place when nothing paid for the class.
+  if (input.memberships.some((m) => startsAfter(m, atMs))) warnings.push("not_started");
   warnings.push("no_cover");
   return {
     membership_id: null,
@@ -230,6 +284,7 @@ export function coveragePreviewLabel(input: {
  * when attaching it would resolve to nothing.
  */
 export function attachableMemberships(candidates: CoverageCandidate[], at: string) {
+  const atMs = new Date(at).getTime();
   return candidates.map((m) => {
     const decision = resolveCoverage({ memberships: candidates, at, only: m.id });
     return {
@@ -245,7 +300,9 @@ export function attachableMemberships(candidates: CoverageCandidate[], at: strin
             ? m.status
             : m.sessions_remaining === 0
               ? "no credits left"
-              : "not valid for this class",
+              : startsAfter(m, atMs)
+                ? "starts after this class"
+                : "not valid for this class",
     };
   });
 }

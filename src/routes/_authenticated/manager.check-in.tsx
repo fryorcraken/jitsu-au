@@ -45,6 +45,7 @@ const WARNING_TEXT: Record<string, string> = {
   credits_exhausted: "a membership has no sessions left",
   payment_pending: "waiting on a payment",
   coverage_race: "another check-in took the session first",
+  not_started: "a membership starts after this class",
 };
 
 const selectClass =
@@ -69,11 +70,14 @@ function fmtTime(iso: string): string {
   });
 }
 
+// `no_cover` is dropped when something more specific explains it, since the row
+// already carries a red "No cover" pill. When it is all we have, say it anyway:
+// a bare dash under "No cover" is what makes an uncovered check-in impossible to
+// diagnose from this screen.
 function Warnings({ codes }: { codes: string[] }) {
-  const text = codes
-    .filter((c) => c !== "no_cover")
-    .map((c) => WARNING_TEXT[c] ?? c)
-    .join("; ");
+  const explained = codes.filter((c) => c !== "no_cover");
+  const shown = explained.length ? explained : codes;
+  const text = shown.map((c) => WARNING_TEXT[c] ?? c).join("; ");
   if (!text) return <span className="text-muted-foreground">—</span>;
   return <span className="text-xs text-muted-foreground">{text}</span>;
 }
@@ -379,7 +383,6 @@ function CheckInPage() {
             <thead className="bg-muted/50 text-left">
               <tr>
                 <th className="px-3 py-2">Person</th>
-                <th className="px-3 py-2">Email</th>
                 <th className="px-3 py-2">What pays for it</th>
                 <th className="px-3 py-2" />
               </tr>
@@ -387,7 +390,7 @@ function CheckInPage() {
             <tbody>
               {matches.length === 0 && (
                 <tr>
-                  <td className="px-3 py-6 text-muted-foreground" colSpan={4}>
+                  <td className="px-3 py-6 text-muted-foreground" colSpan={3}>
                     {search.trim()
                       ? "Nobody by that name has a waiver on file."
                       : "Everyone is checked in."}
@@ -396,14 +399,29 @@ function CheckInPage() {
               )}
               {matches.slice(0, MATCH_LIMIT).map((r) => (
                 <tr key={r.user_id} className="border-t">
-                  <td className="px-3 py-2 font-medium">{r.name ?? "Unknown"}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.email ?? "—"}</td>
+                  <td className="px-3 py-2 font-medium">
+                    <Link
+                      className="hover:underline"
+                      to="/manager/users/$userId"
+                      params={{ userId: r.user_id }}
+                    >
+                      {r.name ?? "Unknown"}
+                    </Link>
+                  </td>
                   <td className="px-3 py-2">
                     <Pill
                       label={coveragePreviewLabel(r)}
                       className={coverageClass(r.coverage)}
                       preserveCase
                     />
+                    {/* Only when nothing pays for it: "No cover" on its own is a
+                        dead end, and this is the row a manager is looking at
+                        while the person stands in front of them. */}
+                    {r.coverage === "none" && (
+                      <div className="mt-1">
+                        <Warnings codes={r.warnings} />
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button

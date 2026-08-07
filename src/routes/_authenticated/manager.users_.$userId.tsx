@@ -249,7 +249,7 @@ function EmailCard({
       <p className="mb-3 text-sm text-muted-foreground">
         {verified
           ? `Confirmed on ${formatDate(emailConfirmedAt)}, when they opened a link we sent here.`
-          : "Nobody has opened a link we sent to this address yet. Approving a waiver emails a sign-in link here, so a typo means it goes nowhere."}
+          : "Nobody has opened a link we sent to this address yet. Approving a waiver emails their account details here, and it is the address they sign in with, so a typo locks them out."}
       </p>
 
       {editing ? (

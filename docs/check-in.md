@@ -44,6 +44,16 @@ In order, highest first:
 - **Yearly insurance never covers a class.** It buys affiliation and cover, not
   mat time.
 - A **pending** membership never covers anything: the money has not landed.
+- **No date ever gates a credit.** A free trial or casual pass is a balance, not
+  a window: it covers any class at all until its credits run out, including one
+  held before the membership row existed. Someone having trained is a fact that
+  already happened, and paperwork catching up cannot unmake it — a waiver signed
+  at the door after the class began, or filed from paper a week later, still
+  pays with the credits it earned. That is also what lets a manager attach an
+  old uncovered check-in to a trial granted afterwards.
+- A **dated** membership is the one thing dates still apply to, because the
+  range of days _is_ what was bought: a training period covers its own dates and
+  not classes before or after them.
 
 Between two memberships in the same tier, the one that **runs out soonest** is
 used, so nothing expires unspent.
@@ -103,7 +113,16 @@ people in to a class that did not run.
 6. **Coverage is resolved against the class's start time**, not the current time,
    so a manager checking people in ten minutes late (or fixing yesterday's roster
    this morning) gets the same answer they would have got at the door.
-7. **Sessions attended is not credits used.** It counts classes trained,
+   **Attendance is a fact, not a claim to be validated.** No check-in is ever
+   refused (rule 5), and no credit is ever withheld because of when the
+   paperwork landed: the club records what happened and pays for it out of what
+   the person is entitled to. Dates only decide what a **dated** membership
+   bought.
+7. **No cover always says why.** "Nothing covers this class" is a dead end;
+   "a membership starts after this class" or "waiting on a payment" is something
+   a manager can act on. Every reason coverage resolution knows is surfaced on
+   the roster and in the attach list, rather than logged and swallowed.
+8. **Sessions attended is not credits used.** It counts classes trained,
    including uncovered ones. How many credits a membership has left is a separate
    number and lives on the membership.
 
