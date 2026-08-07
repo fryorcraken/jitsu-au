@@ -748,6 +748,25 @@ export const createAnnotation = createServerFn({ method: "POST" })
       .select("id, created_at")
       .single();
     if (error || !inserted) throw new Error(error?.message ?? "Could not save your comment.");
+
+    // Best-effort notifications. `notifyKbAnnotation` refuses anything that is
+    // not `shared`, so a private note never reaches it in a state where it
+    // could be quoted; passing the visibility explicitly keeps that check on
+    // the value that was actually stored rather than on the request.
+    try {
+      const { notifyKbAnnotation } = await import("@/lib/notification-events.server");
+      await notifyKbAnnotation(db, {
+        annotationId: inserted.id,
+        articleId: loaded.article.id,
+        actorId: viewer.userId,
+        parentId: data.parent_id ?? null,
+        body: data.body,
+        visibility,
+      });
+    } catch (e) {
+      console.error("[createAnnotation] failed to send notifications:", e);
+    }
+
     return { ok: true as const, id: inserted.id, created_at: inserted.created_at };
   });
 

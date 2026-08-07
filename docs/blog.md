@@ -65,7 +65,13 @@ severities of moderation, not the same action.
 9. **A comment's body is plain text**, not Markdown — no formatting, no
    embedded photos or videos in comments. This is a deliberate scope line for
    now (see Future features).
-10. **A commenter's display name is their own choice, not their legal name.**
+10. **Comments and new posts produce notifications.** A reply emails its
+    recipient straight away; thread activity, announcements and the manager
+    moderation alert batch into a daily summary. Nobody is notified about their
+    own comment, and a reply to a **hidden** comment notifies nobody, since its
+    author is being moderated and telling them would undo that quietly.
+    Announcements are opt-in. Full spec: `docs/notifications.md`.
+11. **A commenter's display name is their own choice, not their legal name.**
     `profiles.display_name` is an optional override a person sets in their
     account settings; when unset, the name shown is derived — first (or
     preferred) name plus last initial (`commentDisplayName` in

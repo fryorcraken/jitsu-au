@@ -267,6 +267,17 @@ Core tables:
   path; it is owner-scoped and **no manager screen reads it**. Managers edit all
   of this at `/manager/kb` or through the manager agent API, which do the same
   things to the same data. Product flows: `docs/knowledge-base.md`.
+- `notifications` / `notification_preferences` / `notification_tokens` — the
+  `/notifications` page, the sidebar badge and the emails behind them. One
+  `notifications` row per person per event drives **both** the in-app list
+  (`read_at`) and the email (`emailed_at`), so there is no separate outbox, and
+  a unique index on `(user_id, kind, subject_id)` makes every writer safe to
+  call twice. The manager "needs attention" items are **not** stored: they stay
+  derived from `membership_plans` and clear by being fixed, which is why they
+  have no read state. Preferences are **nullable booleans** on purpose (NULL =
+  "never chose", resolved against `NOTIFICATION_DEFAULTS`) and govern **email
+  only** — every row is written regardless. A **private** `kb_annotation`
+  notifies nobody, managers included. Product flows: `docs/notifications.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.
@@ -484,6 +495,12 @@ meaningfully). The app reads:
   manager agent API (`/api/manager/agent`). Normally managers mint revocable
   tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
   env var is just an optional fallback (see AGENTS.md).
+- Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
+  notification digest (`POST /api/notifications/digest`, driven by
+  `.github/workflows/notification-digest.yml`). **Unset means the endpoint
+  refuses everything**, so no digest goes out until it is configured. The
+  workflow also needs `NOTIFICATION_DIGEST_URL` and the matching key as
+  repository secrets.
 
 Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 

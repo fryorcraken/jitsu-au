@@ -2249,6 +2249,53 @@ export type BlockCommenterInput = z.infer<typeof blockCommenterSchema>;
 export const unblockCommenterSchema = z.object({ user_id: z.string().uuid() });
 export type UnblockCommenterInput = z.infer<typeof unblockCommenterSchema>;
 
+// ---- Notifications ----
+//
+// The /notifications page and the email switches behind it. The kinds and the
+// defaults live in `src/lib/notifications.ts` (pure, and imported by the email
+// sender too); this file only validates what crosses the wire.
+
+/** The four switches, as the settings UI sends them.
+ *
+ * Every key is optional and every value is `boolean | null`, which is the whole
+ * point: `null` is a real, meaningful value here meaning "no longer a choice of
+ * mine, use the club default", not an absent field. So this deliberately uses
+ * `.nullable().optional()` rather than `.nullish()` — an absent key means
+ * "leave that switch alone", the same convention `updateProfileSchema` uses,
+ * and collapsing the two would make clearing a switch impossible to express. */
+export const notificationPreferencesSchema = z.object({
+  reply_to_me: z.boolean().nullable().optional(),
+  thread_activity: z.boolean().nullable().optional(),
+  new_blog_post: z.boolean().nullable().optional(),
+  manager_comment_alerts: z.boolean().nullable().optional(),
+});
+export type NotificationPreferencesInput = z.infer<typeof notificationPreferencesSchema>;
+
+/** The same patch, arriving from the signed-out settings link in an email
+ * footer. The token IS the authentication, so it is required and the handler
+ * resolves the person from it rather than from a session. */
+export const notificationPreferencesByTokenSchema = notificationPreferencesSchema.extend({
+  token: z.string().trim().min(1).max(200),
+});
+export type NotificationPreferencesByTokenInput = z.infer<
+  typeof notificationPreferencesByTokenSchema
+>;
+
+/** Read the switches behind a footer link, before anything is changed. */
+export const notificationTokenSchema = z.object({
+  token: z.string().trim().min(1).max(200),
+});
+export type NotificationTokenInput = z.infer<typeof notificationTokenSchema>;
+
+/** Mark notifications read. An empty/absent list means "all of mine", which is
+ * what the "Mark all as read" button sends; naming ids is what opening the page
+ * sends, so a notification that arrived while the page was open is not marked
+ * read without ever having been on screen. */
+export const markNotificationsReadSchema = z.object({
+  ids: z.array(z.string().uuid()).max(200).optional(),
+});
+export type MarkNotificationsReadInput = z.infer<typeof markNotificationsReadSchema>;
+
 // ---- Account: the details a member maintains themselves ----
 
 /**

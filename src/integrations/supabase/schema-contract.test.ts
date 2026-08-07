@@ -368,6 +368,83 @@ export type _KbArticlePositionIsNumber = Expect<
   Equals<Tables["kb_articles"]["Row"]["position"], number>
 >;
 
+// ---- notifications: the /notifications page, the badge, and the emails ----
+
+/**
+ * Committed alongside `20260806030000_notifications.sql`, which hand-added this
+ * table's block to `types.ts` (the migration is not applied yet, so the
+ * generator has never seen it) — the same situation as `kb_article_reads`
+ * above, and see that migration's own header. This pins the shape the hand-add
+ * asserted, so a real regeneration landing with a different one is caught here
+ * rather than at runtime.
+ *
+ * `read_at` and `emailed_at` are the two load-bearing columns: the first is the
+ * in-app unread state behind the sidebar badge, the second is what stops a
+ * notification being emailed twice. Losing either would not fail a query, it
+ * would just quietly mail people again.
+ */
+export type _NotificationColumns = RequireColumns<
+  Tables["notifications"]["Row"],
+  | "id"
+  | "user_id"
+  | "kind"
+  | "subject_type"
+  | "subject_id"
+  | "actor_id"
+  | "title"
+  | "body"
+  | "href"
+  | "read_at"
+  | "emailed_at"
+  | "created_at"
+>;
+
+/**
+ * Both timestamps are nullable, and that IS the state machine: NULL `read_at`
+ * means unread, NULL `emailed_at` means "not yet considered for email". A
+ * NOT NULL widening on either would mean the column had gained a default, at
+ * which point every notification arrives pre-read and pre-sent and the whole
+ * feature silently does nothing.
+ */
+export type _NotificationReadAtIsNullable = Expect<
+  Equals<Tables["notifications"]["Row"]["read_at"], string | null>
+>;
+export type _NotificationEmailedAtIsNullable = Expect<
+  Equals<Tables["notifications"]["Row"]["emailed_at"], string | null>
+>;
+
+/**
+ * The four switches, and the reason they are nullable: NULL means "never chose"
+ * and hands that switch to `NOTIFICATION_DEFAULTS` in `src/lib/notifications.ts`.
+ * A NOT NULL widening would collapse "unset" into "off", which silently opts
+ * everybody out of replies and makes changing a club default impossible to
+ * apply to the people who never expressed a view.
+ */
+export type _NotificationPreferenceColumns = RequireColumns<
+  Tables["notification_preferences"]["Row"],
+  "user_id" | "reply_to_me" | "thread_activity" | "new_blog_post" | "manager_comment_alerts"
+>;
+export type _NotificationPreferenceReplyIsNullable = Expect<
+  Equals<Tables["notification_preferences"]["Row"]["reply_to_me"], boolean | null>
+>;
+export type _NotificationPreferenceNewPostIsNullable = Expect<
+  Equals<Tables["notification_preferences"]["Row"]["new_blog_post"], boolean | null>
+>;
+
+/**
+ * The credential behind the settings link in an email footer. `token` holds the
+ * RAW value and is NOT NULL, unlike `calendar_feed_tokens.token`: the server has
+ * to be able to put this link into an email it composes later, so a row whose
+ * raw token had gone missing would be a footer link that cannot be built.
+ */
+export type _NotificationTokenColumns = RequireColumns<
+  Tables["notification_tokens"]["Row"],
+  "user_id" | "token" | "token_hash" | "token_prefix"
+>;
+export type _NotificationTokenRawIsNotNull = Expect<
+  Equals<Tables["notification_tokens"]["Row"]["token"], string>
+>;
+
 describe("live schema contract", () => {
   it("is enforced by the typechecker, not by this test", () => {
     // Nothing to assert at runtime: the contract is the type declarations above,

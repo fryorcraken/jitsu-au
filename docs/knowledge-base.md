@@ -244,6 +244,24 @@ cannot trust that way is one they stop using honestly.
 Deleting a thread's root deletes its replies with it (`ON DELETE CASCADE`), and
 the UI warns before doing so.
 
+### Who gets told
+
+A **shared** comment notifies people: a reply emails its recipient straight
+away, everybody else on the thread gets it in the next daily summary, and
+managers get a summary of new comments so feedback stops depending on somebody
+remembering to open `/manager/kb`.
+
+A **private note notifies nobody**, managers included. That follows from what a
+private note is, and it is enforced twice: `createAnnotation` refuses a private
+reply, and `notifyKbAnnotation` returns immediately for anything that is not
+`shared`, so a private note's text can never reach an inbox.
+
+One rule is specific to this feature: recipients are re-checked against the
+article **as it stands now**, not as it stood when they commented. An article a
+manager has narrowed from `members` to `managers` only notifies managers, even
+about a thread a member took part in while it was wider. Full spec:
+`docs/notifications.md`.
+
 ## Versioning, and what happens to comments when an article changes
 
 Every save that carries text writes a **new version** and publishes it. Nothing
