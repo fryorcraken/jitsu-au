@@ -747,10 +747,12 @@ export async function listMembershipPlanRows(
   return data ?? [];
 }
 
-// The dashboard's "needs attention" queue lives in
-// `manager-notifications.functions.ts` — it composes items from several sources
-// now, so it is no longer a membership concern. This module still owns the
-// membership rule it draws on (`sellableWindowNotifications`, in validation.ts).
+// `managerAttentionItems` — the "needs attention" list behind /notifications —
+// moved to `manager-notifications.functions.ts`. It draws on two subsystems now
+// (membership windows and unanswered contact messages), so composing it here
+// would make every future source a membership concern. This module still owns
+// the membership half: `listMembershipPlanRows` above, and the rule that reads
+// it (`sellableWindowNotifications`, in validation.ts).
 
 // ---- Manager: club settings (invoice payment instructions) ----
 export const getClubSettings = createServerFn({ method: "GET" })

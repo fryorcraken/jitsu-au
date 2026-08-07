@@ -1,12 +1,20 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockUseAuth = vi.fn();
 const mockUseRoles = vi.fn();
+const mockUseNotifications = vi.fn();
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => mockUseAuth(),
   useRoles: () => mockUseRoles(),
+}));
+
+// Mocked rather than wrapped in a QueryClientProvider: this suite is about the
+// navigation, and the real hook would drag a server function and the query
+// cache into every case here.
+vi.mock("@/hooks/useNotifications", () => ({
+  useNotifications: () => mockUseNotifications(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -43,9 +51,15 @@ const managerOnlyLinks = [
 ];
 
 describe("MemberLayout", () => {
+  beforeEach(() => {
+    // Nothing waiting, unless a case says otherwise.
+    mockUseNotifications.mockReturnValue({ badge: 0 });
+  });
+
   afterEach(() => {
     mockUseAuth.mockReset();
     mockUseRoles.mockReset();
+    mockUseNotifications.mockReset();
   });
 
   it("shows member links and the sign-out / back-to-site controls for any signed-in user", () => {
@@ -139,5 +153,53 @@ describe("MemberLayout", () => {
     );
     // Member links remain available to managers too.
     expect(screen.getByRole("link", { name: /account/i })).toBeInTheDocument();
+  });
+
+  // Notifications sit in the MEMBER group, not the manager one: a member's
+  // replies land there too, so it is the one place anybody looks to catch up.
+  it("shows notifications to a plain member", () => {
+    mockUseAuth.mockReturnValue({ user: { id: "u1", email: "m@example.com" } });
+    mockUseRoles.mockReturnValue({ roles: ["member"], isManager: false });
+
+    render(
+      <MemberLayout>
+        <div />
+      </MemberLayout>,
+    );
+
+    expect(screen.getByRole("link", { name: /^notifications$/i })).toHaveAttribute(
+      "href",
+      "/notifications",
+    );
+  });
+
+  it("shows the unread count next to notifications", () => {
+    mockUseAuth.mockReturnValue({ user: { id: "u1", email: "m@example.com" } });
+    mockUseRoles.mockReturnValue({ roles: ["member"], isManager: false });
+    mockUseNotifications.mockReturnValue({ badge: 3 });
+
+    render(
+      <MemberLayout>
+        <div />
+      </MemberLayout>,
+    );
+
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  // A "0" pill reads as something waiting when nothing is, so zero renders
+  // nothing at all.
+  it("renders no badge when nothing is waiting", () => {
+    mockUseAuth.mockReturnValue({ user: { id: "u1", email: "m@example.com" } });
+    mockUseRoles.mockReturnValue({ roles: ["member"], isManager: false });
+    mockUseNotifications.mockReturnValue({ badge: 0 });
+
+    render(
+      <MemberLayout>
+        <div />
+      </MemberLayout>,
+    );
+
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
   });
 });

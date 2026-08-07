@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  Bell,
   BookOpen,
   CalendarDays,
   ChevronLeft,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useNotifications";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -32,6 +34,7 @@ import {
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
@@ -40,12 +43,23 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 
-type NavItem = { to: string; label: string; icon: typeof User };
+type NavItem = {
+  to: string;
+  label: string;
+  icon: typeof User;
+  /** When set, this entry carries a count badge. Only `/notifications` has one,
+   * and it is the single number for the whole member space: open attention
+   * items plus unread activity. */
+  badge?: number;
+};
 
 const memberNav: NavItem[] = [
   // First: what a new member is meant to read before anything else. The rest of
   // this group is admin they only visit when something needs doing.
   { to: "/kb", label: "Knowledge base", icon: BookOpen },
+  // Everyone signed in, not just managers: a member's replies land here too, so
+  // this is the one place anybody looks to catch up.
+  { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/account", label: "Account", icon: User },
   { to: "/membership", label: "Membership", icon: CreditCard },
 ];
@@ -94,6 +108,9 @@ function NavList({ items, pathname }: { items: NavItem[]; pathname: string }) {
               <span>{item.label}</span>
             </Link>
           </SidebarMenuButton>
+          {/* Zero renders nothing rather than a "0" pill: an empty badge reads
+              as something waiting when nothing is. */}
+          {item.badge ? <SidebarMenuBadge>{item.badge}</SidebarMenuBadge> : null}
         </SidebarMenuItem>
       ))}
     </SidebarMenu>
@@ -105,6 +122,11 @@ export function MemberLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const { user } = useAuth();
   const { isManager } = useRoles(user?.id);
+  // The same cached query the /notifications page reads, so the badge and the
+  // list can never disagree about how many things are waiting.
+  const { badge } = useNotifications();
+
+  const nav = memberNav.map((item) => (item.to === "/notifications" ? { ...item, badge } : item));
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -143,7 +165,7 @@ export function MemberLayout({ children }: { children: ReactNode }) {
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupLabel>Your account</SidebarGroupLabel>
-            <NavList items={memberNav} pathname={pathname} />
+            <NavList items={nav} pathname={pathname} />
           </SidebarGroup>
 
           {isManager && (

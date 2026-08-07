@@ -1,15 +1,25 @@
-// The manager dashboard's "needs attention" queue.
+// The "needs attention" list behind /notifications.
+//
+// Standing problems only a manager can fix. Derived on every call and never
+// stored, which is what makes them clear by being FIXED rather than by being
+// dismissed — see docs/notifications.md. That is also why unanswered contact
+// messages belong here rather than among the stored activity rows: they clear
+// when a manager opens the inbox, and there is no per-message read state.
 //
 // This is a composition point, not a feature: each source contributes its own
 // items and this module decides what order a manager meets them in. The rules
-// themselves stay pure and unit-tested in `validation.ts` (the same split the
-// rest of the app uses), so everything here is auth, fetch and ordering.
+// themselves stay pure and unit-tested in `validation.ts`, so everything here
+// is fetch and ordering.
 //
-// It used to live in `membership.functions.ts`, which was right while membership
-// windows were the only thing that could need attention. They are not any more.
-import { createServerFn } from "@tanstack/react-start";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { requireManager } from "@/lib/require-manager";
+// A plain exported function rather than a `createServerFn`, the same shape as
+// `listMembershipPlanRows`: its one caller is `listMyNotifications` in
+// `notifications.functions.ts`, which already has the caller's identity and has
+// checked the manager role. Two server functions deriving this list would be two
+// places for the rule to drift.
+//
+// It lived in `membership.functions.ts` while membership windows were the only
+// source. With a second one, composing it there would make every future source a
+// membership concern.
 import {
   composeManagerNotifications,
   contactMessageNotifications,
@@ -37,20 +47,17 @@ async function membershipWindowNotifications(
   return sellableWindowNotifications(dated, new Date().toISOString());
 }
 
-export const managerNotifications = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+export async function managerAttentionItems(
+  admin: MembershipClient,
+): Promise<ManagerNotification[]> {
+  // Sources are independent, so fetch them together rather than in sequence.
+  const [windows, unreadContact] = await Promise.all([
+    membershipWindowNotifications(admin),
+    countUnreadContactMessages(admin),
+  ]);
 
-    // Sources are independent, so fetch them together rather than in sequence.
-    const [windows, unreadContact] = await Promise.all([
-      membershipWindowNotifications(supabaseAdmin),
-      countUnreadContactMessages(supabaseAdmin),
-    ]);
-
-    return composeManagerNotifications({
-      contactMessages: contactMessageNotifications(unreadContact),
-      membershipWindows: windows,
-    });
+  return composeManagerNotifications({
+    contactMessages: contactMessageNotifications(unreadContact),
+    membershipWindows: windows,
   });
+}

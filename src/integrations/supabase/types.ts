@@ -985,6 +985,129 @@ export type Database = {
           },
         ]
       }
+      notification_preferences: {
+        Row: {
+          created_at: string
+          manager_comment_alerts: boolean | null
+          new_blog_post: boolean | null
+          reply_to_me: boolean | null
+          thread_activity: boolean | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          manager_comment_alerts?: boolean | null
+          new_blog_post?: boolean | null
+          reply_to_me?: boolean | null
+          thread_activity?: boolean | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          manager_comment_alerts?: boolean | null
+          new_blog_post?: boolean | null
+          reply_to_me?: boolean | null
+          thread_activity?: boolean | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_preferences_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      notification_tokens: {
+        Row: {
+          created_at: string
+          token: string
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          token: string
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          token?: string
+          token_hash?: string
+          token_prefix?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_tokens_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          actor_id: string | null
+          body: string | null
+          created_at: string
+          emailed_at: string | null
+          href: string
+          id: string
+          kind: string
+          read_at: string | null
+          subject_id: string
+          subject_type: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          body?: string | null
+          created_at?: string
+          emailed_at?: string | null
+          href: string
+          id?: string
+          kind: string
+          read_at?: string | null
+          subject_id: string
+          subject_type: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          body?: string | null
+          created_at?: string
+          emailed_at?: string | null
+          href?: string
+          id?: string
+          kind?: string
+          read_at?: string | null
+          subject_id?: string
+          subject_type?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           address: string | null

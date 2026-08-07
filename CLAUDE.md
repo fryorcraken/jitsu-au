@@ -15,12 +15,8 @@ Lovable's TanStack Start template.
 
 ## Lovable-managed project — read first
 
-This project is connected to [Lovable](https://lovable.dev) (see `AGENTS.md`).
+This project is connected to [Lovable](https://lovable.dev).
 
-- **Read `AGENTS.md` before you start.** It holds cross-tool directives that
-  apply to every agent working in this repo, including the writing-style rules
-  for public website copy (e.g. no em dashes in prose). Follow it alongside this
-  file.
 - **Never rewrite published history on `main`** (the branch connected to
   Lovable) — no force-push, and no rebasing/amending/squashing commits already
   pushed there. Doing so rewrites history on Lovable's side and the user can
@@ -33,6 +29,25 @@ This project is connected to [Lovable](https://lovable.dev) (see `AGENTS.md`).
 - `.lovable/` holds Lovable metadata (`project.json`) and the current work
   plan (`plan.md`). `src/routes/lovable/**` and `@lovable.dev/*` packages are
   Lovable platform integrations.
+
+## Where things are written down
+
+This file is the main instruction file and everything general lives here. The
+others own exactly one topic each, so nothing is stated twice — go to them when
+you are working in their area, not before.
+
+| Topic                                  | File                        |
+| -------------------------------------- | --------------------------- |
+| How the site is allowed to talk (copy) | `AGENTS.md`                 |
+| The data model, every table            | `docs/database.md`          |
+| Changing the schema — **read first**   | `docs/database-changes.md`  |
+| Manager agent HTTP API                 | `docs/manager-agent-api.md` |
+| Routing conventions                    | `src/routes/README.md`      |
+| Product flows, one file per flow       | the rest of `docs/`         |
+
+When you change behaviour, update the doc that owns it in the same change. When
+you find yourself repeating a rule that already exists somewhere, link it
+instead — every duplicate is a future contradiction.
 
 ## Tech stack
 
@@ -97,10 +112,12 @@ src/
     routeTree.gen.ts      AUTO-GENERATED route tree — never edit by hand
   components/
     ui/                   shadcn/ui primitives (generated; avoid hand-editing)
-    site/                 App chrome: SiteHeader, SiteFooter, SiteLayout, SignaturePad
+    site/                 App chrome + shared UX: SiteLayout/MemberLayout/KbLayout,
+                          SiteHeader, SiteFooter, SignaturePad, AuthPending,
+                          SubmitStatus, StatusPill
   integrations/supabase/  Supabase clients + auth middleware + generated types
   lib/                    Business logic, server functions, PDF, email templates, utils
-  hooks/                  useAuth / useRoles, use-mobile
+  hooks/                  useAuth / useRoles, use-resilient-submit, use-mobile
   router.tsx              createRouter() factory (QueryClient in context)
   server.ts               SSR entry — wraps errors into a rendered error page
   start.ts                createStart(): global function + request middleware
@@ -163,11 +180,22 @@ Read `src/routes/README.md` before touching routes. Key points:
 - `client.ts`, `client.server.ts`, `auth-middleware.ts`, and `types.ts` are
   **auto-generated** ("Do not edit it directly"). Prefer regenerating over hand-edits.
   `types.ts` is generated **from the live schema**, which makes it the repo's
-  closest mirror of what the database actually has — see Schema drift. If you
-  must hand-add a column to it (Lovable out of credits, say), add only what you
-  have verified exists live, in the generator's own style. It is listed in
-  `.prettierignore` so `bun run format` cannot reformat it: Prettier would
-  rewrite all ~1400 lines and the next regen would revert them.
+  closest mirror of what the database actually has (see "Schema drift" in
+  `docs/database-changes.md`). If you must hand-add a column to it (Lovable out
+  of credits, say), add only what you have verified exists live, in the
+  generator's own style. It is listed in `.prettierignore` so `bun run format`
+  cannot reformat it: Prettier would rewrite all ~1400 lines and the next regen
+  would revert them.
+- **Stale types after a migration** show up at runtime as
+  `Could not find the '<column>' column of '<table>' in the schema cache`: the
+  migration ran, but `types.ts` was not regenerated and PostgREST is answering
+  from its cached schema view. Fix both halves — bring `types.ts` back in step
+  and run `NOTIFY pgrst, 'reload schema'`. A `column <table>.<column> does not
+exist` error is the more serious cousin: the migration never reached the live
+  database at all (`docs/database-changes.md`).
+- **Never silence a stale type with a `never` / `unknown` cast.** Those casts are
+  what let `waivers.approval_status` be missing from production for a week with a
+  green build: the cast disables the only check that would have caught it.
 
 > [!WARNING]
 > **Never trust the nullability of an RPC's return type, and never hand-fix it
@@ -267,9 +295,22 @@ Core tables:
   path; it is owner-scoped and **no manager screen reads it**. Managers edit all
   of this at `/manager/kb` or through the manager agent API, which do the same
   things to the same data. Product flows: `docs/knowledge-base.md`.
+- `notifications` / `notification_preferences` / `notification_tokens` — the
+  `/notifications` page, the sidebar badge and the emails behind them. One
+  `notifications` row per person per event drives **both** the in-app list
+  (`read_at`) and the email (`emailed_at`), so there is no separate outbox, and
+  a unique index on `(user_id, kind, subject_id)` makes every writer safe to
+  call twice. The manager "needs attention" items are **not** stored: they stay
+  derived from `membership_plans` and clear by being fixed, which is why they
+  have no read state. Preferences are **nullable booleans** on purpose (NULL =
+  "never chose", resolved against `NOTIFICATION_DEFAULTS`) and govern **email
+  only** — every row is written regardless. A **private** `kb_annotation`
+  notifies nobody, managers included. Product flows: `docs/notifications.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
-  (`/api/manager/agent`); stores only a SHA-256 hash + display prefix, manager-only RLS.
+  (`/api/manager/agent`); stores only a SHA-256 hash + display prefix,
+  manager-only RLS. The API's action contract and its four sync points:
+  `docs/manager-agent-api.md`.
 
 Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
 is via short-lived signed URLs, and `storage.objects` carries explicit
@@ -363,10 +404,10 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   data.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
-  production credential (see Schema drift).
+  production credential (see "Schema drift" in `docs/database-changes.md`).
 - **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
   `supabase/**`) starts a local Postgres, applies every migration to it (which
-  is not the live database — see Schema drift), and runs the
+  is not the live database, see `docs/database-changes.md`), and runs the
   **Advisors** (Splinter — the dashboard's Security/Performance lints, e.g.
   `function_search_path_mutable`) plus `supabase db lint` (plpgsql_check on
   `public`). Security findings at WARN+ fail the build; performance findings are
@@ -436,11 +477,13 @@ hand-produce a public-npm lock.
   **and its own `rel="canonical"`**; manager and other private pages set
   `robots: noindex`. Match the existing pattern when adding pages, and see the
   SEO section below for the two things that are easy to get wrong.
-- **Copy voice:** user-facing website copy must read like a person wrote it, not
-  an AI. **No em dashes (`—`) in prose** — rewrite with a full stop, comma,
-  colon, or "and"/"but". See the "Writing style for website copy" section in
-  `AGENTS.md` for the full rules and allowed exceptions (numeric en-dash ranges,
-  empty-value placeholder glyphs).
+- **Copy voice:** **no em dashes (`—`) in user-facing copy** and no AI-prose
+  tells. `AGENTS.md` has the full rule; it is short, and it applies to emails and
+  signed-in screens too, not just marketing pages.
+- **`null` vs `undefined` at the Supabase boundary:** `.maybeSingle()` and
+  `.select().single()` speak `null`; TS optional parameters speak `undefined`.
+  Normalize at the call site (`helper(row, plan ?? undefined)`) rather than
+  widening a helper's signature to accept `null` for one caller.
 
 ## SEO
 
@@ -483,7 +526,13 @@ meaningfully). The app reads:
 - Server, optional: `MANAGER_AGENT_API_KEY` — break-glass bearer token for the
   manager agent API (`/api/manager/agent`). Normally managers mint revocable
   tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
-  env var is just an optional fallback (see AGENTS.md).
+  env var is just an optional fallback (see `docs/manager-agent-api.md`).
+- Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
+  notification digest (`POST /api/notifications/digest`, driven by
+  `.github/workflows/notification-digest.yml`). **Unset means the endpoint
+  refuses everything**, so no digest goes out until it is configured. The
+  workflow also needs `NOTIFICATION_DIGEST_URL` and the matching key as
+  repository secrets.
 
 Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 
@@ -524,11 +573,118 @@ and get to it once the product shape is agreed. `.lovable/plan.md` is the shape
 to copy: user-facing behavior first, a technical section after it. If the user
 asks for the technical detail, give them all of it.
 
+## Make the change easy, then make the easy change
+
+**When a change feels hard, that is information about the code, not about the
+feature.** Threading a new flag through five call sites, copy-pasting an existing
+handler to vary one line, a third branch inside a branch: each is the code saying
+it is the wrong shape for what is being asked of it. Stop, reshape it so the
+feature becomes a small edit, then make that small edit.
+
+So a change has two kinds of commit, and they do not mix:
+
+1. **Preparatory refactor** — behaviour identical, tests green before and after,
+   no new feature smuggled in. Extract the pure function, widen the type, move
+   the shared bit into the module that should own it.
+2. **The change itself** — now small, and readable on its own.
+
+Say which one a commit is in its message. It makes review cheap and revert
+surgical: if the feature turns out wrong, the refactor usually still stands. If
+the preparatory refactor is large, push it and get CI green before layering the
+feature on top.
+
+Practical rules:
+
+- **Extend a seam, do not add a parallel one.** This repo already has the seam
+  for most things: form rules in `src/lib/validation.ts`, server work in
+  `src/lib/*.functions.ts` (`createServerFn` + Zod), writes from the browser
+  through `useResilientSubmit`, RPC shapes in `src/lib/supabase-rpc.ts`, page
+  chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`. If
+  your change seems to need a _second_ way to do one of these, that is a design
+  decision to raise with the user, not a shortcut to take quietly.
+- **Extracting logic into a pure module is usually the whole "make it easy"
+  step.** `validation.ts` and `submit-resilience.ts` exist because behaviour was
+  pulled out of handlers and components until it could be tested directly. Do
+  the same rather than testing through a server context or a rendered tree.
+- **Scope the refactor to what the change needs.** Preparatory means preparatory.
+  Unrelated tidying belongs in its own PR, where it can be judged on its merits.
+- **Do not abstract on the second occurrence.** Wait for the third, or for a rule
+  that genuinely has to be true in both places. Two similar-looking things that
+  can drift apart are cheaper duplicated.
+- **No speculative generality.** No option, hook point or parameter that has no
+  caller today. The next change will be easier to make than this one is to undo.
+- **Delete what your change makes dead** in the same PR: the branch nothing
+  reaches, the helper with no callers, the column nobody reads (that last one is
+  a migration, so `docs/database-changes.md` applies).
+- **Write the "why" where it will be read.** This codebase puts the non-obvious
+  reasoning at the top of the module it governs (`submit-resilience.ts` is the
+  model). A comment explaining what the code plainly does is noise; one
+  explaining what it is defending against is the most valuable line in the file.
+
+## The UX bar
+
+Every change ships an experience, not a diff. Before writing code, name the
+person it is for, and what they are doing when they hit it:
+
+- a **prospective member** on a phone, often in transit, often on bad reception;
+- a **member**, signed in, usually looking for one specific thing;
+- a **manager**, on a laptop, between classes, doing admin they'd rather not be
+  doing.
+
+Then hold the change to this:
+
+- **Build the whole state machine, not the happy path.** Loading, empty, error,
+  offline, slow, not-allowed, and already-done each need something on screen that
+  a person can act on. A blank panel while data loads, or a spinner with no exit,
+  is an unfinished feature.
+- **Reuse the components that already solve this.** `AuthPending` for "we are
+  working out who you are" (never a blank page while the session resolves).
+  `useResilientSubmit` + `SubmitStatus` for **every form that writes**: it gives
+  you the timeout, the retry that carries the same `client_submission_id`, the
+  "did it actually land?" confirm, and a failure panel that stays on screen with
+  a button in it. Do not write another `setLoading(true) / catch / toast.error`
+  form. Also `StatusPill`, `SiteLayout` / `MemberLayout` / `KbLayout`, and
+  `components/ui/*`.
+- **A toast is not a UI for anything that matters.** It auto-dismisses, it is
+  easy to miss on a phone, and it leaves nothing to press. Use it for "saved",
+  not for "your waiver did not go through".
+- **Never lose someone's input.** A failed submit keeps the form filled and
+  offers the retry. Ask for as little as possible in the first place, and prefill
+  what we already know (the waiver does this with `getMyLatestWaiver`). Every
+  field is friction somebody pays for.
+- **Errors say what to do next**, in the person's terms, not what failed
+  internally. "We could not reach the server. Your details are still here, try
+  again." beats any status code.
+- **Anything irreversible or outward-facing gets a confirm that says what will
+  happen** — in words, before the click. Approving a waiver emails the member and
+  unlocks their login; activating a membership grants a role. The person pressing
+  the button should already know that.
+- **Mobile first.** Most of this club's traffic is phones. Check at ~375px wide,
+  keep tap targets thumb-sized, and never hide something behind hover alone.
+- **Accessibility is part of "done", not a follow-up.** Real `<button>` and `<a>`
+  elements, labels tied to their inputs, `role="status"` / `aria-live` on async
+  updates, visible focus, contrast through the theme tokens. `AuthPending` and
+  `SubmitStatus` are small, correct examples to copy.
+- **Look at it.** For a UI change, run the app and open the screen (the `/run`
+  skill launches it), or read the PR-screenshots artifact. Note what that job
+  does _not_ catch: a route that handles its own loader error and renders a card
+  in place of its content still counts as a green screenshot.
+- **Say what the person will feel.** If a change adds a step, sends an email,
+  slows something down, or briefly breaks a flow mid-rollout, put that in the PR
+  body and in any plan you show the user. See "Plans you show the user are
+  product-level".
+
+Copy is part of the UX: `AGENTS.md` has the voice rules, and they apply to
+button labels, empty states and error text just as much as to marketing pages.
+
 ## When making changes
 
 1. Develop on the assigned feature branch; commit in a working state (Lovable
-   syncs the branch). **Never** force-push or rewrite pushed history.
-2. Don't hand-edit generated files: `routeTree.gen.ts`, the Supabase
+   syncs the branch). **Never** force-push or rewrite pushed history on `main`.
+2. **Shape first, then change** — if the feature does not fit the code as it is,
+   land the preparatory refactor before it (see "Make the change easy, then make
+   the easy change"). Reuse the existing seam rather than adding a second one.
+3. Don't hand-edit generated files: `routeTree.gen.ts`, the Supabase
    `integrations/supabase/*` clients/types, or `components/ui/*` primitives.
    That list is exhaustive — **every other file is normal, editable source**,
    including Lovable-scaffolded code (`src/integrations/lovable/*`,
@@ -536,21 +692,22 @@ asks for the technical detail, give them all of it.
    "Lovable-owned, do-not-touch" category; `bun run format` (Prettier) is the
    sanctioned way to fix formatting on any file, and CI failures in scaffolded
    files are usually a stale branch — merge `main` and re-format, don't avoid them.
-3. Keep the service-role client (`client.server.ts`) off the client bundle —
+4. Keep the service-role client (`client.server.ts`) off the client bundle —
    lazy-`import` it inside server handlers only.
-4. Validate all server-function input with Zod; enforce manager access with
+5. Validate all server-function input with Zod; enforce manager access with
    `has_role` / `requireSupabaseAuth`, never trust the client.
-5. **Keep the tests in step with the code** — update or add `*.test.ts(x)`
+6. **Touches a screen?** Hold it to "The UX bar": every state rendered, the
+   existing components reused, and somebody's input never lost.
+7. **Keep the tests in step with the code** — update or add `*.test.ts(x)`
    coverage for any behavior you change or add (see Testing & CI). A change that
    touches tested logic without touching its tests is incomplete.
-6. Verify with `bun run lint`, `bun run typecheck`, `bun run test`, and
+8. Update the doc that owns the behaviour you changed (see "Where things are
+   written down") in the same change.
+9. Verify with `bun run lint`, `bun run typecheck`, `bun run test`, and
    `bun run build`. The build alone does not type-check.
-7. **Touching the database?** Read `docs/database-changes.md` first — it covers
-   migrations, grants, RLS and the apply gate. Two things that catch everyone:
-   a new table needs `REVOKE ALL ... FROM anon, authenticated;` before any
-   grant, and you must **wait for the user to approve the PR before applying
-   any SQL to the live database**. Once approved, apply it and record it in the
-   ledger before merging; committing it applies nothing.
+10. **Touching the database?** `docs/database-changes.md`, first, every time.
+    The apply gate is summarised under "Database (Supabase)" above; the file has
+    the rest.
 
 ## After pushing — always do this
 

@@ -39,6 +39,10 @@ import {
   isPaperWaiver,
   isUtsStudent,
   managerEmailChangeSchema,
+  markNotificationsReadSchema,
+  notificationPreferencesByTokenSchema,
+  notificationPreferencesSchema,
+  notificationTokenSchema,
   MAX_SCAN_BYTES,
   base64ByteLength,
   normalizeEmail,
@@ -216,6 +220,91 @@ describe("blogCommentSchema", () => {
 describe("blockCommenterSchema", () => {
   it("requires a valid user id to block someone", () => {
     expect(() => blockCommenterSchema.parse({ user_id: "not-a-uuid" })).toThrow();
+  });
+});
+
+describe("notificationPreferencesSchema", () => {
+  it("accepts a switch being turned on or off", () => {
+    expect(notificationPreferencesSchema.parse({ new_blog_post: true }).new_blog_post).toBe(true);
+    expect(notificationPreferencesSchema.parse({ reply_to_me: false }).reply_to_me).toBe(false);
+  });
+
+  // `null` is a real value here, not a missing one: it hands the switch back to
+  // the club default. If this ever became `.nullish()`, "use the default" and
+  // "leave it alone" would collapse into each other and clearing a switch would
+  // silently do nothing.
+  it("allows handing a switch back to the club default with null", () => {
+    expect(notificationPreferencesSchema.parse({ reply_to_me: null }).reply_to_me).toBeNull();
+  });
+
+  it("keeps an absent key distinct from an explicit null", () => {
+    const parsed = notificationPreferencesSchema.parse({ reply_to_me: null });
+    expect("reply_to_me" in parsed).toBe(true);
+    expect("thread_activity" in parsed).toBe(false);
+  });
+
+  it("accepts an empty patch, which changes nothing", () => {
+    expect(notificationPreferencesSchema.parse({})).toEqual({});
+  });
+
+  it("rejects a non-boolean switch", () => {
+    expect(() => notificationPreferencesSchema.parse({ reply_to_me: "yes" })).toThrow();
+    expect(() => notificationPreferencesSchema.parse({ new_blog_post: 1 })).toThrow();
+  });
+});
+
+describe("notificationPreferencesByTokenSchema", () => {
+  // The token IS the authentication on this path, so it can never be optional.
+  it("requires a token", () => {
+    expect(() => notificationPreferencesByTokenSchema.parse({ reply_to_me: false })).toThrow();
+  });
+
+  it("carries the same switches as the signed-in patch", () => {
+    const parsed = notificationPreferencesByTokenSchema.parse({
+      token: "utsj_abc123",
+      new_blog_post: true,
+    });
+    expect(parsed).toEqual({ token: "utsj_abc123", new_blog_post: true });
+  });
+
+  it("rejects a blank token", () => {
+    expect(() => notificationPreferencesByTokenSchema.parse({ token: "   " })).toThrow();
+  });
+});
+
+describe("notificationTokenSchema", () => {
+  it("trims the token, so a copied link with stray whitespace still works", () => {
+    expect(notificationTokenSchema.parse({ token: " utsj_abc " }).token).toBe("utsj_abc");
+  });
+
+  it("rejects an empty token", () => {
+    expect(() => notificationTokenSchema.parse({ token: "" })).toThrow();
+  });
+
+  // Bounded so a hostile caller cannot make the server hash a megabyte.
+  it("rejects an absurdly long token", () => {
+    expect(() => notificationTokenSchema.parse({ token: "x".repeat(201) })).toThrow();
+  });
+});
+
+describe("markNotificationsReadSchema", () => {
+  // An absent list means "all of mine", which is what "Mark all as read" sends.
+  it("allows an absent list", () => {
+    expect(markNotificationsReadSchema.parse({}).ids).toBeUndefined();
+  });
+
+  it("accepts a list of ids", () => {
+    const ids = ["11111111-1111-4111-8111-111111111111"];
+    expect(markNotificationsReadSchema.parse({ ids }).ids).toEqual(ids);
+  });
+
+  it("rejects an id that is not a uuid", () => {
+    expect(() => markNotificationsReadSchema.parse({ ids: ["nope"] })).toThrow();
+  });
+
+  it("rejects an unbounded list", () => {
+    const ids = Array.from({ length: 201 }, () => "11111111-1111-4111-8111-111111111111");
+    expect(() => markNotificationsReadSchema.parse({ ids })).toThrow();
   });
 });
 

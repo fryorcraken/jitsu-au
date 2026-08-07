@@ -220,12 +220,31 @@ export const postComment = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     if (data.hp) return { id: "" };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    return insertBlogComment(supabaseAdmin, {
+    const comment = await insertBlogComment(supabaseAdmin, {
       postId: data.post_id,
       userId: context.userId,
       parentCommentId: data.parent_comment_id,
       body: data.body,
     });
+
+    // Best-effort notifications: the reply email, the thread fan-out and the
+    // manager alert. Deliberately outside `insertBlogComment`, which stays a
+    // pure DB helper with its own tests, and deliberately swallowed: a comment
+    // is saved and must never fail because telling somebody about it did.
+    try {
+      const { notifyBlogComment } = await import("@/lib/notification-events.server");
+      await notifyBlogComment(supabaseAdmin, {
+        commentId: comment.id,
+        postId: data.post_id,
+        actorId: context.userId,
+        parentCommentId: data.parent_comment_id ?? null,
+        body: data.body,
+      });
+    } catch (e) {
+      console.error("[postComment] failed to send notifications:", e);
+    }
+
+    return comment;
   });
 
 export const toggleCommentUpvote = createServerFn({ method: "POST" })
