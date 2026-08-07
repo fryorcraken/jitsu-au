@@ -10,7 +10,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { submitContact } from "@/lib/submissions.functions";
-import { VENUE_NAME, VENUE_ADDRESS, GOOGLE_MAPS_URL, APPLE_MAPS_URL } from "@/lib/venue";
+import {
+  VENUE_NAME,
+  VENUE_ADDRESS,
+  GOOGLE_MAPS_URL,
+  APPLE_MAPS_URL,
+  VENUE_PHONE_DISPLAY,
+  VENUE_PHONE_TEL,
+  WHATSAPP_URL,
+} from "@/lib/venue";
 import { Phone, MessageCircle, MapPin, ExternalLink } from "lucide-react";
 import { buildPageMeta } from "@/lib/seo";
 
@@ -82,17 +90,17 @@ function Contact() {
         <div className="mt-10 grid gap-8 md:grid-cols-[1fr_1.2fr]">
           <div className="space-y-4">
             <a
-              href="tel:0493631759"
+              href={VENUE_PHONE_TEL}
               className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted"
             >
               <Phone className="h-5 w-5 text-primary" />
               <div>
                 <p className="text-xs font-semibold uppercase text-muted-foreground">Phone</p>
-                <p className="font-medium">0493 631 759</p>
+                <p className="font-medium">{VENUE_PHONE_DISPLAY}</p>
               </div>
             </a>
             <a
-              href="https://wa.me/61493631759"
+              href={WHATSAPP_URL}
               className="flex items-center gap-3 rounded-xl border bg-card p-5 hover:bg-muted"
             >
               <MessageCircle className="h-5 w-5 text-primary" />
