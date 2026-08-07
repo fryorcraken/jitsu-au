@@ -44,11 +44,18 @@ CREATE EXTENSION IF NOT EXISTS pg_net;
 -- stores a command string, so a bad reference would apply cleanly and then fail
 -- once a night at 20:00 UTC, in a log nobody reads. Better to find out now,
 -- while somebody is watching the migration run.
+-- Both checks look the name up in `pg_proc` rather than with `to_regproc`.
+-- `to_regproc` returns NULL for an OVERLOADED name as well as a missing one, and
+-- pg_cron ships two `cron.schedule` overloads (2-arg and 3-arg), so the obvious
+-- version of this check reports a perfectly healthy pg_cron as missing.
 DO $$
 DECLARE
   found TEXT;
 BEGIN
-  IF to_regproc('net.http_post') IS NULL THEN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'net' AND p.proname = 'http_post'
+  ) THEN
     SELECT string_agg(DISTINCT n.nspname || '.' || p.proname, ', ')
       INTO found
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -58,7 +65,10 @@ BEGIN
       COALESCE(found, 'nothing named http_post');
   END IF;
 
-  IF to_regproc('cron.schedule') IS NULL THEN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'cron' AND p.proname = 'schedule'
+  ) THEN
     RAISE EXCEPTION 'pg_cron did not install cron.schedule; the digest cannot be scheduled.';
   END IF;
 END;
@@ -130,7 +140,10 @@ REVOKE ALL ON FUNCTION private.run_notification_digest() FROM PUBLIC;
 --
 -- Unscheduled first so re-applying this migration replaces the job rather than
 -- erroring on the duplicate name.
-SELECT cron.unschedule('notification-digest')
+-- The ::text cast is deliberate. `cron.unschedule` is overloaded on (bigint) and
+-- (text), and an unquoted literal arrives as `unknown`, which is exactly the
+-- shape that produces "function is not unique" at apply time.
+SELECT cron.unschedule('notification-digest'::text)
   WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'notification-digest');
 
 SELECT cron.schedule(
