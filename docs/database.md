@@ -1056,13 +1056,22 @@ coding agents.
 
 **`private.run_notification_digest() → void`** — `SECURITY DEFINER`,
 `SET search_path = ''`, `REVOKE ALL ... FROM PUBLIC`. The job names only this
-function, never the token: `cron.job.command` is readable by anyone who can
-select from it, so a token inlined there would be a token published. The function
-reads both values from Supabase Vault and `net.http_post`s to the endpoint.
+function, never the token. The function reads both values from Supabase Vault and
+`net.http_post`s to the endpoint.
 
-It lives in `private` for the same reason the RLS-only helpers do (see "RLS-only
-helpers live in `private`"): nothing calls it over PostgREST, and a function that
-makes the site email every member has no business being a routable RPC.
+Keeping the token out of `cron.job.command` is defence in depth rather than a
+plugged hole: pg_cron 1.4+ puts RLS on `cron.job` with `USING (username =
+current_user)`, so a command string is not world-readable. It is still the right
+call. A credential in a column that exists to be read back and displayed is one
+schema tweak or one superuser query away from being exposed, and there is no
+upside to inlining it.
+
+This **widens** the `private` convention. That section is written as "RLS-only
+helpers live in `private`", and this helper's only caller is pg_cron, not a
+policy. The rule it actually follows is the more general one that section rests
+on: `private` is not routable by PostgREST, so nothing there is reachable as an
+RPC. A function that makes the site email every member belongs on that side of
+the line whether a policy calls it or not.
 
 Two things that fail silently every morning rather than loudly once:
 

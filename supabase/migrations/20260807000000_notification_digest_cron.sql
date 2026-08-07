@@ -28,10 +28,30 @@
 -- NOTIFICATION_DIGEST_KEY is unset.
 
 -- ---------- 1. Extensions ----------
--- Both create their own schema (`cron`, `net`) rather than landing in `public`.
--- Both are idempotent, so re-running is safe.
+-- ⚠️ `WITH SCHEMA extensions` on pg_net is load-bearing, not tidiness.
+--
+-- Neither extension declares an install schema (`pg_available_extension_versions`
+-- reports `schema = NULL, relocatable = false`), so without a SCHEMA clause the
+-- extension lands in the first entry of `search_path`, which on this project is
+-- `"$user", public, extensions` — i.e. `public`. supautils rescues pg_cron via
+-- `extensions_parameter_overrides = {"pg_cron":{"schema":"pg_catalog"}}`, but it
+-- has no such override for pg_net, so pg_net alone needs saying explicitly.
+--
+-- Landing in `public` trips the `extension_in_public` advisor, which is
+-- SECURITY/WARN and not in supabase/lint/advisors-allowlist.txt, so it fails
+-- supabase-lint — and once live it is a permanent Supabase dashboard finding
+-- that no allowlist can clear.
+--
+-- CI cannot catch this: the Supabase CLI's local Postgres ships with pg_net
+-- already installed, so `IF NOT EXISTS` makes it a no-op there and the lint
+-- passes regardless. Only the live database, where pg_net is absent, actually
+-- runs the CREATE.
+--
+-- This does not move `net.http_post`: pg_net's own script creates and qualifies
+-- the `net` schema for its objects, so only the extension's home schema changes.
+-- The assertion below is what proves that, loudly, if it is ever wrong.
 CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 
 -- Assert the two entry points really are where the function below says they
 -- are, and fail the migration if not.
@@ -44,32 +64,37 @@ CREATE EXTENSION IF NOT EXISTS pg_net;
 -- stores a command string, so a bad reference would apply cleanly and then fail
 -- once a night at 20:00 UTC, in a log nobody reads. Better to find out now,
 -- while somebody is watching the migration run.
--- Both checks look the name up in `pg_proc` rather than with `to_regproc`.
--- `to_regproc` returns NULL for an OVERLOADED name as well as a missing one, and
--- pg_cron ships two `cron.schedule` overloads (2-arg and 3-arg), so the obvious
--- version of this check reports a perfectly healthy pg_cron as missing.
+-- `to_regprocedure`, which takes a FULL SIGNATURE, not `to_regproc`, which takes
+-- a bare name. Two distinct traps, and the signature form dodges both:
+--
+--   * `to_regproc` returns NULL for an OVERLOADED name as well as a missing one,
+--     and pg_cron ships two `cron.schedule` overloads (2-arg and 3-arg). A
+--     name-only check therefore reports a perfectly healthy pg_cron as missing.
+--   * A name-only check also proves nothing about the ARGUMENTS. This project can
+--     install any pg_net from 0.11.0 to 0.20.4, and the call below passes four
+--     named arguments. If a version exposed different parameters, a name-only
+--     check would pass, the migration would apply cleanly, and the job would
+--     fail nightly with "function net.http_post(url => text, ...) does not
+--     exist" — precisely the outcome this block exists to prevent.
 DO $$
 DECLARE
-  found TEXT;
+  found_in TEXT;
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'net' AND p.proname = 'http_post'
-  ) THEN
-    SELECT string_agg(DISTINCT n.nspname || '.' || p.proname, ', ')
-      INTO found
+  IF to_regprocedure('net.http_post(text,jsonb,jsonb,jsonb,integer)') IS NULL THEN
+    SELECT string_agg(DISTINCT n.nspname || '.' || p.proname
+                      || '(' || pg_get_function_arguments(p.oid) || ')', '; ')
+      INTO found_in
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE p.proname = 'http_post';
     RAISE EXCEPTION
-      'pg_net did not install net.http_post (found: %). Update private.run_notification_digest() to the real schema before scheduling.',
-      COALESCE(found, 'nothing named http_post');
+      'net.http_post(text,jsonb,jsonb,jsonb,integer) not found (found: %). Update private.run_notification_digest() before scheduling.',
+      COALESCE(found_in, 'nothing named http_post');
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'cron' AND p.proname = 'schedule'
-  ) THEN
-    RAISE EXCEPTION 'pg_cron did not install cron.schedule; the digest cannot be scheduled.';
+  -- Name-only is correct here: the overload is the whole point, and the call
+  -- below uses the 3-arg form which `cron.schedule` has had since 1.4.
+  IF to_regprocedure('cron.schedule(text,text,text)') IS NULL THEN
+    RAISE EXCEPTION 'pg_cron did not install cron.schedule(text,text,text); the digest cannot be scheduled.';
   END IF;
 END;
 $$;
@@ -138,10 +163,15 @@ REVOKE ALL ON FUNCTION private.run_notification_digest() FROM PUBLIC;
 -- schedules are UTC and have no notion of DST, exactly like the cron expression
 -- this replaces, and an hour's drift on a club digest is not worth solving.
 --
--- Unscheduled first so re-applying this migration replaces the job rather than
--- erroring on the duplicate name.
--- The ::text cast is deliberate. `cron.unschedule` is overloaded on (bigint) and
--- (text), and an unquoted literal arrives as `unknown`, which is exactly the
+-- The unschedule is belt and braces, not a correctness requirement: pg_cron 1.4+
+-- upserts `cron.schedule(name, ...)` on (jobname, username), so re-applying would
+-- replace the job rather than error on a duplicate name. It stays because it
+-- makes the replacement explicit. `cron.unschedule` DOES raise on a missing job,
+-- hence the EXISTS guard for the from-scratch case (CI replays every migration
+-- against an empty database, so that path is exercised on every PR).
+--
+-- The ::text cast is not optional. `cron.unschedule` is overloaded on (bigint)
+-- and (text), and an uncast literal arrives as `unknown`, which is exactly the
 -- shape that produces "function is not unique" at apply time.
 SELECT cron.unschedule('notification-digest'::text)
   WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'notification-digest');

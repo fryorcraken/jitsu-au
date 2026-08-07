@@ -49,8 +49,10 @@ export const Route = createFileRoute("/api/notifications/digest")({
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
           const { sendDailyDigests } = await import("@/lib/notification-email.server");
           const result = await sendDailyDigests(supabaseAdmin);
-          // Echoed into the workflow log so a run that mailed nobody is
-          // distinguishable from a run that never happened.
+          // The only durable record that a run happened. The caller is pg_net,
+          // which discards the response, so a run that mailed nobody is
+          // distinguishable from a run that never happened ONLY here, in the
+          // deploy log. See docs/notifications.md on the digest's observability.
           console.log(
             `[digest] considered ${result.considered} notifications for ${result.recipients} people, sent ${result.sent}`,
           );

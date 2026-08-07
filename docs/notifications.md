@@ -127,18 +127,43 @@ honest:
   `LOVABLE_API_KEY`, where nothing is stamped at all: those notifications are
   still owed.
 
-The workflow runs on `schedule` and `workflow_dispatch` only, never on
-`pull_request`. It holds a credential that makes the live site email its
-members, and this repo takes same-repo branches from Lovable and from coding
-agents, so pairing that secret with a workflow a PR can rewrite would be a way
-to exfiltrate it, or to mail every member, in one line. Same reasoning as
-`migration-drift.yml`.
+`0 20 * * *` is 7am in Sydney during daylight saving and 6am outside it. pg_cron
+schedules are UTC and have no notion of DST, and an hour's drift on a club digest
+is not worth a scheduler of our own.
 
-There is no other scheduler available: the Supabase project is Lovable-managed
-and `pg_cron` is not in this repo's migrations, and there is no `wrangler.toml`
-here because Lovable owns the deploy. `cron: "0 20 * * *"` is 7am in Sydney
-during daylight saving and 6am outside it; cron has no notion of DST and an
-hour's drift on a club digest is not worth a scheduler of our own.
+#### Knowing whether it actually ran ⚠️
+
+**This is the weak point of the current setup, and it is a real regression
+against the GitHub Action it replaced.** The Action used `curl --fail-with-body`,
+so any non-2xx turned the job red and GitHub emailed the repo owner. pg_net is
+fire and forget: it queues the request, `PERFORM` discards the request id, and
+the function returns successfully no matter what the site answered. So
+`cron.job_run_details` records **succeeded** for every one of these:
+
+- `NOTIFICATION_DIGEST_KEY` unset or rotated server-side, so the endpoint answers
+  503 or 401 forever
+- the Vault secret drifting from the env var, giving 401 every morning
+- the site being down, DNS or TLS failing, or the request timing out
+
+In all of them nobody is emailed, `emailed_at` stays NULL, the backlog grows, and
+nothing anywhere says so. The only evidence is `net._http_response`, which
+pg_net garbage-collects after `pg_net.ttl` (6 hours by default), so it is
+usually gone before anyone thinks to ask.
+
+To check by hand:
+
+```sql
+SELECT * FROM cron.job_run_details
+ WHERE jobname = 'notification-digest' ORDER BY start_time DESC LIMIT 7;   -- did it fire
+SELECT id, status_code, error_msg, created
+  FROM net._http_response ORDER BY created DESC LIMIT 5;                   -- what came back
+SELECT count(*) FROM public.notifications WHERE emailed_at IS NULL;        -- backlog, the real symptom
+```
+
+That last query is the one worth watching: a number that climbs day over day
+means the digest has stopped, whatever the scheduler thinks. Closing this
+properly wants a second job that reads back the response and raises on a non-2xx
+so the failure lands in `cron.job_run_details`. Not built yet.
 
 ### A post goes live
 
