@@ -10,10 +10,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireManager } from "@/lib/require-manager";
-import { sellableWindowNotifications } from "@/lib/validation";
+import {
+  composeManagerNotifications,
+  contactMessageNotifications,
+  sellableWindowNotifications,
+} from "@/lib/validation";
 import type { ManagerNotification } from "@/lib/validation";
 import type { MembershipClient, MembershipPlanRow } from "@/lib/membership-types";
 import { listMembershipPlanRows } from "@/lib/membership.functions";
+import { countUnreadContactMessages } from "@/lib/contact-messages.functions";
 
 /**
  * "Nothing is defined after the current training period, so enrolments stop
@@ -39,7 +44,13 @@ export const managerNotifications = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     // Sources are independent, so fetch them together rather than in sequence.
-    const [windows] = await Promise.all([membershipWindowNotifications(supabaseAdmin)]);
+    const [windows, unreadContact] = await Promise.all([
+      membershipWindowNotifications(supabaseAdmin),
+      countUnreadContactMessages(supabaseAdmin),
+    ]);
 
-    return [...windows];
+    return composeManagerNotifications({
+      contactMessages: contactMessageNotifications(unreadContact),
+      membershipWindows: windows,
+    });
   });

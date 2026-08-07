@@ -867,8 +867,17 @@ grants off.
 
 ### `club_settings` — manager key/value store
 
-`key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. First use:
-markdown `invoice_payment_instructions`. **RLS:** manager-only.
+`key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. **RLS:**
+manager-only. Keys in use:
+
+| Key                            | Holds                                                                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoice_payment_instructions` | Markdown shown on an invoice. Falls back to a built-in stub when unset.                                                                                 |
+| `contact_messages_seen_at`     | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread. |
+
+Being key/value is what let the contact-message unread count ship without a
+migration. It is also its limit: a value here is a single club-wide fact, so
+anything that needs to differ per manager needs a real table.
 
 ### `email_verification_tokens` — proof that someone can read an address
 
@@ -1127,6 +1136,23 @@ email until the email belongs to a person (they signed the waiver).
 
 `id` PK, `name`, `email`, `subject`, `message`, `client_submission_id`,
 `created_at`. **RLS:** anon INSERT under a validating `WITH CHECK`.
+
+Insert-only for both client roles, and it stays that way: managers read it
+through `listContactMessages` (`src/lib/contact-messages.functions.ts`) on the
+**service-role** client behind the manager gate, so `/manager/contact-messages`
+needed no read grant, no new policy and no migration.
+
+Submitting also emails the sender an acknowledgement and every manager the
+message itself (`src/lib/contact-email.server.ts`, best-effort: a send failure
+is logged and never fails the submission). Before that existed nothing sent an
+email and nothing on the site read this table, so a message reached nobody at
+all.
+
+Which messages are "unread" is a single club-wide marker, not a column here:
+`club_settings.contact_messages_seen_at`, stamped when a manager opens the
+inbox. Anything newer than it is counted onto the manager dashboard. A
+per-manager count would need a table of its own; the club shares one inbox and
+every manager is emailed every message, so it does not have one.
 
 ### `client_submission_id` (all three intake paths)
 

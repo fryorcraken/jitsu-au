@@ -392,6 +392,16 @@ export const contactSchema = z.object({
   hp: z.string().max(0).optional(), // honeypot
 });
 
+/**
+ * Manager: page through the messages the contact form has received. Bounded so
+ * a manager screen cannot ask for the whole table; the default is generous
+ * enough that the club will not page in practice.
+ */
+export const listContactMessagesSchema = z.object({
+  limit: z.number().int().min(1).max(500).default(200),
+});
+export type ListContactMessagesInput = z.infer<typeof listContactMessagesSchema>;
+
 // ---- Waiver submission (name-split + signature + minor guardian) ----
 
 const sigImage = z.string().max(500_000).optional().or(z.literal(""));
@@ -1194,6 +1204,72 @@ export function sellableWindowNotifications<
       actionLabel: "Fix it",
     },
   ];
+}
+
+/**
+ * How many contact-form messages have arrived since a manager last opened the
+ * inbox. `seenAt` is the club-wide marker (`club_settings.contact_messages_seen_at`);
+ * absent means nobody has ever opened it, so everything counts — which is right
+ * both on the day this ships and if the setting is ever cleared.
+ *
+ * Strictly newer than the marker: the marker is stamped at the moment the inbox
+ * is opened, so a message bearing exactly that timestamp was on screen and has
+ * been seen. Counting it would leave a badge that never clears.
+ */
+export function unreadSince<T extends { created_at: string }>(
+  messages: T[],
+  seenAt: string | null | undefined,
+): T[] {
+  if (!seenAt) return [...messages];
+  return messages.filter((m) => m.created_at > seenAt);
+}
+
+/**
+ * The dashboard's unanswered-message item. Empty when nothing is unread, so the
+ * "needs attention" list stays quiet rather than reporting a zero.
+ *
+ * Unlike the membership-window notification this is not a fault to fix: somebody
+ * is waiting on a reply, which is why it carries its own button verb.
+ */
+export function contactMessageNotifications(input: {
+  unread: number;
+  latestName?: string | null;
+  latestAt?: string | null;
+}): ManagerNotification[] {
+  const { unread, latestName, latestAt } = input;
+  if (unread <= 0) return [];
+  const who = latestName?.trim() || "Someone";
+  const when = latestAt ? ` on ${formatDateOnly(latestAt)}` : "";
+  return [
+    {
+      type: "unread_contact_messages",
+      title:
+        unread === 1
+          ? `${who} sent a message through the contact form`
+          : `${unread} unanswered messages from the contact form`,
+      body:
+        unread === 1
+          ? `It arrived${when} and nobody has opened the inbox since. Every manager was emailed a copy too.`
+          : `The most recent is from ${who}${when}. Every manager was emailed a copy of each.`,
+      href: "/manager/contact-messages",
+      actionLabel: unread === 1 ? "Read it" : "Read them",
+    },
+  ];
+}
+
+/**
+ * The order a manager meets the "needs attention" items in.
+ *
+ * Unanswered messages come first: a person is waiting on a reply, whereas an
+ * unset training window is a chore that announces itself weeks ahead. Kept as a
+ * function rather than an inline spread in the handler so the priority is a
+ * decision with a test on it, not an accident of argument order.
+ */
+export function composeManagerNotifications(sources: {
+  contactMessages: ManagerNotification[];
+  membershipWindows: ManagerNotification[];
+}): ManagerNotification[] {
+  return [...sources.contactMessages, ...sources.membershipWindows];
 }
 
 // ---- Member: start a membership ----

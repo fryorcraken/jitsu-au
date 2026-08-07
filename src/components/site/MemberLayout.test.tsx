@@ -119,6 +119,14 @@ describe("MemberLayout", () => {
       "href",
       "/manager/blog-comments",
     );
+    // The contact-form inbox. Same reasoning as the documents editor below: it
+    // is the only screen in the app that can show a contact message at all, so
+    // without a nav entry the messages stay as invisible as they were before it
+    // existed.
+    expect(screen.getByRole("link", { name: /^contact messages$/i })).toHaveAttribute(
+      "href",
+      "/manager/contact-messages",
+    );
     // The documents editor. Without a nav entry a manager has no way to reach
     // it at all, which is exactly how it shipped API-only the first time.
     expect(screen.getByRole("link", { name: /^knowledge base editor$/i })).toHaveAttribute(

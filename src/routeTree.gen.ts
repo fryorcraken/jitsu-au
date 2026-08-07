@@ -42,6 +42,7 @@ import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenti
 import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_authenticated/manager.blog-comments'
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
 import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
+import { Route as AuthenticatedManagerContactMessagesRouteImport } from './routes/_authenticated/manager.contact-messages'
 import { Route as AuthenticatedManagerKbRouteImport } from './routes/_authenticated/manager.kb'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
@@ -230,6 +231,12 @@ const AuthenticatedManagerCheckInRoute =
     path: '/manager/check-in',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerContactMessagesRoute =
+  AuthenticatedManagerContactMessagesRouteImport.update({
+    id: '/manager/contact-messages',
+    path: '/manager/contact-messages',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerKbRoute = AuthenticatedManagerKbRouteImport.update({
   id: '/manager/kb',
   path: '/manager/kb',
@@ -359,6 +366,7 @@ export interface FileRoutesByFullPath {
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
   '/manager/kb': typeof AuthenticatedManagerKbRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
@@ -409,6 +417,7 @@ export interface FileRoutesByTo {
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
   '/manager/kb': typeof AuthenticatedManagerKbRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
@@ -462,6 +471,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/_authenticated/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
   '/_authenticated/manager/kb': typeof AuthenticatedManagerKbRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
@@ -515,6 +525,7 @@ export interface FileRouteTypes {
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
+    | '/manager/contact-messages'
     | '/manager/kb'
     | '/manager/membership-plans'
     | '/manager/memberships'
@@ -565,6 +576,7 @@ export interface FileRouteTypes {
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
+    | '/manager/contact-messages'
     | '/manager/kb'
     | '/manager/membership-plans'
     | '/manager/memberships'
@@ -617,6 +629,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/blog-comments'
     | '/_authenticated/manager/calendar'
     | '/_authenticated/manager/check-in'
+    | '/_authenticated/manager/contact-messages'
     | '/_authenticated/manager/kb'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
@@ -901,6 +914,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/contact-messages': {
+      id: '/_authenticated/manager/contact-messages'
+      path: '/manager/contact-messages'
+      fullPath: '/manager/contact-messages'
+      preLoaderRoute: typeof AuthenticatedManagerContactMessagesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/kb': {
       id: '/_authenticated/manager/kb'
       path: '/manager/kb'
@@ -1031,6 +1051,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerBlogCommentsRoute: typeof AuthenticatedManagerBlogCommentsRoute
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
   AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
+  AuthenticatedManagerContactMessagesRoute: typeof AuthenticatedManagerContactMessagesRoute
   AuthenticatedManagerKbRoute: typeof AuthenticatedManagerKbRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
@@ -1054,6 +1075,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerBlogCommentsRoute: AuthenticatedManagerBlogCommentsRoute,
   AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
   AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
+  AuthenticatedManagerContactMessagesRoute:
+    AuthenticatedManagerContactMessagesRoute,
   AuthenticatedManagerKbRoute: AuthenticatedManagerKbRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,

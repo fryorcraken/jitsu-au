@@ -94,16 +94,45 @@ export const submitContact = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, duplicate: false };
     const supabase = serverSupabase();
+    const submissionId = data.client_submission_id || null;
+
     const { error } = await supabase.from("contact_messages").insert({
       name: data.name,
       email: data.email,
       subject: data.subject || null,
       message: data.message,
-      client_submission_id: data.client_submission_id || null,
+      client_submission_id: submissionId,
     });
     if (error) {
+      // This exact message is already filed. Report success (it IS recorded)
+      // and, crucially, do not send the emails a second time.
       if (error.code === UNIQUE_VIOLATION) return { ok: true as const, duplicate: true };
       throw new Error(error.message);
     }
+
+    // Best-effort transactional emails: acknowledge the sender and put the
+    // message itself in front of every manager. Until this existed the row was
+    // the only trace of a message and nothing on the site read that table, so a
+    // contact form submission reached nobody at all. Never let an email hiccup
+    // fail the message the visitor just sent.
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { sendContactEmails } = await import("@/lib/contact-email.server");
+      await sendContactEmails({
+        // Same reasoning as submitInterest: the anon insert cannot return a row
+        // id and this table has no natural key, so prefer the client's
+        // submission id (a retry that slips past the unique index then lands on
+        // the same idempotency key) and fall back to a fresh one.
+        messageId: submissionId ?? crypto.randomUUID(),
+        name: data.name,
+        email: data.email,
+        subject: data.subject || null,
+        message: data.message,
+        admin: supabaseAdmin,
+      });
+    } catch (e) {
+      console.error("[submitContact] failed to send contact emails:", e);
+    }
+
     return { ok: true as const, duplicate: false };
   });

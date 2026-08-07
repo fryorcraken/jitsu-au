@@ -11,8 +11,13 @@ import {
   codeOfConductAcceptSchema,
   commentDisplayName,
   composeFullName,
+  composeManagerNotifications,
+  contactMessageNotifications,
   contactSchema,
   coverageSources,
+  listContactMessagesSchema,
+  sellableWindowNotifications,
+  unreadSince,
   createAnnotationSchema,
   kbSlugSchema,
   resolveAnnotationSchema,
@@ -751,6 +756,129 @@ describe("contactSchema", () => {
     ).toBe(true);
     expect(contactSchema.safeParse({ ...valid, client_submission_id: "" }).success).toBe(true);
     expect(contactSchema.safeParse({ ...valid, client_submission_id: "nope" }).success).toBe(false);
+  });
+});
+
+describe("listContactMessagesSchema", () => {
+  it("defaults the limit so the manager screen need not pass one", () => {
+    expect(listContactMessagesSchema.parse({})).toEqual({ limit: 200 });
+  });
+
+  it("rejects a limit outside the bounds, so nobody can ask for the whole table", () => {
+    expect(listContactMessagesSchema.safeParse({ limit: 500 }).success).toBe(true);
+    expect(listContactMessagesSchema.safeParse({ limit: 501 }).success).toBe(false);
+    expect(listContactMessagesSchema.safeParse({ limit: 0 }).success).toBe(false);
+    expect(listContactMessagesSchema.safeParse({ limit: 1.5 }).success).toBe(false);
+  });
+});
+
+describe("unreadSince", () => {
+  const messages = [
+    { id: "c", created_at: "2026-08-05T10:00:00.000Z" },
+    { id: "b", created_at: "2026-08-03T10:00:00.000Z" },
+    { id: "a", created_at: "2026-08-01T10:00:00.000Z" },
+  ];
+
+  it("treats everything as unread when nobody has ever opened the inbox", () => {
+    // The state this ships in: a marker has never been written, and every
+    // message the form ever took is still waiting to be read by somebody.
+    expect(unreadSince(messages, null).map((m) => m.id)).toEqual(["c", "b", "a"]);
+    expect(unreadSince(messages, undefined).map((m) => m.id)).toEqual(["c", "b", "a"]);
+    expect(unreadSince(messages, "").map((m) => m.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("counts only what arrived after the marker", () => {
+    expect(unreadSince(messages, "2026-08-02T00:00:00.000Z").map((m) => m.id)).toEqual(["c", "b"]);
+  });
+
+  it("does NOT count a message bearing exactly the marker's timestamp", () => {
+    // The marker is stamped when the inbox is opened, so a message at exactly
+    // that instant was on screen. Counting it would leave a badge that no
+    // amount of opening the page could ever clear.
+    expect(unreadSince(messages, "2026-08-05T10:00:00.000Z")).toEqual([]);
+  });
+
+  it("returns nothing once the marker is past every message", () => {
+    expect(unreadSince(messages, "2026-09-01T00:00:00.000Z")).toEqual([]);
+  });
+});
+
+describe("contactMessageNotifications", () => {
+  it("stays quiet when nothing is unread rather than reporting a zero", () => {
+    expect(contactMessageNotifications({ unread: 0 })).toEqual([]);
+    expect(contactMessageNotifications({ unread: -1 })).toEqual([]);
+  });
+
+  it("names the sender and speaks singular for one message", () => {
+    const [n] = contactMessageNotifications({
+      unread: 1,
+      latestName: "Sam",
+      latestAt: "2026-08-05T10:00:00.000Z",
+    });
+    expect(n.type).toBe("unread_contact_messages");
+    expect(n.title).toBe("Sam sent a message through the contact form");
+    expect(n.href).toBe("/manager/contact-messages");
+    // Not "Fix it": nothing is broken, somebody is waiting on a reply. That
+    // distinction is why the label travels on the notification at all.
+    expect(n.actionLabel).toBe("Read it");
+  });
+
+  it("counts and speaks plural for several", () => {
+    const [n] = contactMessageNotifications({
+      unread: 3,
+      latestName: "Sam",
+      latestAt: "2026-08-05T10:00:00.000Z",
+    });
+    expect(n.title).toBe("3 unanswered messages from the contact form");
+    expect(n.body).toContain("Sam");
+    expect(n.actionLabel).toBe("Read them");
+  });
+
+  it("falls back to 'Someone' rather than printing a blank name", () => {
+    expect(contactMessageNotifications({ unread: 1, latestName: "  " })[0].title).toBe(
+      "Someone sent a message through the contact form",
+    );
+    expect(contactMessageNotifications({ unread: 1, latestName: null })[0].title).toBe(
+      "Someone sent a message through the contact form",
+    );
+  });
+
+  it("omits the date when the newest message could not be read", () => {
+    // countUnreadContactMessages degrades to a count with no name/date rather
+    // than failing the whole dashboard, so the copy has to survive that.
+    const [n] = contactMessageNotifications({ unread: 2, latestName: null, latestAt: null });
+    expect(n.title).toBe("2 unanswered messages from the contact form");
+    expect(n.body).not.toMatch(/ on \s*$/);
+    expect(n.body).not.toContain("undefined");
+  });
+});
+
+describe("composeManagerNotifications", () => {
+  const contact = contactMessageNotifications({ unread: 1, latestName: "Sam" });
+  const windows = sellableWindowNotifications([], "2026-08-03T10:00:00.000Z");
+
+  it("puts unanswered messages above the membership window chore", () => {
+    // A person waiting on a reply outranks a training window that announces
+    // itself weeks ahead. This is the whole reason the order is a function.
+    const all = composeManagerNotifications({
+      contactMessages: contact,
+      membershipWindows: windows,
+    });
+    expect(all.map((n) => n.type)).toEqual(["unread_contact_messages", "define_membership_window"]);
+  });
+
+  it("contributes nothing for a source that is quiet", () => {
+    expect(
+      composeManagerNotifications({ contactMessages: [], membershipWindows: windows }).map(
+        (n) => n.type,
+      ),
+    ).toEqual(["define_membership_window"]);
+    expect(
+      composeManagerNotifications({ contactMessages: contact, membershipWindows: [] }).map(
+        (n) => n.type,
+      ),
+    ).toEqual(["unread_contact_messages"]);
+    expect(composeManagerNotifications({ contactMessages: [], membershipWindows: [] })).toEqual([]);
   });
 });
 
