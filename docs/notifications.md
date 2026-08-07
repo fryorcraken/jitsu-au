@@ -201,25 +201,43 @@ choice to a member would be a lie about what they can turn on.
 - **No per-thread mute.** The switches are per kind. If one thread turns noisy,
   the answer today is to turn thread activity off.
 - **No in-app bell or toast.** The sidebar badge is the only in-app signal.
-- **The attention list keeps the one check it had.** Pending waiver approvals,
-  unmatched bank transactions and unpaid invoices are all obvious next entries
-  and the shape supports them, but widening the manager queue is separate work.
+- **The attention list has two checks**: the club's training dates running out,
+  and unanswered contact messages. Pending waiver approvals, unmatched bank
+  transactions and unpaid invoices are all obvious next entries and the shape
+  supports them, but widening the manager queue further is separate work.
 - **No digest for somebody with nothing.** An empty digest is not sent, and the
   rows are stamped anyway so tomorrow's run is not re-reading them forever.
 
-## Known gap this did not fix
+## The gap this left, since closed
 
-`contact_messages` is **write-only**. The contact form saves a row and nothing
-in the app ever reads it: no manager screen, no server function, no email
-(unlike the interest form, which does notify managers). Anybody who has used the
-contact form has been talking into a void. It is a real bug, it is out of scope
-here, and it deserves its own fix.
+`contact_messages` used to be **write-only**: the form saved a row and nothing in
+the app ever read it, so anybody who used the contact form was talking into a
+void. That is fixed. Submitting now emails the sender an acknowledgement and
+every manager the message itself, `/manager/contact-messages` lists the history,
+and unanswered messages are an **attention item** here.
+
+Attention, not activity, and the distinction is the one this page rests on: they
+are derived live from a club-wide marker
+(`club_settings.contact_messages_seen_at`) rather than stored per person, and
+they clear by a manager opening the inbox rather than by anyone marking a row
+read. See `docs/database.md` under `contact_messages`.
+
+Two consequences worth knowing:
+
+- **The marker is club-wide.** Whichever manager opens the inbox clears the item
+  for all of them. A per-manager count would need a table of its own.
+- **It was the first attention item with its own verb.** `ManagerNotification`
+  carries an `actionLabel` because "Fix it" is right for unset training dates and
+  wrong for a message, where nothing is broken and somebody is waiting on a
+  reply.
 
 ## Where the code lives
 
 | Concern                      | File                                                                   |
 | ---------------------------- | ---------------------------------------------------------------------- |
 | The rules (pure, tested)     | `src/lib/notifications.ts`                                             |
+| The attention list           | `src/lib/manager-notifications.functions.ts`                           |
+| Contact messages             | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`     |
 | Who hears about what         | `src/lib/notification-events.server.ts`                                |
 | Sending, and the digest run  | `src/lib/notification-email.server.ts`                                 |
 | Page and settings server fns | `src/lib/notifications.functions.ts`                                   |

@@ -19,7 +19,7 @@ import { beltSizes, giSizes } from "./kit-sizes";
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
 // the same kind of module as this one (pure, no server imports).
 import { CLUB_TIME_ZONE, clubLocalDate, zonedWallTimeToUtc } from "./calendar";
-import { formatDateOnly } from "./dates";
+import { formatDate, formatDateOnly } from "./dates";
 
 // ---- Pure helpers ----
 
@@ -383,14 +383,59 @@ export const interestSchema = z.object({
 
 // ---- Contact message ----
 
+// `name` and `subject` reach a manager's inbox inside the notification email's
+// SUBJECT LINE, so they are the only two fields here that leave the page as
+// anything but body text. Line breaks are refused: the send API posts JSON so
+// a CR/LF cannot forge a mail header at that layer, but a subject is a
+// single-line field and nothing downstream promises to keep treating it as
+// data. `message` is unrestricted — it is body text everywhere it appears.
+const singleLine = /^[^\r\n]*$/;
+
 export const contactSchema = z.object({
   client_submission_id: clientSubmissionId,
-  name: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(100).regex(singleLine),
   email: z.string().trim().email().max(255),
-  subject: z.string().trim().max(150).optional().or(z.literal("")),
+  subject: z.string().trim().max(150).regex(singleLine).optional().or(z.literal("")),
   message: z.string().trim().min(1).max(2000),
   hp: z.string().max(0).optional(), // honeypot
 });
+
+/**
+ * Manager: page through the messages the contact form has received. Bounded so
+ * a manager screen cannot ask for the whole table; the default is generous
+ * enough that the club will not page in practice.
+ */
+export const listContactMessagesSchema = z.object({
+  limit: z.number().int().min(1).max(500).default(200),
+});
+export type ListContactMessagesInput = z.infer<typeof listContactMessagesSchema>;
+
+/**
+ * Manager: acknowledge everything up to the newest message they were shown.
+ * `seen_at` is that message's `created_at`, not the current time — see
+ * `markContactMessagesSeen`.
+ */
+export const markContactMessagesSeenSchema = z.object({
+  seen_at: z.string().datetime({ offset: true }),
+});
+export type MarkContactMessagesSeenInput = z.infer<typeof markContactMessagesSeenSchema>;
+
+/**
+ * Where the club-wide "messages seen up to here" marker should land.
+ *
+ * Monotonic and clamped: the marker only moves forward, and never past the
+ * present. Backwards would make already-read messages reappear when a stale tab
+ * finishes late; into the future would mark messages read before they arrive,
+ * which is the one failure that loses a message for good.
+ *
+ * Returns `current` unchanged when the candidate earns no move, so the caller
+ * can skip the write.
+ */
+export function advanceSeenMarker(current: string | null, candidate: string, now: string): string {
+  const clamped = candidate > now ? now : candidate;
+  if (current && clamped <= current) return current;
+  return clamped;
+}
 
 // ---- Waiver submission (name-split + signature + minor guardian) ----
 
@@ -1136,14 +1181,22 @@ export function insuranceSelection(input: {
 
 /**
  * One item on the manager dashboard's "needs attention" list. Deliberately
- * data-shaped, not copy-ready JSX: the pure function below is what turns
+ * data-shaped, not copy-ready JSX: the pure functions below are what turn
  * club data into these, so tests pin the messages without rendering.
  */
 export type ManagerNotification = {
-  type: "define_membership_window";
+  type: "define_membership_window" | "unread_contact_messages";
   title: string;
   body: string;
   href: string;
+  /**
+   * What the item's button says. Carried here rather than fixed in the
+   * dashboard, because the right verb depends on the item: unset training dates
+   * really do need fixing, an unanswered message needs reading. Required, not
+   * optional-with-a-default, so adding a kind of notification cannot silently
+   * inherit a verb that does not fit it.
+   */
+  actionLabel: string;
 };
 
 /**
@@ -1171,6 +1224,7 @@ export function sellableWindowNotifications<
         title: "Set up the club's training dates",
         body: "Members cannot join as members until the club's training dates are set. Add them now on the membership plans page.",
         href: "/manager/membership-plans",
+        actionLabel: "Fix it",
       },
     ];
   }
@@ -1182,8 +1236,91 @@ export function sellableWindowNotifications<
       title: `The training period ${latest.name} ends ${formatDateOnly(latest.ends_on)}`,
       body: "Nothing is defined after it, so enrolments stop when it ends. Set the club's next training dates on the membership plans page.",
       href: "/manager/membership-plans",
+      actionLabel: "Fix it",
     },
   ];
+}
+
+/**
+ * How many contact-form messages have arrived since a manager last opened the
+ * inbox. `seenAt` is the club-wide marker (`club_settings.contact_messages_seen_at`);
+ * absent means nobody has ever opened it, so everything counts — which is right
+ * both on the day this ships and if the setting is ever cleared.
+ *
+ * Strictly newer than the marker: the marker is stamped at the moment the inbox
+ * is opened, so a message bearing exactly that timestamp was on screen and has
+ * been seen. Counting it would leave a badge that never clears.
+ */
+export function unreadSince<T extends { created_at: string }>(
+  messages: T[],
+  seenAt: string | null | undefined,
+): T[] {
+  if (!seenAt) return [...messages];
+  return messages.filter((m) => m.created_at > seenAt);
+}
+
+/**
+ * The dashboard's unanswered-message item. Empty when nothing is unread, so the
+ * "needs attention" list stays quiet rather than reporting a zero.
+ *
+ * Unlike the membership-window notification this is not a fault to fix: somebody
+ * is waiting on a reply, which is why it carries its own button verb.
+ */
+export function contactMessageNotifications(input: {
+  unread: number;
+  latestName?: string | null;
+  latestAt?: string | null;
+}): ManagerNotification[] {
+  const { unread, latestName, latestAt } = input;
+  if (unread <= 0) return [];
+  const who = latestName?.trim() || "Someone";
+  // Resolved to the CLUB's day, not the server's.
+  //
+  // This string is built inside `listMyNotifications`, so it renders on the
+  // server (UTC) while the inbox screen it links to formats the same timestamp
+  // in the manager's browser. A message at 9am Sydney is still the previous
+  // date in UTC, so a plain `toLocaleDateString` had the two screens naming
+  // different days for one message. `clubLocalDate` gives the `YYYY-MM-DD` the
+  // club was actually on, which is exactly what `formatDateOnly` is for — and
+  // being pure, it also drops the dependency on the runtime having full ICU.
+  const when = latestAt
+    ? ` on ${formatDateOnly(clubLocalDate(new Date(latestAt), CLUB_TIME_ZONE))}`
+    : "";
+  return [
+    {
+      type: "unread_contact_messages",
+      title:
+        unread === 1
+          ? `${who} sent a message through the contact form`
+          : `${unread} unanswered messages from the contact form`,
+      // Says nothing about emails. The obvious line here is "every manager was
+      // emailed a copy too", and it is false exactly when it matters most: on
+      // the day this shipped the whole existing backlog counted as unread, and
+      // none of those messages was ever emailed to anyone. It is false again
+      // whenever a send fails, since sending is best-effort by design.
+      body:
+        unread === 1
+          ? `It arrived${when} and nobody has opened the inbox since.`
+          : `The most recent is from ${who}${when}. None have been opened yet.`,
+      href: "/manager/contact-messages",
+      actionLabel: unread === 1 ? "Read it" : "Read them",
+    },
+  ];
+}
+
+/**
+ * The order a manager meets the "needs attention" items in.
+ *
+ * Unanswered messages come first: a person is waiting on a reply, whereas an
+ * unset training window is a chore that announces itself weeks ahead. Kept as a
+ * function rather than an inline spread in the handler so the priority is a
+ * decision with a test on it, not an accident of argument order.
+ */
+export function composeManagerNotifications(sources: {
+  contactMessages: ManagerNotification[];
+  membershipWindows: ManagerNotification[];
+}): ManagerNotification[] {
+  return [...sources.contactMessages, ...sources.membershipWindows];
 }
 
 // ---- Member: start a membership ----

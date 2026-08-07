@@ -18,7 +18,13 @@ import {
 } from "./seo";
 import { Route as RootRoute } from "@/routes/__root";
 import { Route as AboutRoute } from "@/routes/about";
-import { GOOGLE_MAPS_URL } from "./venue";
+import {
+  GOOGLE_MAPS_URL,
+  VENUE_PHONE_DISPLAY,
+  VENUE_PHONE_E164,
+  VENUE_PHONE_TEL,
+  WHATSAPP_URL,
+} from "./venue";
 
 describe("canonicalUrl", () => {
   it("keeps the trailing slash on the home page", () => {
@@ -348,10 +354,27 @@ describe("club details match the site", () => {
   const instructors = readFileSync(join(srcDir, "routes", "instructors.tsx"), "utf8");
 
   it("uses the phone number the footer and contact page dial", () => {
-    // "+61493631759" -> the local "0493631759" both pages link with tel:.
-    const local = CLUB_PHONE_E164.replace(/^\+61/, "0");
-    expect(footer).toContain(`tel:${local}`);
-    expect(contact).toContain(`tel:${local}`);
+    // Pinned to the literal digits, deliberately.
+    //
+    // The obvious version of this test derives each expectation from the same
+    // constant it is checking, which passes no matter what venue.ts computes.
+    // The display form is the trap: it comes from a regex replace that falls
+    // back to the raw digits when the pattern stops matching, so
+    // `DISPLAY.replace(/\s/g, "") === localForm` holds even when the grouping
+    // has silently broken and the site is printing "0493631759".
+    expect(CLUB_PHONE_E164).toBe("+61493631759");
+    expect(VENUE_PHONE_E164).toBe("+61493631759");
+    expect(VENUE_PHONE_TEL).toBe("tel:0493631759");
+    expect(VENUE_PHONE_DISPLAY).toBe("0493 631 759");
+    expect(WHATSAPP_URL).toBe("https://wa.me/61493631759");
+  });
+
+  it("has the footer and contact page read that number rather than restate it", () => {
+    // The point of the constant is that nothing hardcodes the digits again.
+    for (const source of [footer, contact]) {
+      expect(source).toContain("VENUE_PHONE_TEL");
+      expect(source).not.toMatch(/tel:04\d{8}/);
+    }
   });
 
   it("lists the social profiles the footer links to", () => {

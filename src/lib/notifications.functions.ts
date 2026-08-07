@@ -18,7 +18,7 @@ import {
   type NotificationKind,
   type NotificationPreferenceRow,
 } from "@/lib/notifications";
-import { managerAttentionItems } from "@/lib/membership.functions";
+import { managerAttentionItems } from "@/lib/manager-notifications.functions";
 import {
   markNotificationsReadSchema,
   notificationPreferencesByTokenSchema,

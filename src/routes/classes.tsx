@@ -3,6 +3,7 @@ import { ArrowRight, Clock, MapPin, Phone } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta } from "@/lib/seo";
+import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL } from "@/lib/venue";
 
 export const Route = createFileRoute("/classes")({
   head: () => ({
@@ -80,8 +81,8 @@ function Classes() {
             <h2 className="mt-2 text-2xl font-bold">ActivateFit Gym, Harris Street, Ultimo NSW</h2>
             <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <Phone className="h-4 w-4" />{" "}
-              <a href="tel:0493631759" className="hover:text-foreground">
-                0493 631 759
+              <a href={VENUE_PHONE_TEL} className="hover:text-foreground">
+                {VENUE_PHONE_DISPLAY}
               </a>
             </p>
             <Link

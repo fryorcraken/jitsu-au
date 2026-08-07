@@ -10,8 +10,6 @@ import {
   haystackContainsRef,
   matchesMembershipReference,
   matchTransactionSchema,
-  sellableWindowNotifications,
-  type ManagerNotification,
   normalizeRef,
   greetingName,
   nameWithPreferred,
@@ -38,6 +36,7 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { userEmails } from "@/lib/supabase-rpc";
+import { requireManager } from "@/lib/require-manager";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -83,16 +82,6 @@ async function clubUserEmailRows(
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
-}
-
-/** Throw unless the caller holds the `manager` role (checked via the RLS RPC). */
-async function requireManager(context: { supabase: MembershipClient; userId: string }) {
-  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
-    _user_id: context.userId,
-    _role: "manager",
-  });
-  if (error) throw new Error(error.message);
-  if (!isMgr) throw new Error("Forbidden");
 }
 
 /** Stable content key so re-importing the same statement line is a no-op. */
@@ -736,7 +725,7 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => savePlanSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     return saveMembershipPlanRow(admin, data);
   });
@@ -758,39 +747,18 @@ export async function listMembershipPlanRows(
   return data ?? [];
 }
 
-// ---- Manager: the "needs attention" list ----
-//
-// Standing problems only a manager can fix. Derived on every call and never
-// stored, which is what makes them clear by being FIXED rather than by being
-// dismissed — see docs/notifications.md.
-//
-// A plain exported function rather than a `createServerFn`, the same shape as
-// `listMembershipPlanRows` above: its one caller is `listMyNotifications` in
-// `notifications.functions.ts`, which already has the caller's identity and
-// has checked the manager role. Two server functions deriving this list would
-// be two places for the rule to drift.
-//
-// The rules themselves live in pure functions (validation.ts, unit-tested);
-// this is only the data fetch.
-export async function managerAttentionItems(
-  admin: MembershipClient,
-): Promise<ManagerNotification[]> {
-  const plans = await listMembershipPlanRows(admin);
-  // Only dated plans (starts_on/ends_on both set) need a successor —
-  // an undated one (trial, casual, insurance) never runs out of training
-  // dates to sell.
-  const dated = plans.filter(
-    (p): p is MembershipPlanRow & { starts_on: string; ends_on: string } =>
-      p.starts_on != null && p.ends_on != null,
-  );
-  return sellableWindowNotifications(dated, new Date().toISOString());
-}
+// `managerAttentionItems` — the "needs attention" list behind /notifications —
+// moved to `manager-notifications.functions.ts`. It draws on two subsystems now
+// (membership windows and unanswered contact messages), so composing it here
+// would make every future source a membership concern. This module still owns
+// the membership half: `listMembershipPlanRows` above, and the rule that reads
+// it (`sellableWindowNotifications`, in validation.ts).
 
 // ---- Manager: club settings (invoice payment instructions) ----
 export const getClubSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { data, error } = await admin
       .from("club_settings")
@@ -807,7 +775,7 @@ export const saveClubSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => saveClubSettingsSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { error } = await admin.from("club_settings").upsert(
       {
@@ -826,7 +794,7 @@ export const saveClubSettings = createServerFn({ method: "POST" })
 export const listAllMembershipPlans = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     return listMembershipPlanRows(admin);
   });
@@ -835,7 +803,7 @@ export const listAllMembershipPlans = createServerFn({ method: "GET" })
 export const listMemberships = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const [{ data: rows, error }, { data: plans, error: plErr }] = await Promise.all([
@@ -882,7 +850,7 @@ export const listMemberships = createServerFn({ method: "GET" })
 export const listClubUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { aggregateClubUsers, profileUserIds, LEADS_LIMIT, CHECKINS_LIMIT } =
       await import("@/lib/club-users");
@@ -988,7 +956,7 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => setMembershipStatusSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const { data: membership, error } = await admin
@@ -1033,7 +1001,7 @@ export const importBankStatement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => importBankStatementSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const importBatch = crypto.randomUUID();
@@ -1068,7 +1036,7 @@ export const importBankStatement = createServerFn({ method: "POST" })
 export const listBankTransactions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { data, error } = await admin
       .from("bank_transactions")
@@ -1095,7 +1063,7 @@ export const matchTransaction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => matchTransactionSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const { data: membership, error: mErr } = await admin

@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Instagram, Youtube, Phone, MessageCircle } from "lucide-react";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
-import { GOOGLE_MAPS_URL } from "@/lib/venue";
+import { GOOGLE_MAPS_URL, VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 
 export function SiteFooter() {
   return (
@@ -81,13 +81,13 @@ export function SiteFooter() {
             </li>
             <li className="flex items-center gap-2">
               <Phone className="h-3.5 w-3.5" />{" "}
-              <a href="tel:0493631759" className="hover:text-foreground">
-                0493 631 759
+              <a href={VENUE_PHONE_TEL} className="hover:text-foreground">
+                {VENUE_PHONE_DISPLAY}
               </a>
             </li>
             <li className="flex items-center gap-2">
               <MessageCircle className="h-3.5 w-3.5" />{" "}
-              <a href="https://wa.me/61493631759" className="hover:text-foreground">
+              <a href={WHATSAPP_URL} className="hover:text-foreground">
                 WhatsApp
               </a>
             </li>
