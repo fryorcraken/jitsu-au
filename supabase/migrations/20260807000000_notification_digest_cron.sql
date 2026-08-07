@@ -100,14 +100,21 @@ END;
 $$;
 
 -- ---------- 2. The job body ----------
--- The command pg_cron stores is world-readable to anyone who can select from
--- `cron.job`, so the bearer token must NOT appear in it. The token lives in
--- Supabase Vault (already installed here, 0.3.1) and is read at fire time by
--- this function, which is the only thing the schedule names.
+-- The schedule names only this function; the bearer token is never in the
+-- command string. That is defence in depth rather than a plugged hole, since
+-- pg_cron 1.4+ puts RLS on `cron.job` with `USING (username = current_user)` so
+-- a command is not world-readable. It is still the right call: a credential
+-- sitting in a column that exists to be read back and displayed is one schema
+-- change or one superuser query away from exposure, and inlining it buys
+-- nothing. The token lives in Supabase Vault (0.3.1 here) and is read at fire
+-- time.
 --
 -- `private`, not `public`: nothing calls this over PostgREST, and a function
--- that makes the site email every member has no business being an RPC. Same
--- reasoning as the RLS-only helpers documented in docs/database.md.
+-- that makes the site email every member has no business being a routable RPC.
+-- Note this WIDENS the convention docs/database.md writes up as "RLS-only
+-- helpers live in `private`" — this helper's caller is pg_cron, not a policy.
+-- The general rule it follows is the one that section rests on: `private` is not
+-- in PostgREST's `db-schemas`, so nothing there is reachable as an RPC.
 CREATE SCHEMA IF NOT EXISTS private;
 
 CREATE OR REPLACE FUNCTION private.run_notification_digest()
