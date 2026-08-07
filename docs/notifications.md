@@ -81,11 +81,40 @@ saved, and must never fail because telling somebody about it did.
 
 ### The daily summary
 
-`.github/workflows/notification-digest.yml` POSTs to
-`/api/notifications/digest` once a day with a bearer token
-(`NOTIFICATION_DIGEST_KEY`). The endpoint groups every row with no `emailed_at`
-by person, drops the kinds they have switched off, and sends one email to
-whoever has anything left.
+A **pg_cron job in the database** POSTs to `/api/notifications/digest` once a
+day. `private.run_notification_digest()` reads the site URL and the bearer token
+out of Supabase Vault and calls out with pg_net; the schedule itself never holds
+the token, since anyone who can read `cron.job` can read a command string. The
+endpoint groups every row with no `emailed_at` by person, drops the kinds they
+have switched off, and sends one email to whoever has anything left.
+
+This ran as a GitHub Actions workflow first, and moving it was a correction, not
+a preference. Scheduling production work from CI put a credential that makes the
+site email its members into a repo that takes same-repo branches from Lovable and
+from coding agents, and it made the club's schedule depend on GitHub, which
+delays and disables scheduled workflows on quiet repos. The original reasoning
+for using Actions ("pg_cron is not available") was never checked: it was inferred
+from the extension being absent from this repo's migrations, which says nothing
+about what the project offers. `pg_available_extensions` lists pg_cron 1.6.4.
+
+**It is not armed by the migration.** The job fires nightly and returns
+immediately, with a warning in the Postgres log, until both Vault secrets exist:
+
+```sql
+SELECT vault.create_secret(
+  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
+SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
+  'notification_digest_key');
+```
+
+Two traps worth stating, because both fail silently every morning rather than
+loudly once:
+
+- Read `vault.decrypted_secrets.decrypted_secret`, never `vault.secrets.secret`.
+  The latter is the ciphertext, and using it sends an `Authorization` header of
+  base64 noise that earns a 401.
+- Use the `jitsu.au` origin, not the published `*.lovable.app` host. That one
+  302s to `jitsu.au`, and pg_net does not follow redirects.
 
 Two things about the stamping are worth knowing, because they are what keep it
 honest:
@@ -98,18 +127,43 @@ honest:
   `LOVABLE_API_KEY`, where nothing is stamped at all: those notifications are
   still owed.
 
-The workflow runs on `schedule` and `workflow_dispatch` only, never on
-`pull_request`. It holds a credential that makes the live site email its
-members, and this repo takes same-repo branches from Lovable and from coding
-agents, so pairing that secret with a workflow a PR can rewrite would be a way
-to exfiltrate it, or to mail every member, in one line. Same reasoning as
-`migration-drift.yml`.
+`0 20 * * *` is 7am in Sydney during daylight saving and 6am outside it. pg_cron
+schedules are UTC and have no notion of DST, and an hour's drift on a club digest
+is not worth a scheduler of our own.
 
-There is no other scheduler available: the Supabase project is Lovable-managed
-and `pg_cron` is not in this repo's migrations, and there is no `wrangler.toml`
-here because Lovable owns the deploy. `cron: "0 20 * * *"` is 7am in Sydney
-during daylight saving and 6am outside it; cron has no notion of DST and an
-hour's drift on a club digest is not worth a scheduler of our own.
+#### Knowing whether it actually ran ⚠️
+
+**This is the weak point of the current setup, and it is a real regression
+against the GitHub Action it replaced.** The Action used `curl --fail-with-body`,
+so any non-2xx turned the job red and GitHub emailed the repo owner. pg_net is
+fire and forget: it queues the request, `PERFORM` discards the request id, and
+the function returns successfully no matter what the site answered. So
+`cron.job_run_details` records **succeeded** for every one of these:
+
+- `NOTIFICATION_DIGEST_KEY` unset or rotated server-side, so the endpoint answers
+  503 or 401 forever
+- the Vault secret drifting from the env var, giving 401 every morning
+- the site being down, DNS or TLS failing, or the request timing out
+
+In all of them nobody is emailed, `emailed_at` stays NULL, the backlog grows, and
+nothing anywhere says so. The only evidence is `net._http_response`, which
+pg_net garbage-collects after `pg_net.ttl` (6 hours by default), so it is
+usually gone before anyone thinks to ask.
+
+To check by hand:
+
+```sql
+SELECT * FROM cron.job_run_details
+ WHERE jobname = 'notification-digest' ORDER BY start_time DESC LIMIT 7;   -- did it fire
+SELECT id, status_code, error_msg, created
+  FROM net._http_response ORDER BY created DESC LIMIT 5;                   -- what came back
+SELECT count(*) FROM public.notifications WHERE emailed_at IS NULL;        -- backlog, the real symptom
+```
+
+That last query is the one worth watching: a number that climbs day over day
+means the digest has stopped, whatever the scheduler thinks. Closing this
+properly wants a second job that reads back the response and raises on a non-2xx
+so the failure lands in `cron.job_run_details`. Not built yet.
 
 ### A post goes live
 
@@ -193,5 +247,5 @@ Two consequences worth knowing:
 | The switches                 | `src/components/site/NotificationSwitches.tsx`                         |
 | The sidebar badge            | `src/components/site/MemberLayout.tsx`                                 |
 | The digest endpoint          | `src/routes/api/notifications/digest.ts`                               |
-| The schedule                 | `.github/workflows/notification-digest.yml`                            |
+| The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`      |
 | Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx` |

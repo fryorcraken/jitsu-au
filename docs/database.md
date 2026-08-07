@@ -1054,6 +1054,52 @@ granting signed-out access to somebody's email settings; `authenticated` has no
 grant and no reason to read even its own row, since the page it powers is
 reached from a link rather than by looking the token up.
 
+### The daily digest schedule (`pg_cron` + `pg_net` + Vault)
+
+Added by `20260807000000_notification_digest_cron.sql`, which enables **pg_cron**
+(schema `cron`) and **pg_net** (schema `net`) and registers one job,
+`notification-digest`, at `0 20 * * *` UTC. It replaced a GitHub Actions
+workflow: scheduling production work from CI put a credential that makes the site
+email its members into a repo that takes same-repo branches from Lovable and from
+coding agents.
+
+**`private.run_notification_digest() → void`** — `SECURITY DEFINER`,
+`SET search_path = ''`, `REVOKE ALL ... FROM PUBLIC`. The job names only this
+function, never the token. The function reads both values from Supabase Vault and
+`net.http_post`s to the endpoint.
+
+Keeping the token out of `cron.job.command` is defence in depth rather than a
+plugged hole: pg_cron 1.4+ puts RLS on `cron.job` with `USING (username =
+current_user)`, so a command string is not world-readable. It is still the right
+call. A credential in a column that exists to be read back and displayed is one
+schema tweak or one superuser query away from being exposed, and there is no
+upside to inlining it.
+
+This **widens** the `private` convention. That section is written as "RLS-only
+helpers live in `private`", and this helper's only caller is pg_cron, not a
+policy. The rule it actually follows is the more general one that section rests
+on: `private` is not routable by PostgREST, so nothing there is reachable as an
+RPC. A function that makes the site email every member belongs on that side of
+the line whether a policy calls it or not.
+
+Two things that fail silently every morning rather than loudly once:
+
+- Read **`vault.decrypted_secrets.decrypted_secret`**, never
+  `vault.secrets.secret` — the latter is ciphertext, and sending it as a bearer
+  token earns a 401.
+- Point at the **`jitsu.au`** origin, not the published `*.lovable.app` host:
+  that one 302s, and pg_net does not follow redirects.
+
+The migration deliberately **does not arm the job**. It fires nightly and returns
+immediately with a `RAISE WARNING` until both secrets exist:
+
+```sql
+SELECT vault.create_secret(
+  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
+SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
+  'notification_digest_key');
+```
+
 ---
 
 ## Knowledge base
