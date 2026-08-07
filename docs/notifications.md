@@ -81,11 +81,40 @@ saved, and must never fail because telling somebody about it did.
 
 ### The daily summary
 
-`.github/workflows/notification-digest.yml` POSTs to
-`/api/notifications/digest` once a day with a bearer token
-(`NOTIFICATION_DIGEST_KEY`). The endpoint groups every row with no `emailed_at`
-by person, drops the kinds they have switched off, and sends one email to
-whoever has anything left.
+A **pg_cron job in the database** POSTs to `/api/notifications/digest` once a
+day. `private.run_notification_digest()` reads the site URL and the bearer token
+out of Supabase Vault and calls out with pg_net; the schedule itself never holds
+the token, since anyone who can read `cron.job` can read a command string. The
+endpoint groups every row with no `emailed_at` by person, drops the kinds they
+have switched off, and sends one email to whoever has anything left.
+
+This ran as a GitHub Actions workflow first, and moving it was a correction, not
+a preference. Scheduling production work from CI put a credential that makes the
+site email its members into a repo that takes same-repo branches from Lovable and
+from coding agents, and it made the club's schedule depend on GitHub, which
+delays and disables scheduled workflows on quiet repos. The original reasoning
+for using Actions ("pg_cron is not available") was never checked: it was inferred
+from the extension being absent from this repo's migrations, which says nothing
+about what the project offers. `pg_available_extensions` lists pg_cron 1.6.4.
+
+**It is not armed by the migration.** The job fires nightly and returns
+immediately, with a warning in the Postgres log, until both Vault secrets exist:
+
+```sql
+SELECT vault.create_secret(
+  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
+SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
+  'notification_digest_key');
+```
+
+Two traps worth stating, because both fail silently every morning rather than
+loudly once:
+
+- Read `vault.decrypted_secrets.decrypted_secret`, never `vault.secrets.secret`.
+  The latter is the ciphertext, and using it sends an `Authorization` header of
+  base64 noise that earns a 401.
+- Use the `jitsu.au` origin, not the published `*.lovable.app` host. That one
+  302s to `jitsu.au`, and pg_net does not follow redirects.
 
 Two things about the stamping are worth knowing, because they are what keep it
 honest:
@@ -175,5 +204,5 @@ here, and it deserves its own fix.
 | The switches                 | `src/components/site/NotificationSwitches.tsx`                         |
 | The sidebar badge            | `src/components/site/MemberLayout.tsx`                                 |
 | The digest endpoint          | `src/routes/api/notifications/digest.ts`                               |
-| The schedule                 | `.github/workflows/notification-digest.yml`                            |
+| The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`      |
 | Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx` |
