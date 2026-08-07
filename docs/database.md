@@ -108,26 +108,31 @@ why.
 ### What the schema scanners make of a closed table
 
 Because almost every table here grants the client roles nothing, a scanner that
-reads policies without reading grants keeps reporting the same two shapes, and
-neither is a finding. Supabase's **dashboard schema review** raises them by
+reads policies without reading grants keeps reporting the same three shapes, and
+none of them is a finding. Supabase's **dashboard schema review** raises them by
 design and has no allowlist, so they come back on every scan — the same standing
 situation as the advisors (see `supabase/lint/README.md`). The answer, once:
 
-- **"RLS enabled but no policies"** on `app_user_connections`,
-  `waiver_drive_uploads`, `bank_transactions`. Fail-closed and intentional. Each
-  is written and read exclusively by a server function on the service-role
-  client — connector ciphertext by `src/lib/app-user-connections.server.ts`, the
-  Drive export by the waiver upload path, statement reconciliation by
-  `src/lib/membership.functions.ts`. `bank_transactions` still carries a manager
-  `SELECT` policy from `20260722000000`, but its grant went in
-  `20260728150000`, so that policy is unreachable too and the manager
-  reconciliation screen reads through the service role like everything else.
+- **"RLS enabled but no policies"** on `app_user_connections` and
+  `waiver_drive_uploads`. Fail-closed and intentional: both are written and read
+  exclusively by a server function on the service-role client — connector
+  ciphertext by `src/lib/app-user-connections.server.ts`, the Drive export by
+  `src/lib/google-drive.functions.ts`.
 - **"no policy allows public/authenticated read"** on `calendar_series`. Also
   intentional, and the one place where adding the policy would be the
   regression: a series is the repeat rule, the public surface is the dated
   `calendar_events` generated from it, and a client-readable series would leak
   the title, instructor, day and time of a session whose occurrences are
   members-only. See the `calendar_series` section below.
+- **"only a manager `SELECT` policy, no write policies"** on
+  `bank_transactions`. The third shape, and the most interesting one, because it
+  is the argument this whole section rests on: the table _does_ carry
+  `"Managers can view bank transactions"` from `20260722000000`, but the grant
+  that made it reachable went in `20260728150000`, so it is as closed as the two
+  above. Statement import and reconciliation run on the service role
+  (`src/lib/membership.functions.ts`), and so does the manager screen that reads
+  the result. A policy surviving its grant is not a leftover to tidy up — it is
+  what every policy on a closed table is (see below).
 
 A closed table is not exempt from having correct policies, though. The policies
 are defence in depth for the day a grant is added back, and one that does not

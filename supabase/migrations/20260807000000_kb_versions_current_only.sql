@@ -34,9 +34,16 @@
 -- because the sub-select below is the thing it is about: a policy expression
 -- runs with the CALLER's privileges, and `authenticated` holds no SELECT on
 -- `public.kb_articles`. Adding a client grant to `kb_article_versions` alone
--- would make this policy raise `permission denied for table kb_articles` rather
--- than deny cleanly; it would need `GRANT SELECT ON public.kb_articles` too, or
--- a SECURITY DEFINER helper in `private` to do the lookup.
+-- would leave this policy raising `permission denied for table kb_articles`; it
+-- needs `GRANT SELECT ON public.kb_articles` too, or a SECURITY DEFINER helper
+-- in `private` to do the lookup.
+--
+-- Narrowing the policy makes that failure WORSE to diagnose, which is worth
+-- knowing before anyone adds that grant. `is_current` is a cheap column test the
+-- planner can satisfy first, so a non-current row is filtered out before the
+-- sub-select is reached and denies silently, while a row that passes `is_current`
+-- still raises. The breakage is therefore partial and plan-dependent rather than
+-- the uniform error the old policy would have given.
 
 DROP POLICY IF EXISTS "Signed-in people can read versions of readable articles"
   ON public.kb_article_versions;
