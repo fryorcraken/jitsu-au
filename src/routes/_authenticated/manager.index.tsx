@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { managerNotifications } from "@/lib/membership.functions";
+import { managerNotifications } from "@/lib/manager-notifications.functions";
 import type { ManagerNotification } from "@/lib/validation";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
@@ -76,7 +76,7 @@ function ManagerDashboard() {
                     <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
                   </div>
                   <Button asChild size="sm" variant="outline">
-                    <Link to={n.href}>Fix it</Link>
+                    <Link to={n.href}>{n.actionLabel}</Link>
                   </Button>
                 </div>
               ))}

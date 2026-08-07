@@ -10,7 +10,6 @@ import {
   haystackContainsRef,
   matchesMembershipReference,
   matchTransactionSchema,
-  sellableWindowNotifications,
   normalizeRef,
   greetingName,
   nameWithPreferred,
@@ -748,25 +747,10 @@ export async function listMembershipPlanRows(
   return data ?? [];
 }
 
-// ---- Manager: dashboard notifications ----
-//
-// The dashboard's "needs attention" list. The rules live in pure functions
-// (validation.ts, unit-tested); this handler is only auth + data fetch.
-export const managerNotifications = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context);
-    const admin = await adminClient();
-    const plans = await listMembershipPlanRows(admin);
-    // Only dated plans (starts_on/ends_on both set) need a successor —
-    // an undated one (trial, casual, insurance) never runs out of training
-    // dates to sell.
-    const dated = plans.filter(
-      (p): p is MembershipPlanRow & { starts_on: string; ends_on: string } =>
-        p.starts_on != null && p.ends_on != null,
-    );
-    return sellableWindowNotifications(dated, new Date().toISOString());
-  });
+// The dashboard's "needs attention" queue lives in
+// `manager-notifications.functions.ts` — it composes items from several sources
+// now, so it is no longer a membership concern. This module still owns the
+// membership rule it draws on (`sellableWindowNotifications`, in validation.ts).
 
 // ---- Manager: club settings (invoice payment instructions) ----
 export const getClubSettings = createServerFn({ method: "GET" })

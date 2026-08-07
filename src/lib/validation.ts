@@ -1136,14 +1136,22 @@ export function insuranceSelection(input: {
 
 /**
  * One item on the manager dashboard's "needs attention" list. Deliberately
- * data-shaped, not copy-ready JSX: the pure function below is what turns
+ * data-shaped, not copy-ready JSX: the pure functions below are what turn
  * club data into these, so tests pin the messages without rendering.
  */
 export type ManagerNotification = {
-  type: "define_membership_window";
+  type: "define_membership_window" | "unread_contact_messages";
   title: string;
   body: string;
   href: string;
+  /**
+   * What the item's button says. Carried here rather than fixed in the
+   * dashboard, because the right verb depends on the item: unset training dates
+   * really do need fixing, an unanswered message needs reading. Required, not
+   * optional-with-a-default, so adding a kind of notification cannot silently
+   * inherit a verb that does not fit it.
+   */
+  actionLabel: string;
 };
 
 /**
@@ -1171,6 +1179,7 @@ export function sellableWindowNotifications<
         title: "Set up the club's training dates",
         body: "Members cannot join as members until the club's training dates are set. Add them now on the membership plans page.",
         href: "/manager/membership-plans",
+        actionLabel: "Fix it",
       },
     ];
   }
@@ -1182,6 +1191,7 @@ export function sellableWindowNotifications<
       title: `The training period ${latest.name} ends ${formatDateOnly(latest.ends_on)}`,
       body: "Nothing is defined after it, so enrolments stop when it ends. Set the club's next training dates on the membership plans page.",
       href: "/manager/membership-plans",
+      actionLabel: "Fix it",
     },
   ];
 }
