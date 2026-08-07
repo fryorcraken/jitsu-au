@@ -92,7 +92,10 @@ const text = {
 };
 const link = { color: "inherit", textDecoration: "underline" };
 // The quoted message. Bordered rather than italic so a long message stays
-// readable, and `whiteSpace: pre-wrap` keeps the line breaks they typed.
+// readable, and `whiteSpace: pre-wrap` keeps the line breaks they typed — in the
+// HTML part only. The plain-text alternative collapses them, so a plain-text
+// client sees one paragraph. Acceptable here: this copy is a courtesy receipt
+// for something the sender wrote themselves and still has.
 const quote = {
   borderLeft: "3px solid #d6d8db",
   padding: "2px 0 2px 15px",

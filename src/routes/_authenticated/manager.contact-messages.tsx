@@ -12,6 +12,8 @@ import {
   type ContactMessage,
 } from "@/lib/contact-messages.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useNotifications";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/_authenticated/manager/contact-messages")({
   head: () => ({
@@ -26,6 +28,7 @@ function ContactMessagesPage() {
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchMessages = useServerFn(listContactMessages);
   const markSeen = useServerFn(markContactMessagesSeen);
+  const { refresh: refreshNotifications } = useNotifications();
 
   const [messages, setMessages] = useState<ContactMessage[]>([]);
   // Which messages were unread when this page loaded. Captured before the marker
@@ -37,40 +40,61 @@ function ContactMessagesPage() {
   // really the inbox could not be read, is the same false reassurance this
   // whole screen exists to end.
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Set when the server had more messages than it returned. The seen marker is a
+  // single watermark, so it cannot express "read the newest 200 but not the 50
+  // behind them" — the server declines to move it, and this says why rather than
+  // leaving a badge that will not clear look broken.
+  const [hiddenOlder, setHiddenOlder] = useState(0);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  useEffect(() => {
-    if (!isManager) return;
-    let cancelled = false;
-    fetchMessages({ data: {} })
+  // Returns its own cancel flag so the mount effect can drop a late response,
+  // while the "Try again" button calls it with nothing to cancel.
+  function load(isCancelled: () => boolean = () => false) {
+    setLoading(true);
+    return fetchMessages({ data: {} })
       .then(async (result) => {
-        if (cancelled) return;
+        if (isCancelled()) return;
         setMessages(result.messages);
         setUnreadIds(new Set(result.unreadIds));
         setLoadError(null);
+        setHiddenOlder(result.truncated ? result.total - result.messages.length : 0);
         // Opening the inbox is what marks it read, like an email client. Fired
         // after the rows are in hand and best-effort: failing to stamp the
         // marker leaves the badge up, which is the safe direction to fail in.
         // Acknowledges the newest message actually listed rather than "now", so
-        // one arriving while this page loaded is not marked read unseen.
+        // one arriving while this page loaded is not marked read unseen. Null
+        // when the list was truncated, which is the server declining to move a
+        // watermark past messages it did not show.
         if (!result.newestAt) return;
         try {
           await markSeen({ data: { seen_at: result.newestAt } });
+          // The sidebar badge and /notifications read one cached query with a
+          // minute of staleness. Without this the manager is looking at the
+          // messages while the badge still counts them, and going back shows the
+          // same "Read it" item they just followed.
+          if (!isCancelled()) refreshNotifications();
         } catch (e) {
           console.error("[manager/contact-messages] could not mark messages seen:", e);
         }
       })
       .catch((e) => {
         const message = e instanceof Error ? e.message : "Could not load the contact messages";
-        if (!cancelled) setLoadError(message);
+        if (isCancelled()) return;
+        setLoadError(message);
         toast.error(message);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!isCancelled()) setLoading(false);
       });
+  }
+
+  useEffect(() => {
+    if (!isManager) return;
+    let cancelled = false;
+    void load(() => cancelled);
     return () => {
       cancelled = true;
     };
@@ -84,17 +108,34 @@ function ContactMessagesPage() {
       <div>
         <h1 className="text-3xl font-black">Contact messages</h1>
         <p className="text-sm text-muted-foreground">
-          Everything sent through the contact form, newest first. Every manager is emailed a copy as
-          it arrives, so reply from your own inbox.
+          Everything sent through the contact form, newest first. Reply from your own inbox: new
+          messages are emailed to every manager as they arrive. Anything from before that was
+          switched on is listed here only.
         </p>
       </div>
+
+      {hiddenOlder > 0 && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+          <p className="text-sm font-medium">
+            Showing the newest {messages.length}. {hiddenOlder} older{" "}
+            {hiddenOlder === 1 ? "message is" : "messages are"} not on this page.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Because of that, none of these count as read yet and the notification stays up. Ask for
+            paging on this screen if you need to work through the older ones.
+          </p>
+        </div>
+      )}
 
       {loadError ? (
         <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
           <p className="text-sm font-medium">The contact messages could not be loaded.</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {loadError} This is not the same as having no messages. Reload the page to try again.
+            {loadError} This is not the same as having no messages.
           </p>
+          <Button className="mt-3" size="sm" variant="outline" onClick={() => void load()}>
+            Try again
+          </Button>
         </div>
       ) : messages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages yet.</p>

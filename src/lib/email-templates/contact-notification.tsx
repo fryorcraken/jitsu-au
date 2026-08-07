@@ -87,8 +87,12 @@ const text = {
   margin: "0 0 25px",
 };
 const link = { color: "inherit", textDecoration: "underline" };
-// `whiteSpace: pre-wrap` keeps the sender's own line breaks, which matters when
-// someone lays out a question in a list.
+// `whiteSpace: pre-wrap` keeps the sender's own line breaks in the HTML part,
+// which matters when someone lays out a question as a list. It does NOT survive
+// into the plain-text alternative: @react-email/render collapses the whitespace
+// there, so a plain-text client shows one run-on paragraph. The inbox screen at
+// /manager/contact-messages renders the stored message with the breaks intact,
+// which is the fallback for anyone who needs the original shape.
 const quote = {
   borderLeft: "3px solid #d6d8db",
   padding: "2px 0 2px 15px",

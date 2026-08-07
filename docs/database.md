@@ -1285,6 +1285,14 @@ inbox. Anything newer than it is counted onto the manager dashboard. A
 per-manager count would need a table of its own; the club shares one inbox and
 every manager is emailed every message, so it does not have one.
 
+Being one watermark ("everything up to here has been seen") is what makes it
+free, and also its one sharp edge: it can only be moved when the list that
+acknowledges it reaches all the way back to it. `listContactMessages` therefore
+returns `newestAt: null` when its own `limit` truncated the result, and the
+screen says so — otherwise showing the newest 200 of 250 would mark the 50 it
+never rendered as read. Paging that screen is the real fix if the club ever
+needs it.
+
 ### `client_submission_id` (all three intake paths)
 
 A nullable `uuid` on `interest_registrations`, `contact_messages` and `waivers`,

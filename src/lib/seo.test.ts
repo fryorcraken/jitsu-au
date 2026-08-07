@@ -354,15 +354,19 @@ describe("club details match the site", () => {
   const instructors = readFileSync(join(srcDir, "routes", "instructors.tsx"), "utf8");
 
   it("uses the phone number the footer and contact page dial", () => {
-    // The number used to be a string literal in each of these files, and this
-    // test read them looking for it. There is now one literal (venue.ts) that
-    // every form derives from, so the drift this guarded against cannot happen
-    // by construction: assert the derivation instead of the copies.
-    expect(CLUB_PHONE_E164).toBe(VENUE_PHONE_E164);
-    expect(VENUE_PHONE_TEL).toBe(`tel:${CLUB_PHONE_E164.replace(/^\+61/, "0")}`);
-    expect(WHATSAPP_URL).toBe(`https://wa.me/${CLUB_PHONE_E164.slice(1)}`);
-    // "0493631759" -> "0493 631 759".
-    expect(VENUE_PHONE_DISPLAY.replace(/\s/g, "")).toBe(CLUB_PHONE_E164.replace(/^\+61/, "0"));
+    // Pinned to the literal digits, deliberately.
+    //
+    // The obvious version of this test derives each expectation from the same
+    // constant it is checking, which passes no matter what venue.ts computes.
+    // The display form is the trap: it comes from a regex replace that falls
+    // back to the raw digits when the pattern stops matching, so
+    // `DISPLAY.replace(/\s/g, "") === localForm` holds even when the grouping
+    // has silently broken and the site is printing "0493631759".
+    expect(CLUB_PHONE_E164).toBe("+61493631759");
+    expect(VENUE_PHONE_E164).toBe("+61493631759");
+    expect(VENUE_PHONE_TEL).toBe("tel:0493631759");
+    expect(VENUE_PHONE_DISPLAY).toBe("0493 631 759");
+    expect(WHATSAPP_URL).toBe("https://wa.me/61493631759");
   });
 
   it("has the footer and contact page read that number rather than restate it", () => {

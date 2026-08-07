@@ -848,6 +848,17 @@ describe("contactSchema", () => {
     expect(contactSchema.safeParse({ ...valid, client_submission_id: "" }).success).toBe(true);
     expect(contactSchema.safeParse({ ...valid, client_submission_id: "nope" }).success).toBe(false);
   });
+
+  it("refuses line breaks in the two fields that reach an email subject line", () => {
+    // name and subject are interpolated into the manager notification's subject.
+    // The message body is not, so it keeps its line breaks.
+    expect(contactSchema.safeParse({ ...valid, name: "Sam\nBcc: someone" }).success).toBe(false);
+    expect(contactSchema.safeParse({ ...valid, name: "Sam\r\nX" }).success).toBe(false);
+    expect(contactSchema.safeParse({ ...valid, subject: "Classes\nX-Header: y" }).success).toBe(
+      false,
+    );
+    expect(contactSchema.safeParse({ ...valid, message: "Line one\nLine two" }).success).toBe(true);
+  });
 });
 
 describe("listContactMessagesSchema", () => {
@@ -971,6 +982,29 @@ describe("contactMessageNotifications", () => {
     });
     expect(n.body).not.toContain("T10:00:00");
     expect(n.body).toMatch(/on \d{2}\/\d{2}\/\d{4}/);
+  });
+
+  it("names the CLUB's day, not the server's", () => {
+    // 9am Sydney on the 6th is still the 5th in UTC. This string is built on the
+    // server while the inbox screen formats the same instant in the manager's
+    // browser, so a runtime-local format had the two screens naming different
+    // days for one message. Independent of the runner's TZ, which is the point.
+    const [n] = contactMessageNotifications({
+      unread: 1,
+      latestName: "Sam",
+      latestAt: "2026-08-05T23:00:00.000Z",
+    });
+    expect(n.body).toContain("06/08/2026");
+  });
+
+  it("claims nothing about emails having been sent", () => {
+    // True for a message that arrived after this shipped, false for every one
+    // in the backlog that counted as unread on day one, and false again
+    // whenever a best-effort send fails. So the copy does not say it.
+    for (const unread of [1, 4]) {
+      const [n] = contactMessageNotifications({ unread, latestName: "Sam", latestAt: null });
+      expect(`${n.title} ${n.body}`.toLowerCase()).not.toContain("email");
+    }
   });
 
   it("counts and speaks plural for several", () => {

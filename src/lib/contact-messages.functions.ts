@@ -40,12 +40,18 @@ async function adminClient(): Promise<AdminClient> {
 }
 
 /**
- * Read the club-wide seen marker. Returns null when it has never been set (so
- * everything is unread) and, deliberately, also on a read error: a dashboard
- * over-reporting unread messages is a nudge to go and look, while one that
- * silently reports zero would hide the very thing it exists to surface.
+ * Read the club-wide seen marker.
+ *
+ * `failed` exists because the two callers need opposite things from an error.
+ * Counting wants to degrade to "everything is unread": over-reporting is a nudge
+ * to go and look, while reporting zero would hide the thing the count exists to
+ * surface. Stamping must NOT degrade that way — treating a failed read as "never
+ * set" skips the only-moves-forward guard and lets a stale tab drag the marker
+ * backwards. So it reports the failure and the caller decides.
  */
-export async function readSeenMarker(admin: AdminClient): Promise<string | null> {
+export async function readSeenMarker(
+  admin: AdminClient,
+): Promise<{ marker: string | null; failed: boolean }> {
   const { data, error } = await admin
     .from("club_settings")
     .select("value")
@@ -53,9 +59,9 @@ export async function readSeenMarker(admin: AdminClient): Promise<string | null>
     .maybeSingle();
   if (error) {
     console.error("[contact-messages] could not read the seen marker:", error);
-    return null;
+    return { marker: null, failed: true };
   }
-  return data?.value?.trim() ? data.value : null;
+  return { marker: data?.value?.trim() ? data.value : null, failed: false };
 }
 
 /**
@@ -64,8 +70,14 @@ export async function readSeenMarker(admin: AdminClient): Promise<string | null>
  * soon as it loads: read it in the same breath and the screen can still show
  * which messages were new on this visit.
  *
- * `newestAt` is the boundary the page hands back to `markContactMessagesSeen`.
- * Null when there is nothing to mark.
+ * `newestAt` is the boundary the page hands back to `markContactMessagesSeen`,
+ * and it is **null when the list was truncated**. The marker is a watermark —
+ * "everything up to here has been seen" — which is only true if the list reaches
+ * back past it. Fetch the newest 200 out of 250 and the watermark would jump to
+ * the newest message overall, marking 50 nobody rendered as read, in a screen
+ * that has no way to scroll back to them. That is the same silent loss the
+ * feature exists to prevent, so a truncated page acknowledges nothing and says
+ * so instead.
  */
 export const listContactMessages = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -74,23 +86,28 @@ export const listContactMessages = createServerFn({ method: "GET" })
     await requireManager(context);
     const admin = await adminClient();
 
-    const [seenAt, { data: rows, error }] = await Promise.all([
+    const [seen, { data: rows, error, count }] = await Promise.all([
       readSeenMarker(admin),
       admin
         .from("contact_messages")
-        .select("id, name, email, subject, message, created_at")
+        .select("id, name, email, subject, message, created_at", { count: "exact" })
         .order("created_at", { ascending: false })
         .limit(data.limit),
     ]);
     if (error) throw new Error(error.message);
 
     const messages = (rows ?? []) as ContactMessage[];
+    const total = count ?? messages.length;
+    const truncated = total > messages.length;
+
     return {
       messages,
-      seenAt,
+      total,
+      truncated,
+      seenAt: seen.marker,
       // Ordered newest-first, so the first row is the boundary that was seen.
-      newestAt: messages[0]?.created_at ?? null,
-      unreadIds: unreadSince(messages, seenAt).map((m) => m.id),
+      newestAt: truncated ? null : (messages[0]?.created_at ?? null),
+      unreadIds: unreadSince(messages, seen.marker).map((m) => m.id),
     };
   });
 
@@ -115,8 +132,16 @@ export const markContactMessagesSeen = createServerFn({ method: "POST" })
     const admin = await adminClient();
 
     const current = await readSeenMarker(admin);
-    const value = advanceSeenMarker(current, data.seen_at, new Date().toISOString());
-    if (value === current) return { ok: true as const, marker: current };
+    // Could not read the current marker, so there is nothing to compare against
+    // and the only-moves-forward guard is not available. Writing anyway would be
+    // the one way this operation can lose ground. Leave it; the badge stays up,
+    // which is the safe direction, and the next visit tries again.
+    if (current.failed) return { ok: true as const, marker: null, skipped: true as const };
+
+    const value = advanceSeenMarker(current.marker, data.seen_at, new Date().toISOString());
+    if (value === current.marker) {
+      return { ok: true as const, marker: current.marker, skipped: true as const };
+    }
 
     const { error } = await admin.from("club_settings").upsert(
       {
@@ -128,7 +153,7 @@ export const markContactMessagesSeen = createServerFn({ method: "POST" })
       { onConflict: "key" },
     );
     if (error) throw new Error(error.message);
-    return { ok: true as const, marker: value };
+    return { ok: true as const, marker: value, skipped: false as const };
   });
 
 /**
@@ -141,7 +166,9 @@ export async function countUnreadContactMessages(admin: AdminClient): Promise<{
   latestName: string | null;
   latestAt: string | null;
 }> {
-  const seenAt = await readSeenMarker(admin);
+  // A failed read degrades to null here on purpose: everything counts as unread,
+  // which over-reports rather than going quiet. See `readSeenMarker`.
+  const { marker: seenAt } = await readSeenMarker(admin);
 
   let countQuery = admin.from("contact_messages").select("id", { count: "exact", head: true });
   if (seenAt) countQuery = countQuery.gt("created_at", seenAt);

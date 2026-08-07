@@ -383,11 +383,19 @@ export const interestSchema = z.object({
 
 // ---- Contact message ----
 
+// `name` and `subject` reach a manager's inbox inside the notification email's
+// SUBJECT LINE, so they are the only two fields here that leave the page as
+// anything but body text. Line breaks are refused: the send API posts JSON so
+// a CR/LF cannot forge a mail header at that layer, but a subject is a
+// single-line field and nothing downstream promises to keep treating it as
+// data. `message` is unrestricted — it is body text everywhere it appears.
+const singleLine = /^[^\r\n]*$/;
+
 export const contactSchema = z.object({
   client_submission_id: clientSubmissionId,
-  name: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(100).regex(singleLine),
   email: z.string().trim().email().max(255),
-  subject: z.string().trim().max(150).optional().or(z.literal("")),
+  subject: z.string().trim().max(150).regex(singleLine).optional().or(z.literal("")),
   message: z.string().trim().min(1).max(2000),
   hp: z.string().max(0).optional(), // honeypot
 });
@@ -1266,10 +1274,18 @@ export function contactMessageNotifications(input: {
   const { unread, latestName, latestAt } = input;
   if (unread <= 0) return [];
   const who = latestName?.trim() || "Someone";
-  // `formatDate`, not `formatDateOnly`: the latter is for a DATE column and
-  // hands back anything that is not `YYYY-MM-DD` verbatim, so a `created_at`
-  // timestamptz would have printed raw on the dashboard.
-  const when = latestAt ? ` on ${formatDate(latestAt)}` : "";
+  // Resolved to the CLUB's day, not the server's.
+  //
+  // This string is built inside `listMyNotifications`, so it renders on the
+  // server (UTC) while the inbox screen it links to formats the same timestamp
+  // in the manager's browser. A message at 9am Sydney is still the previous
+  // date in UTC, so a plain `toLocaleDateString` had the two screens naming
+  // different days for one message. `clubLocalDate` gives the `YYYY-MM-DD` the
+  // club was actually on, which is exactly what `formatDateOnly` is for — and
+  // being pure, it also drops the dependency on the runtime having full ICU.
+  const when = latestAt
+    ? ` on ${formatDateOnly(clubLocalDate(new Date(latestAt), CLUB_TIME_ZONE))}`
+    : "";
   return [
     {
       type: "unread_contact_messages",
@@ -1277,10 +1293,15 @@ export function contactMessageNotifications(input: {
         unread === 1
           ? `${who} sent a message through the contact form`
           : `${unread} unanswered messages from the contact form`,
+      // Says nothing about emails. The obvious line here is "every manager was
+      // emailed a copy too", and it is false exactly when it matters most: on
+      // the day this shipped the whole existing backlog counted as unread, and
+      // none of those messages was ever emailed to anyone. It is false again
+      // whenever a send fails, since sending is best-effort by design.
       body:
         unread === 1
-          ? `It arrived${when} and nobody has opened the inbox since. Every manager was emailed a copy too.`
-          : `The most recent is from ${who}${when}. Every manager was emailed a copy of each.`,
+          ? `It arrived${when} and nobody has opened the inbox since.`
+          : `The most recent is from ${who}${when}. None have been opened yet.`,
       href: "/manager/contact-messages",
       actionLabel: unread === 1 ? "Read it" : "Read them",
     },
