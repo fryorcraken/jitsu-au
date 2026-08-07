@@ -37,6 +37,7 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { userEmails } from "@/lib/supabase-rpc";
+import { requireManager } from "@/lib/require-manager";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -82,16 +83,6 @@ async function clubUserEmailRows(
 async function adminClient(): Promise<MembershipClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
-}
-
-/** Throw unless the caller holds the `manager` role (checked via the RLS RPC). */
-async function requireManager(context: { supabase: MembershipClient; userId: string }) {
-  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
-    _user_id: context.userId,
-    _role: "manager",
-  });
-  if (error) throw new Error(error.message);
-  if (!isMgr) throw new Error("Forbidden");
 }
 
 /** Stable content key so re-importing the same statement line is a no-op. */
@@ -735,7 +726,7 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => savePlanSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     return saveMembershipPlanRow(admin, data);
   });
@@ -764,7 +755,7 @@ export async function listMembershipPlanRows(
 export const managerNotifications = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const plans = await listMembershipPlanRows(admin);
     // Only dated plans (starts_on/ends_on both set) need a successor —
@@ -781,7 +772,7 @@ export const managerNotifications = createServerFn({ method: "GET" })
 export const getClubSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { data, error } = await admin
       .from("club_settings")
@@ -798,7 +789,7 @@ export const saveClubSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => saveClubSettingsSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { error } = await admin.from("club_settings").upsert(
       {
@@ -817,7 +808,7 @@ export const saveClubSettings = createServerFn({ method: "POST" })
 export const listAllMembershipPlans = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     return listMembershipPlanRows(admin);
   });
@@ -826,7 +817,7 @@ export const listAllMembershipPlans = createServerFn({ method: "GET" })
 export const listMemberships = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const [{ data: rows, error }, { data: plans, error: plErr }] = await Promise.all([
@@ -873,7 +864,7 @@ export const listMemberships = createServerFn({ method: "GET" })
 export const listClubUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { aggregateClubUsers, profileUserIds, LEADS_LIMIT, CHECKINS_LIMIT } =
       await import("@/lib/club-users");
@@ -979,7 +970,7 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => setMembershipStatusSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const { data: membership, error } = await admin
@@ -1024,7 +1015,7 @@ export const importBankStatement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => importBankStatementSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const importBatch = crypto.randomUUID();
@@ -1059,7 +1050,7 @@ export const importBankStatement = createServerFn({ method: "POST" })
 export const listBankTransactions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
     const { data, error } = await admin
       .from("bank_transactions")
@@ -1086,7 +1077,7 @@ export const matchTransaction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => matchTransactionSchema.parse(d))
   .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
+    await requireManager(context);
     const admin = await adminClient();
 
     const { data: membership, error: mErr } = await admin

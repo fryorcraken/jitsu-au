@@ -18,19 +18,7 @@ import {
   unblockCommenterSchema,
 } from "@/lib/validation";
 import { userEmails } from "@/lib/supabase-rpc";
-
-/** Fail unless the caller holds the manager role. */
-async function requireManager(context: {
-  supabase: SupabaseClient<Database>;
-  userId: string;
-}): Promise<void> {
-  const { data: isMgr, error } = await context.supabase.rpc("has_role", {
-    _user_id: context.userId,
-    _role: "manager",
-  });
-  if (error) throw new Error(error.message);
-  if (!isMgr) throw new Error("Forbidden");
-}
+import { requireManager } from "@/lib/require-manager";
 
 // ---- Core writes (plain functions, testable without a Start context) ----
 //
