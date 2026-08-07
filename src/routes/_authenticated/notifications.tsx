@@ -134,7 +134,7 @@ function NotificationsPage() {
                   <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
                 </div>
                 <Button asChild size="sm" variant="outline">
-                  <Link to={n.href}>Fix it</Link>
+                  <Link to={n.href}>{n.actionLabel}</Link>
                 </Button>
               </div>
             ))}

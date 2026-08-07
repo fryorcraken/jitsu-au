@@ -28,6 +28,7 @@ const ATTENTION: ManagerNotification = {
   title: "Set up the club's training dates",
   body: "Members cannot join as members until the club's training dates are set.",
   href: "/manager/membership-plans",
+  actionLabel: "Fix it",
 };
 
 function item(over: Partial<NotificationItem> = {}): NotificationItem {

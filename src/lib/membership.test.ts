@@ -557,6 +557,16 @@ describe("sellableWindowNotifications", () => {
     expect(n[0].title).toMatch(/set up/i);
   });
 
+  it("labels its button 'Fix it' — unset training dates really are a fault", () => {
+    // The label used to be hardcoded in the dashboard, which made it wrong for
+    // any notification that is not a fault. It now travels with the item, so
+    // this one has to keep asserting the verb it always showed.
+    expect(sellableWindowNotifications([], NOW)[0].actionLabel).toBe("Fix it");
+    expect(
+      sellableWindowNotifications([w("Semester 2 2026", "2026-08-20")], NOW)[0].actionLabel,
+    ).toBe("Fix it");
+  });
+
   it("asks for the next plan when the latest one ends inside 30 days", () => {
     const n = sellableWindowNotifications([w("Semester 2 2026", "2026-08-20")], NOW);
     expect(n).toHaveLength(1);

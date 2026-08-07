@@ -903,8 +903,17 @@ grants off.
 
 ### `club_settings` — manager key/value store
 
-`key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. First use:
-markdown `invoice_payment_instructions`. **RLS:** manager-only.
+`key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. **RLS:**
+manager-only. Keys in use:
+
+| Key                            | Holds                                                                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoice_payment_instructions` | Markdown shown on an invoice. Falls back to a built-in stub when unset.                                                                                 |
+| `contact_messages_seen_at`     | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread. |
+
+Being key/value is what let the contact-message unread count ship without a
+migration. It is also its limit: a value here is a single club-wide fact, so
+anything that needs to differ per manager needs a real table.
 
 ### `email_verification_tokens` — proof that someone can read an address
 
@@ -1080,6 +1089,52 @@ raw token had gone missing would be a footer link that cannot be built.
 granting signed-out access to somebody's email settings; `authenticated` has no
 grant and no reason to read even its own row, since the page it powers is
 reached from a link rather than by looking the token up.
+
+### The daily digest schedule (`pg_cron` + `pg_net` + Vault)
+
+Added by `20260807000000_notification_digest_cron.sql`, which enables **pg_cron**
+(schema `cron`) and **pg_net** (schema `net`) and registers one job,
+`notification-digest`, at `0 20 * * *` UTC. It replaced a GitHub Actions
+workflow: scheduling production work from CI put a credential that makes the site
+email its members into a repo that takes same-repo branches from Lovable and from
+coding agents.
+
+**`private.run_notification_digest() → void`** — `SECURITY DEFINER`,
+`SET search_path = ''`, `REVOKE ALL ... FROM PUBLIC`. The job names only this
+function, never the token. The function reads both values from Supabase Vault and
+`net.http_post`s to the endpoint.
+
+Keeping the token out of `cron.job.command` is defence in depth rather than a
+plugged hole: pg_cron 1.4+ puts RLS on `cron.job` with `USING (username =
+current_user)`, so a command string is not world-readable. It is still the right
+call. A credential in a column that exists to be read back and displayed is one
+schema tweak or one superuser query away from being exposed, and there is no
+upside to inlining it.
+
+This **widens** the `private` convention. That section is written as "RLS-only
+helpers live in `private`", and this helper's only caller is pg_cron, not a
+policy. The rule it actually follows is the more general one that section rests
+on: `private` is not routable by PostgREST, so nothing there is reachable as an
+RPC. A function that makes the site email every member belongs on that side of
+the line whether a policy calls it or not.
+
+Two things that fail silently every morning rather than loudly once:
+
+- Read **`vault.decrypted_secrets.decrypted_secret`**, never
+  `vault.secrets.secret` — the latter is ciphertext, and sending it as a bearer
+  token earns a 401.
+- Point at the **`jitsu.au`** origin, not the published `*.lovable.app` host:
+  that one 302s, and pg_net does not follow redirects.
+
+The migration deliberately **does not arm the job**. It fires nightly and returns
+immediately with a `RAISE WARNING` until both secrets exist:
+
+```sql
+SELECT vault.create_secret(
+  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
+SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
+  'notification_digest_key');
+```
 
 ---
 
@@ -1261,6 +1316,31 @@ email until the email belongs to a person (they signed the waiver).
 
 `id` PK, `name`, `email`, `subject`, `message`, `client_submission_id`,
 `created_at`. **RLS:** anon INSERT under a validating `WITH CHECK`.
+
+Insert-only for both client roles, and it stays that way: managers read it
+through `listContactMessages` (`src/lib/contact-messages.functions.ts`) on the
+**service-role** client behind the manager gate, so `/manager/contact-messages`
+needed no read grant, no new policy and no migration.
+
+Submitting also emails the sender an acknowledgement and every manager the
+message itself (`src/lib/contact-email.server.ts`, best-effort: a send failure
+is logged and never fails the submission). Before that existed nothing sent an
+email and nothing on the site read this table, so a message reached nobody at
+all.
+
+Which messages are "unread" is a single club-wide marker, not a column here:
+`club_settings.contact_messages_seen_at`, stamped when a manager opens the
+inbox. Anything newer than it is counted onto the manager dashboard. A
+per-manager count would need a table of its own; the club shares one inbox and
+every manager is emailed every message, so it does not have one.
+
+Being one watermark ("everything up to here has been seen") is what makes it
+free, and also its one sharp edge: it can only be moved when the list that
+acknowledges it reaches all the way back to it. `listContactMessages` therefore
+returns `newestAt: null` when its own `limit` truncated the result, and the
+screen says so — otherwise showing the newest 200 of 250 would mark the 50 it
+never rendered as read. Paging that screen is the real fix if the club ever
+needs it.
 
 ### `client_submission_id` (all three intake paths)
 

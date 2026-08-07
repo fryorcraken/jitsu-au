@@ -45,6 +45,7 @@ const ATTENTION = {
   title: "Set up the club's training dates",
   body: "Members cannot join as members until the club's training dates are set.",
   href: "/manager/membership-plans",
+  actionLabel: "Fix it",
 };
 
 const PREFERENCES = {
@@ -137,6 +138,31 @@ describe("/notifications", () => {
     // "Mark all as read" belongs to Activity, and there is no unread activity
     // here, so an attention item on its own must not summon it.
     expect(screen.queryByRole("button", { name: /mark all as read/i })).not.toBeInTheDocument();
+  });
+
+  it("takes the button's wording from the item, not from the page", async () => {
+    // The label used to be hardcoded "Fix it" here, which is right for unset
+    // training dates and wrong for an unanswered message: nothing is broken,
+    // somebody is waiting on a reply.
+    mockPayload({
+      attention: [
+        {
+          ...ATTENTION,
+          type: "unread_contact_messages" as const,
+          title: "Sam sent a message through the contact form",
+          href: "/manager/contact-messages",
+          actionLabel: "Read it",
+        },
+      ],
+      isManager: true,
+    });
+    render(<NotificationsPage />);
+
+    expect(await screen.findByRole("link", { name: /read it/i })).toHaveAttribute(
+      "href",
+      "/manager/contact-messages",
+    );
+    expect(screen.queryByRole("link", { name: /fix it/i })).not.toBeInTheDocument();
   });
 
   it("offers to mark activity read only while something is unread", async () => {

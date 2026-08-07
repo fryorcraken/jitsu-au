@@ -15,6 +15,7 @@ import {
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta } from "@/lib/seo";
+import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 
 export const Route = createFileRoute("/first-class")({
   head: () => ({
@@ -236,13 +237,13 @@ function FirstClass() {
               </a>
             </Button>
             <Button asChild variant="outline">
-              <a href="https://wa.me/61493631759">
+              <a href={WHATSAPP_URL}>
                 <MessageCircle className="mr-1.5 h-4 w-4" /> WhatsApp
               </a>
             </Button>
             <Button asChild variant="outline">
-              <a href="tel:0493631759">
-                <Phone className="mr-1.5 h-4 w-4" /> 0493 631 759
+              <a href={VENUE_PHONE_TEL}>
+                <Phone className="mr-1.5 h-4 w-4" /> {VENUE_PHONE_DISPLAY}
               </a>
             </Button>
           </div>

@@ -87,6 +87,13 @@ const BLOG_COMMENT: Record<BlogCommentStatus, string> = {
 /** A role assignment (`member`, `manager`). One colour covers every role. */
 export const ROLE_CLASS = "bg-indigo-100 text-indigo-800";
 
+/**
+ * A contact-form message that had not been read when the inbox was opened.
+ * Amber, matching every other "somebody is waiting on you" state here rather
+ * than reading as an error.
+ */
+export const UNREAD_CLASS = "bg-amber-100 text-amber-800";
+
 /** Colour for a lifecycle phase (`lead` … `lapsed`). */
 export function lifecycleClass(status: string): string {
   return LIFECYCLE[status as LifecycleStatus] ?? NEUTRAL_STATUS_CLASS;

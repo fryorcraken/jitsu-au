@@ -1,14 +1,17 @@
 # Scheduled digest: findings and recommendation
 
 ## What you asked
+
 Replace the GitHub Actions scheduler that POSTs to `/api/notifications/digest` with something that lives in the running app or database, not in the repo.
 
 ## Factual answers to the four options
 
 ### 1. Lovable Cloud built-in scheduled jobs / cron
+
 No. Lovable Cloud does not provide a first-party scheduler or cron UI. Previews and publishes are builds of the app; there is no separate "jobs" layer.
 
 ### 2. `pg_cron` + `pg_net` on the Supabase project
+
 Not available on this project today.
 
 - `pg_net` is available but not installed (`pg_available_extensions` shows `pg_net` 0.20.4).
@@ -17,9 +20,11 @@ Not available on this project today.
 If `pg_cron` were available, this would be the natural choice: the database would call the TanStack API route on a schedule using `pg_net`, exactly like the project docs already describe for `pg_cron`. But without it, the database cannot be the scheduler.
 
 ### 3. Supabase Edge Functions with scheduled invocation
+
 No. This project runs on TanStack Start, and the standing rule is to maintain existing Edge Functions only — new app logic goes in `createServerFn` or TanStack server routes. A scheduled Edge Function would also still need an external trigger (e.g., `pg_cron` or Cloudflare cron), which is the same scheduling problem you are trying to solve.
 
 ### 4. Cloudflare Cron Triggers
+
 No. Lovable owns the Cloudflare deploy and there is no `wrangler.toml` in the repo. You do not have direct access to configure Cloudflare Cron Triggers or Workers settings.
 
 ## What that leaves

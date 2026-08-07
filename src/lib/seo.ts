@@ -10,7 +10,7 @@
 // `src/routes/sitemap[.]xml.ts`) are thin wrappers around the builders below,
 // so the rules stay unit-testable and free of any server import.
 
-import { GOOGLE_MAPS_URL, VENUE_NAME } from "./venue";
+import { GOOGLE_MAPS_URL, VENUE_NAME, VENUE_PHONE_E164 } from "./venue";
 import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
@@ -72,10 +72,11 @@ export const CLUB_LOGO_URL = `${SITE_ORIGIN}${logoAsset.url}`;
 /**
  * Club contact details that appear in structured data.
  *
- * These mirror what the footer and the contact page render. `seo.test.ts` reads
- * those files and fails if the two ever drift apart.
+ * The phone is not restated here: it is the same `venue.ts` constant the footer
+ * and the contact page render, so structured data cannot drift from the visible
+ * number. `seo.test.ts` pins that the pages really do read it from there.
  */
-export const CLUB_PHONE_E164 = "+61493631759";
+export const CLUB_PHONE_E164 = VENUE_PHONE_E164;
 export const CLUB_SOCIAL_URLS = [
   "https://www.instagram.com/utsjitsu",
   "https://www.youtube.com/@sydneyjitsu",

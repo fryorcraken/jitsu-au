@@ -72,6 +72,11 @@ function ManagerDashboard() {
             },
             { to: "/manager/users", title: "Users", blurb: "Everyone in the funnel." },
             { to: "/manager/waivers", title: "Signed waivers", blurb: "Approvals and uploads." },
+            {
+              to: "/manager/contact-messages",
+              title: "Contact messages",
+              blurb: "What people sent through the form.",
+            },
           ].map((item) => (
             <Link key={item.to} to={item.to}>
               <Card className="h-full transition-colors hover:bg-accent/50">
