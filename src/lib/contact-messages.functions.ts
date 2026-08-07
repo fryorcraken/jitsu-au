@@ -13,7 +13,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireManager } from "@/lib/require-manager";
-import { listContactMessagesSchema, unreadSince } from "@/lib/validation";
+import {
+  advanceSeenMarker,
+  listContactMessagesSchema,
+  markContactMessagesSeenSchema,
+  unreadSince,
+} from "@/lib/validation";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -58,6 +63,9 @@ export async function readSeenMarker(admin: AdminClient): Promise<string | null>
  * against. The marker travels with the rows because the page stamps a new one as
  * soon as it loads: read it in the same breath and the screen can still show
  * which messages were new on this visit.
+ *
+ * `newestAt` is the boundary the page hands back to `markContactMessagesSeen`.
+ * Null when there is nothing to mark.
  */
 export const listContactMessages = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -80,27 +88,47 @@ export const listContactMessages = createServerFn({ method: "GET" })
     return {
       messages,
       seenAt,
+      // Ordered newest-first, so the first row is the boundary that was seen.
+      newestAt: messages[0]?.created_at ?? null,
       unreadIds: unreadSince(messages, seenAt).map((m) => m.id),
     };
   });
 
-/** Stamp the club-wide marker: everything received up to now has been seen. */
+/**
+ * Move the club-wide marker up to the newest message the caller actually saw.
+ *
+ * It takes that instant rather than stamping `now()`, because "now" is a moment
+ * later than the list it is acknowledging: a message arriving in the gap between
+ * the two calls would be marked read without ever having been listed, badged or
+ * counted, which is the one way this feature could lose a message outright.
+ *
+ * Two guards, because the boundary arrives from the browser: it is clamped to
+ * the present (nobody can mark future messages read), and it only ever moves
+ * forward, so a stale tab finishing late cannot drag the marker back and make
+ * already-read messages reappear.
+ */
 export const markContactMessagesSeen = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => markContactMessagesSeenSchema.parse(d))
+  .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
+
+    const current = await readSeenMarker(admin);
+    const value = advanceSeenMarker(current, data.seen_at, new Date().toISOString());
+    if (value === current) return { ok: true as const, marker: current };
+
     const { error } = await admin.from("club_settings").upsert(
       {
         key: CONTACT_SEEN_KEY,
-        value: new Date().toISOString(),
+        value,
         updated_at: new Date().toISOString(),
         updated_by: context.userId,
       },
       { onConflict: "key" },
     );
     if (error) throw new Error(error.message);
-    return { ok: true as const };
+    return { ok: true as const, marker: value };
   });
 
 /**
@@ -118,7 +146,14 @@ export async function countUnreadContactMessages(admin: AdminClient): Promise<{
   let countQuery = admin.from("contact_messages").select("id", { count: "exact", head: true });
   if (seenAt) countQuery = countQuery.gt("created_at", seenAt);
   const { count, error } = await countQuery;
-  if (error) throw new Error(error.message);
+  // Degrade rather than throw. This runs inside the dashboard's Promise.all, so
+  // throwing here would take down the whole "needs attention" queue — including
+  // the pre-existing training-dates warning, which has nothing to do with
+  // contact messages and was working fine before this feature existed.
+  if (error) {
+    console.error("[contact-messages] could not count unread messages:", error);
+    return { unread: 0, latestName: null, latestAt: null };
+  }
   const unread = count ?? 0;
   if (unread === 0) return { unread: 0, latestName: null, latestAt: null };
 

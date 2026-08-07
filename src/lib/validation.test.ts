@@ -9,9 +9,11 @@ import {
   checkInSchema,
   checkInWarnings,
   codeOfConductAcceptSchema,
+  advanceSeenMarker,
   commentDisplayName,
   composeFullName,
   composeManagerNotifications,
+  markContactMessagesSeenSchema,
   contactMessageNotifications,
   contactSchema,
   coverageSources,
@@ -803,6 +805,52 @@ describe("unreadSince", () => {
   });
 });
 
+describe("advanceSeenMarker", () => {
+  const NOW = "2026-08-05T12:00:00.000Z";
+
+  it("sets the first marker when none exists", () => {
+    expect(advanceSeenMarker(null, "2026-08-05T10:00:00.000Z", NOW)).toBe(
+      "2026-08-05T10:00:00.000Z",
+    );
+  });
+
+  it("moves forward", () => {
+    expect(advanceSeenMarker("2026-08-01T00:00:00.000Z", "2026-08-05T10:00:00.000Z", NOW)).toBe(
+      "2026-08-05T10:00:00.000Z",
+    );
+  });
+
+  it("refuses to move backwards, so read messages cannot reappear", () => {
+    // A stale tab finishing after a newer one would otherwise drag the marker
+    // back and re-badge messages somebody has already dealt with.
+    expect(advanceSeenMarker("2026-08-05T10:00:00.000Z", "2026-08-01T00:00:00.000Z", NOW)).toBe(
+      "2026-08-05T10:00:00.000Z",
+    );
+  });
+
+  it("returns the current marker unchanged when the candidate equals it", () => {
+    const current = "2026-08-05T10:00:00.000Z";
+    expect(advanceSeenMarker(current, current, NOW)).toBe(current);
+  });
+
+  it("clamps a future candidate to now, so unarrived messages cannot be marked read", () => {
+    // The boundary comes from the browser. Accepting a future value would mark
+    // messages read before they exist, which loses them outright.
+    expect(advanceSeenMarker(null, "2027-01-01T00:00:00.000Z", NOW)).toBe(NOW);
+  });
+});
+
+describe("markContactMessagesSeenSchema", () => {
+  it("requires an ISO timestamp with an offset", () => {
+    expect(
+      markContactMessagesSeenSchema.safeParse({ seen_at: "2026-08-05T10:00:00.000Z" }).success,
+    ).toBe(true);
+    expect(markContactMessagesSeenSchema.safeParse({ seen_at: "2026-08-05" }).success).toBe(false);
+    expect(markContactMessagesSeenSchema.safeParse({ seen_at: "" }).success).toBe(false);
+    expect(markContactMessagesSeenSchema.safeParse({}).success).toBe(false);
+  });
+});
+
 describe("contactMessageNotifications", () => {
   it("stays quiet when nothing is unread rather than reporting a zero", () => {
     expect(contactMessageNotifications({ unread: 0 })).toEqual([]);
@@ -821,6 +869,19 @@ describe("contactMessageNotifications", () => {
     // Not "Fix it": nothing is broken, somebody is waiting on a reply. That
     // distinction is why the label travels on the notification at all.
     expect(n.actionLabel).toBe("Read it");
+  });
+
+  it("formats the timestamp as a date rather than printing it raw", () => {
+    // `created_at` is a timestamptz. formatDateOnly is for a DATE column and
+    // hands anything else straight back, so this used to render
+    // "It arrived on 2026-08-05T10:00:00.123456+00:00" on the dashboard.
+    const [n] = contactMessageNotifications({
+      unread: 1,
+      latestName: "Sam",
+      latestAt: "2026-08-05T10:00:00.123456+00:00",
+    });
+    expect(n.body).not.toContain("T10:00:00");
+    expect(n.body).toMatch(/on \d{2}\/\d{2}\/\d{4}/);
   });
 
   it("counts and speaks plural for several", () => {

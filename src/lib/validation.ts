@@ -19,7 +19,7 @@ import { beltSizes, giSizes } from "./kit-sizes";
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
 // the same kind of module as this one (pure, no server imports).
 import { CLUB_TIME_ZONE, clubLocalDate, zonedWallTimeToUtc } from "./calendar";
-import { formatDateOnly } from "./dates";
+import { formatDate, formatDateOnly } from "./dates";
 
 // ---- Pure helpers ----
 
@@ -401,6 +401,33 @@ export const listContactMessagesSchema = z.object({
   limit: z.number().int().min(1).max(500).default(200),
 });
 export type ListContactMessagesInput = z.infer<typeof listContactMessagesSchema>;
+
+/**
+ * Manager: acknowledge everything up to the newest message they were shown.
+ * `seen_at` is that message's `created_at`, not the current time — see
+ * `markContactMessagesSeen`.
+ */
+export const markContactMessagesSeenSchema = z.object({
+  seen_at: z.string().datetime({ offset: true }),
+});
+export type MarkContactMessagesSeenInput = z.infer<typeof markContactMessagesSeenSchema>;
+
+/**
+ * Where the club-wide "messages seen up to here" marker should land.
+ *
+ * Monotonic and clamped: the marker only moves forward, and never past the
+ * present. Backwards would make already-read messages reappear when a stale tab
+ * finishes late; into the future would mark messages read before they arrive,
+ * which is the one failure that loses a message for good.
+ *
+ * Returns `current` unchanged when the candidate earns no move, so the caller
+ * can skip the write.
+ */
+export function advanceSeenMarker(current: string | null, candidate: string, now: string): string {
+  const clamped = candidate > now ? now : candidate;
+  if (current && clamped <= current) return current;
+  return clamped;
+}
 
 // ---- Waiver submission (name-split + signature + minor guardian) ----
 
@@ -1239,7 +1266,10 @@ export function contactMessageNotifications(input: {
   const { unread, latestName, latestAt } = input;
   if (unread <= 0) return [];
   const who = latestName?.trim() || "Someone";
-  const when = latestAt ? ` on ${formatDateOnly(latestAt)}` : "";
+  // `formatDate`, not `formatDateOnly`: the latter is for a DATE column and
+  // hands back anything that is not `YYYY-MM-DD` verbatim, so a `created_at`
+  // timestamptz would have printed raw on the dashboard.
+  const when = latestAt ? ` on ${formatDate(latestAt)}` : "";
   return [
     {
       type: "unread_contact_messages",

@@ -33,6 +33,10 @@ function ContactMessagesPage() {
   // it was telling you: which of these you had not read yet.
   const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  // Distinguished from "no messages": telling a manager nobody wrote in, when
+  // really the inbox could not be read, is the same false reassurance this
+  // whole screen exists to end.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -46,18 +50,24 @@ function ContactMessagesPage() {
         if (cancelled) return;
         setMessages(result.messages);
         setUnreadIds(new Set(result.unreadIds));
+        setLoadError(null);
         // Opening the inbox is what marks it read, like an email client. Fired
         // after the rows are in hand and best-effort: failing to stamp the
         // marker leaves the badge up, which is the safe direction to fail in.
+        // Acknowledges the newest message actually listed rather than "now", so
+        // one arriving while this page loaded is not marked read unseen.
+        if (!result.newestAt) return;
         try {
-          await markSeen({});
+          await markSeen({ data: { seen_at: result.newestAt } });
         } catch (e) {
           console.error("[manager/contact-messages] could not mark messages seen:", e);
         }
       })
-      .catch((e) =>
-        toast.error(e instanceof Error ? e.message : "Could not load the contact messages"),
-      )
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : "Could not load the contact messages";
+        if (!cancelled) setLoadError(message);
+        toast.error(message);
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -79,7 +89,14 @@ function ContactMessagesPage() {
         </p>
       </div>
 
-      {messages.length === 0 ? (
+      {loadError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="text-sm font-medium">The contact messages could not be loaded.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {loadError} This is not the same as having no messages. Reload the page to try again.
+          </p>
+        </div>
+      ) : messages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">

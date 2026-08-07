@@ -120,7 +120,10 @@ export async function sendContactEmails({
       apiKey,
       sendUrl,
       to: email,
-      subject: `We got your message, ${name || "thanks"}`,
+      // Fixed wording. This is the one email the site sends to an address
+      // nobody has verified, so the subject line stays out of the sender's
+      // hands: `name` is whatever they typed into a public form.
+      subject: `We got your message at ${SITE_NAME}`,
       html: senderHtml,
       text: senderText,
       idempotencyKey: `contact-sender-${messageId}`,
