@@ -6,7 +6,7 @@
 // invoice-edit patch builder, and the response projections.
 //
 // Keep AGENT_MANIFEST, managerAgentActions (validation.ts), the route dispatch,
-// and the skill (.claude/skills/uts-manager-agent/) in lockstep — see AGENTS.md.
+// and the skill (.claude/skills/uts-manager-agent/) in lockstep. See docs/manager-agent-api.md.
 import { formatCents } from "@/lib/validation";
 import type { EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";

@@ -1341,7 +1341,7 @@ export async function filePaperWaiver(
     scan_files: data.scan.map((f) => f.name),
   };
   // Not every caller resolves to a real auth user: the manager agent API's
-  // break-glass env-key fallback (docs: AGENTS.md) has no owner to look up, so
+  // break-glass env-key fallback (docs/manager-agent-api.md) has no owner to look up, so
   // skip the lookup rather than log a spurious not-found error every call.
   if (UUID_RE.test(uploadedByUserId)) {
     try {
