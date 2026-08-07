@@ -1,15 +1,19 @@
 // The daily notification digest: POST /api/notifications/digest
 //
-// Called on a schedule by .github/workflows/notification-digest.yml, which is
-// the only scheduler this project has. There is no cron in the database (the
-// Supabase project is Lovable-managed and pg_cron is not in this repo's
-// migrations) and no Cloudflare cron (no wrangler.toml here, Lovable owns the
-// deploy), so a GitHub Actions schedule calling this endpoint is the mechanism.
+// Called on a schedule by pg_cron in the database, which reads the URL and the
+// bearer token out of Supabase Vault and POSTs here with pg_net. See
+// supabase/migrations/20260807000000_notification_digest_cron.sql.
+//
+// This used to be a GitHub Actions workflow. It was moved because scheduling
+// production work from CI put a credential that makes the site email its members
+// in a repo that takes same-repo branches from Lovable and from coding agents,
+// and made the club's schedule depend on GitHub not disabling it.
 //
 // Auth is a shared bearer token in NOTIFICATION_DIGEST_KEY, compared in constant
 // time. An UNSET key refuses everything rather than running open: a digest
 // endpoint anybody can POST to is a way to make the club email its own members
-// on demand.
+// on demand. The scheduled job fails closed the same way when its Vault secrets
+// are missing, so the digest needs both halves configured before it sends.
 //
 // All DB access uses the service-role client, lazy-imported (route files ship to
 // the client bundle, so it must never be a top-level import).
@@ -45,8 +49,10 @@ export const Route = createFileRoute("/api/notifications/digest")({
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
           const { sendDailyDigests } = await import("@/lib/notification-email.server");
           const result = await sendDailyDigests(supabaseAdmin);
-          // Echoed into the workflow log so a run that mailed nobody is
-          // distinguishable from a run that never happened.
+          // The only durable record that a run happened. The caller is pg_net,
+          // which discards the response, so a run that mailed nobody is
+          // distinguishable from a run that never happened ONLY here, in the
+          // deploy log. See docs/notifications.md on the digest's observability.
           console.log(
             `[digest] considered ${result.considered} notifications for ${result.recipients} people, sent ${result.sent}`,
           );
