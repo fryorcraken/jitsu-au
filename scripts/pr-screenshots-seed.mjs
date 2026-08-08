@@ -94,6 +94,7 @@ function id(n) {
 const BLOG = { welcome: id(21), grading: id(22), draft: id(23) };
 const KB_ARTICLE = { welcome: id(41), etiquette: id(42) };
 const SERIES = id(51);
+const IMPORT_BATCH = id(71);
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.now();
@@ -108,11 +109,46 @@ function on(days) {
   return at(days).slice(0, 10);
 }
 
-/** Insert rows, failing loudly: a half-seeded database is worse than no run. */
+/**
+ * Everything that went wrong, so one run can report all of it.
+ *
+ * The stack this seeds can only be started where the Supabase container images
+ * are reachable, which in practice means CI. Stopping at the first bad column
+ * would then cost a whole pipeline run per mistake, so the writes below keep
+ * going and the script fails at the end with the full list. Rows whose parent
+ * failed will fail too — that noise sits next to its own cause and is worth
+ * having.
+ */
+const failures = [];
+
+/** Run one write, recording a failure instead of stopping the run. */
+async function attempt(label, run) {
+  try {
+    await run();
+    return true;
+  } catch (error) {
+    const message = error?.message ?? String(error);
+    failures.push(`${label}: ${message}`);
+    console.error(`[seed] FAILED ${label}: ${message}`);
+    return false;
+  }
+}
+
+/**
+ * Insert rows.
+ *
+ * `defaultToNull: false` is what makes a batch behave the way each row reads.
+ * PostgREST turns a batch into ONE insert over the union of every row's keys,
+ * and by default a key a row does not mention is sent as an explicit NULL —
+ * so a column only some rows set (`sms_whatsapp_consent`, `media_consent`)
+ * blows up on its NOT NULL instead of taking the column default.
+ */
 async function insert(table, rows) {
-  const { error } = await admin.from(table).insert(rows);
-  if (error) throw new Error(`insert into ${table} failed: ${error.message}`);
-  console.log(`[seed] ${table}: ${Array.isArray(rows) ? rows.length : 1}`);
+  await attempt(`insert into ${table}`, async () => {
+    const { error } = await admin.from(table).insert(rows, { defaultToNull: false });
+    if (error) throw new Error(error.message);
+    console.log(`[seed] ${table}: ${Array.isArray(rows) ? rows.length : 1}`);
+  });
 }
 
 /** Read rows, failing loudly. */
@@ -132,8 +168,10 @@ async function select(table, columns, build = (query) => query) {
  * explicit NULL and trips the NOT NULLs (`sms_whatsapp_consent`).
  */
 async function fillProfile(userId, values) {
-  const { error } = await admin.from("profiles").update(values).eq("user_id", userId);
-  if (error) throw new Error(`filling in profile ${userId} failed: ${error.message}`);
+  await attempt(`filling in profile ${userId}`, async () => {
+    const { error } = await admin.from("profiles").update(values).eq("user_id", userId);
+    if (error) throw new Error(error.message);
+  });
 }
 
 /** Create a confirmed auth user and return its id. */
@@ -332,10 +370,12 @@ const PLACEHOLDER_PDF = new Blob(
   { type: "application/pdf" },
 );
 for (const waiverId of Object.values(waivers)) {
-  const { error } = await admin.storage
-    .from("waivers")
-    .upload(`${waiverId}.pdf`, PLACEHOLDER_PDF, { contentType: "application/pdf", upsert: true });
-  if (error) throw new Error(`uploading ${waiverId}.pdf failed: ${error.message}`);
+  await attempt(`uploading ${waiverId}.pdf`, async () => {
+    const { error } = await admin.storage
+      .from("waivers")
+      .upload(`${waiverId}.pdf`, PLACEHOLDER_PDF, { contentType: "application/pdf", upsert: true });
+    if (error) throw new Error(error.message);
+  });
 }
 console.log("[seed] waiver PDFs: 2");
 
@@ -387,7 +427,7 @@ await insert("memberships", [
 
 await insert("bank_transactions", [
   {
-    import_batch: "2026-08-01-westpac",
+    import_batch: IMPORT_BATCH,
     dedupe_hash: "seed-transaction-1",
     amount_cents: 16000,
     description: "OSKO PAYMENT T OKAFOR",
@@ -396,7 +436,7 @@ await insert("bank_transactions", [
     status: "matched",
   },
   {
-    import_batch: "2026-08-01-westpac",
+    import_batch: IMPORT_BATCH,
     dedupe_hash: "seed-transaction-2",
     amount_cents: 6500,
     description: "OSKO PAYMENT W ZHANG",
@@ -405,7 +445,7 @@ await insert("bank_transactions", [
     status: "unmatched",
   },
   {
-    import_batch: "2026-08-01-westpac",
+    import_batch: IMPORT_BATCH,
     dedupe_hash: "seed-transaction-3",
     amount_cents: 2500,
     description: "TRANSFER FROM SAVINGS",
@@ -686,6 +726,12 @@ const fixture = {
     slug: "welcome",
   },
 };
+
+if (failures.length > 0) {
+  console.error(`\n[seed] ${failures.length} write(s) failed:`);
+  for (const failure of failures) console.error(`  - ${failure}`);
+  process.exit(1);
+}
 
 writeFileSync(FIXTURE_PATH, `${JSON.stringify(fixture, null, 2)}\n`);
 console.log(`[seed] wrote ${FIXTURE_PATH}`);
