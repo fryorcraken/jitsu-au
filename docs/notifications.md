@@ -97,6 +97,18 @@ Counted from `waivers.approval_status = 'pending'`, which is the stored fact.
 The waivers screen's third state, `superseded`, is derived from a person's other
 **approved** waivers, so it can never hide work from this count.
 
+> [!WARNING]
+> **A pending waiver has exactly one exit, and it is approval.** `approval_status`
+> is `pending | approved` with no reject, and approving one row leaves any other
+> pending row of that person's alone. So a second submission nobody wants
+> approved (a bogus public signing, or a paper form filed for somebody who then
+> signed online outside the same-day duplicate probe) keeps this item and the
+> badge up for good. Clearing it means approving a duplicate, and for a stranger's
+> submission that activates an account, emails them and grants a trial. Nothing
+> counted pending waivers before this, which is why it never surfaced. The fix is
+> a real dismissal state on `waivers`, which is a schema change and a product
+> decision of its own, so it is not in this change.
+
 #### The registration watermark
 
 Interest registrations have no per-row read state to hang a badge on:

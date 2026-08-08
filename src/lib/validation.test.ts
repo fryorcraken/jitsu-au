@@ -1123,9 +1123,20 @@ describe("waiverApprovalNotifications", () => {
     // undone quietly. The consequence belongs in front of the click.
     for (const pending of [1, 3]) {
       const [n] = waiverApprovalNotifications({ pending, latestName: "Sam" });
-      expect(n.body).toContain("activates their account");
+      expect(n.body).toContain("activates that person's account");
       expect(n.body).toContain("emails them");
       expect(n.body).toContain("free trial");
+    }
+  });
+
+  it("scopes the consequence to a FIRST waiver rather than promising it for every one", () => {
+    // A returning member re-signing gets none of the three: `setWaiverApproval`
+    // only unbans and emails somebody still locked, and the trial is one per
+    // person ever. The plural line has to survive a mixed batch as well.
+    for (const pending of [1, 3]) {
+      const [n] = waiverApprovalNotifications({ pending, latestName: "Sam" });
+      expect(n.body).toContain("a first waiver");
+      expect(n.body).not.toMatch(/Approving activates/);
     }
   });
 

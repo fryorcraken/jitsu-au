@@ -57,8 +57,12 @@ export async function managerAttentionItems(
   admin: MembershipClient,
 ): Promise<ManagerNotification[]> {
   // Sources are independent, so fetch them together rather than in sequence.
-  // Each one degrades to "nothing to report" on its own failure rather than
-  // throwing, so a bad query in one cannot empty the whole queue.
+  //
+  // The three counts degrade to "nothing to report" on their own failed reads,
+  // so one bad query cannot empty the queue around it. The membership windows
+  // are the exception and still throw, which `Promise.all` turns into a failed
+  // notifications payload: the page then says it could not load and offers a
+  // retry, which is honest, rather than reporting all quiet.
   const [windows, unreadContact, waitingWaivers, newLeads] = await Promise.all([
     membershipWindowNotifications(admin),
     countUnreadContactMessages(admin),

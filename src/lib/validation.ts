@@ -1314,6 +1314,15 @@ export function interestRegistrationNotifications(input: {
  * what pressing through to it leads to. Approving is outward-facing and cannot
  * be taken back quietly (it emails the person and unlocks their login), so the
  * consequence belongs in front of the manager before the click, not after it.
+ *
+ * "A first waiver" is doing real work in that sentence, not hedging.
+ * `setWaiverApproval` lifts the ban and sends the account-activated email only
+ * for somebody still locked, and `assignTrialMembership` is one per person ever,
+ * so none of the three happens when a returning member re-signs. Stating them
+ * flatly would promise a manager an email and a trial that never go out. The
+ * plural line has to hold for a mixed batch too, which is the other reason it is
+ * written as what approving a first waiver does rather than what this batch will
+ * do.
  */
 export function waiverApprovalNotifications(input: {
   pending: number;
@@ -1325,7 +1334,7 @@ export function waiverApprovalNotifications(input: {
   const who = personOrSomeone(latestName);
   const when = clubDaySuffix(latestAt);
   const consequence =
-    "Approving activates their account, emails them to say so, and gives them the free trial.";
+    "Approving a first waiver activates that person's account, emails them to say so, and gives them the free trial.";
   return [
     {
       type: "waivers_awaiting_approval",

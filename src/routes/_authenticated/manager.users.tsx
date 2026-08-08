@@ -77,6 +77,12 @@ function ManagerUsersPage() {
   // person, and that person stays on this list for good, so the worst a stamp
   // can cost is a badge, never the record of who signed up. That is what makes
   // this looser than the contact inbox, where the message exists nowhere else.
+  //
+  // Once per visit, which is why `isManager` is the only dependency.
+  // `refreshNotifications` is a fresh closure on every render, so listing it
+  // would stamp on every keystroke in the search box AND spin: stamp,
+  // invalidate, refetch, re-render, stamp. Same shape, and the same disable, as
+  // the load effect on /manager/contact-messages.
   useEffect(() => {
     if (!isManager) return;
     markLeadsSeen()
@@ -84,7 +90,8 @@ function ManagerUsersPage() {
       // Silent: nobody asked for this, and the only cost of it failing is a
       // badge that clears on the next visit.
       .catch((e) => console.error("[manager/users] could not mark registrations seen:", e));
-  }, [isManager, markLeadsSeen, refreshNotifications]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManager]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
