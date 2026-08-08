@@ -82,9 +82,21 @@ export type PasswordContext = {
   breach?: BreachStatus;
 };
 
-/** Strip a string down to what a guesser would actually try: letters and digits. */
+/**
+ * Strip a string down to what a guesser would actually try: letters and digits.
+ *
+ * Accents are folded rather than deleted (NFD splits "ü" into "u" plus a
+ * combining mark, and only the mark is dropped). Without that step "Müller"
+ * would reduce to "mller", which matches nothing a person would type, and the
+ * rule would quietly stop working for exactly the members whose names carry
+ * diacritics. Both sides of every comparison go through here, so they agree.
+ */
 function normalise(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 export function passwordByteLength(password: string): number {
@@ -134,23 +146,30 @@ export function personalTokens(personal: (string | null | undefined)[] = []): st
  */
 const PERSONAL_SHARE = 1 / 3;
 
-/** The largest share of the password that any single one of these words covers. */
+/**
+ * The share of the password covered by these words TAKEN TOGETHER.
+ *
+ * Together, not the largest of them separately. Measuring one word at a time
+ * lets a full name through: in "alexander dominguez kettle drill" neither half
+ * reaches a third on its own (each is 9 of 29 letters), so a password that is
+ * nothing but the member's own first and last name passed a rule whose label
+ * promises otherwise.
+ *
+ * Marking positions rather than adding lengths is what makes "together" safe.
+ * The words overlap by construction (an email local part contains the first
+ * name; "utsjitsu" contains "jitsu"), and adding them up would count the same
+ * letters two and three times and start refusing honest passphrases.
+ */
 function personalShare(password: string, tokens: string[]): number {
   const flattened = normalise(password);
   if (!flattened) return 0;
-  let largest = 0;
+  const covered = new Array<boolean>(flattened.length).fill(false);
   for (const token of tokens) {
-    let covered = 0;
-    for (
-      let at = flattened.indexOf(token);
-      at !== -1;
-      at = flattened.indexOf(token, at + token.length)
-    ) {
-      covered += token.length;
+    for (let at = flattened.indexOf(token); at !== -1; at = flattened.indexOf(token, at + 1)) {
+      for (let i = at; i < at + token.length; i++) covered[i] = true;
     }
-    largest = Math.max(largest, covered / flattened.length);
   }
-  return largest;
+  return covered.filter(Boolean).length / flattened.length;
 }
 
 function isBuiltFromPersonal(password: string, tokens: string[]): boolean {
@@ -158,8 +177,34 @@ function isBuiltFromPersonal(password: string, tokens: string[]): boolean {
 }
 
 /**
+ * Whether the password is some unit typed over and over: "abcabcabcabcabc",
+ * "passwordpassword".
+ *
+ * Every unit length is tried, not the first few. This was a regex with the
+ * repeat capped at seven characters, and "passwordpassword" walked through it
+ * on a unit of eight, which is not an edge case: at a fifteen character
+ * minimum, an eight letter word typed twice is the obvious way to reach the
+ * length. A loop rather than a backreference also means no backtracking to
+ * reason about on a pasted megabyte, and it compares code points, so an emoji
+ * counts once here the same as it does everywhere else in this file.
+ */
+function isRepeatedUnit(password: string): boolean {
+  const chars = [...password];
+  const length = chars.length;
+  for (let unit = 1; unit <= length / 2; unit++) {
+    if (length % unit !== 0) continue;
+    let repeats = true;
+    for (let i = unit; i < length && repeats; i++) {
+      if (chars[i] !== chars[i - unit]) repeats = false;
+    }
+    if (repeats) return true;
+  }
+  return false;
+}
+
+/**
  * Reject the degenerate ways to reach the length without adding any guesswork:
- * one character held down, or a short unit typed over and over.
+ * one character held down, or a unit typed over and over.
  *
  * This is not a composition rule. It asks for no particular kind of character,
  * only that there be more than a handful of distinct ones, so "aaaaaaaaaaaaaaa"
@@ -167,7 +212,7 @@ function isBuiltFromPersonal(password: string, tokens: string[]): boolean {
  */
 export function hasVariety(password: string): boolean {
   if (new Set([...password]).size < 5) return false;
-  return !/^(.{1,7}?)\1+$/s.test(password);
+  return !isRepeatedUnit(password);
 }
 
 export function meetsLength(password: string): boolean {

@@ -60,8 +60,14 @@ who has met them. Neither asks for a kind of character, so neither is a
 composition rule.
 
 "Built out of" is the load-bearing phrase in the third one, and it is why the
-check is a **share** and not a substring match. A word has to account for at
-least a third of the password's letters and digits before it counts. Plain
+check is a **share** and not a substring match. Those words, taken together,
+have to account for at least a third of the password's letters and digits
+before it counts. Together, not one at a time: measured separately, "alexander"
+and "dominguez" are each only 9 of the 29 letters in "alexander dominguez
+kettle drill", so a password that is nothing but somebody's own name would pass
+a rule whose whole job is to stop it. Overlaps are counted once (an email local
+part contains the first name, "utsjitsu" contains "jitsu"), or the same letters
+would be counted three times and honest passphrases would start failing. Plain
 substring matching is too blunt to use on its own: "Hill", "Rose", "Dean" and
 "Bell" are surnames and also ordinary words, and flattening the punctuation out
 before comparing (which is necessary, or `J.i.t.s.u` walks straight through)
@@ -116,13 +122,22 @@ failed without telling you the rule. `describePasswordError()` rewrites it, and
 the two screens show it in an alert next to the rules rather than a toast.
 
 > [!IMPORTANT]
-> The 15-character minimum is currently enforced **in the browser only**. The
-> server-side floor is Supabase's `password_min_length`, which is project
-> configuration in the Supabase dashboard (Authentication → Sign In / Providers)
-> and cannot be set from this repo. To make the rule real rather than advertised,
-> set it to **15**, leave "leaked password protection" **on**, and leave the
-> required-characters setting **off**. Until then the client rules are a strong
-> default that a determined person could bypass with a direct API call.
+> **Only one of the four rules has real teeth.** The breach check is enforced by
+> Supabase and cannot be talked out of. The other three are browser-side, and a
+> `supabase.auth.updateUser()` call from the devtools console skips all of them.
+>
+> The length rule can be given teeth, and should be: Supabase's
+> `password_min_length` is project configuration in the dashboard
+> (Authentication → Sign In / Providers) and cannot be set from this repo. Set it
+> to **15**, leave "leaked password protection" **on**, and leave the
+> required-characters setting **off**.
+>
+> The variety and personal-word rules cannot. They are ours, Supabase has no
+> equivalent setting, and there is no server-side hook here to add one to, so
+> they are permanently advisory. That is an accepted trade rather than an
+> oversight: their job is to stop somebody talking themselves into a bad
+> password, not to stop somebody attacking their own account, and the person
+> bypassing them is the only person they protect.
 
 ## Where it appears
 

@@ -69,6 +69,22 @@ describe("hasVariety", () => {
     expect(hasVariety("ab ab ab ab ab ab ")).toBe(false);
   });
 
+  it("rejects a unit too long for the old seven character cap", () => {
+    // At a fifteen character minimum, one eight letter word typed twice is the
+    // obvious way to reach the length, and it used to pass.
+    expect(hasVariety("passwordpassword")).toBe(false);
+    expect(hasVariety("abcdefghabcdefgh")).toBe(false);
+    expect(hasVariety("correcthorsecorrecthorse")).toBe(false);
+  });
+
+  it("does not choke on a pasted novel", () => {
+    // There is no backtracking left to reason about: this was a backreference
+    // regex, and the field runs it on every keystroke.
+    const started = performance.now();
+    expect(hasVariety("otter kettle marina drill ".repeat(20_000))).toBe(false);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
   it("accepts an ordinary passphrase", () => {
     expect(hasVariety(GOOD)).toBe(true);
   });
@@ -158,6 +174,35 @@ describe("passwordProblem", () => {
 
   it("still rejects a password that is mostly the person's surname", () => {
     expect(passwordProblem("hillsboro hill road", { personal: ["Hill"] })).toMatch(
+      /knows you could guess/i,
+    );
+  });
+
+  it("rejects a password that is the person's first and last name", () => {
+    // Measured one word at a time, neither half reaches a third (each is 9 of
+    // 29 letters), so this used to sail through the rule that exists to stop
+    // exactly it.
+    const personal = ["alex.dominguez@example.com", "Alexander", "Dominguez"];
+    expect(passwordProblem("alexander dominguez kettle drill", { personal })).toMatch(
+      /knows you could guess/i,
+    );
+  });
+
+  it("does not count overlapping words twice when adding them up", () => {
+    // The tokens overlap by construction: the email local part contains the
+    // first name, and "utsjitsu" contains "jitsu". Counting the same letters
+    // three times would start refusing honest passphrases.
+    const personal = ["rose.hill@example.com", "Rose", "Hill"];
+    expect(passwordProblem("rose kettle marina drill anvil", { personal })).toBeNull();
+  });
+
+  it("folds accents rather than deleting them", () => {
+    // "Müller" reduced to "mller" before this, which matches nothing anybody
+    // types, so the rule quietly did nothing for members with accented names.
+    expect(passwordProblem("müller müller kettle", { personal: ["Müller"] })).toMatch(
+      /knows you could guess/i,
+    );
+    expect(passwordProblem("muller muller kettle", { personal: ["Müller"] })).toMatch(
       /knows you could guess/i,
     );
   });

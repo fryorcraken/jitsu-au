@@ -5,9 +5,7 @@ import { PasswordInput } from "@/components/site/PasswordInput";
 import { Label } from "@/components/ui/label";
 import {
   checkPassword,
-  hasVariety,
-  meetsLength,
-  PASSWORD_MIN_LENGTH,
+  passwordProblem,
   type BreachStatus,
   type PasswordRuleState,
 } from "@/lib/password-policy";
@@ -68,10 +66,11 @@ export function NewPasswordField({
     report.current?.(breach);
   }, [breach]);
 
-  // Only ask about a password that has already cleared the rules we can check
-  // ourselves. A half-typed one is not worth a request, and its answer would be
-  // stale by the next keystroke anyway.
-  const worthChecking = meetsLength(value) && hasVariety(value);
+  // Only ask about a password that has already cleared every rule we can check
+  // ourselves. A half-typed one is not worth a request, its answer would be
+  // stale by the next keystroke, and a password already failing on screen does
+  // not need a second reason.
+  const worthChecking = !passwordProblem(value, { personal });
 
   useEffect(() => {
     if (!worthChecking) {
