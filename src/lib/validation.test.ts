@@ -18,8 +18,10 @@ import {
   contactSchema,
   coverageSources,
   listContactMessagesSchema,
+  interestRegistrationNotifications,
   sellableWindowNotifications,
   unreadSince,
+  waiverApprovalNotifications,
   createAnnotationSchema,
   kbSlugSchema,
   resolveAnnotationSchema,
@@ -1037,32 +1039,162 @@ describe("contactMessageNotifications", () => {
   });
 });
 
-describe("composeManagerNotifications", () => {
-  const contact = contactMessageNotifications({ unread: 1, latestName: "Sam" });
-  const windows = sellableWindowNotifications([], "2026-08-03T10:00:00.000Z");
+describe("interestRegistrationNotifications", () => {
+  it("stays quiet when nothing is new rather than reporting a zero", () => {
+    expect(interestRegistrationNotifications({ unread: 0 })).toEqual([]);
+    expect(interestRegistrationNotifications({ unread: -1 })).toEqual([]);
+  });
 
-  it("puts unanswered messages above the membership window chore", () => {
-    // A person waiting on a reply outranks a training window that announces
-    // itself weeks ahead. This is the whole reason the order is a function.
+  it("names the person and offers a reading verb, not a fix", () => {
+    // The register step is news, not work: nobody is blocked and nothing is
+    // broken, so the only thing to do with it is read it.
+    const [n] = interestRegistrationNotifications({
+      unread: 1,
+      latestName: "Sam",
+      latestAt: "2026-08-05T10:00:00.000Z",
+    });
+    expect(n.type).toBe("new_interest_registrations");
+    expect(n.title).toBe("Sam registered interest in training");
+    expect(n.href).toBe("/manager/users");
+    expect(n.actionLabel).toBe("Read it");
+  });
+
+  it("counts and speaks plural for several", () => {
+    const [n] = interestRegistrationNotifications({
+      unread: 4,
+      latestName: "Sam",
+      latestAt: "2026-08-05T10:00:00.000Z",
+    });
+    expect(n.title).toBe("4 people registered interest in training");
+    expect(n.body).toContain("Sam");
+    expect(n.actionLabel).toBe("Read them");
+  });
+
+  it("claims nothing about emails having been sent", () => {
+    // Registrations do email the managers, but best-effort: a failed send, and
+    // the whole backlog that counts as new on the day this ships, both make
+    // "you were emailed this too" false. Same rule as the contact item.
+    for (const unread of [1, 4]) {
+      const [n] = interestRegistrationNotifications({ unread, latestName: "Sam" });
+      expect(`${n.title} ${n.body}`.toLowerCase()).not.toContain("email");
+    }
+  });
+
+  it("names the CLUB's day and survives a missing name or date", () => {
+    // 9am Sydney on the 6th is still the 5th in UTC, and the count degrades to
+    // a bare number when the newest row cannot be read.
+    const [dated] = interestRegistrationNotifications({
+      unread: 1,
+      latestName: "Sam",
+      latestAt: "2026-08-05T23:00:00.000Z",
+    });
+    expect(dated.body).toContain("06/08/2026");
+    const [bare] = interestRegistrationNotifications({
+      unread: 2,
+      latestName: null,
+      latestAt: null,
+    });
+    expect(bare.title).toBe("2 people registered interest in training");
+    expect(bare.body).toContain("Someone");
+    expect(bare.body).not.toContain("undefined");
+  });
+});
+
+describe("waiverApprovalNotifications", () => {
+  it("stays quiet when nothing is waiting rather than reporting a zero", () => {
+    expect(waiverApprovalNotifications({ pending: 0 })).toEqual([]);
+    expect(waiverApprovalNotifications({ pending: -1 })).toEqual([]);
+  });
+
+  it("names the signer and asks for the approval", () => {
+    const [n] = waiverApprovalNotifications({
+      pending: 1,
+      latestName: "Sam",
+      latestAt: "2026-08-05T10:00:00.000Z",
+    });
+    expect(n.type).toBe("waivers_awaiting_approval");
+    expect(n.title).toBe("Sam signed the waiver and is waiting for approval");
+    expect(n.href).toBe("/manager/waivers");
+    expect(n.actionLabel).toBe("Approve");
+  });
+
+  it("says what approving does, before the manager gets to the button", () => {
+    // Approving emails the person and unlocks their login, so it cannot be
+    // undone quietly. The consequence belongs in front of the click.
+    for (const pending of [1, 3]) {
+      const [n] = waiverApprovalNotifications({ pending, latestName: "Sam" });
+      expect(n.body).toContain("activates their account");
+      expect(n.body).toContain("emails them");
+      expect(n.body).toContain("free trial");
+    }
+  });
+
+  it("counts and speaks plural for several", () => {
+    const [n] = waiverApprovalNotifications({
+      pending: 3,
+      latestName: "Sam",
+      latestAt: "2026-08-05T10:00:00.000Z",
+    });
+    expect(n.title).toBe("3 signed waivers are waiting for approval");
+    expect(n.body).toContain("Sam");
+    expect(n.actionLabel).toBe("Approve them");
+  });
+
+  it("falls back to 'Someone' rather than printing a blank name", () => {
+    expect(waiverApprovalNotifications({ pending: 1, latestName: "  " })[0].title).toBe(
+      "Someone signed the waiver and is waiting for approval",
+    );
+    expect(waiverApprovalNotifications({ pending: 1, latestName: null })[0].title).toBe(
+      "Someone signed the waiver and is waiting for approval",
+    );
+  });
+});
+
+describe("composeManagerNotifications", () => {
+  const waivers = waiverApprovalNotifications({ pending: 1, latestName: "Ada" });
+  const contact = contactMessageNotifications({ unread: 1, latestName: "Sam" });
+  const leads = interestRegistrationNotifications({ unread: 1, latestName: "Kim" });
+  const windows = sellableWindowNotifications([], "2026-08-03T10:00:00.000Z");
+  const quiet = {
+    waiverApprovals: [],
+    contactMessages: [],
+    interestRegistrations: [],
+    membershipWindows: [],
+  };
+
+  it("orders the queue by who is held up, and for how long", () => {
+    // A signed waiver blocks somebody from starting, an unanswered message has
+    // somebody waiting on a reply, a new registration has nobody waiting on
+    // anything, and the training window is a chore that announces itself weeks
+    // ahead. This is the whole reason the order is a function.
     const all = composeManagerNotifications({
+      waiverApprovals: waivers,
       contactMessages: contact,
+      interestRegistrations: leads,
       membershipWindows: windows,
     });
-    expect(all.map((n) => n.type)).toEqual(["unread_contact_messages", "define_membership_window"]);
+    expect(all.map((n) => n.type)).toEqual([
+      "waivers_awaiting_approval",
+      "unread_contact_messages",
+      "new_interest_registrations",
+      "define_membership_window",
+    ]);
   });
 
   it("contributes nothing for a source that is quiet", () => {
     expect(
-      composeManagerNotifications({ contactMessages: [], membershipWindows: windows }).map(
-        (n) => n.type,
-      ),
+      composeManagerNotifications({ ...quiet, membershipWindows: windows }).map((n) => n.type),
     ).toEqual(["define_membership_window"]);
     expect(
-      composeManagerNotifications({ contactMessages: contact, membershipWindows: [] }).map(
-        (n) => n.type,
-      ),
+      composeManagerNotifications({ ...quiet, contactMessages: contact }).map((n) => n.type),
     ).toEqual(["unread_contact_messages"]);
-    expect(composeManagerNotifications({ contactMessages: [], membershipWindows: [] })).toEqual([]);
+    expect(
+      composeManagerNotifications({ ...quiet, waiverApprovals: waivers }).map((n) => n.type),
+    ).toEqual(["waivers_awaiting_approval"]);
+    expect(
+      composeManagerNotifications({ ...quiet, interestRegistrations: leads }).map((n) => n.type),
+    ).toEqual(["new_interest_registrations"]);
+    expect(composeManagerNotifications(quiet)).toEqual([]);
   });
 });
 

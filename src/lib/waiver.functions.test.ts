@@ -1213,3 +1213,107 @@ describe("filePaperWaiver", () => {
     expect(row).not.toHaveProperty("health_answers");
   });
 });
+
+/**
+ * A PostgREST chain that answers each `from()` with the next queued result.
+ *
+ * Deliberately order-dependent: `countWaiversAwaitingApproval` makes two reads
+ * of the same table (the count, then the newest row), so keying the fake by
+ * table name could not tell them apart. The chain is thenable because the count
+ * query is awaited directly rather than through `.maybeSingle()`.
+ */
+type QueryResult = { data: unknown; error: { message: string } | null; count?: number | null };
+
+function fakeCountAdmin(results: QueryResult[]) {
+  const queue = [...results];
+  const tables: string[] = [];
+  const next = () => queue.shift() ?? { data: null, error: null, count: 0 };
+  const admin = {
+    from(table: string) {
+      tables.push(table);
+      const result = next();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chain: any = {
+        select: () => chain,
+        eq: () => chain,
+        order: () => chain,
+        limit: () => chain,
+        maybeSingle: () => Promise.resolve(result),
+        then: (
+          onFulfilled?: (value: QueryResult) => unknown,
+          onRejected?: (reason: unknown) => unknown,
+        ) => Promise.resolve(result).then(onFulfilled, onRejected),
+      };
+      return chain;
+    },
+  };
+  return { admin: admin as unknown as SupabaseClient<Database>, tables };
+}
+
+describe("countWaiversAwaitingApproval", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("reports nothing waiting without going looking for a name", async () => {
+    const { countWaiversAwaitingApproval } = await import("./waiver.functions");
+    const { admin, tables } = fakeCountAdmin([{ data: null, error: null, count: 0 }]);
+    expect(await countWaiversAwaitingApproval(admin)).toEqual({
+      pending: 0,
+      latestName: null,
+      latestAt: null,
+    });
+    // One read, not two: with nothing waiting there is no newest signer.
+    expect(tables).toEqual(["waivers"]);
+  });
+
+  it("names the newest signer the way the waivers screen does", async () => {
+    const { countWaiversAwaitingApproval } = await import("./waiver.functions");
+    const { admin } = fakeCountAdmin([
+      { data: null, error: null, count: 3 },
+      {
+        data: {
+          first_name: "Alexandra",
+          middle_name: "",
+          last_name: "Nguyen",
+          preferred_name: "Alex",
+          signed_at: "2026-08-05T10:00:00.000Z",
+        },
+        error: null,
+      },
+    ]);
+    expect(await countWaiversAwaitingApproval(admin)).toEqual({
+      pending: 3,
+      latestName: 'Alexandra "Alex" Nguyen',
+      latestAt: "2026-08-05T10:00:00.000Z",
+    });
+  });
+
+  it("degrades to a bare count when the newest row cannot be read", async () => {
+    const { countWaiversAwaitingApproval } = await import("./waiver.functions");
+    const { admin } = fakeCountAdmin([
+      { data: null, error: null, count: 2 },
+      { data: null, error: { message: "boom" } },
+    ]);
+    // The count is the part the notification cannot do without; a missing name
+    // only makes the copy vaguer.
+    expect(await countWaiversAwaitingApproval(admin)).toEqual({
+      pending: 2,
+      latestName: null,
+      latestAt: null,
+    });
+  });
+
+  it("degrades to zero rather than throwing, so one bad read cannot empty the queue", async () => {
+    const { countWaiversAwaitingApproval } = await import("./waiver.functions");
+    const { admin } = fakeCountAdmin([{ data: null, error: { message: "boom" }, count: null }]);
+    // This runs inside the attention list's Promise.all next to the contact
+    // messages and the training-dates warning. Throwing here would take those
+    // down with it.
+    await expect(countWaiversAwaitingApproval(admin)).resolves.toEqual({
+      pending: 0,
+      latestName: null,
+      latestAt: null,
+    });
+  });
+});

@@ -906,14 +906,18 @@ grants off.
 `key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. **RLS:**
 manager-only. Keys in use:
 
-| Key                            | Holds                                                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoice_payment_instructions` | Markdown shown on an invoice. Falls back to a built-in stub when unset.                                                                                 |
-| `contact_messages_seen_at`     | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread. |
+| Key                              | Holds                                                                                                                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `invoice_payment_instructions`   | Markdown shown on an invoice. Falls back to a built-in stub when unset.                                                                                                                          |
+| `contact_messages_seen_at`       | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread.                                          |
+| `interest_registrations_seen_at` | ISO instant of the newest interest registration on file when a manager last opened `/manager/users`. Same club-wide watermark shape; anything newer counts as a new sign-up on `/notifications`. |
 
-Being key/value is what let the contact-message unread count ship without a
-migration. It is also its limit: a value here is a single club-wide fact, so
-anything that needs to differ per manager needs a real table.
+Being key/value is what let the contact-message unread count, and later the
+new-registration count, ship without a migration. It is also its limit: a value
+here is a single club-wide fact, so anything that needs to differ per manager
+needs a real table. Both watermarks are read and written through
+`src/lib/seen-markers.ts`, which holds the only-moves-forward and
+never-into-the-future guards.
 
 ### `email_verification_tokens` — proof that someone can read an address
 

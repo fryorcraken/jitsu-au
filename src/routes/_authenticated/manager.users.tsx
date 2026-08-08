@@ -15,7 +15,9 @@ import {
 import { lifecycleStatuses } from "@/lib/validation";
 import { emailVerificationLabel } from "@/lib/email-verification";
 import { listClubUsers } from "@/lib/membership.functions";
+import { markInterestRegistrationsSeen } from "@/lib/leads.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useNotifications";
 
 export const Route = createFileRoute("/_authenticated/manager/users")({
   head: () => ({
@@ -36,6 +38,8 @@ function ManagerUsersPage() {
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchList = useServerFn(listClubUsers);
+  const markLeadsSeen = useServerFn(markInterestRegistrationsSeen);
+  const { refresh: refreshNotifications } = useNotifications();
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +67,24 @@ function ManagerUsersPage() {
         setLoading(false);
       });
   }, [isManager, fetchList]);
+
+  // This screen is where new interest registrations are read, so opening it is
+  // what clears them off the "needs attention" list. Club-wide, like the contact
+  // inbox: whichever manager looks clears it for all of them.
+  //
+  // Stamped even if the list above failed to load, and even if the manager came
+  // here for something else entirely. Both are deliberate. A registration is a
+  // person, and that person stays on this list for good, so the worst a stamp
+  // can cost is a badge, never the record of who signed up. That is what makes
+  // this looser than the contact inbox, where the message exists nowhere else.
+  useEffect(() => {
+    if (!isManager) return;
+    markLeadsSeen()
+      .then(() => refreshNotifications())
+      // Silent: nobody asked for this, and the only cost of it failing is a
+      // badge that clears on the next visit.
+      .catch((e) => console.error("[manager/users] could not mark registrations seen:", e));
+  }, [isManager, markLeadsSeen, refreshNotifications]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
