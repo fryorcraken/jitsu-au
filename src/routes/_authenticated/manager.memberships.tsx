@@ -2,12 +2,12 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Check, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
+import { MembershipRowActions } from "@/components/site/MembershipRowActions";
 import { membershipClass } from "@/lib/status-colours";
 import { formatCents } from "@/lib/validation";
-import { listMemberships, setMembershipStatus } from "@/lib/membership.functions";
+import { listMemberships } from "@/lib/membership.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/memberships")({
@@ -24,11 +24,9 @@ function ManagerMembershipsPage() {
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchList = useServerFn(listMemberships);
-  const setStatus = useServerFn(setMembershipStatus);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pendingId, setPendingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -47,18 +45,8 @@ function ManagerMembershipsPage() {
       });
   }, [isManager, fetchList]);
 
-  async function update(row: Row, status: "active" | "cancelled" | "pending") {
-    setPendingId(row.id);
-    try {
-      await setStatus({ data: { id: row.id, status } });
-      const data = await fetchList();
-      setRows(data as Row[]);
-      toast.success(status === "active" ? "Membership activated" : `Membership ${status}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update membership");
-    } finally {
-      setPendingId(null);
-    }
+  async function refresh() {
+    setRows((await fetchList()) as Row[]);
   }
 
   return (
@@ -125,24 +113,7 @@ function ManagerMembershipsPage() {
                       <Pill label={r.status} className={membershipClass(r.status)} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {r.status === "active" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={pendingId === r.id}
-                          onClick={() => update(r, "cancelled")}
-                        >
-                          <Undo2 className="mr-1 h-3 w-3" /> Cancel
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          disabled={pendingId === r.id}
-                          onClick={() => update(r, "active")}
-                        >
-                          <Check className="mr-1 h-3 w-3" /> Activate
-                        </Button>
-                      )}
+                      <MembershipRowActions membership={r} onChanged={refresh} />
                     </td>
                   </tr>
                 ))}

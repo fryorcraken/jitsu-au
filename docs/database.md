@@ -548,14 +548,23 @@ dated plan is on sale at once.
 `payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
 Constraint: the student rate requires a `uts_student_number`. The `member` role
-is granted on paid activation. The member's display name/email come from their
-profile (via `user_id`). For a dated plan, `starts_at`/`ends_at` are the plan's
-own dates (`starts_on` at 00:00 and `ends_on` at 23:59:59, both
-Australia/Sydney), computed once at activation and never touched again.
-`sessions_remaining` is set at activation and spent by a **check-in** — see
-`session_checkins` below, the only writer that decrements it.
+is reconciled against these rows by `syncMemberRole` after every activation,
+cancellation and deletion — it is a label, not the access gate (see the
+"Membership ledger" note in `docs/memberships.md`). The member's display
+name/email come from their profile (via `user_id`). For a dated plan,
+`starts_at`/`ends_at` are the plan's own dates (`starts_on` at 00:00 and
+`ends_on` at 23:59:59, both Australia/Sydney), computed once at activation and
+never touched again. `sessions_remaining` is set at activation and spent by a
+**check-in** — see `session_checkins` below, the only writer that decrements it.
 **RLS:** users read own; managers read/update all; direct member INSERT is
-revoked (all inserts go through the service-role `startMembership`).
+revoked (all inserts go through the service-role `startMembership` /
+`createMembershipForUser`). **Deletes** have no policy at all: a manager
+deleting a junk invoice goes through the service-role `deleteMembershipRow`,
+which bypasses RLS, so there is nothing to grant. Its guards
+(`whyMembershipCannotBeDeleted`) are the real gate, and one of them exists
+because `session_checkins.membership_id` is `ON DELETE SET NULL`: deleting a
+membership somebody trained on would silently orphan the check-in rather than
+fail.
 
 ### `bank_transactions` — statement import + reconciliation
 

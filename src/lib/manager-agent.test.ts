@@ -16,7 +16,13 @@ import {
   reconciledEditMessage,
   safeEqual,
 } from "./manager-agent";
-import { editInvoiceSchema, managerAgentActions, paperWaiverUploadSchema } from "./validation";
+import {
+  createInvoiceSchema,
+  deleteInvoiceSchema,
+  editInvoiceSchema,
+  managerAgentActions,
+  paperWaiverUploadSchema,
+} from "./validation";
 import type { EditInvoiceInput } from "./validation";
 import type { MembershipPlanRow, MembershipRow } from "./membership-types";
 
@@ -95,6 +101,50 @@ describe("editInvoiceSchema", () => {
     expect(
       buildInvoicePatch(editInvoiceSchema.parse({ id, notes: "x", confirm_paid_edit: true })),
     ).toEqual({ notes: "x" });
+  });
+});
+
+describe("deleteInvoiceSchema", () => {
+  const id = "11111111-1111-1111-1111-111111111111";
+
+  it("takes an id and nothing else", () => {
+    expect(deleteInvoiceSchema.parse({ id }).id).toBe(id);
+  });
+
+  // There is deliberately no confirm flag: the three delete blockers are not a
+  // caller's judgement call, so an agent reaching for one has misunderstood and
+  // should hear about it rather than have the key silently ignored.
+  it("refuses a confirm flag rather than dropping it", () => {
+    expect(() => deleteInvoiceSchema.parse({ id, confirm_paid_edit: true })).toThrow();
+    expect(() => deleteInvoiceSchema.parse({ id, force: true })).toThrow();
+  });
+});
+
+describe("createInvoiceSchema", () => {
+  const base = { user_id: "11111111-1111-1111-1111-111111111111", plan_code: "2026-s2" };
+
+  it("raises an invoice for a named person against a named plan", () => {
+    const parsed = createInvoiceSchema.parse(base);
+    expect(parsed.user_id).toBe(base.user_id);
+    expect(parsed.plan_code).toBe("2026-s2");
+  });
+
+  it("emails them unless the caller says not to", () => {
+    expect(createInvoiceSchema.parse(base).send_email).toBe(true);
+    expect(createInvoiceSchema.parse({ ...base, send_email: false }).send_email).toBe(false);
+  });
+
+  // Same rule as edit_invoice: a typo must name itself rather than being
+  // silently dropped, or a call that did half of what was asked reads as a
+  // success.
+  it("names an unknown param instead of ignoring it", () => {
+    expect(() => createInvoiceSchema.parse({ ...base, price_cents: 1000 })).toThrow(/price_cents/);
+  });
+
+  // Activation grants the member role and emails the member. It is not
+  // something an invoice-creating call gets to do as a side effect.
+  it("has no way to ask for an active invoice", () => {
+    expect(() => createInvoiceSchema.parse({ ...base, status: "active" })).toThrow();
   });
 });
 
@@ -373,7 +423,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("8");
+    expect(AGENT_MANIFEST.version).toBe("9");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
