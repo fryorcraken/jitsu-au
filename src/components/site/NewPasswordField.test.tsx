@@ -4,12 +4,19 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NewPasswordField } from "./NewPasswordField";
+import type { BreachStatus } from "@/lib/password-policy";
 
 const lookupBreachedPassword = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/pwned-passwords", () => ({ lookupBreachedPassword }));
 
 /** The field is controlled, so tests drive it through a small host. */
-function Host({ personal }: { personal?: (string | null | undefined)[] }) {
+function Host({
+  personal,
+  onBreachChange,
+}: {
+  personal?: (string | null | undefined)[];
+  onBreachChange?: (status: BreachStatus) => void;
+}) {
   const [value, setValue] = useState("");
   return (
     <NewPasswordField
@@ -18,6 +25,7 @@ function Host({ personal }: { personal?: (string | null | undefined)[] }) {
       value={value}
       onChange={setValue}
       personal={personal}
+      onBreachChange={onBreachChange}
     />
   );
 }
@@ -42,7 +50,7 @@ describe("NewPasswordField", () => {
     render(<Host />);
     expect(rule(/At least 15 characters/)).toBeInTheDocument();
     expect(rule(/Not one character or short pattern repeated/)).toBeInTheDocument();
-    expect(rule(/Nothing from your name, your email, or the club's name/)).toBeInTheDocument();
+    expect(rule(/Not built out of your name, your email, or the club's name/)).toBeInTheDocument();
     expect(rule(/public data breaches/)).toBeInTheDocument();
   });
 
@@ -78,7 +86,7 @@ describe("NewPasswordField", () => {
   it("marks a password built from the person's email unmet", async () => {
     render(<Host personal={["samrivers@example.com"]} />);
     await userEvent.type(screen.getByLabelText("New password"), "samrivers is my name");
-    expect(stateOf(/Nothing from your name/)).toContain("not met yet");
+    expect(stateOf(/Not built out of your name/)).toContain("not met yet");
   });
 
   it("does not spend a breach lookup on a password that fails the basics", async () => {
@@ -123,6 +131,25 @@ describe("NewPasswordField", () => {
     render(<Host />);
     await userEvent.type(screen.getByLabelText("New password"), "otter kettle marina");
     await waitFor(() => expect(stateOf(/public data breaches/)).toContain(", met"));
+  });
+
+  it("tells the form what the breach lookup found, so it can refuse to submit", async () => {
+    lookupBreachedPassword.mockResolvedValue("breached");
+    const seen: BreachStatus[] = [];
+    render(<Host onBreachChange={(status) => seen.push(status)} />);
+    await userEvent.type(screen.getByLabelText("New password"), "otter kettle marina");
+    await waitFor(() => expect(seen).toContain("breached"));
+  });
+
+  it("shows the length ceiling only once it has been broken", async () => {
+    render(<Host />);
+    expect(screen.queryByText(/No longer than 72 characters/)).not.toBeInTheDocument();
+    // Pasted rather than typed: nobody reaches 73 characters a keystroke at a
+    // time, and `userEvent.type` of that length is slow.
+    await userEvent.click(screen.getByLabelText("New password"));
+    await userEvent.paste("a b c d e f g h i j ".repeat(4));
+    expect(screen.getByText(/No longer than 72 characters/)).toBeInTheDocument();
+    expect(stateOf(/No longer than 72 characters/)).toContain("not met yet");
   });
 
   it("announces progress through the rules", async () => {

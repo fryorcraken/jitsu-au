@@ -1,7 +1,10 @@
 import { createHash, webcrypto } from "node:crypto";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { lookupBreachedPassword } from "./pwned-passwords";
+// Imported fresh per test rather than once at the top: the module remembers
+// across calls whether the padding header was accepted, and a test that makes
+// it give up must not decide the outcome of the next one.
+let lookupBreachedPassword: typeof import("./pwned-passwords").lookupBreachedPassword;
 
 /** The same hash the module computes, so a fake response can be built around it. */
 function sha1(value: string): string {
@@ -24,12 +27,14 @@ function respondWith(body: string, init: ResponseInit = {}) {
   return fetchMock;
 }
 
-beforeAll(() => {
+beforeEach(async () => {
   // jsdom's `crypto` has no `subtle`, so borrow Node's WebCrypto. The module
   // reads `crypto.subtle` at call time, which is what makes this substitutable.
   if (!globalThis.crypto?.subtle) {
     vi.stubGlobal("crypto", webcrypto);
   }
+  vi.resetModules();
+  ({ lookupBreachedPassword } = await import("./pwned-passwords"));
 });
 
 afterEach(() => {
@@ -96,6 +101,48 @@ describe("lookupBreachedPassword", () => {
       }),
     );
     await expect(lookupBreachedPassword(PASSWORD, controller.signal)).resolves.toBe("unknown");
+  });
+
+  it("still answers when the padding header is refused, and stops sending it", async () => {
+    // `Add-Padding` is not CORS-safelisted, so it forces a preflight. If that
+    // preflight is refused, dropping the header has to be what happens: the
+    // alternative is a lookup that returns "unknown" forever and a rule that
+    // sits green while checking nothing.
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.headers) throw new TypeError("Failed to fetch");
+      return new Response(rangeBody([[SUFFIX, 42]]), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(lookupBreachedPassword(PASSWORD)).resolves.toBe("breached");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // The refusal is remembered, so the next lookup costs one request.
+    fetchMock.mockClear();
+    await expect(lookupBreachedPassword(PASSWORD)).resolves.toBe("breached");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.headers).toBeUndefined();
+  });
+
+  it("keeps sending the padding header while it is accepted", async () => {
+    const fetchMock = respondWith(rangeBody([[SUFFIX, 0]]));
+    await lookupBreachedPassword(PASSWORD);
+    await lookupBreachedPassword(PASSWORD);
+    for (const [, init] of fetchMock.mock.calls as unknown as [string, RequestInit][]) {
+      expect(init.headers).toMatchObject({ "Add-Padding": "true" });
+    }
+  });
+
+  it("does not read an abort as the padding header being refused", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(lookupBreachedPassword(PASSWORD, controller.signal)).resolves.toBe("unknown");
+    // One attempt, not a retry: an abort is us cancelling, not HIBP objecting.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns unknown without WebCrypto rather than throwing", async () => {

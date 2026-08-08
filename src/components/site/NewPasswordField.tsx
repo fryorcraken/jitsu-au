@@ -1,5 +1,5 @@
 import { Check, Circle, Loader2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { PasswordInput } from "@/components/site/PasswordInput";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,11 @@ type Props = {
    * The rules use it to refuse a password built out of it.
    */
   personal?: (string | null | undefined)[];
+  /**
+   * Told how the breach lookup is going, so the form can refuse to submit a
+   * password this field is showing a red cross against.
+   */
+  onBreachChange?: (status: BreachStatus) => void;
   autoFocus?: boolean;
   disabled?: boolean;
 };
@@ -49,10 +54,19 @@ export function NewPasswordField({
   value,
   onChange,
   personal,
+  onBreachChange,
   autoFocus,
   disabled,
 }: Props) {
   const [breach, setBreach] = useState<BreachStatus>("idle");
+
+  // Held in a ref so the report below fires when the STATUS changes and not
+  // whenever the parent happens to re-render with a fresh arrow function.
+  const report = useRef(onBreachChange);
+  report.current = onBreachChange;
+  useEffect(() => {
+    report.current?.(breach);
+  }, [breach]);
 
   // Only ask about a password that has already cleared the rules we can check
   // ourselves. A half-typed one is not worth a request, and its answer would be

@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Pill } from "@/components/site/StatusPill";
 import { NewPasswordField } from "@/components/site/NewPasswordField";
-import { describePasswordError, passwordProblem } from "@/lib/password-policy";
+import { describePasswordError, passwordProblem, type BreachStatus } from "@/lib/password-policy";
 import {
   BELT_SIZE_HINT,
   BeltSizeSelect,
@@ -1116,13 +1116,14 @@ function GoogleDriveCard() {
 
 function ChangePasswordCard({ personal }: { personal: (string | null | undefined)[] }) {
   const [password, setPassword] = useState("");
+  const [breach, setBreach] = useState<BreachStatus>("idle");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     // Say what is wrong here rather than spending a round trip to be told.
-    const local = passwordProblem(password, { personal });
+    const local = passwordProblem(password, { personal, breach });
     if (local) return setProblem(local);
     setProblem(null);
     setBusy(true);
@@ -1147,7 +1148,14 @@ function ChangePasswordCard({ personal }: { personal: (string | null | undefined
             label="New password"
             disabled={busy}
             value={password}
-            onChange={setPassword}
+            // Clear the refusal as soon as they start fixing it. A red panel
+            // sitting under rules that have since gone green is worse than no
+            // panel.
+            onChange={(next) => {
+              setPassword(next);
+              setProblem(null);
+            }}
+            onBreachChange={setBreach}
             personal={personal}
           />
           {problem && (

@@ -27,6 +27,31 @@ const RANGE_URL = "https://api.pwnedpasswords.com/range/";
 
 export type BreachLookup = "safe" | "breached" | "unknown";
 
+/**
+ * Whether to keep asking for padding. `Add-Padding` is not a CORS-safelisted
+ * request header, so sending it turns every lookup into a preflight, and a
+ * refused preflight fails the request outright rather than degrading. That
+ * would be the worst outcome available: the lookup would return "unknown"
+ * forever, the rule would sit permanently green, and nothing would say so.
+ *
+ * So the header is best effort. One failure and it is dropped for the rest of
+ * the session and the plain request is tried instead. Losing the padding costs
+ * a privacy property (the response size hints at how many suffixes share the
+ * prefix). Losing the check costs the check.
+ */
+let usePadding = true;
+
+function requestRange(prefix: string, signal?: AbortSignal): Promise<Response> {
+  const url = `${RANGE_URL}${prefix}`;
+  if (!usePadding) return fetch(url, { signal });
+  return fetch(url, { signal, headers: { "Add-Padding": "true" } }).catch((error) => {
+    // An abort is us, not the header. Do not read it as a verdict on padding.
+    if (signal?.aborted) throw error;
+    usePadding = false;
+    return fetch(url, { signal });
+  });
+}
+
 async function sha1Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)]
@@ -52,13 +77,9 @@ export async function lookupBreachedPassword(
 
   try {
     const hash = await sha1Hex(password);
-    const prefix = hash.slice(0, 5);
     const suffix = hash.slice(5);
 
-    const response = await fetch(`${RANGE_URL}${prefix}`, {
-      signal,
-      headers: { "Add-Padding": "true" },
-    });
+    const response = await requestRange(hash.slice(0, 5), signal);
     if (!response.ok) return "unknown";
 
     for (const line of (await response.text()).split("\n")) {

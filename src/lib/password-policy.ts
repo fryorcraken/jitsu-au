@@ -59,7 +59,7 @@ const CLUB_TERMS = ["jitsu", "jiujitsu", "utsjitsu", "jitsuau"];
 /** How the breach lookup is going. `unknown` means we could not find out. */
 export type BreachStatus = "idle" | "checking" | "safe" | "breached" | "unknown";
 
-export type PasswordRuleId = "length" | "variety" | "notPersonal" | "notBreached";
+export type PasswordRuleId = "length" | "variety" | "notPersonal" | "notBreached" | "maxLength";
 
 /** `pending` is "we cannot say yet", which is only ever the breach lookup. */
 export type PasswordRuleState = "met" | "unmet" | "pending";
@@ -117,10 +117,44 @@ export function personalTokens(personal: (string | null | undefined)[] = []): st
   return [...tokens];
 }
 
-function containsPersonal(password: string, tokens: string[]): boolean {
+/**
+ * How much of a password one of those words has to account for before it is
+ * the reason the password is guessable.
+ *
+ * Plain substring matching is too blunt to use on its own. "Hill", "Rose",
+ * "Dean" and "Bell" are surnames and also ordinary words, and flattening the
+ * punctuation out before matching creates joins nobody typed ("flash escape"
+ * contains "ashe"). Rejecting a strong passphrase with "leave out your name"
+ * is how a rule set loses the person reading it.
+ *
+ * A third is the line. At fifteen characters minimum, a four or five letter
+ * surname cannot reach it by accident, while the passwords this rule is
+ * actually for, the ones that ARE somebody's name with a bit of decoration,
+ * are well past it.
+ */
+const PERSONAL_SHARE = 1 / 3;
+
+/** The largest share of the password that any single one of these words covers. */
+function personalShare(password: string, tokens: string[]): number {
   const flattened = normalise(password);
-  if (!flattened) return false;
-  return tokens.some((token) => flattened.includes(token));
+  if (!flattened) return 0;
+  let largest = 0;
+  for (const token of tokens) {
+    let covered = 0;
+    for (
+      let at = flattened.indexOf(token);
+      at !== -1;
+      at = flattened.indexOf(token, at + token.length)
+    ) {
+      covered += token.length;
+    }
+    largest = Math.max(largest, covered / flattened.length);
+  }
+  return largest;
+}
+
+function isBuiltFromPersonal(password: string, tokens: string[]): boolean {
+  return personalShare(password, tokens) >= PERSONAL_SHARE;
 }
 
 /**
@@ -147,10 +181,41 @@ export function isTooLong(password: string): boolean {
 }
 
 /**
+ * The ceiling stated to someone who has hit it.
+ *
+ * "72 characters" is only true of plain text. Told that while holding a
+ * thirty-character Japanese passphrase, a person would reasonably conclude the
+ * form is broken, so when the two counts disagree the reason comes with the
+ * number.
+ */
+function ceilingWording(password: string): { label: string; message: string } {
+  if (passwordByteLength(password) === [...password].length) {
+    return {
+      label: `No longer than ${PASSWORD_MAX_BYTES} characters`,
+      message: `That is longer than we can store. Passwords go up to ${PASSWORD_MAX_BYTES} characters.`,
+    };
+  }
+  return {
+    label: "Short enough for us to store",
+    message: `That is longer than we can store. The limit is ${PASSWORD_MAX_BYTES} characters of plain text, and accented, emoji and non-Latin characters each use up more than one.`,
+  };
+}
+
+/** The copy for a password found in breach data, shared by the live check and Supabase's refusal. */
+const BREACHED_MESSAGE =
+  "That password has turned up in a public data breach, which puts it on the lists attackers try first. It has to be a different one. Three or four unrelated words is the easiest way to get there.";
+
+/**
  * Every rule and where this password stands against it, in the order the field
  * lists them. The breach rule is `pending` until a lookup has answered, and
  * counts as met when the lookup could not run at all: the server checks it
  * again anyway, and a third party being unreachable is not the person's fault.
+ *
+ * The ceiling is the odd one out: it appears only once it has been broken. It
+ * is a limit nobody approaches, and a rule sitting green from the first
+ * keystroke to the last is noise in a list that is meant to be read. It has to
+ * appear then, though, because it does stop the form, and a list showing all
+ * green next to a refusal is the thing this whole change is fixing.
  */
 export function checkPassword(password: string, context: PasswordContext = {}): PasswordRule[] {
   const breach = context.breach ?? "idle";
@@ -158,7 +223,7 @@ export function checkPassword(password: string, context: PasswordContext = {}): 
   const breachState: PasswordRuleState =
     breach === "breached" ? "unmet" : breach === "safe" || breach === "unknown" ? "met" : "pending";
 
-  return [
+  const rules: PasswordRule[] = [
     {
       id: "length",
       label: `At least ${PASSWORD_MIN_LENGTH} characters`,
@@ -171,8 +236,8 @@ export function checkPassword(password: string, context: PasswordContext = {}): 
     },
     {
       id: "notPersonal",
-      label: "Nothing from your name, your email, or the club's name",
-      state: containsPersonal(password, tokens) ? "unmet" : "met",
+      label: "Not built out of your name, your email, or the club's name",
+      state: isBuiltFromPersonal(password, tokens) ? "unmet" : "met",
     },
     {
       id: "notBreached",
@@ -180,6 +245,11 @@ export function checkPassword(password: string, context: PasswordContext = {}): 
       state: breachState,
     },
   ];
+
+  if (isTooLong(password)) {
+    rules.push({ id: "maxLength", label: ceilingWording(password).label, state: "unmet" });
+  }
+  return rules;
 }
 
 /**
@@ -187,16 +257,15 @@ export function checkPassword(password: string, context: PasswordContext = {}): 
  * null when there is nothing to fix. Forms call this to decide whether to
  * submit.
  *
- * The breach lookup is deliberately not consulted here. It is a call to a
- * third party that can be slow or down, and a member should never be unable to
- * set a password because someone else's API is having an afternoon. Supabase
- * enforces that half server side regardless, and `describePasswordError` turns
- * its refusal into something worth reading.
+ * The breach lookup only blocks when it has actually come back saying the
+ * password has leaked. "Checking" and "unknown" both let the form through: it
+ * is a call to a third party that can be slow or down, and nobody should be
+ * unable to set a password because someone else's API is having an afternoon.
+ * Supabase checks the same thing server side regardless, and
+ * `describePasswordError` turns its refusal into something worth reading.
  */
 export function passwordProblem(password: string, context: PasswordContext = {}): string | null {
-  if (isTooLong(password)) {
-    return `That is longer than we can store. Passwords go up to ${PASSWORD_MAX_BYTES} characters.`;
-  }
+  if (isTooLong(password)) return ceilingWording(password).message;
   if (!meetsLength(password)) {
     const short = PASSWORD_MIN_LENGTH - [...password].length;
     return `A bit short. Add ${short} more character${short === 1 ? "" : "s"} to reach ${PASSWORD_MIN_LENGTH}.`;
@@ -204,9 +273,12 @@ export function passwordProblem(password: string, context: PasswordContext = {})
   if (!hasVariety(password)) {
     return "That is the same thing repeated, so it is as short as its shortest part. Try a few unrelated words instead.";
   }
-  if (containsPersonal(password, personalTokens(context.personal))) {
+  if (isBuiltFromPersonal(password, personalTokens(context.personal))) {
     return "Anyone who knows you could guess that. Leave out your name, your email and the club's name.";
   }
+  // Last, and only on a definite answer: a red cross on screen has to mean the
+  // button will not work, or the list is decoration.
+  if (context.breach === "breached") return BREACHED_MESSAGE;
   return null;
 }
 
@@ -221,9 +293,7 @@ export function passwordProblem(password: string, context: PasswordContext = {})
  */
 export function describePasswordError(message: string): string {
   const text = message.toLowerCase();
-  if (text.includes("known to be weak")) {
-    return "That password has turned up in a public data breach, which puts it on the lists attackers try first. It has to be a different one. Three or four unrelated words is the easiest way to get there.";
-  }
+  if (text.includes("known to be weak")) return BREACHED_MESSAGE;
   if (text.includes("should be at least")) {
     return `A bit short. Use at least ${PASSWORD_MIN_LENGTH} characters.`;
   }

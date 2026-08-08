@@ -141,19 +141,53 @@ describe("passwordProblem", () => {
   });
 
   it("sees through punctuation and capitals used to dodge that", () => {
-    expect(passwordProblem("J.i.T.s.U-training-hall")).toMatch(/knows you could guess/i);
+    expect(passwordProblem("J.i.T.s.U-J.i.T.s.U-club")).toMatch(/knows you could guess/i);
+  });
+
+  it("leaves a passphrase alone when the name is only a small part of it", () => {
+    // "Hill" is a surname and also an ordinary word. Rejecting four unrelated
+    // words because one of them happens to be somebody's name is how a rule
+    // set loses the person reading it.
+    expect(passwordProblem("hill kettle marina drill", { personal: ["Hill"] })).toBeNull();
+  });
+
+  it("does not match across a join that flattening the punctuation invented", () => {
+    // "flash escape" only contains "ashe" once the space is stripped out.
+    expect(passwordProblem("flash escape marina drill", { personal: ["Ashe"] })).toBeNull();
+  });
+
+  it("still rejects a password that is mostly the person's surname", () => {
+    expect(passwordProblem("hillsboro hill road", { personal: ["Hill"] })).toMatch(
+      /knows you could guess/i,
+    );
   });
 
   it("rejects a password past bcrypt's ceiling", () => {
     expect(passwordProblem("a b c d e f g h i j ".repeat(4))).toMatch(/72 characters/);
   });
 
+  it("explains the ceiling differently when characters and bytes disagree", () => {
+    // 40 accented characters is 80 bytes. Telling somebody holding 40 of
+    // something that the limit is 72 reads as a broken form.
+    const message = passwordProblem("é".repeat(40)) ?? "";
+    expect(message).toMatch(/72 characters of plain text/);
+    expect(message).toMatch(/use up more than one/);
+  });
+
   it("reports the length problem before the personal one, so there is one thing to fix", () => {
     expect(passwordProblem("jitsu", { personal: [] })).toMatch(/more character/i);
   });
 
-  it("never consults the breach lookup, which may be unreachable", () => {
-    expect(passwordProblem(GOOD, { breach: "breached" })).toBeNull();
+  it("blocks a password the breach lookup has come back on", () => {
+    // A red cross on screen has to mean the button will not work.
+    expect(passwordProblem(GOOD, { breach: "breached" })).toMatch(/data breach/i);
+  });
+
+  it("lets the form through while the lookup is unfinished or unreachable", () => {
+    expect(passwordProblem(GOOD, { breach: "checking" })).toBeNull();
+    expect(passwordProblem(GOOD, { breach: "unknown" })).toBeNull();
+    expect(passwordProblem(GOOD, { breach: "idle" })).toBeNull();
+    expect(passwordProblem(GOOD)).toBeNull();
   });
 });
 
@@ -165,6 +199,26 @@ describe("checkPassword", () => {
       "notPersonal",
       "notBreached",
     ]);
+  });
+
+  it("keeps the ceiling out of the list until it is broken", () => {
+    // It is a limit nobody approaches, so it would sit green forever.
+    expect(checkPassword(GOOD).map((rule) => rule.id)).not.toContain("maxLength");
+  });
+
+  it("shows the ceiling as a failed rule once it is broken", () => {
+    // Otherwise the list reads 4 of 4 while the form refuses to submit, which
+    // is the exact mismatch this whole change is about.
+    const rules = checkPassword("a".repeat(80));
+    const ceiling = rules.find((rule) => rule.id === "maxLength");
+    expect(ceiling?.state).toBe("unmet");
+    expect(ceiling?.label).toContain("72");
+  });
+
+  it("does not put a character count on the ceiling when bytes are what ran out", () => {
+    const ceiling = checkPassword("é".repeat(40)).find((rule) => rule.id === "maxLength");
+    expect(ceiling?.label).not.toContain("72");
+    expect(ceiling?.label).toMatch(/store/i);
   });
 
   function breachState(breach: BreachStatus) {
@@ -229,11 +283,20 @@ describe("describePasswordError", () => {
     const messages = [
       describePasswordError("Password is known to be weak and easy to guess."),
       describePasswordError("Password should be at least 8 characters."),
+      describePasswordError("Password cannot be longer than 72 characters"),
       passwordProblem("short"),
       passwordProblem("aaaaaaaaaaaaaaaaaa"),
-      passwordProblem("jitsu is the best club"),
+      passwordProblem("utsjitsu training club"),
+      passwordProblem("a".repeat(80)),
+      passwordProblem("é".repeat(40)),
+      passwordProblem("otter kettle marina drill", { breach: "breached" }),
       ...checkPassword("").map((rule) => rule.label),
+      ...checkPassword("é".repeat(40)).map((rule) => rule.label),
     ];
+    // Every entry has to be a real message: a null here would silently pass.
+    expect(messages.every((message) => typeof message === "string" && message.length > 0)).toBe(
+      true,
+    );
     for (const message of messages) expect(message).not.toContain("—");
   });
 });
