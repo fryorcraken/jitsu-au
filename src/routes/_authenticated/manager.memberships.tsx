@@ -59,7 +59,7 @@ function ManagerMembershipsPage() {
               Activate paid memberships once payment lands, or reconcile a bank statement.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline">
               <Link to="/manager/users">Users</Link>
             </Button>
@@ -71,9 +71,6 @@ function ManagerMembershipsPage() {
             </Button>
             <Button asChild variant="outline">
               <Link to="/manager/settings">Settings</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/manager/api-tokens">Agent access</Link>
             </Button>
             <Button asChild variant="outline">
               <Link to="/account">Back to account</Link>
