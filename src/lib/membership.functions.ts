@@ -662,20 +662,36 @@ export async function enrolMember(
     plan.starts_on ?? undefined,
   );
 
-  // Idempotency: reuse an existing pending enrollment for the same plan (and
-  // session, for casual) rather than creating duplicate rows / re-notifying on
-  // a repeated "Choose". A dated plan needs no extra filter here any more: a
+  // Idempotency: reuse an existing enrollment for the same plan (and session,
+  // for casual) rather than creating duplicate rows / re-notifying on a
+  // repeated "Choose". A dated plan needs no extra filter here any more: a
   // different window IS a different plan_id now, so filtering on plan_id
-  // alone already tells "Semester 2 2026" and "Semester 1 2027" apart. The
-  // email send below is also idempotency-keyed.
+  // alone already tells "Semester 2 2026" and "Semester 1 2027" apart. Both
+  // emails are keyed on the membership id, so resolving back to the same row is
+  // also what stops a second copy of either going out.
+  //
+  // A FREE plan has to match an `active` row as well, and that is the whole
+  // reason this is a status list rather than `.eq("status", "pending")`. A free
+  // plan does not wait for a payment: it is activated further down before the
+  // caller ever hears back. So on a repeat — a retried submit, a double press,
+  // a reply that got lost — a pending-only guard finds nothing, inserts a
+  // second membership and activates it, and the member gets a second "your
+  // membership is active" email under a new id that the idempotency key cannot
+  // dedupe. The `once ever` rule only covers the trial, so a $0 casual or
+  // period plan had nothing catching it at all.
+  //
+  // Paid plans keep matching `pending` alone. An active paid membership is one
+  // the club has been paid for, and buying the same plan again after it lapses
+  // is a real purchase, not a duplicate.
+  const reusableStatuses = price === 0 ? ["pending", "active"] : ["pending"];
   const pendingBase = admin
     .from("memberships")
     .select("*")
     .eq("user_id", userId)
     .eq("plan_id", plan.id)
-    .eq("status", "pending");
+    .in("status", reusableStatuses);
   // A failed read here defeats exactly what the reuse is for: it would report
-  // no pending enrollment, insert a duplicate invoice and re-send the payment
+  // no existing enrollment, insert a duplicate invoice and re-send the payment
   // email for one the member already has.
   const { data: existingPending, error: pendErr } = await (
     sessionDate ? pendingBase.eq("session_date", sessionDate) : pendingBase
@@ -762,16 +778,23 @@ export async function enrolMember(
 
   // Free plans (the trial) activate immediately; paid plans await a transfer.
   //
+  // Skipped when the row we resolved to is ALREADY active, which is what the
+  // widened reuse above can now hand back. Re-running activation would reset
+  // the dates and credits of a membership somebody may already have trained on
+  // — the same reason `setMembershipStatus` refuses to re-activate.
+  //
   // `sendEmail` has to reach this call too, not just the payment email below.
   // A free plan skips the payment email entirely and sends the ACTIVATION one
   // instead, so without this a manager raising a trial with the email switched
   // off still emails them "your membership is active" — the opposite of what
   // they asked for, and on the one path where nothing else would tell them.
   if (price === 0) {
-    await activateMembershipRow(admin, inserted, plan, {
-      paymentMethod: "manual",
-      sendEmail: input.sendEmail,
-    });
+    if (inserted.status !== "active") {
+      await activateMembershipRow(admin, inserted, plan, {
+        paymentMethod: "manual",
+        sendEmail: input.sendEmail,
+      });
+    }
     if (!insuranceInvoice) {
       return { ok: true as const, activated: true, reference: null as string | null };
     }

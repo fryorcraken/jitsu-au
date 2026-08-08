@@ -655,3 +655,227 @@ describe("reconcileUnmatched", () => {
     expect(activations).toHaveLength(1);
   });
 });
+
+// ---- Deleting a membership ----
+//
+// The only irreversible thing a manager can do to one, so the guards get a test
+// at the level that actually runs them: the pure rule is pinned in
+// membership.test.ts, this pins that the row is read, the check-ins are counted,
+// and nothing is deleted when either says no.
+
+const DELETABLE = {
+  id: "mem-9",
+  user_id: "user-9",
+  status: "pending",
+  paid_at: null,
+  price_cents: 44500,
+};
+
+function fakeDeleteAdmin(reads: {
+  membership?: Result;
+  checkinCount?: { count: number | null; error: { message: string } | null };
+  activePaid?: Result;
+}) {
+  const deletes: string[] = [];
+  const membership = reads.membership ?? ok(DELETABLE);
+
+  const admin = {
+    from: (table: string) => ({
+      select: (_cols?: string, opts?: { head?: boolean }) => {
+        if (table === "session_checkins")
+          return { eq: () => Promise.resolve(reads.checkinCount ?? counted(0)) };
+        if (table === "membership_plans") return { in: () => Promise.resolve(ok([])) };
+        void opts;
+        // memberships, read two ways: the row under deletion, and
+        // syncMemberRole's active-and-paid tally afterwards.
+        return {
+          eq: () => ({
+            maybeSingle: () => Promise.resolve(membership),
+            eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }),
+          }),
+        };
+      },
+      // `memberships` deletes with one .eq (the row); `user_roles` with two
+      // (user + role), which is syncMemberRole taking the label back afterwards.
+      delete: () => ({
+        eq: (_col: string, val: unknown) => {
+          if (table === "memberships") deletes.push(String(val));
+          return Object.assign(Promise.resolve(ok(null)), {
+            eq: () => Promise.resolve(ok(null)),
+          });
+        },
+      }),
+      upsert: () => Promise.resolve(ok(null)),
+    }),
+  };
+  return { admin, deletes };
+}
+
+async function runDelete(fake: ReturnType<typeof fakeDeleteAdmin>, id = DELETABLE.id) {
+  const { deleteMembershipRow } = await import("./membership.functions");
+  return deleteMembershipRow(fake.admin as never, id);
+}
+
+describe("deleteMembershipRow", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("deletes an unpaid, inactive membership nobody trained on", async () => {
+    const fake = fakeDeleteAdmin({});
+    await expect(runDelete(fake)).resolves.toEqual({ ok: true, id: DELETABLE.id });
+    expect(fake.deletes).toContain(DELETABLE.id);
+  });
+
+  it("refuses, and deletes nothing, when a class was checked in against it", async () => {
+    const fake = fakeDeleteAdmin({ checkinCount: counted(2) });
+    await expect(runDelete(fake)).resolves.toEqual({ ok: false, blockers: ["attended"] });
+    expect(fake.deletes).toEqual([]);
+  });
+
+  it("refuses a paid membership", async () => {
+    const fake = fakeDeleteAdmin({
+      membership: ok({ ...DELETABLE, paid_at: "2026-08-01T00:00:00Z" }),
+    });
+    await expect(runDelete(fake)).resolves.toEqual({ ok: false, blockers: ["paid"] });
+    expect(fake.deletes).toEqual([]);
+  });
+
+  // The rule this codebase repeats everywhere: a failed read must not be
+  // answered the same way as "there is nothing there" when the answer permits
+  // something irreversible. A count that fell over must never read as
+  // "nobody trained on this".
+  it("throws rather than deleting when the check-in count cannot be read", async () => {
+    const fake = fakeDeleteAdmin({ checkinCount: countFails("statement timeout") });
+    await expect(runDelete(fake)).rejects.toThrow("statement timeout");
+    expect(fake.deletes).toEqual([]);
+  });
+
+  it("throws rather than deleting when the membership itself cannot be read", async () => {
+    const fake = fakeDeleteAdmin({ membership: fails("connection reset") });
+    await expect(runDelete(fake)).rejects.toThrow("connection reset");
+    expect(fake.deletes).toEqual([]);
+  });
+
+  it("reports a membership that is already gone rather than claiming a delete", async () => {
+    const fake = fakeDeleteAdmin({ membership: ok(null) });
+    await expect(runDelete(fake)).rejects.toThrow("Membership not found.");
+    expect(fake.deletes).toEqual([]);
+  });
+});
+
+// ---- Raising an enrolment twice ----
+//
+// A free plan does not wait for a payment: it is activated before the caller
+// hears back. So a repeat — a retried submit, a double press, a reply that got
+// lost — must resolve to the SAME row. A pending-only reuse guard would find
+// nothing, insert a second membership, activate it, and send a second "your
+// membership is active" email under a new id that the idempotency key cannot
+// dedupe. Only the trial is caught by the once-ever rule, so a $0 casual or
+// period plan had nothing catching it at all.
+
+const FREE_PLAN = {
+  id: "plan-free",
+  code: "free_week",
+  name: "Free intro week",
+  kind: "period",
+  is_active: true,
+  session_credits: null,
+  public_price_cents: 0,
+  student_price_cents: null,
+  starts_on: "2026-07-20",
+  ends_on: "2026-11-22",
+  duration_days: null,
+};
+
+function fakeEnrolAdmin(existing: Result) {
+  const inserts: unknown[] = [];
+  const updates: unknown[] = [];
+
+  const admin = {
+    rpc: () => Promise.resolve(fails("user_emails unavailable")),
+    from: (table: string) => ({
+      select: () => {
+        if (table === "profiles")
+          return { eq: () => ({ maybeSingle: () => Promise.resolve(ok({ last_name: "Lee" })) }) };
+        if (table === "membership_plans") return { in: () => Promise.resolve(ok([])) };
+        // memberships: the reuse lookup (.eq.eq.in[.eq].limit.maybeSingle) and
+        // syncMemberRole's tally (.eq.eq.gt).
+        return {
+          eq: () => ({
+            eq: () => ({
+              in: () => ({
+                limit: () => ({ maybeSingle: () => Promise.resolve(existing) }),
+                eq: () => ({ limit: () => ({ maybeSingle: () => Promise.resolve(existing) }) }),
+              }),
+              gt: () => Promise.resolve(ok([])),
+            }),
+          }),
+        };
+      },
+      insert: (row: unknown) => {
+        inserts.push(row);
+        return {
+          select: () => ({
+            single: () => Promise.resolve(ok({ id: "mem-new", user_id: "user-1", price_cents: 0 })),
+          }),
+        };
+      },
+      update: (patch: unknown) => {
+        updates.push(patch);
+        return { eq: () => Promise.resolve(ok(null)) };
+      },
+      upsert: () => Promise.resolve(ok(null)),
+      delete: () => ({ eq: () => ({ eq: () => Promise.resolve(ok(null)) }) }),
+    }),
+  };
+  return { admin, inserts, updates };
+}
+
+async function enrol(fake: ReturnType<typeof fakeEnrolAdmin>) {
+  const { enrolMember } = await import("./membership.functions");
+  return enrolMember(fake.admin as never, {
+    userId: "user-1",
+    plan: FREE_PLAN as never,
+    utsStudentNumber: null,
+    insurancePlan: null,
+  });
+}
+
+describe("enrolMember on a free plan", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("raises and activates it the first time", async () => {
+    const fake = fakeEnrolAdmin(ok(null));
+    await expect(enrol(fake)).resolves.toMatchObject({ ok: true, activated: true });
+    expect(fake.inserts).toHaveLength(1);
+    expect(fake.updates[0]).toMatchObject({ status: "active" });
+  });
+
+  // The repeat. It must find the ALREADY-ACTIVE row, not just a pending one.
+  it("resolves a repeat back to the active membership instead of raising a second", async () => {
+    const fake = fakeEnrolAdmin(
+      ok({ id: "mem-1", user_id: "user-1", status: "active", price_cents: 0 }),
+    );
+    await expect(enrol(fake)).resolves.toMatchObject({ ok: true });
+    expect(fake.inserts).toHaveLength(0);
+  });
+
+  // And having found it, must not re-run activation over it: that resets the
+  // dates and credits of a membership somebody may already have trained on.
+  it("does not re-activate the membership it resolved back to", async () => {
+    const fake = fakeEnrolAdmin(
+      ok({ id: "mem-1", user_id: "user-1", status: "active", price_cents: 0 }),
+    );
+    await enrol(fake);
+    expect(fake.updates).toEqual([]);
+  });
+});

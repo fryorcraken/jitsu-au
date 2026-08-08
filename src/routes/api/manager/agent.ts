@@ -656,11 +656,18 @@ async function handleDeleteInvoice(params: unknown, actingAs: string) {
   // the API, and once the row is gone there is nothing left to say what it was.
   // `edit_invoice` audits every reversible field change, so a delete going
   // unrecorded would be the one hole in the club's only invoice history.
-  const { data: before } = await db
+  const { data: before, error: beforeErr } = await db
     .from("memberships")
     .select("id, user_id, plan_id, status, price_cents, payment_reference, paid_at")
     .eq("id", input.id)
     .maybeSingle();
+  // Not fatal — refusing an otherwise-valid delete because the audit read
+  // blipped would be the wrong trade — but never silent either. A `deleted:
+  // null` in the log below has to be distinguishable from "we read it and it
+  // was empty", or the one hole this read exists to close reopens without a
+  // trace.
+  if (beforeErr)
+    console.error("[agent.delete_invoice] could not read the invoice before deleting:", beforeErr);
 
   let result: Awaited<ReturnType<typeof deleteMembershipRow>>;
   try {
