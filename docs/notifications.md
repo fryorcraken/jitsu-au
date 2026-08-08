@@ -108,6 +108,13 @@ The waivers screen's third state, `superseded`, is derived from a person's other
 > counted pending waivers before this, which is why it never surfaced. The fix is
 > a real dismissal state on `waivers`, which is a schema change and a product
 > decision of its own, so it is not in this change.
+>
+> The count is also unbounded while `listWaivers` caps at 500 rows, newest
+> `signed_at` first. Past 500 waivers the club could have a pending one that
+> `/manager/waivers` does not list, and the item would point at a screen without
+> the row on it. Not reachable at the club's current size, and the fix when it is
+> would be paging that screen, the same answer `docs/database.md` gives for the
+> contact inbox.
 
 #### The registration watermark
 
@@ -131,6 +138,24 @@ Two things about it differ from the contact inbox, and both are on purpose:
   happens, which is the difference that makes it acceptable. A registration is a
   person, and that person stays on the users list for good, whereas a contact
   message exists nowhere else and its watermark is therefore stricter.
+
+Two more things follow from the watermark being a bare "everything after this":
+
+- **Acknowledging hands the addresses back**, and the users table pills those
+  rows **new**. Clearing the badge otherwise destroys the only record of what it
+  was about: that screen is one row per person for the whole club, sorted by
+  name, with nothing marking an arrival. `manager.contact-messages.tsx` keeps its
+  unread ids for the same reason, and this is the same move one layer down.
+- **Every query is bounded at both ends**, newer than the watermark AND not in
+  the future. `interest_registrations` grants `anon` a bare INSERT and its RLS
+  `WITH CHECK` constrains only the person fields, so the publishable key in the
+  browser bundle is enough to file a row stamped 2099. Since the watermark is
+  clamped to the present, such a row could never be brought under it: it would
+  count as new for good, pinning an item that by design has no read state and no
+  way to be dismissed. Bounded, a future row is simply not news yet. The same
+  hole is still open on `contact_messages`, which has the identical grant and
+  the identical clamp; closing it is a one-line change in
+  `countUnreadContactMessages` and belongs in its own PR.
 
 ### Somebody replies to you
 

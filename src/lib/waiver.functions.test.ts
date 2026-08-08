@@ -1227,6 +1227,8 @@ type QueryResult = { data: unknown; error: { message: string } | null; count?: n
 function fakeCountAdmin(results: QueryResult[]) {
   const queue = [...results];
   const tables: string[] = [];
+  const filters: Array<[string, unknown]> = [];
+  const orders: Array<[string, boolean | undefined]> = [];
   const next = () => queue.shift() ?? { data: null, error: null, count: 0 };
   const admin = {
     from(table: string) {
@@ -1235,8 +1237,17 @@ function fakeCountAdmin(results: QueryResult[]) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const chain: any = {
         select: () => chain,
-        eq: () => chain,
-        order: () => chain,
+        eq: (col: string, value: unknown) => {
+          filters.push([col, value]);
+          return chain;
+        },
+        // Recorded, not swallowed: a fake that ignored this would let
+        // `ascending: false` flip to `true` with every test still green, and
+        // the item would name whoever signed longest ago.
+        order: (col: string, opts?: { ascending?: boolean }) => {
+          orders.push([col, opts?.ascending]);
+          return chain;
+        },
         limit: () => chain,
         maybeSingle: () => Promise.resolve(result),
         then: (
@@ -1247,7 +1258,7 @@ function fakeCountAdmin(results: QueryResult[]) {
       return chain;
     },
   };
-  return { admin: admin as unknown as SupabaseClient<Database>, tables };
+  return { admin: admin as unknown as SupabaseClient<Database>, tables, filters, orders };
 }
 
 describe("countWaiversAwaitingApproval", () => {
@@ -1269,7 +1280,7 @@ describe("countWaiversAwaitingApproval", () => {
 
   it("names the newest signer the way the waivers screen does", async () => {
     const { countWaiversAwaitingApproval } = await import("./waiver.functions");
-    const { admin } = fakeCountAdmin([
+    const { admin, filters, orders } = fakeCountAdmin([
       { data: null, error: null, count: 3 },
       {
         data: {
@@ -1287,6 +1298,13 @@ describe("countWaiversAwaitingApproval", () => {
       latestName: 'Alexandra "Alex" Nguyen',
       latestAt: "2026-08-05T10:00:00.000Z",
     });
+    // Both reads ask for the stored fact, and the name comes from the newest
+    // signature rather than the oldest one still waiting.
+    expect(filters).toEqual([
+      ["approval_status", "pending"],
+      ["approval_status", "pending"],
+    ]);
+    expect(orders).toEqual([["signed_at", false]]);
   });
 
   it("degrades to a bare count when the newest row cannot be read", async () => {

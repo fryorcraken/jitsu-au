@@ -119,8 +119,13 @@ function NotificationsPage() {
               <AlertTriangle className="h-5 w-5" />
               Needs attention
             </CardTitle>
+            {/* Not "things only a manager can fix" any more: a new interest
+                registration is nobody's fault and needs no fixing, it just
+                wants reading. The one thing every item here still has in common
+                is that none of them can be ticked off. */}
             <CardDescription>
-              Things only a manager can fix. They clear themselves once they are sorted.
+              What is waiting on a manager, and who has just come in. Nothing here is ticked off by
+              hand: each one clears once it is sorted.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

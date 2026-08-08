@@ -8,11 +8,12 @@ import { Pill } from "@/components/site/StatusPill";
 import { formatDate } from "@/lib/dates";
 import {
   ROLE_CLASS,
+  UNREAD_CLASS,
   lifecycleClass,
   membershipClass,
   verificationClass,
 } from "@/lib/status-colours";
-import { lifecycleStatuses } from "@/lib/validation";
+import { lifecycleStatuses, normalizeEmail } from "@/lib/validation";
 import { emailVerificationLabel } from "@/lib/email-verification";
 import { listClubUsers } from "@/lib/membership.functions";
 import { markInterestRegistrationsSeen } from "@/lib/leads.functions";
@@ -43,6 +44,10 @@ function ManagerUsersPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  // Who registered interest since a manager last opened this screen, captured
+  // before the watermark moved. Normalized addresses: a lead is keyed by the
+  // address they typed, a person by their auth email.
+  const [newEmails, setNewEmails] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState("");
   const [lifecycle, setLifecycle] = useState<string>("all");
@@ -78,6 +83,13 @@ function ManagerUsersPage() {
   // can cost is a badge, never the record of who signed up. That is what makes
   // this looser than the contact inbox, where the message exists nowhere else.
   //
+  // The call hands back WHO the badge was about, and the table pills those rows
+  // "new". Without that, following "Read them" for four registrations lands on
+  // one row per person for the whole club, sorted by name, with nothing marking
+  // the four: clearing the badge would destroy the only record of what it was
+  // telling you. `manager.contact-messages.tsx` keeps its unread ids for the
+  // same reason.
+  //
   // Once per visit, which is why `isManager` is the only dependency.
   // `refreshNotifications` is a fresh closure on every render, so listing it
   // would stamp on every keystroke in the search box AND spin: stamp,
@@ -86,7 +98,10 @@ function ManagerUsersPage() {
   useEffect(() => {
     if (!isManager) return;
     markLeadsSeen()
-      .then(() => refreshNotifications())
+      .then((result) => {
+        setNewEmails(new Set(result.newEmails));
+        refreshNotifications();
+      })
       // Silent: nobody asked for this, and the only cost of it failing is a
       // badge that clears on the next visit.
       .catch((e) => console.error("[manager/users] could not mark registrations seen:", e));
@@ -271,6 +286,13 @@ function ManagerUsersPage() {
                         {r.email ? (
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span>{r.email}</span>
+                            {/* Registered interest since a manager last looked.
+                                On the address, not the name, because that is
+                                what the registration and the person record have
+                                in common. */}
+                            {newEmails.has(normalizeEmail(r.email)) ? (
+                              <Pill label="new" className={UNREAD_CLASS} />
+                            ) : null}
                             {/* Leads have no person record, so nothing has been
                                 proven about them either way. Badging one would
                                 claim more than the club knows. */}

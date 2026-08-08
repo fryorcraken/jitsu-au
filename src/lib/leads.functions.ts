@@ -16,13 +16,33 @@ import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireManager } from "@/lib/require-manager";
 import { INTEREST_SEEN_KEY, readSeenMarker, stampSeenMarker } from "@/lib/seen-markers";
+import { normalizeEmail } from "@/lib/validation";
 
 type AdminClient = SupabaseClient<Database>;
+
+/**
+ * How many of the just-seen registrations the users screen is told about, so it
+ * can point at them. Far above any real visit; it exists so a bad row cannot
+ * make the response unbounded.
+ */
+const NEW_EMAILS_LIMIT = 200;
 
 async function adminClient(): Promise<AdminClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
 }
+
+// Every query below is bounded at BOTH ends: newer than the watermark, and not
+// in the future.
+//
+// The upper bound is not defensive padding. `interest_registrations` grants
+// `anon` a bare INSERT and its RLS `WITH CHECK` constrains only the person
+// fields, so the publishable key in the browser bundle is enough to file a row
+// stamped 2099. The watermark is clamped to the present (`advanceSeenMarker`),
+// so without the bound such a row could never be brought under the marker: it
+// would count as new for good, pinning an attention item that by design has no
+// read state and no way to be dismissed. Bounded, a future row is simply not
+// news yet.
 
 /**
  * How many people have registered interest since a manager last opened the
@@ -36,13 +56,15 @@ export async function countNewInterestRegistrations(admin: AdminClient): Promise
   latestName: string | null;
   latestAt: string | null;
 }> {
+  const now = new Date().toISOString();
   // A failed marker read degrades to null on purpose: everything counts as new,
   // which over-reports rather than going quiet. See `readSeenMarker`.
   const { marker: seenAt } = await readSeenMarker(admin, INTEREST_SEEN_KEY);
 
   let countQuery = admin
     .from("interest_registrations")
-    .select("id", { count: "exact", head: true });
+    .select("id", { count: "exact", head: true })
+    .lte("created_at", now);
   if (seenAt) countQuery = countQuery.gt("created_at", seenAt);
   const { count, error } = await countQuery;
   // Degrade rather than throw. This runs inside the attention list's
@@ -59,6 +81,7 @@ export async function countNewInterestRegistrations(admin: AdminClient): Promise
   let latestQuery = admin
     .from("interest_registrations")
     .select("name, created_at")
+    .lte("created_at", now)
     .order("created_at", { ascending: false })
     .limit(1);
   if (seenAt) latestQuery = latestQuery.gt("created_at", seenAt);
@@ -77,43 +100,74 @@ export async function countNewInterestRegistrations(admin: AdminClient): Promise
 }
 
 /**
- * Mark the interest registrations seen, up to the newest one on file right now.
+ * Acknowledge the registrations, and hand back who they were.
  *
- * Stamped from the database rather than from a boundary the browser passes back,
- * which is the one place this differs from `markContactMessagesSeen` and it is a
- * deliberate trade. The users list aggregates one row per PERSON: a lead who has
- * since signed a waiver is on that screen as an applicant, not as a lead, so the
- * rendered rows cannot supply "the newest registration" without the screen
- * re-deriving what the count was made of.
+ * A plain function rather than the `createServerFn` body so it is reachable
+ * from a unit test: picking the NEWEST row is the highest-consequence line in
+ * this file, and picking the oldest instead would barely move the marker,
+ * leaving an item a manager can never put down.
  *
- * What that costs: a registration landing between the users list loading and
- * this call is marked seen without having been badged. Unlike a contact message,
- * nothing is lost when that happens. A registration is a person, and that person
- * stays on the users list for good; only the badge misses them.
+ * The emails are read BEFORE the marker moves, and that is the point of
+ * returning them at all. Clearing the badge otherwise destroys the only record
+ * of which people the badge was about: the users screen is one row per person
+ * across the whole club, sorted by name, with nothing marking a new arrival.
+ * `manager.contact-messages.tsx` captures its unread ids for exactly this
+ * reason, and this is the same move one layer down.
+ *
+ * The watermark is taken from the newest row on file rather than from a
+ * boundary the browser passes back, which is the one place this differs from
+ * `markContactMessagesSeen`. The users screen aggregates one row per PERSON: a
+ * lead who has since signed a waiver appears there as an applicant, so the
+ * rendered rows cannot supply "the newest registration". What that costs is a
+ * registration landing between the screen loading and this call, marked seen
+ * without having been badged. Nothing is lost when that happens. A registration
+ * is a person, and that person stays on the users list for good; only the badge
+ * misses them.
  */
+export async function acknowledgeInterestRegistrations(
+  admin: AdminClient,
+  userId: string,
+): Promise<{ marker: string | null; skipped: boolean; newEmails: string[] }> {
+  const now = new Date().toISOString();
+  const { marker: seenAt } = await readSeenMarker(admin, INTEREST_SEEN_KEY);
+
+  let query = admin
+    .from("interest_registrations")
+    .select("email, created_at")
+    .lte("created_at", now)
+    .order("created_at", { ascending: false })
+    .limit(NEW_EMAILS_LIMIT);
+  if (seenAt) query = query.gt("created_at", seenAt);
+  const { data: rows, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const fresh = rows ?? [];
+  // Nothing new, so there is no watermark to move. Writing `now()` here would
+  // be the one way to mark a registration seen before it exists.
+  if (fresh.length === 0) return { marker: seenAt, skipped: true, newEmails: [] };
+
+  // Ordered newest-first, so the first row is the boundary that was seen.
+  const { marker, skipped } = await stampSeenMarker(
+    admin,
+    INTEREST_SEEN_KEY,
+    fresh[0].created_at,
+    userId,
+  );
+  return {
+    marker,
+    skipped,
+    // Normalized, because the users screen matches these against a person's
+    // auth email as well as a lead's registration email.
+    newEmails: [...new Set(fresh.map((r) => normalizeEmail(r.email)))],
+  };
+}
+
+/** Mark the interest registrations seen, up to the newest one on file. */
 export const markInterestRegistrationsSeen = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context);
     const admin = await adminClient();
-
-    const { data: latest, error } = await admin
-      .from("interest_registrations")
-      .select("created_at")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    // Nothing has ever been registered, so there is no watermark to set. Writing
-    // `now()` here would be the one way to mark a registration seen before it
-    // exists.
-    if (!latest) return { ok: true as const, marker: null, skipped: true as const };
-
-    const { marker, skipped } = await stampSeenMarker(
-      admin,
-      INTEREST_SEEN_KEY,
-      latest.created_at,
-      context.userId,
-    );
-    return { ok: true as const, marker, skipped };
+    const result = await acknowledgeInterestRegistrations(admin, context.userId);
+    return { ok: true as const, ...result };
   });
