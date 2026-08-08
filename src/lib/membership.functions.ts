@@ -94,6 +94,70 @@ function dedupeHash(row: {
   return [row.posted_at ?? "", row.amount_cents, row.description, row.reference ?? ""].join("|");
 }
 
+/**
+ * Bring someone's `member` role row in line with what they actually hold.
+ *
+ * The rule — an `active`, non-`trial`, `price_cents > 0` membership — already
+ * existed in three places before this function did: inline in
+ * `activateMembershipRow`, in `deriveLifecycleStatus`, and in the
+ * `has_active_paid_membership` SQL helper that RLS uses to gate the members-only
+ * calendar and blog comments. Only the SQL one is load-bearing for access; the
+ * role row is a LABEL, read by the manager people directory and the agent API's
+ * `list_users`. That is why a cancel used to leave someone reading as a member
+ * long after their last membership closed: nothing ever took the label back.
+ *
+ * So this reconciles rather than only granting, and every caller that opens or
+ * closes a membership goes through it.
+ *
+ * A failed read leaves the role exactly as it is. "The query fell over" and
+ * "they hold nothing" must never be the same answer here: the second one
+ * revokes, and revoking on a blip would strip the label off paid-up members en
+ * masse. Same reason the write is logged rather than thrown — the membership
+ * change it follows has already committed, and reporting it as failed invites a
+ * retry that re-runs activation.
+ */
+async function syncMemberRole(admin: MembershipClient, userId: string | null): Promise<void> {
+  if (!userId) return;
+
+  const { data: active, error } = await admin
+    .from("memberships")
+    .select("plan_id")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .gt("price_cents", 0);
+  if (error) {
+    console.error(`[syncMemberRole] could not read memberships for ${userId}:`, error.message);
+    return;
+  }
+
+  const planIds = [...new Set((active ?? []).map((m) => m.plan_id))];
+  let shouldHold = false;
+  if (planIds.length) {
+    const { data: plans, error: planErr } = await admin
+      .from("membership_plans")
+      .select("id, kind")
+      .in("id", planIds);
+    if (planErr) {
+      console.error(`[syncMemberRole] could not read plans for ${userId}:`, planErr.message);
+      return;
+    }
+    shouldHold = (plans ?? []).some((p) => p.kind !== "trial");
+  }
+
+  // Only ever the `member` row: a manager who also stops paying keeps managing.
+  const { error: writeErr } = shouldHold
+    ? await admin
+        .from("user_roles")
+        .upsert({ user_id: userId, role: "member" }, { onConflict: "user_id,role" })
+    : await admin.from("user_roles").delete().eq("user_id", userId).eq("role", "member");
+  if (writeErr) {
+    console.error(
+      `[syncMemberRole] could not ${shouldHold ? "grant" : "revoke"} the member role for ${userId}:`,
+      writeErr.message,
+    );
+  }
+}
+
 /** Human-readable validity/credit summary for a plan (used in emails/UI). */
 function validityLabel(plan: MembershipPlanRow): string {
   if (plan.ends_on) return `${plan.name}, until ${formatDateOnly(plan.ends_on)}.`;
@@ -167,28 +231,11 @@ async function activateMembershipRow(
   const { error } = await admin.from("memberships").update(patch).eq("id", membership.id);
   if (error) throw new Error(error.message);
 
-  const isPaid = plan.kind !== "trial" && membership.price_cents > 0;
-
-  // Auto-grant the `member` role on a paid activation (idempotent — the table
-  // has UNIQUE(user_id, role)).
-  // Logged rather than thrown: the membership is already active by this point,
-  // so failing here would report a paid-up activation as an error and invite a
-  // retry that resets the dates and re-sends the confirmation email. A missing
-  // role is recoverable by hand; the log is what makes it findable.
-  if (membership.user_id && isPaid) {
-    const { error: roleErr } = await admin
-      .from("user_roles")
-      .upsert(
-        { user_id: membership.user_id, role: "member" },
-        { onConflict: "user_id,role", ignoreDuplicates: true },
-      );
-    if (roleErr) {
-      console.error(
-        `[activateMembershipRow] could not grant the member role to ${membership.user_id}:`,
-        roleErr,
-      );
-    }
-  }
+  // The row we just wrote is now visible to the reconcile, so a paid activation
+  // grants the label exactly as the inline upsert here used to. It can also take
+  // one back — activating a free trial for somebody whose paid membership closed
+  // a while ago is the case that used to leave the stale label behind.
+  await syncMemberRole(admin, membership.user_id);
 
   // Confirmation email (best-effort — never fail activation on a send error).
   // The email lives on the auth user (the one email store); the name on the
