@@ -156,6 +156,36 @@ login record is created (their email, no way to sign in) and their profile is
 seeded with name + phone. An existing person is left untouched. Either way the
 waiver row stores the full submission, and the person is now an applicant.
 
+### When something is missing
+
+Pressing "Sign and download waiver" with anything outstanding always does the
+same two things, whatever was left out:
+
+- **A summary appears at the top of the form**, naming every outstanding field
+  at once and counting them ("3 things are missing before you can sign"). Each
+  line is a link to the field it is about. It stays on screen and re-counts
+  itself as they work down the list, so a field drops off the moment it is
+  filled in rather than waiting for another press.
+- **The page goes to the first one**, in the form's own reading order, top to
+  bottom, and focuses it. That field, and every other one on the list, is
+  outlined and carries a line saying what it needs, because the jump can leave
+  the summary off screen.
+
+Nothing is marked before the first press: a half-filled form is somebody
+part-way through, not a form full of errors.
+
+The rule is one list, in `src/lib/waiver-required-fields.ts`, computed from the
+form's state. The form is `noValidate`, deliberately: the browser's own
+`required` handling would stop at its first blank text input with a bubble that
+fades, and would say nothing at all about the health answers, the
+acknowledgement ticks or the signature, which is how the page used to answer in
+two different voices depending on what you had missed. Email format is checked
+there too, since dropping native validation makes that ours to report.
+
+It is a courtesy, not the gate: `waiverSubmitSchema` on the server still decides
+whether a waiver may be filed. This is what lets the signer hear it in their own
+words before a round trip, instead of as a Zod issue dump.
+
 ### Signing on a bad connection
 
 The waiver is the one form where "it silently did not go through" is expensive:
