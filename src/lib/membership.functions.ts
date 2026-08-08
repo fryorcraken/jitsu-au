@@ -754,6 +754,28 @@ export async function listMembershipPlanRows(
 // the membership half: `listMembershipPlanRows` above, and the rule that reads
 // it (`sellableWindowNotifications`, in validation.ts).
 
+// ---- Member: how to pay ----
+/**
+ * The club's payment instructions (account name, BSB, PayID — whatever a
+ * manager wrote at `/manager/settings`), for the member's own membership page.
+ *
+ * The same value the invoice email renders, read through the same helper, so
+ * the page and the email can never quote different bank details.
+ *
+ * Readable by any signed-in person, not only one with an invoice outstanding:
+ * these are the club's own receiving details, they are already emailed to
+ * whoever owes money, and a member who paid last week still has reason to check
+ * where they sent it. Never throws — `getInvoiceInstructions` falls back to the
+ * default rather than leaving someone who owes money with nothing to pay to.
+ */
+export const getPaymentInstructions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const admin = await adminClient();
+    const { getInvoiceInstructions } = await import("@/lib/club-settings.server");
+    return { instructions: await getInvoiceInstructions(admin) };
+  });
+
 // ---- Manager: club settings (invoice payment instructions) ----
 export const getClubSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

@@ -24,6 +24,7 @@ import {
   sessionDateTag,
   stableCode,
   startMembershipSchema,
+  unpaidInvoices,
 } from "./validation";
 
 describe("computeMembershipPrice", () => {
@@ -505,6 +506,78 @@ describe("sellablePlans", () => {
   it("is inclusive of the plan's own last day", () => {
     // 2026-11-22T10:00 UTC is still 22 Nov in Sydney (AEDT, +11).
     expect(sellablePlans([dated()], "2026-11-22T10:00:00.000Z")).toHaveLength(1);
+  });
+});
+
+describe("unpaidInvoices", () => {
+  const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    id: "m1",
+    status: "pending",
+    plan_name: "Semester 2 2026",
+    price_cents: 24500,
+    payment_reference: "UTSJ-LOVE-A1B2",
+    ...overrides,
+  });
+
+  it("returns nothing when nothing is pending", () => {
+    expect(
+      unpaidInvoices([row({ status: "active" }), row({ id: "m2", status: "cancelled" })]),
+    ).toEqual([]);
+  });
+
+  it("carries the amount and reference of a single pending membership", () => {
+    expect(unpaidInvoices([row()])).toEqual([
+      {
+        reference: "UTSJ-LOVE-A1B2",
+        total_cents: 24500,
+        lines: [{ membership_id: "m1", plan_name: "Semester 2 2026", price_cents: 24500 }],
+      },
+    ]);
+  });
+
+  it("adds up a bundle sharing one reference into ONE transfer", () => {
+    // Buying a plan with insurance writes two memberships against one
+    // reference. The member owes one payment, and the total has to match the
+    // one the invoice email quotes.
+    const invoices = unpaidInvoices([
+      row(),
+      row({ id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }),
+    ]);
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0].total_cents).toBe(30500);
+    expect(invoices[0].lines.map((l) => l.plan_name)).toEqual([
+      "Semester 2 2026",
+      "Yearly insurance",
+    ]);
+  });
+
+  it("keeps separate references apart, in the order given", () => {
+    const invoices = unpaidInvoices([
+      row({ id: "m2", plan_name: "Casual class", price_cents: 2000, payment_reference: "UTSJ-B" }),
+      row(),
+    ]);
+    expect(invoices.map((i) => i.reference)).toEqual(["UTSJ-B", "UTSJ-LOVE-A1B2"]);
+    expect(invoices.map((i) => i.total_cents)).toEqual([2000, 24500]);
+  });
+
+  it("ignores an already-paid membership sharing the reference", () => {
+    // Half a bundle reconciled on its own (a manager activating one row by
+    // hand) must not be re-billed: only what is still pending is owed.
+    const invoices = unpaidInvoices([
+      row({ status: "active" }),
+      row({ id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }),
+    ]);
+    expect(invoices).toEqual([
+      {
+        reference: "UTSJ-LOVE-A1B2",
+        total_cents: 6000,
+        lines: [{ membership_id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }],
+      },
+    ]);
+  });
+
+  it("still bills a line whose plan could not be resolved", () => {
+    expect(unpaidInvoices([row({ plan_name: null })])[0].lines[0].plan_name).toBeNull();
   });
 });
 

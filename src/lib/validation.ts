@@ -1149,6 +1149,68 @@ export function sellablePlans<T extends PlanWindow & { is_active: boolean }>(
   return all.filter((p) => p.is_active && (!p.ends_on || p.ends_on >= today));
 }
 
+// ---- Member: what is still owed ----
+
+/** One thing on an unpaid invoice: a plan, and what it costs. */
+export interface UnpaidInvoiceLine {
+  membership_id: string;
+  plan_name: string | null;
+  price_cents: number;
+}
+
+/** An unpaid invoice: one transfer the member owes, whatever it is made of. */
+export interface UnpaidInvoice {
+  /** What the member quotes on the transfer. Also the group's identity. */
+  reference: string;
+  /** What to transfer: every line added up. */
+  total_cents: number;
+  lines: UnpaidInvoiceLine[];
+}
+
+/**
+ * The transfers a member still owes, from their membership rows.
+ *
+ * Buying a plan that bundles yearly insurance writes TWO pending memberships
+ * sharing ONE payment reference, because reconciliation has to activate them
+ * together off a single transfer. So "pending memberships" and "invoices to pay"
+ * are different counts, and only the second is a number to put in front of a
+ * member: they owe one payment, and paying half of it against the same reference
+ * would reconcile neither.
+ *
+ * Grouping by reference is what makes them agree, and it is the same sum the
+ * invoice email already shows — the page and the email are two views of one
+ * amount, so they must not compute it differently.
+ *
+ * Input order is preserved (`getMyMemberships` hands them over newest first).
+ */
+export function unpaidInvoices(
+  memberships: readonly {
+    id: string;
+    status: string;
+    plan_name: string | null;
+    price_cents: number;
+    payment_reference: string;
+  }[],
+): UnpaidInvoice[] {
+  const byReference = new Map<string, UnpaidInvoice>();
+  for (const m of memberships) {
+    if (m.status !== "pending") continue;
+    const line = { membership_id: m.id, plan_name: m.plan_name, price_cents: m.price_cents };
+    const existing = byReference.get(m.payment_reference);
+    if (existing) {
+      existing.lines.push(line);
+      existing.total_cents += m.price_cents;
+    } else {
+      byReference.set(m.payment_reference, {
+        reference: m.payment_reference,
+        total_cents: m.price_cents,
+        lines: [line],
+      });
+    }
+  }
+  return [...byReference.values()];
+}
+
 // ---- Member: yearly insurance selection on the purchase screen ----
 
 /**

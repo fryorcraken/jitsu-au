@@ -120,6 +120,29 @@ own), and reconciliation, activation and cancellation follow the same
 `edit_invoice` / bank-reconciliation flow as any other plan — see
 `.claude/skills/uts-manager-agent/SKILL.md` and `/manager/reconciliation`.
 
+## Paying an invoice
+
+The member sees everything they need to pay on `/membership` itself: a **How to
+pay** panel above the plan list carrying the amount, the payment reference (with
+a copy button, because the reference is what someone re-opens the page for while
+standing in their banking app), and the club's own account details. That last
+part is the manager-set markdown from `/manager/settings`, read through the same
+helper the invoice email uses, so the page and the email can never quote
+different bank details. Any signed-in person can read the club's details, not
+only someone who owes money.
+
+The panel appears only while something is unpaid, and it counts **transfers, not
+rows**: a plan bought with yearly insurance is two pending memberships behind one
+reference, so it shows as one payment with the split underneath, matching the
+single combined amount the email quotes. The memberships table above it stays the
+per-row record.
+
+**The invoice email is unchanged** and still goes out on every purchase. This is
+a second copy of the same details, not a replacement, so a member who deleted the
+email is not stuck. If the club's details cannot be loaded, the amount and
+reference (the member's own data) still render and the panel points at the email
+for the rest.
+
 ## Manager screens & the manager agent API
 
 | Manager UI                  | Manager agent actions                            | What it does                                   |

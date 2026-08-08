@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getClubSettings, saveClubSettings } from "@/lib/membership.functions";
+import { invoiceMarkdownComponents } from "@/lib/invoice-markdown";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/settings")({
@@ -103,8 +104,11 @@ function SettingsPage() {
               <CardDescription>How the instructions appear on the invoice.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="prose prose-sm max-w-none prose-headings:font-bold prose-headings:text-foreground prose-p:leading-relaxed prose-strong:text-foreground">
-                <ReactMarkdown>
+              {/* The same component map the member's "how to pay" panel uses,
+                  so this preview is the member's view rather than an
+                  approximation of it. */}
+              <div className="text-sm text-muted-foreground">
+                <ReactMarkdown components={invoiceMarkdownComponents}>
                   {instructions || "_Nothing yet. Add your instructions._"}
                 </ReactMarkdown>
               </div>

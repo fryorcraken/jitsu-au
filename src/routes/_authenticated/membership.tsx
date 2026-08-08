@@ -1,13 +1,15 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
 import { Check, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Pill } from "@/components/site/StatusPill";
+import { CopyButton } from "@/components/site/CopyButton";
 import { lifecycleClass } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import {
@@ -16,11 +18,19 @@ import {
   insuranceSelection,
   isUtsStudent,
   sellablePlans,
+  unpaidInvoices,
   type LifecycleStatus,
+  type UnpaidInvoice,
 } from "@/lib/validation";
+import { invoiceMarkdownComponents } from "@/lib/invoice-markdown";
 import { formatDateOnly } from "@/lib/dates";
 import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
-import { getMyMemberships, listMembershipPlans, startMembership } from "@/lib/membership.functions";
+import {
+  getMyMemberships,
+  getPaymentInstructions,
+  listMembershipPlans,
+  startMembership,
+} from "@/lib/membership.functions";
 import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
@@ -97,14 +107,114 @@ function CodeOfConductNudge() {
   );
 }
 
+/** How a line of an invoice is named when its plan could not be resolved. */
+function lineName(planName: string | null) {
+  return planName ?? "Membership";
+}
+
+/**
+ * Everything a member needs to actually pay: the amount, the reference, and the
+ * club's account details, on the page instead of in their inbox.
+ *
+ * The invoice email still goes out exactly as before. This is the copy they can
+ * get back to without going hunting through it, which is the whole point: the
+ * reference is the thing that reconciles a transfer, and it is the thing people
+ * most often come back for while standing in their banking app.
+ */
+function HowToPay({
+  invoices,
+  instructions,
+}: {
+  invoices: UnpaidInvoice[];
+  /** Null while the club's details could not be read. See the fallback below. */
+  instructions: string | null;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>How to pay</CardTitle>
+        <CardDescription>
+          Transfer the amount below and put the reference in the description. We activate your
+          membership as soon as it lands, and email you to confirm.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {invoices.map((invoice) => (
+          <div key={invoice.reference} className="rounded-lg border bg-muted/30 p-4">
+            <p className="text-sm font-medium">
+              {invoice.lines.map((l) => lineName(l.plan_name)).join(" + ")}
+            </p>
+            <dl className="mt-3 grid gap-4 sm:grid-cols-2">
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Amount
+                </dt>
+                <dd className="mt-1 text-2xl font-bold tracking-tight">
+                  {formatCents(invoice.total_cents)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Payment reference
+                </dt>
+                <dd className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-lg font-semibold tracking-wide">
+                    {invoice.reference}
+                  </span>
+                  <CopyButton text={invoice.reference} label="Copy reference" />
+                </dd>
+              </div>
+            </dl>
+            {/* A bundle is two invoices on our side and one transfer on theirs.
+                Showing the split stops the total reading as a wrong price for
+                the plan they picked. */}
+            {invoice.lines.length > 1 && (
+              <ul className="mt-4 space-y-1 border-t pt-3 text-sm text-muted-foreground">
+                {invoice.lines.map((line) => (
+                  <li key={line.membership_id} className="flex justify-between gap-4">
+                    <span>{lineName(line.plan_name)}</span>
+                    <span>{formatCents(line.price_cents)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+
+        {instructions ? (
+          <div className="text-sm text-muted-foreground">
+            <ReactMarkdown components={invoiceMarkdownComponents}>{instructions}</ReactMarkdown>
+          </div>
+        ) : (
+          /* The amount and reference above are the member's own data and already
+             loaded; only the club's account details are missing. Say which, and
+             point at the copy that is definitely in their inbox. */
+          <p className="flex items-start gap-2 text-sm text-muted-foreground">
+            <Mail className="mt-0.5 h-4 w-4 shrink-0" />
+            We could not load the club's account details just now. They are in the invoice email we
+            sent you, or reload this page to try again.
+          </p>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Paid already? It can take a day or two to reach us. Nothing to do, we will email you when
+          it clears.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function MembershipPage() {
   const navigate = useNavigate();
   const fetchPlans = useServerFn(listMembershipPlans);
   const fetchMine = useServerFn(getMyMemberships);
+  const fetchInstructions = useServerFn(getPaymentInstructions);
   const start = useServerFn(startMembership);
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
+  const [instructions, setInstructions] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -112,6 +222,10 @@ function MembershipPage() {
   // `insuranceSelection` and is only editable while the member has cover.
   const [insuranceTicked, setInsuranceTicked] = useState<boolean | null>(null);
   const [pendingCode, setPendingCode] = useState<string | null>(null);
+  // Set after a purchase that needs paying: the "how to pay" panel sits above
+  // the plan the member just chose, which on a phone is well off screen.
+  const [scrollToPay, setScrollToPay] = useState(false);
+  const payRef = useRef<HTMLDivElement | null>(null);
 
   // A non-empty UTS student number is what makes someone a student; there is no
   // separate "I'm a student" flag. It unlocks the discounted student rate. Same
@@ -138,15 +252,27 @@ function MembershipPage() {
 
   const reload = useMemo(
     () => () => {
-      return Promise.all([fetchPlans(), fetchMine()]).then(([p, m]) => {
+      return Promise.all([
+        fetchPlans(),
+        fetchMine(),
+        // The club's account details are the one thing here the member can do
+        // without: they still get the amount and reference, and the invoice
+        // email has the rest. So a failure degrades this panel instead of
+        // failing the page.
+        fetchInstructions().catch((e) => {
+          console.error("[membership] payment instructions failed to load:", e);
+          return { instructions: null };
+        }),
+      ]).then(([p, m, s]) => {
         setPlans(p);
         setMine(m);
+        setInstructions(s.instructions);
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
         if (m.uts_student_number) setStudentNumber(m.uts_student_number);
       });
     },
-    [fetchPlans, fetchMine],
+    [fetchPlans, fetchMine, fetchInstructions],
   );
 
   useEffect(() => {
@@ -154,6 +280,14 @@ function MembershipPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load memberships"))
       .finally(() => setLoading(false));
   }, [reload]);
+
+  // Runs after the panel has rendered, so the ref is attached by the time we
+  // reach for it. A member who ends up with nothing to pay just clears the flag.
+  useEffect(() => {
+    if (!scrollToPay) return;
+    payRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setScrollToPay(false);
+  }, [scrollToPay]);
 
   async function choose(plan: Plan) {
     setPendingCode(plan.code);
@@ -173,7 +307,10 @@ function MembershipPage() {
       if (res.activated) {
         toast.success("You're all set. Your membership is active.");
       } else {
-        toast.success("Check your email for bank-transfer instructions.");
+        // The details are now on this page, above the plan they just picked, so
+        // send them there rather than to their inbox. The email still goes out.
+        toast.success("Your invoice is ready. The payment details are at the top of this page.");
+        setScrollToPay(true);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start membership");
@@ -192,6 +329,9 @@ function MembershipPage() {
 
   const lifecycle = mine?.lifecycle ?? "lead";
   const status = LIFECYCLE_COPY[lifecycle];
+  // What the member still owes, as transfers rather than as rows: a bundled
+  // plan + insurance is two memberships behind one reference and one payment.
+  const unpaid = unpaidInvoices(mine?.memberships ?? []);
 
   // A dated plan drops off this list on its own once its `ends_on` passes —
   // there is no manager step to retire it, and no pro rata either way.
@@ -282,16 +422,15 @@ function MembershipPage() {
                   {mine.sessions_attended === 1 ? "" : "s"} with us.
                 </p>
               )}
-              {mine.memberships.some((m) => m.status === "pending") && (
-                <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-                  <Mail className="h-4 w-4" />
-                  Awaiting a bank transfer? We emailed you the account details and your payment
-                  reference. Include the reference so we can match your payment automatically.
-                </p>
-              )}
             </CardContent>
           )}
         </Card>
+
+        {unpaid.length > 0 && (
+          <div ref={payRef} className="scroll-mt-4">
+            <HowToPay invoices={unpaid} instructions={instructions} />
+          </div>
+        )}
 
         <CodeOfConductNudge />
 

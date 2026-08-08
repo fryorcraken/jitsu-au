@@ -908,7 +908,7 @@ manager-only. Keys in use:
 
 | Key                            | Holds                                                                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoice_payment_instructions` | Markdown shown on an invoice. Falls back to a built-in stub when unset.                                                                                 |
+| `invoice_payment_instructions` | Markdown shown on an invoice: in the payment email, and in the member's "how to pay" panel on `/membership`. Falls back to a built-in stub when unset.  |
 | `contact_messages_seen_at`     | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread. |
 
 Being key/value is what let the contact-message unread count ship without a
