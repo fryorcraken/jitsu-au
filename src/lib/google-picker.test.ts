@@ -285,7 +285,9 @@ describe("pickDriveFolder", () => {
    * `loadScript` short-circuits on a matching `src`, which is the only way this
    * flow can run without the network.
    */
-  function stubGoogle(opts: { accountEmail?: string | null } = {}) {
+  function stubGoogle(
+    opts: { accountEmail?: string | null; popupError?: string; accountCheckFails?: boolean } = {},
+  ) {
     for (const src of [
       "https://accounts.google.com/gsi/client",
       "https://apis.google.com/js/api.js",
@@ -303,7 +305,12 @@ describe("pickDriveFolder", () => {
         oauth2: {
           initTokenClient: (config) => {
             Object.assign(tokenConfig, config);
-            return { requestAccessToken: () => config.callback({ access_token: "tok-1" }) };
+            return {
+              requestAccessToken: () =>
+                opts.popupError
+                  ? config.error_callback?.({ type: opts.popupError })
+                  : config.callback({ access_token: "tok-1" }),
+            };
           },
         },
       },
@@ -312,10 +319,12 @@ describe("pickDriveFolder", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: opts.accountEmail !== undefined,
-        json: async () => ({ user: { emailAddress: opts.accountEmail } }),
-      }),
+      opts.accountCheckFails
+        ? vi.fn().mockRejectedValue(new Error("network"))
+        : vi.fn().mockResolvedValue({
+            ok: opts.accountEmail !== undefined,
+            json: async () => ({ user: { emailAddress: opts.accountEmail } }),
+          }),
     );
 
     return { built, tokenConfig };
@@ -349,7 +358,47 @@ describe("pickDriveFolder", () => {
     built.respond({ action: "cancel" });
 
     await expect(pending).resolves.toBeNull();
-    expect(tokenConfig.hint).toBe("club@jitsu.au");
+    expect(tokenConfig.login_hint).toBe("club@jitsu.au");
+  });
+
+  it("fails loudly when the sign-in window is closed or blocked", async () => {
+    // `callback` never fires for either, so without `error_callback` the browse
+    // hangs on "Opening..." forever with nothing to press.
+    const closed = stubGoogle({ popupError: "popup_closed" });
+    await expect(
+      pickDriveFolder({
+        clientId: "123456789012-abc.apps.googleusercontent.com",
+        developerKey: "AIza-key",
+      }),
+    ).rejects.toThrow(/closed/i);
+    expect(closed.built.visible).toBe(false);
+
+    vi.unstubAllGlobals();
+    document.head.innerHTML = "";
+    const blocked = stubGoogle({ popupError: "popup_failed_to_open" });
+    await expect(
+      pickDriveFolder({
+        clientId: "123456789012-abc.apps.googleusercontent.com",
+        developerKey: "AIza-key",
+      }),
+    ).rejects.toThrow(/pop-ups/i);
+    expect(blocked.built.visible).toBe(false);
+  });
+
+  it("still opens the picker when the account check cannot run", async () => {
+    // The check is a courtesy: a mismatch it misses still surfaces from the
+    // server, but a failed check must never be what stops the manager.
+    const { built } = stubGoogle({ accountCheckFails: true });
+
+    const pending = pickDriveFolder({
+      clientId: "123456789012-abc.apps.googleusercontent.com",
+      developerKey: "AIza-key",
+      connectedEmail: "club@jitsu.au",
+    });
+    await vi.waitFor(() => expect(built.visible).toBe(true));
+    built.respond({ action: "picked", docs: [{ id: "folder-1", name: "Waivers" }] });
+
+    await expect(pending).resolves.toEqual({ id: "folder-1", name: "Waivers" });
   });
 
   it("refuses to open when Google signed the manager in as another account", async () => {

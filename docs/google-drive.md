@@ -90,6 +90,7 @@ to the manager's whole Drive rather than only the files this site touches.
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | No "Browse in Drive" button                                          | `VITE_GOOGLE_PICKER_API_KEY` (or the client id) is not set on this deploy                                                                    |
 | "Google signed you in as X, but this site's Drive is connected as Y" | Two Google accounts in one browser. Sign in as Y, or reconnect Drive as X                                                                    |
+| "Google's sign-in window could not open"                             | The browser blocked the pop-up. The sign-in window opens after two scripts load, so it is outside the click that asked for it                |
 | "Could not access that folder from the server"                       | The grant did not reach the connector: wrong Google account, or a client id/appId mismatch                                                   |
 | Select greys out and nothing happens                                 | The key, the app id or the Picker API is wrong on the Cloud project. Google reports these in the browser console, never through the callback |
 

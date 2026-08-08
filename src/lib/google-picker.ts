@@ -65,8 +65,9 @@ declare global {
           initTokenClient(config: {
             client_id: string;
             scope: string;
-            hint?: string;
+            login_hint?: string;
             callback: (resp: { access_token?: string; error?: string }) => void;
+            error_callback?: (err?: { type?: string; message?: string }) => void;
           }): { requestAccessToken: (opts?: { prompt?: string }) => void };
         };
       };
@@ -104,11 +105,17 @@ async function loadPickerLibrary(): Promise<void> {
 }
 
 /**
- * `hint` is the connected Google account's address. Without it the token popup
- * silently uses whichever account the browser happens to have as its default,
- * and a manager signed into two accounts then picks a folder their *connection*
- * cannot see: `drive.file` access is recorded against (Google account, OAuth
- * client, file), so the pick looks fine and the server's read-back 404s.
+ * `login_hint` is the connected Google account's address. Without it the token
+ * popup silently uses whichever account the browser happens to have as its
+ * default, and a manager signed into two accounts then picks a folder their
+ * *connection* cannot see: `drive.file` access is recorded against (Google
+ * account, OAuth client, file), so the pick looks fine and the server's
+ * read-back 404s.
+ *
+ * `error_callback` is the other half of settling this promise. `callback` only
+ * fires on a token response, so without it a closed or blocked popup leaves
+ * every await below hanging: the button would sit on "Opening..." with nothing
+ * to press, which is the failure this whole file exists to stop.
  */
 async function requestAccessToken(clientId: string, loginHint?: string): Promise<string> {
   await loadScript(GIS_SRC);
@@ -118,7 +125,7 @@ async function requestAccessToken(clientId: string, loginHint?: string): Promise
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: DRIVE_FILE_SCOPE,
-      ...(loginHint ? { hint: loginHint } : {}),
+      ...(loginHint ? { login_hint: loginHint } : {}),
       callback: (resp) => {
         if (resp.error || !resp.access_token) {
           reject(new Error(resp.error ?? "Google sign-in was cancelled"));
@@ -126,27 +133,46 @@ async function requestAccessToken(clientId: string, loginHint?: string): Promise
         }
         resolve(resp.access_token);
       },
+      error_callback: (err) => {
+        reject(
+          new Error(
+            err?.type === "popup_failed_to_open"
+              ? "Google's sign-in window could not open. Allow pop-ups for this site and try again."
+              : "Google sign-in was closed before it finished.",
+          ),
+        );
+      },
     });
     client.requestAccessToken();
   });
 }
+
+/** Long enough for a slow phone, short enough that nobody watches a dead button. */
+const ACCOUNT_CHECK_TIMEOUT_MS = 8000;
 
 /**
  * The account the picker token belongs to, or null if Drive would not say.
  * `about.get` is readable under `drive.file`, and it is the only way to learn
  * which account the popup actually signed in as: the token itself carries no
  * address, and the `userinfo` endpoints need scopes this token does not have.
+ *
+ * This sits between the token and the picker opening, so it is bounded: a
+ * request that stalls rather than fails (captive portal, extension, proxy)
+ * would otherwise hang the browse for good.
  */
 async function tokenAccountEmail(token: string): Promise<string | null> {
   try {
     const res = await fetch("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)", {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(ACCOUNT_CHECK_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { user?: { emailAddress?: string } };
     return body.user?.emailAddress ?? null;
   } catch {
-    // A blocked or flaky request is not a reason to stop the manager picking.
+    // A slow or blocked request is not a reason to stop the manager picking:
+    // a mismatch they were not warned about still fails with a readable
+    // message, one step later, from the server.
     return null;
   }
 }
