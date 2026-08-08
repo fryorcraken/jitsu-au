@@ -5,7 +5,7 @@
 // rejects), and an unset size must go out as `null` rather than "".
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const updateMyProfile = vi.fn().mockResolvedValue({ ok: true, fields: [] });
@@ -80,13 +80,21 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 
+// Mutable so the manager-only cards (Google Drive) can be rendered by the few
+// tests that need them, without a second copy of this whole mock setup.
+const mockRoles = { isManager: false };
+
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({
     user: { id: "u1", email: "ada@example.com", email_confirmed_at: "2026-01-01T00:00:00Z" },
     session: null,
     loading: false,
   }),
-  useRoles: () => ({ roles: ["member"], loading: false, isManager: false }),
+  useRoles: () => ({
+    roles: mockRoles.isManager ? ["manager"] : ["member"],
+    loading: false,
+    isManager: mockRoles.isManager,
+  }),
 }));
 
 const { Route } = await import("./account");
@@ -356,5 +364,56 @@ describe("/account", () => {
     expect(consentCard.queryByRole("button", { name: "Revert" })).toBeNull();
     expect(consentCard.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(updateMyProfile).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Browsing needs an OAuth client id AND a Picker API key from the same Cloud
+   * project. Offered without the key, the Google window opens, browses, and
+   * then silently refuses to hand the folder back, so the manager is better
+   * off being pointed at the name field than at that dead end.
+   */
+  describe("the Google Drive card", () => {
+    async function renderConnected() {
+      mockRoles.isManager = true;
+      const { getGoogleDriveStatus } = await import("@/lib/google-drive.functions");
+      vi.mocked(getGoogleDriveStatus).mockResolvedValue({
+        connected: true,
+        email: "club@jitsu.au",
+        folderId: null,
+        folderName: null,
+      } as never);
+      await renderLoaded();
+      await screen.findByLabelText("Drive folder");
+      return within(card("Google Drive"));
+    }
+
+    afterEach(async () => {
+      mockRoles.isManager = false;
+      const { getGoogleDriveStatus } = await import("@/lib/google-drive.functions");
+      vi.mocked(getGoogleDriveStatus).mockResolvedValue({ connected: false } as never);
+      vi.unstubAllEnvs();
+    });
+
+    it("offers browsing, and says how to select a folder, once the picker is configured", async () => {
+      vi.stubEnv("VITE_GOOGLE_OAUTH_CLIENT_ID", "123456789012-abc.apps.googleusercontent.com");
+      vi.stubEnv("VITE_GOOGLE_PICKER_API_KEY", "AIza-key");
+
+      const driveCard = await renderConnected();
+
+      expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeInTheDocument();
+      // Picker has no "choose the folder I'm in": opening a folder leaves
+      // Select greyed out, which is what sent the manager round in circles.
+      expect(driveCard.getByText(/click a folder once/i)).toBeInTheDocument();
+    });
+
+    it("hides browsing and points at the name field when the Picker key is missing", async () => {
+      vi.stubEnv("VITE_GOOGLE_OAUTH_CLIENT_ID", "123456789012-abc.apps.googleusercontent.com");
+      vi.stubEnv("VITE_GOOGLE_PICKER_API_KEY", "");
+
+      const driveCard = await renderConnected();
+
+      expect(driveCard.queryByRole("button", { name: "Browse in Drive" })).toBeNull();
+      expect(driveCard.getByText(/not set up on this site yet/i)).toBeInTheDocument();
+    });
   });
 });

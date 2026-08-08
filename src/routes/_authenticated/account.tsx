@@ -914,6 +914,18 @@ function CodeOfConductCard() {
   );
 }
 
+/**
+ * The two build-time values Google Picker needs, or null when either is
+ * missing. Read here rather than inside `@/lib/google-picker` so the picker
+ * module (and Google's scripts with it) stay lazily loaded until the manager
+ * actually browses.
+ */
+function googlePickerConfig(): { clientId: string; developerKey: string } | null {
+  const clientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
+  const developerKey = import.meta.env.VITE_GOOGLE_PICKER_API_KEY as string | undefined;
+  return clientId && developerKey ? { clientId, developerKey } : null;
+}
+
 function GoogleDriveCard() {
   const status = useServerFn(getGoogleDriveStatus);
   const start = useServerFn(startGoogleDriveConnect);
@@ -930,6 +942,13 @@ function GoogleDriveCard() {
   const [folderNameInput, setFolderNameInput] = useState("");
   const [folderBusy, setFolderBusy] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
+
+  // Google Picker needs both halves of the same Cloud project: the OAuth client
+  // the connector runs on, and a browser API key with the Picker API enabled.
+  // With the key missing the picker opens, browses, and then silently refuses
+  // to hand a folder back, so offer typing a name rather than that dead end.
+  const picker = googlePickerConfig();
 
   const refresh = () =>
     status()
@@ -996,34 +1015,32 @@ function GoogleDriveCard() {
     const folderName = folderNameInput.trim();
     if (!folderName) return;
     setFolderBusy(true);
+    setFolderError(null);
     try {
       const result = await setFolder({ data: { folderName } });
       setSavedFolderName(result.folderName);
       toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to set the Drive folder");
+      setFolderError(e instanceof Error ? e.message : "Failed to set the Drive folder");
     } finally {
       setFolderBusy(false);
     }
   }
 
   async function onBrowseFolder() {
-    const clientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
-    if (!clientId) {
-      toast.error("Browsing isn't set up yet. Type the folder name instead.");
-      return;
-    }
+    if (!picker) return;
     setPickerBusy(true);
+    setFolderError(null);
     try {
       const { pickDriveFolder } = await import("@/lib/google-picker");
-      const picked = await pickDriveFolder(clientId);
+      const picked = await pickDriveFolder({ ...picker, connectedEmail: email });
       if (!picked) return;
       const result = await saveFolderFromPicker({ data: { folderId: picked.id } });
       setSavedFolderName(result.folderName);
       setFolderNameInput(result.folderName);
       toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to pick a folder");
+      setFolderError(e instanceof Error ? e.message : "Failed to pick a folder");
     } finally {
       setPickerBusy(false);
     }
@@ -1071,20 +1088,33 @@ function GoogleDriveCard() {
                 <Button type="submit" variant="outline" size="sm" disabled={folderBusy}>
                   {folderBusy ? "Saving..." : savedFolderName ? "Update folder" : "Save folder"}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={onBrowseFolder}
-                  disabled={pickerBusy}
-                >
-                  {pickerBusy ? "Opening..." : "Browse in Drive"}
-                </Button>
+                {picker ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onBrowseFolder}
+                    disabled={pickerBusy}
+                  >
+                    {pickerBusy ? "Opening..." : "Browse in Drive"}
+                  </Button>
+                ) : null}
               </div>
+              {folderError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {folderError}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 {savedFolderName
-                  ? `Waivers save to "${savedFolderName}". Browsing lets you pick any folder you have access to, including one in a shared drive; typing a name will only find one this app made before (a folder you made yourself in Drive with the same name won't be found).`
-                  : "Browse to pick any folder you have access to, including one in a shared drive, or type a name and we'll create it in your own Drive (a folder you made yourself with the same name won't be found by typing)."}
+                  ? `Waivers save to "${savedFolderName}". `
+                  : "Waivers do not save to Drive until you set a folder. "}
+                {picker
+                  ? "Browsing lets you pick any folder you have access to, including one in a shared drive. In the Google window, click a folder once to highlight it and then press Select: opening a folder does not choose it. "
+                  : "Folder browsing is not set up on this site yet, so type a name for now. "}
+                {savedFolderName
+                  ? "Typing a name only finds a folder this app made before, so a folder you made yourself in Drive with the same name will not be found."
+                  : "Typing a name creates that folder in your own Drive, and only finds an existing one this app made before."}
               </p>
             </form>
           </div>

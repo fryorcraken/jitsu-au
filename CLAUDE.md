@@ -349,6 +349,12 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   the manifest's `start_url` is `/app`, a route that forwards you to the screen you
   actually wanted (member area when signed in, home page otherwise). Full spec:
   `docs/pwa.md`.
+- **Waivers into a manager's Google Drive** (`lib/google-drive.functions.ts` +
+  `lib/google-picker.ts`): a manager connects their Google account on `/account`
+  and every signed PDF is copied to a folder they choose. The one scope is
+  `drive.file`, so access is per (account, OAuth client, file) and the Google
+  picker is the only way to reach a folder the site did not create itself. Full
+  spec, including the two build-time values it needs: `docs/google-drive.md`.
 - **Auth emails** (`routes/lovable/email/auth/webhook.ts`): a Lovable
   `createAuthEmailHandler` dispatches React-email templates from
   `src/lib/email-templates/` for signup, invite, magic-link, recovery, etc.
@@ -521,8 +527,17 @@ meaningfully). The app reads:
 
 - Client (Vite, build-time): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`,
   `VITE_SUPABASE_PROJECT_ID`.
+- Client, for the manager's Google Drive card: `VITE_GOOGLE_OAUTH_CLIENT_ID` and
+  `VITE_GOOGLE_PICKER_API_KEY`, both from the **same** Google Cloud project as
+  the Drive connector's OAuth client, with the Picker API enabled on it. Missing
+  either one hides "Browse in Drive" (typing a folder name still works), because
+  a picker built without them browses fine and then swallows the selection. See
+  `docs/google-drive.md`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
+- Server: `GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY` — authenticates the
+  site to the Lovable connector gateway that holds each manager's Google refresh
+  token (`docs/google-drive.md`).
 - Server, optional: `MANAGER_AGENT_API_KEY` — break-glass bearer token for the
   manager agent API (`/api/manager/agent`). Normally managers mint revocable
   tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
