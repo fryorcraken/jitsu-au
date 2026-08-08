@@ -21,12 +21,18 @@ additional_redirect_urls = ["http://127.0.0.1:4173", "http://localhost:4173"]
 # confirmed (pr-screenshots-seed.mjs) and sign in straight away.
 enable_confirmations = false
 
+[db.seed]
+# The fixture is a script, not SQL (scripts/pr-screenshots-seed.mjs): it has to
+# create auth users through the Auth API before it can reference them. Off, so
+# the CLI stops warning about the supabase/seed.sql that will never exist.
+enabled = false
+
 # Containers nothing in this repo talks to locally. Off means a smaller, faster
 # `supabase start` — the screenshot job pays for this on every pull request.
 [studio]
 enabled = false
 
-[inbucket]
+[local_smtp]
 enabled = false
 
 [realtime]

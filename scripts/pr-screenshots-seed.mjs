@@ -114,11 +114,18 @@ async function insert(table, rows) {
   console.log(`[seed] ${table}: ${Array.isArray(rows) ? rows.length : 1}`);
 }
 
-/** Same, for a table something else has already put a row in (see profiles). */
-async function upsert(table, rows, onConflict) {
-  const { error } = await admin.from(table).upsert(rows, { onConflict });
-  if (error) throw new Error(`upsert into ${table} failed: ${error.message}`);
-  console.log(`[seed] ${table}: ${Array.isArray(rows) ? rows.length : 1}`);
+/**
+ * Fill in the profile row that already exists for `userId`.
+ *
+ * `ensure_profile` (a trigger on auth.users) makes a bare row the moment a
+ * person is created, so these are updates, not inserts. An upsert of all three
+ * at once does not work: PostgREST turns a batch into ONE insert over the union
+ * of every row's keys, so a column that only some rows mention arrives as an
+ * explicit NULL and trips the NOT NULLs (`sms_whatsapp_consent`).
+ */
+async function fillProfile(userId, values) {
+  const { error } = await admin.from("profiles").update(values).eq("user_id", userId);
+  if (error) throw new Error(`filling in profile ${userId} failed: ${error.message}`);
 }
 
 /** Create a confirmed auth user and return its id. */
@@ -139,54 +146,44 @@ const users = {
 };
 console.log("[seed] auth users: 3");
 
-// `ensure_profile` (a trigger on auth.users) has already made a bare row for
-// each persona, so these fill it in rather than creating it.
-await upsert(
-  "profiles",
-  [
-    {
-      user_id: users.manager,
-      first_name: PERSONAS.manager.firstName,
-      last_name: PERSONAS.manager.lastName,
-      phone: "0400 000 001",
-      address: "1 Broadway, Ultimo NSW 2007",
-      date_of_birth: "1988-03-14",
-      emergency_contact_name: "Anil Raman",
-      emergency_contact_relationship: "Partner",
-      emergency_contact_phone: "0400 000 011",
-    },
-    {
-      user_id: users.member,
-      first_name: PERSONAS.member.firstName,
-      last_name: PERSONAS.member.lastName,
-      preferred_name: "Tommy",
-      phone: "0400 000 002",
-      address: "42 Harris Street, Pyrmont NSW 2009",
-      date_of_birth: "1999-11-02",
-      uts_student_number: "12345678",
-      gi_size: "3",
-      belt_size: "3",
-      martial_arts_experience: "Two years of judo at school, nothing since.",
-      emergency_contact_name: "Ada Okafor",
-      emergency_contact_relationship: "Sister",
-      emergency_contact_phone: "0400 000 012",
-      media_consent: true,
-      sms_whatsapp_consent: true,
-    },
-    {
-      user_id: users.applicant,
-      first_name: PERSONAS.applicant.firstName,
-      last_name: PERSONAS.applicant.lastName,
-      phone: "0400 000 003",
-      address: "9 Quay Street, Haymarket NSW 2000",
-      date_of_birth: "2001-06-21",
-      emergency_contact_name: "Lin Zhang",
-      emergency_contact_relationship: "Parent",
-      emergency_contact_phone: "0400 000 013",
-    },
-  ],
-  "user_id",
-);
+await fillProfile(users.manager, {
+  first_name: PERSONAS.manager.firstName,
+  last_name: PERSONAS.manager.lastName,
+  phone: "0400 000 001",
+  address: "1 Broadway, Ultimo NSW 2007",
+  date_of_birth: "1988-03-14",
+  emergency_contact_name: "Anil Raman",
+  emergency_contact_relationship: "Partner",
+  emergency_contact_phone: "0400 000 011",
+});
+await fillProfile(users.member, {
+  first_name: PERSONAS.member.firstName,
+  last_name: PERSONAS.member.lastName,
+  preferred_name: "Tommy",
+  phone: "0400 000 002",
+  address: "42 Harris Street, Pyrmont NSW 2009",
+  date_of_birth: "1999-11-02",
+  uts_student_number: "12345678",
+  gi_size: "3",
+  belt_size: "3",
+  martial_arts_experience: "Two years of judo at school, nothing since.",
+  emergency_contact_name: "Ada Okafor",
+  emergency_contact_relationship: "Sister",
+  emergency_contact_phone: "0400 000 012",
+  media_consent: true,
+  sms_whatsapp_consent: true,
+});
+await fillProfile(users.applicant, {
+  first_name: PERSONAS.applicant.firstName,
+  last_name: PERSONAS.applicant.lastName,
+  phone: "0400 000 003",
+  address: "9 Quay Street, Haymarket NSW 2000",
+  date_of_birth: "2001-06-21",
+  emergency_contact_name: "Lin Zhang",
+  emergency_contact_relationship: "Parent",
+  emergency_contact_phone: "0400 000 013",
+});
+console.log("[seed] profiles: 3");
 
 await insert("user_roles", [
   { user_id: users.manager, role: "manager" },
