@@ -1810,7 +1810,7 @@ function KnowledgeBaseManager() {
                   {preview ? `Version ${preview.version}: ${preview.title}` : "Preview"}
                 </CardTitle>
                 {preview && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {/* Said plainly, because the panel now shows text that is NOT
                         what members are reading, and nothing else on the page says
                         so. */}
