@@ -1,32 +1,19 @@
 project_id = "lgmacvxejzpvghgbjrjd"
 
 # ---------------------------------------------------------------------------
-# Everything below is written for the LOCAL stack — the throwaway containers
+# Everything below only ever shapes the LOCAL stack — the throwaway containers
 # `supabase start` / `supabase db start` bring up on a developer's machine and
 # in CI (.github/workflows/pr-screenshots.yml, .github/workflows/supabase-lint.yml).
-# Nothing in this repository applies any of it to the hosted project, which is
-# configured in the Supabase dashboard.
+# The hosted project is configured in the Supabase dashboard.
 #
-# ⚠️  `supabase config push` WOULD apply it, to the project named by
-# `project_id` above. Do not run it: it would set the live site's `site_url` to
-# a loopback address and turn off email confirmations, which between them break
-# every auth email the club sends. If the hosted project ever does need to be
-# configured from this file, the [auth] block below has to be reworked first —
-# its values exist to let a CI container redirect to a CI port.
+# Keep it that way: every section here is a switch for a local container, and
+# NONE of them describe auth. That is deliberate. `supabase config push` would
+# apply an [auth] block to the live project named on line 1, and a `site_url`
+# written for a CI container would break every auth email the club sends. The
+# screenshot job needs no such block — GoTrue accepts any loopback redirect
+# without consulting its allow list, so the port that job serves on is its own
+# business (see signIn in scripts/pr-screenshots.mjs).
 # ---------------------------------------------------------------------------
-
-[auth]
-# Where the screenshot job serves the built site (scripts/pr-screenshots.mjs,
-# PR_SCREENSHOTS_PORT). GoTrue refuses to redirect anywhere it has not been
-# told about, and signing a persona in is exactly such a redirect — so moving
-# the port means moving these too.
-site_url = "http://127.0.0.1:4173"
-additional_redirect_urls = ["http://127.0.0.1:4173", "http://localhost:4173"]
-
-[auth.email]
-# Nobody reads a confirmation inbox in CI. Seeded people are created already
-# confirmed (pr-screenshots-seed.mjs) and sign in straight away.
-enable_confirmations = false
 
 [db.seed]
 # The fixture is a script, not SQL (scripts/pr-screenshots-seed.mjs): it has to

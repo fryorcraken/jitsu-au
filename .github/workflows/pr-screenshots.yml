@@ -113,7 +113,9 @@ jobs:
 
       - name: Upload screenshots
         id: artifact
+        if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: pr-screenshots-${{ github.event.pull_request.number }}
           path: screenshots
@@ -122,7 +124,11 @@ jobs:
       # Read through the environment rather than the filesystem so the comment
       # script below stays free of `require`, which newer github-script majors
       # (ESM-only) no longer provide.
+      # `always()` from here down: `supabase start` and the seed are hard-failure
+      # steps ahead of the screenshots, and a reviewer who gets NO comment has
+      # to go digging in the Actions tab to find out why.
       - name: Collect the summary table
+        if: always()
         run: |
           {
             echo 'SCREENSHOT_SUMMARY<<PR_SCREENSHOTS_EOF'
@@ -143,6 +149,7 @@ jobs:
           fi
 
       - name: Comment on the pull request
+        if: always()
         uses: actions/github-script@v8
         env:
           ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}

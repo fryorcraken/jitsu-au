@@ -14,11 +14,20 @@
 //   bun scripts/pr-screenshots.mjs
 //
 // SIGNED-IN PAGES need a database with people in it, so they are photographed
-// only when there is a seeded local Supabase stack to sign in against:
+// only when there is a seeded local Supabase stack to sign in against. Export
+// the local values ONCE and keep them for the build and this script too — the
+// build bakes VITE_SUPABASE_URL in, and signing in is a service-role admin call
+// that this script refuses to make against anything but the stack the fixture
+// was seeded from:
 //
-//   supabase start && eval "$(supabase status -o env)"
-//   SUPABASE_URL=$API_URL SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
-//     bun scripts/pr-screenshots-seed.mjs      # writes .screenshot-fixture.json
+//   supabase start
+//   eval "$(supabase status -o env)"
+//   export SUPABASE_URL=$API_URL VITE_SUPABASE_URL=$API_URL
+//   export SUPABASE_PUBLISHABLE_KEY=$ANON_KEY VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY
+//   export SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
+//   bun scripts/pr-screenshots-seed.mjs        # writes .screenshot-fixture.json
+//   NITRO_PRESET=node-server bun run build
+//   bun scripts/pr-screenshots.mjs
 //
 // With neither a fixture file nor a service-role key, the run photographs the
 // public pages alone — what a local `bun scripts/pr-screenshots.mjs` against a
@@ -58,7 +67,7 @@ import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 
 import { PUBLIC_PAGES } from "../src/lib/seo.ts";
-import { fillRouteParams, personaFor, signedInPaths } from "./pr-screenshots-pages.mjs";
+import { planSignedInGroups, signedInAvailability } from "./pr-screenshots-pages.mjs";
 import {
   buildContactSheet,
   buildSummaryTable,
@@ -70,11 +79,18 @@ import {
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * Public pages that are deliberately absent from the sitemap (they are
- * server-rendered `noindex`, see src/lib/seo.ts) but are still worth looking at
- * in review: they carry the site's two biggest forms.
+ * Public pages that are deliberately absent from the sitemap and have to be
+ * listed by hand.
+ *
+ * They are server-rendered `noindex` (see src/lib/seo.ts), and `seo.test.ts`
+ * FAILS if a noindex page appears in `PUBLIC_PAGES` — so unlike the signed-in
+ * pages, these can never be derived. A new public noindex page has to be added
+ * here or it goes unphotographed.
+ *
+ * Not listed, because each needs a token or a session that only its own email
+ * gives it: `/update-password`, `/email-settings/$token`, `/blog/$slug`.
  */
-const EXTRA_PATHS = ["/waiver", "/auth"];
+const EXTRA_PATHS = ["/waiver", "/auth", "/reset-password", "/thank-you", "/app"];
 
 /**
  * Widths members actually read the site at. The heights are only the initial
@@ -114,41 +130,10 @@ const publicPaths = [...PUBLIC_PAGES.map((page) => page.path), ...EXTRA_PATHS];
  * beats doing it once per page.
  */
 function buildGroups() {
-  const groups = [{ persona: null, paths: publicPaths }];
   const fixture = readFixture();
+  const groups = [{ persona: null, paths: publicPaths }];
   if (!fixture) return groups;
-
-  const skipped = [];
-  const byPersona = { member: [], manager: [] };
-  for (const template of signedInPaths(listRouteFiles())) {
-    const path = fillRouteParams(template, fixture.params);
-    if (!path) {
-      skipped.push(template);
-      continue;
-    }
-    byPersona[personaFor(path)].push(path);
-  }
-  if (skipped.length > 0) {
-    // Never silent: a route parameter the fixture has no value for means a
-    // whole screen goes unphotographed, and the artifact would just be missing
-    // it. Add the id to the manifest in pr-screenshots-seed.mjs.
-    console.warn(`[screenshots] no fixture value for: ${skipped.join(", ")}`);
-  }
-
-  for (const persona of ["member", "manager"]) {
-    // Same reasoning as readFixture: with a seeded stack in hand, a persona
-    // with nothing to photograph means the route derivation stopped working,
-    // not that the screens went away.
-    if (byPersona[persona].length === 0) {
-      throw new Error(
-        `no ${persona} pages found under src/routes — check pr-screenshots-pages.mjs`,
-      );
-    }
-    const email = fixture.personas[persona]?.email;
-    if (!email) throw new Error(`the fixture manifest names no ${persona} to sign in as`);
-    groups.push({ persona, paths: byPersona[persona], email });
-  }
-  return groups;
+  return [...groups, ...planSignedInGroups(listRouteFiles(), fixture)];
 }
 
 /** Every route file, relative to `src/routes`, in a stable order. */
@@ -158,36 +143,90 @@ function listRouteFiles() {
     .sort();
 }
 
-/**
- * The seed's manifest, or null when this run has no database to sign into.
- *
- * Falling back to the public pages is right for a run with no seeded stack at
- * all (a local `bun scripts/pr-screenshots.mjs` against a production project),
- * and wrong for anything else. HALF a setup is always a mistake — a seed step
- * that was reordered away, a moved PR_SCREENSHOTS_FIXTURE, an environment step
- * that stopped exporting the key — and silently dropping every signed-in page
- * would take the whole feature away behind a green check and a PR comment
- * still claiming the member area was photographed. So that case is fatal.
- */
+/** The seed's manifest, or null when this run has no database to sign into. */
 function readFixture() {
-  const hasManifest = existsSync(FIXTURE_PATH);
-  const hasCredentials = Boolean(SUPABASE_URL && SERVICE_ROLE_KEY);
+  const availability = signedInAvailability(
+    existsSync(FIXTURE_PATH),
+    Boolean(SUPABASE_URL && SERVICE_ROLE_KEY),
+  );
 
-  if (!hasManifest && !hasCredentials) {
+  if (availability === "public-only") {
     console.log("[screenshots] no seeded stack: photographing the public pages only");
     return null;
   }
-  if (!hasManifest) {
+  if (availability === "no-manifest") {
     throw new Error(
       `A Supabase service-role key is set but there is no fixture manifest at ${FIXTURE_PATH}. Run scripts/pr-screenshots-seed.mjs first, or unset SUPABASE_SERVICE_ROLE_KEY to photograph the public pages alone.`,
     );
   }
-  if (!hasCredentials) {
+  if (availability === "no-credentials") {
     throw new Error(
       `There is a fixture manifest at ${FIXTURE_PATH} but SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set, so nobody can be signed in.`,
     );
   }
-  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
+
+  const fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
+
+  // Signing in is a SERVICE-ROLE admin call, and GoTrue's generate_link creates
+  // the account when it does not exist — so pointed at the hosted project it
+  // would put fixture people in the club's real auth, exactly what
+  // `assertLocal` in the seed exists to prevent. The seed had that guard and
+  // this did not, which matters because bun auto-loads `.env`: run the seed
+  // with an explicit local URL and then this script bare, and the manifest is
+  // local while the credentials are whatever `.env` holds.
+  //
+  // Checking the manifest's own URL is the stricter test — it catches a
+  // production URL AND a different local stack — with the loopback rule behind
+  // it for a manifest written before this field existed.
+  assertLocalSupabase(SUPABASE_URL);
+  if (fixture.supabaseUrl && fixture.supabaseUrl !== SUPABASE_URL) {
+    throw new Error(
+      `The fixture was seeded against ${fixture.supabaseUrl} but SUPABASE_URL is ${SUPABASE_URL}. Refusing to sign in: these are different databases.`,
+    );
+  }
+  return fixture;
+}
+
+/**
+ * Put back the fixture state that the act of photographing consumed, so every
+ * viewport sees the same club.
+ *
+ * This is a KNOWN LIST, not a general undo: a future screen that marks
+ * something read on open has to be added here, or its unread state will only
+ * ever be photographed at the first width. Nothing detects that automatically —
+ * the symptom is a mobile shot that looks calmer than its desktop twin.
+ */
+async function restoreFixtureState() {
+  const fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
+  const memberId = fixture.personas?.member?.userId;
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // /notifications marks everything unread read when it opens.
+  if (memberId) {
+    await admin
+      .from("notifications")
+      .update({ read_at: null })
+      .eq("user_id", memberId)
+      .eq("kind", "new_blog_post");
+  }
+  // The manager screens keep one club-wide watermark per inbox
+  // (src/lib/seen-markers.ts); deleting it makes the items unseen again.
+  await admin
+    .from("club_settings")
+    .delete()
+    .in("key", ["contact_messages_seen_at", "interest_registrations_seen_at"]);
+}
+
+/** Refuse to make admin calls against anything but a local stack. */
+function assertLocalSupabase(url) {
+  const host = new URL(url).hostname;
+  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
+    throw new Error(
+      `Refusing to sign in against ${host}: the screenshot run only ever talks to a local stack.`,
+    );
+  }
 }
 
 /**
@@ -349,9 +388,9 @@ async function isPortAnswering() {
  * `isAuthCallbackUrl` in src/lib/auth-persistence.ts exists for), so the
  * session is stored exactly the way a member's would be.
  *
- * GoTrue only redirects to a URL it has been told about, which is why
- * `supabase/config.toml` names the port this script serves on. Change
- * PR_SCREENSHOTS_PORT and that has to move with it.
+ * The redirect target needs no configuration: GoTrue short-circuits its
+ * allow-list check for a loopback address (`IsRedirectURLValid`), so any port
+ * on 127.0.0.1 is accepted. PR_SCREENSHOTS_PORT can move on its own.
  */
 async function signIn(context, baseUrl, email) {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -484,7 +523,13 @@ try {
   server = await startServer();
   browser = await chromium.launch({ executablePath: CHROMIUM_PATH || undefined });
 
-  for (const viewport of VIEWPORTS) {
+  for (const [index, viewport] of VIEWPORTS.entries()) {
+    // Photographing is not read-only: opening /notifications marks the member's
+    // unread ones read, opening /manager/contact-messages stamps the club's
+    // "seen up to here" marker. Left alone, the desktop pass would be the only
+    // one to see an unread badge and the phone pass — the width most of this
+    // club browses at — would show every screen already dealt with.
+    if (index > 0 && groups.some((group) => group.persona)) await restoreFixtureState();
     for (const group of groups) {
       results.push(...(await shootGroup(browser, server.baseUrl, viewport, group)));
     }

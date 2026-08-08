@@ -408,18 +408,33 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     screens and a run that is identical on every branch and every fork.
   - The trade: `/blog`, `/pricing` and the calendar show **seeded fixture
     content**, not what is on `jitsu.au` today.
-  - Which pages get shot, and as whom, is **derived from the route files**
-    (`scripts/pr-screenshots-pages.mjs`): `PUBLIC_PAGES` from `src/lib/seo.ts`
-    plus `/waiver` and `/auth` signed out, everything under
-    `src/routes/_authenticated/` and `src/routes/kb/` signed in — as the
-    manager for `/manager/*`, as the member for the rest. **A new screen is
-    photographed the moment its route file exists**, so nothing has to be added
-    here. A dynamic route (`$userId`) needs an id in the seed's manifest; one
-    that has none is logged and skipped rather than shot as a 404.
+  - The **signed-in** pages are **derived from the route files**
+    (`scripts/pr-screenshots-pages.mjs`): everything under
+    `src/routes/_authenticated/` and `src/routes/kb/`, shot as the manager for
+    `/manager/*` and as the member for the rest. **A new member or manager
+    screen is photographed the moment its route file exists.** A dynamic route
+    (`$userId`) needs an id in the seed's manifest, and one that has none fails
+    the job rather than leaving a gap nobody notices.
+  - The **public** pages are not derived and cannot be: they are `PUBLIC_PAGES`
+    from `src/lib/seo.ts` plus a hand-written list in `pr-screenshots.mjs`
+    (`/waiver`, `/auth`, `/reset-password`, `/thank-you`, `/app`). The extras
+    are `noindex`, and `seo.test.ts` fails if a `noindex` page is added to
+    `PUBLIC_PAGES` — so **a new public noindex page has to be added to that
+    list by hand**. `/update-password`, `/email-settings/$token` and
+    `/blog/$slug` are deliberately not shot; each needs a token only its own
+    email carries.
   - Signing in uses an admin-generated **magic link**, so the session is stored
-    exactly as a real one is. GoTrue only redirects to URLs it knows, which is
-    why `supabase/config.toml` names the port the script serves on — move
-    `PR_SCREENSHOTS_PORT` and that has to move with it.
+    exactly as a real one is. It needs no redirect configuration: GoTrue accepts
+    any loopback redirect without consulting its allow list, so
+    `PR_SCREENSHOTS_PORT` can move on its own. **Do not add an `[auth]` block to
+    `supabase/config.toml`** for it — `supabase config push` would apply that to
+    the live project.
+  - Photographing **mutates the fixture**: opening `/notifications` marks the
+    member's unread ones read, opening a manager inbox stamps its "seen"
+    watermark. The run puts those back between viewports
+    (`restoreFixtureState`), which is a **known list** — a new screen that marks
+    something read on open has to be added to it, or its unread state will only
+    ever appear at the first width.
   - A page that returns an error status, or that renders the router's error/404
     boundary (both arrive inside an ordinary 200, which is why those boundaries
     carry `data-page-state`), fails the job. **It does not catch a route that
@@ -429,7 +444,11 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   - Run it locally the same way CI does (`supabase start`, seed, build with
     `NITRO_PRESET=node-server`, `bun scripts/pr-screenshots.mjs`); the header
     comment in `scripts/pr-screenshots.mjs` has the exact commands. With no
-    seeded stack it falls back to the public pages alone.
+    seeded stack it falls back to the public pages alone. Half a setup (a
+    manifest without credentials, or the reverse) fails instead: signing in is a
+    service-role admin call, and GoTrue's `generate_link` **creates** the
+    account when it is missing, so a run must never point local fixture ids at
+    the club's real database.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see "Schema drift" in `docs/database-changes.md`).

@@ -129,6 +129,11 @@ function on(days) {
  * going and the script fails at the end with the full list. Rows whose parent
  * failed will fail too — that noise sits next to its own cause and is worth
  * having.
+ *
+ * Deliberately NOT collected: creating the people (`createUser`) and reading
+ * what the migrations shipped (`select`, `planOf`). Every row below hangs off
+ * those, so carrying on past one would report a page of failures that all say
+ * the same thing. They throw, and the stack trace is the message.
  */
 const failures = [];
 
@@ -180,8 +185,20 @@ async function select(table, columns, build = (query) => query) {
  */
 async function fillProfile(userId, values) {
   await attempt(`filling in profile ${userId}`, async () => {
-    const { error } = await admin.from("profiles").update(values).eq("user_id", userId);
+    // `.select()` so a match of NO rows is caught. An update that hits nothing
+    // returns no error, and this is the seed's only write that depends on a
+    // trigger having run rather than on something it did itself — drop
+    // `ensure_profile` and every signed-in screenshot would quietly show
+    // "Member" with blank contact details behind a green run.
+    const { data, error } = await admin
+      .from("profiles")
+      .update(values)
+      .eq("user_id", userId)
+      .select("user_id");
     if (error) throw new Error(error.message);
+    if (!data || data.length === 0) {
+      throw new Error("no profile row to fill in — did the ensure_profile trigger run?");
+    }
   });
 }
 
@@ -728,6 +745,11 @@ await insert("interest_registrations", [
 ]);
 
 const fixture = {
+  // Which database these ids exist in. pr-screenshots.mjs refuses to sign in
+  // when this does not match its own SUPABASE_URL: the manifest and the
+  // credentials arriving from different places is the failure that would put
+  // fixture people in the club's real auth.
+  supabaseUrl: SUPABASE_URL,
   // What signing in needs.
   personas: {
     manager: { email: PERSONAS.manager.email, userId: users.manager },
