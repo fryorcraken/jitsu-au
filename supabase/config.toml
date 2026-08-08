@@ -1,1 +1,39 @@
 project_id = "lgmacvxejzpvghgbjrjd"
+
+# ---------------------------------------------------------------------------
+# Everything below only ever shapes the LOCAL stack — the throwaway containers
+# `supabase start` / `supabase db start` bring up on a developer's machine and
+# in CI (.github/workflows/pr-screenshots.yml, .github/workflows/supabase-lint.yml).
+# The hosted project is configured in the Supabase dashboard.
+#
+# Keep it that way: every section here is a switch for a local container, and
+# NONE of them describe auth. That is deliberate. `supabase config push` would
+# apply an [auth] block to the live project named on line 1, and a `site_url`
+# written for a CI container would break every auth email the club sends. The
+# screenshot job needs no such block — GoTrue accepts any loopback redirect
+# without consulting its allow list, so the port that job serves on is its own
+# business (see signIn in scripts/pr-screenshots.mjs).
+# ---------------------------------------------------------------------------
+
+[db.seed]
+# The fixture is a script, not SQL (scripts/pr-screenshots-seed.mjs): it has to
+# create auth users through the Auth API before it can reference them. Off, so
+# the CLI stops warning about the supabase/seed.sql that will never exist.
+enabled = false
+
+# Containers nothing in this repo talks to locally. Off means a smaller, faster
+# `supabase start` — the screenshot job pays for this on every pull request.
+[studio]
+enabled = false
+
+[local_smtp]
+enabled = false
+
+[realtime]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false
