@@ -915,11 +915,12 @@ grants off.
 `key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. **RLS:**
 manager-only. Keys in use:
 
-| Key                              | Holds                                                                                                                                                                                            |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `invoice_payment_instructions`   | Markdown shown on an invoice. Falls back to a built-in stub when unset.                                                                                                                          |
-| `contact_messages_seen_at`       | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread.                                          |
-| `interest_registrations_seen_at` | ISO instant of the newest interest registration on file when a manager last opened `/manager/users`. Same club-wide watermark shape; anything newer counts as a new sign-up on `/notifications`. |
+| Key                              | Holds                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoice_payment_details`        | **JSON.** The club's bank account (account name, BSB, account number, bank, plus optional SWIFT/BIC and addresses, plus a note), shown field by field with a copy button each on `/membership` and in the payment email. Anything that is not a complete account parses as "not published yet". See `docs/memberships.md`. |
+| `invoice_payment_instructions`   | **Legacy.** The free-text markdown that `invoice_payment_details` replaced. Nothing member-facing reads it; `/manager/settings` shows it read-only while the account fields are still empty. Pending deletion.                                                                                                             |
+| `contact_messages_seen_at`       | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread.                                                                                                                                                                    |
+| `interest_registrations_seen_at` | ISO instant of the newest interest registration on file when a manager last opened `/manager/users`. Same club-wide watermark shape; anything newer counts as a new sign-up on `/notifications`.                                                                                                                           |
 
 Being key/value is what let the contact-message unread count, and later the
 new-registration count, ship without a migration. It is also its limit: a value

@@ -1222,6 +1222,68 @@ export function sellablePlans<T extends PlanWindow & { is_active: boolean }>(
   return all.filter((p) => p.is_active && (!p.ends_on || p.ends_on >= today));
 }
 
+// ---- Member: what is still owed ----
+
+/** One thing on an unpaid invoice: a plan, and what it costs. */
+export interface UnpaidInvoiceLine {
+  membership_id: string;
+  plan_name: string | null;
+  price_cents: number;
+}
+
+/** An unpaid invoice: one transfer the member owes, whatever it is made of. */
+export interface UnpaidInvoice {
+  /** What the member quotes on the transfer. Also the group's identity. */
+  reference: string;
+  /** What to transfer: every line added up. */
+  total_cents: number;
+  lines: UnpaidInvoiceLine[];
+}
+
+/**
+ * The transfers a member still owes, from their membership rows.
+ *
+ * Buying a plan that bundles yearly insurance writes TWO pending memberships
+ * sharing ONE payment reference, because reconciliation has to activate them
+ * together off a single transfer. So "pending memberships" and "invoices to pay"
+ * are different counts, and only the second is a number to put in front of a
+ * member: they owe one payment, and paying half of it against the same reference
+ * would reconcile neither.
+ *
+ * Grouping by reference is what makes them agree, and it is the same sum the
+ * invoice email already shows — the page and the email are two views of one
+ * amount, so they must not compute it differently.
+ *
+ * Input order is preserved (`getMyMemberships` hands them over newest first).
+ */
+export function unpaidInvoices(
+  memberships: readonly {
+    id: string;
+    status: string;
+    plan_name: string | null;
+    price_cents: number;
+    payment_reference: string;
+  }[],
+): UnpaidInvoice[] {
+  const byReference = new Map<string, UnpaidInvoice>();
+  for (const m of memberships) {
+    if (m.status !== "pending") continue;
+    const line = { membership_id: m.id, plan_name: m.plan_name, price_cents: m.price_cents };
+    const existing = byReference.get(m.payment_reference);
+    if (existing) {
+      existing.lines.push(line);
+      existing.total_cents += m.price_cents;
+    } else {
+      byReference.set(m.payment_reference, {
+        reference: m.payment_reference,
+        total_cents: m.price_cents,
+        lines: [line],
+      });
+    }
+  }
+  return [...byReference.values()];
+}
+
 // ---- Member: yearly insurance selection on the purchase screen ----
 
 /**
@@ -1983,16 +2045,153 @@ export const revokeApiTokenSchema = z.object({
 });
 export type RevokeApiTokenInput = z.infer<typeof revokeApiTokenSchema>;
 
-// ---- Manager: club settings (invoice payment instructions) ----
+// ---- Manager: club settings (the club's bank account) ----
 
-/** Default invoice instructions used until a manager customizes them. */
+/**
+ * The free-text instructions this replaced. Still exported because the manager
+ * settings screen shows whatever is left in the old `club_settings` row as a
+ * read-only reference while the structured fields are empty, and that row was
+ * seeded with a stub. Nothing member-facing renders it any more.
+ */
 export const DEFAULT_INVOICE_INSTRUCTIONS =
   "Pay by bank transfer to the club account. Please include your payment reference in the transfer description so we can match your payment automatically.";
 
-export const saveClubSettingsSchema = z.object({
-  invoice_payment_instructions: z.string().trim().max(5000),
+/**
+ * A BSB is six digits identifying an Australian bank branch. Stored as the six
+ * digits alone so what a manager typed (with or without the hyphen) cannot
+ * change what a member copies; `formatBsb` puts the hyphen back for display.
+ */
+const BSB_DIGITS = /^\d{6}$/;
+
+/**
+ * BIC, the same thing as a SWIFT code: 4 letters for the bank, 2 for the country
+ * (ISO 3166-1), 2 alphanumeric for the location, and an optional 3 more for a
+ * branch. That is why it is always 8 or 11 characters and never 9 or 10.
+ *
+ * This is the field an overseas sender actually needs. Australia does not use
+ * IBAN, so there is nothing else to give them.
+ */
+const BIC = /^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
+
+/** `062000` -> `062-000`. How every Australian bank prints a BSB. */
+export function formatBsb(bsb: string): string {
+  const digits = bsb.replace(/\D/g, "");
+  return BSB_DIGITS.test(digits) ? `${digits.slice(0, 3)}-${digits.slice(3)}` : bsb;
+}
+
+/**
+ * The club's bank account, as a member needs to see it.
+ *
+ * The four account fields are required TOGETHER. A half-filled account is worse
+ * than no account at all, because it looks payable: someone copies a BSB, finds
+ * no account number, and either guesses or gives up having already been told
+ * what they owe. So an incomplete set never parses, and the screens treat it
+ * exactly as "not published yet".
+ *
+ * The overseas fields are each optional. They only ever add to a set of account
+ * details that already works domestically, and a club that never takes an
+ * overseas payment should not be blocked on filling them in.
+ */
+export const clubPaymentDetailsSchema = z.object({
+  account_name: z.string().trim().min(1, "Add the account name.").max(120),
+  bsb: z
+    .string()
+    .transform((v) => v.replace(/\D/g, ""))
+    .pipe(z.string().regex(BSB_DIGITS, "A BSB is six digits, like 062-000.")),
+  account_number: z
+    .string()
+    .transform((v) => v.replace(/\s/g, ""))
+    .pipe(z.string().regex(/^\d{4,10}$/, "An account number is 4 to 10 digits.")),
+  bank_name: z.string().trim().min(1, "Add the bank's name.").max(120),
+  swift_bic: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(BIC, "A SWIFT/BIC code is 8 or 11 characters, like CTBAAU2S.")
+    .or(z.literal(""))
+    .default(""),
+  bank_address: z.string().trim().max(200).default(""),
+  account_holder_address: z.string().trim().max(200).default(""),
+  note: z.string().trim().max(1000).default(""),
 });
-export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
+export type ClubPaymentDetails = z.infer<typeof clubPaymentDetailsSchema>;
+
+/** The manager form posts exactly the details. */
+export const saveClubSettingsSchema = clubPaymentDetailsSchema;
+export type SaveClubSettingsInput = ClubPaymentDetails;
+
+/**
+ * The account rows, in the order a member reads them, shared by the membership
+ * page and the invoice email so the two can never drift apart.
+ *
+ * Every one of them is a value somebody pastes into a banking app, so every one
+ * gets a copy button. `copyLabel` is carried per field rather than built from
+ * `label`, because it is the button's accessible name: seven buttons all called
+ * "Copy" are unusable by voice or screen reader, and "Copy bsb" is what
+ * lowercasing the label would produce.
+ *
+ * `mono` marks the fields that are strings of digits and letters to be
+ * transcribed, where a monospace font makes a misread digit visible.
+ */
+export const CLUB_ACCOUNT_FIELDS = [
+  { key: "account_name", label: "Account name", copyLabel: "Copy account name", mono: false },
+  { key: "bsb", label: "BSB", copyLabel: "Copy BSB", mono: true },
+  { key: "account_number", label: "Account number", copyLabel: "Copy account number", mono: true },
+  { key: "bank_name", label: "Bank", copyLabel: "Copy bank name", mono: false },
+] as const;
+
+/** The same, for someone sending from outside Australia. */
+export const CLUB_INTERNATIONAL_FIELDS = [
+  { key: "swift_bic", label: "SWIFT/BIC", copyLabel: "Copy SWIFT/BIC", mono: true },
+  { key: "bank_address", label: "Bank address", copyLabel: "Copy bank address", mono: false },
+  {
+    key: "account_holder_address",
+    label: "Account holder address",
+    copyLabel: "Copy account holder address",
+    mono: false,
+  },
+] as const;
+
+export type ClubPaymentFieldKey =
+  | (typeof CLUB_ACCOUNT_FIELDS)[number]["key"]
+  | (typeof CLUB_INTERNATIONAL_FIELDS)[number]["key"];
+
+/**
+ * The value to show and to copy for one field. Only the BSB differs from what is
+ * stored, and it must differ in exactly one place or the hyphen ends up on
+ * screen but not on the clipboard.
+ */
+export function clubPaymentFieldValue(
+  details: ClubPaymentDetails,
+  key: ClubPaymentFieldKey,
+): string {
+  return key === "bsb" ? formatBsb(details.bsb) : details[key];
+}
+
+/** True when there is at least one overseas field worth showing. */
+export function hasInternationalDetails(details: ClubPaymentDetails): boolean {
+  return CLUB_INTERNATIONAL_FIELDS.some((f) => details[f.key].trim().length > 0);
+}
+
+/**
+ * Read the stored JSON blob back. Returns null for anything that is not a
+ * complete set of account details: never written, half-written, hand-edited into
+ * invalid JSON, or written by a future version with a rule this one fails.
+ *
+ * Null is not an error state to swallow — it is what the screens render the
+ * "we have not published these yet" message from. Guessing at a partial blob
+ * would put a wrong account number in front of someone about to transfer money,
+ * which is the one outcome worth being strict about.
+ */
+export function parseClubPaymentDetails(raw: string | null): ClubPaymentDetails | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = clubPaymentDetailsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 // ---- Calendar (see docs/calendar.md) ----
 
