@@ -296,7 +296,7 @@ function PlanCard({
           onKindChange={(kind) => onPatch(plan.id, planTypePatch(kind))}
           onFieldChange={(patch) => onPatch(plan.id, patch)}
         />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={!dirty || savingId === plan.id} onClick={() => onSave(plan)}>
             {savingId === plan.id ? "Saving..." : "Save"}
           </Button>
