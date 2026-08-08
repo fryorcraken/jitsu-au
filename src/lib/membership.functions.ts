@@ -3,13 +3,16 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   buildPaymentReference,
   computeMembershipPrice,
+  createMembershipSchema,
   DEFAULT_INVOICE_INSTRUCTIONS,
+  deleteMembershipSchema,
   formatCents,
   importBankStatementSchema,
   isUtsStudent,
   haystackContainsRef,
   matchesMembershipReference,
   matchTransactionSchema,
+  membershipDeleteMessage,
   normalizeRef,
   greetingName,
   nameWithPreferred,
@@ -20,8 +23,15 @@ import {
   sellablePlans,
   setMembershipStatusSchema,
   startMembershipSchema,
+  whyMembershipCannotBeDeleted,
 } from "@/lib/validation";
-import type { MembershipPlanKind, MembershipStatus, SavePlanInput } from "@/lib/validation";
+import type {
+  CreateMembershipInput,
+  MembershipDeleteBlocker,
+  MembershipPlanKind,
+  MembershipStatus,
+  SavePlanInput,
+} from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
 import type {
   BankTransactionRow,
@@ -116,7 +126,10 @@ function dedupeHash(row: {
  * change it follows has already committed, and reporting it as failed invites a
  * retry that re-runs activation.
  */
-async function syncMemberRole(admin: MembershipClient, userId: string | null): Promise<void> {
+export async function syncMemberRole(
+  admin: MembershipClient,
+  userId: string | null,
+): Promise<void> {
   if (!userId) return;
 
   const { data: active, error } = await admin
@@ -1106,8 +1119,129 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
         .update({ status: data.status })
         .eq("id", data.id);
       if (uErr) throw new Error(uErr.message);
+      // Closing a membership can be the moment somebody stops being a member.
+      // Access itself is gated live by `has_active_paid_membership`, so it has
+      // already closed by now; this is the label catching up.
+      await syncMemberRole(admin, membership.user_id);
     }
     return { ok: true as const, id: data.id, status: data.status };
+  });
+
+/**
+ * Delete a membership outright, or refuse and say what would have to change.
+ *
+ * Shared by the manager screens and the agent's `delete_invoice`, so both
+ * refuse for the same three reasons with the same words. Returns the blockers
+ * alongside the message rather than only throwing, because the agent reports
+ * them as structured `error.details` while a screen shows the sentence.
+ *
+ * The check-in count is what makes this more than a status check: a class
+ * someone actually attended is a fact, and `session_checkins.membership_id` is
+ * `ON DELETE SET NULL`, so deleting underneath it would silently turn a covered
+ * class into an uncovered one rather than failing. `bank_transactions` points at
+ * memberships the same way, but a matched transaction always implies `paid_at`,
+ * so the paid blocker already covers it.
+ */
+export async function deleteMembershipRow(
+  admin: MembershipClient,
+  id: string,
+): Promise<{ ok: true; id: string } | { ok: false; blockers: MembershipDeleteBlocker[] }> {
+  const { data: membership, error } = await admin
+    .from("memberships")
+    .select("id, user_id, status, paid_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!membership) throw new Error("Membership not found.");
+
+  const { count, error: cErr } = await admin
+    .from("session_checkins")
+    .select("id", { count: "exact", head: true })
+    .eq("membership_id", id);
+  // Throws rather than assuming zero. "Nobody trained on this" is the answer
+  // that permits an irreversible delete, and a failed count must never be able
+  // to give it.
+  if (cErr) throw new Error(cErr.message);
+
+  const blockers = whyMembershipCannotBeDeleted({
+    paid_at: membership.paid_at,
+    status: membership.status,
+    checkin_count: count ?? 0,
+  });
+  if (blockers.length) return { ok: false as const, blockers };
+
+  const { error: dErr } = await admin.from("memberships").delete().eq("id", id);
+  if (dErr) throw new Error(dErr.message);
+  await syncMemberRole(admin, membership.user_id);
+  return { ok: true as const, id };
+}
+
+// ---- Manager: delete a membership ----
+export const deleteMembership = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => deleteMembershipSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const result = await deleteMembershipRow(await adminClient(), data.id);
+    if (!result.ok) throw new Error(membershipDeleteMessage(result.blockers));
+    return { ok: true as const, id: result.id };
+  });
+
+/**
+ * Raise a membership for somebody else: the manager's counterpart to a member
+ * pressing "Choose" on `/membership`.
+ *
+ * Shared by the manager screen and the agent's `create_membership`. Two things
+ * differ from the member's own purchase, and both follow from who is asking:
+ *
+ *   - **Any plan, not just a sellable one.** A manager recording an enrolment is
+ *     often writing down something that already happened, so last semester's
+ *     plan has to be reachable. The member's own screen still refuses it.
+ *   - **Insurance is their call.** A member may not train uninsured, so
+ *     `startMembership` refuses. A manager backfilling a real enrolment that
+ *     happened without cover is recording history, not selling anything.
+ *
+ * What does NOT differ: the invoice lands `pending`, exactly like one the member
+ * raised. Activating is what grants the label and emails them, and it stays a
+ * separate, deliberate press.
+ */
+export async function createMembershipForUser(
+  admin: MembershipClient,
+  input: CreateMembershipInput,
+): Promise<{ ok: true; activated: boolean; reference: string | null }> {
+  const { data: plan, error: planErr } = await admin
+    .from("membership_plans")
+    .select("*")
+    .eq("code", input.plan_code)
+    .maybeSingle();
+  if (planErr) throw new Error(planErr.message);
+  if (!plan) throw new Error(`No plan with the code "${input.plan_code}".`);
+
+  // One free trial per person, ever, however it is raised. A manager can give
+  // somebody a second casual class; the free trial is the one thing that is
+  // once, and going through a manager does not make it twice.
+  if (plan.kind === "trial" && (await hasUsedTrial(admin, input.user_id, plan.id)))
+    throw new Error("They have already had their free trial.");
+
+  const { insurancePlan } = await resolveInsuranceCover(admin, input.user_id, plan);
+
+  return enrolMember(admin, {
+    userId: input.user_id,
+    plan,
+    utsStudentNumber: input.uts_student_number ?? null,
+    sessionDate: input.session_date,
+    insurancePlan: input.include_insurance ? insurancePlan : null,
+    sendEmail: input.send_email,
+  });
+}
+
+// ---- Manager: raise a membership for somebody ----
+export const createMembership = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => createMembershipSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    return createMembershipForUser(await adminClient(), data);
   });
 
 // ---- Manager: import a bank statement + auto-reconcile ----

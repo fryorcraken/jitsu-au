@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "8",
+  version: "9",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "9",
+      // Two new actions, and one existing action quietly doing more. Nothing
+      // that worked before fails or means something different.
+      breaking: false,
+      notes: [
+        "New action create_membership: raise a pending invoice for a person, the manager's counterpart to a member choosing a plan on the site. Unlike a member's own purchase it can use a plan that is no longer on sale (backfilling a past training period), its include_insurance answer is final rather than enforced, and send_email: false records the invoice without telling them about it. It never activates — activation grants the member role and emails them, and stays a separate deliberate step.",
+        "New action delete_invoice: delete an invoice outright. Refused with 409 invoice_not_deletable when a payment is recorded against it, it is still active, or a class was checked in against it; error.details.blockers lists every reason at once (paid | active | attended) so clearing one does not walk into the next. A paid invoice is never deletable — cancel it instead, via edit_invoice. Moving a check-in off a membership is UI-only for now, so an 'attended' blocker cannot be cleared through this API.",
+        "edit_invoice: setting status to cancelled or expired now also reconciles the person's `member` role, so list_users stops reporting somebody as a member once their last paid membership closes. Members-only ACCESS was already gated live and is unaffected; this only corrects the label, which used to be granted and never taken back.",
+      ],
+    },
     {
       version: "8",
       // Purely additive: one new optional param on an existing action. Nothing
@@ -239,6 +250,48 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
+      name: "create_membership",
+      method: "POST",
+      summary:
+        "Raise a pending invoice for a person against a plan — the manager's counterpart to a member choosing a plan on the site. Lands PENDING with the same payment reference the member would quote on a transfer, so it reconciles off a bank statement normally. It does NOT activate: activation grants the member role and emails them, and stays a separate deliberate step. Unlike a member's own purchase it accepts a plan that is no longer on sale, which is what backfilling a past training period needs. Re-raising the same person + plan reuses their existing unpaid invoice rather than creating a second one, so a retry is safe. The free trial is still once per person, ever.",
+      params: [
+        {
+          name: "user_id",
+          required: true,
+          description: "The person's user UUID, from list_users.",
+        },
+        {
+          name: "plan_code",
+          required: true,
+          description: "Plan code from list_membership_plans. May be a plan no longer on sale.",
+        },
+        {
+          name: "uts_student_number",
+          required: false,
+          description:
+            "Their UTS student number. Its presence is what applies the student rate — there is no separate flag, and the price is computed server-side.",
+        },
+        {
+          name: "session_date",
+          required: false,
+          description:
+            "YYYY-MM-DD, for a casual class only, so the payment reconciles to that session. Defaults to today; ignored by every other plan kind.",
+        },
+        {
+          name: "include_insurance",
+          required: false,
+          description:
+            "Bundle yearly insurance as a second invoice on the same payment reference (default false). A member buying for themselves cannot decline this without current cover; a manager can, because recording an enrolment that really happened without cover is history, not a sale.",
+        },
+        {
+          name: "send_email",
+          required: false,
+          description:
+            "Email them the payment instructions (default true). Set false when backfilling something already settled, so nobody is invoiced for last semester.",
+        },
+      ],
+    },
+    {
       name: "edit_invoice",
       method: "POST",
       summary:
@@ -269,6 +322,13 @@ export const AGENT_MANIFEST: {
             "Set true to allow price_cents / payment_reference / payment_method to be rewritten on an invoice that has already been paid. Not a field to write, and a no-op on an unpaid invoice.",
         },
       ],
+    },
+    {
+      name: "delete_invoice",
+      method: "POST",
+      summary:
+        "Delete an invoice outright, for tidying up one that should never have existed. Refused with 409 invoice_not_deletable when a payment is recorded against it, when it is still active, or when a class was checked in against it; error.details.blockers names EVERY reason at once (paid | active | attended) so clearing one does not walk into the next. A paid invoice is never deletable and there is no confirm flag to force it — cancel it instead via edit_invoice, which closes it and keeps the club's record of the money. An 'attended' blocker is cleared by moving those check-ins to another membership, which is a manager-screen action and not available through this API.",
+      params: [{ name: "id", required: true, description: "Invoice (membership) UUID." }],
     },
     {
       name: "file_waiver",

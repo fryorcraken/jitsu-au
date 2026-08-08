@@ -14,6 +14,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ZodError } from "zod";
 import {
+  createInvoiceSchema,
+  deleteInvoiceSchema,
   editInvoiceSchema,
   deleteKbSectionSchema,
   getKbArticleSchema,
@@ -21,6 +23,7 @@ import {
   listAgentUsersSchema,
   listKbCommentsSchema,
   managerAgentActions,
+  membershipDeleteMessage,
   nameWithPreferred,
   paperWaiverUploadSchema,
   savePlanSchema,
@@ -69,7 +72,13 @@ import {
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
 import { filePaperWaiver } from "@/lib/waiver.functions";
-import { listMembershipPlanRows, saveMembershipPlanRow } from "@/lib/membership.functions";
+import {
+  createMembershipForUser,
+  deleteMembershipRow,
+  listMembershipPlanRows,
+  saveMembershipPlanRow,
+  syncMemberRole,
+} from "@/lib/membership.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
@@ -493,6 +502,14 @@ async function handleEditInvoice(params: unknown, actingAs: string) {
     );
   }
 
+  // Closing an invoice can be the moment somebody stops being a member, so the
+  // `member` label has to catch up here exactly as it does on the manager
+  // screen's cancel. Access itself is gated live by `has_active_paid_membership`
+  // and has already closed; this is the label, which used to be granted and
+  // never taken back. Failures are logged inside, never thrown: the edit has
+  // committed, and a throw would invite a retry of a write that already landed.
+  if (diff.changed.includes("status")) await syncMemberRole(db, updated.user_id);
+
   // This read must NOT throw: the update above has already committed, so
   // failing now would report a successful edit as an error and invite the
   // agent to retry it. It only decorates the echoed invoice, so log and
@@ -606,6 +623,55 @@ function projectAgentMembershipPlan(p: MembershipPlanRow) {
     starts_on: p.starts_on,
     ends_on: p.ends_on,
   };
+}
+
+// ---- action: create_membership ----
+//
+// The whole action is `createMembershipForUser`, which is also what the manager
+// screen posts to, so an agent and a manager raise an invoice through the exact
+// same write and get the same refusals.
+async function handleCreateMembership(params: unknown) {
+  const input = createInvoiceSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await createMembershipForUser(db, input);
+  } catch (e) {
+    // The two refusals a caller can act on — an unknown plan code, and the free
+    // trial already being used — are the caller's mistakes, not server faults,
+    // and a 500 would tell them to retry something that can never succeed.
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.startsWith("No plan with the code"))
+      throw new AgentError(404, "plan_not_found", message);
+    if (message.includes("free trial")) throw new AgentError(409, "trial_already_used", message);
+    throw e;
+  }
+}
+
+// ---- action: delete_invoice ----
+async function handleDeleteInvoice(params: unknown) {
+  const input = deleteInvoiceSchema.parse(params);
+  const db = await adminClient();
+
+  let result: Awaited<ReturnType<typeof deleteMembershipRow>>;
+  try {
+    result = await deleteMembershipRow(db, input.id);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message === "Membership not found.")
+      throw new AgentError(404, "not_found", "Invoice not found.");
+    throw e;
+  }
+
+  if (!result.ok) {
+    // Every blocker, not the first: an agent that fixes one and retries into the
+    // next has burned two calls to learn what one could have told it. `paid` is
+    // in here precisely so a caller can tell "do something else first" from
+    // "this will never be deletable".
+    throw new AgentError(409, "invoice_not_deletable", membershipDeleteMessage(result.blockers), {
+      blockers: result.blockers,
+    });
+  }
+  return { deleted: true as const, id: result.id };
 }
 
 // ---- action: list_membership_plans ----
@@ -827,8 +893,12 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleListUsers(params);
     case "list_invoices":
       return handleListInvoices(params);
+    case "create_membership":
+      return handleCreateMembership(params);
     case "edit_invoice":
       return handleEditInvoice(params, actingAs);
+    case "delete_invoice":
+      return handleDeleteInvoice(params);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
     case "list_membership_plans":

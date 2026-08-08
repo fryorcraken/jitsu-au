@@ -21,6 +21,7 @@ import {
   checkInBoardSchema,
   checkInSchema,
   nameWithPreferred,
+  transferCheckInSchema,
   undoCheckInSchema,
 } from "@/lib/validation";
 import type { CheckInWarning } from "@/lib/validation";
@@ -604,6 +605,82 @@ export const attachCheckInCoverage = createServerFn({ method: "POST" })
       throw new Error(
         "That check-in is already covered. Undo it first to change what paid for it.",
       );
+
+    const { data: event } = await admin
+      .from("calendar_events")
+      .select("starts_at")
+      .eq("id", row.event_id)
+      .maybeSingle();
+
+    const decision = await applyCoverage(admin, {
+      checkInId: row.id,
+      userId: row.user_id,
+      at: event?.starts_at ?? row.checked_in_at,
+      onlyMembershipId: data.membership_id,
+    });
+    return { decision };
+  });
+
+/**
+ * Move an already-covered check-in onto a different membership.
+ *
+ * `attachCheckInCoverage` above handles the uncovered row; this handles the one
+ * that is covered by the wrong membership. Until now the only way to correct
+ * that was to undo the check-in and record it again, which deletes the row and
+ * loses `checked_in_at` — the record of when they were actually on the mat.
+ *
+ * The order is the same guard `undoCheckInRow` uses, for the same reason:
+ * RELEASE the check-in first, with a compare-and-swap against the coverage it
+ * had, and only refund once that update is ours. Exactly one caller can win the
+ * release, so exactly one refund is ever attempted. Refunding first would let
+ * two managers moving the same check-in hand back two credits for one class.
+ *
+ * Once released the row is genuinely uncovered, so the move finishes through
+ * `applyCoverage` — the same code the door and the attach path run, which means
+ * a target that cannot actually cover the class (wrong dates, no credits left)
+ * lands it uncovered and warns, rather than being force-fitted. The old
+ * membership has its credit back either way, which is the honest outcome: the
+ * manager asked to take the class off it.
+ */
+export const transferCheckInCoverage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => transferCheckInSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const ctx = context as { supabase: CheckinClient; userId: string };
+    await requireManager(ctx);
+    const admin = await adminClient();
+
+    const { data: row, error } = await admin
+      .from("session_checkins")
+      .select(
+        "id, user_id, event_id, coverage, membership_id, consumed_credit, closed_membership, checked_in_at",
+      )
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("That check-in no longer exists.");
+    if (row.coverage === "none")
+      throw new Error("That check-in is not covered by anything yet, so attach it instead.");
+    if (row.membership_id === data.membership_id)
+      throw new Error("That check-in is already on that membership.");
+
+    // The claim. Losing it means another manager is already moving this row.
+    const { data: released, error: relErr } = await admin
+      .from("session_checkins")
+      .update({
+        coverage: "none",
+        membership_id: null,
+        consumed_credit: false,
+        closed_membership: false,
+      })
+      .eq("id", row.id)
+      .eq("coverage", row.coverage)
+      .select("id");
+    if (relErr) throw new Error(relErr.message);
+    if ((released ?? []).length === 0)
+      throw new Error("Someone else moved that check-in first. Reload to see where it landed.");
+
+    await refundCheckInCredit(admin, row);
 
     const { data: event } = await admin
       .from("calendar_events")

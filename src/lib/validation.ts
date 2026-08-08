@@ -887,6 +887,72 @@ export type LifecycleStatus = (typeof lifecycleStatuses)[number];
 export const membershipStatuses = ["pending", "active", "expired", "cancelled"] as const;
 export type MembershipStatus = (typeof membershipStatuses)[number];
 
+/**
+ * Why a membership may not be deleted outright.
+ *
+ * Deleting is for tidying up something that should never have existed: a junk
+ * invoice, or someone who said they would join and never paid. Three things mean
+ * a row is a record of something that really happened, and a record is cancelled
+ * rather than erased.
+ */
+export const membershipDeleteBlockers = ["paid", "active", "attended"] as const;
+export type MembershipDeleteBlocker = (typeof membershipDeleteBlockers)[number];
+
+/** Why each blocker stops the delete, in the manager's terms. */
+export const MEMBERSHIP_DELETE_REASONS: Record<MembershipDeleteBlocker, string> = {
+  paid: "a payment is recorded against it",
+  active: "it is still active",
+  attended: "a class was checked in against it",
+};
+
+/**
+ * Everything standing between this membership and deletion, all at once.
+ *
+ * All of them, never the first one found: a manager who clears one blocker only
+ * to be refused by the next has been sent round the loop for nothing, and the
+ * whole point of the delete guard is that it is obvious what to do instead.
+ */
+export function whyMembershipCannotBeDeleted(membership: {
+  paid_at: string | null;
+  status: string;
+  checkin_count: number;
+}): MembershipDeleteBlocker[] {
+  const blockers: MembershipDeleteBlocker[] = [];
+  if (membership.paid_at) blockers.push("paid");
+  if (membership.status === "active") blockers.push("active");
+  if (membership.checkin_count > 0) blockers.push("attended");
+  return blockers;
+}
+
+/**
+ * The refusal a manager (or an agent) reads. Empty blockers means deletable.
+ *
+ * `paid` is the one blocker a manager cannot clear, so it decides the advice on
+ * its own: there is no sequence of steps that ends in this row being deleted,
+ * and sending someone off to move check-ins first would be a wasted trip.
+ * Everything else is a to-do list, in the order it has to happen.
+ */
+export function membershipDeleteMessage(blockers: readonly MembershipDeleteBlocker[]): string {
+  if (!blockers.length) return "";
+  const reasons = blockers.map((b) => MEMBERSHIP_DELETE_REASONS[b]);
+  const listed =
+    reasons.length === 1
+      ? reasons[0]
+      : `${reasons.slice(0, -1).join(", ")} and ${reasons[reasons.length - 1]}`;
+
+  let advice: string;
+  if (blockers.includes("paid")) {
+    advice = "Cancel it instead. That closes it and keeps the club's record of the money.";
+  } else {
+    const steps = [
+      blockers.includes("attended") ? "move those check-ins to another membership" : null,
+      blockers.includes("active") ? "cancel it" : null,
+    ].filter((s): s is string => s !== null);
+    advice = `To delete it, ${steps.join(", then ")} first.`;
+  }
+  return `This membership cannot be deleted because ${listed}. ${advice}`;
+}
+
 type PlanPricing = { public_price_cents: number; student_price_cents: number | null };
 
 /**
@@ -1627,6 +1693,35 @@ export const setMembershipStatusSchema = z.object({
 });
 export type SetMembershipStatusInput = z.infer<typeof setMembershipStatusSchema>;
 
+// ---- Manager: delete a membership ----
+
+export const deleteMembershipSchema = z.object({ id: z.string().uuid() });
+export type DeleteMembershipInput = z.infer<typeof deleteMembershipSchema>;
+
+// ---- Manager: raise a membership for somebody ----
+//
+// The manager's counterpart to `startMembershipSchema`. Two fields differ, and
+// both are the difference between buying for yourself and recording an
+// enrolment for someone else: `user_id` names who it is for, and `send_email`
+// can be turned off so a backfill of something already settled does not invoice
+// anyone. `include_insurance` is here for the same reason it is on the member
+// schema, but a manager's answer is final — the server refuses a member who
+// unticks it and has no cover, and does not refuse a manager.
+
+export const createMembershipSchema = z.object({
+  user_id: z.string().uuid(),
+  plan_code: z.string().trim().min(1).max(64),
+  uts_student_number: z.string().trim().max(32).nullable().optional(),
+  session_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  include_insurance: z.boolean().optional().default(false),
+  send_email: z.boolean().optional().default(true),
+});
+export type CreateMembershipInput = z.infer<typeof createMembershipSchema>;
+
 // ---- Manager: import a bank statement ----
 
 export const bankTxnRowSchema = z.object({
@@ -1662,7 +1757,9 @@ export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 export const managerAgentActions = [
   "list_users",
   "list_invoices",
+  "create_membership",
   "edit_invoice",
+  "delete_invoice",
   "file_waiver",
   "list_membership_plans",
   "save_membership_plan",
@@ -1718,6 +1815,23 @@ export const editInvoiceSchema = z
     { message: "Provide at least one invoice field to edit." },
   );
 export type EditInvoiceInput = z.infer<typeof editInvoiceSchema>;
+
+/**
+ * `delete_invoice` params. Deliberately just the id: unlike `edit_invoice`'s
+ * paid guard there is no `confirm` to override with, because the three things
+ * that block a delete (see `whyMembershipCannotBeDeleted`) are not a caller's
+ * judgement call. A paid invoice is cancelled, never erased.
+ */
+export const deleteInvoiceSchema = z.object({ id: z.string().uuid() }).strict();
+export type DeleteInvoiceInput = z.infer<typeof deleteInvoiceSchema>;
+
+/**
+ * `create_membership` params. Same shape the manager screen posts, minus
+ * nothing: an agent raising somebody's invoice must be able to say what a
+ * manager can say, including leaving the email off for a backfill.
+ */
+export const createInvoiceSchema = createMembershipSchema.strict();
+export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
 
 /** `list_users` params — optional lifecycle filter + result cap. */
 export const listAgentUsersSchema = z.object({
@@ -1976,6 +2090,21 @@ export const attachCheckInSchema = z.object({
   membership_id: z.string().uuid().optional(),
 });
 export type AttachCheckInInput = z.infer<typeof attachCheckInSchema>;
+
+/**
+ * Manager: move an already-covered check-in onto a different membership.
+ *
+ * The sibling of `attachCheckInSchema`, for the row that is not uncovered. Here
+ * `membership_id` is required rather than optional: re-running the door's own
+ * precedence rules would just pick the same membership again, so the only
+ * reason to move a check-in is that a manager has one specific membership in
+ * mind. It is what clears a membership of the classes blocking its deletion.
+ */
+export const transferCheckInSchema = z.object({
+  id: z.string().uuid(),
+  membership_id: z.string().uuid(),
+});
+export type TransferCheckInInput = z.infer<typeof transferCheckInSchema>;
 
 /**
  * Parse a "$245", "245", "20.50" or "2,450.00" money string into integer cents.
