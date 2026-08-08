@@ -225,22 +225,35 @@ describe("/waiver missing fields", () => {
 
   // The jump can leave the summary scrolled off screen, and a red border is a
   // colour: whoever lands on the field has to be able to read why they are here.
-  it("gives every flagged field a message of its own, tied to the field", async () => {
+  // Tied to the control, not merely rendered near it, or a screen reader
+  // announces an invalid field and nothing about what it wants. This has to
+  // hold for the controls the browser could never have checked too, which is
+  // exactly where an earlier version of this only rendered the text.
+  it("gives every flagged control a message of its own, tied to the control", async () => {
     const user = userEvent.setup();
     renderWaiver();
     await screen.findByLabelText("First name");
 
     await user.click(screen.getByRole("button", { name: /Sign and download waiver/i }));
 
-    const firstName = await screen.findByLabelText("First name");
-    await waitFor(() => expect(firstName).toHaveAccessibleDescription("Please fill this in."));
-    expect(document.getElementById("drugs_yes_needed")).toHaveTextContent("Answer yes or no.");
-    expect(document.getElementById("signature_field_needed")).toHaveTextContent(
-      "Draw it or type your full name.",
+    await waitFor(() =>
+      expect(screen.getByLabelText("First name")).toHaveAccessibleDescription(
+        "Please fill this in.",
+      ),
     );
-    expect(document.getElementById(`${ackAnchorId("risk")}_needed`)).toHaveTextContent(
-      "Please read this and tick it.",
-    );
+    // A radio group, a checkbox and the signature pad's wrapper, none of which
+    // are inputs, and the last of which is what focus lands on while drawing.
+    expect(
+      screen.getByRole("radiogroup", { name: /prescribed any drugs/i }),
+    ).toHaveAccessibleDescription("Answer yes or no.");
+    expect(
+      screen.getByRole("checkbox", { name: /I accept the risks of training/i }),
+    ).toHaveAccessibleDescription("Please read this and tick it.");
+    const pad = screen.getByRole("group", { name: "Your signature" });
+    expect(pad).toHaveAccessibleDescription("Draw it or type your full name.");
+    expect(pad).toHaveAttribute("aria-invalid", "true");
+    // And the ids the messages carry are the ones the controls point at.
+    expect(document.getElementById(`${ackAnchorId("risk")}_needed`)).toBeInTheDocument();
   });
 
   it("explains a malformed email on the field as well as in the summary", async () => {

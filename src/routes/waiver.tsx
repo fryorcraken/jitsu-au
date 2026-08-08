@@ -488,13 +488,19 @@ function Waiver() {
   /** The id its message carries, so the control can point at it. */
   const messageId = (anchorId: string) => `${anchorId}_needed`;
   /**
-   * How a flagged input looks and reads. The summary can be scrolled off screen
-   * by the jump itself, so the field they land on has to say for itself that it
-   * is the one being asked for.
+   * What a flagged control has to say about itself, whatever kind of control it
+   * is. The jump is the point: focus lands on the field with the summary
+   * possibly scrolled away, so the control has to carry both the state and the
+   * sentence, or a screen reader announces an invalid field and nothing about
+   * what it wants. Every flagged control gets these, not just the text inputs.
    */
-  const fieldProps = (anchorId: string) => ({
+  const flaggedProps = (anchorId: string) => ({
     "aria-invalid": flagged(anchorId) || undefined,
     "aria-describedby": flagged(anchorId) ? messageId(anchorId) : undefined,
+  });
+  /** The same, plus how a flagged input looks. */
+  const fieldProps = (anchorId: string) => ({
+    ...flaggedProps(anchorId),
     className: cn(
       "mt-1.5",
       flagged(anchorId) && "border-destructive focus-visible:ring-destructive",
@@ -1072,7 +1078,7 @@ function Waiver() {
                   <RadioGroup
                     className="flex gap-6"
                     aria-label={q.question}
-                    aria-invalid={flagged(`${q.id}_yes`) || undefined}
+                    {...flaggedProps(`${q.id}_yes`)}
                     value={health[q.id] === null ? "" : health[q.id] ? "yes" : "no"}
                     onValueChange={(v) => setHealth((prev) => ({ ...prev, [q.id]: v === "yes" }))}
                   >
@@ -1124,7 +1130,7 @@ function Waiver() {
                       <Checkbox
                         id={ackAnchorId(ack.id)}
                         checked={acks[ack.id] === true}
-                        aria-invalid={flagged(ackAnchorId(ack.id)) || undefined}
+                        {...flaggedProps(ackAnchorId(ack.id))}
                         onCheckedChange={(v) =>
                           setAcks((prev) => ({ ...prev, [ack.id]: v === true }))
                         }
@@ -1201,6 +1207,9 @@ function Waiver() {
               <div
                 id={WAIVER_ANCHORS.signaturePad}
                 tabIndex={-1}
+                role="group"
+                aria-label="Your signature"
+                {...flaggedProps(WAIVER_ANCHORS.signaturePad)}
                 className={cn(
                   "rounded-lg outline-none",
                   flagged(WAIVER_ANCHORS.signaturePad) && "border border-destructive p-3",
@@ -1259,6 +1268,9 @@ function Waiver() {
                   <div
                     id={WAIVER_ANCHORS.guardianPad}
                     tabIndex={-1}
+                    role="group"
+                    aria-label="Parent or guardian signature"
+                    {...flaggedProps(WAIVER_ANCHORS.guardianPad)}
                     className={cn(
                       "rounded-lg outline-none",
                       flagged(WAIVER_ANCHORS.guardianPad) && "border border-destructive p-3",
