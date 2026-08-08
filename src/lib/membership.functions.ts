@@ -457,6 +457,292 @@ export const getMyMemberships = createServerFn({ method: "GET" })
     };
   });
 
+/**
+ * Has this person already had the trial plan they are asking for?
+ *
+ * Throws rather than degrading: a failed query and "they have not had a trial"
+ * are different answers, and only the second one may hand out a free trial.
+ * The refusal wording is the caller's, because the two callers speak to
+ * different people — a member is told about their own trial, a manager about
+ * somebody else's.
+ */
+async function hasUsedTrial(
+  admin: MembershipClient,
+  userId: string,
+  planId: string,
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from("memberships")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("plan_id", planId)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return Boolean(data);
+}
+
+/**
+ * The club's insurance position for one person buying one plan: which plan sells
+ * yearly cover, and how long their current cover still runs.
+ *
+ * Split out from the enrolment itself because the two callers make opposite
+ * decisions with the same facts. A member buying for themselves may not train
+ * uninsured, so `startMembership` refuses when cover is missing and the box is
+ * unticked. A manager recording somebody's enrolment may be writing down history
+ * that really did happen without cover, so they get the same default and are
+ * allowed to override it.
+ *
+ * A trial or the insurance plan itself never bundles, and a club with no
+ * insurance plan in the catalogue has nothing to enforce — both answer
+ * "no plan, no cover to consider".
+ */
+export async function resolveInsuranceCover(
+  admin: MembershipClient,
+  userId: string,
+  plan: MembershipPlanRow,
+): Promise<{ insurancePlan: MembershipPlanRow | null; coverEndsAt: string | null }> {
+  if (plan.kind === "trial" || plan.kind === "insurance")
+    return { insurancePlan: null, coverEndsAt: null };
+
+  const { data: insPlans, error: ipErr } = await admin
+    .from("membership_plans")
+    .select("*")
+    .eq("kind", "insurance");
+  if (ipErr) throw new Error(ipErr.message);
+  const insurancePlanIds = new Set((insPlans ?? []).map((p) => p.id));
+  const insurancePlan =
+    (insPlans ?? []).filter((p) => p.is_active).sort((a, b) => a.sort_order - b.sort_order)[0] ??
+    null;
+
+  if (insurancePlanIds.size === 0) return { insurancePlan, coverEndsAt: null };
+
+  // Cover they already hold: an ACTIVE insurance membership whose ends_at is
+  // still ahead. A pending insurance invoice is a promise, not cover, and stays
+  // out.
+  const { data: coverRows, error: covErr } = await admin
+    .from("memberships")
+    .select("ends_at")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .in("plan_id", [...insurancePlanIds]);
+  if (covErr) throw new Error(covErr.message);
+  const nowIso = new Date().toISOString();
+  const coverEndsAt =
+    (coverRows ?? [])
+      .map((r) => r.ends_at)
+      .filter((e): e is string => e != null && e > nowIso)
+      .sort()
+      .pop() ?? null;
+
+  return { insurancePlan, coverEndsAt };
+}
+
+/**
+ * Raise somebody's invoice for a plan and, if asked, bundle yearly insurance
+ * onto the same payment reference.
+ *
+ * Everything mechanical about enrolment lives here: pricing, the bank-safe
+ * reference, reusing an unpaid invoice instead of raising a second one, and the
+ * payment email. What it deliberately does NOT decide is whether this person is
+ * allowed to buy this plan — that is policy, and it differs by who is asking.
+ * The caller resolves the plan and settles the policy first, then hands the
+ * answers in.
+ *
+ * `insurancePlan` non-null is the instruction to bundle: one transfer, one
+ * reference, two invoices that reconcile together.
+ */
+export async function enrolMember(
+  admin: MembershipClient,
+  input: {
+    userId: string;
+    plan: MembershipPlanRow;
+    utsStudentNumber: string | null;
+    /** The casual class this is for; ignored by every other plan kind. */
+    sessionDate?: string | null;
+    insurancePlan: MembershipPlanRow | null;
+    /** False records the invoice without telling them about it. */
+    sendEmail?: boolean;
+  },
+): Promise<{ ok: true; activated: boolean; reference: string | null }> {
+  const { userId, plan, insurancePlan } = input;
+
+  // Student status is derived server-side from the number's presence, so the
+  // number is the single source of truth: a non-empty UTS student number gets
+  // the student rate. The client's is_student flag is not trusted for pricing.
+  const utsStudentNumber = input.utsStudentNumber?.trim() || null;
+  const isStudent = isUtsStudent(utsStudentNumber);
+  const price = computeMembershipPrice(plan, isStudent);
+
+  // Resolve the name once: the surname drives the human-friendly reference, and
+  // the full name is used in emails. Falls back gracefully when they have not
+  // signed a waiver yet.
+  // Throws rather than falling back to an empty surname: this reference is
+  // written onto the invoice and is what the member quotes on their transfer and
+  // the manager reads off the bank statement. A degraded read would mint a
+  // permanently nameless reference on a real invoice, where retrying costs one
+  // more click.
+  const { data: who, error: whoErr } = await admin
+    .from("profiles")
+    .select("first_name, middle_name, last_name, preferred_name")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (whoErr) throw new Error(whoErr.message);
+  const surname = who?.last_name || who?.first_name || "";
+
+  // Per-session plans carry a session date (defaults to today) so each drop-in
+  // payment reconciles to its own session; other plan kinds have no date.
+  const sessionDate =
+    plan.kind === "session" ? input.sessionDate || new Date().toISOString().slice(0, 10) : null;
+
+  // Stable, bank-safe reference derived from the member (see buildPaymentReference).
+  const reference = buildPaymentReference(
+    surname,
+    userId,
+    sessionDate || undefined,
+    plan.starts_on ?? undefined,
+  );
+
+  // Idempotency: reuse an existing pending enrollment for the same plan (and
+  // session, for casual) rather than creating duplicate rows / re-notifying on
+  // a repeated "Choose". A dated plan needs no extra filter here any more: a
+  // different window IS a different plan_id now, so filtering on plan_id
+  // alone already tells "Semester 2 2026" and "Semester 1 2027" apart. The
+  // email send below is also idempotency-keyed.
+  const pendingBase = admin
+    .from("memberships")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("plan_id", plan.id)
+    .eq("status", "pending");
+  // A failed read here defeats exactly what the reuse is for: it would report
+  // no pending enrollment, insert a duplicate invoice and re-send the payment
+  // email for one the member already has.
+  const { data: existingPending, error: pendErr } = await (
+    sessionDate ? pendingBase.eq("session_date", sessionDate) : pendingBase
+  )
+    .limit(1)
+    .maybeSingle();
+  if (pendErr) throw new Error(pendErr.message);
+
+  let inserted: MembershipRow;
+  if (existingPending) {
+    inserted = existingPending;
+  } else {
+    const insert = {
+      user_id: userId,
+      plan_id: plan.id,
+      status: "pending",
+      is_student: isStudent,
+      uts_student_number: utsStudentNumber,
+      price_cents: price,
+      payment_reference: reference,
+      payment_method: "bank_transfer",
+      session_date: sessionDate,
+    };
+    const { data: row, error: insErr } = await admin
+      .from("memberships")
+      .insert(insert)
+      .select("*")
+      .single();
+    if (insErr || !row) throw new Error(insErr?.message || "Could not create membership.");
+    inserted = row;
+  }
+
+  // The bundled insurance invoice rides on the SAME payment reference as the
+  // plan invoice, so a member with no cover pays one transfer for both and
+  // reconciliation activates them together. A pending insurance invoice from
+  // an earlier attempt is reused with its reference and price refreshed to
+  // this purchase — an unpaid row holds no decisions to preserve.
+  let insuranceInvoice: MembershipRow | null = null;
+  if (insurancePlan) {
+    const insurancePrice = computeMembershipPrice(insurancePlan, isStudent);
+    const { data: existingIns, error: eiErr } = await admin
+      .from("memberships")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("plan_id", insurancePlan.id)
+      .eq("status", "pending")
+      .limit(1)
+      .maybeSingle();
+    if (eiErr) throw new Error(eiErr.message);
+    if (existingIns) {
+      const { data: updated, error: uErr } = await admin
+        .from("memberships")
+        .update({
+          payment_reference: inserted.payment_reference,
+          price_cents: insurancePrice,
+          is_student: isStudent,
+          uts_student_number: utsStudentNumber,
+        })
+        .eq("id", existingIns.id)
+        .select("*")
+        .single();
+      if (uErr || !updated) throw new Error(uErr?.message || "Could not create membership.");
+      insuranceInvoice = updated;
+    } else {
+      const { data: row, error: insErr } = await admin
+        .from("memberships")
+        .insert({
+          user_id: userId,
+          plan_id: insurancePlan.id,
+          status: "pending",
+          is_student: isStudent,
+          uts_student_number: utsStudentNumber,
+          price_cents: insurancePrice,
+          payment_reference: inserted.payment_reference,
+          payment_method: "bank_transfer",
+          session_date: null,
+        })
+        .select("*")
+        .single();
+      if (insErr || !row) throw new Error(insErr?.message || "Could not create membership.");
+      insuranceInvoice = row;
+    }
+  }
+
+  // Free plans (the trial) activate immediately; paid plans await a transfer.
+  if (price === 0) {
+    await activateMembershipRow(admin, inserted, plan, { paymentMethod: "manual" });
+    if (!insuranceInvoice) {
+      return { ok: true as const, activated: true, reference: null as string | null };
+    }
+  }
+
+  // Email the member their bank-transfer instructions + notify managers. A
+  // bundle gets ONE email with the combined amount and both plan names — the
+  // member does not care that it lands as two invoices on our side.
+  if (input.sendEmail !== false) {
+    try {
+      const emails = await emailsByUserId(admin, [userId]);
+      const email = emails.get(userId) ?? null;
+      if (email) {
+        const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
+        const planName = insuranceInvoice ? `${plan.name} + ${insurancePlan!.name}` : plan.name;
+        const { sendMembershipPaymentEmail } = await import("./membership-email.server");
+        await sendMembershipPaymentEmail({
+          membershipId: inserted.id,
+          memberName: who ? profileFullName(who) : "",
+          memberGreetingName: who ? greetingName(who) : "",
+          memberEmail: email,
+          planName,
+          amount: formatCents(totalCents),
+          reference: inserted.payment_reference,
+          admin,
+        });
+      }
+    } catch (e) {
+      console.error("[enrolMember] failed to send payment email:", e);
+    }
+  }
+
+  return {
+    ok: true as const,
+    activated: price === 0,
+    reference: inserted.payment_reference,
+  };
+}
+
 // ---- Member: start a membership ----
 export const startMembership = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -477,252 +763,33 @@ export const startMembership = createServerFn({ method: "POST" })
     if (!plan || !sellablePlans([plan], new Date().toISOString()).length)
       throw new Error("That plan is not currently available. Refresh the page and try again.");
 
-    // One free trial per member.
-    //
-    // The read throws rather than degrading, for the same reason the guard in
-    // assignTrialMembership does: a failed query and "they have not had a trial"
-    // are different answers, and only the second one may hand out a trial. This
-    // is the member-driven half of that pair, so a swallowed error here is the
-    // easier one to hit — the member can keep pressing until a read fails.
-    if (plan.kind === "trial") {
-      const { data: existing, error: exErr } = await admin
-        .from("memberships")
-        .select("id")
-        .eq("user_id", context.userId)
-        .eq("plan_id", plan.id)
-        .limit(1)
-        .maybeSingle();
-      if (exErr) throw new Error(exErr.message);
-      if (existing) throw new Error("You've already started your free trial.");
-    }
-
-    // Student status is derived server-side from the number's presence, so the
-    // number is the single source of truth: a non-empty UTS student number gets
-    // the student rate. The client's is_student flag is not trusted for pricing.
-    const utsStudentNumber = data.uts_student_number?.trim() || null;
-    const isStudent = isUtsStudent(utsStudentNumber);
-    const price = computeMembershipPrice(plan, isStudent);
+    // One free trial per member. This is the member-driven half of the pair with
+    // `assignTrialMembership`, so it is the easier one to hit: the member can
+    // keep pressing until a read fails.
+    if (plan.kind === "trial" && (await hasUsedTrial(admin, context.userId, plan.id)))
+      throw new Error("You've already started your free trial.");
 
     // ---- Yearly insurance: required cover bundled into the purchase ----
     //
-    // Every paid training product (session or period) needs current insurance
-    // cover. A member whose cover is ongoing may buy without adding it; a
-    // member with none gets it bundled as a second invoice on the same
-    // payment reference, so one transfer pays for both. The trial (free) and
-    // insurance itself never bundle. If the club has no insurance plan in the
-    // catalogue there is nothing to enforce, so the check drops away.
-    let insurancePlan: MembershipPlanRow | null = null;
-    let addInsurance = false;
-    if (plan.kind !== "trial" && plan.kind !== "insurance") {
-      const { data: insPlans, error: ipErr } = await admin
-        .from("membership_plans")
-        .select("*")
-        .eq("kind", "insurance");
-      if (ipErr) throw new Error(ipErr.message);
-      const insurancePlanIds = new Set((insPlans ?? []).map((p) => p.id));
-      insurancePlan =
-        (insPlans ?? [])
-          .filter((p) => p.is_active)
-          .sort((a, b) => a.sort_order - b.sort_order)[0] ?? null;
-
-      let coverEndsAt: string | null = null;
-      if (insurancePlanIds.size > 0) {
-        // Cover the member already holds: an ACTIVE insurance membership whose
-        // ends_at is still ahead. A pending insurance invoice is a promise,
-        // not cover, and stays out.
-        const { data: coverRows, error: covErr } = await admin
-          .from("memberships")
-          .select("ends_at")
-          .eq("user_id", context.userId)
-          .eq("status", "active")
-          .in("plan_id", [...insurancePlanIds]);
-        if (covErr) throw new Error(covErr.message);
-        const nowIso = new Date().toISOString();
-        coverEndsAt =
-          (coverRows ?? [])
-            .map((r) => r.ends_at)
-            .filter((e): e is string => e != null && e > nowIso)
-            .sort()
-            .pop() ?? null;
-      }
-
-      // Refusing is the insurance plan existing plus cover missing plus the
-      // caller opting out: all three. A club with no insurance plan never
-      // blocks a purchase here, and `include_insurance` from a covered member
-      // is their own choice to renew early.
-      if (insurancePlan && !coverEndsAt && !data.include_insurance) {
-        throw new Error(
-          "Yearly insurance is required to train with us. Keep it selected and choose the plan again.",
-        );
-      }
-      addInsurance = Boolean(insurancePlan && (data.include_insurance || !coverEndsAt));
+    // Refusing is the insurance plan existing plus cover missing plus the
+    // caller opting out: all three. A club with no insurance plan never blocks a
+    // purchase here, and `include_insurance` from a covered member is their own
+    // choice to renew early.
+    const { insurancePlan, coverEndsAt } = await resolveInsuranceCover(admin, context.userId, plan);
+    if (insurancePlan && !coverEndsAt && !data.include_insurance) {
+      throw new Error(
+        "Yearly insurance is required to train with us. Keep it selected and choose the plan again.",
+      );
     }
 
-    // Resolve the member's name once: the surname drives the human-friendly
-    // reference, and the full name is used in emails. Falls back gracefully when
-    // the member has not signed a waiver yet.
-    // Throws rather than falling back to an empty surname: this reference is
-    // written onto the invoice and is what the member quotes on their transfer
-    // and the manager reads off the bank statement. A degraded read would mint a
-    // permanently nameless reference on a real invoice, where retrying costs the
-    // member one more click.
-    const { data: who, error: whoErr } = await admin
-      .from("profiles")
-      .select("first_name, middle_name, last_name, preferred_name")
-      .eq("user_id", context.userId)
-      .maybeSingle();
-    if (whoErr) throw new Error(whoErr.message);
-    const surname = who?.last_name || who?.first_name || "";
-
-    // Per-session plans carry a session date (defaults to today) so each drop-in
-    // payment reconciles to its own session; other plan kinds have no date.
-    const sessionDate =
-      plan.kind === "session" ? data.session_date || new Date().toISOString().slice(0, 10) : null;
-
-    // Stable, bank-safe reference derived from the member (see buildPaymentReference).
-    const reference = buildPaymentReference(
-      surname,
-      context.userId,
-      sessionDate || undefined,
-      plan.starts_on ?? undefined,
-    );
-
-    // Idempotency: reuse an existing pending enrollment for the same plan (and
-    // session, for casual) rather than creating duplicate rows / re-notifying on
-    // a repeated "Choose". A dated plan needs no extra filter here any more: a
-    // different window IS a different plan_id now, so filtering on plan_id
-    // alone already tells "Semester 2 2026" and "Semester 1 2027" apart. The
-    // email send below is also idempotency-keyed.
-    const pendingBase = admin
-      .from("memberships")
-      .select("*")
-      .eq("user_id", context.userId)
-      .eq("plan_id", plan.id)
-      .eq("status", "pending");
-    // A failed read here defeats exactly what the reuse is for: it would report
-    // no pending enrollment, insert a duplicate invoice and re-send the payment
-    // email for one the member already has.
-    const { data: existingPending, error: pendErr } = await (
-      sessionDate ? pendingBase.eq("session_date", sessionDate) : pendingBase
-    )
-      .limit(1)
-      .maybeSingle();
-    if (pendErr) throw new Error(pendErr.message);
-
-    let inserted: MembershipRow;
-    if (existingPending) {
-      inserted = existingPending;
-    } else {
-      const insert = {
-        user_id: context.userId,
-        plan_id: plan.id,
-        status: "pending",
-        is_student: isStudent,
-        uts_student_number: utsStudentNumber,
-        price_cents: price,
-        payment_reference: reference,
-        payment_method: "bank_transfer",
-        session_date: sessionDate,
-      };
-      const { data: row, error: insErr } = await admin
-        .from("memberships")
-        .insert(insert)
-        .select("*")
-        .single();
-      if (insErr || !row) throw new Error(insErr?.message || "Could not create membership.");
-      inserted = row;
-    }
-
-    // The bundled insurance invoice rides on the SAME payment reference as the
-    // plan invoice, so a member with no cover pays one transfer for both and
-    // reconciliation activates them together. A pending insurance invoice from
-    // an earlier attempt is reused with its reference and price refreshed to
-    // this purchase — an unpaid row holds no decisions to preserve.
-    let insuranceInvoice: MembershipRow | null = null;
-    if (addInsurance && insurancePlan) {
-      const insurancePrice = computeMembershipPrice(insurancePlan, isStudent);
-      const { data: existingIns, error: eiErr } = await admin
-        .from("memberships")
-        .select("*")
-        .eq("user_id", context.userId)
-        .eq("plan_id", insurancePlan.id)
-        .eq("status", "pending")
-        .limit(1)
-        .maybeSingle();
-      if (eiErr) throw new Error(eiErr.message);
-      if (existingIns) {
-        const { data: updated, error: uErr } = await admin
-          .from("memberships")
-          .update({
-            payment_reference: inserted.payment_reference,
-            price_cents: insurancePrice,
-            is_student: isStudent,
-            uts_student_number: utsStudentNumber,
-          })
-          .eq("id", existingIns.id)
-          .select("*")
-          .single();
-        if (uErr || !updated) throw new Error(uErr?.message || "Could not create membership.");
-        insuranceInvoice = updated;
-      } else {
-        const { data: row, error: insErr } = await admin
-          .from("memberships")
-          .insert({
-            user_id: context.userId,
-            plan_id: insurancePlan.id,
-            status: "pending",
-            is_student: isStudent,
-            uts_student_number: utsStudentNumber,
-            price_cents: insurancePrice,
-            payment_reference: inserted.payment_reference,
-            payment_method: "bank_transfer",
-            session_date: null,
-          })
-          .select("*")
-          .single();
-        if (insErr || !row) throw new Error(insErr?.message || "Could not create membership.");
-        insuranceInvoice = row;
-      }
-    }
-
-    // Free plans (the trial) activate immediately; paid plans await a transfer.
-    if (price === 0) {
-      await activateMembershipRow(admin, inserted, plan, { paymentMethod: "manual" });
-      if (!insuranceInvoice) {
-        return { ok: true as const, activated: true, reference: null as string | null };
-      }
-    }
-
-    // Email the member their bank-transfer instructions + notify managers. A
-    // bundle gets ONE email with the combined amount and both plan names — the
-    // member does not care that it lands as two invoices on our side.
-    try {
-      const emails = await emailsByUserId(admin, [context.userId]);
-      const email = emails.get(context.userId) ?? null;
-      if (email) {
-        const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
-        const planName = insuranceInvoice ? `${plan.name} + ${insurancePlan!.name}` : plan.name;
-        const { sendMembershipPaymentEmail } = await import("./membership-email.server");
-        await sendMembershipPaymentEmail({
-          membershipId: inserted.id,
-          memberName: who ? profileFullName(who) : "",
-          memberGreetingName: who ? greetingName(who) : "",
-          memberEmail: email,
-          planName,
-          amount: formatCents(totalCents),
-          reference: inserted.payment_reference,
-          admin,
-        });
-      }
-    } catch (e) {
-      console.error("[startMembership] failed to send payment email:", e);
-    }
-
-    return {
-      ok: true as const,
-      activated: price === 0,
-      reference: inserted.payment_reference,
-    };
+    return enrolMember(admin, {
+      userId: context.userId,
+      plan,
+      utsStudentNumber: data.uts_student_number ?? null,
+      sessionDate: data.session_date,
+      insurancePlan:
+        insurancePlan && (data.include_insurance || !coverEndsAt) ? insurancePlan : null,
+    });
   });
 
 /**

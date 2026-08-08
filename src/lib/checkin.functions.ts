@@ -658,23 +658,50 @@ export async function undoCheckInRow(
   // Nothing deleted: another manager undid it first. Say so rather than
   // reporting a no-op as a successful removal.
   if (!deleted) return { removed: false, refunded: false };
-  if (!deleted.consumed_credit || !deleted.membership_id) return { removed: true, refunded: false };
+
+  const { refunded, reopened } = await refundCheckInCredit(admin, deleted);
+  return { removed: true, refunded, reopened };
+}
+
+/**
+ * Give back the credit a check-in spent, and reopen the membership if that
+ * check-in is what closed it.
+ *
+ * Takes the check-in's own record of what it took (`consumed_credit`,
+ * `membership_id`, `closed_membership`) rather than re-deciding, because by the
+ * time this runs the check-in has already been released — deleted by an undo, or
+ * detached by a transfer. Only the row's own record still knows what to put back.
+ *
+ * The caller must release the check-in FIRST, and release it with a
+ * compare-and-swap, so that exactly one caller ever reaches here for a given
+ * check-in. Refunding before releasing would let a retry hand out sessions
+ * nobody paid for.
+ */
+export async function refundCheckInCredit(
+  admin: CheckinClient,
+  row: {
+    membership_id: string | null;
+    consumed_credit: boolean | null;
+    closed_membership: boolean | null;
+  },
+): Promise<{ refunded: boolean; reopened?: boolean }> {
+  if (!row.consumed_credit || !row.membership_id) return { refunded: false };
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const { data: m, error: mErr } = await admin
       .from("memberships")
       .select("id, status, sessions_remaining, ends_at")
-      .eq("id", deleted.membership_id)
+      .eq("id", row.membership_id)
       .maybeSingle();
     if (mErr) throw new Error(mErr.message);
     // The membership is gone: nothing to refund, and the check-in is already
-    // removed, so there is nothing left to reconcile.
-    if (!m || m.sessions_remaining === null) return { removed: true, refunded: false };
+    // released, so there is nothing left to reconcile.
+    if (!m || m.sessions_remaining === null) return { refunded: false };
 
     // Reopen only what THIS check-in closed, and only if the end date has not
     // also passed — a membership a manager expired by hand stays expired.
     const stillWithinDates = !m.ends_at || new Date(m.ends_at).getTime() >= Date.now();
-    const reopen = deleted.closed_membership && m.status === "expired" && stillWithinDates;
+    const reopen = Boolean(row.closed_membership) && m.status === "expired" && stillWithinDates;
 
     const { data: updated, error: uErr } = await admin
       .from("memberships")
@@ -686,7 +713,7 @@ export async function undoCheckInRow(
       .eq("sessions_remaining", m.sessions_remaining)
       .select("id");
     if (uErr) throw new Error(uErr.message);
-    if ((updated ?? []).length > 0) return { removed: true, refunded: true, reopened: reopen };
+    if ((updated ?? []).length > 0) return { refunded: true, reopened: reopen };
   }
-  throw new Error("The check-in was removed but the session could not be given back. Try again.");
+  throw new Error("The check-in was released but the session could not be given back. Try again.");
 }
