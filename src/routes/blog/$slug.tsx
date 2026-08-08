@@ -121,7 +121,7 @@ function CommentComposer({
       {remaining <= 200 && (
         <p className="text-xs text-muted-foreground">{remaining} characters left</p>
       )}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button size="sm" disabled={busy || !body.trim()} onClick={handleSubmit}>
           {busy ? "Posting..." : "Post"}
         </Button>

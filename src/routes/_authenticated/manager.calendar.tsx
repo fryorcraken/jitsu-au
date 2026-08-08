@@ -763,7 +763,7 @@ function ManagerCalendarPage() {
                                 />
                                 Show an &quot;invite only&quot; badge
                               </label>
-                              <div className="flex items-end gap-2">
+                              <div className="flex flex-wrap items-end gap-2">
                                 <Button
                                   size="sm"
                                   onClick={() => saveEdit(ev)}

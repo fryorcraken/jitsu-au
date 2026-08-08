@@ -328,7 +328,7 @@ export function BlogPostEditor({
       </div>
       <div>
         <Label htmlFor="post-cover-image">Cover image</Label>
-        <div className="mt-1.5 flex items-center gap-3">
+        <div className="mt-1.5 flex flex-wrap items-center gap-3">
           {coverUrl && (
             <img
               src={coverUrl}
