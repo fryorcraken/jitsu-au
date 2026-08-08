@@ -135,7 +135,7 @@ describe("deriveLifecycleStatus", () => {
 // EVERY blocker, because clearing one and being refused by the next is how a
 // manager ends up deciding the screen is broken.
 describe("whyMembershipCannotBeDeleted", () => {
-  const junk = { paid_at: null, status: "pending", checkin_count: 0 };
+  const junk = { paid_at: null, price_cents: 44500, status: "pending", checkin_count: 0 };
 
   it("lets a pending invoice nobody paid or trained on go", () => {
     expect(whyMembershipCannotBeDeleted(junk)).toEqual([]);
@@ -166,10 +166,38 @@ describe("whyMembershipCannotBeDeleted", () => {
     expect(
       whyMembershipCannotBeDeleted({
         paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 44500,
         status: "active",
         checkin_count: 3,
       }),
     ).toEqual(["paid", "active", "attended"]);
+  });
+
+  // Activation stamps `paid_at` on every membership, the $0 free trial
+  // included — and the trial is auto-assigned at waiver approval, so it is the
+  // likeliest thing a manager ever needs to undo. Reading that stamp as a
+  // payment would make it undeletable and say "a payment is recorded against
+  // it", which is both untrue and a dead end.
+  it("does not treat an activated free trial as paid", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 0,
+        status: "cancelled",
+        checkin_count: 0,
+      }),
+    ).toEqual([]);
+  });
+
+  it("still blocks a free membership somebody actually trained on", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 0,
+        status: "cancelled",
+        checkin_count: 1,
+      }),
+    ).toEqual(["attended"]);
   });
 
   // An expired membership is not automatically safe: it expired BECAUSE its

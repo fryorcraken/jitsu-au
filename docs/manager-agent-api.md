@@ -40,9 +40,11 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   equivalent of the manager screen's "Add a membership" and of a member choosing
   a plan themselves. Dispatches to `createMembershipForUser` in
   `src/lib/membership.functions.ts`, the same function the screen posts to, so
-  an agent-raised invoice and a manager's own are identical. It **never
-  activates**: activation grants the member role and emails the member, so it
-  stays the separate deliberate step it is everywhere else. Two things it can do
+  an agent-raised invoice and a manager's own are identical. A **priced** plan
+  lands pending and does not activate: activation grants the member role and
+  emails the member, so it stays the separate deliberate step it is everywhere
+  else. A **free** plan (the trial) activates immediately, as it does for a
+  member's own purchase — `activated` in the result says which happened. Two things it can do
   that a member's own purchase cannot, both for the same case — a manager
   writing down an enrolment that already happened: it accepts a plan that is no
   longer on sale (backfilling a past training period), and its

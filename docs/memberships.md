@@ -173,11 +173,12 @@ lands it uncovered and warns, rather than being force-fitted. See
 ## A manager raising somebody's membership
 
 `createMembershipForUser` is the manager's counterpart to a member pressing
-"Choose" on `/membership`, and both go through the same `enrolMember`. It lands
-a **pending** invoice carrying the payment reference the member would quote on a
-transfer, so it reconciles off a bank statement normally. It never activates:
-that stays the separate press, because activating emails them and grants the
-label.
+"Choose" on `/membership`, and both go through the same `enrolMember`. A priced
+plan lands a **pending** invoice carrying the payment reference the member would
+quote on a transfer, so it reconciles off a bank statement normally, and
+activating stays the separate press because that emails them and grants the
+label. A **free** plan activates on the spot, exactly as it does for a member
+choosing it themselves.
 
 Two things differ from a member's own purchase, and both follow from a manager
 often writing down an enrolment that already happened rather than selling one:

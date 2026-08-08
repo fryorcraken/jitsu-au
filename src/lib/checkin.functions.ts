@@ -665,7 +665,16 @@ export const transferCheckInCoverage = createServerFn({ method: "POST" })
       throw new Error("That check-in is already on that membership.");
 
     // The claim. Losing it means another manager is already moving this row.
-    const { data: released, error: relErr } = await admin
+    //
+    // Pinned on `membership_id` as well as `coverage`, because coverage alone
+    // does not identify the state this call read. Two managers moving the same
+    // check-in: the first releases it, refunds A and re-covers it from B, all
+    // before the second's update runs — whose `coverage` filter then matches
+    // the NEW state and releases it a second time, refunding A again off a
+    // stale row while B's credit stays spent and the class ends up uncovered.
+    // Pinning the membership makes the second update match nothing, which is
+    // the whole point of a compare-and-swap.
+    let claim = admin
       .from("session_checkins")
       .update({
         coverage: "none",
@@ -674,8 +683,11 @@ export const transferCheckInCoverage = createServerFn({ method: "POST" })
         closed_membership: false,
       })
       .eq("id", row.id)
-      .eq("coverage", row.coverage)
-      .select("id");
+      .eq("coverage", row.coverage);
+    claim = row.membership_id
+      ? claim.eq("membership_id", row.membership_id)
+      : claim.is("membership_id", null);
+    const { data: released, error: relErr } = await claim.select("id");
     if (relErr) throw new Error(relErr.message);
     if ((released ?? []).length === 0)
       throw new Error("Someone else moved that check-in first. Reload to see where it landed.");

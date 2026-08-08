@@ -1,10 +1,12 @@
 // Manager: raise a membership for the person whose page this is.
 //
 // The counterpart to a member pressing "Choose" on /membership, and it lands the
-// same thing: a PENDING invoice carrying the payment reference they would quote
-// on a transfer, so it reconciles off a bank statement exactly like one they
-// raised themselves. Activating stays the separate press it already was, because
-// activating emails them and grants the member label.
+// same thing: for a priced plan, a PENDING invoice carrying the payment
+// reference they would quote on a transfer, so it reconciles off a bank
+// statement exactly like one they raised themselves. Activating stays the
+// separate press it already was, because activating emails them and grants the
+// member label. A free plan (the trial) has nothing to wait for and activates
+// immediately, again matching what a member gets.
 //
 // Two choices exist here that a member never gets, and both are for the same
 // case — a manager writing down an enrolment that already happened:
@@ -107,8 +109,8 @@ export function AddMembershipCard({
         <div>
           <h3 className="font-bold">Add a membership</h3>
           <p className="text-sm text-muted-foreground">
-            This raises a pending invoice, the same as if they had chosen the plan themselves. It
-            does not activate anything: use Activate once the payment lands.
+            This raises an invoice, the same as if they had chosen the plan themselves. A plan with
+            a price stays pending until you press Activate; a free plan starts straight away.
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>

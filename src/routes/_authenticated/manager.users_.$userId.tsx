@@ -579,10 +579,14 @@ function ManagerUserPage() {
       } else {
         toast.success(`Moved to ${res.decision.plan_name ?? "that membership"}.`);
       }
-      await load(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not move that check-in");
     } finally {
+      // Reload whatever happened, not only on success. A move that fails part
+      // way has already released the check-in and refunded the old membership,
+      // so leaving the old coverage on screen would show a state that no longer
+      // exists and make the next press argue with an error about it.
+      await load(false).catch(() => {});
       setMoving(null);
     }
   }

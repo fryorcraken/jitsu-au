@@ -30,6 +30,7 @@ const JUNK: Row = {
   id: "mem-1",
   status: "pending",
   paid_at: null,
+  price_cents: 44500,
   checkin_count: 0,
   plan_name: "Semester 2 2026",
 };
@@ -74,6 +75,19 @@ describe("MembershipRowActions", () => {
     renderRow({ checkin_count: 2 });
     expect(screen.getByRole("button", { name: /delete/i })).toBeDisabled();
     expect(screen.getByText(/a class was checked in against it/i)).toBeInTheDocument();
+  });
+
+  // Activation stamps `paid_at` on the $0 free trial too, and the trial is
+  // auto-assigned at waiver approval — so this is the row a manager most often
+  // wants gone. Reading that stamp as a payment would lock it forever.
+  it("still allows deleting an activated free trial nobody used", () => {
+    renderRow({
+      status: "cancelled",
+      paid_at: "2026-08-01T00:00:00Z",
+      price_cents: 0,
+      plan_name: "Free trial",
+    });
+    expect(screen.getByRole("button", { name: /delete/i })).toBeEnabled();
   });
 
   // A disabled button with a hover-only reason is a dead end on a phone, where

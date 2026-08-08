@@ -914,11 +914,18 @@ export const MEMBERSHIP_DELETE_REASONS: Record<MembershipDeleteBlocker, string> 
  */
 export function whyMembershipCannotBeDeleted(membership: {
   paid_at: string | null;
+  price_cents: number;
   status: string;
   checkin_count: number;
 }): MembershipDeleteBlocker[] {
   const blockers: MembershipDeleteBlocker[] = [];
-  if (membership.paid_at) blockers.push("paid");
+  // `paid_at` alone is not evidence of a payment: activation stamps it on every
+  // membership, including the $0 free trial, which is auto-assigned at waiver
+  // approval and therefore the single most likely thing a manager needs to undo.
+  // Refusing that one with "a payment is recorded against it" would be both
+  // untrue and a dead end. Money is what this blocker protects, so it takes
+  // money to raise it.
+  if (membership.paid_at && membership.price_cents > 0) blockers.push("paid");
   if (membership.status === "active") blockers.push("active");
   if (membership.checkin_count > 0) blockers.push("attended");
   return blockers;

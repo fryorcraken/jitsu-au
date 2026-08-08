@@ -34,6 +34,8 @@ export type MembershipActionRow = {
   id: string;
   status: string;
   paid_at: string | null;
+  /** Needed by the guard: a stamped `paid_at` on a $0 plan is not a payment. */
+  price_cents: number;
   checkin_count: number;
   plan_name: string | null;
 };
@@ -67,8 +69,6 @@ export function MembershipRowActions({
         await setStatus({
           data: { id: membership.id, status: kind === "activate" ? "active" : "cancelled" },
         });
-      await onChanged();
-      setPending(null);
     } catch (e) {
       // Stays on screen, in the dialog, with the button still there to press
       // again. This is the half of the flow a toast would lose.
@@ -77,7 +77,14 @@ export function MembershipRowActions({
         busy: false,
         error: e instanceof Error ? e.message : "That did not go through. Try again.",
       });
+      return;
     }
+    // Deliberately outside the try above. The write has committed by now, so a
+    // failed list refresh is a stale screen, not a failed cancel — reporting it
+    // as one would offer "Try again" on a write that already landed, and
+    // activating twice emails the member twice.
+    await onChanged().catch(() => {});
+    setPending(null);
   }
 
   const copy = {

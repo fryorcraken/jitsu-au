@@ -648,9 +648,19 @@ async function handleCreateMembership(params: unknown) {
 }
 
 // ---- action: delete_invoice ----
-async function handleDeleteInvoice(params: unknown) {
+async function handleDeleteInvoice(params: unknown, actingAs: string) {
   const input = deleteInvoiceSchema.parse(params);
   const db = await adminClient();
+
+  // Read it BEFORE deleting: this is the only irreversible invoice action in
+  // the API, and once the row is gone there is nothing left to say what it was.
+  // `edit_invoice` audits every reversible field change, so a delete going
+  // unrecorded would be the one hole in the club's only invoice history.
+  const { data: before } = await db
+    .from("memberships")
+    .select("id, user_id, plan_id, status, price_cents, payment_reference, paid_at")
+    .eq("id", input.id)
+    .maybeSingle();
 
   let result: Awaited<ReturnType<typeof deleteMembershipRow>>;
   try {
@@ -671,6 +681,18 @@ async function handleDeleteInvoice(params: unknown) {
       blockers: result.blockers,
     });
   }
+
+  // console.info, not console.error — a manager tidying up is a normal event,
+  // and it has to be findable as one.
+  console.info(
+    "[agent.delete_invoice] audit",
+    JSON.stringify({
+      invoiceId: result.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      deleted: before ?? null,
+    }),
+  );
   return { deleted: true as const, id: result.id };
 }
 
@@ -898,7 +920,7 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
     case "edit_invoice":
       return handleEditInvoice(params, actingAs);
     case "delete_invoice":
-      return handleDeleteInvoice(params);
+      return handleDeleteInvoice(params, actingAs);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
     case "list_membership_plans":

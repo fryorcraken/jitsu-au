@@ -126,10 +126,13 @@ statement like any other.
 scripts/agent.sh create_membership '{"user_id":"<uuid>","plan_code":"2026-s2"}'
 ```
 
-> **It never activates.** The invoice lands pending. Activation grants the
-> `member` role and emails the member, so it runs through bank reconciliation or
-> the manager UI, exactly as it does for a member's own purchase. Raising an
-> invoice is not the same as saying it was paid.
+> **A priced plan lands pending; a free one activates.** Raising an invoice is
+> not the same as saying it was paid: activation grants the `member` role and
+> emails the member, so for anything with a price it runs through bank
+> reconciliation or the manager UI, exactly as for a member's own purchase. A
+> **free** plan (the trial) has nothing to wait for and activates on the spot,
+> again matching what a member gets. Read `activated` in the result rather than
+> assuming either way. With `send_email: false` neither email goes out.
 >
 > **Two things you can do here that a member cannot**, both for the same case —
 > writing down an enrolment that already happened rather than selling one:

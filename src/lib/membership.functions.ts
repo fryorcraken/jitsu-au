@@ -761,8 +761,17 @@ export async function enrolMember(
   }
 
   // Free plans (the trial) activate immediately; paid plans await a transfer.
+  //
+  // `sendEmail` has to reach this call too, not just the payment email below.
+  // A free plan skips the payment email entirely and sends the ACTIVATION one
+  // instead, so without this a manager raising a trial with the email switched
+  // off still emails them "your membership is active" — the opposite of what
+  // they asked for, and on the one path where nothing else would tell them.
   if (price === 0) {
-    await activateMembershipRow(admin, inserted, plan, { paymentMethod: "manual" });
+    await activateMembershipRow(admin, inserted, plan, {
+      paymentMethod: "manual",
+      sendEmail: input.sendEmail,
+    });
     if (!insuranceInvoice) {
       return { ok: true as const, activated: true, reference: null as string | null };
     }
@@ -1202,7 +1211,7 @@ export async function deleteMembershipRow(
 ): Promise<{ ok: true; id: string } | { ok: false; blockers: MembershipDeleteBlocker[] }> {
   const { data: membership, error } = await admin
     .from("memberships")
-    .select("id, user_id, status, paid_at")
+    .select("id, user_id, status, paid_at, price_cents")
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -1219,6 +1228,7 @@ export async function deleteMembershipRow(
 
   const blockers = whyMembershipCannotBeDeleted({
     paid_at: membership.paid_at,
+    price_cents: membership.price_cents,
     status: membership.status,
     checkin_count: count ?? 0,
   });
