@@ -216,15 +216,46 @@ const plans = await select(
   "membership_plans",
   "id, kind, name, public_price_cents, student_price_cents",
 );
-/** The plan of a given kind a manager would reach for first. */
-function planOf(kind) {
-  const plan = plans.find((candidate) => candidate.kind === kind);
-  if (!plan) throw new Error(`no ${kind} membership plan to put anyone on: check the migrations`);
-  return plan;
+/**
+ * The plan of a given kind a manager would reach for, creating one when the
+ * schema ships none.
+ *
+ * `trial`, `session` and `insurance` plans arrive with the migrations. A
+ * `period` plan does not, and that is not an oversight: semesters used to live
+ * in `club_semesters`, that table is gone (20260804010000), and each semester
+ * is now a dated plan a manager creates for themselves. So a database with
+ * nothing but migrations in it has nobody who *can* hold a membership until
+ * this makes the semester a manager would have made.
+ */
+async function planOf(kind, fallback) {
+  const existing = plans.find((candidate) => candidate.kind === kind);
+  if (existing) return existing;
+  if (!fallback) {
+    throw new Error(`no ${kind} membership plan to put anyone on: check the migrations`);
+  }
+  const { data, error } = await admin
+    .from("membership_plans")
+    .insert(fallback)
+    .select("id, kind, name, public_price_cents, student_price_cents")
+    .single();
+  if (error) throw new Error(`creating a ${kind} plan failed: ${error.message}`);
+  console.log(`[seed] membership_plans: 1 (${kind})`);
+  return data;
 }
-const PERIOD_PLAN = planOf("period");
-const INSURANCE_PLAN = planOf("insurance");
-const TRIAL_PLAN = planOf("trial");
+
+const PERIOD_PLAN = await planOf("period", {
+  code: "screenshot-semester",
+  name: "This semester",
+  description: "Unlimited classes for the whole semester. Grading fee included.",
+  kind: "period",
+  public_price_cents: 44500,
+  student_price_cents: 24500,
+  starts_on: on(-60),
+  ends_on: on(120),
+  sort_order: 2,
+});
+const INSURANCE_PLAN = await planOf("insurance");
+const TRIAL_PLAN = await planOf("trial");
 /** What this person actually paid, so the invoice on screen adds up. */
 function priceOf(plan, isStudent) {
   return isStudent
