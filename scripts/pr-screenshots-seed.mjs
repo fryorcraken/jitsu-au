@@ -13,12 +13,15 @@
 // bypasses RLS, so pointing it at production would write fixture members into
 // the real club.
 //
-// What it writes is a small but complete club: a manager, a member with an
-// approved waiver and a paid membership, and an applicant waiting on approval,
-// plus the rows the manager screens list (waivers, memberships, bank
-// transactions, contact messages, leads, blog posts and comments, knowledge
-// base articles, calendar events, notifications). Screens whose table is left
-// empty still photograph fine — they render their empty state, which is worth
+// What it writes is the PEOPLE and the ACTIVITY: a manager, a member with an
+// approved waiver and a paid membership, an applicant waiting on approval, plus
+// the rows the manager screens list (waivers, memberships, bank transactions,
+// contact messages, leads, blog posts and comments, knowledge base articles,
+// calendar events, notifications). The club's own starting content — the
+// waiver template, the membership plans, the knowledge base sections — is
+// already in the database because the migrations put it there, so this reads
+// those rows rather than inserting rival copies. Screens whose table is left
+// empty still photograph fine: they render their empty state, which is worth
 // seeing too.
 //
 // The ids it created land in a manifest (PR_SCREENSHOTS_FIXTURE) that
@@ -88,10 +91,8 @@ function id(n) {
   return `${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`;
 }
 
-const PLAN = { trial: id(11), casual: id(12), term: id(13), insurance: id(14) };
 const BLOG = { welcome: id(21), grading: id(22), draft: id(23) };
-const KB_SECTION = { start: id(31), training: id(32) };
-const KB_ARTICLE = { welcome: id(41), etiquette: id(42), firstClass: id(43) };
+const KB_ARTICLE = { welcome: id(41), etiquette: id(42) };
 const SERIES = id(51);
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -112,6 +113,13 @@ async function insert(table, rows) {
   const { error } = await admin.from(table).insert(rows);
   if (error) throw new Error(`insert into ${table} failed: ${error.message}`);
   console.log(`[seed] ${table}: ${Array.isArray(rows) ? rows.length : 1}`);
+}
+
+/** Read rows, failing loudly. */
+async function select(table, columns, build = (query) => query) {
+  const { data, error } = await build(admin.from(table).select(columns));
+  if (error) throw new Error(`reading ${table} failed: ${error.message}`);
+  return data ?? [];
 }
 
 /**
@@ -190,43 +198,44 @@ await insert("user_roles", [
   { user_id: users.member, role: "member" },
 ]);
 
-await insert("waiver_templates", {
-  version: 1,
-  is_current: true,
-  title: "Training waiver",
-  body_md: [
-    "# Training waiver",
-    "",
-    "{{adult_checkbox}} Adult (18+)",
-    "{{minor_checkbox}} Under 18",
-    "",
-    "I, **{{full_name}}**, born {{date_of_birth}}, of {{address}}, agree to train with",
-    "{{club_name}} on the terms below.",
-    "",
-    "Jiu jitsu is a contact sport. Injuries happen, and I take part knowing that.",
-    "I will follow the instructions of the instructor on the mat at all times, and I",
-    "will tell them about any injury or condition that affects my training.",
-    "",
-    "## Emergency contact",
-    "",
-    "{{emergency_contact_name}} ({{emergency_contact_relationship}}), {{emergency_contact_phone}}",
-    "",
-    "## Health",
-    "",
-    "{{medical_notes}}",
-    "",
-    "Signed by {{signature_name}} on {{signed_date}}.",
-  ].join("\n"),
-  acknowledgements: [
-    { id: "risk", label: "I understand that jiu jitsu carries a risk of injury.", required: true },
-    { id: "rules", label: "I will follow the instructor's directions on the mat.", required: true },
-    {
-      id: "media",
-      label: "The club may use photos of me from training in its own posts.",
-      required: false,
-    },
-  ],
-});
+// ---------------------------------------------------------------------------
+// The migrations already ship the club's own starting content: the current
+// waiver template, the four membership plans, and the knowledge base sections.
+// This fixture adds PEOPLE and ACTIVITY on top of that rather than a second
+// copy of it, so it reads those rows instead of inserting rival ones — which is
+// also why it does not go stale when a migration changes them.
+// ---------------------------------------------------------------------------
+
+const [currentTemplate] = await select("waiver_templates", "version", (query) =>
+  query.eq("is_current", true).limit(1),
+);
+if (!currentTemplate) throw new Error("no current waiver template: check the migrations");
+const TEMPLATE_VERSION = currentTemplate.version;
+
+const plans = await select(
+  "membership_plans",
+  "id, kind, name, public_price_cents, student_price_cents",
+);
+/** The plan of a given kind a manager would reach for first. */
+function planOf(kind) {
+  const plan = plans.find((candidate) => candidate.kind === kind);
+  if (!plan) throw new Error(`no ${kind} membership plan to put anyone on: check the migrations`);
+  return plan;
+}
+const PERIOD_PLAN = planOf("period");
+const INSURANCE_PLAN = planOf("insurance");
+const TRIAL_PLAN = planOf("trial");
+/** What this person actually paid, so the invoice on screen adds up. */
+function priceOf(plan, isStudent) {
+  return isStudent
+    ? (plan.student_price_cents ?? plan.public_price_cents)
+    : plan.public_price_cents;
+}
+
+const sections = await select("kb_sections", "id, slug, title", (query) =>
+  query.order("position", { ascending: true }),
+);
+if (sections.length === 0) throw new Error("no knowledge base sections: check the migrations");
 
 const waivers = {
   member: id(61),
@@ -251,7 +260,7 @@ await insert("waivers", [
     medical_notes: "Old left knee sprain, fine to train.",
     media_consent: true,
     sms_whatsapp_consent: true,
-    template_version: 1,
+    template_version: TEMPLATE_VERSION,
     approval_status: "approved",
     approved_at: at(-58),
     approved_by: users.manager,
@@ -271,7 +280,7 @@ await insert("waivers", [
     emergency_contact_name: "Lin Zhang",
     emergency_contact_relationship: "Parent",
     emergency_contact_phone: "0400 000 013",
-    template_version: 1,
+    template_version: TEMPLATE_VERSION,
     approval_status: "pending",
     signed_at: at(-2),
     signer_ip: "203.0.113.9",
@@ -308,60 +317,13 @@ await insert("code_of_conduct_acceptances", {
   accepted_at: at(-59),
 });
 
-await insert("membership_plans", [
-  {
-    id: PLAN.trial,
-    code: "trial",
-    kind: "trial",
-    name: "Free trial class",
-    description: "Your first class, on us. No gi needed, just clothes you can move in.",
-    public_price_cents: 0,
-    student_price_cents: 0,
-    session_credits: 1,
-    sort_order: 1,
-  },
-  {
-    id: PLAN.casual,
-    code: "casual",
-    kind: "session",
-    name: "Casual class",
-    description: "One class, paid on the day.",
-    public_price_cents: 2500,
-    student_price_cents: 1500,
-    session_credits: 1,
-    sort_order: 2,
-  },
-  {
-    id: PLAN.term,
-    code: "semester",
-    kind: "period",
-    name: "Semester membership",
-    description: "Train as often as you like for the whole semester.",
-    public_price_cents: 22000,
-    student_price_cents: 16000,
-    duration_days: 180,
-    sort_order: 3,
-  },
-  {
-    id: PLAN.insurance,
-    code: "insurance",
-    kind: "insurance",
-    name: "Annual insurance",
-    description: "Required once a year by the association.",
-    public_price_cents: 6500,
-    student_price_cents: 6500,
-    duration_days: 365,
-    sort_order: 4,
-  },
-]);
-
 await insert("memberships", [
   {
     user_id: users.member,
-    plan_id: PLAN.term,
+    plan_id: PERIOD_PLAN.id,
     status: "active",
     is_student: true,
-    price_cents: 16000,
+    price_cents: priceOf(PERIOD_PLAN, true),
     payment_method: "bank_transfer",
     payment_reference: "JITSU-000101",
     paid_at: at(-58),
@@ -371,9 +333,9 @@ await insert("memberships", [
   },
   {
     user_id: users.member,
-    plan_id: PLAN.insurance,
+    plan_id: INSURANCE_PLAN.id,
     status: "active",
-    price_cents: 6500,
+    price_cents: priceOf(INSURANCE_PLAN, false),
     payment_method: "bank_transfer",
     payment_reference: "JITSU-000102",
     paid_at: at(-58),
@@ -382,9 +344,9 @@ await insert("memberships", [
   },
   {
     user_id: users.applicant,
-    plan_id: PLAN.trial,
+    plan_id: TRIAL_PLAN.id,
     status: "pending",
-    price_cents: 0,
+    price_cents: priceOf(TRIAL_PLAN, false),
     payment_method: "manual",
     payment_reference: "JITSU-000103",
     session_date: on(3),
@@ -525,36 +487,24 @@ await insert("blog_comments", [
   },
 ]);
 
-await insert("kb_sections", [
-  { id: KB_SECTION.start, slug: "start-here", title: "Start here", position: 1 },
-  { id: KB_SECTION.training, slug: "training", title: "Training", position: 2 },
-]);
-
+// The migrations create the sections and the two link entries; these are the
+// first two articles with words in them, one per section so the sidebar shows
+// the shape of a reading path rather than a single list.
 await insert("kb_articles", [
   {
     id: KB_ARTICLE.welcome,
     slug: "welcome",
-    section_id: KB_SECTION.start,
-    position: 1,
+    section_id: sections[0].id,
+    position: 5,
     visibility: "members",
     annotations_enabled: true,
     created_by: users.manager,
   },
   {
-    id: KB_ARTICLE.firstClass,
-    slug: "your-first-class",
-    section_id: KB_SECTION.start,
-    position: 2,
-    visibility: "members",
-    link_path: "/first-class",
-    nav_title: "Your first class",
-    created_by: users.manager,
-  },
-  {
     id: KB_ARTICLE.etiquette,
     slug: "mat-etiquette",
-    section_id: KB_SECTION.training,
-    position: 1,
+    section_id: (sections[1] ?? sections[0]).id,
+    position: 15,
     visibility: "members",
     annotations_enabled: true,
     created_by: users.manager,
