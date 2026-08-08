@@ -77,14 +77,18 @@ an `id` you can pass to `edit_invoice`). A `lead` (registered interest only) has
 > out of a plan code like `trial_2_session` — the code is a label and can change.
 >
 > **`null` is not zero.** `sessions_allowed` is `null` only for a plan with no
-> session credits at all (a period plan). `sessions_remaining` is _also_ `null`
-> on a still-`pending` invoice for a session-credit plan, because activation is
-> what sets it — there it means "not started yet", not "none left". Read
-> `status`/`paid_at` alongside it before telling anyone they are out of classes.
+> session credits at all (a period plan). `sessions_remaining` is `null` on a
+> legacy `pending` row, where it means "not started yet" rather than "none left".
+> Read `paid_at` alongside it before telling anyone they are out of classes.
+
+> **`status` is not about money.** `active` means authorised to train, and every
+> membership is authorised from the moment it is raised. `paid_at` is what says
+> whether the club has been paid: null means the invoice is still outstanding.
+> Filtering by `status` to find who owes money will find nobody.
 
 `roles` is empty for a member on a **free** plan, including the trial: the
-`member` role is granted on a _paid_ activation, so an active $0 invoice with
-`roles: []` is correct, not a missed grant.
+`member` role follows an active, priced, non-trial membership, so an active $0
+invoice with `roles: []` is correct, not a missed grant.
 
 ```bash
 scripts/agent.sh list_users '{"status":"member","limit":50}'
@@ -105,17 +109,19 @@ tell a capped page from a complete one. Each invoice also carries
 `sessions_allowed` and `sessions_remaining`, including what `null` means on each
 (see the note under `list_users`).
 `params` (optional): `status` (`pending | active | expired | cancelled`), `limit`.
+To find unpaid invoices, filter the result on `paid_at` being null rather than by
+status — see the note under `list_users`.
 
 ```bash
-scripts/agent.sh list_invoices '{"status":"pending"}'
+scripts/agent.sh list_invoices '{}'
 ```
 
 ### `create_membership` — raise a membership for somebody
 
 The agent equivalent of a manager using **Add a membership** on a person's page,
-and of a member choosing a plan themselves. Lands a **pending** invoice with the
-payment reference they would quote on a transfer, so it reconciles off a bank
-statement like any other.
+and of a member choosing a plan themselves. The membership is authorised on the
+spot and carries the payment reference they would quote on a transfer, so its
+invoice reconciles off a bank statement like any other.
 
 `params`: `user_id` (**required** — from `list_users`), `plan_code`
 (**required** — from `list_membership_plans`), `uts_student_number` (optional),
@@ -126,13 +132,13 @@ statement like any other.
 scripts/agent.sh create_membership '{"user_id":"<uuid>","plan_code":"2026-s2"}'
 ```
 
-> **A priced plan lands pending; a free one activates.** Raising an invoice is
-> not the same as saying it was paid: activation grants the `member` role and
-> emails the member, so for anything with a price it runs through bank
-> reconciliation or the manager UI, exactly as for a member's own purchase. A
-> **free** plan (the trial) has nothing to wait for and activates on the spot,
-> again matching what a member gets. Read `activated` in the result rather than
-> assuming either way. With `send_email: false` neither email goes out.
+> **It is authorised straight away, and that is not the same as paid.** Whatever
+> the plan costs, the person can be checked in from the moment you raise it, with
+> the invoice outstanding. Recording the money is a separate act
+> (`mark_invoice_paid`, or bank reconciliation). `reference` in the result is
+> non-null exactly when money is owed, and carries what the member would quote on
+> a transfer; `authorised` is always true. With `send_email: false` no invoice
+> email goes out.
 >
 > **Two things you can do here that a member cannot**, both for the same case —
 > writing down an enrolment that already happened rather than selling one:
@@ -187,12 +193,16 @@ audit log with who made it and each field's old and new value.
 > the member role and emails the member, so it must go through bank
 > reconciliation / the manager UI — not a raw invoice edit.
 
-> **Cancelling is how a membership is closed**, and it is safe from any status,
-> including `pending`. Closing somebody's last paid membership also stops
-> `list_users` calling them a member. Their members-only access closed at the
-> same moment either way — that is gated on the membership itself, never on the
-> role — so this is the club's records catching up, not a separate act you need
-> to warn anyone about.
+> **Cancelling is how a membership is closed**, and it is safe from any status.
+> Closing somebody's last membership also stops `list_users` calling them a
+> member, and closes their members-only access at the same moment — that is gated
+> on holding an active membership, never on the role.
+>
+> **`status` says nothing about money.** `active` means authorised to train, and
+> every membership is authorised from the moment it is raised. To tell who owes
+> the club money, read `paid_at`: null means unpaid. Rows created before this
+> distinction existed still say `pending` and are unpaid in exactly the same way,
+> so filter on `paid_at` rather than listing statuses.
 
 > **A paid invoice's money fields are guarded.** Once an invoice has a `paid_at`,
 > its `price_cents`, `payment_reference` and `payment_method` are the club's
@@ -217,6 +227,37 @@ audit log with who made it and each field's old and new value.
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
 
+### `mark_invoice_paid` — record money that arrived
+
+`params`: `id` (**required** — the invoice UUID from a list call),
+`payment_method` (optional: `bank_transfer | stripe | manual`, default `manual`).
+
+```bash
+scripts/agent.sh mark_invoice_paid '{"id":"<uuid>"}'
+```
+
+Bank reconciliation records payments on its own when a statement line matches, so
+reach for this only when it cannot: cash at the door, or a transfer settled some
+other way.
+
+> **This is the one-way door.** It emails the member a receipt, and an invoice
+> with a payment against it can be cancelled but **never deleted**. Record it
+> only once the money has actually arrived. If you are marking something paid
+> because a manager said so rather than because you saw it land, say so back to
+> them.
+>
+> **Retrying is safe.** A second call on an already-paid invoice records nothing,
+> moves no date and sends no second receipt — it comes back `recorded: false`,
+> which is also how you tell a real recording from a replay. Count those
+> separately when you report a batch.
+>
+> **`payment_method` defaults to `manual` on purpose.** Saying `bank_transfer`
+> puts a claim in the club's books that the bank statement will never back up.
+> Use it only when a real transfer landed and you are recording it by hand.
+>
+> A free membership has nothing to pay, so it is refused with
+> `422 nothing_to_pay`.
+
 ### `delete_invoice` — remove an invoice that should never have existed
 
 `params`: `id` (**required** — the invoice UUID from a list call).
@@ -230,21 +271,23 @@ said they would join and never paid. Everything else is **cancelled**, which
 closes the membership and keeps the record (`edit_invoice` with
 `"status":"cancelled"`).
 
-> **Three things refuse it, and you get all of them at once.**
+> **Two things refuse it, and you get both at once.**
 > `409 invoice_not_deletable`, with `error.details.blockers` naming every reason
-> that applies out of `paid | active | attended`. Fixing one and retrying into
-> the next would cost you a call to learn what the first refusal already told
-> you, so read the whole list.
+> that applies out of `paid | attended`. Fixing one and retrying into the next
+> would cost you a call to learn what the first refusal already told you, so read
+> the whole list.
 >
 > - **`paid`** — a payment is recorded against it. **There is no confirm flag,
 >   and there will not be one.** Unlike `edit_invoice`'s paid guard this is not
 >   a judgement call you can override: a paid invoice is the club's record that
 >   money moved. Cancel it instead.
-> - **`active`** — cancel it first, then delete.
 > - **`attended`** — a class was checked in against it. **You cannot clear this
 >   one.** It is cleared by moving those check-ins to another membership, which
 >   is a manager-screen action; this API has no check-in actions. Tell the
 >   manager what is blocking it and leave it to them.
+>
+> Being **active is not a blocker**. Every membership is authorised from the
+> moment it is raised, so there is nothing to cancel first.
 >
 > **Deleting is not reversible and there is no undo.** If you are unsure whether
 > a row is junk or history, cancel it and say why — a cancelled invoice can be
@@ -560,7 +603,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"9"`), and its
+- The manifest's `version` tells generations apart (currently `"10"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

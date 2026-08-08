@@ -1975,6 +1975,7 @@ export const managerAgentActions = [
   "list_invoices",
   "create_membership",
   "edit_invoice",
+  "mark_invoice_paid",
   "delete_invoice",
   "file_waiver",
   "list_membership_plans",
@@ -2048,6 +2049,18 @@ export type DeleteInvoiceInput = z.infer<typeof deleteInvoiceSchema>;
  */
 export const createInvoiceSchema = createMembershipSchema.strict();
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
+
+/**
+ * `mark_invoice_paid` params. The manual counterpart to bank reconciliation,
+ * for money that never touches the club account.
+ *
+ * `payment_method` defaults to `manual` rather than `bank_transfer`: a caller
+ * reaching for this action is recording something the reconciler could not see,
+ * and guessing "bank transfer" would put a claim in the club's books that the
+ * statement will never back up.
+ */
+export const markInvoicePaidSchema = markMembershipPaidSchema.strict();
+export type MarkInvoicePaidInput = z.infer<typeof markInvoicePaidSchema>;
 
 /** `list_users` params — optional lifecycle filter + result cap. */
 export const listAgentUsersSchema = z.object({

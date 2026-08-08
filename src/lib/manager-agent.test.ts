@@ -20,6 +20,7 @@ import {
   createInvoiceSchema,
   deleteInvoiceSchema,
   editInvoiceSchema,
+  markInvoicePaidSchema,
   managerAgentActions,
   paperWaiverUploadSchema,
 } from "./validation";
@@ -111,7 +112,7 @@ describe("deleteInvoiceSchema", () => {
     expect(deleteInvoiceSchema.parse({ id }).id).toBe(id);
   });
 
-  // There is deliberately no confirm flag: the three delete blockers are not a
+  // There is deliberately no confirm flag: the delete blockers are not a
   // caller's judgement call, so an agent reaching for one has misunderstood and
   // should hear about it rather than have the key silently ignored.
   it("refuses a confirm flag rather than dropping it", () => {
@@ -141,10 +142,38 @@ describe("createInvoiceSchema", () => {
     expect(() => createInvoiceSchema.parse({ ...base, price_cents: 1000 })).toThrow(/price_cents/);
   });
 
-  // Activation grants the member role and emails the member. It is not
-  // something an invoice-creating call gets to do as a side effect.
-  it("has no way to ask for an active invoice", () => {
+  // Recording a payment emails a receipt and makes the row permanent. Raising
+  // an invoice is not allowed to do that as a side effect.
+  it("has no way to claim the invoice was paid", () => {
     expect(() => createInvoiceSchema.parse({ ...base, status: "active" })).toThrow();
+    expect(() => createInvoiceSchema.parse({ ...base, paid_at: "2026-08-01" })).toThrow();
+  });
+});
+
+describe("markInvoicePaidSchema", () => {
+  const id = "11111111-1111-1111-1111-111111111111";
+
+  // A caller reaching for this action is recording something the bank reconciler
+  // could not see. Defaulting to bank_transfer would put a claim in the club's
+  // books that no statement will ever back up.
+  it("assumes a manual payment unless told otherwise", () => {
+    expect(markInvoicePaidSchema.parse({ id }).payment_method).toBe("manual");
+  });
+
+  it("takes a named method", () => {
+    expect(markInvoicePaidSchema.parse({ id, payment_method: "stripe" }).payment_method).toBe(
+      "stripe",
+    );
+  });
+
+  it("refuses a method the memberships table would not accept", () => {
+    expect(() => markInvoicePaidSchema.parse({ id, payment_method: "cash" })).toThrow();
+  });
+
+  // The date is the server's to write. Letting a caller backdate a payment would
+  // let it land before the invoice it settles.
+  it("names an unknown param rather than dropping it", () => {
+    expect(() => markInvoicePaidSchema.parse({ id, paid_at: "2026-08-01" })).toThrow(/paid_at/);
   });
 });
 
@@ -423,7 +452,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("9");
+    expect(AGENT_MANIFEST.version).toBe("10");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it

@@ -16,6 +16,7 @@ import { ZodError } from "zod";
 import {
   createInvoiceSchema,
   deleteInvoiceSchema,
+  markInvoicePaidSchema,
   editInvoiceSchema,
   deleteKbSectionSchema,
   getKbArticleSchema,
@@ -75,6 +76,7 @@ import { filePaperWaiver } from "@/lib/waiver.functions";
 import {
   createMembershipForUser,
   deleteMembershipRow,
+  recordMembershipPayment,
   listMembershipPlanRows,
   saveMembershipPlanRow,
   syncMemberRole,
@@ -647,6 +649,59 @@ async function handleCreateMembership(params: unknown) {
   }
 }
 
+// ---- action: mark_invoice_paid ----
+//
+// The manual counterpart to bank reconciliation, sharing its writer so a payment
+// recorded by an agent and one matched off a statement are the same event.
+async function handleMarkInvoicePaid(params: unknown, actingAs: string) {
+  const input = markInvoicePaidSchema.parse(params);
+  const db = await adminClient();
+
+  const { data: membership, error } = await db
+    .from("memberships")
+    .select("*")
+    .eq("id", input.id)
+    .maybeSingle();
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (!membership) throw new AgentError(404, "not_found", "Invoice not found.");
+  if (membership.price_cents === 0)
+    throw new AgentError(
+      422,
+      "nothing_to_pay",
+      "That membership is free, so there is no payment to record against it.",
+    );
+
+  // Decorates the receipt only, so a failed read must not refuse the payment.
+  const { data: plan } = await db
+    .from("membership_plans")
+    .select("*")
+    .eq("id", membership.plan_id)
+    .maybeSingle();
+
+  const { recorded } = await recordMembershipPayment(db, {
+    membership: membership as MembershipRow,
+    plan: (plan ?? undefined) as MembershipPlanRow | undefined,
+    method: input.payment_method,
+  });
+
+  // Money moving is the one thing the club most needs to be able to reconstruct,
+  // and there is no audit table — the server log is the whole history. Logged
+  // even when nothing was recorded, because "an agent tried to mark this paid a
+  // second time" is itself worth being able to find.
+  console.info(
+    "[agent.mark_invoice_paid] audit",
+    JSON.stringify({
+      invoiceId: input.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      method: input.payment_method,
+      recorded,
+    }),
+  );
+
+  return { paid: true as const, id: input.id, recorded };
+}
+
 // ---- action: delete_invoice ----
 async function handleDeleteInvoice(params: unknown, actingAs: string) {
   const input = deleteInvoiceSchema.parse(params);
@@ -926,6 +981,8 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleCreateMembership(params);
     case "edit_invoice":
       return handleEditInvoice(params, actingAs);
+    case "mark_invoice_paid":
+      return handleMarkInvoicePaid(params, actingAs);
     case "delete_invoice":
       return handleDeleteInvoice(params, actingAs);
     case "file_waiver":

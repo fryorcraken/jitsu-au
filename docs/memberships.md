@@ -10,12 +10,16 @@ three aligned with the code in the same change.
 A **plan** is what the club sells (free trial, casual class, a dated training
 period, yearly insurance), and it carries everything about itself: its price
 and how long it runs. A **membership** is one person's enrolment against a
-plan: pending until paid, then active with a `starts_at`/`ends_at` window. A
+plan. It is **authorised** the moment it is raised — `active`, with its
+`starts_at`/`ends_at` window and its credits — and its invoice is outstanding
+until somebody records a payment. Those are two separate facts about the same
+row, and keeping them apart is what lets a member train while their transfer
+clears. A
 plan's **kind** decides how it ends, and the manager screen asks for it as a
 single plain-language question ("what kind of plan is this?"): a **training
 period** runs between fixed dates (everyone who buys it gets exactly those
 dates, regardless of when in it they joined), **yearly insurance** runs N days
-from the moment payment clears, and a **casual class** or the **free trial**
+from the moment it is raised, and a **casual class** or the **free trial**
 ends with its session credits instead of on a date. There is no self-serve
 sign-up: a membership only exists because someone bought one, because a manager
 raised it for them, or because a manager approved a waiver and the club's free
@@ -23,12 +27,12 @@ trial was assigned automatically.
 
 ## Plans
 
-| Plan               | Kind        | Shown to managers as       | Runs                                | What it buys                                      |
-| ------------------ | ----------- | -------------------------- | ----------------------------------- | ------------------------------------------------- |
-| `trial_2_session`  | `trial`     | Free trial                 | ends with its credits               | Two free classes, ever, no expiry.                |
-| `casual_session`   | `session`   | Casual class or class pack | ends with its credits               | One class, tied to a session date.                |
-| `2026-s2`, …       | `period`    | Training period            | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.       |
-| `insurance_yearly` | `insurance` | Yearly insurance           | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from pay. |
+| Plan               | Kind        | Shown to managers as       | Runs                                | What it buys                                                    |
+| ------------------ | ----------- | -------------------------- | ----------------------------------- | --------------------------------------------------------------- |
+| `trial_2_session`  | `trial`     | Free trial                 | ends with its credits               | Two free classes, ever, no expiry.                              |
+| `casual_session`   | `session`   | Casual class or class pack | ends with its credits               | One class, tied to a session date.                              |
+| `2026-s2`, …       | `period`    | Training period            | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.                     |
+| `insurance_yearly` | `insurance` | Yearly insurance           | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from when it is raised. |
 
 A plan that ends with its credits carries a `starts_at` for the record, but
 **nothing reads it as a limit**: at check-in a credit balance covers any class
@@ -116,6 +120,14 @@ the `has_active_paid_membership` SQL helper — an active, non-`trial`,
 comments call directly. So the moment a membership is cancelled, access closes,
 with no role change involved.
 
+That helper's **name is now a leftover**: it never read `paid_at`, and since
+`active` means authorised rather than paid, what it actually asks is "do they
+hold a real membership". Members-only areas therefore open when a membership is
+raised, not when its invoice is settled — deliberately, and the same rule
+`deriveLifecycleStatus` and `syncMemberRole` use. Renaming a function that RLS
+policies call would mean a migration and a production apply gate for a cosmetic
+gain, so it keeps the name.
+
 The `member` role row is a **label**: what `/manager/users` and the agent API's
 `list_users` report. It used to be granted on a paid activation and never taken
 back, so somebody tidied up months ago still read as a member. `syncMemberRole`
@@ -130,28 +142,40 @@ leaving the club, and a manager cancelling is.
 
 ## Closing and clearing up
 
-Three things a manager can do to an existing membership, from either
+What a manager can do to an existing membership, from either
 `/manager/memberships` or the person's own page at `/manager/users/<id>`. Both
 screens share `MembershipRowActions`, so the rules cannot drift between them.
 
-**Cancel** works from any state, including `pending`. Cancelling a pending
-invoice is the ordinary tidy-up for somebody who said they would join and never
-paid, and it used to be impossible: the only button on a non-active row was
-Activate, which marks it paid, grants the label and **emails them that their
-membership is live**. Cancelling keeps the row, its dates and its credits;
-re-activating still works.
+**Mark as paid** records the money and is the manual counterpart to bank
+reconciliation, for cash at the door or anything else that never touches the club
+account. It writes `paid_at` through `recordMembershipPayment` — the only writer
+of that column — emails a receipt, and is idempotent, so a second press records
+nothing and re-sends nothing. There is no **Activate** button any more, because
+there is nothing left for it to do: a membership is authorised from the moment it
+is raised. **Reopen** is the narrow leftover, putting a cancelled or expired
+membership back into service, and it says nothing about money either way.
+
+**Cancel** works from any state and is the ordinary tidy-up for somebody who said
+they would join and never paid. It keeps the row, its dates and its credits;
+reopening still works.
 
 **Delete** removes the row outright, for an invoice that should never have
 existed. `whyMembershipCannotBeDeleted` (in `src/lib/validation.ts`) refuses it
-for three reasons, and reports **all** that apply rather than the first found —
-a manager who clears one blocker only to be refused by the next has been sent
+for two reasons, and reports **both** when both apply rather than the first found
+— a manager who clears one blocker only to be refused by the next has been sent
 round the loop for nothing:
 
 | Blocker    | Why                                                            | What to do instead                  |
 | ---------- | -------------------------------------------------------------- | ----------------------------------- |
 | `paid`     | `paid_at` set: the club's record of money that actually moved. | Cancel it. Never deletable.         |
-| `active`   | It is still running.                                           | Cancel it first, then delete.       |
 | `attended` | A class was checked in against it.                             | Move those check-ins first (below). |
+
+**Being active is deliberately not a blocker.** Every membership is active from
+the moment it exists, so refusing on it would make every delete a two-step
+cancel-first. And `paid_at` needed no propping up with `price_cents > 0` once
+authorising stopped writing it: it had been stamped on every activation, free
+trials included, which is what made a hand-authorised membership permanently
+undeletable and refused it with a reason the club knew to be false.
 
 `attended` is not bookkeeping fussiness: `session_checkins.membership_id` is
 `ON DELETE SET NULL`, so without the guard the delete would succeed and quietly
@@ -173,12 +197,11 @@ lands it uncovered and warns, rather than being force-fitted. See
 ## A manager raising somebody's membership
 
 `createMembershipForUser` is the manager's counterpart to a member pressing
-"Choose" on `/membership`, and both go through the same `enrolMember`. A priced
-plan lands a **pending** invoice carrying the payment reference the member would
-quote on a transfer, so it reconciles off a bank statement normally, and
-activating stays the separate press because that emails them and grants the
-label. A **free** plan activates on the spot, exactly as it does for a member
-choosing it themselves.
+"Choose" on `/membership`, and both go through the same `enrolMember`. The
+membership is authorised immediately whatever the plan costs, carrying the
+payment reference the member would quote on a transfer, so its invoice reconciles
+off a bank statement normally. Recording the money stays a separate act, because
+that is what emails a receipt and makes the row permanent.
 
 Two things differ from a member's own purchase, and both follow from a manager
 often writing down an enrolment that already happened rather than selling one:
