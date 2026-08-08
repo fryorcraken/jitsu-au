@@ -2,13 +2,14 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Check, Copy, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { CopyButton } from "@/components/site/CopyButton";
 import { formatDateTime } from "@/lib/dates";
 import { createApiToken, listApiTokens, revokeApiToken } from "@/lib/manager-api-tokens.functions";
 import { buildAgentPrompt } from "@/lib/manager-api-tokens";
@@ -30,30 +31,6 @@ type TokenRow = {
   revoked_at: string | null;
   active: boolean;
 };
-
-/** A small copy-to-clipboard button with a transient "copied" state. */
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        } catch {
-          toast.error("Couldn't copy. Select and copy manually.");
-        }
-      }}
-    >
-      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-      {label}
-    </Button>
-  );
-}
 
 function ApiTokensPage() {
   const navigate = useNavigate();
