@@ -165,6 +165,46 @@ describe("/notifications", () => {
     expect(screen.queryByRole("link", { name: /fix it/i })).not.toBeInTheDocument();
   });
 
+  it("shows both steps of signing up, one to read and one to approve", async () => {
+    // Somebody signing up used to reach this page not at all. Registering is
+    // news and offers only a reading verb; a signed waiver is work and blocks
+    // the person who signed it, so it comes first and carries the approval.
+    mockPayload({
+      attention: [
+        {
+          ...ATTENTION,
+          type: "waivers_awaiting_approval" as const,
+          title: "Sam signed the waiver and is waiting for approval",
+          href: "/manager/waivers",
+          actionLabel: "Approve",
+        },
+        {
+          ...ATTENTION,
+          type: "new_interest_registrations" as const,
+          title: "Kim registered interest in training",
+          href: "/manager/users",
+          actionLabel: "Read it",
+        },
+      ],
+      isManager: true,
+    });
+    render(<NotificationsPage />);
+
+    expect(
+      await screen.findByText("Sam signed the waiver and is waiting for approval"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /approve/i })).toHaveAttribute(
+      "href",
+      "/manager/waivers",
+    );
+    expect(screen.getByRole("link", { name: /read it/i })).toHaveAttribute(
+      "href",
+      "/manager/users",
+    );
+    // Neither can be dismissed: they clear by being approved and by being read.
+    expect(screen.queryByRole("button", { name: /mark all as read/i })).not.toBeInTheDocument();
+  });
+
   it("offers to mark activity read only while something is unread", async () => {
     mockPayload({ items: [activity({ read_at: "2026-08-06T01:00:00.000Z" })] });
     const { unmount } = render(<NotificationsPage />);

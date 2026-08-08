@@ -231,6 +231,11 @@ exist` error is the more serious cousin: the migration never reached the live
 ## Auth & roles
 
 - Auth is Supabase email/password + magic link; the auth UI is `routes/auth.tsx`.
+- **Password rules live in `src/lib/password-policy.ts`, and only there.** They
+  follow NIST SP 800-63B-4: 15 characters minimum, no composition rules at all,
+  and a breached-password check (Have I Been Pwned as you type, Supabase's own
+  check server side). Every rule is stated on screen before anything is typed,
+  by `components/site/NewPasswordField`. Full spec: `docs/passwords.md`.
 - `_authenticated/route.tsx` gates the group: `ssr: false`, redirects to
   `/auth?redirect=...` when there is no user.
 - Roles come from the `user_roles` table and the `app_role` enum
@@ -478,7 +483,13 @@ hand-produce a public-npm lock.
 - **Styling:** Tailwind utility classes; compose conditionals with `cn()` from
   `@/lib/utils`. Reuse `components/ui` primitives and the `SiteLayout`
   (`SiteHeader`/`SiteFooter`) shell for pages. Theme tokens (`bg-background`,
-  `text-muted-foreground`, etc.) come from `styles.css`.
+  `text-muted-foreground`, etc.) come from `styles.css`. Tailwind v4's preflight
+  dropped v3's `cursor: pointer` on buttons; an `@layer base` rule in
+  `styles.css` puts it back on every enabled `button` / `[role="button"]`, so
+  **don't add `cursor-pointer` to a button** (the `components/ui` primitives
+  carry it only because they are generated that way). That rule has to stay in
+  the base layer — layer order, not specificity, is what lets a `cursor-*`
+  utility still win over it.
 - **SEO:** every public page sets its own `head()` meta (title/description/og)
   **and its own `rel="canonical"`**; manager and other private pages set
   `robots: noindex`. Match the existing pattern when adding pages, and see the
@@ -664,6 +675,13 @@ Then hold the change to this:
 - **A toast is not a UI for anything that matters.** It auto-dismisses, it is
   easy to miss on a phone, and it leaves nothing to press. Use it for "saved",
   not for "your waiver did not go through".
+- **That rule applies to a failed load, not just a failed submit.** A list page
+  that catches a fetch error with only `toast.error(...)` and then renders an
+  empty table is indistinguishable from "there's nothing here" once the toast
+  fades — the manager has no way to tell a genuinely empty list from a broken
+  one. Keep the error on screen (a `loadError`-style state) with a retry
+  action; `manager.contact-messages.tsx` is the pattern to copy, not the
+  `toast.error()` + empty-table pattern most manager list pages default to.
 - **Never lose someone's input.** A failed submit keeps the form filled and
   offers the retry. Ask for as little as possible in the first place, and prefill
   what we already know (the waiver does this with `getMyLatestWaiver`). Every
@@ -675,12 +693,27 @@ Then hold the change to this:
   happen** — in words, before the click. Approving a waiver emails the member and
   unlocks their login; activating a membership grants a role. The person pressing
   the button should already know that.
+- **Match that confirm's friction to reversibility, and build it one way.** A
+  reversible action (cancel, hide, reorder) should just happen, with an undo
+  option if you want a safety net — a modal gate on it only slows down the 99%
+  of clicks that were correct. Save the hard stop for actions that are both
+  irreversible and consequential, like the waiver-approval example above, and
+  build that stop as the app's own `AlertDialog` (see `manager.blog.tsx`'s
+  delete confirmation), never the browser's `window.confirm()`. Confirming
+  everything trains people to click through without reading, which is exactly
+  what makes the one confirm that matters stop working.
 - **Mobile first.** Most of this club's traffic is phones. Check at ~375px wide,
   keep tap targets thumb-sized, and never hide something behind hover alone.
 - **Accessibility is part of "done", not a follow-up.** Real `<button>` and `<a>`
   elements, labels tied to their inputs, `role="status"` / `aria-live` on async
   updates, visible focus, contrast through the theme tokens. `AuthPending` and
   `SubmitStatus` are small, correct examples to copy.
+- **Copy that live-region wiring, not just the look, onto every loading state.**
+  A page that renders its own bare `Loading...` text instead of reusing
+  `AuthPending`/`SubmitStatus` still needs `role="status"` (or
+  `aria-live="polite"`) on it — otherwise a screen-reader user gets no signal
+  that anything is happening or has finished, even though a sighted user sees
+  the same information those two components already announce correctly.
 - **Look at it.** For a UI change, run the app and open the screen (the `/run`
   skill launches it), or read the PR-screenshots artifact. Note what that job
   does _not_ catch: a route that handles its own loader error and renders a card

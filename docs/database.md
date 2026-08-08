@@ -548,14 +548,23 @@ dated plan is on sale at once.
 `payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
 Constraint: the student rate requires a `uts_student_number`. The `member` role
-is granted on paid activation. The member's display name/email come from their
-profile (via `user_id`). For a dated plan, `starts_at`/`ends_at` are the plan's
-own dates (`starts_on` at 00:00 and `ends_on` at 23:59:59, both
-Australia/Sydney), computed once at activation and never touched again.
-`sessions_remaining` is set at activation and spent by a **check-in** — see
-`session_checkins` below, the only writer that decrements it.
+is reconciled against these rows by `syncMemberRole` after every activation,
+cancellation and deletion — it is a label, not the access gate (see the
+"Membership ledger" note in `docs/memberships.md`). The member's display
+name/email come from their profile (via `user_id`). For a dated plan,
+`starts_at`/`ends_at` are the plan's own dates (`starts_on` at 00:00 and
+`ends_on` at 23:59:59, both Australia/Sydney), computed once at activation and
+never touched again. `sessions_remaining` is set at activation and spent by a
+**check-in** — see `session_checkins` below, the only writer that decrements it.
 **RLS:** users read own; managers read/update all; direct member INSERT is
-revoked (all inserts go through the service-role `startMembership`).
+revoked (all inserts go through the service-role `startMembership` /
+`createMembershipForUser`). **Deletes** have no policy at all: a manager
+deleting a junk invoice goes through the service-role `deleteMembershipRow`,
+which bypasses RLS, so there is nothing to grant. Its guards
+(`whyMembershipCannotBeDeleted`) are the real gate, and one of them exists
+because `session_checkins.membership_id` is `ON DELETE SET NULL`: deleting a
+membership somebody trained on would silently orphan the check-in rather than
+fail.
 
 ### `bank_transactions` — statement import + reconciliation
 
@@ -906,14 +915,19 @@ grants off.
 `key` PK, `value`, `updated_at`, `updated_by → auth.users(id)`. **RLS:**
 manager-only. Keys in use:
 
-| Key                            | Holds                                                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoice_payment_instructions` | Markdown shown on an invoice. Falls back to a built-in stub when unset.                                                                                 |
-| `contact_messages_seen_at`     | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread. |
+| Key                              | Holds                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoice_payment_details`        | **JSON.** The club's bank account (account name, BSB, account number, bank, plus optional SWIFT/BIC and addresses, plus a note), shown field by field with a copy button each on `/membership` and in the payment email. Anything that is not a complete account parses as "not published yet". See `docs/memberships.md`. |
+| `invoice_payment_instructions`   | **Legacy.** The free-text markdown that `invoice_payment_details` replaced. Nothing member-facing reads it; `/manager/settings` shows it read-only while the account fields are still empty. Pending deletion.                                                                                                             |
+| `contact_messages_seen_at`       | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread.                                                                                                                                                                    |
+| `interest_registrations_seen_at` | ISO instant of the newest interest registration on file when a manager last opened `/manager/users`. Same club-wide watermark shape; anything newer counts as a new sign-up on `/notifications`.                                                                                                                           |
 
-Being key/value is what let the contact-message unread count ship without a
-migration. It is also its limit: a value here is a single club-wide fact, so
-anything that needs to differ per manager needs a real table.
+Being key/value is what let the contact-message unread count, and later the
+new-registration count, ship without a migration. It is also its limit: a value
+here is a single club-wide fact, so anything that needs to differ per manager
+needs a real table. Both watermarks are read and written through
+`src/lib/seen-markers.ts`, which holds the only-moves-forward and
+never-into-the-future guards.
 
 ### `email_verification_tokens` — proof that someone can read an address
 

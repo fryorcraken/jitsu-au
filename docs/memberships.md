@@ -17,8 +17,9 @@ period** runs between fixed dates (everyone who buys it gets exactly those
 dates, regardless of when in it they joined), **yearly insurance** runs N days
 from the moment payment clears, and a **casual class** or the **free trial**
 ends with its session credits instead of on a date. There is no self-serve
-sign-up: a membership only exists because someone bought one, or a manager
-approved a waiver and the club's free trial was assigned automatically.
+sign-up: a membership only exists because someone bought one, because a manager
+raised it for them, or because a manager approved a waiver and the club's free
+trial was assigned automatically.
 
 ## Plans
 
@@ -100,14 +101,99 @@ casual per-class rate instead — that is what it is for.
 
 Nothing in the app closes a membership automatically when its `ends_at`
 passes — see `docs/check-in.md`'s "When the last session goes" — so a member
-who paid for the period just finished keeps their `member` role, and with it
-the members-only calendar and blog comments, straight through the winter or
-summer break and into the next period's first class. That is deliberate: the
-alternative (locking members out at the exact hour a period ends) would drop
-the whole club out of members-only areas every few months for no product
-reason. The trade-off is symmetric with every other plan in this app: someone
-who never comes back also keeps that access until a check-in eventually
-closes their membership, or a manager cancels it by hand.
+who paid for the period just finished keeps the members-only calendar and blog
+comments straight through the winter or summer break and into the next period's
+first class. That is deliberate: the alternative (locking members out at the
+exact hour a period ends) would drop the whole club out of members-only areas
+every few months for no product reason. The trade-off is symmetric with every
+other plan in this app: someone who never comes back also keeps that access
+until a check-in eventually closes their membership, or a manager cancels it by
+hand.
+
+**Members-only access is not gated on the `member` role.** It is gated live by
+the `has_active_paid_membership` SQL helper — an active, non-`trial`,
+`price_cents > 0` membership — which the RLS policies on the calendar and blog
+comments call directly. So the moment a membership is cancelled, access closes,
+with no role change involved.
+
+The `member` role row is a **label**: what `/manager/users` and the agent API's
+`list_users` report. It used to be granted on a paid activation and never taken
+back, so somebody tidied up months ago still read as a member. `syncMemberRole`
+in `src/lib/membership.functions.ts` now owns that rule in one place and
+reconciles it after every activation, cancellation and deletion. A failed read
+leaves the label alone: "the query fell over" must never be answered the same
+way as "they hold nothing", because the second one revokes.
+
+**Expiry deliberately does not reconcile the label**, only an explicit cancel
+does. That is the same break rule as above: a period ending is not somebody
+leaving the club, and a manager cancelling is.
+
+## Closing and clearing up
+
+Three things a manager can do to an existing membership, from either
+`/manager/memberships` or the person's own page at `/manager/users/<id>`. Both
+screens share `MembershipRowActions`, so the rules cannot drift between them.
+
+**Cancel** works from any state, including `pending`. Cancelling a pending
+invoice is the ordinary tidy-up for somebody who said they would join and never
+paid, and it used to be impossible: the only button on a non-active row was
+Activate, which marks it paid, grants the label and **emails them that their
+membership is live**. Cancelling keeps the row, its dates and its credits;
+re-activating still works.
+
+**Delete** removes the row outright, for an invoice that should never have
+existed. `whyMembershipCannotBeDeleted` (in `src/lib/validation.ts`) refuses it
+for three reasons, and reports **all** that apply rather than the first found —
+a manager who clears one blocker only to be refused by the next has been sent
+round the loop for nothing:
+
+| Blocker    | Why                                                            | What to do instead                  |
+| ---------- | -------------------------------------------------------------- | ----------------------------------- |
+| `paid`     | `paid_at` set: the club's record of money that actually moved. | Cancel it. Never deletable.         |
+| `active`   | It is still running.                                           | Cancel it first, then delete.       |
+| `attended` | A class was checked in against it.                             | Move those check-ins first (below). |
+
+`attended` is not bookkeeping fussiness: `session_checkins.membership_id` is
+`ON DELETE SET NULL`, so without the guard the delete would succeed and quietly
+turn a class somebody trained at into an uncovered one.
+`bank_transactions.matched_membership_id` points the same way, but a matched
+transaction always implies `paid_at`, so `paid` already covers it.
+
+**Move a check-in to another membership** (`transferCheckInCoverage` in
+`src/lib/checkin.functions.ts`) is what clears the `attended` blocker, and the
+only way to correct wrong coverage without destroying the record: previously a
+manager had to undo the check-in and record it again, which deletes the row and
+loses `checked_in_at`, the record of when they were actually on the mat. It
+releases the row with a compare-and-swap against the coverage it had, refunds
+the old membership's credit only once that release is won, then finishes through
+the same `applyCoverage` the door runs — so a target that cannot cover the class
+lands it uncovered and warns, rather than being force-fitted. See
+`docs/check-in.md`.
+
+## A manager raising somebody's membership
+
+`createMembershipForUser` is the manager's counterpart to a member pressing
+"Choose" on `/membership`, and both go through the same `enrolMember`. A priced
+plan lands a **pending** invoice carrying the payment reference the member would
+quote on a transfer, so it reconciles off a bank statement normally, and
+activating stays the separate press because that emails them and grants the
+label. A **free** plan activates on the spot, exactly as it does for a member
+choosing it themselves.
+
+Two things differ from a member's own purchase, and both follow from a manager
+often writing down an enrolment that already happened rather than selling one:
+
+- **Any plan, not just a sellable one.** `startMembership` refuses anything
+  outside `sellablePlans`; a manager can pick a past training period, which is
+  what backfilling needs. The screen groups those under "No longer on sale" so
+  it cannot happen by accident.
+- **Insurance is their call.** A member with no current cover cannot decline it
+  (see "Buying a dated plan"); a manager can, because an enrolment that really
+  did happen without cover is history, not a sale.
+
+`send_email: false` records the invoice without telling anyone about it, so
+backfilling last semester does not invoice the whole club for it. The free trial
+is still once per person ever, however it is raised.
 
 ## Reconciliation and invoices
 
@@ -120,12 +206,78 @@ own), and reconciliation, activation and cancellation follow the same
 `edit_invoice` / bank-reconciliation flow as any other plan — see
 `.claude/skills/uts-manager-agent/SKILL.md` and `/manager/reconciliation`.
 
+## Paying an invoice
+
+The member sees everything they need to pay on `/membership` itself: a **How to
+pay** panel above the plan list carrying the amount, the payment reference, and
+the club's bank account. Any signed-in person can read the club's account, not
+only someone who owes money.
+
+The panel appears only while something is unpaid, and it counts **transfers, not
+rows**: a plan bought with yearly insurance is two pending memberships behind one
+reference, so it shows as one payment with the split underneath, matching the
+single combined amount the email quotes. The memberships table above it stays the
+per-row record.
+
+**The invoice email is a second copy of the same details, not a replacement**, so
+a member who deleted the email is not stuck, and it links back to the page.
+
+### The club's account is fields, not prose
+
+The account is eight named values under the `club_settings` key
+`invoice_payment_details` (a JSON blob), edited on `/manager/settings`, and
+**every one of them has its own copy button** on the page. That is the whole
+reason it is structured: a member is in a banking app on a phone, and a block of
+prose gives them one thing to select by hand.
+
+- **Account name, BSB, account number, bank** are required **together**. A
+  half-filled account never parses, because it looks payable: somebody copies the
+  BSB, finds no account number, and guesses. An incomplete set is treated exactly
+  like nothing published.
+- **SWIFT/BIC, bank address, account holder address** are each optional and sit
+  behind a "Paying from overseas?" disclosure, hidden entirely when all three are
+  blank. Australia has no IBAN, so the BIC (the same thing as a SWIFT code, 8 or
+  11 characters) plus the BSB and account number is what a sending bank abroad
+  asks for.
+- **The note** is the one free-text field left, markdown, with no copy button.
+
+The BSB is stored as six bare digits and displayed **and copied** as `062-000`,
+formatted in one place (`clubPaymentFieldValue`) so what is on screen and what
+lands on the clipboard cannot disagree. `CLUB_ACCOUNT_FIELDS` /
+`CLUB_INTERNATIONAL_FIELDS` in `src/lib/validation.ts` are the single ordered
+list both the page and the email walk, which is what stops the two drifting.
+
+**An overseas transfer often arrives short**, because a bank in the middle took a
+cut. Reconciliation matches on the reference _and the exact amount_
+(`matchesMembershipReference`), so a short payment does not activate anything and
+waits for a manager. The overseas block says so before anyone pays.
+
+### Before the club has published an account
+
+The page and the email both say the club has not published its details yet and to
+get in touch, rather than rendering an empty block. `/manager/settings` leads with
+a warning while that is true, and shows whatever free text is left in the old
+`invoice_payment_instructions` row read-only, so the values can be copied across.
+Nothing member-facing reads that legacy row any more; it is deleted in a later
+change.
+
+A failed **read** of the settings is kept apart from a club that never published
+anything (`readClubPaymentDetails` returns `ok`), because the two say different
+things to somebody about to transfer money.
+
 ## Manager screens & the manager agent API
 
-| Manager UI                  | Manager agent actions                            | What it does                                   |
-| --------------------------- | ------------------------------------------------ | ---------------------------------------------- |
-| `/manager/membership-plans` | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan. |
-| `/manager/memberships`      | `list_invoices` / `edit_invoice`                 | See and correct invoices.                      |
+| Manager UI                        | Manager agent actions                            | What it does                                   |
+| --------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
+| `/manager/membership-plans`       | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan. |
+| `/manager/memberships`            | `list_invoices` / `edit_invoice`                 | See and correct invoices.                      |
+| both membership screens           | `edit_invoice` (`status`) / `delete_invoice`     | Cancel from any state; delete a junk invoice.  |
+| `/manager/users/<id>`             | `create_membership`                              | Raise a membership for a person.               |
+| `/manager/users/<id>` (check-ins) | none                                             | Move a check-in to another membership.         |
+
+Moving a check-in is the one row with no agent equivalent: the API has no
+check-in actions at all, and adding the first one is a wider decision than this
+needed. It means an agent cannot clear an `attended` delete blocker on its own.
 
 Per this repo's standing rule (`docs/manager-agent-api.md`), the agent
 actions mirror what a manager can do in the UI — see the skill file for the

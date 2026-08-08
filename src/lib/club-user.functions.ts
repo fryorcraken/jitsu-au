@@ -230,6 +230,15 @@ export const getClubUser = createServerFn({ method: "POST" })
       membershipRows.map((m) => [m.id, planById.get(m.plan_id)?.name ?? null]),
     );
 
+    // Exact per-membership check-in counts, not derived from `checkinRows`
+    // above: that read is capped at CHECKINS_LIMIT, and an under-count here
+    // would offer a Delete the server then refuses.
+    const { checkinCountsByMembership } = await import("@/lib/membership.functions");
+    const checkinCounts = await checkinCountsByMembership(
+      admin,
+      membershipRows.map((m) => m.id),
+    );
+
     return {
       // Only the derived headline fields, not the whole aggregate. Its
       // `uts_student_number` in particular falls back to a number captured on a
@@ -287,9 +296,15 @@ export const getClubUser = createServerFn({ method: "POST" })
         starts_at: m.starts_at,
         ends_at: m.ends_at,
         sessions_remaining: m.sessions_remaining,
+        // The three inputs to the delete guard, so the screen can say why the
+        // button is unavailable instead of only that it is.
+        paid_at: m.paid_at,
+        checkin_count: checkinCounts.get(m.id) ?? 0,
       })),
       // Their attendance, newest first. `membership_id` with no cover is what
-      // the needs-attention flow fixes, and it can be fixed from here too.
+      // the needs-attention flow fixes, and it can be fixed from here too;
+      // `membership_id` WITH cover is what a manager moves to free a membership
+      // up for deletion.
       checkins: checkinRows.map((c) => ({
         id: c.id,
         event_id: c.event_id,
@@ -297,6 +312,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         event_starts_at: eventById.get(c.event_id)?.starts_at ?? null,
         checked_in_at: c.checked_in_at,
         coverage: c.coverage,
+        membership_id: c.membership_id,
         plan_name: c.membership_id ? (planNameByMembership.get(c.membership_id) ?? null) : null,
         consumed_credit: c.consumed_credit,
         warnings: c.warnings,

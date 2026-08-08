@@ -3,10 +3,6 @@
 // Pulls in server-only dependencies (the Lovable send API, the React-email
 // renderer) so it must never reach the client bundle — it is named `*.server.ts`
 // and only ever lazy-imported from inside server-function handlers.
-//
-// The club's receiving bank details live here (server-side only) because they
-// are only needed to render the payment-instructions email — they are never
-// returned to the browser.
 import * as React from "react";
 import { render } from "@react-email/render";
 import { sendLovableEmail } from "@lovable.dev/email-js";
@@ -16,7 +12,7 @@ import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment
 import { MembershipActivatedEmail } from "@/lib/email-templates/membership-activated";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
-import { DEFAULT_INVOICE_INSTRUCTIONS } from "@/lib/validation";
+import { readClubPaymentDetails } from "@/lib/club-settings.server";
 
 const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
@@ -30,25 +26,6 @@ export const MEMBERSHIP_REVIEW_URL = `${SITE_URL}/manager/memberships`;
 const ACCOUNT_URL = `${SITE_URL}/membership`;
 
 type AdminClient = SupabaseClient<Database>;
-
-/**
- * The manager-set markdown payment instructions shown on invoices. Read from
- * the `club_settings` store; falls back to a default until a manager customizes
- * it. Never throws — a lookup hiccup falls back to the default so it can't block
- * the invoice email.
- */
-export async function getInvoiceInstructions(admin: AdminClient): Promise<string> {
-  try {
-    const { data } = await admin
-      .from("club_settings")
-      .select("value")
-      .eq("key", "invoice_payment_instructions")
-      .maybeSingle();
-    return data?.value?.trim() || DEFAULT_INVOICE_INSTRUCTIONS;
-  } catch {
-    return DEFAULT_INVOICE_INSTRUCTIONS;
-  }
-}
 
 async function sendOne(opts: {
   apiKey: string;
@@ -110,7 +87,9 @@ export async function sendMembershipPaymentEmail({
     return { sent: [], skipped: true };
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
-  const instructions = await getInvoiceInstructions(admin);
+  // Null covers both "never published" and "could not read": either way the
+  // email cannot name an account, and it says so rather than inventing one.
+  const { details } = await readClubPaymentDetails(admin);
 
   const memberEl = React.createElement(MembershipPaymentEmail, {
     siteName: SITE_NAME,
@@ -120,7 +99,8 @@ export async function sendMembershipPaymentEmail({
     planName,
     amount,
     reference,
-    instructions,
+    details,
+    membershipUrl: ACCOUNT_URL,
   });
   const [memberHtml, memberText, managers] = await Promise.all([
     render(memberEl),

@@ -416,4 +416,72 @@ describe("/account", () => {
       expect(driveCard.getByText(/not set up on this site yet/i)).toBeInTheDocument();
     });
   });
+
+  // The password rules themselves are pinned in `lib/password-policy.test.ts`.
+  // What is pinned here is the wiring: that this card actually consults them,
+  // that Supabase's refusal reaches the screen in words, and that the refusal
+  // gets out of the way again.
+  describe("change password", () => {
+    const passwordCard = () => within(card("Change password"));
+
+    async function typePassword(user: ReturnType<typeof userEvent.setup>, value: string) {
+      await user.click(passwordCard().getByLabelText("New password"));
+      await user.paste(value);
+    }
+
+    it("refuses a password that breaks a rule without calling Supabase", async () => {
+      const { supabase } = await import("@/integrations/supabase/client");
+      const user = userEvent.setup();
+      await renderLoaded();
+
+      await typePassword(user, "Password1!");
+      await user.click(passwordCard().getByRole("button", { name: "Update password" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(/5 more characters/);
+      expect(supabase.auth.updateUser).not.toHaveBeenCalled();
+    });
+
+    it("checks the password against the name on the profile, not just the email", async () => {
+      const user = userEvent.setup();
+      await renderLoaded();
+
+      // Ada Lovelace, per the profile fixture. Her own name is not a password.
+      await typePassword(user, "ada lovelace ada");
+      await user.click(passwordCard().getByRole("button", { name: "Update password" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(/knows you could guess/i);
+    });
+
+    it("puts Supabase's refusal on screen in words a person can act on", async () => {
+      const { supabase } = await import("@/integrations/supabase/client");
+      vi.mocked(supabase.auth.updateUser).mockResolvedValueOnce({
+        data: { user: null },
+        error: {
+          message: "Password is known to be weak and easy to guess, please choose a different one.",
+        },
+      } as unknown as Awaited<ReturnType<typeof supabase.auth.updateUser>>);
+      const user = userEvent.setup();
+      await renderLoaded();
+
+      await typePassword(user, "otter kettle marina drill");
+      await user.click(passwordCard().getByRole("button", { name: "Update password" }));
+
+      const alert = await screen.findByRole("alert");
+      // Not the raw message, and not a toast: it stays on screen next to the rules.
+      expect(alert).toHaveTextContent(/data breach/i);
+      expect(alert).not.toHaveTextContent(/known to be weak/i);
+    });
+
+    it("clears the refusal as soon as they start fixing it", async () => {
+      const user = userEvent.setup();
+      await renderLoaded();
+
+      await typePassword(user, "short");
+      await user.click(passwordCard().getByRole("button", { name: "Update password" }));
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+      await user.type(passwordCard().getByLabelText("New password"), "er");
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
 });

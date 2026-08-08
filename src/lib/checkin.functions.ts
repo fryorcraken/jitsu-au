@@ -21,6 +21,7 @@ import {
   checkInBoardSchema,
   checkInSchema,
   nameWithPreferred,
+  transferCheckInSchema,
   undoCheckInSchema,
 } from "@/lib/validation";
 import type { CheckInWarning } from "@/lib/validation";
@@ -621,6 +622,94 @@ export const attachCheckInCoverage = createServerFn({ method: "POST" })
   });
 
 /**
+ * Move an already-covered check-in onto a different membership.
+ *
+ * `attachCheckInCoverage` above handles the uncovered row; this handles the one
+ * that is covered by the wrong membership. Until now the only way to correct
+ * that was to undo the check-in and record it again, which deletes the row and
+ * loses `checked_in_at` — the record of when they were actually on the mat.
+ *
+ * The order is the same guard `undoCheckInRow` uses, for the same reason:
+ * RELEASE the check-in first, with a compare-and-swap against the coverage it
+ * had, and only refund once that update is ours. Exactly one caller can win the
+ * release, so exactly one refund is ever attempted. Refunding first would let
+ * two managers moving the same check-in hand back two credits for one class.
+ *
+ * Once released the row is genuinely uncovered, so the move finishes through
+ * `applyCoverage` — the same code the door and the attach path run, which means
+ * a target that cannot actually cover the class (wrong dates, no credits left)
+ * lands it uncovered and warns, rather than being force-fitted. The old
+ * membership has its credit back either way, which is the honest outcome: the
+ * manager asked to take the class off it.
+ */
+export const transferCheckInCoverage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => transferCheckInSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const ctx = context as { supabase: CheckinClient; userId: string };
+    await requireManager(ctx);
+    const admin = await adminClient();
+
+    const { data: row, error } = await admin
+      .from("session_checkins")
+      .select(
+        "id, user_id, event_id, coverage, membership_id, consumed_credit, closed_membership, checked_in_at",
+      )
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("That check-in no longer exists.");
+    if (row.coverage === "none")
+      throw new Error("That check-in is not covered by anything yet, so attach it instead.");
+    if (row.membership_id === data.membership_id)
+      throw new Error("That check-in is already on that membership.");
+
+    // The claim. Losing it means another manager is already moving this row.
+    //
+    // Pinned on `membership_id` as well as `coverage`, because coverage alone
+    // does not identify the state this call read. Two managers moving the same
+    // check-in: the first releases it, refunds A and re-covers it from B, all
+    // before the second's update runs — whose `coverage` filter then matches
+    // the NEW state and releases it a second time, refunding A again off a
+    // stale row while B's credit stays spent and the class ends up uncovered.
+    // Pinning the membership makes the second update match nothing, which is
+    // the whole point of a compare-and-swap.
+    let claim = admin
+      .from("session_checkins")
+      .update({
+        coverage: "none",
+        membership_id: null,
+        consumed_credit: false,
+        closed_membership: false,
+      })
+      .eq("id", row.id)
+      .eq("coverage", row.coverage);
+    claim = row.membership_id
+      ? claim.eq("membership_id", row.membership_id)
+      : claim.is("membership_id", null);
+    const { data: released, error: relErr } = await claim.select("id");
+    if (relErr) throw new Error(relErr.message);
+    if ((released ?? []).length === 0)
+      throw new Error("Someone else moved that check-in first. Reload to see where it landed.");
+
+    await refundCheckInCredit(admin, row);
+
+    const { data: event } = await admin
+      .from("calendar_events")
+      .select("starts_at")
+      .eq("id", row.event_id)
+      .maybeSingle();
+
+    const decision = await applyCoverage(admin, {
+      checkInId: row.id,
+      userId: row.user_id,
+      at: event?.starts_at ?? row.checked_in_at,
+      onlyMembershipId: data.membership_id,
+    });
+    return { decision };
+  });
+
+/**
  * Undo a check-in and give back whatever it spent.
  *
  * The row is deleted FIRST, with `RETURNING`, so the delete is the guard: two
@@ -658,23 +747,50 @@ export async function undoCheckInRow(
   // Nothing deleted: another manager undid it first. Say so rather than
   // reporting a no-op as a successful removal.
   if (!deleted) return { removed: false, refunded: false };
-  if (!deleted.consumed_credit || !deleted.membership_id) return { removed: true, refunded: false };
+
+  const { refunded, reopened } = await refundCheckInCredit(admin, deleted);
+  return { removed: true, refunded, reopened };
+}
+
+/**
+ * Give back the credit a check-in spent, and reopen the membership if that
+ * check-in is what closed it.
+ *
+ * Takes the check-in's own record of what it took (`consumed_credit`,
+ * `membership_id`, `closed_membership`) rather than re-deciding, because by the
+ * time this runs the check-in has already been released — deleted by an undo, or
+ * detached by a transfer. Only the row's own record still knows what to put back.
+ *
+ * The caller must release the check-in FIRST, and release it with a
+ * compare-and-swap, so that exactly one caller ever reaches here for a given
+ * check-in. Refunding before releasing would let a retry hand out sessions
+ * nobody paid for.
+ */
+export async function refundCheckInCredit(
+  admin: CheckinClient,
+  row: {
+    membership_id: string | null;
+    consumed_credit: boolean | null;
+    closed_membership: boolean | null;
+  },
+): Promise<{ refunded: boolean; reopened?: boolean }> {
+  if (!row.consumed_credit || !row.membership_id) return { refunded: false };
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const { data: m, error: mErr } = await admin
       .from("memberships")
       .select("id, status, sessions_remaining, ends_at")
-      .eq("id", deleted.membership_id)
+      .eq("id", row.membership_id)
       .maybeSingle();
     if (mErr) throw new Error(mErr.message);
     // The membership is gone: nothing to refund, and the check-in is already
-    // removed, so there is nothing left to reconcile.
-    if (!m || m.sessions_remaining === null) return { removed: true, refunded: false };
+    // released, so there is nothing left to reconcile.
+    if (!m || m.sessions_remaining === null) return { refunded: false };
 
     // Reopen only what THIS check-in closed, and only if the end date has not
     // also passed — a membership a manager expired by hand stays expired.
     const stillWithinDates = !m.ends_at || new Date(m.ends_at).getTime() >= Date.now();
-    const reopen = deleted.closed_membership && m.status === "expired" && stillWithinDates;
+    const reopen = Boolean(row.closed_membership) && m.status === "expired" && stillWithinDates;
 
     const { data: updated, error: uErr } = await admin
       .from("memberships")
@@ -686,7 +802,7 @@ export async function undoCheckInRow(
       .eq("sessions_remaining", m.sessions_remaining)
       .select("id");
     if (uErr) throw new Error(uErr.message);
-    if ((updated ?? []).length > 0) return { removed: true, refunded: true, reopened: reopen };
+    if ((updated ?? []).length > 0) return { refunded: true, reopened: reopen };
   }
-  throw new Error("The check-in was removed but the session could not be given back. Try again.");
+  throw new Error("The check-in was released but the session could not be given back. Try again.");
 }

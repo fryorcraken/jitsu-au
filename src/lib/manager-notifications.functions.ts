@@ -4,7 +4,9 @@
 // stored, which is what makes them clear by being FIXED rather than by being
 // dismissed — see docs/notifications.md. That is also why unanswered contact
 // messages belong here rather than among the stored activity rows: they clear
-// when a manager opens the inbox, and there is no per-message read state.
+// when a manager opens the inbox, and there is no per-message read state. The
+// two sign-up steps arrive the same way: a waiver clears by being approved, and
+// a registration by a manager opening the users list.
 //
 // This is a composition point, not a feature: each source contributes its own
 // items and this module decides what order a manager meets them in. The rules
@@ -23,12 +25,16 @@
 import {
   composeManagerNotifications,
   contactMessageNotifications,
+  interestRegistrationNotifications,
   sellableWindowNotifications,
+  waiverApprovalNotifications,
 } from "@/lib/validation";
 import type { ManagerNotification } from "@/lib/validation";
 import type { MembershipClient, MembershipPlanRow } from "@/lib/membership-types";
 import { listMembershipPlanRows } from "@/lib/membership.functions";
 import { countUnreadContactMessages } from "@/lib/contact-messages.functions";
+import { countNewInterestRegistrations } from "@/lib/leads.functions";
+import { countWaiversAwaitingApproval } from "@/lib/waiver.functions";
 
 /**
  * "Nothing is defined after the current training period, so enrolments stop
@@ -51,13 +57,23 @@ export async function managerAttentionItems(
   admin: MembershipClient,
 ): Promise<ManagerNotification[]> {
   // Sources are independent, so fetch them together rather than in sequence.
-  const [windows, unreadContact] = await Promise.all([
+  //
+  // The three counts degrade to "nothing to report" on their own failed reads,
+  // so one bad query cannot empty the queue around it. The membership windows
+  // are the exception and still throw, which `Promise.all` turns into a failed
+  // notifications payload: the page then says it could not load and offers a
+  // retry, which is honest, rather than reporting all quiet.
+  const [windows, unreadContact, waitingWaivers, newLeads] = await Promise.all([
     membershipWindowNotifications(admin),
     countUnreadContactMessages(admin),
+    countWaiversAwaitingApproval(admin),
+    countNewInterestRegistrations(admin),
   ]);
 
   return composeManagerNotifications({
+    waiverApprovals: waiverApprovalNotifications(waitingWaivers),
     contactMessages: contactMessageNotifications(unreadContact),
+    interestRegistrations: interestRegistrationNotifications(newLeads),
     membershipWindows: windows,
   });
 }

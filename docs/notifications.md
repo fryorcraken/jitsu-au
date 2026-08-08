@@ -68,6 +68,95 @@ written whether or not the person wants it emailed.
 
 ## Flows
 
+### Somebody signs up
+
+Signing up is two steps, and until this existed neither of them reached the
+notifications page at all. A manager found out by opening `/manager/users` or
+`/manager/waivers` on the off chance, or by spotting the best-effort email.
+
+Both are **attention items**, and they are deliberately different shapes:
+
+| Step         | Item                                                | Verb    | Clears when                      |
+| ------------ | --------------------------------------------------- | ------- | -------------------------------- |
+| **Register** | "Sam registered interest in training"               | Read it | a manager opens `/manager/users` |
+| **Waiver**   | "Sam signed the waiver and is waiting for approval" | Approve | the waiver is approved           |
+
+The register step is **news, not work**. Nobody is waiting on anything, so it
+carries a reading verb and nothing else, and its copy says so in as many words.
+The waiver step is the opposite: somebody has signed and cannot start until a
+manager presses the button, which is why it sits at the top of the queue (see
+`composeManagerNotifications` for the full ordering and why).
+
+The waiver item's body says what approving leads to before the manager gets
+anywhere near the button: it activates the person's account, emails them to say
+so, and assigns the free trial. That is outward-facing and cannot be taken back
+quietly, and "anything irreversible gets a confirm that says what will happen"
+is the club's own UX rule.
+
+Counted from `waivers.approval_status = 'pending'`, which is the stored fact.
+The waivers screen's third state, `superseded`, is derived from a person's other
+**approved** waivers, so it can never hide work from this count.
+
+> [!WARNING]
+> **A pending waiver has exactly one exit, and it is approval.** `approval_status`
+> is `pending | approved` with no reject, and approving one row leaves any other
+> pending row of that person's alone. So a second submission nobody wants
+> approved (a bogus public signing, or a paper form filed for somebody who then
+> signed online outside the same-day duplicate probe) keeps this item and the
+> badge up for good. Clearing it means approving a duplicate, and for a stranger's
+> submission that activates an account, emails them and grants a trial. Nothing
+> counted pending waivers before this, which is why it never surfaced. The fix is
+> a real dismissal state on `waivers`, which is a schema change and a product
+> decision of its own, so it is not in this change.
+>
+> The count is also unbounded while `listWaivers` caps at 500 rows, newest
+> `signed_at` first. Past 500 waivers the club could have a pending one that
+> `/manager/waivers` does not list, and the item would point at a screen without
+> the row on it. Not reachable at the club's current size, and the fix when it is
+> would be paging that screen, the same answer `docs/database.md` gives for the
+> contact inbox.
+
+#### The registration watermark
+
+Interest registrations have no per-row read state to hang a badge on:
+`interest_registrations` grants `anon` INSERT and deliberately nothing else. So
+"new" means everything created after one club-wide watermark,
+`club_settings.interest_registrations_seen_at`, exactly as unanswered contact
+messages work. `src/lib/seen-markers.ts` owns both.
+
+Two things about it differ from the contact inbox, and both are on purpose:
+
+- **Opening `/manager/users` at all clears it**, not opening some leads-only
+  view. That screen is the whole funnel, one row per person, and it is where a
+  registration ends up whether or not that person is still a lead.
+- **The watermark is stamped from the newest registration in the database**,
+  not from a boundary the browser hands back. The users screen aggregates one
+  row per person, so a lead who has since signed a waiver appears there as an
+  applicant and the rendered rows cannot supply "the newest registration". The
+  cost is a registration landing in the gap between that screen loading and the
+  stamp: it is marked seen without ever being badged. Nothing is lost when that
+  happens, which is the difference that makes it acceptable. A registration is a
+  person, and that person stays on the users list for good, whereas a contact
+  message exists nowhere else and its watermark is therefore stricter.
+
+Two more things follow from the watermark being a bare "everything after this":
+
+- **Acknowledging hands the addresses back**, and the users table pills those
+  rows **new**. Clearing the badge otherwise destroys the only record of what it
+  was about: that screen is one row per person for the whole club, sorted by
+  name, with nothing marking an arrival. `manager.contact-messages.tsx` keeps its
+  unread ids for the same reason, and this is the same move one layer down.
+- **Every query is bounded at both ends**, newer than the watermark AND not in
+  the future. `interest_registrations` grants `anon` a bare INSERT and its RLS
+  `WITH CHECK` constrains only the person fields, so the publishable key in the
+  browser bundle is enough to file a row stamped 2099. Since the watermark is
+  clamped to the present, such a row could never be brought under it: it would
+  count as new for good, pinning an item that by design has no read state and no
+  way to be dismissed. Bounded, a future row is simply not news yet. The same
+  hole is still open on `contact_messages`, which has the identical grant and
+  the identical clamp; closing it is a one-line change in
+  `countUnreadContactMessages` and belongs in its own PR.
+
 ### Somebody replies to you
 
 `postComment` (`src/lib/blog-comments.functions.ts`) and `createAnnotation`
@@ -201,10 +290,18 @@ choice to a member would be a lie about what they can turn on.
 - **No per-thread mute.** The switches are per kind. If one thread turns noisy,
   the answer today is to turn thread activity off.
 - **No in-app bell or toast.** The sidebar badge is the only in-app signal.
-- **The attention list has two checks**: the club's training dates running out,
-  and unanswered contact messages. Pending waiver approvals, unmatched bank
-  transactions and unpaid invoices are all obvious next entries and the shape
-  supports them, but widening the manager queue further is separate work.
+- **The attention list has four checks**: waivers waiting for approval, unanswered
+  contact messages, new interest registrations, and the club's training dates
+  running out. Unmatched bank transactions and unpaid invoices are the obvious
+  next entries and the shape supports them, but widening the manager queue
+  further is separate work.
+- **Signing up notifies managers by email at the moment it happens** (a new-lead
+  email on registration, a copy of the waiver on signing), and none of that is
+  changed by the attention items. Neither item claims a copy was emailed: those
+  sends are best-effort, and on the day this shipped the club's whole existing
+  backlog counted as new without anybody having been emailed about it.
+- **Neither sign-up item is per person.** Ten registrations are one line saying
+  ten, not ten lines. The page points at the screen that lists them.
 - **No digest for somebody with nothing.** An empty digest is not sent, and the
   rows are stamped anyway so tomorrow's run is not re-reading them forever.
 
@@ -238,6 +335,9 @@ Two consequences worth knowing:
 | The rules (pure, tested)     | `src/lib/notifications.ts`                                             |
 | The attention list           | `src/lib/manager-notifications.functions.ts`                           |
 | Contact messages             | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`     |
+| Interest registrations       | `src/lib/leads.functions.ts`                                           |
+| Waivers waiting on a manager | `countWaiversAwaitingApproval` in `src/lib/waiver.functions.ts`        |
+| The club-wide watermarks     | `src/lib/seen-markers.ts`                                              |
 | Who hears about what         | `src/lib/notification-events.server.ts`                                |
 | Sending, and the digest run  | `src/lib/notification-email.server.ts`                                 |
 | Page and settings server fns | `src/lib/notifications.functions.ts`                                   |

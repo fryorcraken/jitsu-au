@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPaymentReference,
+  clubPaymentDetailsSchema,
+  clubPaymentFieldValue,
   computeMembershipPrice,
+  createMembershipSchema,
   deriveLifecycleStatus,
+  formatBsb,
   formatCents,
+  hasInternationalDetails,
+  parseClubPaymentDetails,
   haystackContainsRef,
   insuranceSelection,
   matchesMembershipReference,
+  membershipDeleteMessage,
   normalizeRef,
+  whyMembershipCannotBeDeleted,
   parseMoneyToCents,
   planEditPayload,
   planEditsDiffer,
@@ -17,13 +25,13 @@ import {
   strandedPlanFields,
   planMembershipWindow,
   sanitizeSurname,
-  saveClubSettingsSchema,
   savePlanSchema,
   sellablePlans,
   sellableWindowNotifications,
   sessionDateTag,
   stableCode,
   startMembershipSchema,
+  unpaidInvoices,
 } from "./validation";
 
 describe("computeMembershipPrice", () => {
@@ -124,6 +132,144 @@ describe("deriveLifecycleStatus", () => {
     expect(
       deriveLifecycleStatus({ ...approved, memberships: [trial("active"), paid("expired")] }),
     ).toBe("visitor");
+  });
+});
+
+// Deleting a membership is the only irreversible thing a manager can do to one,
+// so the guard is where the care goes. The rule that matters most: it reports
+// EVERY blocker, because clearing one and being refused by the next is how a
+// manager ends up deciding the screen is broken.
+describe("whyMembershipCannotBeDeleted", () => {
+  const junk = { paid_at: null, price_cents: 44500, status: "pending", checkin_count: 0 };
+
+  it("lets a pending invoice nobody paid or trained on go", () => {
+    expect(whyMembershipCannotBeDeleted(junk)).toEqual([]);
+  });
+
+  it("lets a cancelled invoice go, which is the tidy-up this exists for", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, status: "cancelled" })).toEqual([]);
+  });
+
+  it("blocks one that has been paid", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, paid_at: "2026-08-01T00:00:00Z" })).toEqual([
+      "paid",
+    ]);
+  });
+
+  it("blocks one that is still active", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, status: "active" })).toEqual(["active"]);
+  });
+
+  // session_checkins.membership_id is ON DELETE SET NULL, so without this guard
+  // the delete would succeed and silently turn a covered class into an
+  // uncovered one rather than failing.
+  it("blocks one somebody trained on", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, checkin_count: 1 })).toEqual(["attended"]);
+  });
+
+  it("reports every blocker at once, not the first one found", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 44500,
+        status: "active",
+        checkin_count: 3,
+      }),
+    ).toEqual(["paid", "active", "attended"]);
+  });
+
+  // Activation stamps `paid_at` on every membership, the $0 free trial
+  // included — and the trial is auto-assigned at waiver approval, so it is the
+  // likeliest thing a manager ever needs to undo. Reading that stamp as a
+  // payment would make it undeletable and say "a payment is recorded against
+  // it", which is both untrue and a dead end.
+  it("does not treat an activated free trial as paid", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 0,
+        status: "cancelled",
+        checkin_count: 0,
+      }),
+    ).toEqual([]);
+  });
+
+  it("still blocks a free membership somebody actually trained on", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 0,
+        status: "cancelled",
+        checkin_count: 1,
+      }),
+    ).toEqual(["attended"]);
+  });
+
+  // An expired membership is not automatically safe: it expired BECAUSE its
+  // credits ran out on classes somebody attended.
+  it("still blocks an expired membership that was trained on", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, status: "expired", checkin_count: 2 })).toEqual([
+      "attended",
+    ]);
+  });
+});
+
+describe("membershipDeleteMessage", () => {
+  it("says nothing when there is nothing in the way", () => {
+    expect(membershipDeleteMessage([])).toBe("");
+  });
+
+  it("names the single reason and what to do instead", () => {
+    const msg = membershipDeleteMessage(["active"]);
+    expect(msg).toContain("it is still active");
+    expect(msg).toContain("cancel it");
+  });
+
+  // The one blocker a manager cannot clear decides the advice on its own:
+  // there is no sequence of steps that ends in a paid row being deleted, so
+  // sending them off to move check-ins first would be a wasted trip.
+  it("tells a manager to cancel a paid one rather than listing steps", () => {
+    const msg = membershipDeleteMessage(["paid", "attended"]);
+    expect(msg).toContain("Cancel it instead");
+    expect(msg).not.toContain("To delete it");
+  });
+
+  it("orders the steps so the check-ins move before the cancel", () => {
+    const msg = membershipDeleteMessage(["active", "attended"]);
+    expect(msg.indexOf("move those check-ins")).toBeLessThan(msg.indexOf("cancel it"));
+  });
+
+  it("reads as a sentence with every reason in it", () => {
+    const msg = membershipDeleteMessage(["paid", "active", "attended"]);
+    expect(msg).toContain("a payment is recorded against it, it is still active and a class");
+  });
+});
+
+// A manager raising somebody's invoice, as opposed to a member raising their
+// own. The two fields that differ carry the whole difference.
+describe("createMembershipSchema", () => {
+  const base = { user_id: "11111111-1111-4111-8111-111111111111", plan_code: "2026-s2" };
+
+  it("emails them by default, because most of the time they owe money", () => {
+    expect(createMembershipSchema.parse(base).send_email).toBe(true);
+  });
+
+  it("lets a manager record a backfill without invoicing anyone", () => {
+    expect(createMembershipSchema.parse({ ...base, send_email: false }).send_email).toBe(false);
+  });
+
+  // Unlike the member's own purchase, where leaving insurance off is refused
+  // when they have no cover, a manager's answer stands.
+  it("leaves insurance off unless it is asked for", () => {
+    expect(createMembershipSchema.parse(base).include_insurance).toBe(false);
+  });
+
+  it("needs a real person to raise it against", () => {
+    expect(() => createMembershipSchema.parse({ ...base, user_id: "someone" })).toThrow();
+  });
+
+  it("rejects a session date that is not a date", () => {
+    expect(() => createMembershipSchema.parse({ ...base, session_date: "7 Dec" })).toThrow();
   });
 });
 
@@ -508,6 +654,78 @@ describe("sellablePlans", () => {
   });
 });
 
+describe("unpaidInvoices", () => {
+  const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    id: "m1",
+    status: "pending",
+    plan_name: "Semester 2 2026",
+    price_cents: 24500,
+    payment_reference: "UTSJ-LOVE-A1B2",
+    ...overrides,
+  });
+
+  it("returns nothing when nothing is pending", () => {
+    expect(
+      unpaidInvoices([row({ status: "active" }), row({ id: "m2", status: "cancelled" })]),
+    ).toEqual([]);
+  });
+
+  it("carries the amount and reference of a single pending membership", () => {
+    expect(unpaidInvoices([row()])).toEqual([
+      {
+        reference: "UTSJ-LOVE-A1B2",
+        total_cents: 24500,
+        lines: [{ membership_id: "m1", plan_name: "Semester 2 2026", price_cents: 24500 }],
+      },
+    ]);
+  });
+
+  it("adds up a bundle sharing one reference into ONE transfer", () => {
+    // Buying a plan with insurance writes two memberships against one
+    // reference. The member owes one payment, and the total has to match the
+    // one the invoice email quotes.
+    const invoices = unpaidInvoices([
+      row(),
+      row({ id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }),
+    ]);
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0].total_cents).toBe(30500);
+    expect(invoices[0].lines.map((l) => l.plan_name)).toEqual([
+      "Semester 2 2026",
+      "Yearly insurance",
+    ]);
+  });
+
+  it("keeps separate references apart, in the order given", () => {
+    const invoices = unpaidInvoices([
+      row({ id: "m2", plan_name: "Casual class", price_cents: 2000, payment_reference: "UTSJ-B" }),
+      row(),
+    ]);
+    expect(invoices.map((i) => i.reference)).toEqual(["UTSJ-B", "UTSJ-LOVE-A1B2"]);
+    expect(invoices.map((i) => i.total_cents)).toEqual([2000, 24500]);
+  });
+
+  it("ignores an already-paid membership sharing the reference", () => {
+    // Half a bundle reconciled on its own (a manager activating one row by
+    // hand) must not be re-billed: only what is still pending is owed.
+    const invoices = unpaidInvoices([
+      row({ status: "active" }),
+      row({ id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }),
+    ]);
+    expect(invoices).toEqual([
+      {
+        reference: "UTSJ-LOVE-A1B2",
+        total_cents: 6000,
+        lines: [{ membership_id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }],
+      },
+    ]);
+  });
+
+  it("still bills a line whose plan could not be resolved", () => {
+    expect(unpaidInvoices([row({ plan_name: null })])[0].lines[0].plan_name).toBeNull();
+  });
+});
+
 describe("insuranceSelection", () => {
   const NOW = "2026-08-03T10:00:00.000Z";
 
@@ -598,25 +816,139 @@ describe("sellableWindowNotifications", () => {
   });
 });
 
-describe("saveClubSettingsSchema", () => {
-  it("accepts markdown instructions", () => {
-    const r = saveClubSettingsSchema.safeParse({
-      invoice_payment_instructions: "**BSB** 062-000\n**Acc** 1234 5678",
-    });
-    expect(r.success).toBe(true);
+describe("clubPaymentDetailsSchema", () => {
+  const account = (overrides: Record<string, unknown> = {}) => ({
+    account_name: "UTS Jitsu Club Inc",
+    bsb: "062-000",
+    account_number: "12345678",
+    bank_name: "Commonwealth Bank of Australia",
+    ...overrides,
   });
 
-  it("accepts empty instructions", () => {
-    expect(saveClubSettingsSchema.safeParse({ invoice_payment_instructions: "" }).success).toBe(
-      true,
+  it("accepts an account with only the four required fields", () => {
+    const r = clubPaymentDetailsSchema.safeParse(account());
+    expect(r.success).toBe(true);
+    // The optional fields settle to "" rather than undefined, so every renderer
+    // can read them without a null check.
+    expect(r.success && r.data.swift_bic).toBe("");
+    expect(r.success && r.data.note).toBe("");
+  });
+
+  it("stores a BSB as six digits however it was typed", () => {
+    for (const typed of ["062-000", "062000", "062 000"]) {
+      const r = clubPaymentDetailsSchema.safeParse(account({ bsb: typed }));
+      expect(r.success && r.data.bsb).toBe("062000");
+    }
+  });
+
+  it("rejects a BSB that is not six digits", () => {
+    expect(clubPaymentDetailsSchema.safeParse(account({ bsb: "06200" })).success).toBe(false);
+    expect(clubPaymentDetailsSchema.safeParse(account({ bsb: "0620001" })).success).toBe(false);
+    expect(clubPaymentDetailsSchema.safeParse(account({ bsb: "abcdef" })).success).toBe(false);
+  });
+
+  it("strips spaces from an account number and rejects a non-numeric one", () => {
+    const spaced = clubPaymentDetailsSchema.safeParse(account({ account_number: "1234 5678" }));
+    expect(spaced.success && spaced.data.account_number).toBe("12345678");
+    expect(clubPaymentDetailsSchema.safeParse(account({ account_number: "12-34" })).success).toBe(
+      false,
+    );
+    expect(clubPaymentDetailsSchema.safeParse(account({ account_number: "123" })).success).toBe(
+      false,
     );
   });
 
-  it("rejects instructions over the length cap", () => {
-    const r = saveClubSettingsSchema.safeParse({
-      invoice_payment_instructions: "x".repeat(5001),
-    });
-    expect(r.success).toBe(false);
+  // A half-filled account is worse than none: it looks payable, and somebody
+  // copies what is there and guesses the rest.
+  it("refuses a partly filled account", () => {
+    for (const missing of ["account_name", "bsb", "account_number", "bank_name"] as const) {
+      expect(clubPaymentDetailsSchema.safeParse(account({ [missing]: "" })).success).toBe(false);
+    }
+  });
+
+  // 8 or 11 characters, never 9 or 10: the branch part is three characters or
+  // it is absent.
+  it("accepts an 8 or 11 character SWIFT/BIC and rejects the shapes in between", () => {
+    expect(clubPaymentDetailsSchema.safeParse(account({ swift_bic: "CTBAAU2S" })).success).toBe(
+      true,
+    );
+    expect(clubPaymentDetailsSchema.safeParse(account({ swift_bic: "CTBAAU2SXXX" })).success).toBe(
+      true,
+    );
+    expect(clubPaymentDetailsSchema.safeParse(account({ swift_bic: "CTBAAU2SX" })).success).toBe(
+      false,
+    );
+    expect(clubPaymentDetailsSchema.safeParse(account({ swift_bic: "12BAAU2S" })).success).toBe(
+      false,
+    );
+  });
+
+  it("uppercases a SWIFT/BIC and treats blank as simply not given", () => {
+    const r = clubPaymentDetailsSchema.safeParse(account({ swift_bic: "ctbaau2s" }));
+    expect(r.success && r.data.swift_bic).toBe("CTBAAU2S");
+    expect(clubPaymentDetailsSchema.safeParse(account({ swift_bic: "" })).success).toBe(true);
+  });
+});
+
+describe("formatBsb", () => {
+  it("hyphenates six digits the way every Australian bank prints them", () => {
+    expect(formatBsb("062000")).toBe("062-000");
+  });
+
+  it("leaves anything that is not six digits alone rather than mangling it", () => {
+    expect(formatBsb("06200")).toBe("06200");
+    expect(formatBsb("")).toBe("");
+  });
+});
+
+describe("parseClubPaymentDetails", () => {
+  const stored = JSON.stringify({
+    account_name: "UTS Jitsu Club Inc",
+    bsb: "062000",
+    account_number: "12345678",
+    bank_name: "Commonwealth Bank of Australia",
+  });
+
+  it("reads back a stored account", () => {
+    expect(parseClubPaymentDetails(stored)?.account_name).toBe("UTS Jitsu Club Inc");
+  });
+
+  // Everything that is not a complete account is the same answer: not
+  // published. Guessing at a partial blob would put a wrong account number in
+  // front of somebody about to transfer money.
+  it("returns null for anything that is not a complete account", () => {
+    expect(parseClubPaymentDetails(null)).toBeNull();
+    expect(parseClubPaymentDetails("")).toBeNull();
+    expect(parseClubPaymentDetails("   ")).toBeNull();
+    expect(parseClubPaymentDetails("not json at all")).toBeNull();
+    expect(parseClubPaymentDetails("[]")).toBeNull();
+    // The free text this replaced, left in the wrong key.
+    expect(parseClubPaymentDetails("**BSB** 062-000")).toBeNull();
+    expect(parseClubPaymentDetails(JSON.stringify({ account_name: "UTS Jitsu" }))).toBeNull();
+  });
+});
+
+describe("clubPaymentFieldValue / hasInternationalDetails", () => {
+  const details = clubPaymentDetailsSchema.parse({
+    account_name: "UTS Jitsu Club Inc",
+    bsb: "062000",
+    account_number: "12345678",
+    bank_name: "Commonwealth Bank of Australia",
+  });
+
+  // The one field where what is shown differs from what is stored. It has to
+  // differ in exactly one place, or the hyphen ends up on screen but not on the
+  // clipboard.
+  it("hyphenates the BSB and passes every other field through untouched", () => {
+    expect(clubPaymentFieldValue(details, "bsb")).toBe("062-000");
+    expect(clubPaymentFieldValue(details, "account_number")).toBe("12345678");
+    expect(clubPaymentFieldValue(details, "account_name")).toBe("UTS Jitsu Club Inc");
+  });
+
+  it("knows when there is nothing to show an overseas payer", () => {
+    expect(hasInternationalDetails(details)).toBe(false);
+    expect(hasInternationalDetails({ ...details, swift_bic: "CTBAAU2S" })).toBe(true);
+    expect(hasInternationalDetails({ ...details, bank_address: "Sydney NSW" })).toBe(true);
   });
 });
 

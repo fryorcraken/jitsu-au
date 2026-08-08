@@ -15,6 +15,13 @@ export type HealthQuestion = {
   id: HealthQuestionId;
   /** The question, as asked on the form and printed on the document. */
   question: string;
+  /**
+   * A few words naming the question, for somewhere the whole sentence does not
+   * fit: the "you still have to answer this" list the signing form shows when
+   * someone presses Sign with questions left blank. Five full questions there
+   * would be a wall of text on a phone.
+   */
+  shortLabel: string;
 };
 
 /** The five questions, in the order the form asks them. */
@@ -23,25 +30,30 @@ export const healthQuestions: HealthQuestion[] = [
     id: "drugs",
     question:
       "Is the participant prescribed any drugs which may impair reaction time or judgement?",
+    shortLabel: "prescribed drugs",
   },
   {
     id: "blackouts",
     question:
       "Has the participant, within the past 5 years, suffered any blackout, seizure, convulsion, fainting or dizzy spells, or any incapacity that would render it unsafe to participate in martial arts?",
+    shortLabel: "blackouts, seizures or dizzy spells",
   },
   {
     id: "device",
     question: "Is the participant fitted with any electronic device or shunt?",
+    shortLabel: "electronic device or shunt",
   },
   {
     id: "impairments",
     question:
       "Does the participant have any current physical impairment, injuries or medical conditions (for example back injuries, weak ankles)?",
+    shortLabel: "injuries or medical conditions",
   },
   {
     id: "other",
     question:
       "Is there any other medical information or health needs our instructors should be aware of for the participant's safety?",
+    shortLabel: "anything else we should know",
   },
 ];
 

@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { CheckCircle2, Download } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { SignaturePad, type SignaturePadHandle } from "@/components/site/SignaturePad";
 import { GI_SIZE_HINT, GiSizeSelect } from "@/components/site/KitSizeSelect";
@@ -27,8 +26,14 @@ import {
 } from "@/lib/waiver.functions";
 import { redeemWaiverEmailVerification } from "@/lib/email-verification.functions";
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
-import { missingRequiredAcks, resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
-import { anyHealthConcern, healthQuestions, missingHealthAnswers } from "@/lib/waiver-health";
+import { resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
+import { anyHealthConcern, healthQuestions } from "@/lib/waiver-health";
+import {
+  ackAnchorId,
+  missingFieldsSummary,
+  missingWaiverFields,
+  WAIVER_ANCHORS,
+} from "@/lib/waiver-required-fields";
 import { useAuth } from "@/hooks/useAuth";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { WAIVER_SUBMIT } from "@/lib/submit-resilience";
@@ -46,6 +51,7 @@ import {
   type HealthQuestionId,
 } from "@/lib/validation";
 import { buildPageMeta } from "@/lib/seo";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/waiver")({
   // Optional prefill carried over from Step 1 of the "Start your free trial" flow.
@@ -164,7 +170,15 @@ function Waiver() {
 
   const sigPadRef = useRef<SignaturePadHandle | null>(null);
   const gSigPadRef = useRef<SignaturePadHandle | null>(null);
-  const healthQuestionRefs = useRef<Partial<Record<HealthQuestionId, HTMLDivElement | null>>>({});
+  /**
+   * Whether they have pressed Sign yet.
+   *
+   * Nothing is marked wrong before that: a half-filled form is not a form full
+   * of errors, it is somebody part-way through. From the first press the
+   * summary and the field markers track the live state, so each thing they fix
+   * drops off the list instead of waiting for another press to be re-checked.
+   */
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
 
   const fullName = useMemo(
     () =>
@@ -438,6 +452,95 @@ function Waiver() {
     signedDate: new Date(previewSignedAt).toLocaleDateString("en-AU"),
   });
 
+  // What is still outstanding, recomputed every render so the summary and the
+  // field markers below can never disagree with the form. Labels are
+  // substituted first, so the summary names an acknowledgement the way the
+  // signer just read it rather than showing them a raw {{token}}.
+  const missing = missingWaiverFields({
+    firstName,
+    lastName,
+    dob,
+    phone,
+    email,
+    address,
+    ecName,
+    ecRelationship,
+    ecPhone,
+    health,
+    medical,
+    ackDefs: ackDefs.map((ack) => ({
+      ...ack,
+      label: applyWaiverPlaceholders(ack.label, ackPlaceholders),
+    })),
+    acks,
+    signatureMode,
+    signatureName,
+    signatureImage,
+    isMinor,
+    guardianSignatureMode,
+    guardianSignature,
+    guardianSignatureImage,
+  });
+  const showMissing = attemptedSubmit && missing.length > 0;
+  const missingByAnchor = new Map(missing.map((field) => [field.anchorId, field]));
+  /** True for a control the summary is currently pointing at. */
+  const flagged = (anchorId: string) => showMissing && missingByAnchor.has(anchorId);
+  /** The id its message carries, so the control can point at it. */
+  const messageId = (anchorId: string) => `${anchorId}_needed`;
+  /**
+   * What a flagged control has to say about itself, whatever kind of control it
+   * is. The jump is the point: focus lands on the field with the summary
+   * possibly scrolled away, so the control has to carry both the state and the
+   * sentence, or a screen reader announces an invalid field and nothing about
+   * what it wants. Every flagged control gets these, not just the text inputs.
+   */
+  const flaggedProps = (anchorId: string) => ({
+    "aria-invalid": flagged(anchorId) || undefined,
+    "aria-describedby": flagged(anchorId) ? messageId(anchorId) : undefined,
+  });
+  /** The same, plus how a flagged input looks. */
+  const fieldProps = (anchorId: string) => ({
+    ...flaggedProps(anchorId),
+    className: cn(
+      "mt-1.5",
+      flagged(anchorId) && "border-destructive focus-visible:ring-destructive",
+    ),
+  });
+  /**
+   * The line under a flagged control, in the same words the summary used.
+   *
+   * Every flagged control gets one: a red border is a colour, and somebody who
+   * cannot pick it out, or who arrived by jumping straight to the field with
+   * the summary now scrolled away, would otherwise have nothing telling them
+   * what this field wants.
+   */
+  const fieldMessage = (anchorId: string) => {
+    const field = flagged(anchorId) ? missingByAnchor.get(anchorId) : undefined;
+    if (!field) return null;
+    return (
+      <p id={messageId(anchorId)} className="mt-1.5 text-xs font-medium text-destructive">
+        {field.hint ? `${field.hint}.` : "Please fill this in."}
+      </p>
+    );
+  };
+
+  /**
+   * Take the signer to a field, the same way from the summary's jump links and
+   * from pressing Sign.
+   *
+   * A frame first: the summary appears in the same commit that calls this, and
+   * measuring before it has laid out scrolls to where the field used to be.
+   * `preventScroll` then stops the focus from fighting the smooth scroll.
+   */
+  function goToField(anchorId: string) {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(anchorId);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus({ preventScroll: true });
+    });
+  }
+
   /**
    * Send the waiver, and keep sending it.
    *
@@ -548,42 +651,15 @@ function Waiver() {
    * date of birth now makes the signer a minor with no guardian signature. The
    * server would reject it, and the signer would be shown a raw Zod issue dump
    * instead of the plain sentence they get here.
+   *
+   * One answer for every field: the summary lists all of them at once and the
+   * page goes to the first, whether the browser could have checked it or not.
    */
   function readyToSend(): boolean {
-    const missingHealth = missingHealthAnswers(health);
-    if (missingHealth.length > 0) {
-      toast.error("Please answer yes or no to every health question.");
-      const firstMissing = missingHealth[0];
-      healthQuestionRefs.current[firstMissing.id]?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-      document.getElementById(`${firstMissing.id}_yes`)?.focus();
-      return false;
-    }
-    if (anyHealthConcern(health) && !medical.trim()) {
-      toast.error("Please give details of anything you answered yes to.");
-      return false;
-    }
-    if (missingRequiredAcks(ackDefs, acks).length > 0) {
-      toast.error("Please read and accept the required acknowledgements.");
-      return false;
-    }
-    const sigImg = signatureMode === "draw" ? signatureImage : "";
-    const sigName = signatureMode === "type" ? signatureName : "";
-    if (!sigImg && !sigName.trim()) {
-      toast.error("Please add your signature by drawing it or typing your name.");
-      return false;
-    }
-    if (isMinor) {
-      const gImg = guardianSignatureMode === "draw" ? guardianSignatureImage : "";
-      const gName = guardianSignatureMode === "type" ? guardianSignature : "";
-      if (!gImg && !gName.trim()) {
-        toast.error("A parent or guardian must sign for participants under 18.");
-        return false;
-      }
-    }
-    return true;
+    setAttemptedSubmit(true);
+    if (missing.length === 0) return true;
+    goToField(missing[0].anchorId);
+    return false;
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -678,7 +754,15 @@ function Waiver() {
         </p>
 
         <div className="mt-8">
-          <form onSubmit={onSubmit} className="space-y-6 rounded-2xl border bg-card p-6 md:p-8">
+          {/* noValidate because the checking is ours: the browser would stop the
+              submit at its own first `required` field with a bubble that fades,
+              and the fields it cannot see (health answers, ticks, signature)
+              would still be reported separately. One set of rules, one summary. */}
+          <form
+            onSubmit={onSubmit}
+            noValidate
+            className="space-y-6 rounded-2xl border bg-card p-6 md:p-8"
+          >
             <input type="hidden" name="hp" value="" />
 
             {restored && (
@@ -700,6 +784,41 @@ function Waiver() {
               </p>
             )}
 
+            {/* Everything outstanding, in the order the form asks for it. It
+                stays on screen and re-counts itself as they work down it, and
+                every line is a link back to the field it is about.
+
+                `polite` overrides the assertive that role="alert" implies:
+                because the list re-counts on every keystroke, assertive would
+                interrupt a screen reader each time a field is completed, which
+                is the opposite of helpful while somebody is working down it. */}
+            {showMissing && (
+              <div
+                role="alert"
+                aria-live="polite"
+                className="rounded-lg border border-destructive/40 bg-destructive/5 p-4"
+              >
+                <p className="flex items-center gap-2 text-sm font-semibold text-destructive">
+                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {missingFieldsSummary(missing.length)}
+                </p>
+                <ul className="mt-2 space-y-1.5 text-sm">
+                  {missing.map((field) => (
+                    <li key={field.anchorId}>
+                      <button
+                        type="button"
+                        onClick={() => goToField(field.anchorId)}
+                        className="text-left underline underline-offset-2 hover:no-underline"
+                      >
+                        {field.label}
+                      </button>
+                      {field.hint && <span className="text-muted-foreground"> ({field.hint})</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <fieldset className="space-y-5">
               <legend className="text-sm font-semibold">Your details</legend>
               <div className="grid gap-5 sm:grid-cols-3">
@@ -711,8 +830,9 @@ function Waiver() {
                     maxLength={60}
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
-                    className="mt-1.5"
+                    {...fieldProps("first_name")}
                   />
+                  {fieldMessage("first_name")}
                 </div>
                 <div>
                   <Label htmlFor="middle_name">
@@ -734,8 +854,9 @@ function Waiver() {
                     maxLength={60}
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
-                    className="mt-1.5"
+                    {...fieldProps("last_name")}
                   />
+                  {fieldMessage("last_name")}
                 </div>
               </div>
               <div>
@@ -764,8 +885,9 @@ function Waiver() {
                     required
                     value={dob}
                     onChange={(e) => setDob(e.target.value)}
-                    className="mt-1.5"
+                    {...fieldProps("date_of_birth")}
                   />
+                  {fieldMessage("date_of_birth")}
                   {/* The paper form's "participant type" tick box. It follows
                       from the date of birth, so we show which one applies
                       rather than asking the same thing twice. */}
@@ -786,8 +908,9 @@ function Waiver() {
                     maxLength={30}
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="mt-1.5"
+                    {...fieldProps("phone")}
                   />
+                  {fieldMessage("phone")}
                   <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
                     <Checkbox
                       checked={smsConsent}
@@ -811,8 +934,9 @@ function Waiver() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={Boolean(user)}
-                  className="mt-1.5"
+                  {...fieldProps("email")}
                 />
+                {fieldMessage("email")}
                 {user && (
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     You're signed in, so the waiver uses your account email.
@@ -841,8 +965,9 @@ function Waiver() {
                   maxLength={300}
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  className="mt-1.5"
+                  {...fieldProps("address")}
                 />
+                {fieldMessage("address")}
               </div>
               <div>
                 <Label htmlFor="uts_student_number">
@@ -909,8 +1034,9 @@ function Waiver() {
                     maxLength={120}
                     value={ecName}
                     onChange={(e) => setEcName(e.target.value)}
-                    className="mt-1.5"
+                    {...fieldProps("emergency_contact_name")}
                   />
+                  {fieldMessage("emergency_contact_name")}
                 </div>
                 <div>
                   <Label htmlFor="emergency_contact_relationship">Relationship</Label>
@@ -921,8 +1047,9 @@ function Waiver() {
                     value={ecRelationship}
                     onChange={(e) => setEcRelationship(e.target.value)}
                     placeholder="Parent, partner, friend"
-                    className="mt-1.5"
+                    {...fieldProps("emergency_contact_relationship")}
                   />
+                  {fieldMessage("emergency_contact_relationship")}
                 </div>
                 <div>
                   <Label htmlFor="emergency_contact_phone">Contact mobile</Label>
@@ -933,8 +1060,9 @@ function Waiver() {
                     maxLength={30}
                     value={ecPhone}
                     onChange={(e) => setEcPhone(e.target.value)}
-                    className="mt-1.5"
+                    {...fieldProps("emergency_contact_phone")}
                   />
+                  {fieldMessage("emergency_contact_phone")}
                 </div>
               </div>
             </fieldset>
@@ -945,17 +1073,12 @@ function Waiver() {
                 Please answer all five. Your instructors read these before you train.
               </p>
               {healthQuestions.map((q) => (
-                <div
-                  key={q.id}
-                  ref={(el) => {
-                    healthQuestionRefs.current[q.id] = el;
-                  }}
-                  className="space-y-2"
-                >
+                <div key={q.id} className="space-y-2">
                   <p className="text-sm">{q.question}</p>
                   <RadioGroup
                     className="flex gap-6"
                     aria-label={q.question}
+                    {...flaggedProps(`${q.id}_yes`)}
                     value={health[q.id] === null ? "" : health[q.id] ? "yes" : "no"}
                     onValueChange={(v) => setHealth((prev) => ({ ...prev, [q.id]: v === "yes" }))}
                   >
@@ -968,6 +1091,7 @@ function Waiver() {
                       No
                     </label>
                   </RadioGroup>
+                  {fieldMessage(`${q.id}_yes`)}
                 </div>
               ))}
               <div>
@@ -987,8 +1111,9 @@ function Waiver() {
                   value={medical}
                   onChange={(e) => setMedical(e.target.value)}
                   placeholder="Medication, injuries, conditions, anything else our instructors should know"
-                  className="mt-1.5"
+                  {...fieldProps("medical_notes")}
                 />
+                {fieldMessage("medical_notes")}
               </div>
               <p className="text-xs text-muted-foreground">
                 Privacy note: we collect this health information only to keep you (or the minor)
@@ -1000,19 +1125,29 @@ function Waiver() {
               <fieldset className="space-y-4 border-t pt-6">
                 <legend className="text-sm font-semibold">Acknowledgements</legend>
                 {ackDefs.map((ack) => (
-                  <label key={ack.id} className="flex items-start gap-3 text-sm">
-                    <Checkbox
-                      checked={acks[ack.id] === true}
-                      onCheckedChange={(v) =>
-                        setAcks((prev) => ({ ...prev, [ack.id]: v === true }))
-                      }
-                      className="mt-0.5"
-                    />
-                    <span>
-                      {applyWaiverPlaceholders(ack.label, ackPlaceholders)}
-                      {!ack.required && <span className="text-muted-foreground"> (optional)</span>}
-                    </span>
-                  </label>
+                  <div key={ack.id}>
+                    <label className="flex items-start gap-3 text-sm">
+                      <Checkbox
+                        id={ackAnchorId(ack.id)}
+                        checked={acks[ack.id] === true}
+                        {...flaggedProps(ackAnchorId(ack.id))}
+                        onCheckedChange={(v) =>
+                          setAcks((prev) => ({ ...prev, [ack.id]: v === true }))
+                        }
+                        className={cn(
+                          "mt-0.5",
+                          flagged(ackAnchorId(ack.id)) && "border-destructive",
+                        )}
+                      />
+                      <span>
+                        {applyWaiverPlaceholders(ack.label, ackPlaceholders)}
+                        {!ack.required && (
+                          <span className="text-muted-foreground"> (optional)</span>
+                        )}
+                      </span>
+                    </label>
+                    <div className="pl-7">{fieldMessage(ackAnchorId(ack.id))}</div>
+                  </div>
                 ))}
               </fieldset>
             )}
@@ -1065,38 +1200,56 @@ function Waiver() {
               <p className="text-sm text-muted-foreground">
                 By signing below, you confirm you've read and agree to the waiver above.
               </p>
-              <Tabs
-                value={signatureMode}
-                onValueChange={(v) => setSignatureMode(v as "draw" | "type")}
+              {/* tabIndex so the summary can send someone here while they are
+                  drawing: the pad is a canvas, which takes no focus of its own,
+                  and the id has to land on something focusable for the jump to
+                  read as arriving somewhere. */}
+              <div
+                id={WAIVER_ANCHORS.signaturePad}
+                tabIndex={-1}
+                role="group"
+                aria-label="Your signature"
+                {...flaggedProps(WAIVER_ANCHORS.signaturePad)}
+                className={cn(
+                  "rounded-lg outline-none",
+                  flagged(WAIVER_ANCHORS.signaturePad) && "border border-destructive p-3",
+                )}
               >
-                <TabsList className="grid w-full max-w-xs grid-cols-2">
-                  <TabsTrigger value="draw">Draw</TabsTrigger>
-                  <TabsTrigger value="type">Type</TabsTrigger>
-                </TabsList>
-                <TabsContent value="draw" className="mt-3">
-                  {/* The pad mounts before the draft restore effect runs, so a
-                      restored signature would arrive too late for it. Keying on
-                      `restored` remounts it once, with the signature showing. */}
-                  <SignaturePad
-                    key={restored ? "restored" : "fresh"}
-                    ref={sigPadRef}
-                    onChange={setSignatureImage}
-                    initialDataUrl={signatureImage}
-                    ariaLabel="Your signature"
-                  />
-                </TabsContent>
-                <TabsContent value="type" className="mt-3">
-                  <Label htmlFor="signature_name">Type your full name to sign</Label>
-                  <Input
-                    id="signature_name"
-                    maxLength={120}
-                    value={signatureName}
-                    onChange={(e) => setSignatureName(e.target.value)}
-                    placeholder="Your full name"
-                    className="mt-1.5"
-                  />
-                </TabsContent>
-              </Tabs>
+                <Tabs
+                  value={signatureMode}
+                  onValueChange={(v) => setSignatureMode(v as "draw" | "type")}
+                >
+                  <TabsList className="grid w-full max-w-xs grid-cols-2">
+                    <TabsTrigger value="draw">Draw</TabsTrigger>
+                    <TabsTrigger value="type">Type</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="draw" className="mt-3">
+                    {/* The pad mounts before the draft restore effect runs, so a
+                        restored signature would arrive too late for it. Keying on
+                        `restored` remounts it once, with the signature showing. */}
+                    <SignaturePad
+                      key={restored ? "restored" : "fresh"}
+                      ref={sigPadRef}
+                      onChange={setSignatureImage}
+                      initialDataUrl={signatureImage}
+                      ariaLabel="Your signature"
+                    />
+                  </TabsContent>
+                  <TabsContent value="type" className="mt-3">
+                    <Label htmlFor="signature_name">Type your full name to sign</Label>
+                    <Input
+                      id={WAIVER_ANCHORS.signatureName}
+                      maxLength={120}
+                      value={signatureName}
+                      onChange={(e) => setSignatureName(e.target.value)}
+                      placeholder="Your full name"
+                      {...fieldProps(WAIVER_ANCHORS.signatureName)}
+                    />
+                    {fieldMessage(WAIVER_ANCHORS.signatureName)}
+                  </TabsContent>
+                </Tabs>
+                {fieldMessage(WAIVER_ANCHORS.signaturePad)}
+              </div>
               <p className="text-xs text-muted-foreground">
                 By signing and submitting this form, you agree it constitutes an electronic
                 signature dated {new Date().toLocaleDateString()}.
@@ -1112,7 +1265,17 @@ function Waiver() {
                     {ecRelationship ? ` (${ecRelationship})` : ""} signs below, taken from the
                     emergency contact section above. Change it there if someone else is signing.
                   </p>
-                  <div>
+                  <div
+                    id={WAIVER_ANCHORS.guardianPad}
+                    tabIndex={-1}
+                    role="group"
+                    aria-label="Parent or guardian signature"
+                    {...flaggedProps(WAIVER_ANCHORS.guardianPad)}
+                    className={cn(
+                      "rounded-lg outline-none",
+                      flagged(WAIVER_ANCHORS.guardianPad) && "border border-destructive p-3",
+                    )}
+                  >
                     <Label>Parent/guardian signature</Label>
                     <Tabs
                       value={guardianSignatureMode}
@@ -1134,13 +1297,17 @@ function Waiver() {
                       </TabsContent>
                       <TabsContent value="type" className="mt-3">
                         <Input
+                          id={WAIVER_ANCHORS.guardianName}
                           maxLength={120}
                           value={guardianSignature}
                           onChange={(e) => setGuardianSignature(e.target.value)}
                           placeholder="Guardian full name"
+                          {...fieldProps(WAIVER_ANCHORS.guardianName)}
                         />
+                        {fieldMessage(WAIVER_ANCHORS.guardianName)}
                       </TabsContent>
                     </Tabs>
+                    {fieldMessage(WAIVER_ANCHORS.guardianPad)}
                   </div>
                 </div>
               )}

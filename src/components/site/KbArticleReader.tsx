@@ -422,7 +422,7 @@ function Thread({
                 placeholder="Reply..."
                 className="text-sm"
               />
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   disabled={busy || !replyBody.trim()}
@@ -516,7 +516,7 @@ function AnnotationCard({
             maxLength={5000}
             className="text-sm"
           />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               disabled={busy || !draft.trim()}
