@@ -219,9 +219,10 @@ describe("readPickerResponse", () => {
 
 describe("buildFolderPicker", () => {
   it("sets the developer key, token, app id and origin the pick depends on", () => {
-    // Google checks all four when the manager presses Select, and rejects them
-    // silently: a picker missing any of them browses fine and then swallows the
-    // pick, leaving a greyed-out button and no callback. That was the bug.
+    // Google checks these when the manager presses Select, and rejects them
+    // silently: nothing reaches the callback, so a picker missing any of them
+    // browses fine and then leaves a greyed-out button and no result. The
+    // developer key is the one that was missing when that was reported.
     const { picker, built } = fakePicker();
 
     buildFolderPicker(picker, {
@@ -361,9 +362,51 @@ describe("pickDriveFolder", () => {
     expect(tokenConfig.login_hint).toBe("club@jitsu.au");
   });
 
+  it("gives the caller a way to abandon the dialog once it is on screen", async () => {
+    // Google's dialog only talks back on a pick or a cancel. When it refuses
+    // the pick instead, this is the only thing that ends the browse.
+    const { built } = stubGoogle({ accountEmail: "club@jitsu.au" });
+    let abandon: (() => void) | undefined;
+
+    const pending = pickDriveFolder({
+      clientId: "123456789012-abc.apps.googleusercontent.com",
+      developerKey: "AIza-key",
+      connectedEmail: "club@jitsu.au",
+      onOpen: (close) => {
+        abandon = close;
+      },
+    });
+    await vi.waitFor(() => expect(abandon).toBeDefined());
+    abandon!();
+
+    await expect(pending).resolves.toBeNull();
+    expect(built.visible).toBe(false);
+  });
+
+  it("bounds the account check so a stalled request cannot hang the browse", async () => {
+    // The check sits between the token and the dialog. A request that stalls
+    // rather than fails is not caught by a try/catch, only by this signal.
+    const { built } = stubGoogle({ accountEmail: "club@jitsu.au" });
+
+    const pending = pickDriveFolder({
+      clientId: "123456789012-abc.apps.googleusercontent.com",
+      developerKey: "AIza-key",
+      connectedEmail: "club@jitsu.au",
+    });
+    await vi.waitFor(() => expect(built.visible).toBe(true));
+    built.respond({ action: "cancel" });
+    await pending;
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/drive/v3/about"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it("fails loudly when the sign-in window is closed or blocked", async () => {
-    // `callback` never fires for either, so without `error_callback` the browse
-    // hangs on "Opening..." forever with nothing to press.
+    // `callback` never fires for either, so without `error_callback` these
+    // promises never settle: the assertions below would not fail, the test
+    // would time out with nothing to say about which path broke.
     const closed = stubGoogle({ popupError: "popup_closed" });
     await expect(
       pickDriveFolder({

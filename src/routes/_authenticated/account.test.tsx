@@ -72,6 +72,13 @@ vi.mock("@/lib/google-drive.functions", () => ({
   setGoogleDriveFolderFromPicker: vi.fn(),
 }));
 
+// The picker itself is Google's; what this file pins is the wiring into it.
+const mockPickDriveFolder = vi.fn();
+vi.mock("@/lib/google-picker", () => ({
+  pickDriveFolder: (...args: unknown[]) => mockPickDriveFolder(...args),
+  preloadGooglePicker: vi.fn(),
+}));
+
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: { auth: { updateUser: vi.fn() } },
 }));
@@ -387,33 +394,98 @@ describe("/account", () => {
       return within(card("Google Drive"));
     }
 
+    function configurePicker() {
+      vi.stubEnv("VITE_GOOGLE_OAUTH_CLIENT_ID", "123456789012-abc.apps.googleusercontent.com");
+      vi.stubEnv("VITE_GOOGLE_PICKER_API_KEY", "AIza-key");
+    }
+
     afterEach(async () => {
       mockRoles.isManager = false;
       const { getGoogleDriveStatus } = await import("@/lib/google-drive.functions");
       vi.mocked(getGoogleDriveStatus).mockResolvedValue({ connected: false } as never);
+      mockPickDriveFolder.mockReset();
       vi.unstubAllEnvs();
     });
 
     it("offers browsing, and says how to select a folder, once the picker is configured", async () => {
-      vi.stubEnv("VITE_GOOGLE_OAUTH_CLIENT_ID", "123456789012-abc.apps.googleusercontent.com");
-      vi.stubEnv("VITE_GOOGLE_PICKER_API_KEY", "AIza-key");
+      configurePicker();
 
       const driveCard = await renderConnected();
 
-      expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeInTheDocument();
+      expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeEnabled();
       // Picker has no "choose the folder I'm in": opening a folder leaves
       // Select greyed out, which is what sent the manager round in circles.
       expect(driveCard.getByText(/click a folder once/i)).toBeInTheDocument();
     });
 
-    it("hides browsing and points at the name field when the Picker key is missing", async () => {
+    it("disables browsing and points at the name field when the Picker key is missing", async () => {
       vi.stubEnv("VITE_GOOGLE_OAUTH_CLIENT_ID", "123456789012-abc.apps.googleusercontent.com");
       vi.stubEnv("VITE_GOOGLE_PICKER_API_KEY", "");
 
       const driveCard = await renderConnected();
 
-      expect(driveCard.queryByRole("button", { name: "Browse in Drive" })).toBeNull();
-      expect(driveCard.getByText(/not set up on this site yet/i)).toBeInTheDocument();
+      // Disabled rather than absent: the manager is the person who can fix
+      // this, and a button that vanished tells them nothing to fix.
+      expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeDisabled();
+      expect(driveCard.getByText(/until this site has its google picker key/i)).toBeInTheDocument();
+    });
+
+    it("picks with the site's key, as the account the connection is on", async () => {
+      // Drop `connectedEmail` and the login hint plus the whole wrong-account
+      // check go quietly dead, with every picker test still green.
+      configurePicker();
+      mockPickDriveFolder.mockResolvedValue(null);
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      await waitFor(() => expect(mockPickDriveFolder).toHaveBeenCalledTimes(1));
+      expect(mockPickDriveFolder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientId: "123456789012-abc.apps.googleusercontent.com",
+          developerKey: "AIza-key",
+          connectedEmail: "club@jitsu.au",
+        }),
+      );
+    });
+
+    it("gives the manager a way out while Google's window is open", async () => {
+      // Google's dialog only talks back on a pick or a cancel. If it refuses
+      // the pick, nothing reaches us, and without this the button would sit on
+      // "Opening..." until the page was reloaded. That was the reported bug.
+      configurePicker();
+      mockPickDriveFolder.mockImplementation(
+        (opts: { onOpen?: (close: () => void) => void }) =>
+          new Promise((resolve) => opts.onOpen?.(() => resolve(null))),
+      );
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      const cancel = await screen.findByRole("button", { name: "Cancel" });
+      await user.click(cancel);
+
+      await waitFor(() =>
+        expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeEnabled(),
+      );
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    });
+
+    it("keeps a failed pick on screen, where it can be read and retried", async () => {
+      configurePicker();
+      mockPickDriveFolder.mockRejectedValue(new Error("Google sign-in did not finish. Try again."));
+      const { toast } = await import("sonner");
+      vi.mocked(toast.error).mockClear();
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(/google sign-in did not finish/i);
+      // A toast would take the one instruction away after a few seconds.
+      expect(toast.error).not.toHaveBeenCalled();
     });
   });
 

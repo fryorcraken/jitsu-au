@@ -22,10 +22,9 @@ that name (see the scope note below), so it will make a second folder alongside
 it. Browsing is the only way to point waivers at a folder that already exists or
 at a shared drive the committee watches.
 
-**Browsing only appears when the site is configured for it** (both values under
-Setup). Without them, the Google window opens, browses perfectly, and then
-silently refuses to hand the folder back, so the button is not offered at all
-and the card points at the name field instead.
+**Browsing is disabled until the site is configured for it** (both values under
+Setup), and the card points at the name field instead. The button stays visible
+because the person reading this page is usually the person who can fix it.
 
 ### Using the Google window
 
@@ -42,13 +41,29 @@ thing about the flow.
 Both live in the club's own Google Cloud project, and both must come from the
 **same** project as the OAuth client the connector runs on.
 
-| Value                         | What it is                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------------- |
-| `VITE_GOOGLE_OAUTH_CLIENT_ID` | The OAuth **web** client id. The connector runs on this same client             |
-| `VITE_GOOGLE_PICKER_API_KEY`  | A browser **API key**, restricted to the Picker API and to the site's referrers |
+| Value                         | What it is                                                          |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `VITE_GOOGLE_OAUTH_CLIENT_ID` | The OAuth **web** client id. The connector runs on this same client |
+| `VITE_GOOGLE_PICKER_API_KEY`  | A browser **API key**, restricted by HTTP referrer to the site      |
 
 The **Picker API** must be enabled on that project. It is a separate API from
 the Drive API, and a disabled one fails exactly like a missing key.
+
+Both are read at build time (`import.meta.env`), so adding the key needs a
+rebuild and a redeploy, not just a settings change.
+
+> [!NOTE]
+> Restrict the key by **referrer** first. An API restriction that allows only
+> the Picker API is the tighter setting, but reports differ on whether the
+> picker also calls the Drive API with that key, and getting it wrong fails the
+> same silent way as having no key at all. If the picker misbehaves with an API
+> restriction on, widen it before assuming anything else is wrong.
+>
+> The claim that `VITE_GOOGLE_OAUTH_CLIENT_ID` is the connector's own client is
+> an **assumption nothing in this repo can check**: the site sends the gateway
+> only `GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY`, and never sees the
+> Google client the connector uses. If the two ever diverge, every pick fails
+> server-side as a folder that cannot be read, with nothing pointing at why.
 
 Server-side, `GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY` authenticates the
 site to Lovable's connector gateway, which holds the manager's refresh token and
@@ -86,13 +101,13 @@ to the manager's whole Drive rather than only the files this site touches.
 
 ## When a pick or an upload fails
 
-| What the manager sees                                                | What it means                                                                                                                                |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| No "Browse in Drive" button                                          | `VITE_GOOGLE_PICKER_API_KEY` (or the client id) is not set on this deploy                                                                    |
-| "Google signed you in as X, but this site's Drive is connected as Y" | Two Google accounts in one browser. Sign in as Y, or reconnect Drive as X                                                                    |
-| "Google's sign-in window could not open"                             | The browser blocked the pop-up. The sign-in window opens after two scripts load, so it is outside the click that asked for it                |
-| "Could not access that folder from the server"                       | The grant did not reach the connector: wrong Google account, or a client id/appId mismatch                                                   |
-| Select greys out and nothing happens                                 | The key, the app id or the Picker API is wrong on the Cloud project. Google reports these in the browser console, never through the callback |
+| What the manager sees                                                | What it means                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Browse in Drive" greyed out                                         | `VITE_GOOGLE_PICKER_API_KEY` (or the client id) is not set on this deploy                                                                                                                                                          |
+| "Google signed you in as X, but this site's Drive is connected as Y" | Two Google accounts in one browser. Sign in as Y, or reconnect Drive as X                                                                                                                                                          |
+| "Google's sign-in window could not open"                             | The browser blocked the pop-up. It opens a network round trip after the click, which can be long enough to lose the click's activation                                                                                             |
+| "Could not access that folder from the server"                       | The grant did not reach the connector: wrong Google account, or a client id/appId mismatch                                                                                                                                         |
+| Select greys out and nothing happens                                 | Something on the Cloud project is wrong: the API key, its restrictions, the app id, or the Picker API being disabled. Google reports these in the browser console, never through the callback. Press Cancel on the card to get out |
 
 A folder that later disappears is only recreated when it came from a **typed
 name** (`shouldRecreateFolder`). A picked folder is never recreated: its name is

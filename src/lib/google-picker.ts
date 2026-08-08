@@ -105,6 +105,39 @@ async function loadPickerLibrary(): Promise<void> {
 }
 
 /**
+ * Fetches Google's two scripts ahead of the manager pressing Browse.
+ *
+ * The sign-in popup has to open inside the click that asked for it, or the
+ * browser treats it as unsolicited and blocks it. Awaiting a script download
+ * first spends the click's transient activation, so the download happens when
+ * the card mounts instead. Failures are ignored on purpose: this is a warm-up,
+ * and `pickDriveFolder` reports for real if the scripts are genuinely missing.
+ */
+export function preloadGooglePicker(): void {
+  void loadScript(GIS_SRC).catch(() => {});
+  void loadPickerLibrary().catch(() => {});
+}
+
+/**
+ * Google's sign-in failures arrive as bare codes (`access_denied`,
+ * `popup_closed`). They now land in an alert that stays on screen, so they have
+ * to be sentences a manager can act on rather than something to paste into a
+ * search box.
+ */
+export function signInErrorMessage(code: string | undefined): string {
+  switch (code) {
+    case "popup_failed_to_open":
+      return "Google's sign-in window could not open. Allow pop-ups for this site and try again.";
+    case "popup_closed":
+      return "Google sign-in was closed before it finished.";
+    case "access_denied":
+      return "Google would not give this site access. Try again and allow it to see the folder you choose.";
+    default:
+      return "Google sign-in did not finish. Try again.";
+  }
+}
+
+/**
  * `login_hint` is the connected Google account's address. Without it the token
  * popup silently uses whichever account the browser happens to have as its
  * default, and a manager signed into two accounts then picks a folder their
@@ -128,20 +161,12 @@ async function requestAccessToken(clientId: string, loginHint?: string): Promise
       ...(loginHint ? { login_hint: loginHint } : {}),
       callback: (resp) => {
         if (resp.error || !resp.access_token) {
-          reject(new Error(resp.error ?? "Google sign-in was cancelled"));
+          reject(new Error(signInErrorMessage(resp.error)));
           return;
         }
         resolve(resp.access_token);
       },
-      error_callback: (err) => {
-        reject(
-          new Error(
-            err?.type === "popup_failed_to_open"
-              ? "Google's sign-in window could not open. Allow pop-ups for this site and try again."
-              : "Google sign-in was closed before it finished.",
-          ),
-        );
-      },
+      error_callback: (err) => reject(new Error(signInErrorMessage(err?.type))),
     });
     client.requestAccessToken();
   });
@@ -278,13 +303,13 @@ export function readPickerResponse(
  * be pinned by a test: everything Google enforces when the manager presses
  * Select lives here, and getting any of it wrong fails the same silent way.
  *
- * `setDeveloperKey` is not optional decoration. Google enforces the API key
- * together with the app id on the response path, so a picker built without one
- * browses perfectly and then swallows the Select: the button greys out, no
- * callback ever fires, and the dialog just sits there. The key must come from
- * the same Cloud project as the OAuth client, with the Picker API enabled on
- * it (the Picker API is separate from the Drive API, and a disabled one fails
- * identically).
+ * `setDeveloperKey` is the one this file was missing. Google documents the
+ * builder as taking a view, an OAuth token, a developer key and a callback,
+ * and a picker without the key is the leading explanation for browsing working
+ * and then Select doing nothing at all. It is not the only candidate: the
+ * Picker API being disabled on the project, or the key's own restrictions
+ * refusing the call, look identical from here, because none of them reach the
+ * callback. The key must come from the same Cloud project as the OAuth client.
  */
 export function buildFolderPicker(
   picker: GooglePickerNamespace,
@@ -317,6 +342,15 @@ export interface PickDriveFolderOptions {
   developerKey: string;
   /** The Google account this site's Drive is connected as, when we know it. */
   connectedEmail?: string | null;
+  /**
+   * Called once the dialog is on screen, with a way to give up on it.
+   *
+   * Everything inside that dialog is Google's, and it only talks back on a pick
+   * or a cancel. If it refuses the pick, or shows an error of its own and the
+   * manager dismisses it, nothing reaches us and the browse would wait forever.
+   * The caller uses this to put a way out on our own page.
+   */
+  onOpen?: (close: () => void) => void;
 }
 
 /**
@@ -355,6 +389,10 @@ export async function pickDriveFolder(
         },
       });
       picker.setVisible(true);
+      opts.onOpen?.(() => {
+        picker.setVisible(false);
+        resolve(null);
+      });
     } catch (e) {
       reject(e instanceof Error ? e : new Error("Failed to open Google Picker"));
     }

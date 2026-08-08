@@ -541,9 +541,9 @@ meaningfully). The app reads:
 - Client, for the manager's Google Drive card: `VITE_GOOGLE_OAUTH_CLIENT_ID` and
   `VITE_GOOGLE_PICKER_API_KEY`, both from the **same** Google Cloud project as
   the Drive connector's OAuth client, with the Picker API enabled on it. Missing
-  either one hides "Browse in Drive" (typing a folder name still works), because
-  a picker built without them browses fine and then swallows the selection. See
-  `docs/google-drive.md`.
+  either one disables "Browse in Drive" (typing a folder name still works): a
+  picker without them is expected to browse fine and then swallow the selection.
+  See `docs/google-drive.md`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
 - Server: `GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY` — authenticates the

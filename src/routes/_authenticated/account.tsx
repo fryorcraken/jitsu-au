@@ -954,12 +954,16 @@ function GoogleDriveCard() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
+  // Set while Google's dialog is on screen. Everything in that dialog is
+  // Google's and it only talks back on a pick or a cancel, so this is the
+  // manager's own way out if it refuses the pick or shows its own error.
+  const [abandonPicker, setAbandonPicker] = useState<(() => void) | null>(null);
 
   // Google Picker needs both halves of the same Cloud project: the OAuth client
   // the connector runs on, and a browser API key with the Picker API enabled.
-  // With the key missing the picker opens, browses, and then silently refuses
-  // to hand a folder back, so offer typing a name rather than that dead end.
-  const picker = googlePickerConfig();
+  // Without the key the picker is expected to browse and then refuse to hand a
+  // folder back, so the button is disabled rather than left as a dead end.
+  const picker = useMemo(googlePickerConfig, []);
 
   const refresh = () =>
     status()
@@ -981,6 +985,14 @@ function GoogleDriveCard() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetch Google's scripts now, while nobody is waiting. Downloading them
+  // inside the Browse click spends its transient activation, and the browser
+  // then blocks the sign-in popup as unsolicited.
+  useEffect(() => {
+    if (!picker || !connected) return;
+    void import("@/lib/google-picker").then((m) => m.preloadGooglePicker()).catch(() => {});
+  }, [picker, connected]);
 
   async function onConnect() {
     setBusy(true);
@@ -1044,7 +1056,11 @@ function GoogleDriveCard() {
     setFolderError(null);
     try {
       const { pickDriveFolder } = await import("@/lib/google-picker");
-      const picked = await pickDriveFolder({ ...picker, connectedEmail: email });
+      const picked = await pickDriveFolder({
+        ...picker,
+        connectedEmail: email,
+        onOpen: (close) => setAbandonPicker(() => close),
+      });
       if (!picked) return;
       const result = await saveFolderFromPicker({ data: { folderId: picked.id } });
       setSavedFolderName(result.folderName);
@@ -1054,6 +1070,7 @@ function GoogleDriveCard() {
       setFolderError(e instanceof Error ? e.message : "Failed to pick a folder");
     } finally {
       setPickerBusy(false);
+      setAbandonPicker(null);
     }
   }
 
@@ -1099,15 +1116,18 @@ function GoogleDriveCard() {
                 <Button type="submit" variant="outline" size="sm" disabled={folderBusy}>
                   {folderBusy ? "Saving..." : savedFolderName ? "Update folder" : "Save folder"}
                 </Button>
-                {picker ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={onBrowseFolder}
-                    disabled={pickerBusy}
-                  >
-                    {pickerBusy ? "Opening..." : "Browse in Drive"}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onBrowseFolder}
+                  disabled={pickerBusy || !picker}
+                >
+                  {pickerBusy ? "Opening..." : "Browse in Drive"}
+                </Button>
+                {abandonPicker ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={abandonPicker}>
+                    Cancel
                   </Button>
                 ) : null}
               </div>
@@ -1122,7 +1142,7 @@ function GoogleDriveCard() {
                   : "Waivers do not save to Drive until you set a folder. "}
                 {picker
                   ? "Browsing lets you pick any folder you have access to, including one in a shared drive. In the Google window, click a folder once to highlight it and then press Select: opening a folder does not choose it. "
-                  : "Folder browsing is not set up on this site yet, so type a name for now. "}
+                  : "Browsing is off until this site has its Google Picker key, so type a name for now. "}
                 {savedFolderName
                   ? "Typing a name only finds a folder this app made before, so a folder you made yourself in Drive with the same name will not be found."
                   : "Typing a name creates that folder in your own Drive, and only finds an existing one this app made before."}
