@@ -887,6 +887,79 @@ export type LifecycleStatus = (typeof lifecycleStatuses)[number];
 export const membershipStatuses = ["pending", "active", "expired", "cancelled"] as const;
 export type MembershipStatus = (typeof membershipStatuses)[number];
 
+/**
+ * Why a membership may not be deleted outright.
+ *
+ * Deleting is for tidying up something that should never have existed: a junk
+ * invoice, or someone who said they would join and never paid. Three things mean
+ * a row is a record of something that really happened, and a record is cancelled
+ * rather than erased.
+ */
+export const membershipDeleteBlockers = ["paid", "active", "attended"] as const;
+export type MembershipDeleteBlocker = (typeof membershipDeleteBlockers)[number];
+
+/** Why each blocker stops the delete, in the manager's terms. */
+export const MEMBERSHIP_DELETE_REASONS: Record<MembershipDeleteBlocker, string> = {
+  paid: "a payment is recorded against it",
+  active: "it is still active",
+  attended: "a class was checked in against it",
+};
+
+/**
+ * Everything standing between this membership and deletion, all at once.
+ *
+ * All of them, never the first one found: a manager who clears one blocker only
+ * to be refused by the next has been sent round the loop for nothing, and the
+ * whole point of the delete guard is that it is obvious what to do instead.
+ */
+export function whyMembershipCannotBeDeleted(membership: {
+  paid_at: string | null;
+  price_cents: number;
+  status: string;
+  checkin_count: number;
+}): MembershipDeleteBlocker[] {
+  const blockers: MembershipDeleteBlocker[] = [];
+  // `paid_at` alone is not evidence of a payment: activation stamps it on every
+  // membership, including the $0 free trial, which is auto-assigned at waiver
+  // approval and therefore the single most likely thing a manager needs to undo.
+  // Refusing that one with "a payment is recorded against it" would be both
+  // untrue and a dead end. Money is what this blocker protects, so it takes
+  // money to raise it.
+  if (membership.paid_at && membership.price_cents > 0) blockers.push("paid");
+  if (membership.status === "active") blockers.push("active");
+  if (membership.checkin_count > 0) blockers.push("attended");
+  return blockers;
+}
+
+/**
+ * The refusal a manager (or an agent) reads. Empty blockers means deletable.
+ *
+ * `paid` is the one blocker a manager cannot clear, so it decides the advice on
+ * its own: there is no sequence of steps that ends in this row being deleted,
+ * and sending someone off to move check-ins first would be a wasted trip.
+ * Everything else is a to-do list, in the order it has to happen.
+ */
+export function membershipDeleteMessage(blockers: readonly MembershipDeleteBlocker[]): string {
+  if (!blockers.length) return "";
+  const reasons = blockers.map((b) => MEMBERSHIP_DELETE_REASONS[b]);
+  const listed =
+    reasons.length === 1
+      ? reasons[0]
+      : `${reasons.slice(0, -1).join(", ")} and ${reasons[reasons.length - 1]}`;
+
+  let advice: string;
+  if (blockers.includes("paid")) {
+    advice = "Cancel it instead. That closes it and keeps the club's record of the money.";
+  } else {
+    const steps = [
+      blockers.includes("attended") ? "move those check-ins to another membership" : null,
+      blockers.includes("active") ? "cancel it" : null,
+    ].filter((s): s is string => s !== null);
+    advice = `To delete it, ${steps.join(", then ")} first.`;
+  }
+  return `This membership cannot be deleted because ${listed}. ${advice}`;
+}
+
 type PlanPricing = { public_price_cents: number; student_price_cents: number | null };
 
 /**
@@ -1247,7 +1320,11 @@ export function insuranceSelection(input: {
  * club data into these, so tests pin the messages without rendering.
  */
 export type ManagerNotification = {
-  type: "define_membership_window" | "unread_contact_messages";
+  type:
+    | "define_membership_window"
+    | "unread_contact_messages"
+    | "waivers_awaiting_approval"
+    | "new_interest_registrations";
   title: string;
   body: string;
   href: string;
@@ -1304,6 +1381,113 @@ export function sellableWindowNotifications<
 }
 
 /**
+ * " on 06/08/2026" for a notification body, resolved to the CLUB's day rather
+ * than the server's, or "" when the timestamp could not be read.
+ *
+ * These strings are built inside `listMyNotifications`, so they render on the
+ * server (UTC) while the screen each one links to formats the same timestamp in
+ * the manager's browser. Something at 9am Sydney is still the previous date in
+ * UTC, so a plain `toLocaleDateString` had the two screens naming different days
+ * for one message. `clubLocalDate` gives the `YYYY-MM-DD` the club was actually
+ * on, which is exactly what `formatDateOnly` is for, and being pure it also
+ * drops the dependency on the runtime having full ICU.
+ */
+function clubDaySuffix(at: string | null | undefined): string {
+  return at ? ` on ${formatDateOnly(clubLocalDate(new Date(at), CLUB_TIME_ZONE))}` : "";
+}
+
+/**
+ * Somebody's name for notification copy, or "Someone" when it is blank. Every
+ * one of these counts degrades to a name-less count rather than failing the
+ * whole attention list, so the copy has to survive having no name.
+ */
+function personOrSomeone(name: string | null | undefined): string {
+  return name?.trim() || "Someone";
+}
+
+/**
+ * The first step of signing up: somebody filled in the interest form. Read-only
+ * on purpose. Nothing is broken and nothing is blocked, a manager just needs to
+ * know who has come in, so the item carries a reading verb and no other action.
+ *
+ * Says nothing about the emails that go out on a registration. Those are
+ * best-effort, and the whole existing backlog counts as new on the day this
+ * ships, so "you were emailed this too" is false exactly when it matters.
+ */
+export function interestRegistrationNotifications(input: {
+  unread: number;
+  latestName?: string | null;
+  latestAt?: string | null;
+}): ManagerNotification[] {
+  const { unread, latestName, latestAt } = input;
+  if (unread <= 0) return [];
+  const who = personOrSomeone(latestName);
+  const when = clubDaySuffix(latestAt);
+  return [
+    {
+      type: "new_interest_registrations",
+      title:
+        unread === 1
+          ? `${who} registered interest in training`
+          : `${unread} people registered interest in training`,
+      body:
+        unread === 1
+          ? `They left their details${when}. Nothing has to happen yet, this is just so you know who has come in.`
+          : `The most recent is ${who}${when}. Nothing has to happen yet, this is just so you know who has come in.`,
+      // The whole funnel, one row per person, which is where a registration
+      // ends up whether or not that person has moved on from being a lead. It
+      // is also where the new-lead email already sends managers.
+      href: "/manager/users",
+      actionLabel: unread === 1 ? "Read it" : "Read them",
+    },
+  ];
+}
+
+/**
+ * The second step of signing up: somebody signed the waiver and is waiting on a
+ * manager. Unlike the two items above, this one is real work, and the body says
+ * what pressing through to it leads to. Approving is outward-facing and cannot
+ * be taken back quietly (it emails the person and unlocks their login), so the
+ * consequence belongs in front of the manager before the click, not after it.
+ *
+ * "A first waiver" is doing real work in that sentence, not hedging.
+ * `setWaiverApproval` lifts the ban and sends the account-activated email only
+ * for somebody still locked, and `assignTrialMembership` is one per person ever,
+ * so none of the three happens when a returning member re-signs. Stating them
+ * flatly would promise a manager an email and a trial that never go out. The
+ * plural line has to hold for a mixed batch too, which is the other reason it is
+ * written as what approving a first waiver does rather than what this batch will
+ * do.
+ */
+export function waiverApprovalNotifications(input: {
+  pending: number;
+  latestName?: string | null;
+  latestAt?: string | null;
+}): ManagerNotification[] {
+  const { pending, latestName, latestAt } = input;
+  if (pending <= 0) return [];
+  const who = personOrSomeone(latestName);
+  const when = clubDaySuffix(latestAt);
+  const consequence =
+    "Approving a first waiver activates that person's account, emails them to say so, and gives them the free trial.";
+  return [
+    {
+      type: "waivers_awaiting_approval",
+      title:
+        pending === 1
+          ? `${who} signed the waiver and is waiting for approval`
+          : `${pending} signed waivers are waiting for approval`,
+      body:
+        pending === 1
+          ? `They signed${when}. ${consequence}`
+          : `The most recent is ${who}${when}. ${consequence}`,
+      href: "/manager/waivers",
+      actionLabel: pending === 1 ? "Approve" : "Approve them",
+    },
+  ];
+}
+
+/**
  * How many contact-form messages have arrived since a manager last opened the
  * inbox. `seenAt` is the club-wide marker (`club_settings.contact_messages_seen_at`);
  * absent means nobody has ever opened it, so everything counts — which is right
@@ -1335,19 +1519,8 @@ export function contactMessageNotifications(input: {
 }): ManagerNotification[] {
   const { unread, latestName, latestAt } = input;
   if (unread <= 0) return [];
-  const who = latestName?.trim() || "Someone";
-  // Resolved to the CLUB's day, not the server's.
-  //
-  // This string is built inside `listMyNotifications`, so it renders on the
-  // server (UTC) while the inbox screen it links to formats the same timestamp
-  // in the manager's browser. A message at 9am Sydney is still the previous
-  // date in UTC, so a plain `toLocaleDateString` had the two screens naming
-  // different days for one message. `clubLocalDate` gives the `YYYY-MM-DD` the
-  // club was actually on, which is exactly what `formatDateOnly` is for — and
-  // being pure, it also drops the dependency on the runtime having full ICU.
-  const when = latestAt
-    ? ` on ${formatDateOnly(clubLocalDate(new Date(latestAt), CLUB_TIME_ZONE))}`
-    : "";
+  const who = personOrSomeone(latestName);
+  const when = clubDaySuffix(latestAt);
   return [
     {
       type: "unread_contact_messages",
@@ -1373,16 +1546,31 @@ export function contactMessageNotifications(input: {
 /**
  * The order a manager meets the "needs attention" items in.
  *
- * Unanswered messages come first: a person is waiting on a reply, whereas an
- * unset training window is a chore that announces itself weeks ahead. Kept as a
- * function rather than an inline spread in the handler so the priority is a
- * decision with a test on it, not an accident of argument order.
+ * Sorted by who is held up and for how long:
+ *
+ * 1. **Waiver approvals.** Somebody has signed and cannot start until a manager
+ *    presses the button. They are stuck, and only this list says so.
+ * 2. **Unanswered messages.** Somebody is waiting on a reply, but nothing about
+ *    them is blocked in the meantime.
+ * 3. **New interest registrations.** Nobody is waiting on anything. It is news,
+ *    and it sits below the two items that are work.
+ * 4. **The membership window.** A chore that announces itself weeks ahead.
+ *
+ * Kept as a function rather than an inline spread in the handler so the priority
+ * is a decision with a test on it, not an accident of argument order.
  */
 export function composeManagerNotifications(sources: {
+  waiverApprovals: ManagerNotification[];
   contactMessages: ManagerNotification[];
+  interestRegistrations: ManagerNotification[];
   membershipWindows: ManagerNotification[];
 }): ManagerNotification[] {
-  return [...sources.contactMessages, ...sources.membershipWindows];
+  return [
+    ...sources.waiverApprovals,
+    ...sources.contactMessages,
+    ...sources.interestRegistrations,
+    ...sources.membershipWindows,
+  ];
 }
 
 // ---- Member: start a membership ----
@@ -1689,6 +1877,35 @@ export const setMembershipStatusSchema = z.object({
 });
 export type SetMembershipStatusInput = z.infer<typeof setMembershipStatusSchema>;
 
+// ---- Manager: delete a membership ----
+
+export const deleteMembershipSchema = z.object({ id: z.string().uuid() });
+export type DeleteMembershipInput = z.infer<typeof deleteMembershipSchema>;
+
+// ---- Manager: raise a membership for somebody ----
+//
+// The manager's counterpart to `startMembershipSchema`. Two fields differ, and
+// both are the difference between buying for yourself and recording an
+// enrolment for someone else: `user_id` names who it is for, and `send_email`
+// can be turned off so a backfill of something already settled does not invoice
+// anyone. `include_insurance` is here for the same reason it is on the member
+// schema, but a manager's answer is final — the server refuses a member who
+// unticks it and has no cover, and does not refuse a manager.
+
+export const createMembershipSchema = z.object({
+  user_id: z.string().uuid(),
+  plan_code: z.string().trim().min(1).max(64),
+  uts_student_number: z.string().trim().max(32).nullable().optional(),
+  session_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  include_insurance: z.boolean().optional().default(false),
+  send_email: z.boolean().optional().default(true),
+});
+export type CreateMembershipInput = z.infer<typeof createMembershipSchema>;
+
 // ---- Manager: import a bank statement ----
 
 export const bankTxnRowSchema = z.object({
@@ -1724,7 +1941,9 @@ export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 export const managerAgentActions = [
   "list_users",
   "list_invoices",
+  "create_membership",
   "edit_invoice",
+  "delete_invoice",
   "file_waiver",
   "list_membership_plans",
   "save_membership_plan",
@@ -1780,6 +1999,23 @@ export const editInvoiceSchema = z
     { message: "Provide at least one invoice field to edit." },
   );
 export type EditInvoiceInput = z.infer<typeof editInvoiceSchema>;
+
+/**
+ * `delete_invoice` params. Deliberately just the id: unlike `edit_invoice`'s
+ * paid guard there is no `confirm` to override with, because the three things
+ * that block a delete (see `whyMembershipCannotBeDeleted`) are not a caller's
+ * judgement call. A paid invoice is cancelled, never erased.
+ */
+export const deleteInvoiceSchema = z.object({ id: z.string().uuid() }).strict();
+export type DeleteInvoiceInput = z.infer<typeof deleteInvoiceSchema>;
+
+/**
+ * `create_membership` params. Same shape the manager screen posts, minus
+ * nothing: an agent raising somebody's invoice must be able to say what a
+ * manager can say, including leaving the email off for a backfill.
+ */
+export const createInvoiceSchema = createMembershipSchema.strict();
+export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
 
 /** `list_users` params — optional lifecycle filter + result cap. */
 export const listAgentUsersSchema = z.object({
@@ -2175,6 +2411,21 @@ export const attachCheckInSchema = z.object({
   membership_id: z.string().uuid().optional(),
 });
 export type AttachCheckInInput = z.infer<typeof attachCheckInSchema>;
+
+/**
+ * Manager: move an already-covered check-in onto a different membership.
+ *
+ * The sibling of `attachCheckInSchema`, for the row that is not uncovered. Here
+ * `membership_id` is required rather than optional: re-running the door's own
+ * precedence rules would just pick the same membership again, so the only
+ * reason to move a check-in is that a manager has one specific membership in
+ * mind. It is what clears a membership of the classes blocking its deletion.
+ */
+export const transferCheckInSchema = z.object({
+  id: z.string().uuid(),
+  membership_id: z.string().uuid(),
+});
+export type TransferCheckInInput = z.infer<typeof transferCheckInSchema>;
 
 /**
  * Parse a "$245", "245", "20.50" or "2,450.00" money string into integer cents.

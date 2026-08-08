@@ -12,6 +12,13 @@
 // Server-only by convention rather than by dependency: nothing here imports a
 // secret, but every caller passes a service-role client, and the store is
 // manager-only under RLS.
+//
+// `src/lib/seen-markers.ts` is the other reader of this table, for the manager
+// "seen up to here" watermarks. The two are kept apart on purpose: a failed read
+// means opposite things to them (a watermark degrades to "everything is unread"
+// so nothing goes unnoticed, while an account degrades to "we could not read
+// this" so nobody transfers money on a guess), and folding them together would
+// have to pick one of those.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { DEFAULT_INVOICE_INSTRUCTIONS, parseClubPaymentDetails } from "@/lib/validation";

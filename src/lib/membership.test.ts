@@ -4,6 +4,7 @@ import {
   clubPaymentDetailsSchema,
   clubPaymentFieldValue,
   computeMembershipPrice,
+  createMembershipSchema,
   deriveLifecycleStatus,
   formatBsb,
   formatCents,
@@ -12,7 +13,9 @@ import {
   haystackContainsRef,
   insuranceSelection,
   matchesMembershipReference,
+  membershipDeleteMessage,
   normalizeRef,
+  whyMembershipCannotBeDeleted,
   parseMoneyToCents,
   planEditPayload,
   planEditsDiffer,
@@ -129,6 +132,144 @@ describe("deriveLifecycleStatus", () => {
     expect(
       deriveLifecycleStatus({ ...approved, memberships: [trial("active"), paid("expired")] }),
     ).toBe("visitor");
+  });
+});
+
+// Deleting a membership is the only irreversible thing a manager can do to one,
+// so the guard is where the care goes. The rule that matters most: it reports
+// EVERY blocker, because clearing one and being refused by the next is how a
+// manager ends up deciding the screen is broken.
+describe("whyMembershipCannotBeDeleted", () => {
+  const junk = { paid_at: null, price_cents: 44500, status: "pending", checkin_count: 0 };
+
+  it("lets a pending invoice nobody paid or trained on go", () => {
+    expect(whyMembershipCannotBeDeleted(junk)).toEqual([]);
+  });
+
+  it("lets a cancelled invoice go, which is the tidy-up this exists for", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, status: "cancelled" })).toEqual([]);
+  });
+
+  it("blocks one that has been paid", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, paid_at: "2026-08-01T00:00:00Z" })).toEqual([
+      "paid",
+    ]);
+  });
+
+  it("blocks one that is still active", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, status: "active" })).toEqual(["active"]);
+  });
+
+  // session_checkins.membership_id is ON DELETE SET NULL, so without this guard
+  // the delete would succeed and silently turn a covered class into an
+  // uncovered one rather than failing.
+  it("blocks one somebody trained on", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, checkin_count: 1 })).toEqual(["attended"]);
+  });
+
+  it("reports every blocker at once, not the first one found", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 44500,
+        status: "active",
+        checkin_count: 3,
+      }),
+    ).toEqual(["paid", "active", "attended"]);
+  });
+
+  // Activation stamps `paid_at` on every membership, the $0 free trial
+  // included — and the trial is auto-assigned at waiver approval, so it is the
+  // likeliest thing a manager ever needs to undo. Reading that stamp as a
+  // payment would make it undeletable and say "a payment is recorded against
+  // it", which is both untrue and a dead end.
+  it("does not treat an activated free trial as paid", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 0,
+        status: "cancelled",
+        checkin_count: 0,
+      }),
+    ).toEqual([]);
+  });
+
+  it("still blocks a free membership somebody actually trained on", () => {
+    expect(
+      whyMembershipCannotBeDeleted({
+        paid_at: "2026-08-01T00:00:00Z",
+        price_cents: 0,
+        status: "cancelled",
+        checkin_count: 1,
+      }),
+    ).toEqual(["attended"]);
+  });
+
+  // An expired membership is not automatically safe: it expired BECAUSE its
+  // credits ran out on classes somebody attended.
+  it("still blocks an expired membership that was trained on", () => {
+    expect(whyMembershipCannotBeDeleted({ ...junk, status: "expired", checkin_count: 2 })).toEqual([
+      "attended",
+    ]);
+  });
+});
+
+describe("membershipDeleteMessage", () => {
+  it("says nothing when there is nothing in the way", () => {
+    expect(membershipDeleteMessage([])).toBe("");
+  });
+
+  it("names the single reason and what to do instead", () => {
+    const msg = membershipDeleteMessage(["active"]);
+    expect(msg).toContain("it is still active");
+    expect(msg).toContain("cancel it");
+  });
+
+  // The one blocker a manager cannot clear decides the advice on its own:
+  // there is no sequence of steps that ends in a paid row being deleted, so
+  // sending them off to move check-ins first would be a wasted trip.
+  it("tells a manager to cancel a paid one rather than listing steps", () => {
+    const msg = membershipDeleteMessage(["paid", "attended"]);
+    expect(msg).toContain("Cancel it instead");
+    expect(msg).not.toContain("To delete it");
+  });
+
+  it("orders the steps so the check-ins move before the cancel", () => {
+    const msg = membershipDeleteMessage(["active", "attended"]);
+    expect(msg.indexOf("move those check-ins")).toBeLessThan(msg.indexOf("cancel it"));
+  });
+
+  it("reads as a sentence with every reason in it", () => {
+    const msg = membershipDeleteMessage(["paid", "active", "attended"]);
+    expect(msg).toContain("a payment is recorded against it, it is still active and a class");
+  });
+});
+
+// A manager raising somebody's invoice, as opposed to a member raising their
+// own. The two fields that differ carry the whole difference.
+describe("createMembershipSchema", () => {
+  const base = { user_id: "11111111-1111-4111-8111-111111111111", plan_code: "2026-s2" };
+
+  it("emails them by default, because most of the time they owe money", () => {
+    expect(createMembershipSchema.parse(base).send_email).toBe(true);
+  });
+
+  it("lets a manager record a backfill without invoicing anyone", () => {
+    expect(createMembershipSchema.parse({ ...base, send_email: false }).send_email).toBe(false);
+  });
+
+  // Unlike the member's own purchase, where leaving insurance off is refused
+  // when they have no cover, a manager's answer stands.
+  it("leaves insurance off unless it is asked for", () => {
+    expect(createMembershipSchema.parse(base).include_insurance).toBe(false);
+  });
+
+  it("needs a real person to raise it against", () => {
+    expect(() => createMembershipSchema.parse({ ...base, user_id: "someone" })).toThrow();
+  });
+
+  it("rejects a session date that is not a date", () => {
+    expect(() => createMembershipSchema.parse({ ...base, session_date: "7 Dec" })).toThrow();
   });
 });
 

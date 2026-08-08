@@ -36,6 +36,23 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 
 - `list_users` — members and their lifecycle status, roles, and invoices.
 - `list_invoices` — invoices with member name/email (to find an id to edit).
+- `create_membership` — raise a **pending** invoice for a person, the agent's
+  equivalent of the manager screen's "Add a membership" and of a member choosing
+  a plan themselves. Dispatches to `createMembershipForUser` in
+  `src/lib/membership.functions.ts`, the same function the screen posts to, so
+  an agent-raised invoice and a manager's own are identical. A **priced** plan
+  lands pending and does not activate: activation grants the member role and
+  emails the member, so it stays the separate deliberate step it is everywhere
+  else. A **free** plan (the trial) activates immediately, as it does for a
+  member's own purchase — `activated` in the result says which happened. Two things it can do
+  that a member's own purchase cannot, both for the same case — a manager
+  writing down an enrolment that already happened: it accepts a plan that is no
+  longer on sale (backfilling a past training period), and its
+  `include_insurance` answer is final rather than enforced. `send_email: false`
+  records the invoice without invoicing anybody for it. Re-raising the same
+  person + plan reuses their existing unpaid invoice rather than creating a
+  second one, so a retry is safe; the free trial is still once per person ever
+  (`409 trial_already_used`), and an unknown plan code is `404 plan_not_found`.
 - `edit_invoice` — correct an invoice's detail fields. Cannot set `status` to
   `active` (activation grants the member role + emails the member, so it runs
   through bank reconciliation, not a raw edit). Returns `changed` + `previous`
@@ -49,7 +66,29 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   editable (a note claims nothing about money; expiring a membership that ran
   its course is ordinary). There is **no audit table** — if the log is not
   enough for the club's bookkeeping, that is a schema change and a product
-  decision, not something to add quietly.
+  decision, not something to add quietly. Setting `status` to `cancelled` or
+  `expired` also reconciles the person's `member` role (`syncMemberRole`), so
+  `list_users` stops calling somebody a member once their last paid membership
+  closes. Members-only **access** was never gated on that role — it is gated
+  live by the `has_active_paid_membership` SQL helper — so this corrects a label
+  that used to be granted and never taken back, and changes nobody's access.
+- `delete_invoice` — delete an invoice outright, for tidying up one that should
+  never have existed. Dispatches to `deleteMembershipRow`, which the manager
+  screens' Delete button also calls, so both refuse for the same reasons in the
+  same words. Refused with `409 invoice_not_deletable` when a payment is
+  recorded against it, when it is still `active`, or when a class was checked in
+  against it; `error.details.blockers` lists **every** reason at once
+  (`paid | active | attended`), because a caller that fixes one and retries into
+  the next has burned two calls to learn what one could have told it. There is
+  deliberately **no confirm flag**: unlike `edit_invoice`'s paid guard these are
+  not a caller's judgement call, so a paid invoice is never deletable and is
+  cancelled instead. The `attended` blocker exists because
+  `session_checkins.membership_id` is `ON DELETE SET NULL` — without it the
+  delete would succeed and silently turn a class somebody attended into an
+  uncovered one. Clearing it means moving those check-ins to another membership,
+  which is a **manager-screen action with no agent equivalent**: this API has no
+  check-in actions at all, and adding the first one is a wider surface decision
+  than the change that introduced this made on its own.
 - `file_waiver` — file a scanned paper waiver (migration / bulk filing from
   paper records). Same params as the manager's paper-upload form
   (`paperWaiverUploadSchema`); dispatches to `filePaperWaiver` in
@@ -139,7 +178,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"6"`.
+test so the bump is a deliberate edit, and the current value is `"9"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call
