@@ -32,6 +32,7 @@ import {
   ackAnchorId,
   missingFieldsSummary,
   missingWaiverFields,
+  WAIVER_ANCHORS,
 } from "@/lib/waiver-required-fields";
 import { useAuth } from "@/hooks/useAuth";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
@@ -481,9 +482,11 @@ function Waiver() {
     guardianSignatureImage,
   });
   const showMissing = attemptedSubmit && missing.length > 0;
-  const missingAnchors = new Set(missing.map((field) => field.anchorId));
+  const missingByAnchor = new Map(missing.map((field) => [field.anchorId, field]));
   /** True for a control the summary is currently pointing at. */
-  const flagged = (anchorId: string) => showMissing && missingAnchors.has(anchorId);
+  const flagged = (anchorId: string) => showMissing && missingByAnchor.has(anchorId);
+  /** The id its message carries, so the control can point at it. */
+  const messageId = (anchorId: string) => `${anchorId}_needed`;
   /**
    * How a flagged input looks and reads. The summary can be scrolled off screen
    * by the jump itself, so the field they land on has to say for itself that it
@@ -491,11 +494,29 @@ function Waiver() {
    */
   const fieldProps = (anchorId: string) => ({
     "aria-invalid": flagged(anchorId) || undefined,
+    "aria-describedby": flagged(anchorId) ? messageId(anchorId) : undefined,
     className: cn(
       "mt-1.5",
       flagged(anchorId) && "border-destructive focus-visible:ring-destructive",
     ),
   });
+  /**
+   * The line under a flagged control, in the same words the summary used.
+   *
+   * Every flagged control gets one: a red border is a colour, and somebody who
+   * cannot pick it out, or who arrived by jumping straight to the field with
+   * the summary now scrolled away, would otherwise have nothing telling them
+   * what this field wants.
+   */
+  const fieldMessage = (anchorId: string) => {
+    const field = flagged(anchorId) ? missingByAnchor.get(anchorId) : undefined;
+    if (!field) return null;
+    return (
+      <p id={messageId(anchorId)} className="mt-1.5 text-xs font-medium text-destructive">
+        {field.hint ? `${field.hint}.` : "Please fill this in."}
+      </p>
+    );
+  };
 
   /**
    * Take the signer to a field, the same way from the summary's jump links and
@@ -759,11 +780,16 @@ function Waiver() {
 
             {/* Everything outstanding, in the order the form asks for it. It
                 stays on screen and re-counts itself as they work down it, and
-                every line is a link back to the field it is about. */}
+                every line is a link back to the field it is about.
+
+                `polite` overrides the assertive that role="alert" implies:
+                because the list re-counts on every keystroke, assertive would
+                interrupt a screen reader each time a field is completed, which
+                is the opposite of helpful while somebody is working down it. */}
             {showMissing && (
               <div
                 role="alert"
-                aria-live="assertive"
+                aria-live="polite"
                 className="rounded-lg border border-destructive/40 bg-destructive/5 p-4"
               >
                 <p className="flex items-center gap-2 text-sm font-semibold text-destructive">
@@ -800,6 +826,7 @@ function Waiver() {
                     onChange={(e) => setFirstName(e.target.value)}
                     {...fieldProps("first_name")}
                   />
+                  {fieldMessage("first_name")}
                 </div>
                 <div>
                   <Label htmlFor="middle_name">
@@ -823,6 +850,7 @@ function Waiver() {
                     onChange={(e) => setLastName(e.target.value)}
                     {...fieldProps("last_name")}
                   />
+                  {fieldMessage("last_name")}
                 </div>
               </div>
               <div>
@@ -853,6 +881,7 @@ function Waiver() {
                     onChange={(e) => setDob(e.target.value)}
                     {...fieldProps("date_of_birth")}
                   />
+                  {fieldMessage("date_of_birth")}
                   {/* The paper form's "participant type" tick box. It follows
                       from the date of birth, so we show which one applies
                       rather than asking the same thing twice. */}
@@ -875,6 +904,7 @@ function Waiver() {
                     onChange={(e) => setPhone(e.target.value)}
                     {...fieldProps("phone")}
                   />
+                  {fieldMessage("phone")}
                   <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
                     <Checkbox
                       checked={smsConsent}
@@ -900,6 +930,7 @@ function Waiver() {
                   disabled={Boolean(user)}
                   {...fieldProps("email")}
                 />
+                {fieldMessage("email")}
                 {user && (
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     You're signed in, so the waiver uses your account email.
@@ -930,6 +961,7 @@ function Waiver() {
                   onChange={(e) => setAddress(e.target.value)}
                   {...fieldProps("address")}
                 />
+                {fieldMessage("address")}
               </div>
               <div>
                 <Label htmlFor="uts_student_number">
@@ -998,6 +1030,7 @@ function Waiver() {
                     onChange={(e) => setEcName(e.target.value)}
                     {...fieldProps("emergency_contact_name")}
                   />
+                  {fieldMessage("emergency_contact_name")}
                 </div>
                 <div>
                   <Label htmlFor="emergency_contact_relationship">Relationship</Label>
@@ -1010,6 +1043,7 @@ function Waiver() {
                     placeholder="Parent, partner, friend"
                     {...fieldProps("emergency_contact_relationship")}
                   />
+                  {fieldMessage("emergency_contact_relationship")}
                 </div>
                 <div>
                   <Label htmlFor="emergency_contact_phone">Contact mobile</Label>
@@ -1022,6 +1056,7 @@ function Waiver() {
                     onChange={(e) => setEcPhone(e.target.value)}
                     {...fieldProps("emergency_contact_phone")}
                   />
+                  {fieldMessage("emergency_contact_phone")}
                 </div>
               </div>
             </fieldset>
@@ -1050,9 +1085,7 @@ function Waiver() {
                       No
                     </label>
                   </RadioGroup>
-                  {flagged(`${q.id}_yes`) && (
-                    <p className="text-xs font-medium text-destructive">Please answer yes or no.</p>
-                  )}
+                  {fieldMessage(`${q.id}_yes`)}
                 </div>
               ))}
               <div>
@@ -1074,11 +1107,7 @@ function Waiver() {
                   placeholder="Medication, injuries, conditions, anything else our instructors should know"
                   {...fieldProps("medical_notes")}
                 />
-                {flagged("medical_notes") && (
-                  <p className="mt-1.5 text-xs font-medium text-destructive">
-                    You answered yes to at least one question, so please tell us about it.
-                  </p>
-                )}
+                {fieldMessage("medical_notes")}
               </div>
               <p className="text-xs text-muted-foreground">
                 Privacy note: we collect this health information only to keep you (or the minor)
@@ -1111,11 +1140,7 @@ function Waiver() {
                         )}
                       </span>
                     </label>
-                    {flagged(ackAnchorId(ack.id)) && (
-                      <p className="mt-1 pl-7 text-xs font-medium text-destructive">
-                        Please tick this to continue.
-                      </p>
-                    )}
+                    <div className="pl-7">{fieldMessage(ackAnchorId(ack.id))}</div>
                   </div>
                 ))}
               </fieldset>
@@ -1174,11 +1199,11 @@ function Waiver() {
                   and the id has to land on something focusable for the jump to
                   read as arriving somewhere. */}
               <div
-                id="signature_field"
+                id={WAIVER_ANCHORS.signaturePad}
                 tabIndex={-1}
                 className={cn(
                   "rounded-lg outline-none",
-                  flagged("signature_field") && "border border-destructive p-3",
+                  flagged(WAIVER_ANCHORS.signaturePad) && "border border-destructive p-3",
                 )}
               >
                 <Tabs
@@ -1204,21 +1229,17 @@ function Waiver() {
                   <TabsContent value="type" className="mt-3">
                     <Label htmlFor="signature_name">Type your full name to sign</Label>
                     <Input
-                      id="signature_name"
+                      id={WAIVER_ANCHORS.signatureName}
                       maxLength={120}
                       value={signatureName}
                       onChange={(e) => setSignatureName(e.target.value)}
                       placeholder="Your full name"
-                      {...fieldProps("signature_name")}
+                      {...fieldProps(WAIVER_ANCHORS.signatureName)}
                     />
+                    {fieldMessage(WAIVER_ANCHORS.signatureName)}
                   </TabsContent>
                 </Tabs>
-                {(flagged("signature_field") || flagged("signature_name")) && (
-                  <p className="mt-2 text-xs font-medium text-destructive">
-                    Please sign: draw your signature above, or switch to Type and enter your full
-                    name.
-                  </p>
-                )}
+                {fieldMessage(WAIVER_ANCHORS.signaturePad)}
               </div>
               <p className="text-xs text-muted-foreground">
                 By signing and submitting this form, you agree it constitutes an electronic
@@ -1236,11 +1257,11 @@ function Waiver() {
                     emergency contact section above. Change it there if someone else is signing.
                   </p>
                   <div
-                    id="guardian_signature_field"
+                    id={WAIVER_ANCHORS.guardianPad}
                     tabIndex={-1}
                     className={cn(
                       "rounded-lg outline-none",
-                      flagged("guardian_signature_field") && "border border-destructive p-3",
+                      flagged(WAIVER_ANCHORS.guardianPad) && "border border-destructive p-3",
                     )}
                   >
                     <Label>Parent/guardian signature</Label>
@@ -1264,23 +1285,17 @@ function Waiver() {
                       </TabsContent>
                       <TabsContent value="type" className="mt-3">
                         <Input
-                          id="guardian_signature_name"
+                          id={WAIVER_ANCHORS.guardianName}
                           maxLength={120}
                           value={guardianSignature}
                           onChange={(e) => setGuardianSignature(e.target.value)}
                           placeholder="Guardian full name"
-                          aria-invalid={flagged("guardian_signature_name") || undefined}
-                          className={cn(flagged("guardian_signature_name") && "border-destructive")}
+                          {...fieldProps(WAIVER_ANCHORS.guardianName)}
                         />
+                        {fieldMessage(WAIVER_ANCHORS.guardianName)}
                       </TabsContent>
                     </Tabs>
-                    {(flagged("guardian_signature_field") ||
-                      flagged("guardian_signature_name")) && (
-                      <p className="mt-2 text-xs font-medium text-destructive">
-                        A parent or guardian signs here: draw the signature, or switch to Type and
-                        enter their full name.
-                      </p>
-                    )}
+                    {fieldMessage(WAIVER_ANCHORS.guardianPad)}
                   </div>
                 </div>
               )}

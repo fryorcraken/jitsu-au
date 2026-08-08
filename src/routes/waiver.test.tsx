@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { ackAnchorId } from "@/lib/waiver-required-fields";
 
 const submitWaiverWithPdf = vi.fn();
 const getCurrentWaiverTemplate = vi.fn();
@@ -220,6 +221,39 @@ describe("/waiver missing fields", () => {
     );
     // Optional fields are never marked.
     expect(screen.getByLabelText(/Middle name/)).not.toHaveAttribute("aria-invalid");
+  });
+
+  // The jump can leave the summary scrolled off screen, and a red border is a
+  // colour: whoever lands on the field has to be able to read why they are here.
+  it("gives every flagged field a message of its own, tied to the field", async () => {
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+
+    await user.click(screen.getByRole("button", { name: /Sign and download waiver/i }));
+
+    const firstName = await screen.findByLabelText("First name");
+    await waitFor(() => expect(firstName).toHaveAccessibleDescription("Please fill this in."));
+    expect(document.getElementById("drugs_yes_needed")).toHaveTextContent("Answer yes or no.");
+    expect(document.getElementById("signature_field_needed")).toHaveTextContent(
+      "Draw it or type your full name.",
+    );
+    expect(document.getElementById(`${ackAnchorId("risk")}_needed`)).toHaveTextContent(
+      "Please read this and tick it.",
+    );
+  });
+
+  it("explains a malformed email on the field as well as in the summary", async () => {
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+    await user.type(screen.getByLabelText("Email"), "ada.example.com");
+
+    await user.click(screen.getByRole("button", { name: /Sign and download waiver/i }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Email")).toHaveAccessibleDescription(/name@example.com/),
+    );
   });
 
   it("catches an email that is filled in but is not an address", async () => {

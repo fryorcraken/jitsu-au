@@ -70,13 +70,27 @@ export type WaiverFieldState = {
 /** The dom id of an acknowledgement's tick box. */
 export const ackAnchorId = (id: string) => `ack_${id}`;
 
+/**
+ * The ids of the two signature blocks, invented here rather than being a
+ * field's own name. The form puts them on the elements, so both sides read them
+ * from this one place: an id that only matched by convention would come apart
+ * silently, as a jump that goes nowhere and a field that is never marked, with
+ * nothing in a typecheck or a test to notice.
+ */
+export const WAIVER_ANCHORS = {
+  signaturePad: "signature_field",
+  signatureName: "signature_name",
+  guardianPad: "guardian_signature_field",
+  guardianName: "guardian_signature_name",
+} as const;
+
 /** Where the signature block jumps to, which depends on how they are signing. */
 export const signatureAnchorId = (mode: "draw" | "type") =>
-  mode === "type" ? "signature_name" : "signature_field";
+  mode === "type" ? WAIVER_ANCHORS.signatureName : WAIVER_ANCHORS.signaturePad;
 
 /** Same, for the parent/guardian block shown for a participant under 18. */
 export const guardianSignatureAnchorId = (mode: "draw" | "type") =>
-  mode === "type" ? "guardian_signature_name" : "guardian_signature_field";
+  mode === "type" ? WAIVER_ANCHORS.guardianName : WAIVER_ANCHORS.guardianPad;
 
 // Same rule the submission schema applies, so the form cannot wave through an
 // address the server will reject. The form's own `maxLength` caps the length.
