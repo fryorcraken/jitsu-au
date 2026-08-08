@@ -231,6 +231,11 @@ exist` error is the more serious cousin: the migration never reached the live
 ## Auth & roles
 
 - Auth is Supabase email/password + magic link; the auth UI is `routes/auth.tsx`.
+- **Password rules live in `src/lib/password-policy.ts`, and only there.** They
+  follow NIST SP 800-63B-4: 15 characters minimum, no composition rules at all,
+  and a breached-password check (Have I Been Pwned as you type, Supabase's own
+  check server side). Every rule is stated on screen before anything is typed,
+  by `components/site/NewPasswordField`. Full spec: `docs/passwords.md`.
 - `_authenticated/route.tsx` gates the group: `ssr: false`, redirects to
   `/auth?redirect=...` when there is no user.
 - Roles come from the `user_roles` table and the `app_role` enum

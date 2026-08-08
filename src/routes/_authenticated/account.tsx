@@ -8,7 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Pill } from "@/components/site/StatusPill";
+import { NewPasswordField } from "@/components/site/NewPasswordField";
+import { describePasswordError, passwordProblem } from "@/lib/password-policy";
 import {
   BELT_SIZE_HINT,
   BeltSizeSelect,
@@ -232,7 +235,15 @@ function AccountPage() {
 
       <SectionHeading>Sign-in</SectionHeading>
 
-      <ChangePasswordCard />
+      <ChangePasswordCard
+        personal={[
+          user?.email,
+          profile?.first_name,
+          profile?.middle_name,
+          profile?.last_name,
+          profile?.preferred_name,
+        ]}
+      />
 
       {isManager && (
         <>
@@ -1103,16 +1114,23 @@ function GoogleDriveCard() {
   );
 }
 
-function ChangePasswordCard() {
+function ChangePasswordCard({ personal }: { personal: (string | null | undefined)[] }) {
   const [password, setPassword] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Say what is wrong here rather than spending a round trip to be told.
+    const local = passwordProblem(password, { personal });
+    if (local) return setProblem(local);
+    setProblem(null);
     setBusy(true);
     const { error } = await supabase.auth.updateUser({ password });
     setBusy(false);
-    if (error) return toast.error(error.message);
+    // Not a toast: this stops somebody, so it has to still be on screen while
+    // they fix it, next to the rules it is about.
+    if (error) return setProblem(describePasswordError(error.message));
     setPassword("");
     toast.success("Password updated");
   }
@@ -1123,18 +1141,20 @@ function ChangePasswordCard() {
         <CardTitle>Change password</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={onSubmit} className="space-y-3">
-          <div>
-            <Label htmlFor="cp">New password</Label>
-            <Input
-              id="cp"
-              type="password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <NewPasswordField
+            id="cp"
+            label="New password"
+            disabled={busy}
+            value={password}
+            onChange={setPassword}
+            personal={personal}
+          />
+          {problem && (
+            <Alert variant="destructive">
+              <AlertDescription>{problem}</AlertDescription>
+            </Alert>
+          )}
           <Button type="submit" disabled={busy}>
             {busy ? "Saving..." : "Update password"}
           </Button>
