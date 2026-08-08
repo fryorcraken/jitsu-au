@@ -134,13 +134,17 @@
     letter-spacing: -0.02em;
   }
 
-  /* Tailwind v4's preflight sets buttons to `cursor: default`, matching the
-     browser default rather than the pointer people expect from something
+  /* Tailwind v3's preflight gave buttons `cursor: pointer`; v4 dropped that
+     rule, so a button falls back to the browser's own arrow and stops looking
      clickable. Every `components/ui` primitive puts `cursor-pointer` back one
-     class at a time, so only the hand-written buttons around the site were
-     left with an arrow cursor. Restore it once here instead: utilities still
-     win on specificity, so a button that wants a different cursor (the
-     primitives' own `disabled:cursor-not-allowed`) keeps it. */
+     class at a time, which left only the hand-written buttons around the site
+     showing an arrow. Restore it once here instead.
+
+     This must stay inside `@layer base`. That, not specificity, is what lets a
+     `cursor-*` utility override it: the selector is (0,1,1), so out of the
+     layer it would beat `.cursor-default` and break the buttons that ask for a
+     different cursor on purpose (`MenubarTrigger`, `SidebarRail`'s resize
+     handles, every `disabled:cursor-not-allowed`). */
   button:not(:disabled, [aria-disabled="true"]),
   [role="button"]:not(:disabled, [aria-disabled="true"]) {
     cursor: pointer;
