@@ -37,3 +37,7 @@ dist-ssr
 # Output of scripts/pr-screenshots.mjs (uploaded as a CI artifact, never committed)
 screenshots/
 screenshots-*/
+
+# Ids of the people scripts/pr-screenshots-seed.mjs put in the local database.
+# Regenerated on every seed, and meaningless against any other database.
+.screenshot-fixture.json

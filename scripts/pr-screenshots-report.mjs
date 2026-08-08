@@ -124,8 +124,10 @@ export function buildContactSheet(shots, viewports) {
 </style>
 </head>
 <body>
-<h1>UTS Jitsu — public pages on this branch</h1>
-<p>Full-page screenshots of the production build. Click an image for the original.</p>
+<h1>UTS Jitsu — every page on this branch</h1>
+<p>Full-page screenshots of the production build, public pages first, then the member
+area and the manager screens as the people who use them see them. Click an image for
+the original.</p>
 ${sections}
 </body>
 </html>

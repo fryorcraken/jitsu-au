@@ -1,1 +1,39 @@
 project_id = "lgmacvxejzpvghgbjrjd"
+
+# ---------------------------------------------------------------------------
+# Everything below configures the LOCAL stack only — the throwaway containers
+# `supabase start` / `supabase db start` bring up on a developer's machine and
+# in CI (.github/workflows/pr-screenshots.yml, .github/workflows/supabase-lint.yml).
+# It has no bearing on the hosted project, which is configured in the Supabase
+# dashboard; only `project_id` above points at it.
+# ---------------------------------------------------------------------------
+
+[auth]
+# Where the screenshot job serves the built site (scripts/pr-screenshots.mjs,
+# PR_SCREENSHOTS_PORT). GoTrue refuses to redirect anywhere it has not been
+# told about, and signing a persona in is exactly such a redirect — so moving
+# the port means moving these too.
+site_url = "http://127.0.0.1:4173"
+additional_redirect_urls = ["http://127.0.0.1:4173", "http://localhost:4173"]
+
+[auth.email]
+# Nobody reads a confirmation inbox in CI. Seeded people are created already
+# confirmed (pr-screenshots-seed.mjs) and sign in straight away.
+enable_confirmations = false
+
+# Containers nothing in this repo talks to locally. Off means a smaller, faster
+# `supabase start` — the screenshot job pays for this on every pull request.
+[studio]
+enabled = false
+
+[inbucket]
+enabled = false
+
+[realtime]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false

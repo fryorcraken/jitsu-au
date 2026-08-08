@@ -1,28 +1,33 @@
 name: PR screenshots
 
-# Photographs every public page of the site as this branch builds it, at
-# desktop and phone widths, and posts the result on the pull request. Reviewing
-# a copy or layout change then means looking at the page instead of reading the
-# diff and imagining it.
+# Photographs every page of the site as this branch builds it — the public
+# pages, the member area and the manager screens — at desktop and phone widths,
+# and posts the result on the pull request. Reviewing a copy or layout change
+# then means looking at the page instead of reading the diff and imagining it.
+#
+# The signed-in screens need a database with people in it, so the job runs the
+# whole site against a THROWAWAY LOCAL SUPABASE STACK: `supabase start` brings
+# up Postgres, Auth, PostgREST and Storage, every migration in
+# supabase/migrations is applied to it, and scripts/pr-screenshots-seed.mjs
+# fills it with a small club (a manager, a member, an applicant, and the rows
+# the manager screens list). Nothing here touches the hosted project, and the
+# job needs no repository secrets: the local stack's keys are the CLI's own
+# well-known development keys, printed by `supabase status`.
+#
+# One consequence worth knowing when you read the artifact: /blog, /pricing and
+# the calendar show the SEEDED content, not what is on jitsu.au today. That is
+# the trade for screenshots that are the same on every run and on every fork.
 #
 # The repository is private, so GitHub will not render images pulled from
 # `raw.githubusercontent.com` inside a comment (they need an authenticated
 # request). The screenshots therefore ship as a build artifact and the comment
 # links to it: download, unzip, open `index.html`.
-#
-# Needs two repository secrets, both of which are values the deployed site
-# already ships to every visitor in its JavaScript bundle:
-#   VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY
-# Without them the pages that read plans, blog posts or the calendar render as
-# error pages, so the job skips itself with a notice instead of posting
-# misleading screenshots.
 
 on:
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
-      - "supabase/**"
 
 # Superseded runs are pointless here: only the newest push is being reviewed.
 concurrency:
@@ -36,15 +41,9 @@ permissions:
 
 jobs:
   screenshots:
-    name: Screenshot public pages
+    name: Screenshot every page
     runs-on: ubuntu-latest
     env:
-      # Build-time (browser bundle) and run-time (SSR) names for the same two
-      # values. src/integrations/supabase/client.ts reads whichever it finds.
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-      SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
       # Pinned so the browser Playwright downloads matches the driver that
       # drives it. Bump both by bumping this one line — but not to a release
       # under a day old: bunfig.toml's minimumReleaseAge would refuse to
@@ -53,26 +52,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # `secrets` is not available in a job-level `if`, so the skip decision is
-      # a step that every later step keys off.
-      - name: Check Supabase secrets are configured
-        id: config
-        run: |
-          if [ -n "$VITE_SUPABASE_URL" ] && [ -n "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=PR screenshots skipped::Set the VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY repository secrets to enable screenshots."
-          fi
-
       - uses: oven-sh/setup-bun@v2
-        if: steps.config.outputs.ready == 'true'
         with:
           bun-version: latest
 
       # Same lockfile-preserving install CI uses. See CLAUDE.md > Lock file strategy.
       - name: Install dependencies
-        if: steps.config.outputs.ready == 'true'
         run: bash scripts/bun-install.sh
 
       # Playwright is deliberately NOT in package.json: dependencies there have
@@ -80,26 +65,54 @@ jobs:
       # is a CI-only tool. Installing it here leaves the committed lockfile
       # alone — the checkout is thrown away at the end of the job.
       - name: Install Playwright
-        if: steps.config.outputs.ready == 'true'
         run: |
           bun add --no-save "playwright@${PLAYWRIGHT_VERSION}"
           bunx playwright install --with-deps chromium
 
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+
+      # Brings up the local stack and applies every migration in order, so the
+      # screenshots are of the schema THIS BRANCH ships. A migration that fails
+      # to apply fails here, before anything is photographed.
+      - name: Start local Supabase (applies every migration)
+        run: supabase start
+
+      # The local keys are printed, not secret. The build bakes VITE_* in at
+      # bundle time and the Nitro server reads the unprefixed names at runtime,
+      # so both spellings of the same two values have to be set before `build`.
+      - name: Point the build at the local stack
+        run: |
+          eval "$(supabase status -o env)"
+          : "${API_URL:?supabase status reported no API_URL}"
+          : "${ANON_KEY:?supabase status reported no ANON_KEY}"
+          : "${SERVICE_ROLE_KEY:?supabase status reported no SERVICE_ROLE_KEY}"
+          {
+            echo "VITE_SUPABASE_URL=$API_URL"
+            echo "VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+
+      # Writes .screenshot-fixture.json, which is how the screenshot script
+      # knows there is a database to sign in against and who to sign in as.
+      - name: Seed the club
+        run: bun scripts/pr-screenshots-seed.mjs
+
       # NITRO_PRESET overrides the Cloudflare default so the build produces a
       # server this runner can execute directly.
       - name: Build
-        if: steps.config.outputs.ready == 'true'
         run: NITRO_PRESET=node-server bun run build
 
       - name: Capture screenshots
         id: shots
-        if: steps.config.outputs.ready == 'true'
         continue-on-error: true
         run: bun scripts/pr-screenshots.mjs
 
       - name: Upload screenshots
         id: artifact
-        if: steps.config.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: pr-screenshots-${{ github.event.pull_request.number }}
@@ -110,7 +123,6 @@ jobs:
       # script below stays free of `require`, which newer github-script majors
       # (ESM-only) no longer provide.
       - name: Collect the summary table
-        if: steps.config.outputs.ready == 'true'
         run: |
           {
             echo 'SCREENSHOT_SUMMARY<<PR_SCREENSHOTS_EOF'
@@ -131,7 +143,6 @@ jobs:
           fi
 
       - name: Comment on the pull request
-        if: steps.config.outputs.ready == 'true'
         uses: actions/github-script@v8
         env:
           ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
@@ -160,6 +171,7 @@ jobs:
               ? [
                   `[**Download the screenshots**](${artifactUrl}) (zip, kept 14 days).`,
                   "Unzip it and open `index.html` to see every page at desktop and phone width on one page.",
+                  "Signed-in screens are shot against a seeded local database, so the content is fixture data, not the live club.",
                 ]
               : [`[**See the job log**](${runUrl}) for what went wrong.`];
 
@@ -202,10 +214,10 @@ jobs:
       # job goes red — but only after the comment above has gone out saying
       # which page it was.
       - name: Fail if the run did not come back clean
-        if: steps.config.outputs.ready == 'true' && steps.shots.outcome == 'failure'
+        if: steps.shots.outcome == 'failure'
         run: |
           if [ "$SCREENSHOTS_CAPTURED" = "true" ]; then
-            echo "::error title=PR screenshots::One or more public pages failed to render. See the job log above."
+            echo "::error title=PR screenshots::One or more pages failed to render. See the job log above."
           else
             echo "::error title=PR screenshots::The screenshot run failed before it photographed any page. See the job log above."
           fi

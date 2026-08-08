@@ -128,7 +128,7 @@ public/                   Served at the site root
   offline.html            Shown when a page is opened with no connection
   icons/                  Generated PWA icons (scripts/generate-pwa-icons.mjs)
 supabase/
-  config.toml             Supabase project ref
+  config.toml             Supabase project ref + the local stack CI boots
   migrations/*.sql        Schema + RLS (timestamped, applied in order)
 ```
 
@@ -393,20 +393,43 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   Linux with Bun for every PR and pushes to `main`. It installs via
   `bash scripts/bun-install.sh` (see Lock file strategy below), not a plain
   `bun install`.
-- **PR screenshots:** `.github/workflows/pr-screenshots.yml` builds the branch,
-  runs `scripts/pr-screenshots.mjs` over every page in `PUBLIC_PAGES` (plus
-  `/waiver` and `/auth`) at desktop and phone widths, uploads the PNGs plus an
+- **PR screenshots:** `.github/workflows/pr-screenshots.yml` photographs **every
+  page** on the branch at desktop and phone widths, uploads the PNGs plus an
   `index.html` contact sheet as an artifact, and posts one sticky PR comment
   linking to it. The repo is private, so images cannot be embedded in the
-  comment — reviewers download the artifact. The job needs the
-  `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` repository secrets and
-  skips itself with a notice when they are absent. A page that returns an error
-  status, or that renders the router's error/404 boundary (both arrive inside an
-  ordinary 200, which is why those boundaries carry `data-page-state`), fails
-  the job. **It does not catch a route that handles its own loader error** and
-  renders a card in place of its content — `/blog` and `/waiver` do exactly
-  that, so a green run means every route rendered, not that every route has its
-  data.
+  comment — reviewers download the artifact.
+  - It runs the whole site against a **throwaway local Supabase stack**:
+    `supabase start` (Postgres + Auth + PostgREST + Storage) with every
+    migration in `supabase/migrations` applied, then
+    `scripts/pr-screenshots-seed.mjs` fills it with a manager, a member, an
+    applicant and the rows the manager screens list. **No repository secrets
+    are involved** — the local stack's keys are the CLI's own development keys,
+    read from `supabase status`. The two things this buys are the signed-in
+    screens and a run that is identical on every branch and every fork.
+  - The trade: `/blog`, `/pricing` and the calendar show **seeded fixture
+    content**, not what is on `jitsu.au` today.
+  - Which pages get shot, and as whom, is **derived from the route files**
+    (`scripts/pr-screenshots-pages.mjs`): `PUBLIC_PAGES` from `src/lib/seo.ts`
+    plus `/waiver` and `/auth` signed out, everything under
+    `src/routes/_authenticated/` and `src/routes/kb/` signed in — as the
+    manager for `/manager/*`, as the member for the rest. **A new screen is
+    photographed the moment its route file exists**, so nothing has to be added
+    here. A dynamic route (`$userId`) needs an id in the seed's manifest; one
+    that has none is logged and skipped rather than shot as a 404.
+  - Signing in uses an admin-generated **magic link**, so the session is stored
+    exactly as a real one is. GoTrue only redirects to URLs it knows, which is
+    why `supabase/config.toml` names the port the script serves on — move
+    `PR_SCREENSHOTS_PORT` and that has to move with it.
+  - A page that returns an error status, or that renders the router's error/404
+    boundary (both arrive inside an ordinary 200, which is why those boundaries
+    carry `data-page-state`), fails the job. **It does not catch a route that
+    handles its own loader error** and renders a card in place of its content —
+    `/blog` and `/waiver` do exactly that, so a green run means every route
+    rendered, not that every route has its data.
+  - Run it locally the same way CI does (`supabase start`, seed, build with
+    `NITRO_PRESET=node-server`, `bun scripts/pr-screenshots.mjs`); the header
+    comment in `scripts/pr-screenshots.mjs` has the exact commands. With no
+    seeded stack it falls back to the public pages alone.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see "Schema drift" in `docs/database-changes.md`).

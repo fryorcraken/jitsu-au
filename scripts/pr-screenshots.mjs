@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 //
-// Screenshot every public page of a production build, at desktop and phone
-// widths, so a pull request can be reviewed by looking at it.
+// Screenshot every page of a production build, at desktop and phone widths, so
+// a pull request can be reviewed by looking at it.
 //
 // Run it with **bun** (not node): the page list is imported straight from
 // `src/lib/seo.ts` so a new marketing page is photographed the moment it is
@@ -12,6 +12,18 @@
 //   bunx playwright install chromium
 //   NITRO_PRESET=node-server bun run build   # a server this can run directly
 //   bun scripts/pr-screenshots.mjs
+//
+// SIGNED-IN PAGES need a database with people in it, so they are photographed
+// only when there is a seeded local Supabase stack to sign in against:
+//
+//   supabase start && eval "$(supabase status -o env)"
+//   SUPABASE_URL=$API_URL SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
+//     bun scripts/pr-screenshots-seed.mjs      # writes .screenshot-fixture.json
+//
+// With no fixture file (or no service-role key) the run quietly photographs the
+// public pages alone, which is what a local `bun scripts/pr-screenshots.mjs`
+// against a production Supabase project should do — signing in there is not
+// something a screenshot run gets to do.
 //
 // `--no-save` matters: package.json dependencies have to be re-resolved by
 // Lovable (CLAUDE.md > Lock file strategy), and this tool is not part of the
@@ -41,9 +53,11 @@ import {
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 
 import { PUBLIC_PAGES } from "../src/lib/seo.ts";
+import { fillRouteParams, personaFor, signedInPaths } from "./pr-screenshots-pages.mjs";
 import {
   buildContactSheet,
   buildSummaryTable,
@@ -72,6 +86,7 @@ const VIEWPORTS = [
 
 const OUT_DIR = resolve(REPO_ROOT, process.env.PR_SCREENSHOTS_OUT ?? "screenshots");
 const SERVER_ENTRY = join(REPO_ROOT, ".output/server/index.mjs");
+const ROUTES_DIR = join(REPO_ROOT, "src/routes");
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PR_SCREENSHOTS_PORT ?? 4173);
 /** Set to screenshot something already running (a dev server, a deploy). */
@@ -79,7 +94,74 @@ const EXTERNAL_BASE_URL = process.env.PR_SCREENSHOTS_BASE_URL;
 /** Escape hatch for sandboxes that ship a chromium Playwright didn't install. */
 const CHROMIUM_PATH = process.env.PR_SCREENSHOTS_CHROMIUM;
 
-const paths = [...PUBLIC_PAGES.map((page) => page.path), ...EXTRA_PATHS];
+/**
+ * The seeded local stack, if there is one: who to sign in as, and the record
+ * ids that fill the dynamic routes. Written by pr-screenshots-seed.mjs.
+ */
+const FIXTURE_PATH = resolve(
+  REPO_ROOT,
+  process.env.PR_SCREENSHOTS_FIXTURE ?? ".screenshot-fixture.json",
+);
+const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const publicPaths = [...PUBLIC_PAGES.map((page) => page.path), ...EXTRA_PATHS];
+
+/**
+ * The pages to shoot, grouped by who is looking at them. One group is one
+ * browser context: signing in is per-context, and doing it once per persona
+ * beats doing it once per page.
+ */
+function buildGroups() {
+  const groups = [{ persona: null, paths: publicPaths }];
+  const fixture = readFixture();
+  if (!fixture) return groups;
+
+  const skipped = [];
+  const byPersona = { member: [], manager: [] };
+  for (const template of signedInPaths(listRouteFiles())) {
+    const path = fillRouteParams(template, fixture.params);
+    if (!path) {
+      skipped.push(template);
+      continue;
+    }
+    byPersona[personaFor(path)].push(path);
+  }
+  if (skipped.length > 0) {
+    // Never silent: a route parameter the fixture has no value for means a
+    // whole screen goes unphotographed, and the artifact would just be missing
+    // it. Add the id to the manifest in pr-screenshots-seed.mjs.
+    console.warn(`[screenshots] no fixture value for: ${skipped.join(", ")}`);
+  }
+
+  for (const persona of ["member", "manager"]) {
+    if (byPersona[persona].length === 0) continue;
+    groups.push({ persona, paths: byPersona[persona], email: fixture.personas[persona]?.email });
+  }
+  return groups;
+}
+
+/** Every route file, relative to `src/routes`, in a stable order. */
+function listRouteFiles() {
+  return readdirSync(ROUTES_DIR, { recursive: true })
+    .map((entry) => String(entry).split(sep).join("/"))
+    .sort();
+}
+
+/** The seed's manifest, or null when this run has no database to sign into. */
+function readFixture() {
+  if (!existsSync(FIXTURE_PATH)) {
+    console.log("[screenshots] no fixture manifest: photographing the public pages only");
+    return null;
+  }
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+    console.warn(
+      "[screenshots] fixture manifest present but SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set: skipping the signed-in pages",
+    );
+    return null;
+  }
+  return JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
+}
 
 /**
  * Give the traced server bundle the tslib files it actually imports.
@@ -229,14 +311,49 @@ async function isPortAnswering() {
   }
 }
 
-async function shoot(browser, baseUrl, viewport, path) {
-  const context = await browser.newContext({
-    viewport: { width: viewport.width, height: viewport.height },
-    isMobile: viewport.isMobile,
-    hasTouch: viewport.isMobile,
-    deviceScaleFactor: 1,
-    reducedMotion: "reduce",
+/**
+ * Sign `context` in as `email`, by walking it through a real Supabase email
+ * link.
+ *
+ * The alternative — writing a session into localStorage ourselves — means
+ * hard-coding the storage key the generated Supabase client happens to derive
+ * from the project URL, and would go stale silently. An admin-generated magic
+ * link goes through the app's own landing path instead (the one
+ * `isAuthCallbackUrl` in src/lib/auth-persistence.ts exists for), so the
+ * session is stored exactly the way a member's would be.
+ *
+ * GoTrue only redirects to a URL it has been told about, which is why
+ * `supabase/config.toml` names the port this script serves on. Change
+ * PR_SCREENSHOTS_PORT and that has to move with it.
+ */
+async function signIn(context, baseUrl, email) {
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email,
+    options: { redirectTo: `${baseUrl}/account` },
+  });
+  if (error) throw new Error(`could not make a sign-in link for ${email}: ${error.message}`);
+
+  const page = await context.newPage();
+  try {
+    await page.goto(data.properties.action_link, { waitUntil: "networkidle", timeout: 30_000 });
+    // The link lands with tokens in the fragment and the client turns them into
+    // a stored session a moment later. Waiting on the storage rather than on
+    // the URL keeps this independent of where the app decides to send them.
+    await page.waitForFunction(
+      () => Object.keys(localStorage).some((key) => key.endsWith("-auth-token")),
+      undefined,
+      { timeout: 30_000 },
+    );
+  } finally {
+    await page.close();
+  }
+}
+
+async function shoot(context, baseUrl, viewport, path) {
   const page = await context.newPage();
   const file = join(OUT_DIR, viewport.name, `${slugFor(path)}.png`);
 
@@ -263,7 +380,7 @@ async function shoot(browser, baseUrl, viewport, path) {
   } catch (error) {
     return { path, viewport: viewport.name, status: 0, state: null, error: String(error) };
   } finally {
-    await context.close();
+    await page.close();
   }
 }
 
@@ -287,23 +404,62 @@ if (OUT_DIR === REPO_ROOT || !OUT_DIR.startsWith(REPO_ROOT + sep)) {
 rmSync(OUT_DIR, { recursive: true, force: true });
 for (const viewport of VIEWPORTS) mkdirSync(join(OUT_DIR, viewport.name), { recursive: true });
 
+const groups = buildGroups();
 const results = [];
 let server;
 let browser;
+
+/** Photograph one group's pages in a context of its own, signed in or not. */
+async function shootGroup(browser, baseUrl, viewport, group) {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    isMobile: viewport.isMobile,
+    hasTouch: viewport.isMobile,
+    deviceScaleFactor: 1,
+    reducedMotion: "reduce",
+  });
+
+  try {
+    if (group.persona) await signIn(context, baseUrl, group.email);
+  } catch (error) {
+    // A failed sign-in is one fault, not one per page — but every page it cost
+    // us still has to appear in the summary, or the artifact just silently
+    // lacks the whole member area.
+    await context.close();
+    console.error(`[screenshots] could not sign in as ${group.persona}: ${error}`);
+    return group.paths.map((path) => ({
+      path,
+      viewport: viewport.name,
+      status: 0,
+      state: null,
+      error: `sign-in as ${group.persona} failed: ${error}`,
+    }));
+  }
+
+  try {
+    const shots = [];
+    for (const path of group.paths) {
+      const result = await shoot(context, baseUrl, viewport, path);
+      shots.push(result);
+      console.log(
+        `[screenshots] ${viewport.name.padEnd(7)} ${(group.persona ?? "public").padEnd(8)} ${path.padEnd(28)} ${
+          isShotOk(result) ? `ok (${result.status})` : `FAILED ${failureReason(result)}`
+        }`,
+      );
+    }
+    return shots;
+  } finally {
+    await context.close();
+  }
+}
 
 try {
   server = await startServer();
   browser = await chromium.launch({ executablePath: CHROMIUM_PATH || undefined });
 
   for (const viewport of VIEWPORTS) {
-    for (const path of paths) {
-      const result = await shoot(browser, server.baseUrl, viewport, path);
-      results.push(result);
-      console.log(
-        `[screenshots] ${viewport.name.padEnd(7)} ${path.padEnd(20)} ${
-          isShotOk(result) ? `ok (${result.status})` : `FAILED ${failureReason(result)}`
-        }`,
-      );
+    for (const group of groups) {
+      results.push(...(await shootGroup(browser, server.baseUrl, viewport, group)));
     }
   }
 } finally {
