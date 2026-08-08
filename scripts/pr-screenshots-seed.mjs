@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
 import { CODE_OF_CONDUCT_VERSION } from "../src/lib/code-of-conduct.ts";
+import { splitBlocks } from "../src/lib/kb.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -95,6 +96,16 @@ const BLOG = { welcome: id(21), grading: id(22), draft: id(23) };
 const KB_ARTICLE = { welcome: id(41), etiquette: id(42) };
 const SERIES = id(51);
 const IMPORT_BATCH = id(71);
+
+/** Named so the annotation below can be anchored to one of its blocks. */
+const ETIQUETTE_BODY = [
+  "A few habits keep training safe and quick to run.",
+  "",
+  "- Bow on and off the mat.",
+  "- Nails short, jewellery off, gi clean.",
+  "- Tap early. Tapping is information, not defeat.",
+  "- Tell your partner about any injury before you start.",
+].join("\n");
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.now();
@@ -609,24 +620,29 @@ await insert("kb_article_versions", [
     version: 1,
     is_current: true,
     title: "Mat etiquette",
-    body_md: [
-      "A few habits keep training safe and quick to run.",
-      "",
-      "- Bow on and off the mat.",
-      "- Nails short, jewellery off, gi clean.",
-      "- Tap early. Tapping is information, not defeat.",
-      "- Tell your partner about any injury before you start.",
-    ].join("\n"),
+    body_md: ETIQUETTE_BODY,
     created_by: users.manager,
   },
 ]);
 
+// Anchored to the passage it is about, exactly as the reader anchors one: a
+// hash of that block's own text (see `blockId` in src/lib/kb.ts). Left null it
+// would still be a valid row, but `resolveAnchors` would file it as an
+// article-level note and the passage-anchored comment UI — the thing worth
+// looking at in a screenshot — would never be on screen.
+const etiquetteAnchor = splitBlocks(ETIQUETTE_BODY).find((block) =>
+  block.markdown.includes("jewellery off"),
+);
+if (!etiquetteAnchor) {
+  failures.push("no block in the mat etiquette article to anchor the annotation to");
+}
 await insert("kb_annotations", {
   article_id: KB_ARTICLE.etiquette,
   article_version: 1,
   user_id: users.member,
   body: "Does this mean I should take my wedding ring off, or is taping it enough?",
   quote: "Nails short, jewellery off, gi clean.",
+  block_id: etiquetteAnchor?.id ?? null,
   visibility: "shared",
   created_at: at(-5),
 });

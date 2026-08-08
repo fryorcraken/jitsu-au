@@ -1,11 +1,18 @@
 project_id = "lgmacvxejzpvghgbjrjd"
 
 # ---------------------------------------------------------------------------
-# Everything below configures the LOCAL stack only — the throwaway containers
+# Everything below is written for the LOCAL stack — the throwaway containers
 # `supabase start` / `supabase db start` bring up on a developer's machine and
 # in CI (.github/workflows/pr-screenshots.yml, .github/workflows/supabase-lint.yml).
-# It has no bearing on the hosted project, which is configured in the Supabase
-# dashboard; only `project_id` above points at it.
+# Nothing in this repository applies any of it to the hosted project, which is
+# configured in the Supabase dashboard.
+#
+# ⚠️  `supabase config push` WOULD apply it, to the project named by
+# `project_id` above. Do not run it: it would set the live site's `site_url` to
+# a loopback address and turn off email confirmations, which between them break
+# every auth email the club sends. If the hosted project ever does need to be
+# configured from this file, the [auth] block below has to be reworked first —
+# its values exist to let a CI container redirect to a CI port.
 # ---------------------------------------------------------------------------
 
 [auth]

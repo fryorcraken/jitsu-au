@@ -20,10 +20,11 @@
 //   SUPABASE_URL=$API_URL SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
 //     bun scripts/pr-screenshots-seed.mjs      # writes .screenshot-fixture.json
 //
-// With no fixture file (or no service-role key) the run quietly photographs the
-// public pages alone, which is what a local `bun scripts/pr-screenshots.mjs`
-// against a production Supabase project should do — signing in there is not
-// something a screenshot run gets to do.
+// With neither a fixture file nor a service-role key, the run photographs the
+// public pages alone — what a local `bun scripts/pr-screenshots.mjs` against a
+// production Supabase project should do, since signing in there is not
+// something a screenshot run gets to do. One without the other is a broken
+// setup rather than a smaller run, and fails (see readFixture).
 //
 // `--no-save` matters: package.json dependencies have to be re-resolved by
 // Lovable (CLAUDE.md > Lock file strategy), and this tool is not part of the
@@ -135,8 +136,17 @@ function buildGroups() {
   }
 
   for (const persona of ["member", "manager"]) {
-    if (byPersona[persona].length === 0) continue;
-    groups.push({ persona, paths: byPersona[persona], email: fixture.personas[persona]?.email });
+    // Same reasoning as readFixture: with a seeded stack in hand, a persona
+    // with nothing to photograph means the route derivation stopped working,
+    // not that the screens went away.
+    if (byPersona[persona].length === 0) {
+      throw new Error(
+        `no ${persona} pages found under src/routes — check pr-screenshots-pages.mjs`,
+      );
+    }
+    const email = fixture.personas[persona]?.email;
+    if (!email) throw new Error(`the fixture manifest names no ${persona} to sign in as`);
+    groups.push({ persona, paths: byPersona[persona], email });
   }
   return groups;
 }
@@ -148,17 +158,34 @@ function listRouteFiles() {
     .sort();
 }
 
-/** The seed's manifest, or null when this run has no database to sign into. */
+/**
+ * The seed's manifest, or null when this run has no database to sign into.
+ *
+ * Falling back to the public pages is right for a run with no seeded stack at
+ * all (a local `bun scripts/pr-screenshots.mjs` against a production project),
+ * and wrong for anything else. HALF a setup is always a mistake — a seed step
+ * that was reordered away, a moved PR_SCREENSHOTS_FIXTURE, an environment step
+ * that stopped exporting the key — and silently dropping every signed-in page
+ * would take the whole feature away behind a green check and a PR comment
+ * still claiming the member area was photographed. So that case is fatal.
+ */
 function readFixture() {
-  if (!existsSync(FIXTURE_PATH)) {
-    console.log("[screenshots] no fixture manifest: photographing the public pages only");
+  const hasManifest = existsSync(FIXTURE_PATH);
+  const hasCredentials = Boolean(SUPABASE_URL && SERVICE_ROLE_KEY);
+
+  if (!hasManifest && !hasCredentials) {
+    console.log("[screenshots] no seeded stack: photographing the public pages only");
     return null;
   }
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-    console.warn(
-      "[screenshots] fixture manifest present but SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set: skipping the signed-in pages",
+  if (!hasManifest) {
+    throw new Error(
+      `A Supabase service-role key is set but there is no fixture manifest at ${FIXTURE_PATH}. Run scripts/pr-screenshots-seed.mjs first, or unset SUPABASE_SERVICE_ROLE_KEY to photograph the public pages alone.`,
     );
-    return null;
+  }
+  if (!hasCredentials) {
+    throw new Error(
+      `There is a fixture manifest at ${FIXTURE_PATH} but SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set, so nobody can be signed in.`,
+    );
   }
   return JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
 }
