@@ -71,6 +71,25 @@ describe("/manager/settings", () => {
     expect(screen.getByText(/old text/)).toBeVisible();
   });
 
+  // The read failing and the club never having published are different things,
+  // and only one of them should put an empty form in front of a manager. An
+  // empty form here invites retyping a working account from memory, which is how
+  // one digit gets lost.
+  it("shows an error instead of an empty form when the settings cannot be read", async () => {
+    getClubSettings.mockRejectedValue(new Error("Could not read the club settings. Try again."));
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
+
+    expect(screen.getByText(/could not load the club's payment settings/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
+    // Nothing to type into means nothing to overwrite.
+    expect(screen.queryByLabelText("Account name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    // And no claim about what members can see, because we do not know.
+    expect(screen.queryByText(/members cannot see how to pay yet/i)).not.toBeInTheDocument();
+    expect(toastError).toHaveBeenCalled();
+  });
+
   it("drops the warning and the old text once an account exists", async () => {
     getClubSettings.mockResolvedValue({ details: ACCOUNT, legacy_instructions: "old text" });
     await renderLoaded();

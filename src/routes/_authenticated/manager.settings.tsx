@@ -83,6 +83,8 @@ function SettingsPage() {
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // The load failing is its own state, not an absent one. See the panel below.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -92,13 +94,21 @@ function SettingsPage() {
     if (!isManager) return;
     fetchSettings()
       .then((s) => {
+        setLoadFailed(false);
         setLegacy(s.legacy_instructions);
         setPublished(s.details != null);
         if (s.details) {
           setForm({ ...s.details, bsb: formatBsb(s.details.bsb) });
         }
       })
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load settings"))
+      .catch((e) => {
+        // Not just a toast. `getClubSettings` throws rather than return an empty
+        // account precisely so a failed read cannot be mistaken for an
+        // unpublished one; swallowing that here would put the empty form back on
+        // screen and hand a manager the overwrite it was protecting them from.
+        setLoadFailed(true);
+        toast.error(e instanceof Error ? e.message : "Failed to load settings");
+      })
       .finally(() => setLoading(false));
   }, [isManager, fetchSettings]);
 
@@ -146,6 +156,44 @@ function SettingsPage() {
     );
   }
 
+  /**
+   * The read failed, so we do not know what the club's account currently says.
+   *
+   * The form is deliberately NOT rendered here. An empty form plus "members
+   * cannot see how to pay" is a lie we cannot support, and worse, it invites a
+   * manager to retype the account from memory over the top of one that may be
+   * perfectly fine. Nothing to type into means nothing to overwrite.
+   */
+  if (loadFailed) {
+    return (
+      <section className="mx-auto max-w-5xl space-y-6 px-4 py-10">
+        <h1 className="text-3xl font-black">Club settings</h1>
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div className="text-sm">
+            <p className="font-medium">We could not load the club's payment settings.</p>
+            <p className="mt-1 text-muted-foreground">
+              Nothing has changed, and members are unaffected. We have not shown the form because we
+              cannot tell you what is in it right now, and saving over details we could not read is
+              worse than waiting a minute.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => window.location.reload()}>
+                Try again
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/manager/memberships">Back to memberships</Link>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <>
       <section className="mx-auto max-w-5xl space-y-6 px-4 py-10">
@@ -163,8 +211,9 @@ function SettingsPage() {
         </div>
 
         {/* Leads, rather than sits at the bottom: while this is showing, nobody
-            can pay us. */}
-        {!published && (
+            can pay us. Suppressed when the read failed, because then we do not
+            know whether it is true. */}
+        {!published && !loadFailed && (
           <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
             <div className="text-sm">
