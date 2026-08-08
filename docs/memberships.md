@@ -123,12 +123,8 @@ own), and reconciliation, activation and cancellation follow the same
 ## Paying an invoice
 
 The member sees everything they need to pay on `/membership` itself: a **How to
-pay** panel above the plan list carrying the amount, the payment reference (with
-a copy button, because the reference is what someone re-opens the page for while
-standing in their banking app), and the club's own account details. That last
-part is the manager-set markdown from `/manager/settings`, read through the same
-helper the invoice email uses, so the page and the email can never quote
-different bank details. Any signed-in person can read the club's details, not
+pay** panel above the plan list carrying the amount, the payment reference, and
+the club's bank account. Any signed-in person can read the club's account, not
 only someone who owes money.
 
 The panel appears only while something is unpaid, and it counts **transfers, not
@@ -137,11 +133,51 @@ reference, so it shows as one payment with the split underneath, matching the
 single combined amount the email quotes. The memberships table above it stays the
 per-row record.
 
-**The invoice email is unchanged** and still goes out on every purchase. This is
-a second copy of the same details, not a replacement, so a member who deleted the
-email is not stuck. If the club's details cannot be loaded, the amount and
-reference (the member's own data) still render and the panel points at the email
-for the rest.
+**The invoice email is a second copy of the same details, not a replacement**, so
+a member who deleted the email is not stuck, and it links back to the page.
+
+### The club's account is fields, not prose
+
+The account is eight named values under the `club_settings` key
+`invoice_payment_details` (a JSON blob), edited on `/manager/settings`, and
+**every one of them has its own copy button** on the page. That is the whole
+reason it is structured: a member is in a banking app on a phone, and a block of
+prose gives them one thing to select by hand.
+
+- **Account name, BSB, account number, bank** are required **together**. A
+  half-filled account never parses, because it looks payable: somebody copies the
+  BSB, finds no account number, and guesses. An incomplete set is treated exactly
+  like nothing published.
+- **SWIFT/BIC, bank address, account holder address** are each optional and sit
+  behind a "Paying from overseas?" disclosure, hidden entirely when all three are
+  blank. Australia has no IBAN, so the BIC (the same thing as a SWIFT code, 8 or
+  11 characters) plus the BSB and account number is what a sending bank abroad
+  asks for.
+- **The note** is the one free-text field left, markdown, with no copy button.
+
+The BSB is stored as six bare digits and displayed **and copied** as `062-000`,
+formatted in one place (`clubPaymentFieldValue`) so what is on screen and what
+lands on the clipboard cannot disagree. `CLUB_ACCOUNT_FIELDS` /
+`CLUB_INTERNATIONAL_FIELDS` in `src/lib/validation.ts` are the single ordered
+list both the page and the email walk, which is what stops the two drifting.
+
+**An overseas transfer often arrives short**, because a bank in the middle took a
+cut. Reconciliation matches on the reference _and the exact amount_
+(`matchesMembershipReference`), so a short payment does not activate anything and
+waits for a manager. The overseas block says so before anyone pays.
+
+### Before the club has published an account
+
+The page and the email both say the club has not published its details yet and to
+get in touch, rather than rendering an empty block. `/manager/settings` leads with
+a warning while that is true, and shows whatever free text is left in the old
+`invoice_payment_instructions` row read-only, so the values can be copied across.
+Nothing member-facing reads that legacy row any more; it is deleted in a later
+change.
+
+A failed **read** of the settings is kept apart from a club that never published
+anything (`readClubPaymentDetails` returns `ok`), because the two say different
+things to somebody about to transfer money.
 
 ## Manager screens & the manager agent API
 

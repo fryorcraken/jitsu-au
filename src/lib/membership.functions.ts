@@ -3,7 +3,6 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   buildPaymentReference,
   computeMembershipPrice,
-  DEFAULT_INVOICE_INSTRUCTIONS,
   formatCents,
   importBankStatementSchema,
   isUtsStudent,
@@ -756,46 +755,49 @@ export async function listMembershipPlanRows(
 
 // ---- Member: how to pay ----
 /**
- * The club's payment instructions (account name, BSB, PayID — whatever a
- * manager wrote at `/manager/settings`), for the member's own membership page.
- *
- * The same value the invoice email renders, read through the same helper, so
- * the page and the email can never quote different bank details.
+ * The club's bank account, for the member's own membership page: the same
+ * details the invoice email renders, read through the same helper, so the page
+ * and the email can never quote different bank details.
  *
  * Readable by any signed-in person, not only one with an invoice outstanding:
  * these are the club's own receiving details, they are already emailed to
  * whoever owes money, and a member who paid last week still has reason to check
  * where they sent it.
  *
- * Never throws, but does report a failed read as `null` rather than as the
- * built-in default, so the page can say "we could not load these" instead of
- * quietly showing generic wording that names no bank account. A club that has
- * simply never set them gets the default, exactly as the email does.
+ * Never throws. It reports a failed read (`ok: false`) separately from details
+ * that were never published, because the page says different things about them.
  */
 export const getPaymentInstructions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     const admin = await adminClient();
-    const { readInvoiceInstructions } = await import("@/lib/club-settings.server");
-    const { ok, value } = await readInvoiceInstructions(admin);
-    return { instructions: ok ? (value ?? DEFAULT_INVOICE_INSTRUCTIONS) : null };
+    const { readClubPaymentDetails } = await import("@/lib/club-settings.server");
+    return await readClubPaymentDetails(admin);
   });
 
-// ---- Manager: club settings (invoice payment instructions) ----
+// ---- Manager: club settings (the club's bank account) ----
+/**
+ * The form's current values, plus whatever free text is left in the old
+ * `invoice_payment_instructions` row. That legacy string is shown read-only
+ * beside an empty form so a manager can copy the account details across; nothing
+ * member-facing renders it any more.
+ */
 export const getClubSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context);
     const admin = await adminClient();
-    const { data, error } = await admin
-      .from("club_settings")
-      .select("value")
-      .eq("key", "invoice_payment_instructions")
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    return {
-      invoice_payment_instructions: data?.value?.trim() ? data.value : DEFAULT_INVOICE_INSTRUCTIONS,
-    };
+    const { readClubPaymentDetails, getInvoiceInstructions } =
+      await import("@/lib/club-settings.server");
+    const [{ ok, details }, legacyInstructions] = await Promise.all([
+      readClubPaymentDetails(admin),
+      getInvoiceInstructions(admin),
+    ]);
+    // A manager editing the club's account must not be shown an empty form when
+    // the truth is "we could not read it": saving would then overwrite real
+    // details with blanks.
+    if (!ok) throw new Error("Could not read the club settings. Try again.");
+    return { details, legacy_instructions: legacyInstructions };
   });
 
 export const saveClubSettings = createServerFn({ method: "POST" })
@@ -806,8 +808,8 @@ export const saveClubSettings = createServerFn({ method: "POST" })
     const admin = await adminClient();
     const { error } = await admin.from("club_settings").upsert(
       {
-        key: "invoice_payment_instructions",
-        value: data.invoice_payment_instructions,
+        key: "invoice_payment_details",
+        value: JSON.stringify(data),
         updated_at: new Date().toISOString(),
         updated_by: context.userId,
       },

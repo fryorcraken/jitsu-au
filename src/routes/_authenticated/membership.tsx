@@ -2,14 +2,14 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import ReactMarkdown from "react-markdown";
-import { Check, Mail } from "lucide-react";
+import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Pill } from "@/components/site/StatusPill";
 import { CopyButton } from "@/components/site/CopyButton";
+import { ClubAccountDetails } from "@/components/site/ClubAccountDetails";
 import { lifecycleClass } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import {
@@ -19,10 +19,10 @@ import {
   isUtsStudent,
   sellablePlans,
   unpaidInvoices,
+  type ClubPaymentDetails,
   type LifecycleStatus,
   type UnpaidInvoice,
 } from "@/lib/validation";
-import { invoiceMarkdownComponents } from "@/lib/invoice-markdown";
 import { formatDateOnly } from "@/lib/dates";
 import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
 import {
@@ -123,11 +123,14 @@ function lineName(planName: string | null) {
  */
 function HowToPay({
   invoices,
-  instructions,
+  details,
+  detailsUnreadable,
 }: {
   invoices: UnpaidInvoice[];
-  /** Null while the club's details could not be read. See the fallback below. */
-  instructions: string | null;
+  /** Null when the club has not published a complete set of account details. */
+  details: ClubPaymentDetails | null;
+  /** True when the settings could not be read, which reads differently. */
+  detailsUnreadable: boolean;
 }) {
   return (
     <Card>
@@ -181,20 +184,10 @@ function HowToPay({
           </div>
         ))}
 
-        {instructions ? (
-          <div className="text-sm text-muted-foreground">
-            <ReactMarkdown components={invoiceMarkdownComponents}>{instructions}</ReactMarkdown>
-          </div>
-        ) : (
-          /* The amount and reference above are the member's own data and already
-             loaded; only the club's account details are missing. Say which, and
-             point at the copy that is definitely in their inbox. */
-          <p className="flex items-start gap-2 text-sm text-muted-foreground">
-            <Mail className="mt-0.5 h-4 w-4 shrink-0" />
-            We could not load the club's account details just now. They are in the invoice email we
-            sent you, or reload this page to try again.
-          </p>
-        )}
+        {/* The amount and reference above are the member's own data and always
+            render. Only the club's account details can be missing, and the
+            component says which kind of missing it is. */}
+        <ClubAccountDetails details={details} unreadable={detailsUnreadable} />
 
         <p className="text-xs text-muted-foreground">
           Paid already? It can take a day or two to reach us. Nothing to do, we will email you when
@@ -214,7 +207,10 @@ function MembershipPage() {
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
-  const [instructions, setInstructions] = useState<string | null>(null);
+  const [account, setAccount] = useState<{
+    details: ClubPaymentDetails | null;
+    unreadable: boolean;
+  }>({ details: null, unreadable: false });
   const [loading, setLoading] = useState(true);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -255,18 +251,18 @@ function MembershipPage() {
       return Promise.all([
         fetchPlans(),
         fetchMine(),
-        // The club's account details are the one thing here the member can do
-        // without: they still get the amount and reference, and the invoice
-        // email has the rest. So a failure degrades this panel instead of
-        // failing the page.
+        // The club's account details are the one thing here the member cannot
+        // supply themselves, but they are also the one thing that is not their
+        // own data: a failure degrades this panel into "we could not load
+        // these" instead of failing the whole page.
         fetchInstructions().catch((e) => {
-          console.error("[membership] payment instructions failed to load:", e);
-          return { instructions: null };
+          console.error("[membership] club account details failed to load:", e);
+          return { ok: false, details: null };
         }),
       ]).then(([p, m, s]) => {
         setPlans(p);
         setMine(m);
-        setInstructions(s.instructions);
+        setAccount({ details: s.details, unreadable: !s.ok });
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
         if (m.uts_student_number) setStudentNumber(m.uts_student_number);
@@ -442,7 +438,11 @@ function MembershipPage() {
             a purchase lands. */}
         {unpaid.length > 0 && (
           <div ref={payRef} className="scroll-mt-20">
-            <HowToPay invoices={unpaid} instructions={instructions} />
+            <HowToPay
+              invoices={unpaid}
+              details={account.details}
+              detailsUnreadable={account.unreadable}
+            />
           </div>
         )}
 

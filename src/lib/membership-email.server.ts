@@ -12,7 +12,7 @@ import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment
 import { MembershipActivatedEmail } from "@/lib/email-templates/membership-activated";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
-import { getInvoiceInstructions } from "@/lib/club-settings.server";
+import { readClubPaymentDetails } from "@/lib/club-settings.server";
 
 const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
@@ -87,7 +87,9 @@ export async function sendMembershipPaymentEmail({
     return { sent: [], skipped: true };
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
-  const instructions = await getInvoiceInstructions(admin);
+  // Null covers both "never published" and "could not read": either way the
+  // email cannot name an account, and it says so rather than inventing one.
+  const { details } = await readClubPaymentDetails(admin);
 
   const memberEl = React.createElement(MembershipPaymentEmail, {
     siteName: SITE_NAME,
@@ -97,7 +99,8 @@ export async function sendMembershipPaymentEmail({
     planName,
     amount,
     reference,
-    instructions,
+    details,
+    membershipUrl: ACCOUNT_URL,
   });
   const [memberHtml, memberText, managers] = await Promise.all([
     render(memberEl),

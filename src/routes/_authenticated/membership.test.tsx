@@ -105,47 +105,101 @@ async function renderLoaded() {
   await waitFor(() => expect(screen.getByRole("heading", { name: "Membership" })).toBeVisible());
 }
 
+/** The club's account as the server hands it over: BSB stored as bare digits. */
+const ACCOUNT = {
+  account_name: "UTS Jitsu Club Inc",
+  bsb: "062000",
+  account_number: "12345678",
+  bank_name: "Commonwealth Bank of Australia",
+  swift_bic: "CTBAAU2S",
+  bank_address: "Sydney NSW 2000, Australia",
+  account_holder_address: "1 Broadway, Ultimo NSW 2007",
+  note: "",
+};
+
 beforeEach(() => {
   getMyMemberships.mockReset().mockResolvedValue(mine([pendingPlan]));
-  getPaymentInstructions
-    .mockReset()
-    .mockResolvedValue({ instructions: "Pay **UTS Jitsu Club**, BSB 062-000, acct 1234 5678." });
+  getPaymentInstructions.mockReset().mockResolvedValue({ ok: true, details: ACCOUNT });
   listMembershipPlans.mockReset().mockResolvedValue([]);
   startMembership.mockReset().mockResolvedValue({ ok: true, activated: true, reference: null });
   toastSuccess.mockReset();
 });
 
 describe("/membership: how to pay", () => {
-  it("shows the amount, the reference and the club's account details", async () => {
+  it("shows the amount, the reference and the club's account", async () => {
     await renderLoaded();
     const card = payCard()!;
     expect(card).toBeInTheDocument();
     expect(within(card).getByText("$245")).toBeVisible();
     expect(within(card).getByText(PLAN_REF)).toBeVisible();
-    // The markdown a manager wrote at /manager/settings, rendered — this is the
-    // half that used to exist only in the invoice email.
-    expect(within(card).getByText(/BSB 062-000, acct 1234 5678/)).toBeVisible();
-    expect(within(card).getByText("UTS Jitsu Club")).toBeVisible();
+    expect(within(card).getByText("UTS Jitsu Club Inc")).toBeVisible();
+    // Stored as six digits, shown the way a bank prints it.
+    expect(within(card).getByText("062-000")).toBeVisible();
+    expect(within(card).getByText("12345678")).toBeVisible();
+    expect(within(card).getByText("Commonwealth Bank of Australia")).toBeVisible();
   });
 
-  it("renders the instructions as markdown, bullets and all", async () => {
-    // Not with `prose` classes: this repo has no typography plugin, so a set of
-    // bank details written as a list would otherwise render as one run-on line.
-    getPaymentInstructions.mockResolvedValue({
-      instructions: "Pay to:\n\n- BSB: 062-000\n- Account: 1234 5678",
-    });
-    await renderLoaded();
-    const card = payCard()!;
-    expect(within(card).getByRole("list").className).toContain("list-disc");
-    expect(within(card).getAllByRole("listitem")).toHaveLength(2);
-  });
-
-  it("copies the reference, which is what a bank transfer reconciles on", async () => {
+  // A regression in any one of these sends somebody's money to the wrong place,
+  // so each button is pinned to the exact string it puts on the clipboard.
+  it("copies each field on its own, the BSB hyphenated as displayed", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     await renderLoaded();
-    await userEvent.click(within(payCard()!).getByRole("button", { name: /copy reference/i }));
-    expect(writeText).toHaveBeenCalledWith(PLAN_REF);
+    const card = within(payCard()!);
+
+    for (const [name, expected] of [
+      [/copy reference/i, PLAN_REF],
+      [/copy account name/i, "UTS Jitsu Club Inc"],
+      [/copy BSB/i, "062-000"],
+      [/copy account number/i, "12345678"],
+      [/copy bank name/i, "Commonwealth Bank of Australia"],
+    ] as const) {
+      writeText.mockClear();
+      await userEvent.click(card.getByRole("button", { name }));
+      expect(writeText).toHaveBeenCalledWith(expected);
+    }
+  });
+
+  it("keeps the overseas details out of the way until someone opens them", async () => {
+    await renderLoaded();
+    const card = within(payCard()!);
+    const disclosure = screen.getByText("Paying from overseas?").closest("details")!;
+    expect(disclosure.open).toBe(false);
+    // Present in the DOM but collapsed, which is what <details> gives us for
+    // free and what keeps it findable by in-page search.
+    expect(card.getByText("CTBAAU2S")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Paying from overseas?"));
+    expect(disclosure.open).toBe(true);
+    expect(card.getByText(/take fees out of an international transfer/i)).toBeVisible();
+  });
+
+  it("copies the SWIFT/BIC code, which is what an overseas bank needs", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    await renderLoaded();
+    await userEvent.click(within(payCard()!).getByRole("button", { name: /copy SWIFT/i }));
+    expect(writeText).toHaveBeenCalledWith("CTBAAU2S");
+  });
+
+  it("hides the overseas block entirely when the club has not filled it in", async () => {
+    getPaymentInstructions.mockResolvedValue({
+      ok: true,
+      details: { ...ACCOUNT, swift_bic: "", bank_address: "", account_holder_address: "" },
+    });
+    await renderLoaded();
+    expect(screen.queryByText("Paying from overseas?")).not.toBeInTheDocument();
+  });
+
+  it("renders the club's note as markdown under the account", async () => {
+    getPaymentInstructions.mockResolvedValue({
+      ok: true,
+      details: { ...ACCOUNT, note: "PayID:\n\n- pay@jitsu.au\n- 0400 000 000" },
+    });
+    await renderLoaded();
+    const card = within(payCard()!);
+    expect(card.getByRole("list").className).toContain("list-disc");
+    expect(card.getAllByRole("listitem")).toHaveLength(2);
   });
 
   it("bills a bundled plan + insurance as one transfer, and shows the split", async () => {
@@ -203,15 +257,27 @@ describe("/membership: how to pay", () => {
   });
 
   it("keeps the amount and reference when the club's details fail to load", async () => {
-    // The member's own invoice is already loaded; only the club's account
-    // details are missing, so the panel degrades rather than disappearing.
+    // The member's own invoice is already loaded; only the club's account is
+    // missing, so the panel degrades rather than disappearing.
     vi.spyOn(console, "error").mockImplementation(() => {});
     getPaymentInstructions.mockRejectedValue(new Error("nope"));
     await renderLoaded();
     const card = payCard()!;
     expect(within(card).getByText("$245")).toBeVisible();
     expect(within(card).getByText(PLAN_REF)).toBeVisible();
-    expect(within(card).getByText(/invoice email we sent you/)).toBeVisible();
+    expect(within(card).getByText(/could not load the club's account details/i)).toBeVisible();
     vi.restoreAllMocks();
+  });
+
+  // Different from the read failing, and it has to read differently: this is
+  // the state between shipping and a manager filling the form in.
+  it("says the club has not published an account yet when there is none", async () => {
+    getPaymentInstructions.mockResolvedValue({ ok: true, details: null });
+    await renderLoaded();
+    const card = payCard()!;
+    expect(within(card).getByText("$245")).toBeVisible();
+    expect(within(card).getByText(PLAN_REF)).toBeVisible();
+    expect(within(card).getByText(/has not published its account details yet/i)).toBeVisible();
+    expect(within(card).queryByRole("button", { name: /copy BSB/i })).not.toBeInTheDocument();
   });
 });
