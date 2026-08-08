@@ -472,7 +472,11 @@ hand-produce a public-npm lock.
 - **Styling:** Tailwind utility classes; compose conditionals with `cn()` from
   `@/lib/utils`. Reuse `components/ui` primitives and the `SiteLayout`
   (`SiteHeader`/`SiteFooter`) shell for pages. Theme tokens (`bg-background`,
-  `text-muted-foreground`, etc.) come from `styles.css`.
+  `text-muted-foreground`, etc.) come from `styles.css`. Tailwind v4's preflight
+  makes buttons `cursor: default`; a base rule in `styles.css` puts the pointer
+  back on every enabled `button` / `[role="button"]`, so **don't add
+  `cursor-pointer` to a button** (the `components/ui` primitives carry it only
+  because they are generated that way).
 - **SEO:** every public page sets its own `head()` meta (title/description/og)
   **and its own `rel="canonical"`**; manager and other private pages set
   `robots: noindex`. Match the existing pattern when adding pages, and see the

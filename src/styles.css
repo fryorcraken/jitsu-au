@@ -133,4 +133,16 @@
     font-weight: 900;
     letter-spacing: -0.02em;
   }
+
+  /* Tailwind v4's preflight sets buttons to `cursor: default`, matching the
+     browser default rather than the pointer people expect from something
+     clickable. Every `components/ui` primitive puts `cursor-pointer` back one
+     class at a time, so only the hand-written buttons around the site were
+     left with an arrow cursor. Restore it once here instead: utilities still
+     win on specificity, so a button that wants a different cursor (the
+     primitives' own `disabled:cursor-not-allowed`) keeps it. */
+  button:not(:disabled, [aria-disabled="true"]),
+  [role="button"]:not(:disabled, [aria-disabled="true"]) {
+    cursor: pointer;
+  }
 }
