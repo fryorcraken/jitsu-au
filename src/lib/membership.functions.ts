@@ -765,15 +765,20 @@ export async function listMembershipPlanRows(
  * Readable by any signed-in person, not only one with an invoice outstanding:
  * these are the club's own receiving details, they are already emailed to
  * whoever owes money, and a member who paid last week still has reason to check
- * where they sent it. Never throws — `getInvoiceInstructions` falls back to the
- * default rather than leaving someone who owes money with nothing to pay to.
+ * where they sent it.
+ *
+ * Never throws, but does report a failed read as `null` rather than as the
+ * built-in default, so the page can say "we could not load these" instead of
+ * quietly showing generic wording that names no bank account. A club that has
+ * simply never set them gets the default, exactly as the email does.
  */
 export const getPaymentInstructions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     const admin = await adminClient();
-    const { getInvoiceInstructions } = await import("@/lib/club-settings.server");
-    return { instructions: await getInvoiceInstructions(admin) };
+    const { readInvoiceInstructions } = await import("@/lib/club-settings.server");
+    const { ok, value } = await readInvoiceInstructions(admin);
+    return { instructions: ok ? (value ?? DEFAULT_INVOICE_INSTRUCTIONS) : null };
   });
 
 // ---- Manager: club settings (invoice payment instructions) ----

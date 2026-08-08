@@ -39,6 +39,23 @@ const activePlan = { ...pendingPlan, id: "m3", status: "active", paid_at: "2026-
 
 const getMyMemberships = vi.fn();
 const getPaymentInstructions = vi.fn();
+const listMembershipPlans = vi.fn();
+const startMembership = vi.fn();
+const toastSuccess = vi.fn();
+
+const FREE_PLAN = {
+  code: "open_mat",
+  name: "Open mat",
+  description: null,
+  kind: "session",
+  public_price_cents: 0,
+  student_price_cents: null,
+  session_credits: 1,
+  starts_on: null,
+  ends_on: null,
+  duration_days: null,
+  is_active: true,
+};
 
 function mine(memberships: unknown[]) {
   return {
@@ -60,10 +77,10 @@ vi.mock("@tanstack/react-start", () => ({
 }));
 
 vi.mock("@/lib/membership.functions", () => ({
-  listMembershipPlans: vi.fn().mockResolvedValue([]),
+  listMembershipPlans: (...args: unknown[]) => listMembershipPlans(...args),
   getMyMemberships: (...args: unknown[]) => getMyMemberships(...args),
   getPaymentInstructions: (...args: unknown[]) => getPaymentInstructions(...args),
-  startMembership: vi.fn(),
+  startMembership: (...args: unknown[]) => startMembership(...args),
 }));
 
 vi.mock("@/lib/code-of-conduct.functions", () => ({
@@ -71,7 +88,7 @@ vi.mock("@/lib/code-of-conduct.functions", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: (...args: unknown[]) => toastSuccess(...args) },
 }));
 
 const { Route } = await import("./membership");
@@ -93,6 +110,9 @@ beforeEach(() => {
   getPaymentInstructions
     .mockReset()
     .mockResolvedValue({ instructions: "Pay **UTS Jitsu Club**, BSB 062-000, acct 1234 5678." });
+  listMembershipPlans.mockReset().mockResolvedValue([]);
+  startMembership.mockReset().mockResolvedValue({ ok: true, activated: true, reference: null });
+  toastSuccess.mockReset();
 });
 
 describe("/membership: how to pay", () => {
@@ -155,6 +175,30 @@ describe("/membership: how to pay", () => {
   it("says nothing about paying when nothing is owed", async () => {
     getMyMemberships.mockResolvedValue(mine([activePlan]));
     await renderLoaded();
+    expect(payCard()).toBeNull();
+  });
+
+  it("points at the panel after a purchase that still owes money, not at the inbox", async () => {
+    // `startMembership` reports `activated: true` for a $0 plan even when it
+    // bundled an insurance invoice alongside it, so "you're all set" has to be
+    // decided by what is actually still owed, not by that flag.
+    listMembershipPlans.mockResolvedValue([FREE_PLAN]);
+    getMyMemberships.mockResolvedValueOnce(mine([])).mockResolvedValue(mine([pendingInsurance]));
+    await renderLoaded();
+    expect(payCard()).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /choose & pay/i }));
+    await waitFor(() => expect(payCard()).not.toBeNull());
+    expect(toastSuccess).toHaveBeenCalledWith(expect.stringContaining("payment details"));
+    expect(toastSuccess).not.toHaveBeenCalledWith(expect.stringContaining("all set"));
+  });
+
+  it("says you're all set when the purchase left nothing to pay", async () => {
+    listMembershipPlans.mockResolvedValue([FREE_PLAN]);
+    getMyMemberships.mockResolvedValue(mine([]));
+    await renderLoaded();
+    await userEvent.click(screen.getByRole("button", { name: /choose & pay/i }));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(toastSuccess).toHaveBeenCalledWith(expect.stringContaining("all set"));
     expect(payCard()).toBeNull();
   });
 

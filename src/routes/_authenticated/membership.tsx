@@ -270,6 +270,9 @@ function MembershipPage() {
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
         if (m.uts_student_number) setStudentNumber(m.uts_student_number);
+        // Handed back as well as stored: `choose` needs to know what the member
+        // owes NOW, and reading it out of state would still see the old value.
+        return m;
       });
     },
     [fetchPlans, fetchMine, fetchInstructions],
@@ -283,16 +286,20 @@ function MembershipPage() {
 
   // Runs after the panel has rendered, so the ref is attached by the time we
   // reach for it. A member who ends up with nothing to pay just clears the flag.
+  //
+  // `?.` on the method too: this is a convenience on top of a panel that is
+  // already on screen, and an environment without `scrollIntoView` must lose the
+  // scroll, not throw out of an effect and take the whole page with it.
   useEffect(() => {
     if (!scrollToPay) return;
-    payRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    payRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
     setScrollToPay(false);
   }, [scrollToPay]);
 
   async function choose(plan: Plan) {
     setPendingCode(plan.code);
     try {
-      const res = await start({
+      await start({
         data: {
           plan_code: plan.code,
           is_student: isStudent,
@@ -303,14 +310,18 @@ function MembershipPage() {
         },
       });
       setInsuranceTicked(null);
-      await reload();
-      if (res.activated) {
-        toast.success("You're all set. Your membership is active.");
-      } else {
+      const refreshed = await reload();
+      // What they owe after the purchase, not whether the plan itself activated:
+      // a free plan bought with insurance bundled activates AND leaves an
+      // invoice, and "you're all set" is the wrong thing to tell someone who
+      // still has to transfer money.
+      if (unpaidInvoices(refreshed.memberships).length > 0) {
         // The details are now on this page, above the plan they just picked, so
         // send them there rather than to their inbox. The email still goes out.
         toast.success("Your invoice is ready. The payment details are at the top of this page.");
         setScrollToPay(true);
+      } else {
+        toast.success("You're all set. Your membership is active.");
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start membership");
@@ -426,8 +437,11 @@ function MembershipPage() {
           )}
         </Card>
 
+        {/* `scroll-mt-20` clears the member-space header (`sticky top-0 h-14`),
+            which would otherwise sit over the card's title once the scroll after
+            a purchase lands. */}
         {unpaid.length > 0 && (
-          <div ref={payRef} className="scroll-mt-4">
+          <div ref={payRef} className="scroll-mt-20">
             <HowToPay invoices={unpaid} instructions={instructions} />
           </div>
         )}
