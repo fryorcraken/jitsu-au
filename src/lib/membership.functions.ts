@@ -171,6 +171,52 @@ export async function syncMemberRole(
   }
 }
 
+/**
+ * Ceiling on the check-in rows read to count what each membership covered.
+ * Well past club volumes; the warn below is what makes hitting it visible
+ * rather than silently under-counting.
+ */
+const CHECKIN_COUNT_LIMIT = 5000;
+
+/**
+ * How many classes were checked in against each of these memberships.
+ *
+ * This is what decides whether the Delete button appears, so an under-count is
+ * not cosmetic: it would offer a delete the server then refuses. Counting the
+ * ids rather than issuing one exact count per membership keeps a 500-row invoice
+ * list to a single query.
+ *
+ * Memberships with no check-ins are simply absent from the map, so read it with
+ * `?? 0`.
+ */
+export async function checkinCountsByMembership(
+  admin: MembershipClient,
+  membershipIds: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (!membershipIds.length) return counts;
+
+  const { data, error } = await admin
+    .from("session_checkins")
+    .select("membership_id")
+    .in("membership_id", membershipIds)
+    .limit(CHECKIN_COUNT_LIMIT);
+  // Throws rather than degrading to zero. "Nobody trained on this" is the answer
+  // that offers an irreversible delete, and a failed read must not give it.
+  if (error) throw new Error(error.message);
+  if ((data ?? []).length >= CHECKIN_COUNT_LIMIT) {
+    console.warn(
+      `[checkinCountsByMembership] capped at ${CHECKIN_COUNT_LIMIT}; some counts truncated`,
+    );
+  }
+
+  for (const row of data ?? []) {
+    if (!row.membership_id) continue;
+    counts.set(row.membership_id, (counts.get(row.membership_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /** Human-readable validity/credit summary for a plan (used in emails/UI). */
 function validityLabel(plan: MembershipPlanRow): string {
   if (plan.ends_on) return `${plan.name}, until ${formatDateOnly(plan.ends_on)}.`;
@@ -964,10 +1010,18 @@ export const listMemberships = createServerFn({ method: "GET" })
       }
     }
 
+    // What each invoice would take with it if deleted, so the screen can gate
+    // the button without a round trip per row.
+    const checkinCounts = await checkinCountsByMembership(
+      admin,
+      (rows ?? []).map((r) => r.id),
+    );
+
     return (rows ?? []).map((r) => ({
       ...projectMembership(r, planById.get(r.plan_id)),
       user_id: r.user_id,
       uts_student_number: r.uts_student_number,
+      checkin_count: checkinCounts.get(r.id) ?? 0,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
       member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
     }));

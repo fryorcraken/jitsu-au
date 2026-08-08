@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Pill } from "@/components/site/StatusPill";
+import { AddMembershipCard } from "@/components/site/AddMembershipCard";
+import { MembershipRowActions } from "@/components/site/MembershipRowActions";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
 import {
@@ -44,7 +46,7 @@ import {
   setClubUserEmail,
   setClubUserKitSizes,
 } from "@/lib/club-user.functions";
-import { attachCheckInCoverage } from "@/lib/checkin.functions";
+import { attachCheckInCoverage, transferCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { runApproval } from "@/lib/waiver-approval";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -461,6 +463,13 @@ function ManagerUserPage() {
   const [attachChoice, setAttachChoice] = useState<Record<string, string>>({});
   const [attaching, setAttaching] = useState<string | null>(null);
 
+  // The same pair for moving a check-in that IS covered, onto another of their
+  // memberships. Required rather than defaulted: re-running the door's own
+  // precedence would land it back where it started.
+  const moveCoverage = useServerFn(transferCheckInCoverage);
+  const [moveChoice, setMoveChoice] = useState<Record<string, string>>({});
+  const [moving, setMoving] = useState<string | null>(null);
+
   const load = useCallback(
     async (resetOpen: boolean) => {
       const seq = ++loadSeq.current;
@@ -546,6 +555,35 @@ function ManagerUserPage() {
       toast.error(e instanceof Error ? e.message : "Could not attach that check-in");
     } finally {
       setAttaching(null);
+    }
+  }
+
+  /** Somewhere else this person's check-in could go. */
+  function otherMemberships(membershipId: string | null) {
+    return (detail?.memberships ?? []).filter((m) => m.id !== membershipId);
+  }
+
+  async function moveCheckIn(id: string) {
+    const target = moveChoice[id];
+    if (!target) return;
+    setMoving(id);
+    try {
+      const res = await moveCoverage({ data: { id, membership_id: target } });
+      // The credit came off the old membership either way — the manager asked
+      // for that. Saying so plainly beats a success message over a class that
+      // is now uncovered.
+      if (res.decision.coverage === "none") {
+        toast.warning(
+          "That membership cannot cover this class, so it is now uncovered. Pick another one.",
+        );
+      } else {
+        toast.success(`Moved to ${res.decision.plan_name ?? "that membership"}.`);
+      }
+      await load(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not move that check-in");
+    } finally {
+      setMoving(null);
     }
   }
 
@@ -769,6 +807,7 @@ function ManagerUserPage() {
                   <th className="px-3 py-2">Starts</th>
                   <th className="px-3 py-2">Ends</th>
                   <th className="px-3 py-2">Sessions left</th>
+                  <th className="px-3 py-2 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -783,12 +822,16 @@ function ManagerUserPage() {
                     <td className="px-3 py-2">{formatDate(m.starts_at)}</td>
                     <td className="px-3 py-2">{formatDate(m.ends_at)}</td>
                     <td className="px-3 py-2">{m.sessions_remaining ?? "—"}</td>
+                    <td className="px-3 py-2">
+                      <MembershipRowActions membership={m} onChanged={() => load(false)} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        <AddMembershipCard userId={userId} onAdded={() => load(false)} />
       </div>
 
       <div className="space-y-3">
@@ -863,7 +906,43 @@ function ManagerUserPage() {
                             Attach
                           </Button>
                         </div>
-                      ) : null}
+                      ) : (
+                        // Moving a covered check-in is what frees its membership
+                        // up to be deleted. Nowhere to move it to when it is
+                        // their only membership, so the control stays hidden
+                        // rather than offering a no-op.
+                        otherMemberships(c.membership_id).length > 0 && (
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <select
+                              aria-label="Membership to move this check-in to"
+                              className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm"
+                              value={moveChoice[c.id] ?? ""}
+                              onChange={(e) =>
+                                setMoveChoice((prev) => ({ ...prev, [c.id]: e.target.value }))
+                              }
+                            >
+                              <option value="">Move to...</option>
+                              {otherMemberships(c.membership_id).map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.plan_name ?? "Membership"} ({m.status}
+                                  {m.sessions_remaining != null
+                                    ? `, ${m.sessions_remaining} left`
+                                    : ""}
+                                  )
+                                </option>
+                              ))}
+                            </select>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={moving === c.id || !moveChoice[c.id]}
+                              onClick={() => moveCheckIn(c.id)}
+                            >
+                              Move
+                            </Button>
+                          </div>
+                        )
+                      )}
                     </td>
                   </tr>
                 ))}
