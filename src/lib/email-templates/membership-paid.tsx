@@ -12,37 +12,48 @@ import {
   Text,
 } from "@react-email/components";
 
-interface MembershipActivatedEmailProps {
+interface MembershipPaidEmailProps {
   siteName: string;
   siteUrl: string;
   memberName: string;
   planName: string;
   /** Human-readable validity/credit summary, e.g. "Valid until 12 Dec 2026" or "2 sessions". */
   validity: string;
+  /** What they paid, already formatted. */
+  amount: string;
   accountUrl: string;
 }
 
-/** Sent once a membership payment is reconciled and the membership goes active. */
-export const MembershipActivatedEmail = ({
+/**
+ * Sent when a payment is recorded against a membership, by bank reconciliation
+ * or by a manager marking it paid.
+ *
+ * It is a receipt, not a welcome. Being allowed to train is settled when the
+ * membership is raised, and the invoice email says so at the time, so this
+ * email's whole job is to confirm the money arrived and nothing is outstanding.
+ */
+export const MembershipPaidEmail = ({
   siteName,
   siteUrl,
   memberName,
   planName,
   validity,
+  amount,
   accountUrl,
-}: MembershipActivatedEmailProps) => (
+}: MembershipPaidEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
-    <Preview>Your {planName} is active</Preview>
+    <Preview>We received your payment for {planName}</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Heading style={h1}>You're all set, welcome to the mat</Heading>
+        <Heading style={h1}>Payment received, thank you</Heading>
         <Text style={text}>
-          Hi {memberName || "there"}, your <strong>{planName}</strong> at{" "}
+          Hi {memberName || "there"}, we have received {amount} for your <strong>{planName}</strong>{" "}
+          at{" "}
           <Link href={siteUrl} style={link}>
             <strong>{siteName}</strong>
-          </Link>{" "}
-          is now active. {validity}
+          </Link>
+          . There is nothing left to pay on it. {validity}
         </Text>
         <Button style={button} href={accountUrl}>
           View your membership
@@ -53,7 +64,7 @@ export const MembershipActivatedEmail = ({
   </Html>
 );
 
-export default MembershipActivatedEmail;
+export default MembershipPaidEmail;
 
 const main = { backgroundColor: "#ffffff", fontFamily: "Arial, sans-serif" };
 const container = { padding: "20px 25px" };

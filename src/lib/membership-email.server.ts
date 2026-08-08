@@ -9,7 +9,7 @@ import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment";
-import { MembershipActivatedEmail } from "@/lib/email-templates/membership-activated";
+import { MembershipPaidEmail } from "@/lib/email-templates/membership-paid";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
@@ -158,7 +158,7 @@ export async function sendMembershipPaymentEmail({
   return { sent, skipped: false };
 }
 
-export interface MembershipActivatedEmailParams {
+export interface MembershipPaidEmailParams {
   membershipId: string;
   /** What to call the member to their face: preferred name, else first name.
    * This email has no manager copy, so the legal name is never needed. */
@@ -167,29 +167,40 @@ export interface MembershipActivatedEmailParams {
   planName: string;
   /** Human-readable validity/credit summary. */
   validity: string;
+  /** What they paid, already formatted. */
+  amount: string;
 }
 
-/** Confirm to the member that their membership is active. Best-effort. */
-export async function sendMembershipActivatedEmail({
+/**
+ * Confirm to the member that their payment landed. Best-effort.
+ *
+ * The receipt half of the lifecycle. Being authorised to train is settled when
+ * the membership is raised and the invoice email says so, so this one is only
+ * ever about money arriving — which is also why its idempotency key is keyed to
+ * the payment rather than to activation.
+ */
+export async function sendMembershipPaidEmail({
   membershipId,
   memberGreetingName,
   memberEmail,
   planName,
   validity,
-}: MembershipActivatedEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
+  amount,
+}: MembershipPaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
-    console.warn("[membership-email] LOVABLE_API_KEY not set — skipping activation email");
+    console.warn("[membership-email] LOVABLE_API_KEY not set — skipping payment email");
     return { sent: false, skipped: true };
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
-  const el = React.createElement(MembershipActivatedEmail, {
+  const el = React.createElement(MembershipPaidEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_URL,
     memberName: memberGreetingName,
     planName,
     validity,
+    amount,
     accountUrl: ACCOUNT_URL,
   });
   try {
@@ -198,10 +209,10 @@ export async function sendMembershipActivatedEmail({
       apiKey,
       sendUrl,
       to: memberEmail,
-      subject: `Your ${planName} is active`,
+      subject: `Payment received for ${planName}`,
       html,
       text,
-      idempotencyKey: `membership-active-${membershipId}`,
+      idempotencyKey: `membership-paid-${membershipId}`,
     });
     return { sent: true, skipped: false };
   } catch (e) {
