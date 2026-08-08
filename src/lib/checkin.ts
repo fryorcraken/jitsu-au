@@ -9,6 +9,7 @@
 // and on the server to actually spend it, so the warning a manager reads and the
 // credit that moves can never disagree.
 import { CLUB_TIME_ZONE, clubLocalDate } from "./calendar";
+import { isUnpaid } from "./validation";
 import type { CheckInWarning, CoverageSource } from "./validation";
 
 /** A person's membership joined to its plan, as coverage resolution reads it. */
@@ -20,6 +21,8 @@ export type CoverageCandidate = {
   /** `memberships.status` — widened to string by the generated DB types. */
   status: string;
   price_cents: number;
+  /** When a payment was recorded against it, if one has been. */
+  paid_at: string | null;
   sessions_remaining: number | null;
   starts_at: string | null;
   ends_at: string | null;
@@ -177,7 +180,13 @@ export function resolveCoverage(input: {
   if (input.memberships.some(endedButActive)) warnings.push("membership_ended");
   if (input.memberships.some((m) => isLive(m, atMs) && m.sessions_remaining === 0))
     warnings.push("credits_exhausted");
-  if (input.memberships.some((m) => m.status === "pending" && m.price_cents > 0))
+  // "They are training on an invoice nobody has paid." This used to key on
+  // `status === "pending"`, back when raising a membership left it waiting for
+  // money and being authorised meant it had arrived. Now that authorising and
+  // paying are separate, an unpaid member is `active` like everyone else, and a
+  // status check would warn about nobody at all — which is exactly when the door
+  // most needs telling.
+  if (input.memberships.some((m) => isUnpaid(m) && m.price_cents > 0))
     warnings.push("payment_pending");
 
   const tiers: { source: CoverageSource; pool: CoverageCandidate[] }[] = [

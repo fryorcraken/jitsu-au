@@ -43,7 +43,7 @@ const UNCOVERED_LIMIT = 100;
 const EVENT_LIMIT = 500;
 
 const MEMBERSHIP_COLUMNS =
-  "id, user_id, plan_id, status, price_cents, sessions_remaining, starts_at, ends_at, created_at";
+  "id, user_id, plan_id, status, price_cents, paid_at, sessions_remaining, starts_at, ends_at, created_at";
 
 type MembershipSelection = Pick<
   Database["public"]["Tables"]["memberships"]["Row"],
@@ -52,6 +52,7 @@ type MembershipSelection = Pick<
   | "plan_id"
   | "status"
   | "price_cents"
+  | "paid_at"
   | "sessions_remaining"
   | "starts_at"
   | "ends_at"
@@ -134,6 +135,7 @@ async function coverageCandidatesByUser(
       plan_name: plan.name,
       status: m.status,
       price_cents: m.price_cents,
+      paid_at: m.paid_at,
       sessions_remaining: m.sessions_remaining,
       starts_at: m.starts_at,
       ends_at: m.ends_at,

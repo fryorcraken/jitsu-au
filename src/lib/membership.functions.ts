@@ -8,6 +8,7 @@ import {
   formatCents,
   importBankStatementSchema,
   isUtsStudent,
+  markMembershipPaidSchema,
   haystackContainsRef,
   matchesMembershipReference,
   matchTransactionSchema,
@@ -1331,8 +1332,6 @@ export async function deleteMembershipRow(
 
   const blockers = whyMembershipCannotBeDeleted({
     paid_at: membership.paid_at,
-    price_cents: membership.price_cents,
-    status: membership.status,
     checkin_count: count ?? 0,
   });
   if (blockers.length) return { ok: false as const, blockers };
@@ -1342,6 +1341,40 @@ export async function deleteMembershipRow(
   await syncMemberRole(admin, membership.user_id);
   return { ok: true as const, id };
 }
+
+// ---- Manager: record a payment against a membership ----
+export const markMembershipPaid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => markMembershipPaidSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const admin = await adminClient();
+
+    const { data: membership, error } = await admin
+      .from("memberships")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!membership) throw new Error("Membership not found.");
+    if (membership.price_cents === 0)
+      throw new Error("There is nothing to pay on a free membership.");
+
+    // Not fatal: the plan only decorates the receipt, and refusing to record a
+    // payment because a plan name could not be read would be the wrong trade.
+    const { data: plan } = await admin
+      .from("membership_plans")
+      .select("*")
+      .eq("id", membership.plan_id)
+      .maybeSingle();
+
+    const { recorded } = await recordMembershipPayment(admin, {
+      membership,
+      plan: plan ?? undefined,
+      method: data.payment_method,
+    });
+    return { ok: true as const, id: data.id, recorded };
+  });
 
 // ---- Manager: delete a membership ----
 export const deleteMembership = createServerFn({ method: "POST" })

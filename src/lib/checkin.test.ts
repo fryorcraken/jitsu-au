@@ -19,6 +19,9 @@ function membership(over: Partial<CoverageCandidate> = {}): CoverageCandidate {
     plan_name: "Casual class",
     status: "active",
     price_cents: 3000,
+    // Paid by default: most cases here are about coverage, not money, and an
+    // unpaid default would add a payment warning to every one of them.
+    paid_at: "2026-08-01T00:00:00.000Z",
     sessions_remaining: 1,
     starts_at: "2026-08-01T00:00:00.000Z",
     ends_at: null,
@@ -218,9 +221,28 @@ describe("resolveCoverage", () => {
     expect(resolveCoverage({ memberships: [trial({ status })], at: AT }).coverage).toBe("none");
   });
 
-  it("flags a paid membership still waiting on payment", () => {
-    const d = resolveCoverage({ memberships: [semester({ status: "pending" })], at: AT });
+  // The member trains while the transfer clears, which is the whole point of
+  // authorising and paying being separate — so the warning is keyed on the
+  // payment, not the status. An unpaid member is `active` like everyone else,
+  // and a status check would warn about nobody at all.
+  it("flags a membership that is authorised but not paid for", () => {
+    const d = resolveCoverage({ memberships: [semester({ paid_at: null })], at: AT });
+    expect(d.coverage).toBe("period");
     expect(d.warnings).toContain("payment_pending");
+  });
+
+  it("says nothing about payment once one is recorded", () => {
+    const d = resolveCoverage({ memberships: [semester()], at: AT });
+    expect(d.warnings).not.toContain("payment_pending");
+  });
+
+  // A withdrawn invoice is owed nothing, so nobody should be chased for it.
+  it("says nothing about payment on a cancelled membership", () => {
+    const d = resolveCoverage({
+      memberships: [semester({ status: "cancelled", paid_at: null })],
+      at: AT,
+    });
+    expect(d.warnings).not.toContain("payment_pending");
   });
 
   it("closes the membership when the last credit goes", () => {
@@ -298,7 +320,7 @@ describe("resolveCoverage with an override", () => {
   // account, or a manager fixes one thing and never sees the next.
   it("still reports warnings from the memberships it did not consider", () => {
     const d = resolveCoverage({
-      memberships: [trial(), semester({ status: "pending" })],
+      memberships: [trial(), semester({ paid_at: null })],
       at: AT,
       only: "trial",
     });

@@ -883,9 +883,35 @@ export const RENEWAL_WINDOW_DAYS = 30;
 export const lifecycleStatuses = ["lead", "applicant", "visitor", "member", "lapsed"] as const;
 export type LifecycleStatus = (typeof lifecycleStatuses)[number];
 
-/** The states an enrollment record can be in. */
+/**
+ * The states an enrollment record can be in.
+ *
+ * `active` means **authorised to train**, and says nothing about money: a
+ * membership is authorised the moment it is raised, with its invoice
+ * outstanding. Whether it has been paid for is `paid_at`, written only when a
+ * payment is actually recorded (see `isUnpaid`).
+ *
+ * `pending` is no longer produced by anything. It survives here for rows created
+ * before authorising and paying were separated, when it meant "raised, waiting
+ * for money" — a meaning that now belongs to `paid_at` being null.
+ */
 export const membershipStatuses = ["pending", "active", "expired", "cancelled"] as const;
 export type MembershipStatus = (typeof membershipStatuses)[number];
+
+/**
+ * Does the club still expect money for this membership?
+ *
+ * The single definition of "unpaid", used by the member's invoice list, the
+ * reconciliation screen, the check-in warning and the delete guard, so those
+ * four can never disagree about who owes what. It deliberately reads `paid_at`
+ * and not `status`: status is about permission to train.
+ *
+ * A cancelled membership is owed nothing. A manager closed it, and chasing
+ * somebody for an invoice that was withdrawn is worse than not chasing at all.
+ */
+export function isUnpaid(membership: { status: string; paid_at: string | null }): boolean {
+  return membership.paid_at === null && membership.status !== "cancelled";
+}
 
 /**
  * Why a membership may not be deleted outright.
@@ -895,13 +921,12 @@ export type MembershipStatus = (typeof membershipStatuses)[number];
  * a row is a record of something that really happened, and a record is cancelled
  * rather than erased.
  */
-export const membershipDeleteBlockers = ["paid", "active", "attended"] as const;
+export const membershipDeleteBlockers = ["paid", "attended"] as const;
 export type MembershipDeleteBlocker = (typeof membershipDeleteBlockers)[number];
 
 /** Why each blocker stops the delete, in the manager's terms. */
 export const MEMBERSHIP_DELETE_REASONS: Record<MembershipDeleteBlocker, string> = {
   paid: "a payment is recorded against it",
-  active: "it is still active",
   attended: "a class was checked in against it",
 };
 
@@ -914,19 +939,16 @@ export const MEMBERSHIP_DELETE_REASONS: Record<MembershipDeleteBlocker, string> 
  */
 export function whyMembershipCannotBeDeleted(membership: {
   paid_at: string | null;
-  price_cents: number;
-  status: string;
   checkin_count: number;
 }): MembershipDeleteBlocker[] {
   const blockers: MembershipDeleteBlocker[] = [];
-  // `paid_at` alone is not evidence of a payment: activation stamps it on every
-  // membership, including the $0 free trial, which is auto-assigned at waiver
-  // approval and therefore the single most likely thing a manager needs to undo.
-  // Refusing that one with "a payment is recorded against it" would be both
-  // untrue and a dead end. Money is what this blocker protects, so it takes
-  // money to raise it.
-  if (membership.paid_at && membership.price_cents > 0) blockers.push("paid");
-  if (membership.status === "active") blockers.push("active");
+  // `paid_at` on its own is enough now, and used to need propping up with
+  // `price_cents > 0`. It was written by every activation, including the $0 free
+  // trial's, so it meant "somebody switched this on" rather than "money
+  // arrived" — and a manager who authorised a member by hand could never delete
+  // that row again. Only `recordMembershipPayment` writes it now, so it says
+  // exactly what this blocker needs it to say.
+  if (membership.paid_at) blockers.push("paid");
   if (membership.checkin_count > 0) blockers.push("attended");
   return blockers;
 }
@@ -934,10 +956,9 @@ export function whyMembershipCannotBeDeleted(membership: {
 /**
  * The refusal a manager (or an agent) reads. Empty blockers means deletable.
  *
- * `paid` is the one blocker a manager cannot clear, so it decides the advice on
- * its own: there is no sequence of steps that ends in this row being deleted,
+ * `paid` is the blocker nobody can clear, so it decides the advice on its own:
+ * there is no sequence of steps that ends in a settled invoice being deleted,
  * and sending someone off to move check-ins first would be a wasted trip.
- * Everything else is a to-do list, in the order it has to happen.
  */
 export function membershipDeleteMessage(blockers: readonly MembershipDeleteBlocker[]): string {
   if (!blockers.length) return "";
@@ -947,16 +968,9 @@ export function membershipDeleteMessage(blockers: readonly MembershipDeleteBlock
       ? reasons[0]
       : `${reasons.slice(0, -1).join(", ")} and ${reasons[reasons.length - 1]}`;
 
-  let advice: string;
-  if (blockers.includes("paid")) {
-    advice = "Cancel it instead. That closes it and keeps the club's record of the money.";
-  } else {
-    const steps = [
-      blockers.includes("attended") ? "move those check-ins to another membership" : null,
-      blockers.includes("active") ? "cancel it" : null,
-    ].filter((s): s is string => s !== null);
-    advice = `To delete it, ${steps.join(", then ")} first.`;
-  }
+  const advice = blockers.includes("paid")
+    ? "Cancel it instead. That closes it and keeps the club's record of the money."
+    : "To delete it, move those check-ins to another membership first.";
   return `This membership cannot be deleted because ${listed}. ${advice}`;
 }
 
@@ -1260,6 +1274,7 @@ export function unpaidInvoices(
   memberships: readonly {
     id: string;
     status: string;
+    paid_at: string | null;
     plan_name: string | null;
     price_cents: number;
     payment_reference: string;
@@ -1267,7 +1282,7 @@ export function unpaidInvoices(
 ): UnpaidInvoice[] {
   const byReference = new Map<string, UnpaidInvoice>();
   for (const m of memberships) {
-    if (m.status !== "pending") continue;
+    if (!isUnpaid(m)) continue;
     const line = { membership_id: m.id, plan_name: m.plan_name, price_cents: m.price_cents };
     const existing = byReference.get(m.payment_reference);
     if (existing) {
@@ -1876,6 +1891,23 @@ export const setMembershipStatusSchema = z.object({
   status: z.enum(membershipStatuses),
 });
 export type SetMembershipStatusInput = z.infer<typeof setMembershipStatusSchema>;
+
+// ---- Manager: record a payment ----
+//
+// The counterpart to bank reconciliation, for money that never touches the club
+// account: cash at the door, or a transfer settled some other way. It is the
+// only manual writer of `paid_at`, and therefore the only manual way to make a
+// membership undeletable.
+//
+// `payment_method` is asked for rather than assumed, because the club's record
+// of HOW somebody paid is the thread back to the money when the books and the
+// bank disagree.
+
+export const markMembershipPaidSchema = z.object({
+  id: z.string().uuid(),
+  payment_method: z.enum(["bank_transfer", "stripe", "manual"]).default("manual"),
+});
+export type MarkMembershipPaidInput = z.infer<typeof markMembershipPaidSchema>;
 
 // ---- Manager: delete a membership ----
 
