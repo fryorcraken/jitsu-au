@@ -1125,6 +1125,56 @@ export const listWaivers = createServerFn({ method: "GET" })
     }));
   });
 
+/**
+ * How many signed waivers are waiting for a manager, and who signed the newest
+ * one. Feeds the "needs attention" list behind /notifications.
+ *
+ * `approval_status` is the stored fact, and it is the right one to count here.
+ * The list screen's third state, `superseded`, is derived from a person's OTHER
+ * approved waivers and only ever applies to one that is already approved, so it
+ * can never hide work from this count.
+ *
+ * A plain exported function taking its client, like `countUnreadContactMessages`:
+ * the attention list is composed in one place and this is a source for it.
+ */
+export async function countWaiversAwaitingApproval(admin: SupabaseClient<Database>): Promise<{
+  pending: number;
+  latestName: string | null;
+  latestAt: string | null;
+}> {
+  const { count, error } = await admin
+    .from("waivers")
+    .select("id", { count: "exact", head: true })
+    .eq("approval_status", "pending");
+  // Degrade rather than throw: this runs inside the attention list's
+  // Promise.all, and a failed count must not take down the other items with it.
+  if (error) {
+    console.error("[waivers] could not count waivers awaiting approval:", error);
+    return { pending: 0, latestName: null, latestAt: null };
+  }
+  const pending = count ?? 0;
+  if (pending === 0) return { pending: 0, latestName: null, latestAt: null };
+
+  const { data: latest, error: latestError } = await admin
+    .from("waivers")
+    .select("first_name, middle_name, last_name, preferred_name, signed_at")
+    .eq("approval_status", "pending")
+    .order("signed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  // The count is the part the notification cannot do without; a missing name
+  // only makes the copy vaguer.
+  if (latestError) {
+    console.error("[waivers] could not read the newest waiting waiver:", latestError);
+    return { pending, latestName: null, latestAt: null };
+  }
+  return {
+    pending,
+    latestName: latest ? nameWithPreferred(latest) : null,
+    latestAt: latest?.signed_at ?? null,
+  };
+}
+
 // ---- Manager: file a scanned paper waiver ----
 //
 // The paper equivalent of the public signing page. Someone fills the form at

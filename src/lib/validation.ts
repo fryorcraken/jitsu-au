@@ -1258,7 +1258,11 @@ export function insuranceSelection(input: {
  * club data into these, so tests pin the messages without rendering.
  */
 export type ManagerNotification = {
-  type: "define_membership_window" | "unread_contact_messages";
+  type:
+    | "define_membership_window"
+    | "unread_contact_messages"
+    | "waivers_awaiting_approval"
+    | "new_interest_registrations";
   title: string;
   body: string;
   href: string;
@@ -1315,6 +1319,113 @@ export function sellableWindowNotifications<
 }
 
 /**
+ * " on 06/08/2026" for a notification body, resolved to the CLUB's day rather
+ * than the server's, or "" when the timestamp could not be read.
+ *
+ * These strings are built inside `listMyNotifications`, so they render on the
+ * server (UTC) while the screen each one links to formats the same timestamp in
+ * the manager's browser. Something at 9am Sydney is still the previous date in
+ * UTC, so a plain `toLocaleDateString` had the two screens naming different days
+ * for one message. `clubLocalDate` gives the `YYYY-MM-DD` the club was actually
+ * on, which is exactly what `formatDateOnly` is for, and being pure it also
+ * drops the dependency on the runtime having full ICU.
+ */
+function clubDaySuffix(at: string | null | undefined): string {
+  return at ? ` on ${formatDateOnly(clubLocalDate(new Date(at), CLUB_TIME_ZONE))}` : "";
+}
+
+/**
+ * Somebody's name for notification copy, or "Someone" when it is blank. Every
+ * one of these counts degrades to a name-less count rather than failing the
+ * whole attention list, so the copy has to survive having no name.
+ */
+function personOrSomeone(name: string | null | undefined): string {
+  return name?.trim() || "Someone";
+}
+
+/**
+ * The first step of signing up: somebody filled in the interest form. Read-only
+ * on purpose. Nothing is broken and nothing is blocked, a manager just needs to
+ * know who has come in, so the item carries a reading verb and no other action.
+ *
+ * Says nothing about the emails that go out on a registration. Those are
+ * best-effort, and the whole existing backlog counts as new on the day this
+ * ships, so "you were emailed this too" is false exactly when it matters.
+ */
+export function interestRegistrationNotifications(input: {
+  unread: number;
+  latestName?: string | null;
+  latestAt?: string | null;
+}): ManagerNotification[] {
+  const { unread, latestName, latestAt } = input;
+  if (unread <= 0) return [];
+  const who = personOrSomeone(latestName);
+  const when = clubDaySuffix(latestAt);
+  return [
+    {
+      type: "new_interest_registrations",
+      title:
+        unread === 1
+          ? `${who} registered interest in training`
+          : `${unread} people registered interest in training`,
+      body:
+        unread === 1
+          ? `They left their details${when}. Nothing has to happen yet, this is just so you know who has come in.`
+          : `The most recent is ${who}${when}. Nothing has to happen yet, this is just so you know who has come in.`,
+      // The whole funnel, one row per person, which is where a registration
+      // ends up whether or not that person has moved on from being a lead. It
+      // is also where the new-lead email already sends managers.
+      href: "/manager/users",
+      actionLabel: unread === 1 ? "Read it" : "Read them",
+    },
+  ];
+}
+
+/**
+ * The second step of signing up: somebody signed the waiver and is waiting on a
+ * manager. Unlike the two items above, this one is real work, and the body says
+ * what pressing through to it leads to. Approving is outward-facing and cannot
+ * be taken back quietly (it emails the person and unlocks their login), so the
+ * consequence belongs in front of the manager before the click, not after it.
+ *
+ * "A first waiver" is doing real work in that sentence, not hedging.
+ * `setWaiverApproval` lifts the ban and sends the account-activated email only
+ * for somebody still locked, and `assignTrialMembership` is one per person ever,
+ * so none of the three happens when a returning member re-signs. Stating them
+ * flatly would promise a manager an email and a trial that never go out. The
+ * plural line has to hold for a mixed batch too, which is the other reason it is
+ * written as what approving a first waiver does rather than what this batch will
+ * do.
+ */
+export function waiverApprovalNotifications(input: {
+  pending: number;
+  latestName?: string | null;
+  latestAt?: string | null;
+}): ManagerNotification[] {
+  const { pending, latestName, latestAt } = input;
+  if (pending <= 0) return [];
+  const who = personOrSomeone(latestName);
+  const when = clubDaySuffix(latestAt);
+  const consequence =
+    "Approving a first waiver activates that person's account, emails them to say so, and gives them the free trial.";
+  return [
+    {
+      type: "waivers_awaiting_approval",
+      title:
+        pending === 1
+          ? `${who} signed the waiver and is waiting for approval`
+          : `${pending} signed waivers are waiting for approval`,
+      body:
+        pending === 1
+          ? `They signed${when}. ${consequence}`
+          : `The most recent is ${who}${when}. ${consequence}`,
+      href: "/manager/waivers",
+      actionLabel: pending === 1 ? "Approve" : "Approve them",
+    },
+  ];
+}
+
+/**
  * How many contact-form messages have arrived since a manager last opened the
  * inbox. `seenAt` is the club-wide marker (`club_settings.contact_messages_seen_at`);
  * absent means nobody has ever opened it, so everything counts — which is right
@@ -1346,19 +1457,8 @@ export function contactMessageNotifications(input: {
 }): ManagerNotification[] {
   const { unread, latestName, latestAt } = input;
   if (unread <= 0) return [];
-  const who = latestName?.trim() || "Someone";
-  // Resolved to the CLUB's day, not the server's.
-  //
-  // This string is built inside `listMyNotifications`, so it renders on the
-  // server (UTC) while the inbox screen it links to formats the same timestamp
-  // in the manager's browser. A message at 9am Sydney is still the previous
-  // date in UTC, so a plain `toLocaleDateString` had the two screens naming
-  // different days for one message. `clubLocalDate` gives the `YYYY-MM-DD` the
-  // club was actually on, which is exactly what `formatDateOnly` is for — and
-  // being pure, it also drops the dependency on the runtime having full ICU.
-  const when = latestAt
-    ? ` on ${formatDateOnly(clubLocalDate(new Date(latestAt), CLUB_TIME_ZONE))}`
-    : "";
+  const who = personOrSomeone(latestName);
+  const when = clubDaySuffix(latestAt);
   return [
     {
       type: "unread_contact_messages",
@@ -1384,16 +1484,31 @@ export function contactMessageNotifications(input: {
 /**
  * The order a manager meets the "needs attention" items in.
  *
- * Unanswered messages come first: a person is waiting on a reply, whereas an
- * unset training window is a chore that announces itself weeks ahead. Kept as a
- * function rather than an inline spread in the handler so the priority is a
- * decision with a test on it, not an accident of argument order.
+ * Sorted by who is held up and for how long:
+ *
+ * 1. **Waiver approvals.** Somebody has signed and cannot start until a manager
+ *    presses the button. They are stuck, and only this list says so.
+ * 2. **Unanswered messages.** Somebody is waiting on a reply, but nothing about
+ *    them is blocked in the meantime.
+ * 3. **New interest registrations.** Nobody is waiting on anything. It is news,
+ *    and it sits below the two items that are work.
+ * 4. **The membership window.** A chore that announces itself weeks ahead.
+ *
+ * Kept as a function rather than an inline spread in the handler so the priority
+ * is a decision with a test on it, not an accident of argument order.
  */
 export function composeManagerNotifications(sources: {
+  waiverApprovals: ManagerNotification[];
   contactMessages: ManagerNotification[];
+  interestRegistrations: ManagerNotification[];
   membershipWindows: ManagerNotification[];
 }): ManagerNotification[] {
-  return [...sources.contactMessages, ...sources.membershipWindows];
+  return [
+    ...sources.waiverApprovals,
+    ...sources.contactMessages,
+    ...sources.interestRegistrations,
+    ...sources.membershipWindows,
+  ];
 }
 
 // ---- Member: start a membership ----

@@ -373,6 +373,11 @@ the person detail page (with the date), and on the member's account page.
 
 ### Manager reviews and approves
 
+Both steps of signing up now reach the manager on `/notifications`: a read-only
+item for the registration, and one carrying **Approve** for every waiver still
+`pending`. Neither replaces the emails that already go out at the moment each
+step happens. See `docs/notifications.md` for the two items and how each clears.
+
 The manager waivers screen lists submissions newest first with the submitted
 name/email, date, template version, status badge (pending / active /
 superseded), the PDF, and Approve / Unapprove. Approve = promote + unlock +
