@@ -92,6 +92,28 @@ people in to a class that did not run.
    list or from the person's own page. By default it re-runs the same rules the
    door would have applied, which is the right answer once a late bank transfer
    has been reconciled; a manager can override and name the membership instead.
+4. **Move** — take a check-in that IS covered and put it on a different
+   membership, from the person's page. The mirror of Attach, for cover that
+   landed on the wrong membership rather than nowhere. Naming the target is
+   required here, not optional: re-running the door's rules would pick the same
+   membership again. It is also what frees a membership up to be **deleted**,
+   since a membership with classes checked in against it cannot be
+   (`docs/memberships.md`).
+
+   Until this existed the only correction was Undo followed by a fresh check-in,
+   which deletes the row and loses `checked_in_at` — the record of when they were
+   actually on the mat.
+
+   The order is the same guard Undo uses. The row is **released first**, with a
+   compare-and-swap against the coverage it held, and the old membership's credit
+   is refunded only once that release is won: exactly one caller can win, so
+   exactly one refund is attempted. Refunding first would let two managers moving
+   the same check-in hand back two credits for one class. The move then finishes
+   through the ordinary `applyCoverage`, so if the chosen membership cannot
+   actually cover the class (wrong dates, no credits left) the check-in lands
+   **uncovered** and says so, rather than being force-fitted. The credit comes
+   off the old membership either way — that is what the manager asked for — and
+   the needs-attention list already knows how to deal with the result.
 
 ## Rules
 
@@ -129,8 +151,8 @@ people in to a class that did not run.
 ## Where the count shows
 
 - **Manager directory** (`/manager/users`) — a Sessions column, sortable.
-- **A person's page** — the total plus their check-in history, and the attach
-  control for anything uncovered.
+- **A person's page** — the total plus their check-in history, the attach
+  control for anything uncovered, and the move control for anything covered.
 - **A member's own Membership page** — "You have trained N times." Members are
   deliberately not shown the coverage bookkeeping: "no cover" against a class
   they attended reads as an accusation.

@@ -1,11 +1,13 @@
 ---
 name: uts-manager-agent
 description: >-
-  Perform UTS Jitsu manager actions (list members and their status, edit an
-  invoice's details, file a scanned paper waiver, manage the club's membership
-  dates, publish and reorder the club's knowledge base and read members'
-  comments on it) against the live site via its manager agent HTTP API. Use when
-  a club manager asks an agent to look up members/invoices, correct invoice
+  Perform UTS Jitsu manager actions (list members and their status, raise a
+  membership for someone, cancel or delete an invoice, edit an invoice's
+  details, file a scanned paper waiver, manage the club's membership dates,
+  publish and reorder the club's knowledge base and read members' comments on
+  it) against the live site via its manager agent HTTP API. Use when a club
+  manager asks an agent to look up members/invoices, put a member on a plan or
+  swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), migrate/bulk-file waivers
   the club holds on paper, add or edit a membership window's start/end dates, or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
@@ -108,6 +110,50 @@ tell a capped page from a complete one. Each invoice also carries
 scripts/agent.sh list_invoices '{"status":"pending"}'
 ```
 
+### `create_membership` — raise a membership for somebody
+
+The agent equivalent of a manager using **Add a membership** on a person's page,
+and of a member choosing a plan themselves. Lands a **pending** invoice with the
+payment reference they would quote on a transfer, so it reconciles off a bank
+statement like any other.
+
+`params`: `user_id` (**required** — from `list_users`), `plan_code`
+(**required** — from `list_membership_plans`), `uts_student_number` (optional),
+`session_date` (optional `YYYY-MM-DD`, casual class only), `include_insurance`
+(optional, default false), `send_email` (optional, default true).
+
+```bash
+scripts/agent.sh create_membership '{"user_id":"<uuid>","plan_code":"2026-s2"}'
+```
+
+> **It never activates.** The invoice lands pending. Activation grants the
+> `member` role and emails the member, so it runs through bank reconciliation or
+> the manager UI, exactly as it does for a member's own purchase. Raising an
+> invoice is not the same as saying it was paid.
+>
+> **Two things you can do here that a member cannot**, both for the same case —
+> writing down an enrolment that already happened rather than selling one:
+>
+> - **A plan that is no longer on sale is accepted.** That is what backfilling a
+>   past training period needs. It also means a typo in `plan_code` that happens
+>   to match a retired plan will not be caught for you — check the code against
+>   `list_membership_plans` before sending a batch. An unknown code is
+>   `404 plan_not_found`.
+> - **`include_insurance` is your answer, not a rule.** A member with no current
+>   cover cannot decline it; you can. Only decline it when you are recording
+>   something that genuinely happened without cover, and say so to the manager.
+>
+> **`send_email: false` is the backfill switch.** Left at its default, every
+> invoice you raise emails that person their payment instructions. In a bulk
+> import of settled history, that is an inbox full of demands for money already
+> paid. Decide once, at the start of the batch, and tell the manager which way
+> you went.
+>
+> **Retrying is safe.** Re-raising the same person and plan reuses their existing
+> unpaid invoice rather than creating a second one (and does not re-send the
+> email), so a call whose reply you never saw can simply be repeated. The free
+> trial is still once per person ever: a second one is `409 trial_already_used`.
+
 ### `edit_invoice` — correct an invoice's details
 
 `params`: `id` (**required** — the invoice UUID from a list call) plus at least
@@ -138,6 +184,13 @@ audit log with who made it and each field's old and new value.
 > the member role and emails the member, so it must go through bank
 > reconciliation / the manager UI — not a raw invoice edit.
 
+> **Cancelling is how a membership is closed**, and it is safe from any status,
+> including `pending`. Closing somebody's last paid membership also stops
+> `list_users` calling them a member. Their members-only access closed at the
+> same moment either way — that is gated on the membership itself, never on the
+> role — so this is the club's records catching up, not a separate act you need
+> to warn anyone about.
+
 > **A paid invoice's money fields are guarded.** Once an invoice has a `paid_at`,
 > its `price_cents`, `payment_reference` and `payment_method` are the club's
 > record of money that actually moved through the bank. Changing one is refused
@@ -160,6 +213,39 @@ audit log with who made it and each field's old and new value.
 >
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
+
+### `delete_invoice` — remove an invoice that should never have existed
+
+`params`: `id` (**required** — the invoice UUID from a list call).
+
+```bash
+scripts/agent.sh delete_invoice '{"id":"<uuid>"}'
+```
+
+Deleting is for tidying up junk: a duplicate raised by mistake, or somebody who
+said they would join and never paid. Everything else is **cancelled**, which
+closes the membership and keeps the record (`edit_invoice` with
+`"status":"cancelled"`).
+
+> **Three things refuse it, and you get all of them at once.**
+> `409 invoice_not_deletable`, with `error.details.blockers` naming every reason
+> that applies out of `paid | active | attended`. Fixing one and retrying into
+> the next would cost you a call to learn what the first refusal already told
+> you, so read the whole list.
+>
+> - **`paid`** — a payment is recorded against it. **There is no confirm flag,
+>   and there will not be one.** Unlike `edit_invoice`'s paid guard this is not
+>   a judgement call you can override: a paid invoice is the club's record that
+>   money moved. Cancel it instead.
+> - **`active`** — cancel it first, then delete.
+> - **`attended`** — a class was checked in against it. **You cannot clear this
+>   one.** It is cleared by moving those check-ins to another membership, which
+>   is a manager-screen action; this API has no check-in actions. Tell the
+>   manager what is blocking it and leave it to them.
+>
+> **Deleting is not reversible and there is no undo.** If you are unsure whether
+> a row is junk or history, cancel it and say why — a cancelled invoice can be
+> re-activated, a deleted one cannot be anything.
 
 ### `list_membership_plans` / `save_membership_plan` — the plan catalogue
 
