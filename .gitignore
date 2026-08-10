@@ -41,3 +41,11 @@ screenshots-*/
 # Ids of the people scripts/seed-local-club.mjs put in the local database.
 # Regenerated on every seed, and meaningless against any other database.
 .local-club-fixture.json
+
+# Playwright end-to-end run output: the HTML report, per-test traces/videos,
+# and the persona sessions e2e/support/auth.setup.ts saves (real access tokens
+# for the local stack, regenerated on every run).
+playwright-report/
+test-results/
+blob-report/
+e2e/.auth/

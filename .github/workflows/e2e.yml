@@ -1,0 +1,113 @@
+name: End-to-end tests
+
+# Walks the site's user flows in a real browser: the public funnel, the sign-in
+# gate, the member area and the manager screens. What the unit suite cannot
+# reach — SSR, the server functions, RLS, the router's own redirects — is
+# exactly what is under test here.
+#
+# Like the screenshot job, it runs the whole site against a THROWAWAY LOCAL
+# SUPABASE STACK: `supabase start` brings up Postgres, Auth, PostgREST and
+# Storage, every migration in supabase/migrations is applied to it, and
+# scripts/seed-local-club.mjs fills it with a manager, a member and an
+# applicant. Nothing here touches the hosted project and the job needs no
+# repository secrets — the local stack's keys are the CLI's own development
+# keys, printed by `supabase status`.
+#
+# docs/e2e-tests.md has the local equivalent (`bash scripts/e2e.sh`).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Walk the user flows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Same lockfile-preserving install CI uses. See CLAUDE.md > Lock file strategy.
+      - name: Install dependencies
+        run: bash scripts/bun-install.sh
+
+      # Playwright is deliberately NOT in package.json (CLAUDE.md > Lock file
+      # strategy): installing it here leaves the committed lockfile alone, and
+      # the checkout is thrown away at the end of the job. The version is pinned
+      # in one file so this job and the screenshot job never drift onto
+      # different browsers.
+      - name: Install Playwright
+        run: |
+          bun add --no-save "@playwright/test@$(cat scripts/playwright-version.txt)"
+          bunx playwright install --with-deps chromium
+
+      # The tests import @playwright/test, so they are outside the app's
+      # tsconfig and `bun run typecheck` never sees them. This is the only place
+      # a type error in them is caught — before the suite, so a broken test
+      # fails as a type error rather than as a mystery timeout.
+      - name: Typecheck the tests
+        run: bunx tsc -p e2e/tsconfig.json
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+
+      # Brings up the local stack and applies every migration in order, so the
+      # flows are walked against the schema THIS BRANCH ships.
+      - name: Start local Supabase (applies every migration)
+        run: supabase start
+
+      # The build bakes VITE_* in at bundle time and the Nitro server reads the
+      # unprefixed names at runtime, so both spellings have to be set before the
+      # build. The tests read them too, to sign the personas in.
+      - name: Point the build at the local stack
+        run: |
+          eval "$(supabase status -o env)"
+          : "${API_URL:?supabase status reported no API_URL}"
+          : "${ANON_KEY:?supabase status reported no ANON_KEY}"
+          : "${SERVICE_ROLE_KEY:?supabase status reported no SERVICE_ROLE_KEY}"
+          {
+            echo "VITE_SUPABASE_URL=$API_URL"
+            echo "VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Seed the club
+        run: bun scripts/seed-local-club.mjs
+
+      # NITRO_PRESET overrides the Cloudflare default so the build produces a
+      # server Playwright's webServer can run directly.
+      - name: Build
+        run: NITRO_PRESET=node-server bun run build
+
+      - name: Run the end-to-end tests
+        run: bunx playwright test
+
+      # Traces, screenshots and video for whatever failed. Only useful on a red
+      # run, but uploaded on green too so a flaky retry can still be read back.
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: e2e-report-${{ github.run_id }}
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14

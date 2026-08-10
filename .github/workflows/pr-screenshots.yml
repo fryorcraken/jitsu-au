@@ -43,12 +43,6 @@ jobs:
   screenshots:
     name: Screenshot every page
     runs-on: ubuntu-latest
-    env:
-      # Pinned so the browser Playwright downloads matches the driver that
-      # drives it. Bump both by bumping this one line — but not to a release
-      # under a day old: bunfig.toml's minimumReleaseAge would refuse to
-      # resolve it, and the job fails on a confusing install error.
-      PLAYWRIGHT_VERSION: 1.62.1
     steps:
       - uses: actions/checkout@v7
 
@@ -64,9 +58,13 @@ jobs:
       # to be re-resolved by Lovable (CLAUDE.md > Lock file strategy), and this
       # is a CI-only tool. Installing it here leaves the committed lockfile
       # alone — the checkout is thrown away at the end of the job.
+      #
+      # The version is pinned in scripts/playwright-version.txt so the browser
+      # Playwright downloads matches the driver that drives it, and so this job
+      # and the end-to-end tests never drift onto different browsers.
       - name: Install Playwright
         run: |
-          bun add --no-save "playwright@${PLAYWRIGHT_VERSION}"
+          bun add --no-save "playwright@$(cat scripts/playwright-version.txt)"
           bunx playwright install --with-deps chromium
 
       - uses: supabase/setup-cli@v3

@@ -42,6 +42,7 @@ you are working in their area, not before.
 | The data model, every table            | `docs/database.md`          |
 | Changing the schema — **read first**   | `docs/database-changes.md`  |
 | Manager agent HTTP API                 | `docs/manager-agent-api.md` |
+| End-to-end tests (the browser suite)   | `docs/e2e-tests.md`         |
 | Routing conventions                    | `src/routes/README.md`      |
 | Product flows, one file per flow       | the rest of `docs/`         |
 
@@ -66,19 +67,20 @@ instead — every duplicate is a future contradiction.
 
 Use **Bun** (this is a Bun project — `bun install`, not npm/pnpm).
 
-| Command                 | Purpose                             |
-| ----------------------- | ----------------------------------- |
-| `bun install`           | Install dependencies                |
-| `bun run dev`           | Start the Vite dev server           |
-| `bun run build`         | Production build (Nitro)            |
-| `bun run build:dev`     | Build in development mode           |
-| `bun run preview`       | Preview the production build        |
-| `bun run lint`          | ESLint over the repo                |
-| `bun run typecheck`     | `tsc --noEmit` over the repo        |
-| `bun run format`        | Prettier `--write` over the repo    |
-| `bun run test`          | Run the Vitest suite once (CI mode) |
-| `bun run test:watch`    | Vitest in watch mode                |
-| `bun run test:coverage` | Vitest with a V8 coverage report    |
+| Command                 | Purpose                                |
+| ----------------------- | -------------------------------------- |
+| `bun install`           | Install dependencies                   |
+| `bun run dev`           | Start the Vite dev server              |
+| `bun run build`         | Production build (Nitro)               |
+| `bun run build:dev`     | Build in development mode              |
+| `bun run preview`       | Preview the production build           |
+| `bun run lint`          | ESLint over the repo                   |
+| `bun run typecheck`     | `tsc --noEmit` over the repo           |
+| `bun run format`        | Prettier `--write` over the repo       |
+| `bun run test`          | Run the Vitest suite once (CI mode)    |
+| `bun run test:watch`    | Vitest in watch mode                   |
+| `bun run test:coverage` | Vitest with a V8 coverage report       |
+| `bun run test:e2e`      | End-to-end suite (`docs/e2e-tests.md`) |
 
 Verify changes with `bun run lint`, `bun run typecheck`, `bun run test`, and
 `bun run build`. All four run in CI on every PR (see Testing & CI).
@@ -389,10 +391,24 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   have failed before your change. Never delete or `.skip` a test to get CI
   green — fix the code or fix the test on purpose, and say which in the commit.
   `bun run test` must pass before you push.
+- **End-to-end tests** are a second suite, not part of `bun run test`: Playwright
+  driving a real browser over a production build of the site, against a
+  throwaway local Supabase stack seeded by `scripts/seed-local-club.mjs` (the
+  same club the PR screenshots use). They live in `e2e/`, run with
+  `bun run test:e2e`, and cover **flows** — the interest funnel, the sign-in
+  gate, the member area, the manager screens — which is the only place SSR, the
+  server functions, RLS and the router's redirects are exercised together. Where
+  a rule can be proved in a `src/lib/` unit test, prove it there instead; e2e is
+  slow and shares one database. Full spec, including where a new spec goes and
+  the rules for writing one: **`docs/e2e-tests.md`**. Playwright is deliberately
+  **not** in `package.json` (Lock file strategy) — it is installed `--no-save`
+  at the version in `scripts/playwright-version.txt`.
 - **CI:** `.github/workflows/ci.yml` runs lint → typecheck → test → build on
   Linux with Bun for every PR and pushes to `main`. It installs via
   `bash scripts/bun-install.sh` (see Lock file strategy below), not a plain
-  `bun install`.
+  `bun install`. `.github/workflows/e2e.yml` runs the end-to-end suite
+  alongside it (no repository secrets, same local-stack recipe as the
+  screenshots job).
 - **PR screenshots:** `.github/workflows/pr-screenshots.yml` photographs **every
   page** on the branch at desktop and phone widths, uploads the PNGs plus an
   `index.html` contact sheet as an artifact, and posts one sticky PR comment
