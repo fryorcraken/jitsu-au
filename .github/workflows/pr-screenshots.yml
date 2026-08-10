@@ -8,7 +8,7 @@ name: PR screenshots
 # The signed-in screens need a database with people in it, so the job runs the
 # whole site against a THROWAWAY LOCAL SUPABASE STACK: `supabase start` brings
 # up Postgres, Auth, PostgREST and Storage, every migration in
-# supabase/migrations is applied to it, and scripts/pr-screenshots-seed.mjs
+# supabase/migrations is applied to it, and scripts/seed-local-club.mjs
 # fills it with a small club (a manager, a member, an applicant, and the rows
 # the manager screens list). Nothing here touches the hosted project, and the
 # job needs no repository secrets: the local stack's keys are the CLI's own
@@ -43,12 +43,6 @@ jobs:
   screenshots:
     name: Screenshot every page
     runs-on: ubuntu-latest
-    env:
-      # Pinned so the browser Playwright downloads matches the driver that
-      # drives it. Bump both by bumping this one line — but not to a release
-      # under a day old: bunfig.toml's minimumReleaseAge would refuse to
-      # resolve it, and the job fails on a confusing install error.
-      PLAYWRIGHT_VERSION: 1.62.1
     steps:
       - uses: actions/checkout@v7
 
@@ -64,9 +58,13 @@ jobs:
       # to be re-resolved by Lovable (CLAUDE.md > Lock file strategy), and this
       # is a CI-only tool. Installing it here leaves the committed lockfile
       # alone — the checkout is thrown away at the end of the job.
+      #
+      # The version is pinned in scripts/playwright-version.txt so the browser
+      # Playwright downloads matches the driver that drives it, and so this job
+      # and the end-to-end tests never drift onto different browsers.
       - name: Install Playwright
         run: |
-          bun add --no-save "playwright@${PLAYWRIGHT_VERSION}"
+          bun add --no-save "playwright@$(cat scripts/playwright-version.txt)"
           bunx playwright install --with-deps chromium
 
       - uses: supabase/setup-cli@v3
@@ -96,10 +94,10 @@ jobs:
             echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
           } >> "$GITHUB_ENV"
 
-      # Writes .screenshot-fixture.json, which is how the screenshot script
+      # Writes .local-club-fixture.json, which is how the screenshot script
       # knows there is a database to sign in against and who to sign in as.
       - name: Seed the club
-        run: bun scripts/pr-screenshots-seed.mjs
+        run: bun scripts/seed-local-club.mjs
 
       # NITRO_PRESET overrides the Cloudflare default so the build produces a
       # server this runner can execute directly.

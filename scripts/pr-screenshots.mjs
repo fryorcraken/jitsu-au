@@ -25,7 +25,7 @@
 //   export SUPABASE_URL=$API_URL VITE_SUPABASE_URL=$API_URL
 //   export SUPABASE_PUBLISHABLE_KEY=$ANON_KEY VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY
 //   export SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
-//   bun scripts/pr-screenshots-seed.mjs        # writes .screenshot-fixture.json
+//   bun scripts/seed-local-club.mjs        # writes .local-club-fixture.json
 //   NITRO_PRESET=node-server bun run build
 //   bun scripts/pr-screenshots.mjs
 //
@@ -51,15 +51,7 @@
 // error and rendered a card in place of its content, as /blog does.
 
 import { spawn } from "node:child_process";
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,7 +59,9 @@ import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 
 import { PUBLIC_PAGES } from "../src/lib/seo.ts";
+import { isLocalSupabase } from "./local-supabase.ts";
 import { planSignedInGroups, signedInAvailability } from "./pr-screenshots-pages.mjs";
+import { repairTracedTslib } from "./repair-traced-tslib.mjs";
 import {
   buildContactSheet,
   buildSummaryTable,
@@ -113,11 +107,11 @@ const CHROMIUM_PATH = process.env.PR_SCREENSHOTS_CHROMIUM;
 
 /**
  * The seeded local stack, if there is one: who to sign in as, and the record
- * ids that fill the dynamic routes. Written by pr-screenshots-seed.mjs.
+ * ids that fill the dynamic routes. Written by seed-local-club.mjs.
  */
 const FIXTURE_PATH = resolve(
   REPO_ROOT,
-  process.env.PR_SCREENSHOTS_FIXTURE ?? ".screenshot-fixture.json",
+  process.env.LOCAL_CLUB_FIXTURE ?? ".local-club-fixture.json",
 );
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -156,7 +150,7 @@ function readFixture() {
   }
   if (availability === "no-manifest") {
     throw new Error(
-      `A Supabase service-role key is set but there is no fixture manifest at ${FIXTURE_PATH}. Run scripts/pr-screenshots-seed.mjs first, or unset SUPABASE_SERVICE_ROLE_KEY to photograph the public pages alone.`,
+      `A Supabase service-role key is set but there is no fixture manifest at ${FIXTURE_PATH}. Run scripts/seed-local-club.mjs first, or unset SUPABASE_SERVICE_ROLE_KEY to photograph the public pages alone.`,
     );
   }
   if (availability === "no-credentials") {
@@ -221,89 +215,10 @@ async function restoreFixtureState() {
 
 /** Refuse to make admin calls against anything but a local stack. */
 function assertLocalSupabase(url) {
-  const host = new URL(url).hostname;
-  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
-    throw new Error(
-      `Refusing to sign in against ${host}: the screenshot run only ever talks to a local stack.`,
-    );
-  }
-}
-
-/**
- * Give the traced server bundle the tslib files it actually imports.
- *
- * `vite.config.ts` aliases `tslib` to `tslib/tslib.es6.js` (pdf-lib needs it —
- * the comment there explains why). Nitro's dependency tracer follows that alias
- * and copies only that one file into `.output/server/node_modules`, but the
- * bundled `@supabase/functions-js` still imports the package's own
- * `tslib/modules/index.js`, which was never copied. The Cloudflare build we
- * deploy inlines its dependencies so it never sees this; the node-server build
- * this script runs resolves them from disk and 500s on every SSR request.
- *
- * Copying the real package over the traced stub fixes it without touching the
- * alias that the PDF renderer depends on.
- */
-function repairTracedTslib() {
-  const tracedRoot = join(REPO_ROOT, ".output/server/node_modules/.nf3");
-  if (!existsSync(tracedRoot)) return;
-
-  for (const entry of readdirSync(tracedRoot)) {
-    if (!entry.startsWith("tslib@")) continue;
-    const version = entry.slice("tslib@".length);
-    const traced = join(tracedRoot, entry);
-
-    // Copy unconditionally rather than probing for one known-missing file:
-    // the version matches exactly, so overwriting the traced stub with the
-    // real package cannot change what the server runs, and a stub missing
-    // some *other* file would slip past a targeted check.
-    const source = findInstalledPackage("tslib", version);
-    if (!source) {
-      console.warn(`[screenshots] no installed tslib@${version} to repair ${entry} with`);
-      continue;
-    }
-    // Synchronous on purpose: the server is spawned the moment this returns,
-    // and an unawaited copy would race the first SSR request that needs it.
-    cpSync(source, traced, { recursive: true, force: true });
-  }
-}
-
-/** Locate an installed copy of `name` at exactly `version`, hoisted or nested. */
-function findInstalledPackage(name, version) {
-  const roots = [join(REPO_ROOT, "node_modules")];
-
-  while (roots.length > 0) {
-    const root = roots.shift();
-    if (!existsSync(root)) continue;
-
-    const candidate = join(root, name, "package.json");
-    if (existsSync(candidate)) {
-      try {
-        if (JSON.parse(readFileSync(candidate, "utf8")).version === version) {
-          return join(root, name);
-        }
-      } catch {
-        // Unreadable package.json: not the copy we want.
-      }
-    }
-
-    // Nested copies live under <root>/<pkg>/node_modules; one level of fan-out
-    // is enough for the transitive tslib installs bun produces. A scope
-    // directory holds no package of its own, so descend through it — otherwise
-    // a copy nested under @scope/pkg is invisible.
-    if (root !== join(REPO_ROOT, "node_modules")) continue;
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-      if (!entry.name.startsWith("@")) {
-        roots.push(join(root, entry.name, "node_modules"));
-        continue;
-      }
-      for (const scoped of readdirSync(join(root, entry.name), { withFileTypes: true })) {
-        if (!scoped.isDirectory()) continue;
-        roots.push(join(root, entry.name, scoped.name, "node_modules"));
-      }
-    }
-  }
-  return undefined;
+  if (isLocalSupabase(url)) return;
+  throw new Error(
+    `Refusing to sign in against ${new URL(url).hostname}: the screenshot run only ever talks to a local stack.`,
+  );
 }
 
 /** Start the built server and resolve once it answers, or throw with its log. */

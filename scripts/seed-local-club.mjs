@@ -1,12 +1,18 @@
 #!/usr/bin/env bun
 //
-// Fill a freshly started LOCAL Supabase stack with enough of a club to
-// photograph every signed-in screen.
+// Fill a freshly started LOCAL Supabase stack with enough of a club to sign in
+// to and use.
+//
+// Two jobs run against what this writes: the PR screenshots
+// (scripts/pr-screenshots.mjs) photograph every signed-in screen, and the
+// end-to-end tests (e2e/, docs/e2e-tests.md) drive the flows on them. Neither
+// owns it, which is why it is named after the club rather than after either of
+// them.
 //
 //   supabase start                 # Postgres + Auth + PostgREST + Storage
 //   eval "$(supabase status -o env)"
 //   SUPABASE_URL=$API_URL SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY \
-//     bun scripts/pr-screenshots-seed.mjs
+//     bun scripts/seed-local-club.mjs
 //
 // This NEVER runs against the hosted project. It refuses any URL that is not
 // loopback (see assertLocal) — every insert below is a service-role write that
@@ -24,9 +30,9 @@
 // empty still photograph fine: they render their empty state, which is worth
 // seeing too.
 //
-// The ids it created land in a manifest (PR_SCREENSHOTS_FIXTURE) that
-// pr-screenshots.mjs reads: it needs the personas' email addresses to sign in,
-// and the record ids to fill the `$userId` / `$id` / `$slug` route parameters.
+// The ids it created land in a manifest (LOCAL_CLUB_FIXTURE) that its readers
+// need: the personas' email addresses to sign in as, and the record ids that
+// fill the `$userId` / `$id` / `$slug` route parameters.
 
 import { writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -36,13 +42,14 @@ import { createClient } from "@supabase/supabase-js";
 
 import { CODE_OF_CONDUCT_VERSION } from "../src/lib/code-of-conduct.ts";
 import { splitBlocks } from "../src/lib/kb.ts";
+import { isLocalSupabase } from "./local-supabase.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const FIXTURE_PATH = resolve(
   REPO_ROOT,
-  process.env.PR_SCREENSHOTS_FIXTURE ?? ".screenshot-fixture.json",
+  process.env.LOCAL_CLUB_FIXTURE ?? ".local-club-fixture.json",
 );
 
 /**
@@ -51,7 +58,7 @@ const FIXTURE_PATH = resolve(
  * the seeded stack usable by hand: `supabase start`, seed, then sign in as
  * member@example.com to poke at a member screen locally.
  */
-const PERSONA_PASSWORD = "screenshot-fixture-password";
+const PERSONA_PASSWORD = "local-club-fixture-password";
 
 /** RFC 2606 reserves example.com, so no fixture address can ever reach anyone. */
 const PERSONAS = {
@@ -76,11 +83,10 @@ assertLocal(SUPABASE_URL);
  * club's real database.
  */
 function assertLocal(url) {
+  if (isLocalSupabase(url)) return;
   const host = new URL(url).hostname;
-  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
-    console.error(`[seed] refusing to seed ${host}: this only ever runs against a local stack.`);
-    process.exit(1);
-  }
+  console.error(`[seed] refusing to seed ${host}: this only ever runs against a local stack.`);
+  process.exit(1);
 }
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
