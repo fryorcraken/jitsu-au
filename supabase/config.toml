@@ -16,7 +16,7 @@ project_id = "lgmacvxejzpvghgbjrjd"
 # ---------------------------------------------------------------------------
 
 [db.seed]
-# The fixture is a script, not SQL (scripts/pr-screenshots-seed.mjs): it has to
+# The fixture is a script, not SQL (scripts/seed-local-club.mjs): it has to
 # create auth users through the Auth API before it can reference them. Off, so
 # the CLI stops warning about the supabase/seed.sql that will never exist.
 enabled = false

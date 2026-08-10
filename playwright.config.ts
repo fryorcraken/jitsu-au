@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { storageStatePath } from "./e2e/support/fixture";
+
 /**
  * End-to-end tests: the whole site, in a real browser, against a real database.
  *
@@ -81,7 +83,7 @@ export default defineConfig({
       name: "member",
       testDir: "./e2e/member",
       dependencies: ["setup"],
-      use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/member.json" },
+      use: { ...devices["Desktop Chrome"], storageState: storageStatePath("member") },
     },
     {
       name: "manager",
@@ -89,7 +91,7 @@ export default defineConfig({
       dependencies: ["setup"],
       // Managers do their admin on a laptop, so that is the only width these
       // are walked at.
-      use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/manager.json" },
+      use: { ...devices["Desktop Chrome"], storageState: storageStatePath("manager") },
     },
   ],
 

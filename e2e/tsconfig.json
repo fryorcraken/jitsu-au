@@ -3,7 +3,7 @@
   // @playwright/test, which is installed with `--no-save` (CLAUDE.md > Lock
   // file strategy) and so is not present for the ordinary `bun run typecheck`.
   // The e2e workflow, which does install it, runs
-  // `bunx tsc -p e2e/tsconfig.json` after the suite.
+  // `bunx tsc -p e2e/tsconfig.json` before the suite.
   "extends": "../tsconfig.json",
   "include": ["**/*.ts", "../playwright.config.ts"],
   "compilerOptions": {

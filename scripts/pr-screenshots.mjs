@@ -59,6 +59,7 @@ import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 
 import { PUBLIC_PAGES } from "../src/lib/seo.ts";
+import { isLocalSupabase } from "./local-supabase.ts";
 import { planSignedInGroups, signedInAvailability } from "./pr-screenshots-pages.mjs";
 import { repairTracedTslib } from "./repair-traced-tslib.mjs";
 import {
@@ -214,12 +215,10 @@ async function restoreFixtureState() {
 
 /** Refuse to make admin calls against anything but a local stack. */
 function assertLocalSupabase(url) {
-  const host = new URL(url).hostname;
-  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
-    throw new Error(
-      `Refusing to sign in against ${host}: the screenshot run only ever talks to a local stack.`,
-    );
-  }
+  if (isLocalSupabase(url)) return;
+  throw new Error(
+    `Refusing to sign in against ${new URL(url).hostname}: the screenshot run only ever talks to a local stack.`,
+  );
 }
 
 /** Start the built server and resolve once it answers, or throw with its log. */

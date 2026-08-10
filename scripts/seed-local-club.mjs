@@ -42,6 +42,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { CODE_OF_CONDUCT_VERSION } from "../src/lib/code-of-conduct.ts";
 import { splitBlocks } from "../src/lib/kb.ts";
+import { isLocalSupabase } from "./local-supabase.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -82,11 +83,10 @@ assertLocal(SUPABASE_URL);
  * club's real database.
  */
 function assertLocal(url) {
+  if (isLocalSupabase(url)) return;
   const host = new URL(url).hostname;
-  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
-    console.error(`[seed] refusing to seed ${host}: this only ever runs against a local stack.`);
-    process.exit(1);
-  }
+  console.error(`[seed] refusing to seed ${host}: this only ever runs against a local stack.`);
+  process.exit(1);
 }
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {

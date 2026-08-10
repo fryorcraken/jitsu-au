@@ -6,18 +6,27 @@ import { expect, test } from "@playwright/test";
 import { adminClient } from "../support/fixture";
 
 /**
- * A fresh address per run, so a re-run against a local stack that was never
- * torn down is not filed as the same person twice.
+ * Every address this file has filed, so they can all be cleaned up.
+ *
+ * The seeded club is shared, and a lead nobody removed shows up on the
+ * manager's screens for every later run.
  */
-const email = `e2e-${crypto.randomUUID()}@example.com`;
+const filed: string[] = [];
 
-// The seeded club is shared, and a lead nobody removed shows up on the
-// manager's screens for every later run.
 test.afterAll(async () => {
-  await adminClient().from("interest_registrations").delete().eq("email", email);
+  if (filed.length === 0) return;
+  await adminClient().from("interest_registrations").delete().in("email", filed);
 });
 
 test("registering interest lands the lead and offers the waiver", async ({ page }) => {
+  // A fresh address per ATTEMPT, not per file. A retry re-runs this body but
+  // not the module around it, and `interest_registrations` has no unique
+  // constraint on the address — so a shared one would file the same person
+  // twice and the read-back below would find two rows and throw, turning the
+  // one flake the retry exists to absorb into a hard failure.
+  const email = `e2e-${crypto.randomUUID()}@example.com`;
+  filed.push(email);
+
   await page.goto("/register-interest");
 
   await page.getByLabel("First name").fill("Jo");

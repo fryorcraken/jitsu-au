@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { isLocalSupabase } from "../../scripts/local-supabase";
+
 export type Persona = "member" | "manager";
 
 type ClubFixture = {
@@ -32,7 +34,12 @@ const FIXTURE_PATH = resolve(
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-/** Where a persona's signed-in session is saved. Mirrors playwright.config.ts. */
+/**
+ * Where a persona's signed-in session is saved.
+ *
+ * playwright.config.ts calls this too, so the projects and the setup that
+ * writes their sessions cannot disagree about the path.
+ */
 export function storageStatePath(persona: Persona) {
   return `e2e/.auth/${persona}.json`;
 }
@@ -75,12 +82,10 @@ export function readClubFixture(): ClubFixture {
 
 /** Refuse to make admin calls against anything but a local stack. */
 export function assertLocalSupabase(url: string) {
-  const host = new URL(url).hostname;
-  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
-    throw new Error(
-      `Refusing to talk to ${host} as the service role: the end-to-end tests only ever drive a local stack.`,
-    );
-  }
+  if (isLocalSupabase(url)) return;
+  throw new Error(
+    `Refusing to talk to ${new URL(url).hostname} as the service role: the end-to-end tests only ever drive a local stack.`,
+  );
 }
 
 /**
