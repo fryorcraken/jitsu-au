@@ -8,7 +8,7 @@ name: PR screenshots
 # The signed-in screens need a database with people in it, so the job runs the
 # whole site against a THROWAWAY LOCAL SUPABASE STACK: `supabase start` brings
 # up Postgres, Auth, PostgREST and Storage, every migration in
-# supabase/migrations is applied to it, and scripts/pr-screenshots-seed.mjs
+# supabase/migrations is applied to it, and scripts/seed-local-club.mjs
 # fills it with a small club (a manager, a member, an applicant, and the rows
 # the manager screens list). Nothing here touches the hosted project, and the
 # job needs no repository secrets: the local stack's keys are the CLI's own
@@ -96,10 +96,10 @@ jobs:
             echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
           } >> "$GITHUB_ENV"
 
-      # Writes .screenshot-fixture.json, which is how the screenshot script
+      # Writes .local-club-fixture.json, which is how the screenshot script
       # knows there is a database to sign in against and who to sign in as.
       - name: Seed the club
-        run: bun scripts/pr-screenshots-seed.mjs
+        run: bun scripts/seed-local-club.mjs
 
       # NITRO_PRESET overrides the Cloudflare default so the build produces a
       # server this runner can execute directly.

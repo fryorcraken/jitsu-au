@@ -25,7 +25,7 @@
 //   export SUPABASE_URL=$API_URL VITE_SUPABASE_URL=$API_URL
 //   export SUPABASE_PUBLISHABLE_KEY=$ANON_KEY VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY
 //   export SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY
-//   bun scripts/pr-screenshots-seed.mjs        # writes .screenshot-fixture.json
+//   bun scripts/seed-local-club.mjs        # writes .local-club-fixture.json
 //   NITRO_PRESET=node-server bun run build
 //   bun scripts/pr-screenshots.mjs
 //
@@ -113,11 +113,11 @@ const CHROMIUM_PATH = process.env.PR_SCREENSHOTS_CHROMIUM;
 
 /**
  * The seeded local stack, if there is one: who to sign in as, and the record
- * ids that fill the dynamic routes. Written by pr-screenshots-seed.mjs.
+ * ids that fill the dynamic routes. Written by seed-local-club.mjs.
  */
 const FIXTURE_PATH = resolve(
   REPO_ROOT,
-  process.env.PR_SCREENSHOTS_FIXTURE ?? ".screenshot-fixture.json",
+  process.env.LOCAL_CLUB_FIXTURE ?? ".local-club-fixture.json",
 );
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -156,7 +156,7 @@ function readFixture() {
   }
   if (availability === "no-manifest") {
     throw new Error(
-      `A Supabase service-role key is set but there is no fixture manifest at ${FIXTURE_PATH}. Run scripts/pr-screenshots-seed.mjs first, or unset SUPABASE_SERVICE_ROLE_KEY to photograph the public pages alone.`,
+      `A Supabase service-role key is set but there is no fixture manifest at ${FIXTURE_PATH}. Run scripts/seed-local-club.mjs first, or unset SUPABASE_SERVICE_ROLE_KEY to photograph the public pages alone.`,
     );
   }
   if (availability === "no-credentials") {

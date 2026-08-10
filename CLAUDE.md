@@ -401,7 +401,7 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   - It runs the whole site against a **throwaway local Supabase stack**:
     `supabase start` (Postgres + Auth + PostgREST + Storage) with every
     migration in `supabase/migrations` applied, then
-    `scripts/pr-screenshots-seed.mjs` fills it with a manager, a member, an
+    `scripts/seed-local-club.mjs` fills it with a manager, a member, an
     applicant and the rows the manager screens list. **No repository secrets
     are involved** — the local stack's keys are the CLI's own development keys,
     read from `supabase status`. The two things this buys are the signed-in
