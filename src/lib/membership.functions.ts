@@ -743,7 +743,12 @@ export async function enrolMember(
     .eq("user_id", userId)
     .eq("plan_id", plan.id)
     .is("paid_at", null)
-    .neq("status", "cancelled");
+    // Only a LIVE enrolment is reusable. An expired unpaid row is a dead
+    // invoice: reusing it would hand back its old reference and leave
+    // `starts_at`/`ends_at` in the past, so somebody re-buying yearly insurance
+    // a year later would pay for cover whose window had already closed. Nothing
+    // re-runs `authorisedFields` on reuse, so the window has to still be good.
+    .eq("status", "active");
   // A failed read here defeats exactly what the reuse is for: it would report
   // no existing enrollment, insert a duplicate invoice and re-send the payment
   // email for one the member already has.
@@ -797,7 +802,7 @@ export async function enrolMember(
       .eq("user_id", userId)
       .eq("plan_id", insurancePlan.id)
       .is("paid_at", null)
-      .neq("status", "cancelled")
+      .eq("status", "active")
       .limit(1)
       .maybeSingle();
     if (eiErr) throw new Error(eiErr.message);
@@ -1588,7 +1593,14 @@ export async function reconcileUnmatched(
     .from("memberships")
     .select("*")
     .is("paid_at", null)
-    .neq("status", "cancelled");
+    .neq("status", "cancelled")
+    // Priced only. A free membership is never owed for, so leaving trials in the
+    // pool put every one the club has ever granted permanently up for matching —
+    // and a trial's reference has no date component, so it is byte-identical to
+    // the one minted for any undated purchase by the same person. It would join
+    // that reference's bundle, add 0 to the total so the sum still matched, and
+    // get stamped paid with a receipt for "Free".
+    .gt("price_cents", 0);
   if (pdErr) throw new Error(pdErr.message);
   const pendingList = (pending ?? []) as MembershipRow[];
   const planIds = [...new Set(pendingList.map((m) => m.plan_id))];

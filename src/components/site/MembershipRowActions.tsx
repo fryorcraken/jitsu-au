@@ -81,8 +81,8 @@ export function MembershipRowActions({
   // deleted out from under.
   const blockers = whyMembershipCannotBeDeleted(membership);
   const canDelete = blockers.length === 0;
-  // A free membership has no invoice, so there is nothing to record.
-  const owesMoney = membership.price_cents > 0 && isUnpaid(membership);
+  // `isUnpaid` already knows a free membership owes nothing.
+  const owesMoney = isUnpaid(membership);
   const isClosed = membership.status === "cancelled" || membership.status === "expired";
 
   async function run(kind: Pending["kind"]) {

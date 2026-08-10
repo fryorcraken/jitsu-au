@@ -353,7 +353,9 @@ function fakeReconcileAdmin(reads: {
           // syncMemberRole narrows to active and paid (`.eq.eq.gt`).
           const pending = reads.pending ?? ok([]);
           return {
-            is: () => ({ neq: () => Promise.resolve(pending) }),
+            // The unpaid pool: .is(paid_at, null).neq(status, cancelled).gt(price_cents, 0)
+            is: () => ({ neq: () => ({ gt: () => Promise.resolve(pending) }) }),
+            // syncMemberRole's tally: .eq.eq.gt
             eq: () => ({ eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }) }),
           };
         }
@@ -839,7 +841,9 @@ function fakeEnrolAdmin(existing: Result) {
         return {
           eq: () => ({
             eq: () => ({
-              is: () => ({ neq: () => ({ ...found, eq: () => found }) }),
+              // reuse: .is(paid_at, null).eq(status, active)[.eq(session_date)]
+              is: () => ({ eq: () => ({ ...found, eq: () => found }) }),
+              // syncMemberRole's tally
               gt: () => Promise.resolve(ok([])),
             }),
           }),

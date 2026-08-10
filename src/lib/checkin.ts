@@ -186,8 +186,7 @@ export function resolveCoverage(input: {
   // paying are separate, an unpaid member is `active` like everyone else, and a
   // status check would warn about nobody at all — which is exactly when the door
   // most needs telling.
-  if (input.memberships.some((m) => isUnpaid(m) && m.price_cents > 0))
-    warnings.push("payment_pending");
+  if (input.memberships.some(isUnpaid)) warnings.push("payment_pending");
 
   const tiers: { source: CoverageSource; pool: CoverageCandidate[] }[] = [
     { source: "trial", pool: live.filter((m) => m.kind === "trial" && hasCredits(m)) },

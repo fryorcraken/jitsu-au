@@ -207,24 +207,36 @@ describe("membershipDeleteMessage", () => {
 // reconciliation screen, the check-in warning and the delete guard. It reads
 // `paid_at` and never `status`, because status is about permission to train.
 describe("isUnpaid", () => {
+  const owed = { status: "active", paid_at: null, price_cents: 44500 };
+
   it("is unpaid while no payment has been recorded", () => {
-    expect(isUnpaid({ status: "active", paid_at: null })).toBe(true);
+    expect(isUnpaid(owed)).toBe(true);
   });
 
   it("is paid once a payment is recorded", () => {
-    expect(isUnpaid({ status: "active", paid_at: "2026-08-01T00:00:00Z" })).toBe(false);
+    expect(isUnpaid({ ...owed, paid_at: "2026-08-01T00:00:00Z" })).toBe(false);
   });
 
   // A withdrawn invoice is owed nothing. Chasing somebody for one a manager
   // cancelled is worse than not chasing at all.
   it("owes nothing on a cancelled membership", () => {
-    expect(isUnpaid({ status: "cancelled", paid_at: null })).toBe(false);
+    expect(isUnpaid({ ...owed, status: "cancelled" })).toBe(false);
   });
 
   // The rows that predate the split still say `pending`, and they are unpaid in
   // exactly the same way as everything else.
   it("still reads a legacy pending row as unpaid", () => {
-    expect(isUnpaid({ status: "pending", paid_at: null })).toBe(true);
+    expect(isUnpaid({ ...owed, status: "pending" })).toBe(true);
+  });
+
+  // Nothing records a payment against $0, so a free membership's `paid_at` is
+  // null for ever. Without the price test that made every auto-assigned trial a
+  // standing invoice: the member's own page showed them the club's bank details
+  // and a payment reference for something the club had given them, with no
+  // action anywhere that could clear it.
+  it("never owes anything on a free membership, however long it goes unpaid", () => {
+    expect(isUnpaid({ ...owed, price_cents: 0 })).toBe(false);
+    expect(isUnpaid({ status: "active", paid_at: null, price_cents: 0 })).toBe(false);
   });
 });
 

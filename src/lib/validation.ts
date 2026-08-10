@@ -909,7 +909,20 @@ export type MembershipStatus = (typeof membershipStatuses)[number];
  * A cancelled membership is owed nothing. A manager closed it, and chasing
  * somebody for an invoice that was withdrawn is worse than not chasing at all.
  */
-export function isUnpaid(membership: { status: string; paid_at: string | null }): boolean {
+export function isUnpaid(membership: {
+  status: string;
+  paid_at: string | null;
+  price_cents: number;
+}): boolean {
+  // A free membership is never owed for. It has no invoice to settle, so it can
+  // never be "unpaid" — and leaving that out of this rule was a real bug rather
+  // than a nicety. `paid_at` is null on every free trial for ever (nothing
+  // records a payment against $0), so without the price test a member who was
+  // simply approved is billed on their own membership page, in perpetuity, for
+  // something the club gave them. Two call sites had bolted `price_cents > 0`
+  // on locally; three had not, which is exactly the drift a shared rule exists
+  // to prevent.
+  if (membership.price_cents === 0) return false;
   return membership.paid_at === null && membership.status !== "cancelled";
 }
 
