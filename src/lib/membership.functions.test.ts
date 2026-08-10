@@ -142,12 +142,28 @@ describe("assignTrialMembership", () => {
     vi.restoreAllMocks();
   });
 
-  it("assigns the trial and activates it", async () => {
+  // Authorised by the INSERT itself, not by a follow-up update. That ordering
+  // is the point: an `active` row with no dates is one `isLive` reads as
+  // running forever, and splitting the two left exactly that gap open.
+  it("assigns the trial already authorised", async () => {
     const fake = fakeAdmin({});
     await assignTrial(fake);
     expect(fake.inserts).toHaveLength(1);
-    expect(fake.inserts[0]).toMatchObject({ user_id: "user-1", plan_id: TRIAL_PLAN.id });
-    expect(fake.updates[0]).toMatchObject({ status: "active" });
+    expect(fake.inserts[0]).toMatchObject({
+      user_id: "user-1",
+      plan_id: TRIAL_PLAN.id,
+      status: "active",
+    });
+    expect(fake.updates).toHaveLength(0);
+  });
+
+  // The free trial is free, so there is no payment to record. Authorising it
+  // used to stamp `paid_at`, which is what made a trial read as paid for and
+  // therefore undeletable.
+  it("records no payment against a free trial", async () => {
+    const fake = fakeAdmin({});
+    await assignTrial(fake);
+    expect(fake.inserts[0]).not.toHaveProperty("paid_at");
   });
 
   // The trial records when the entitlement was earned, not when a manager got
@@ -158,7 +174,7 @@ describe("assignTrialMembership", () => {
   it("runs the trial from the day the waiver was signed, not the day it was approved", async () => {
     const fake = fakeAdmin({});
     await assignTrial(fake);
-    expect(fake.updates[0]).toMatchObject({
+    expect(fake.inserts[0]).toMatchObject({
       status: "active",
       starts_at: "2026-08-04T14:00:00.000Z",
       ends_at: null,
@@ -255,14 +271,13 @@ describe("syncMemberRole, via activation", () => {
     expect(fake.roleWrites).toEqual([]);
   });
 
-  // Activation has already committed by the time the label is reconciled, so a
-  // failed role write is logged, never thrown: throwing would report a paid-up
-  // activation as an error and invite a retry that resets the dates and
-  // re-sends the confirmation email.
-  it("does not fail the activation when the label cannot be written", async () => {
+  // The membership has already committed by the time the label is reconciled,
+  // so a failed role write is logged, never thrown: throwing would report a
+  // successful assignment as an error and invite a retry.
+  it("does not fail the assignment when the label cannot be written", async () => {
     const fake = fakeAdmin({ activePaid: ok([]), roleWriteFails: true });
     await expect(assignTrial(fake)).resolves.toBeUndefined();
-    expect(fake.updates[0]).toMatchObject({ status: "active" });
+    expect(fake.inserts[0]).toMatchObject({ status: "active" });
   });
 });
 
@@ -316,6 +331,8 @@ function fakeReconcileAdmin(reads: {
   // Forces the `memberships` row with this id to fail its activation update,
   // so a per-row failure can be exercised without a second table to break.
   brokenActivationId?: string;
+  /** Makes every payment compare-and-swap lose, as if somebody got there first. */
+  paymentLost?: boolean;
 }) {
   const updates: { table: string; patch: Record<string, unknown> }[] = [];
 
@@ -331,16 +348,15 @@ function fakeReconcileAdmin(reads: {
             : { eq: () => Promise.resolve(reads.txns ?? ok([TXN])) };
         }
         if (table === "memberships") {
-          // Two readers share this table: reconciliation lists the pending
-          // invoices (one `.eq`, awaited), and syncMemberRole narrows to active
-          // and paid (`.eq.eq.gt`). The first `.eq` is therefore both awaitable
-          // and chainable.
+          // Two readers share this table: reconciliation lists the UNPAID
+          // invoices (`.is("paid_at", null).neq("status", ...)`, awaited), and
+          // syncMemberRole narrows to active and paid (`.eq.eq.gt`).
           const pending = reads.pending ?? ok([]);
           return {
-            eq: () => ({
-              then: (resolve: (v: Result) => unknown) => Promise.resolve(pending).then(resolve),
-              eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }),
-            }),
+            // The unpaid pool: .is(paid_at, null).neq(status, cancelled).gt(price_cents, 0)
+            is: () => ({ neq: () => ({ gt: () => Promise.resolve(pending) }) }),
+            // syncMemberRole's tally: .eq.eq.gt
+            eq: () => ({ eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }) }),
           };
         }
         if (table === "membership_plans")
@@ -351,11 +367,22 @@ function fakeReconcileAdmin(reads: {
       },
       update: (patch: Record<string, unknown>) => ({
         eq: (col: string, val: unknown) => {
-          if (col === "id" && val === reads.brokenActivationId) {
-            return Promise.resolve(fails("constraint violation"));
-          }
-          updates.push({ table, patch });
-          return Promise.resolve(ok(null));
+          const broken = col === "id" && val === reads.brokenActivationId;
+          if (!broken) updates.push({ table, patch });
+          // Awaitable for the bank_transactions write, and chainable for
+          // recordMembershipPayment's compare-and-swap
+          // (`.eq("id").is("paid_at", null).select("id")`), whose empty result
+          // is how a second caller learns it lost the race.
+          return Object.assign(Promise.resolve(broken ? fails("constraint violation") : ok(null)), {
+            is: () => ({
+              select: () =>
+                Promise.resolve(
+                  broken
+                    ? fails("constraint violation")
+                    : ok(reads.paymentLost ? [] : [{ id: val }]),
+                ),
+            }),
+          });
         },
       }),
       upsert: () => Promise.resolve(ok(null)),
@@ -382,7 +409,7 @@ describe("reconcileUnmatched", () => {
   it("matches a statement line to its pending invoice and activates it", async () => {
     const fake = fakeReconcileAdmin({ pending: ok([PENDING]) });
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
-    expect(fake.updates.some((u) => u.table === "memberships" && u.patch.status === "active")).toBe(
+    expect(fake.updates.some((u) => u.table === "memberships" && u.patch.paid_at != null)).toBe(
       true,
     );
     expect(
@@ -409,7 +436,7 @@ describe("reconcileUnmatched", () => {
       count: countFails("could not obtain lock"),
     });
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: null });
-    expect(fake.updates.some((u) => u.table === "memberships" && u.patch.status === "active")).toBe(
+    expect(fake.updates.some((u) => u.table === "memberships" && u.patch.paid_at != null)).toBe(
       true,
     );
   });
@@ -448,25 +475,27 @@ describe("reconcileUnmatched", () => {
     amount_cents: 44500,
   };
 
-  it("activates a dated plan with the plan's own dates, not a rolling window", async () => {
+  // Reconciliation records money and touches nothing else. A membership's dates
+  // were settled when it was raised, and a payment landing must not move them:
+  // rewriting the window of a dated plan months into it is how somebody loses
+  // the training period they already paid for. (The window itself is pinned by
+  // `planMembershipWindow` in membership.test.ts.)
+  it("records the payment on a dated plan without touching its window", async () => {
     const fake = fakeReconcileAdmin({
       txns: ok([DATED_TXN]),
       pending: ok([PENDING_DATED]),
       plans: ok([DATED_PLAN]),
     });
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
-    const activation = fake.updates.find(
-      (u) => u.table === "memberships" && u.patch.status === "active",
-    );
-    expect(activation).toBeTruthy();
-    // 00:00 Australia/Sydney on starts_on -> 2026-07-19T14:00:00.000Z (AEST, +10).
-    expect(activation!.patch.starts_at).toBe("2026-07-19T14:00:00.000Z");
-    // 23:59:59 Australia/Sydney on ends_on, inclusive -> one second before the
-    // next day's midnight, not a bare "now + 182 days" instant.
-    expect(activation!.patch.ends_at).toBe("2026-11-22T12:59:59.000Z");
+    const payment = fake.updates.find((u) => u.table === "memberships" && u.patch.paid_at != null);
+    expect(payment).toBeTruthy();
+    expect(payment!.patch).toEqual({
+      paid_at: expect.any(String),
+      payment_method: "bank_transfer",
+    });
   });
 
-  it("activates a rolling plan from the payment instant for duration_days", async () => {
+  it("records the payment on a rolling plan without recomputing its window", async () => {
     const ROLLING_PLAN = {
       id: "plan-insurance-yearly",
       code: "insurance_yearly",
@@ -503,10 +532,11 @@ describe("reconcileUnmatched", () => {
     });
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
     const activation = fake.updates.find(
-      (u) => u.table === "memberships" && u.patch.status === "active",
+      (u) => u.table === "memberships" && u.patch.paid_at != null,
     );
     expect(activation).toBeTruthy();
-    expect(activation!.patch.ends_at).not.toBeNull();
+    // Only money. The rolling window was set when the membership was raised.
+    expect(activation!.patch).not.toHaveProperty("ends_at");
   });
 
   // One bad invoice's activation failing (e.g. a constraint the update itself
@@ -543,7 +573,7 @@ describe("reconcileUnmatched", () => {
 
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
     const activations = fake.updates.filter(
-      (u) => u.table === "memberships" && u.patch.status === "active",
+      (u) => u.table === "memberships" && u.patch.paid_at != null,
     );
     expect(activations).toHaveLength(1);
     const matchedTxns = fake.updates.filter(
@@ -556,7 +586,7 @@ describe("reconcileUnmatched", () => {
   // one reference, settled by ONE transfer of the combined amount. Neither
   // invoice's own price matches that amount, and leaving a bundle unpaid just
   // because the member paid in one go would be the daily failure here.
-  it("activates both halves of a reference-sharing bundle from one combined transfer", async () => {
+  it("settles both halves of a reference-sharing bundle from one combined transfer", async () => {
     const bundleRef = buildPaymentReference("Nguyen", "user-4", undefined, undefined);
     const membershipRow = {
       id: "mem-4",
@@ -603,12 +633,14 @@ describe("reconcileUnmatched", () => {
     });
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
     const activations = fake.updates.filter(
-      (u) => u.table === "memberships" && u.patch.status === "active",
+      (u) => u.table === "memberships" && u.patch.paid_at != null,
     );
+    // Both halves settled by the one transfer, and each recorded as its own
+    // payment so neither can be re-billed on its own later.
     expect(activations).toHaveLength(2);
-    // Insurance activates on the fixed one-year window, not "here indefinitely".
-    const insuranceActivation = activations.find((u) => u.patch.ends_at != null);
-    expect(insuranceActivation).toBeTruthy();
+    for (const a of activations) {
+      expect(a.patch).toEqual({ paid_at: expect.any(String), payment_method: "bank_transfer" });
+    }
   });
 
   // The same two invoices, but the member paid only the plan price: the bundle
@@ -650,7 +682,7 @@ describe("reconcileUnmatched", () => {
     await expect(reconcile(fake)).resolves.toEqual({ matched: 1, unmatched: 0 });
     // Exactly one invoice is activated (the membership), never the whole group.
     const activations = fake.updates.filter(
-      (u) => u.table === "memberships" && u.patch.status === "active",
+      (u) => u.table === "memberships" && u.patch.paid_at != null,
     );
     expect(activations).toHaveLength(1);
   });
@@ -802,15 +834,16 @@ function fakeEnrolAdmin(existing: Result) {
         if (table === "profiles")
           return { eq: () => ({ maybeSingle: () => Promise.resolve(ok({ last_name: "Lee" })) }) };
         if (table === "membership_plans") return { in: () => Promise.resolve(ok([])) };
-        // memberships: the reuse lookup (.eq.eq.in[.eq].limit.maybeSingle) and
-        // syncMemberRole's tally (.eq.eq.gt).
+        // memberships, two readers sharing a `.eq.eq` prefix: the reuse lookup
+        // (`.is("paid_at", null).neq("status", "cancelled")[.eq(session)]
+        // .limit.maybeSingle`) and syncMemberRole's tally (`.gt`).
+        const found = { limit: () => ({ maybeSingle: () => Promise.resolve(existing) }) };
         return {
           eq: () => ({
             eq: () => ({
-              in: () => ({
-                limit: () => ({ maybeSingle: () => Promise.resolve(existing) }),
-                eq: () => ({ limit: () => ({ maybeSingle: () => Promise.resolve(existing) }) }),
-              }),
+              // reuse: .is(paid_at, null).eq(status, active)[.eq(session_date)]
+              is: () => ({ eq: () => ({ ...found, eq: () => found }) }),
+              // syncMemberRole's tally
               gt: () => Promise.resolve(ok([])),
             }),
           }),
@@ -853,27 +886,43 @@ describe("enrolMember on a free plan", () => {
     vi.restoreAllMocks();
   });
 
-  it("raises and activates it the first time", async () => {
+  // Raised and authorised in one INSERT, with its window already on it, and
+  // never a second UPDATE to finish the job.
+  it("raises it already authorised, in one write", async () => {
     const fake = fakeEnrolAdmin(ok(null));
-    await expect(enrol(fake)).resolves.toMatchObject({ ok: true, activated: true });
+    await expect(enrol(fake)).resolves.toMatchObject({ ok: true, authorised: true });
     expect(fake.inserts).toHaveLength(1);
-    expect(fake.updates[0]).toMatchObject({ status: "active" });
+    expect(fake.inserts[0]).toMatchObject({
+      status: "active",
+      starts_at: expect.any(String),
+    });
+    expect(fake.updates).toEqual([]);
   });
 
-  // The repeat. It must find the ALREADY-ACTIVE row, not just a pending one.
-  it("resolves a repeat back to the active membership instead of raising a second", async () => {
+  // Nothing is owed on a free plan, so nothing is recorded as paid either. This
+  // is what used to make an auto-assigned trial permanently undeletable.
+  it("records no payment on a free plan", async () => {
+    const fake = fakeEnrolAdmin(ok(null));
+    await enrol(fake);
+    expect(fake.inserts[0]).not.toHaveProperty("paid_at");
+  });
+
+  // The repeat — a retried submit, a double press, a reply that got lost. It
+  // has to find the UNPAID row, which is now `active` like every other
+  // membership; a pending-only guard would find nothing and raise a second.
+  it("resolves a repeat back to the existing membership instead of raising a second", async () => {
     const fake = fakeEnrolAdmin(
-      ok({ id: "mem-1", user_id: "user-1", status: "active", price_cents: 0 }),
+      ok({ id: "mem-1", user_id: "user-1", status: "active", paid_at: null, price_cents: 0 }),
     );
     await expect(enrol(fake)).resolves.toMatchObject({ ok: true });
     expect(fake.inserts).toHaveLength(0);
   });
 
-  // And having found it, must not re-run activation over it: that resets the
+  // And having found it, must not re-authorise it: that would recompute the
   // dates and credits of a membership somebody may already have trained on.
-  it("does not re-activate the membership it resolved back to", async () => {
+  it("does not re-authorise the membership it resolved back to", async () => {
     const fake = fakeEnrolAdmin(
-      ok({ id: "mem-1", user_id: "user-1", status: "active", price_cents: 0 }),
+      ok({ id: "mem-1", user_id: "user-1", status: "active", paid_at: null, price_cents: 0 }),
     );
     await enrol(fake);
     expect(fake.updates).toEqual([]);

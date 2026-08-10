@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import {
-  sendMembershipActivatedEmail,
-  sendMembershipPaymentEmail,
-} from "./membership-email.server";
+import { sendMembershipPaidEmail, sendMembershipPaymentEmail } from "./membership-email.server";
 
 describe("membership emails without an API key", () => {
   const original = process.env.LOVABLE_API_KEY;
@@ -38,14 +35,15 @@ describe("membership emails without an API key", () => {
     expect(from).not.toHaveBeenCalled();
   });
 
-  it("activation email skips when no API key", async () => {
+  it("payment-received email skips when no API key", async () => {
     delete process.env.LOVABLE_API_KEY;
-    const result = await sendMembershipActivatedEmail({
+    const result = await sendMembershipPaidEmail({
       membershipId: "m1",
       memberGreetingName: "Addy",
       memberEmail: "ada@example.com",
       planName: "One semester",
       validity: "Valid for 182 days.",
+      amount: "$245",
     });
     expect(result).toEqual({ sent: false, skipped: true });
   });

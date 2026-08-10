@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const setMembershipStatus = vi.fn();
 const deleteMembership = vi.fn();
+const markMembershipPaid = vi.fn();
 
 vi.mock("@tanstack/react-start", () => ({
   useServerFn: (fn: unknown) => fn,
@@ -20,15 +21,16 @@ vi.mock("@tanstack/react-start", () => ({
 vi.mock("@/lib/membership.functions", () => ({
   setMembershipStatus: (...args: unknown[]) => setMembershipStatus(...args),
   deleteMembership: (...args: unknown[]) => deleteMembership(...args),
+  markMembershipPaid: (...args: unknown[]) => markMembershipPaid(...args),
 }));
 
 const { MembershipRowActions } = await import("./MembershipRowActions");
 type Row = import("./MembershipRowActions").MembershipActionRow;
 
-/** A pending invoice nobody paid or trained on: the tidy-up case. */
+/** Authorised and unpaid: what every membership looks like once raised. */
 const JUNK: Row = {
   id: "mem-1",
-  status: "pending",
+  status: "active",
   paid_at: null,
   price_cents: 44500,
   checkin_count: 0,
@@ -41,26 +43,43 @@ function renderRow(overrides: Partial<Row> = {}, onChanged = vi.fn().mockResolve
 }
 
 describe("MembershipRowActions", () => {
-  // The bug this whole change starts from: the only button on a pending row was
-  // Activate, so cancelling one meant activating it first, which emails the
-  // member that their membership is live.
-  it("offers Cancel on a pending membership, with no activation first", () => {
+  // There is no Activate any more. A membership is authorised the moment it is
+  // raised, so what a manager is waiting to do is record the money.
+  it("offers Mark as paid on an unpaid membership, and no Activate", () => {
     renderRow();
-    expect(screen.getByRole("button", { name: /cancel/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /mark as paid/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /^activate/i })).not.toBeInTheDocument();
   });
 
-  it("offers Cancel on an active membership but not Activate", () => {
-    renderRow({ status: "active", paid_at: "2026-08-01T00:00:00Z" });
-    expect(screen.getByRole("button", { name: /cancel/i })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /activate/i })).not.toBeInTheDocument();
+  it("stops offering Mark as paid once a payment is recorded", () => {
+    renderRow({ paid_at: "2026-08-01T00:00:00Z" });
+    expect(screen.queryByRole("button", { name: /mark as paid/i })).not.toBeInTheDocument();
+  });
+
+  // Nothing is owed on a free membership, so there is nothing to record.
+  it("does not offer Mark as paid on a free membership", () => {
+    renderRow({ price_cents: 0, plan_name: "Free trial" });
+    expect(screen.queryByRole("button", { name: /mark as paid/i })).not.toBeInTheDocument();
+  });
+
+  it("offers Cancel on an authorised membership", () => {
+    renderRow();
+    expect(screen.getByRole("button", { name: /^cancel$/i })).toBeEnabled();
+  });
+
+  // Reopening is the narrow leftover: back into service, saying nothing about
+  // money either way.
+  it("offers Reopen on a closed membership and not on a running one", () => {
+    renderRow({ status: "cancelled" });
+    expect(screen.getByRole("button", { name: /reopen/i })).toBeEnabled();
   });
 
   it("does not offer Cancel on one already cancelled", () => {
     renderRow({ status: "cancelled" });
-    expect(screen.queryByRole("button", { name: /cancel/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^cancel$/i })).not.toBeInTheDocument();
   });
 
-  it("allows deleting a pending invoice nobody paid or trained on", () => {
+  it("allows deleting an unpaid invoice nobody trained on", () => {
     renderRow();
     expect(screen.getByRole("button", { name: /delete/i })).toBeEnabled();
   });
@@ -77,32 +96,55 @@ describe("MembershipRowActions", () => {
     expect(screen.getByText(/a class was checked in against it/i)).toBeInTheDocument();
   });
 
-  // Activation stamps `paid_at` on the $0 free trial too, and the trial is
-  // auto-assigned at waiver approval — so this is the row a manager most often
-  // wants gone. Reading that stamp as a payment would lock it forever.
-  it("still allows deleting an activated free trial nobody used", () => {
-    renderRow({
-      status: "cancelled",
-      paid_at: "2026-08-01T00:00:00Z",
-      price_cents: 0,
-      plan_name: "Free trial",
-    });
+  // The case the whole change exists for. Being authorised is now the normal
+  // state of every membership, so it must not stand in the way of a delete —
+  // it used to, because authorising was what wrote `paid_at`.
+  it("allows deleting an authorised membership nobody has paid for", () => {
+    renderRow({ status: "active", paid_at: null });
     expect(screen.getByRole("button", { name: /delete/i })).toBeEnabled();
   });
 
   // A disabled button with a hover-only reason is a dead end on a phone, where
   // there is no hover. The reason is in the accessibility tree either way.
   it("names every blocker at once rather than the first", () => {
-    renderRow({ status: "active", checkin_count: 1 });
+    renderRow({ paid_at: "2026-08-01T00:00:00Z", checkin_count: 1 });
     const reason = screen.getByText(/cannot be deleted/i);
-    expect(reason).toHaveTextContent(/still active/i);
+    expect(reason).toHaveTextContent(/a payment is recorded against it/i);
     expect(reason).toHaveTextContent(/checked in against it/i);
+  });
+
+  // Marking paid is outward-facing and one-way: it emails a receipt and makes
+  // the row undeletable. Both belong in the confirm, before the click.
+  it("says what marking paid will do before it happens", async () => {
+    const user = userEvent.setup();
+    renderRow();
+    await user.click(screen.getByRole("button", { name: /mark as paid/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent(/emails them a receipt/i);
+    expect(dialog).toHaveTextContent(/never deleted/i);
+  });
+
+  it("records the payment only after the confirm", async () => {
+    const user = userEvent.setup();
+    markMembershipPaid.mockResolvedValueOnce({ ok: true });
+    const { onChanged } = renderRow();
+
+    await user.click(screen.getByRole("button", { name: /mark as paid/i }));
+    expect(markMembershipPaid).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /^mark as paid$/i }));
+    await waitFor(() =>
+      expect(markMembershipPaid).toHaveBeenCalledWith({
+        data: { id: "mem-1", payment_method: "manual" },
+      }),
+    );
+    expect(onChanged).toHaveBeenCalled();
   });
 
   it("says what cancelling will do before it happens", async () => {
     const user = userEvent.setup();
     renderRow();
-    await user.click(screen.getByRole("button", { name: /cancel/i }));
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(await screen.findByRole("alertdialog")).toHaveTextContent(
       /lose the members-only calendar/i,
     );
@@ -113,7 +155,7 @@ describe("MembershipRowActions", () => {
     setMembershipStatus.mockResolvedValueOnce({ ok: true });
     const { onChanged } = renderRow();
 
-    await user.click(screen.getByRole("button", { name: /cancel/i }));
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(setMembershipStatus).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: /cancel membership/i }));
