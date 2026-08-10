@@ -8,6 +8,7 @@ import {
   formatCents,
   importBankStatementSchema,
   isUtsStudent,
+  markMembershipPaidSchema,
   haystackContainsRef,
   matchesMembershipReference,
   matchTransactionSchema,
@@ -247,59 +248,116 @@ function projectMembership(m: MembershipRow, plan?: MembershipPlanRow) {
 }
 
 /**
- * Activate a membership: set the active dates/credits, grant the `member` role
- * for paid plans, and email the member a confirmation. This is the single
- * activation code path shared by bank reconciliation and manual manager action
- * (and where a future Stripe webhook would also land).
+ * Authorise a membership: give it its dates and credits, mark it `active`, and
+ * reconcile the member label. This is what lets somebody be checked in.
+ *
+ * **It says nothing about money.** Until recently this function also stamped
+ * `paid_at` and the payment method, which made "this person may train" and "this
+ * person has paid" the same act — so a manager letting somebody on the mat while
+ * their transfer cleared was recording a payment that had not happened, and the
+ * delete guard then refused to remove the row because "a payment is recorded
+ * against it". Paying is now its own event: see `recordMembershipPayment`.
+ *
+ * No email either. Being authorised is not news on its own — the invoice that
+ * goes out when the membership is raised already says they can start training —
+ * and the one email left in the lifecycle belongs to the payment landing.
  */
-async function activateMembershipRow(
+/**
+ * The columns that make a membership authorised, for a plan and a start instant.
+ *
+ * Shared by the two ways a membership gets there — written straight into the
+ * INSERT when one is raised, and into the UPDATE when a closed one is reopened —
+ * so a membership can never exist in the half-state those two used to allow: an
+ * `active` row with no dates, which `isLive` reads as running forever.
+ *
+ * The plan resolves its own window: a dated plan runs exactly the range it was
+ * set up with, a rolling plan (yearly insurance) runs from this instant, and
+ * trial/casual plans end with their credits rather than on a date. No branch on
+ * `plan.kind` here — `planMembershipWindow` reads `starts_on`/`ends_on`/
+ * `duration_days` directly, so a new plan shape needs no new code path.
+ */
+function authorisedFields(plan: MembershipPlanRow, effectiveFrom?: string) {
+  const { starts_at, ends_at } = planMembershipWindow(
+    plan,
+    effectiveFrom ?? new Date().toISOString(),
+  );
+  return {
+    status: "active" as const,
+    starts_at,
+    ends_at,
+    sessions_remaining: plan.session_credits ?? null,
+  };
+}
+
+async function authoriseMembershipRow(
   admin: MembershipClient,
   membership: MembershipRow,
   plan: MembershipPlanRow,
   opts: {
-    paymentMethod: MembershipRow["payment_method"];
-    sendEmail?: boolean;
     /**
      * The instant the membership should be treated as beginning from, when that
      * is not "right now". Only the auto-assigned trial passes one: it runs from
      * the day its waiver was SIGNED, not the day a manager got round to
-     * approving it. `paid_at` still records the real clock.
+     * approving it.
      */
     effectiveFrom?: string;
-  },
+  } = {},
 ): Promise<void> {
-  const nowIso = new Date().toISOString();
-  const fromIso = opts.effectiveFrom ?? nowIso;
-
-  // The plan resolves its own dates — a dated plan runs exactly the window it
-  // was set up with, a rolling plan (yearly insurance) runs from this instant,
-  // and trial/casual plans end with their credits, not a date. No branch on
-  // `plan.kind` here: `planMembershipWindow` reads `starts_on`/`ends_on`/
-  // `duration_days` directly, so a brand-new plan shape needs no new code path.
-  const { starts_at: startsAt, ends_at: endsAt } = planMembershipWindow(plan, fromIso);
-
-  const patch: Partial<MembershipRow> = {
-    status: "active",
-    paid_at: nowIso,
-    starts_at: startsAt,
-    ends_at: endsAt,
-    sessions_remaining: plan.session_credits ?? null,
-    payment_method: opts.paymentMethod,
-  };
-  const { error } = await admin.from("memberships").update(patch).eq("id", membership.id);
+  const { error } = await admin
+    .from("memberships")
+    .update(authorisedFields(plan, opts.effectiveFrom))
+    .eq("id", membership.id);
   if (error) throw new Error(error.message);
 
-  // The row we just wrote is now visible to the reconcile, so a paid activation
-  // grants the label exactly as the inline upsert here used to. It can also take
-  // one back — activating a free trial for somebody whose paid membership closed
-  // a while ago is the case that used to leave the stale label behind.
+  // The row we just wrote is now visible to the reconcile. Being authorised is
+  // what makes somebody a member, paid or not, so this is where the label moves.
   await syncMemberRole(admin, membership.user_id);
+}
 
-  // Confirmation email (best-effort — never fail activation on a send error).
-  // The email lives on the auth user (the one email store); the name on the
-  // profile. Suppressed via opts.sendEmail for the auto-assigned trial, whose
-  // approval already emails them that their account is active.
-  if (membership.user_id && opts.sendEmail !== false) {
+/**
+ * Record that a membership has been paid for.
+ *
+ * The only writer of `paid_at`, and therefore the only thing that can make a
+ * membership undeletable. Reached two ways: bank reconciliation matching a
+ * statement line, and a manager pressing "Mark as paid" for money that never
+ * touched the club account (cash at the door).
+ *
+ * Idempotent on an already-paid row. It returns without writing rather than
+ * refreshing the date, because the first record is the true one and a second
+ * confirmation email to the member would be worse than useless. Reconciliation
+ * can legitimately see the same invoice twice — a re-imported statement, a
+ * manual match after an automatic one — so this is a normal path, not a guard
+ * against misuse.
+ */
+export async function recordMembershipPayment(
+  admin: MembershipClient,
+  input: {
+    membership: MembershipRow;
+    plan?: MembershipPlanRow;
+    method: MembershipRow["payment_method"];
+    /** When the money actually moved, if that is not now (a bank posting date). */
+    at?: string;
+  },
+): Promise<{ recorded: boolean }> {
+  const { membership } = input;
+  if (membership.paid_at) return { recorded: false };
+
+  const paidAt = input.at ?? new Date().toISOString();
+  // Compare-and-swap on `paid_at` still being null: two managers marking the
+  // same invoice paid, or a manual match racing the reconciler, must record one
+  // payment and send one email.
+  const { data: claimed, error } = await admin
+    .from("memberships")
+    .update({ paid_at: paidAt, payment_method: input.method })
+    .eq("id", membership.id)
+    .is("paid_at", null)
+    .select("id");
+  if (error) throw new Error(error.message);
+  if ((claimed ?? []).length === 0) return { recorded: false };
+
+  // Best-effort, and only after the write has committed: a send failure must not
+  // report a recorded payment as a failure and invite a retry.
+  if (membership.user_id) {
     try {
       const [{ data: profile }, emails] = await Promise.all([
         admin
@@ -311,20 +369,22 @@ async function activateMembershipRow(
       ]);
       const email = emails.get(membership.user_id) ?? null;
       if (email) {
-        const memberGreetingName = profile ? greetingName(profile) : "";
-        const { sendMembershipActivatedEmail } = await import("./membership-email.server");
-        await sendMembershipActivatedEmail({
+        const { sendMembershipPaidEmail } = await import("./membership-email.server");
+        await sendMembershipPaidEmail({
           membershipId: membership.id,
-          memberGreetingName,
+          memberGreetingName: profile ? greetingName(profile) : "",
           memberEmail: email,
-          planName: plan.name,
-          validity: validityLabel(plan),
+          planName: input.plan?.name ?? "your membership",
+          validity: input.plan ? validityLabel(input.plan) : "",
+          amount: formatCents(membership.price_cents),
         });
       }
     } catch (e) {
-      console.error("[activateMembershipRow] failed to send activation email:", e);
+      console.error("[recordMembershipPayment] failed to send the payment email:", e);
     }
   }
+
+  return { recorded: true };
 }
 
 /**
@@ -384,7 +444,10 @@ export async function assignTrialMembership(userId: string, signedAt: string): P
     .insert({
       user_id: userId,
       plan_id: plan.id,
-      status: "pending",
+      // Authorised on the spot, and never "paid": the trial is free, so there is
+      // no payment to record and nothing to email. The approval that triggered
+      // this already told them their account is live.
+      ...authorisedFields(plan, signedAt),
       is_student: false,
       uts_student_number: null,
       price_cents: 0,
@@ -394,11 +457,7 @@ export async function assignTrialMembership(userId: string, signedAt: string): P
     .select("*")
     .single();
   if (error || !inserted) throw new Error(error?.message || "Could not create trial membership.");
-  await activateMembershipRow(admin, inserted, plan, {
-    paymentMethod: "manual",
-    sendEmail: false,
-    effectiveFrom: signedAt,
-  });
+  await syncMemberRole(admin, inserted.user_id);
 }
 
 // ---- Member: list active plans ----
@@ -622,7 +681,7 @@ export async function enrolMember(
     /** False records the invoice without telling them about it. */
     sendEmail?: boolean;
   },
-): Promise<{ ok: true; activated: boolean; reference: string | null }> {
+): Promise<{ ok: true; authorised: true; reference: string | null }> {
   const { userId, plan, insurancePlan } = input;
 
   // Student status is derived server-side from the number's presence, so the
@@ -665,48 +724,52 @@ export async function enrolMember(
   // for casual) rather than creating duplicate rows / re-notifying on a
   // repeated "Choose". A dated plan needs no extra filter here any more: a
   // different window IS a different plan_id now, so filtering on plan_id
-  // alone already tells "Semester 2 2026" and "Semester 1 2027" apart. Both
-  // emails are keyed on the membership id, so resolving back to the same row is
-  // also what stops a second copy of either going out.
+  // alone already tells "Semester 2 2026" and "Semester 1 2027" apart. The
+  // invoice email is keyed on the membership id, so resolving back to the same
+  // row is also what stops a second copy going out.
   //
-  // A FREE plan has to match an `active` row as well, and that is the whole
-  // reason this is a status list rather than `.eq("status", "pending")`. A free
-  // plan does not wait for a payment: it is activated further down before the
-  // caller ever hears back. So on a repeat — a retried submit, a double press,
-  // a reply that got lost — a pending-only guard finds nothing, inserts a
-  // second membership and activates it, and the member gets a second "your
-  // membership is active" email under a new id that the idempotency key cannot
-  // dedupe. The `once ever` rule only covers the trial, so a $0 casual or
-  // period plan had nothing catching it at all.
+  // The rule is UNPAID and not cancelled, which is one rule for every plan kind.
+  // It used to be `status = 'pending'`, back when raising a membership left it
+  // waiting; now every membership is authorised the moment it exists, so status
+  // says nothing about whether this is a repeat. What makes a row a duplicate is
+  // that the club is still owed for the one already there.
   //
-  // Paid plans keep matching `pending` alone. An active paid membership is one
-  // the club has been paid for, and buying the same plan again after it lapses
-  // is a real purchase, not a duplicate.
-  const reusableStatuses = price === 0 ? ["pending", "active"] : ["pending"];
-  const pendingBase = admin
+  // A PAID membership is deliberately not reusable: buying the same plan again
+  // after paying for it is a real second purchase, not a double press. Nor is a
+  // cancelled one, which a manager closed on purpose.
+  const reuseBase = admin
     .from("memberships")
     .select("*")
     .eq("user_id", userId)
     .eq("plan_id", plan.id)
-    .in("status", reusableStatuses);
+    .is("paid_at", null)
+    // Only a LIVE enrolment is reusable. An expired unpaid row is a dead
+    // invoice: reusing it would hand back its old reference and leave
+    // `starts_at`/`ends_at` in the past, so somebody re-buying yearly insurance
+    // a year later would pay for cover whose window had already closed. Nothing
+    // re-runs `authorisedFields` on reuse, so the window has to still be good.
+    .eq("status", "active");
   // A failed read here defeats exactly what the reuse is for: it would report
   // no existing enrollment, insert a duplicate invoice and re-send the payment
   // email for one the member already has.
-  const { data: existingPending, error: pendErr } = await (
-    sessionDate ? pendingBase.eq("session_date", sessionDate) : pendingBase
+  const { data: existingUnpaid, error: pendErr } = await (
+    sessionDate ? reuseBase.eq("session_date", sessionDate) : reuseBase
   )
     .limit(1)
     .maybeSingle();
   if (pendErr) throw new Error(pendErr.message);
 
   let inserted: MembershipRow;
-  if (existingPending) {
-    inserted = existingPending;
+  if (existingUnpaid) {
+    inserted = existingUnpaid;
   } else {
     const insert = {
       user_id: userId,
       plan_id: plan.id,
-      status: "pending",
+      // Authorised on the spot. Raising a membership IS the authorisation: the
+      // invoice goes out and they can be checked in from that moment, with the
+      // money outstanding until somebody records it.
+      ...authorisedFields(plan),
       is_student: isStudent,
       uts_student_number: utsStudentNumber,
       price_cents: price,
@@ -725,9 +788,11 @@ export async function enrolMember(
 
   // The bundled insurance invoice rides on the SAME payment reference as the
   // plan invoice, so a member with no cover pays one transfer for both and
-  // reconciliation activates them together. A pending insurance invoice from
-  // an earlier attempt is reused with its reference and price refreshed to
-  // this purchase — an unpaid row holds no decisions to preserve.
+  // reconciliation settles them together. An unpaid insurance invoice from an
+  // earlier attempt is reused with its reference and price refreshed to this
+  // purchase — an unpaid row holds no decisions to preserve. A PAID one is left
+  // alone: rewriting the reference on a settled invoice would break the trail
+  // back to the transfer that paid it.
   let insuranceInvoice: MembershipRow | null = null;
   if (insurancePlan) {
     const insurancePrice = computeMembershipPrice(insurancePlan, isStudent);
@@ -736,7 +801,8 @@ export async function enrolMember(
       .select("*")
       .eq("user_id", userId)
       .eq("plan_id", insurancePlan.id)
-      .eq("status", "pending")
+      .is("paid_at", null)
+      .eq("status", "active")
       .limit(1)
       .maybeSingle();
     if (eiErr) throw new Error(eiErr.message);
@@ -760,7 +826,7 @@ export async function enrolMember(
         .insert({
           user_id: userId,
           plan_id: insurancePlan.id,
-          status: "pending",
+          ...authorisedFields(insurancePlan),
           is_student: isStudent,
           uts_student_number: utsStudentNumber,
           price_cents: insurancePrice,
@@ -775,28 +841,14 @@ export async function enrolMember(
     }
   }
 
-  // Free plans (the trial) activate immediately; paid plans await a transfer.
-  //
-  // Skipped when the row we resolved to is ALREADY active, which is what the
-  // widened reuse above can now hand back. Re-running activation would reset
-  // the dates and credits of a membership somebody may already have trained on
-  // — the same reason `setMembershipStatus` refuses to re-activate.
-  //
-  // `sendEmail` has to reach this call too, not just the payment email below.
-  // A free plan skips the payment email entirely and sends the ACTIVATION one
-  // instead, so without this a manager raising a trial with the email switched
-  // off still emails them "your membership is active" — the opposite of what
-  // they asked for, and on the one path where nothing else would tell them.
-  if (price === 0) {
-    if (inserted.status !== "active") {
-      await activateMembershipRow(admin, inserted, plan, {
-        paymentMethod: "manual",
-        sendEmail: input.sendEmail,
-      });
-    }
-    if (!insuranceInvoice) {
-      return { ok: true as const, activated: true, reference: null as string | null };
-    }
+  // Being authorised is what makes somebody a member, so the label follows the
+  // rows just written rather than waiting for a payment.
+  await syncMemberRole(admin, userId);
+
+  // A free plan has no invoice, so there is nothing to send and nothing to owe.
+  // It is already authorised by the insert above.
+  if (price === 0 && !insuranceInvoice) {
+    return { ok: true as const, authorised: true as const, reference: null as string | null };
   }
 
   // Email the member their bank-transfer instructions + notify managers. A
@@ -826,9 +878,12 @@ export async function enrolMember(
     }
   }
 
+  // `authorised` is always true now: raising a membership is what authorises it.
+  // A non-null `reference` is what says money is still owed — that, and not the
+  // status, is the question a caller actually has.
   return {
     ok: true as const,
-    activated: price === 0,
+    authorised: true as const,
     reference: inserted.payment_reference,
   };
 }
@@ -1210,14 +1265,18 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
     if (!membership) throw new Error("Membership not found.");
 
     if (data.status === "active") {
-      // Already active — don't re-run activation (it would reset the dates and
-      // re-send the confirmation email).
+      // Already active — don't re-authorise, which would recompute the dates and
+      // credits of a membership somebody may already have trained on.
       if (membership.status === "active") {
         return { ok: true as const, id: data.id, status: data.status };
       }
-      // Both outcomes stop the activation, but they are not the same problem:
-      // "Plan not found." for a broken query sends a manager to the plan
-      // catalogue to look for a plan that is sitting right there.
+      // Reopening a cancelled or expired membership. It gives back the dates and
+      // credits and nothing else: whether it was ever paid for is a separate
+      // fact this must not touch, in either direction.
+      //
+      // Both outcomes stop it, but they are not the same problem: "Plan not
+      // found." for a broken query sends a manager to the plan catalogue to look
+      // for a plan that is sitting right there.
       const { data: plan, error: planErr } = await admin
         .from("membership_plans")
         .select("*")
@@ -1225,9 +1284,7 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
         .maybeSingle();
       if (planErr) throw new Error(planErr.message);
       if (!plan) throw new Error("Plan not found.");
-      await activateMembershipRow(admin, membership, plan, {
-        paymentMethod: membership.payment_method || "manual",
-      });
+      await authoriseMembershipRow(admin, membership, plan);
     } else {
       const { error: uErr } = await admin
         .from("memberships")
@@ -1280,8 +1337,6 @@ export async function deleteMembershipRow(
 
   const blockers = whyMembershipCannotBeDeleted({
     paid_at: membership.paid_at,
-    price_cents: membership.price_cents,
-    status: membership.status,
     checkin_count: count ?? 0,
   });
   if (blockers.length) return { ok: false as const, blockers };
@@ -1291,6 +1346,40 @@ export async function deleteMembershipRow(
   await syncMemberRole(admin, membership.user_id);
   return { ok: true as const, id };
 }
+
+// ---- Manager: record a payment against a membership ----
+export const markMembershipPaid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => markMembershipPaidSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const admin = await adminClient();
+
+    const { data: membership, error } = await admin
+      .from("memberships")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!membership) throw new Error("Membership not found.");
+    if (membership.price_cents === 0)
+      throw new Error("There is nothing to pay on a free membership.");
+
+    // Not fatal: the plan only decorates the receipt, and refusing to record a
+    // payment because a plan name could not be read would be the wrong trade.
+    const { data: plan } = await admin
+      .from("membership_plans")
+      .select("*")
+      .eq("id", membership.plan_id)
+      .maybeSingle();
+
+    const { recorded } = await recordMembershipPayment(admin, {
+      membership,
+      plan: plan ?? undefined,
+      method: data.payment_method,
+    });
+    return { ok: true as const, id: data.id, recorded };
+  });
 
 // ---- Manager: delete a membership ----
 export const deleteMembership = createServerFn({ method: "POST" })
@@ -1324,7 +1413,7 @@ export const deleteMembership = createServerFn({ method: "POST" })
 export async function createMembershipForUser(
   admin: MembershipClient,
   input: CreateMembershipInput,
-): Promise<{ ok: true; activated: boolean; reference: string | null }> {
+): Promise<{ ok: true; authorised: true; reference: string | null }> {
   const { data: plan, error: planErr } = await admin
     .from("membership_plans")
     .select("*")
@@ -1449,9 +1538,14 @@ export const matchTransaction = createServerFn({ method: "POST" })
     if (planErr) throw new Error(planErr.message);
     if (!plan) throw new Error("Plan not found.");
 
-    if (membership.status !== "active") {
-      await activateMembershipRow(admin, membership, plan, { paymentMethod: "bank_transfer" });
-    }
+    // Matching a statement line to an invoice records a PAYMENT. It no longer
+    // authorises anything: the membership has been authorised since it was
+    // raised, and the money arriving is a separate fact about the same row.
+    await recordMembershipPayment(admin, {
+      membership,
+      plan,
+      method: "bank_transfer",
+    });
     const { error: tErr } = await admin
       .from("bank_transactions")
       .update({
@@ -1478,7 +1572,7 @@ export async function reconcileUnmatched(
   admin: MembershipClient,
 ): Promise<{ matched: number; unmatched: number | null }> {
   // Reconciliation reports a count back to the manager, so a failed read must
-  // not read as "nothing to match": an errored pending-memberships query would
+  // not read as "nothing to match": an errored unpaid-memberships query would
   // otherwise answer an import with "0 matched" while every payment sat there
   // waiting, and the manager would go chasing members who had already paid.
   const { data: txns, error: txErr } = await admin
@@ -1486,10 +1580,27 @@ export async function reconcileUnmatched(
     .select("*")
     .eq("status", "unmatched");
   if (txErr) throw new Error(txErr.message);
+  // What a statement line can settle is an UNPAID invoice, whatever its status.
+  // This used to look for `status = 'pending'`, which worked only while raising
+  // a membership left it waiting for money; now every membership is authorised
+  // from the moment it exists, so status says nothing about what is owed and
+  // filtering on it would match nothing at all.
+  //
+  // Cancelled invoices stay out: a manager closed those deliberately, and a
+  // stray transfer against one is something to look at by hand, not to settle
+  // silently.
   const { data: pending, error: pdErr } = await admin
     .from("memberships")
     .select("*")
-    .eq("status", "pending");
+    .is("paid_at", null)
+    .neq("status", "cancelled")
+    // Priced only. A free membership is never owed for, so leaving trials in the
+    // pool put every one the club has ever granted permanently up for matching —
+    // and a trial's reference has no date component, so it is byte-identical to
+    // the one minted for any undated purchase by the same person. It would join
+    // that reference's bundle, add 0 to the total so the sum still matched, and
+    // get stamped paid with a receipt for "Free".
+    .gt("price_cents", 0);
   if (pdErr) throw new Error(pdErr.message);
   const pendingList = (pending ?? []) as MembershipRow[];
   const planIds = [...new Set(pendingList.map((m) => m.plan_id))];
@@ -1550,29 +1661,30 @@ export async function reconcileUnmatched(
         continue;
       }
       const group = bundles[0];
-      // Activate every invoice in the bundle. One failure must not abort the
-      // others (same per-row rule as the single match below), and only a fully
-      // activated bundle marks the transaction matched: leaving a half-paid
-      // bundle for the manager is better than silently losing one invoice.
-      let allActivated = true;
+      // Record the payment against every invoice in the bundle. One failure must
+      // not abort the others (same per-row rule as the single match below), and
+      // only a fully settled bundle marks the transaction matched: leaving a
+      // half-paid bundle for the manager is better than silently losing one
+      // invoice.
+      let allRecorded = true;
       for (const hit of group) {
         const plan = planById.get(hit.plan_id);
         if (!plan) {
-          allActivated = false;
+          allRecorded = false;
           continue;
         }
         try {
-          await activateMembershipRow(admin, hit, plan, { paymentMethod: "bank_transfer" });
+          await recordMembershipPayment(admin, { membership: hit, plan, method: "bank_transfer" });
           remaining.delete(hit.id);
         } catch (e) {
-          allActivated = false;
+          allRecorded = false;
           console.error(
-            `[reconcile] bundle activation failed for membership ${hit.id} (transaction ${txn.id}); left for a manager to resolve:`,
+            `[reconcile] recording the payment failed for membership ${hit.id} (transaction ${txn.id}); left for a manager to resolve:`,
             e,
           );
         }
       }
-      if (allActivated) {
+      if (allRecorded) {
         await admin
           .from("bank_transactions")
           .update({
@@ -1589,18 +1701,17 @@ export async function reconcileUnmatched(
     const hit = hits[0];
     const plan = planById.get(hit.plan_id);
     if (!plan) continue;
-    // One bad invoice (e.g. a period row with no window selected, which
-    // activateMembershipRow refuses rather than silently defaulting) must not
-    // abort every other transaction in this statement. The bank_transactions
-    // row this txn came from was already committed by importBankStatement
-    // before this function ever ran, so an uncaught throw here would leave it
-    // permanently unmatched: every future import hits the same pair and fails
-    // the same way, with nothing after it in the loop ever getting a chance.
+    // One bad invoice must not abort every other transaction in this statement.
+    // The bank_transactions row this txn came from was already committed by
+    // importBankStatement before this function ever ran, so an uncaught throw
+    // here would leave it permanently unmatched: every future import hits the
+    // same pair and fails the same way, with nothing after it in the loop ever
+    // getting a chance.
     try {
-      await activateMembershipRow(admin, hit, plan, { paymentMethod: "bank_transfer" });
+      await recordMembershipPayment(admin, { membership: hit, plan, method: "bank_transfer" });
     } catch (e) {
       console.error(
-        `[reconcile] activation failed for membership ${hit.id} (transaction ${txn.id}); left unmatched for a manager to resolve:`,
+        `[reconcile] recording the payment failed for membership ${hit.id} (transaction ${txn.id}); left unmatched for a manager to resolve:`,
         e,
       );
       continue;

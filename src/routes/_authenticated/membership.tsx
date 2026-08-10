@@ -16,6 +16,7 @@ import {
   computeMembershipPrice,
   formatCents,
   insuranceSelection,
+  isUnpaid,
   isUtsStudent,
   sellablePlans,
   unpaidInvoices,
@@ -405,7 +406,7 @@ function MembershipPage() {
                         <td className="px-3 py-2 capitalize">{m.status}</td>
                         <td className="px-3 py-2">{formatCents(m.price_cents)}</td>
                         <td className="px-3 py-2">
-                          {m.status === "pending" ? (
+                          {isUnpaid(m) ? (
                             <span className="font-mono text-xs">{m.payment_reference}</span>
                           ) : (
                             "—"

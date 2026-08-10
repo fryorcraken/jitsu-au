@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCents, parseMoneyToCents, type BankTxnRow } from "@/lib/validation";
+import { formatCents, isUnpaid, parseMoneyToCents, type BankTxnRow } from "@/lib/validation";
 import {
   importBankStatement,
   listBankTransactions,
@@ -109,7 +109,11 @@ function ReconciliationPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const pending = useMemo(() => memberships.filter((m) => m.status === "pending"), [memberships]);
+  // What a statement line can settle is an UNPAID invoice, which is what this
+  // screen is for. Filtering on `status === "pending"` used to mean the same
+  // thing and now means nothing: every membership is authorised from the moment
+  // it is raised, so the list would come back empty with money still owed.
+  const pending = useMemo(() => memberships.filter(isUnpaid), [memberships]);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });

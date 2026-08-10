@@ -547,6 +547,13 @@ dated plan is on sale at once.
 `price_cents`, `payment_reference` (indexed; per-member, not unique),
 `payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
+`status` is about PERMISSION TO TRAIN, never money: `active` means authorised,
+and a membership is authorised the moment it is raised. `paid_at` is the money,
+written only by `recordMembershipPayment` (bank reconciliation, or a manager
+marking it paid), and it is what the delete guard reads. `pending` is no longer
+produced by anything and survives only on rows created before the two were
+separated; `isUnpaid` in `src/lib/validation.ts` is the one definition of who
+still owes the club money.
 Constraint: the student rate requires a `uts_student_number`. The `member` role
 is reconciled against these rows by `syncMemberRole` after every activation,
 cancellation and deletion — it is a label, not the access gate (see the

@@ -13,6 +13,7 @@ import {
   haystackContainsRef,
   insuranceSelection,
   matchesMembershipReference,
+  isUnpaid,
   membershipDeleteMessage,
   normalizeRef,
   whyMembershipCannotBeDeleted,
@@ -140,24 +141,16 @@ describe("deriveLifecycleStatus", () => {
 // EVERY blocker, because clearing one and being refused by the next is how a
 // manager ends up deciding the screen is broken.
 describe("whyMembershipCannotBeDeleted", () => {
-  const junk = { paid_at: null, price_cents: 44500, status: "pending", checkin_count: 0 };
+  const junk = { paid_at: null, checkin_count: 0 };
 
-  it("lets a pending invoice nobody paid or trained on go", () => {
+  it("lets an unpaid invoice nobody trained on go", () => {
     expect(whyMembershipCannotBeDeleted(junk)).toEqual([]);
-  });
-
-  it("lets a cancelled invoice go, which is the tidy-up this exists for", () => {
-    expect(whyMembershipCannotBeDeleted({ ...junk, status: "cancelled" })).toEqual([]);
   });
 
   it("blocks one that has been paid", () => {
     expect(whyMembershipCannotBeDeleted({ ...junk, paid_at: "2026-08-01T00:00:00Z" })).toEqual([
       "paid",
     ]);
-  });
-
-  it("blocks one that is still active", () => {
-    expect(whyMembershipCannotBeDeleted({ ...junk, status: "active" })).toEqual(["active"]);
   });
 
   // session_checkins.membership_id is ON DELETE SET NULL, so without this guard
@@ -169,48 +162,18 @@ describe("whyMembershipCannotBeDeleted", () => {
 
   it("reports every blocker at once, not the first one found", () => {
     expect(
-      whyMembershipCannotBeDeleted({
-        paid_at: "2026-08-01T00:00:00Z",
-        price_cents: 44500,
-        status: "active",
-        checkin_count: 3,
-      }),
-    ).toEqual(["paid", "active", "attended"]);
+      whyMembershipCannotBeDeleted({ paid_at: "2026-08-01T00:00:00Z", checkin_count: 3 }),
+    ).toEqual(["paid", "attended"]);
   });
 
-  // Activation stamps `paid_at` on every membership, the $0 free trial
-  // included — and the trial is auto-assigned at waiver approval, so it is the
-  // likeliest thing a manager ever needs to undo. Reading that stamp as a
-  // payment would make it undeletable and say "a payment is recorded against
-  // it", which is both untrue and a dead end.
-  it("does not treat an activated free trial as paid", () => {
-    expect(
-      whyMembershipCannotBeDeleted({
-        paid_at: "2026-08-01T00:00:00Z",
-        price_cents: 0,
-        status: "cancelled",
-        checkin_count: 0,
-      }),
-    ).toEqual([]);
-  });
-
-  it("still blocks a free membership somebody actually trained on", () => {
-    expect(
-      whyMembershipCannotBeDeleted({
-        paid_at: "2026-08-01T00:00:00Z",
-        price_cents: 0,
-        status: "cancelled",
-        checkin_count: 1,
-      }),
-    ).toEqual(["attended"]);
-  });
-
-  // An expired membership is not automatically safe: it expired BECAUSE its
-  // credits ran out on classes somebody attended.
-  it("still blocks an expired membership that was trained on", () => {
-    expect(whyMembershipCannotBeDeleted({ ...junk, status: "expired", checkin_count: 2 })).toEqual([
-      "attended",
-    ]);
+  // The whole reason authorising and paying were separated. Being authorised
+  // is now the normal state of every membership from the moment it is raised,
+  // so if it blocked deletion nothing would ever be deletable without a cancel
+  // first — and `paid_at` used to be written by that same act, which is what
+  // made a hand-authorised membership permanently undeletable.
+  it("does not care whether it is active, only whether it was paid for", () => {
+    expect(whyMembershipCannotBeDeleted(junk)).toEqual([]);
+    expect(whyMembershipCannotBeDeleted({ paid_at: null, checkin_count: 0 })).toEqual([]);
   });
 });
 
@@ -219,29 +182,61 @@ describe("membershipDeleteMessage", () => {
     expect(membershipDeleteMessage([])).toBe("");
   });
 
-  it("names the single reason and what to do instead", () => {
-    const msg = membershipDeleteMessage(["active"]);
-    expect(msg).toContain("it is still active");
-    expect(msg).toContain("cancel it");
+  it("names the reason and what to do about it", () => {
+    const msg = membershipDeleteMessage(["attended"]);
+    expect(msg).toContain("a class was checked in against it");
+    expect(msg).toContain("move those check-ins");
   });
 
-  // The one blocker a manager cannot clear decides the advice on its own:
-  // there is no sequence of steps that ends in a paid row being deleted, so
-  // sending them off to move check-ins first would be a wasted trip.
+  // The blocker nobody can clear decides the advice on its own: there is no
+  // sequence of steps that ends in a settled invoice being deleted, so sending
+  // them off to move check-ins first would be a wasted trip.
   it("tells a manager to cancel a paid one rather than listing steps", () => {
     const msg = membershipDeleteMessage(["paid", "attended"]);
     expect(msg).toContain("Cancel it instead");
     expect(msg).not.toContain("To delete it");
   });
 
-  it("orders the steps so the check-ins move before the cancel", () => {
-    const msg = membershipDeleteMessage(["active", "attended"]);
-    expect(msg.indexOf("move those check-ins")).toBeLessThan(msg.indexOf("cancel it"));
+  it("reads as a sentence with every reason in it", () => {
+    const msg = membershipDeleteMessage(["paid", "attended"]);
+    expect(msg).toContain("a payment is recorded against it and a class was checked in against it");
+  });
+});
+
+// One definition of "unpaid", shared by the member's invoice list, the
+// reconciliation screen, the check-in warning and the delete guard. It reads
+// `paid_at` and never `status`, because status is about permission to train.
+describe("isUnpaid", () => {
+  const owed = { status: "active", paid_at: null, price_cents: 44500 };
+
+  it("is unpaid while no payment has been recorded", () => {
+    expect(isUnpaid(owed)).toBe(true);
   });
 
-  it("reads as a sentence with every reason in it", () => {
-    const msg = membershipDeleteMessage(["paid", "active", "attended"]);
-    expect(msg).toContain("a payment is recorded against it, it is still active and a class");
+  it("is paid once a payment is recorded", () => {
+    expect(isUnpaid({ ...owed, paid_at: "2026-08-01T00:00:00Z" })).toBe(false);
+  });
+
+  // A withdrawn invoice is owed nothing. Chasing somebody for one a manager
+  // cancelled is worse than not chasing at all.
+  it("owes nothing on a cancelled membership", () => {
+    expect(isUnpaid({ ...owed, status: "cancelled" })).toBe(false);
+  });
+
+  // The rows that predate the split still say `pending`, and they are unpaid in
+  // exactly the same way as everything else.
+  it("still reads a legacy pending row as unpaid", () => {
+    expect(isUnpaid({ ...owed, status: "pending" })).toBe(true);
+  });
+
+  // Nothing records a payment against $0, so a free membership's `paid_at` is
+  // null for ever. Without the price test that made every auto-assigned trial a
+  // standing invoice: the member's own page showed them the club's bank details
+  // and a payment reference for something the club had given them, with no
+  // action anywhere that could clear it.
+  it("never owes anything on a free membership, however long it goes unpaid", () => {
+    expect(isUnpaid({ ...owed, price_cents: 0 })).toBe(false);
+    expect(isUnpaid({ status: "active", paid_at: null, price_cents: 0 })).toBe(false);
   });
 });
 
@@ -655,22 +650,31 @@ describe("sellablePlans", () => {
 });
 
 describe("unpaidInvoices", () => {
+  // Authorised and unpaid, which is what every membership looks like the moment
+  // it is raised.
   const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
     id: "m1",
-    status: "pending",
+    status: "active",
+    paid_at: null,
     plan_name: "Semester 2 2026",
     price_cents: 24500,
     payment_reference: "UTSJ-LOVE-A1B2",
     ...overrides,
   });
 
-  it("returns nothing when nothing is pending", () => {
+  it("returns nothing when everything is settled or withdrawn", () => {
     expect(
-      unpaidInvoices([row({ status: "active" }), row({ id: "m2", status: "cancelled" })]),
+      unpaidInvoices([
+        row({ paid_at: "2026-08-01T00:00:00Z" }),
+        row({ id: "m2", status: "cancelled" }),
+      ]),
     ).toEqual([]);
   });
 
-  it("carries the amount and reference of a single pending membership", () => {
+  // Being authorised is not being paid up. This is the case that would break
+  // silently if "unpaid" went back to meaning `status === "pending"`: every
+  // membership is active now, so the member would be shown nothing to pay.
+  it("bills an authorised membership that has not been paid for", () => {
     expect(unpaidInvoices([row()])).toEqual([
       {
         reference: "UTSJ-LOVE-A1B2",
@@ -706,10 +710,10 @@ describe("unpaidInvoices", () => {
   });
 
   it("ignores an already-paid membership sharing the reference", () => {
-    // Half a bundle reconciled on its own (a manager activating one row by
-    // hand) must not be re-billed: only what is still pending is owed.
+    // Half a bundle settled on its own (a manager marking one row paid by hand)
+    // must not be re-billed: only what is still owed is owed.
     const invoices = unpaidInvoices([
-      row({ status: "active" }),
+      row({ paid_at: "2026-08-01T00:00:00Z" }),
       row({ id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }),
     ]);
     expect(invoices).toEqual([

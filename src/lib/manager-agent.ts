@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "9",
+  version: "10",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,20 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "10",
+      // Authorising a membership and paying for one used to be the same act.
+      // Splitting them changes what `status` means and what `create_membership`
+      // hands back, so a client that branched on either behaves differently.
+      breaking: true,
+      notes: [
+        "A membership's `status` no longer says anything about money. `active` now means AUTHORISED TO TRAIN, and a membership is authorised the moment it is raised, with its invoice outstanding. Whether it has been paid for is `paid_at`, which is written only when a payment is actually recorded. Read `paid_at`, never `status`, to tell who owes the club money.",
+        "`pending` is no longer produced by anything. Rows created before this still carry it and are unpaid in exactly the same way as any other unpaid row, so filter on `paid_at` rather than listing statuses.",
+        "create_membership returns `authorised: true` in place of `activated`, and the membership it raises is already authorised whatever the plan costs. Its invoice is what is outstanding, and `reference` is non-null exactly when money is owed.",
+        "New action mark_invoice_paid: record a payment against an invoice, for money that never touches the club account (cash at the door). It is idempotent — a second call on an already-paid invoice records nothing and re-sends nothing — and it emails the member a receipt. This is the manual counterpart to bank reconciliation, and it is what makes an invoice permanently undeletable.",
+        "delete_invoice no longer refuses on `active`, because every membership is active now and that blocker would have made every delete a two-step. The remaining blockers are `paid` and `attended`. A call that used to be refused with `active` can now succeed.",
+      ],
+    },
     {
       version: "9",
       // Two new actions, and one existing action quietly doing more. Nothing
@@ -253,7 +267,7 @@ export const AGENT_MANIFEST: {
       name: "create_membership",
       method: "POST",
       summary:
-        "Raise an invoice for a person against a plan — the manager's counterpart to a member choosing a plan on the site. A priced plan lands PENDING with the same payment reference the member would quote on a transfer, so it reconciles off a bank statement normally, and activating it stays a separate deliberate step because that grants the member role and emails them. A FREE plan (the trial) activates on the spot, as it does for a member choosing it themselves; read `activated` in the result rather than assuming. Unlike a member's own purchase it accepts a plan that is no longer on sale, which is what backfilling a past training period needs. Re-raising the same person + plan reuses their existing unpaid invoice rather than creating a second one, so a retry is safe. The free trial is still once per person, ever.",
+        "Raise a membership for a person against a plan — the manager's counterpart to a member choosing a plan on the site. It is AUTHORISED immediately, whatever the plan costs: they can be checked in from that moment, with the invoice outstanding. Paying is a separate event (see mark_invoice_paid, or bank reconciliation); `reference` in the result is non-null exactly when money is owed, and carries what the member would quote on a transfer. Unlike a member's own purchase it accepts a plan that is no longer on sale, which is what backfilling a past training period needs. Re-raising the same person + plan reuses their existing UNPAID invoice rather than creating a second one, so a retry is safe. The free trial is still once per person, ever.",
       params: [
         {
           name: "user_id",
@@ -324,10 +338,25 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
+      name: "mark_invoice_paid",
+      method: "POST",
+      summary:
+        "Record a payment against an invoice, for money that never touches the club account — cash at the door, or a transfer settled some other way. Bank reconciliation does this automatically when a statement line matches, so reach for this only when it cannot. It emails the member a receipt, and it is what makes the invoice permanently undeletable, so record it only once the money has actually arrived. Idempotent: a second call on an already-paid invoice records nothing, moves no date and sends no second receipt, and comes back with `recorded: false`. Refused on a free membership, which has nothing to pay.",
+      params: [
+        { name: "id", required: true, description: "Invoice (membership) UUID." },
+        {
+          name: "payment_method",
+          required: false,
+          description:
+            "bank_transfer | stripe | manual. Defaults to manual, which is what an invoice the reconciler could not see almost always is — say bank_transfer only when a real transfer landed and you are recording it by hand.",
+        },
+      ],
+    },
+    {
       name: "delete_invoice",
       method: "POST",
       summary:
-        "Delete an invoice outright, for tidying up one that should never have existed. Refused with 409 invoice_not_deletable when a payment is recorded against it, when it is still active, or when a class was checked in against it; error.details.blockers names EVERY reason at once (paid | active | attended) so clearing one does not walk into the next. A paid invoice is never deletable and there is no confirm flag to force it — cancel it instead via edit_invoice, which closes it and keeps the club's record of the money. An 'attended' blocker is cleared by moving those check-ins to another membership, which is a manager-screen action and not available through this API.",
+        "Delete an invoice outright, for tidying up one that should never have existed. Refused with 409 invoice_not_deletable when a payment is recorded against it, or when a class was checked in against it; error.details.blockers names EVERY reason at once (paid | attended) so clearing one does not walk into the next. Being active is NOT a blocker: every membership is authorised from the moment it is raised, so that would refuse everything. A paid invoice is never deletable and there is no confirm flag to force it — cancel it instead via edit_invoice, which closes it and keeps the club's record of the money. An 'attended' blocker is cleared by moving those check-ins to another membership, which is a manager-screen action and not available through this API.",
       params: [{ name: "id", required: true, description: "Invoice (membership) UUID." }],
     },
     {

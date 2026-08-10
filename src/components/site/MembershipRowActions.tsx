@@ -1,20 +1,26 @@
-// Activate / Cancel / Delete for one membership, shared by the two manager
-// screens that show them: the club-wide invoice list (/manager/memberships) and
-// one person's page (/manager/users/<id>).
+// Mark as paid / Reopen / Cancel / Delete for one membership, shared by the two
+// manager screens that show them: the club-wide invoice list
+// (/manager/memberships) and one person's page (/manager/users/<id>).
 //
 // Shared rather than duplicated because these buttons are not styling — they
-// grant somebody membership, close it, or destroy a record. Two copies of that
+// record money, close a membership, or destroy a record. Two copies of that
 // would be two places for the delete guard to drift, and the guard is the whole
 // point of the delete button.
 //
+// There is no Activate here any more, and its absence is the point: a membership
+// is authorised from the moment it is raised, so the thing a manager is waiting
+// to do is record the payment. Reopen is the narrow leftover — putting a
+// cancelled or expired membership back into service — and it says nothing about
+// money.
+//
 // The confirms say what will happen in words before the click, because both
-// outward-facing actions here are ones somebody feels: activating emails the
-// member and grants them the member label, deleting cannot be undone. A failure
+// outward-facing actions here are ones somebody feels: marking paid emails a
+// receipt and makes the row permanent, deleting cannot be undone. A failure
 // stays in the dialog with the button still there rather than becoming a toast
 // that auto-dismisses on a phone.
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Check, Loader2, Trash2, Undo2 } from "lucide-react";
+import { Check, Loader2, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -26,21 +32,35 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { deleteMembership, setMembershipStatus } from "@/lib/membership.functions";
-import { membershipDeleteMessage, whyMembershipCannotBeDeleted } from "@/lib/validation";
+import {
+  deleteMembership,
+  markMembershipPaid,
+  setMembershipStatus,
+} from "@/lib/membership.functions";
+import {
+  formatCents,
+  isUnpaid,
+  membershipDeleteMessage,
+  whyMembershipCannotBeDeleted,
+} from "@/lib/validation";
 
 /** The fields both screens' membership rows carry, and all the guard needs. */
 export type MembershipActionRow = {
   id: string;
   status: string;
+  /** When a payment was recorded. Null means the club is still owed for it. */
   paid_at: string | null;
-  /** Needed by the guard: a stamped `paid_at` on a $0 plan is not a payment. */
+  /** A free membership has nothing to pay, so it is never marked paid. */
   price_cents: number;
   checkin_count: number;
   plan_name: string | null;
 };
 
-type Pending = { kind: "activate" | "cancel" | "delete"; error: string | null; busy: boolean };
+type Pending = {
+  kind: "pay" | "reopen" | "cancel" | "delete";
+  error: string | null;
+  busy: boolean;
+};
 
 export function MembershipRowActions({
   membership,
@@ -52,6 +72,7 @@ export function MembershipRowActions({
 }) {
   const setStatus = useServerFn(setMembershipStatus);
   const remove = useServerFn(deleteMembership);
+  const markPaid = useServerFn(markMembershipPaid);
   const [pending, setPending] = useState<Pending | null>(null);
 
   // Computed here from the same pure rule the server enforces, so the button and
@@ -60,14 +81,19 @@ export function MembershipRowActions({
   // deleted out from under.
   const blockers = whyMembershipCannotBeDeleted(membership);
   const canDelete = blockers.length === 0;
+  // `isUnpaid` already knows a free membership owes nothing.
+  const owesMoney = isUnpaid(membership);
+  const isClosed = membership.status === "cancelled" || membership.status === "expired";
 
   async function run(kind: Pending["kind"]) {
     setPending({ kind, error: null, busy: true });
     try {
       if (kind === "delete") await remove({ data: { id: membership.id } });
+      else if (kind === "pay")
+        await markPaid({ data: { id: membership.id, payment_method: "manual" } });
       else
         await setStatus({
-          data: { id: membership.id, status: kind === "activate" ? "active" : "cancelled" },
+          data: { id: membership.id, status: kind === "reopen" ? "active" : "cancelled" },
         });
     } catch (e) {
       // Stays on screen, in the dialog, with the button still there to press
@@ -88,10 +114,16 @@ export function MembershipRowActions({
   }
 
   const copy = {
-    activate: {
-      title: `Activate ${membership.plan_name ?? "this membership"}?`,
-      body: "This marks it paid, emails them that their membership is active, and lists them as a member. There is no undo email.",
-      confirm: "Activate",
+    pay: {
+      title: `Record payment for ${membership.plan_name ?? "this membership"}?`,
+      body: `This records ${formatCents(membership.price_cents)} as received and emails them a receipt. It is also what makes this membership permanent: a membership with a payment against it can be cancelled, but never deleted. Only do this once the money has actually arrived.`,
+      confirm: "Mark as paid",
+      destructive: false,
+    },
+    reopen: {
+      title: `Reopen ${membership.plan_name ?? "this membership"}?`,
+      body: "This gives back its dates and credits so they can be checked in again. It does not change whether it was paid for.",
+      confirm: "Reopen",
       destructive: false,
     },
     cancel: {
@@ -111,12 +143,18 @@ export function MembershipRowActions({
   return (
     <>
       <div className="flex flex-wrap justify-end gap-2">
-        {membership.status !== "active" && (
+        {owesMoney && (
+          <Button size="sm" onClick={() => setPending({ kind: "pay", error: null, busy: false })}>
+            <Check className="mr-1 h-3 w-3" /> Mark as paid
+          </Button>
+        )}
+        {isClosed && (
           <Button
             size="sm"
-            onClick={() => setPending({ kind: "activate", error: null, busy: false })}
+            variant="outline"
+            onClick={() => setPending({ kind: "reopen", error: null, busy: false })}
           >
-            <Check className="mr-1 h-3 w-3" /> Activate
+            <RotateCcw className="mr-1 h-3 w-3" /> Reopen
           </Button>
         )}
         {membership.status !== "cancelled" && (

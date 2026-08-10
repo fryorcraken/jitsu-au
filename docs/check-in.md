@@ -43,7 +43,11 @@ In order, highest first:
   not quietly die unused.
 - **Yearly insurance never covers a class.** It buys affiliation and cover, not
   mat time.
-- A **pending** membership never covers anything: the money has not landed.
+- **An unpaid membership still covers a class.** Being authorised is what
+  entitles somebody to train, and that happens when the membership is raised, so
+  a member training while their transfer clears is covered and the door sees a
+  "waiting on payment" flag beside it. Only a **cancelled** or **expired**
+  membership covers nothing.
 - **No date ever gates a credit.** A free trial or casual pass is a balance, not
   a window: it covers any class at all until its credits run out, including one
   held before the membership row existed. Someone having trained is a fact that
@@ -140,11 +144,19 @@ people in to a class that did not run.
    paperwork landed: the club records what happened and pays for it out of what
    the person is entitled to. Dates only decide what a **dated** membership
    bought.
-7. **No cover always says why.** "Nothing covers this class" is a dead end;
+7. **Being authorised is what covers a class, not having paid.** A membership is
+   `active` from the moment it is raised, so a member can train while their
+   transfer clears. The door is told: `payment_pending` fires on an unpaid
+   invoice (`paid_at` null, priced, not cancelled), which is a flag next to a
+   covered check-in, never a refusal — see rule 5. It used to key on
+   `status = 'pending'`, which meant the same thing only while raising a
+   membership left it waiting for money; on the current model that would warn
+   about nobody at all.
+8. **No cover always says why.** "Nothing covers this class" is a dead end;
    "a membership starts after this class" or "waiting on a payment" is something
    a manager can act on. Every reason coverage resolution knows is surfaced on
    the roster and in the attach list, rather than logged and swallowed.
-8. **Sessions attended is not credits used.** It counts classes trained,
+9. **Sessions attended is not credits used.** It counts classes trained,
    including uncovered ones. How many credits a membership has left is a separate
    number and lives on the membership.
 
