@@ -19,6 +19,7 @@ test("the header takes you to the class schedule", async ({ page }) => {
   await (await siteNavLink(page, "Classes")).click();
 
   await expect(page).toHaveURL(/\/classes$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Train with us in Ultimo");
   await expectPageRendered(page);
 });
 

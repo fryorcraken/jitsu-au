@@ -6,7 +6,8 @@
 // rather than two that drift. docs/e2e-tests.md has the run instructions.
 
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
@@ -20,7 +21,14 @@ type ClubFixture = {
   params: Record<string, string>;
 };
 
-const FIXTURE_PATH = resolve(process.env.LOCAL_CLUB_FIXTURE ?? ".local-club-fixture.json");
+// Resolved against the repo root, not the working directory: the seed writes it
+// there, and a run started from a subdirectory would otherwise report "no
+// seeded club" for a perfectly good one.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const FIXTURE_PATH = resolve(
+  REPO_ROOT,
+  process.env.LOCAL_CLUB_FIXTURE ?? ".local-club-fixture.json",
+);
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 

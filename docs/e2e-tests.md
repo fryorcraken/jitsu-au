@@ -35,7 +35,10 @@ each other:
 
 Two escape hatches while iterating on a test rather than on the app:
 `E2E_SKIP_BUILD=1` reuses the build on disk, `E2E_SKIP_SEED=1` reuses the club
-already in the stack.
+already in the stack. Skipping the build refuses to reuse one made against a
+different Supabase project — `VITE_SUPABASE_URL` is baked in at build time, so
+an `.env`-flavoured build would serve a browser talking to the live club and no
+runtime guard would see it.
 
 After a run, `playwright-report/index.html` has the results; a failure carries
 its trace, screenshot and video, and `bunx playwright show-trace` replays it
@@ -65,7 +68,7 @@ those personas in once for the whole run rather than per test.
 
 `public/` is walked twice, at desktop and phone width, because most of this
 club's traffic is phones and the header nav is behind a menu button down there
-(use `openSiteNav` from `support/page.ts` rather than clicking the link
+(use `siteNavLink` from `support/page.ts` rather than clicking the link
 directly). The manager screens are laptop-only, which is where that admin
 actually gets done.
 

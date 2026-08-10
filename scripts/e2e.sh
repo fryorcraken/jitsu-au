@@ -56,17 +56,39 @@ fi
 # test-only tool. `--no-save` installs it without touching the committed
 # lockfile. The version is pinned so the browser matches the driver.
 PLAYWRIGHT_VERSION="$(cat scripts/playwright-version.txt)"
-if [[ "$(bun pm ls 2>/dev/null | grep -c "@playwright/test@${PLAYWRIGHT_VERSION}")" == "0" ]]; then
+# Read what is on disk rather than asking bun: a `--no-save` install is by
+# definition absent from package.json, so `bun pm ls` never sees it and we would
+# reinstall Playwright and its browser on every run.
+INSTALLED_PLAYWRIGHT="$(
+  node -p "require('./node_modules/@playwright/test/package.json').version" 2>/dev/null || true
+)"
+if [[ "$INSTALLED_PLAYWRIGHT" != "$PLAYWRIGHT_VERSION" ]]; then
   echo "[e2e] installing @playwright/test@${PLAYWRIGHT_VERSION}"
   bun add --no-save "@playwright/test@${PLAYWRIGHT_VERSION}"
   bunx playwright install chromium
 fi
 
-if [[ "${E2E_SKIP_BUILD:-}" != "1" ]]; then
+# Which Supabase project a build was made against, recorded next to it.
+#
+# VITE_SUPABASE_URL is baked in at BUILD time, so a build made from `.env` — the
+# live project — serves a browser that talks to production, and no runtime guard
+# would notice: e2e/support/fixture.ts only checks the URL this script signs in
+# against. So a reused build has to prove where it came from.
+BUILD_STAMP=".output/.e2e-supabase-url"
+
+if [[ "${E2E_SKIP_BUILD:-}" == "1" ]]; then
+  if [[ "$(cat "$BUILD_STAMP" 2>/dev/null || true)" != "$API_URL" ]]; then
+    echo "The build in .output was not made against $API_URL (E2E_SKIP_BUILD=1)." >&2
+    echo "Re-run without E2E_SKIP_BUILD so the browser under test cannot be pointed" >&2
+    echo "at the club's real database." >&2
+    exit 1
+  fi
+else
   # NITRO_PRESET overrides the Cloudflare default so the build produces a server
   # Playwright's webServer can run directly.
   echo "[e2e] building"
   NITRO_PRESET=node-server bun run build
+  printf '%s' "$API_URL" > "$BUILD_STAMP"
 fi
 
 exec bunx playwright test "$@"
