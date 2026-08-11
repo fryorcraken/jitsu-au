@@ -10,8 +10,22 @@
 // must hand the credit back rather than keep it, attaching the same check-in
 // twice must not spend twice, and the membership a check-in just drew on must
 // not be closed out from under it.
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyCoverage, undoCheckInRow } from "./checkin.functions";
+
+/**
+ * `applyCoverage` reaches for this the moment a casual credit is actually
+ * spent (see the doc comment on `applyCoverage` and on
+ * `ensureCasualInvoiceEmailed` itself for why: the email `enrolMember` sends
+ * when the membership is raised is not a guarantee). Mocked here because what
+ * these tests pin is WHETHER and WITH WHAT it is called, not the email
+ * machinery underneath it, which `membership.functions.test.ts` covers on its
+ * own.
+ */
+const ensureCasualInvoiceEmailed = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/membership.functions", () => ({
+  ensureCasualInvoiceEmailed: (...args: unknown[]) => ensureCasualInvoiceEmailed(...args),
+}));
 
 type Result = { data: unknown; error: { message: string } | null; count?: number | null };
 const ok = (data: unknown): Result => ({ data, error: null });
@@ -98,6 +112,10 @@ const ofTable = (calls: Op[], table: string, verb: Op["verb"]) =>
   calls.filter((c) => c.table === table && c.verb === verb);
 
 describe("applyCoverage", () => {
+  beforeEach(() => {
+    ensureCasualInvoiceEmailed.mockClear();
+  });
+
   it("spends the credit and records what paid for the class", async () => {
     const { admin, calls } = fakeClient((op) => {
       if (op.table === "membership_plans") return ok(PLANS);
@@ -212,6 +230,62 @@ describe("applyCoverage", () => {
     expect(sweeps.flatMap((c) => (filterValue(c, "id") as string[]) ?? [])).not.toContain(
       "mem-pack",
     );
+
+    // A casual credit was what paid for this class, so the check-in guarantees
+    // it has an invoice or receipt in their inbox.
+    expect(ensureCasualInvoiceEmailed).toHaveBeenCalledWith(admin, "mem-pack");
+  });
+
+  // The invoice guarantee is specific to a casual (credit) coverage — spending
+  // a trial credit or drawing on an unlimited period membership must not fire
+  // it, since neither is the "casual session" case this exists for.
+  it("does not guarantee an invoice email for a trial or a period membership", async () => {
+    const { admin: trialAdmin } = fakeClient((op) => {
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships" && op.verb === "select") return ok([trialRow()]);
+      if (op.table === "memberships" && op.verb === "update") return ok([{ id: "mem-trial" }]);
+      if (op.table === "session_checkins") return ok([{ id: "chk-1" }]);
+      return ok([]);
+    });
+    const trialDecision = await applyCoverage(trialAdmin, {
+      checkInId: "chk-1",
+      userId: "u1",
+      at: CLASS_AT,
+    });
+    expect(trialDecision.coverage).toBe("trial");
+    expect(ensureCasualInvoiceEmailed).not.toHaveBeenCalled();
+
+    const period = trialRow({
+      id: "mem-sem",
+      plan_id: "plan-sem",
+      sessions_remaining: null,
+      starts_at: "2026-01-01T00:00:00.000Z",
+    });
+    const { admin: periodAdmin } = fakeClient((op) => {
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships" && op.verb === "select") return ok([period]);
+      if (op.table === "session_checkins") return ok([{ id: "chk-2" }]);
+      return ok([]);
+    });
+    const periodDecision = await applyCoverage(periodAdmin, {
+      checkInId: "chk-2",
+      userId: "u1",
+      at: CLASS_AT,
+    });
+    expect(periodDecision.coverage).toBe("period");
+    expect(ensureCasualInvoiceEmailed).not.toHaveBeenCalled();
+  });
+
+  it("does not guarantee an invoice email for an uncovered check-in", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships" && op.verb === "select") return ok([]);
+      if (op.table === "session_checkins") return ok([{ id: "chk-1" }]);
+      return ok([]);
+    });
+    const decision = await applyCoverage(admin, { checkInId: "chk-1", userId: "u1", at: CLASS_AT });
+    expect(decision.coverage).toBe("none");
+    expect(ensureCasualInvoiceEmailed).not.toHaveBeenCalled();
   });
 
   // ...but a lapsed membership it did NOT use is still closed on sight, which is

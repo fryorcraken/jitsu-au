@@ -218,6 +218,14 @@ often writing down an enrolment that already happened rather than selling one:
 backfilling last semester does not invoice the whole club for it. The free trial
 is still once per person ever, however it is raised.
 
+That suppression is only ever about the RAISING email, though. If a casual
+credit raised with `send_email: false` is later actually spent — checked in at
+the door, or attached to an old uncovered check-in — the check-in itself
+guarantees an invoice or receipt for it regardless, on the reasoning that
+someone who really trained on a credit should not be the one left with no
+record of what they owe or paid. See "A casual credit is invoiced when it is
+spent, not just when it is raised" in `docs/check-in.md`.
+
 ## Reconciliation and invoices
 
 An "invoice" is a `memberships` row: its `price_cents`, `payment_reference`

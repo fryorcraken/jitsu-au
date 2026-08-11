@@ -79,6 +79,29 @@ A membership whose **end date has passed** does not cover a class either, and is
 closed on sight. Nothing else in the app enforces an end date, so a check-in is
 where a finished semester finally stops reading as current.
 
+## A casual credit is invoiced when it is spent, not just when it is raised
+
+Every check-in that draws on a **casual credit** (`coverage: "session"` — a
+casual class, or any future credit pack) guarantees the member has an invoice
+or receipt for it, whichever their credit is currently owed:
+`ensureCasualInvoiceEmailed` in `src/lib/membership.functions.ts`, reached from
+`applyCoverage` for the door, an attach and a move alike, since all three are
+the same act of actually spending the credit.
+
+This exists because the email a casual credit's invoice sends when it is
+**raised** (`enrolMember`, see `docs/memberships.md`) is not a guarantee: a
+manager can raise it with `send_email: false` (the backfill case), or the send
+can simply fail, since every email in this lifecycle is best-effort. Someone
+who has already paid before the class, or who bought the credit weeks ago and
+is only now spending it, still gets the email a check-in guarantees — the send
+is idempotent on the membership id (the same key `enrolMember` and
+`recordMembershipPayment` already use), so a credit that was already emailed
+just gets a harmless repeat, not a duplicate in anyone's inbox.
+
+It never blocks or slows the door: like every email in this app, it is
+best-effort, and a check-in is never withheld or delayed because an email could
+not be built or sent (see rule 5 below).
+
 ## Which class
 
 The screen opens on the class that is **on now or next**: today's, the closest in

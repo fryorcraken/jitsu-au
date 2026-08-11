@@ -128,4 +128,6 @@ artifact so it can be found.
 This is the scaffold. It carries one flow per audience to prove the harness
 works end to end; the rest arrive in their own changes. The obvious next ones:
 signing a waiver through to the PDF, a manager approving one and the member's
-login being set up, the membership and invoice flows, and the knowledge base.
+login being set up, the rest of the membership and invoice flows (only casual
+check-in, `e2e/manager/check-in-casual-invoice.spec.ts`, is covered so far),
+and the knowledge base.

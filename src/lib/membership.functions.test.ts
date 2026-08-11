@@ -125,6 +125,18 @@ vi.mock("@/integrations/supabase/client.server", () => ({
   },
 }));
 
+/**
+ * The actual send is a server-only network call (`ensureCasualInvoiceEmailed`
+ * tests care only about WHICH of the two it reaches for, and with what), so
+ * the transport is mocked rather than routed through `LOVABLE_API_KEY`.
+ */
+const sendMembershipPaymentEmail = vi.fn().mockResolvedValue({ sent: [], skipped: false });
+const sendMembershipPaidEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
+vi.mock("./membership-email.server", () => ({
+  sendMembershipPaymentEmail: (...args: unknown[]) => sendMembershipPaymentEmail(...args),
+  sendMembershipPaidEmail: (...args: unknown[]) => sendMembershipPaidEmail(...args),
+}));
+
 /** 18:05 Sydney on 5 Aug: signed at the door, minutes after the class began. */
 const SIGNED_AT = "2026-08-05T08:05:00.000Z";
 
@@ -926,5 +938,146 @@ describe("enrolMember on a free plan", () => {
     );
     await enrol(fake);
     expect(fake.updates).toEqual([]);
+  });
+});
+
+// ---- Guaranteeing a casual credit was actually invoiced ----
+//
+// `applyCoverage` in checkin.functions.ts calls this the moment a casual
+// credit is spent, precisely because the email `enrolMember` sends when the
+// membership is RAISED is not a guarantee: `send_email: false` can suppress
+// it, and every email in this lifecycle is best-effort. These pin what a
+// check-in reaches for once a credit has actually been drawn on.
+
+const CASUAL_PLAN = {
+  id: "plan-casual",
+  code: "casual_session",
+  name: "Casual class",
+  kind: "session",
+  session_credits: 1,
+  ends_on: null,
+};
+
+function fakeInvoiceEmailAdmin(over: {
+  membership?: Result;
+  plan?: Result;
+  profile?: Result;
+  emails?: Result;
+}) {
+  const membership =
+    over.membership ??
+    ok({
+      id: "mem-casual",
+      user_id: "user-1",
+      plan_id: CASUAL_PLAN.id,
+      price_cents: 3000,
+      payment_reference: "JITSU-ADA-1234",
+      paid_at: null,
+    });
+  const plan = over.plan ?? ok(CASUAL_PLAN);
+  const profile =
+    over.profile ?? ok({ first_name: "Ada", middle_name: null, last_name: "Lovelace" });
+  const emails =
+    over.emails ?? ok([{ user_id: "user-1", email: "ada@example.com", email_confirmed_at: null }]);
+
+  const admin = {
+    rpc: () => Promise.resolve(emails),
+    from: (table: string) => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: () =>
+            Promise.resolve(
+              table === "memberships" ? membership : table === "membership_plans" ? plan : profile,
+            ),
+        }),
+      }),
+    }),
+  };
+  return admin;
+}
+
+async function ensureInvoiceEmailed(admin: unknown, membershipId = "mem-casual") {
+  const { ensureCasualInvoiceEmailed } = await import("./membership.functions");
+  return ensureCasualInvoiceEmailed(admin as never, membershipId);
+}
+
+describe("ensureCasualInvoiceEmailed", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    sendMembershipPaymentEmail.mockClear();
+    sendMembershipPaidEmail.mockClear();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends the pay-this invoice for an unpaid casual credit", async () => {
+    await ensureInvoiceEmailed(fakeInvoiceEmailAdmin({}));
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        memberEmail: "ada@example.com",
+        planName: "Casual class",
+        amount: "$30",
+        reference: "JITSU-ADA-1234",
+      }),
+    );
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends the receipt instead when the credit was already paid for", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      membership: ok({
+        id: "mem-casual",
+        user_id: "user-1",
+        plan_id: CASUAL_PLAN.id,
+        price_cents: 3000,
+        payment_reference: "JITSU-ADA-1234",
+        paid_at: "2026-08-05T00:00:00.000Z",
+      }),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaidEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        memberEmail: "ada@example.com",
+        planName: "Casual class",
+        amount: "$30",
+      }),
+    );
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing for a comped, zero-priced casual", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      membership: ok({
+        id: "mem-casual",
+        user_id: "user-1",
+        plan_id: CASUAL_PLAN.id,
+        price_cents: 0,
+        payment_reference: "JITSU-ADA-1234",
+        paid_at: null,
+      }),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the membership no longer exists", async () => {
+    await ensureInvoiceEmailed(fakeInvoiceEmailAdmin({ membership: ok(null) }));
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the person has no resolvable email, rather than throwing", async () => {
+    await ensureInvoiceEmailed(fakeInvoiceEmailAdmin({ emails: ok([]) }));
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  it("never lets a failed send escape — the check-in it guards must never fail", async () => {
+    sendMembershipPaymentEmail.mockRejectedValueOnce(new Error("Lovable is down"));
+    await expect(ensureInvoiceEmailed(fakeInvoiceEmailAdmin({}))).resolves.toBeUndefined();
   });
 });

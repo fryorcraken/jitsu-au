@@ -388,6 +388,87 @@ export async function recordMembershipPayment(
 }
 
 /**
+ * Guarantee a casual credit that a check-in just spent has an invoice or
+ * receipt sitting in the member's inbox, independent of what happened when the
+ * membership itself was raised.
+ *
+ * Reached from `applyCoverage` in checkin.functions.ts — the one place a
+ * casual credit is actually consumed — rather than relying on `enrolMember`
+ * alone, because the two moments can be far apart and the first email is not
+ * guaranteed: a manager can raise the invoice with `send_email: false` (the
+ * backfill case in `createMembershipForUser`), or the send can fail and be
+ * swallowed, since every email in this lifecycle is best-effort. Someone who
+ * actually trains on a casual credit must not be the one left with no record
+ * of what they owe or paid for it.
+ *
+ * Both target emails are idempotent on the membership id
+ * (`membership-payment-<id>` / `membership-paid-<id>`) — the same keys
+ * `enrolMember` and `recordMembershipPayment` already send under — so calling
+ * this a second time for a membership that was already emailed is a safe
+ * provider-side no-op, not a duplicate landing in anyone's inbox.
+ *
+ * Which of the two goes out follows `paid_at`: unpaid still needs the "pay
+ * this" invoice, paid needs the receipt, and either is the wrong email for the
+ * other state. A comped casual (`price_cents = 0`) has nothing to invoice.
+ *
+ * Best-effort, exactly like every other email in this lifecycle: a check-in
+ * must never fail, or even slow down, because an email could not be built or
+ * sent.
+ */
+export async function ensureCasualInvoiceEmailed(
+  admin: MembershipClient,
+  membershipId: string,
+): Promise<void> {
+  try {
+    const { data: membership, error } = await admin
+      .from("memberships")
+      .select("id, user_id, plan_id, price_cents, payment_reference, paid_at")
+      .eq("id", membershipId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!membership || !membership.user_id || !membership.price_cents) return;
+
+    const [{ data: plan }, { data: profile }, emails] = await Promise.all([
+      admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
+      admin
+        .from("profiles")
+        .select("first_name, middle_name, last_name, preferred_name")
+        .eq("user_id", membership.user_id)
+        .maybeSingle(),
+      emailsByUserId(admin, [membership.user_id]),
+    ]);
+    const email = emails.get(membership.user_id) ?? null;
+    if (!email) return;
+
+    if (membership.paid_at) {
+      const { sendMembershipPaidEmail } = await import("./membership-email.server");
+      await sendMembershipPaidEmail({
+        membershipId: membership.id,
+        memberGreetingName: profile ? greetingName(profile) : "",
+        memberEmail: email,
+        planName: plan?.name ?? "your casual class",
+        validity: plan ? validityLabel(plan) : "",
+        amount: formatCents(membership.price_cents),
+      });
+    } else if (membership.payment_reference) {
+      const { sendMembershipPaymentEmail } = await import("./membership-email.server");
+      await sendMembershipPaymentEmail({
+        membershipId: membership.id,
+        memberName: profile ? profileFullName(profile) : "",
+        memberGreetingName: profile ? greetingName(profile) : "",
+        memberEmail: email,
+        planName: plan?.name ?? "your casual class",
+        amount: formatCents(membership.price_cents),
+        reference: membership.payment_reference,
+        admin,
+      });
+    }
+  } catch (e) {
+    console.error(`[ensureCasualInvoiceEmailed] failed for membership ${membershipId}:`, e);
+  }
+}
+
+/**
  * Assign the club's free trial to a person, once ever: called when a manager
  * first approves their waiver (approved = visitor = trial assigned). Skips
  * silently if they ever had a trial membership or no trial plan exists. The
