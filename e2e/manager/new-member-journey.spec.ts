@@ -134,14 +134,24 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     await expect(page.getByRole("button", { name: "Unapprove" })).toBeVisible();
   });
 
-  const [event1, event2, event3] = (
-    await adminClient()
-      .from("calendar_events")
-      .select("id")
-      .eq("title", "Tuesday class")
-      .order("starts_at", { ascending: true })
-      .limit(3)
-  ).data!.map((e) => e.id);
+  // The three earliest seeded classes (scripts/seed-local-club.mjs puts five
+  // on the calendar, at day -14/-7/+1/+8/+15 from seed time). The earliest
+  // sits right at the check-in screen's 14-day lookback edge, so if this CI
+  // run happens to straddle a UTC midnight between seeding and this step,
+  // it could briefly fall outside the window — a known, narrow residual risk
+  // rather than one this test tries to fully engineer away.
+  const { data: events, error: eventsErr } = await adminClient()
+    .from("calendar_events")
+    .select("id")
+    .eq("title", "Tuesday class")
+    .order("starts_at", { ascending: true })
+    .limit(3);
+  if (eventsErr || !events || events.length < 3) {
+    throw new Error(
+      `fewer than 3 seeded classes to check the new member in against: ${eventsErr?.message}`,
+    );
+  }
+  const [event1, event2, event3] = events.map((e) => e.id);
 
   await test.step("a manager checks them in twice, using up the trial", async () => {
     await page.goto("/manager/check-in");

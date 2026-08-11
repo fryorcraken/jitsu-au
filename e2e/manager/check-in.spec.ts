@@ -44,6 +44,12 @@ test.afterAll(async () => {
  * first. Read fresh each time rather than cached: the check-in screen tops up
  * the recurring series on every load, and while that only ever appends to the
  * future end, reading live is what makes that assumption safe to make once.
+ *
+ * The earliest one (day -14 from seed time) sits right at the check-in
+ * screen's 14-day lookback edge, so a CI run that happens to straddle a UTC
+ * midnight between seeding and a test using it could briefly push it outside
+ * the window — a known, narrow residual risk this suite accepts rather than
+ * arranging synthetic events to fully engineer away.
  */
 async function seededClassEventIds(limit: number): Promise<string[]> {
   const { data, error } = await adminClient()
@@ -128,11 +134,12 @@ test("a membership blocked from deletion by a check-in can be freed by moving it
     .select("id")
     .eq("code", "casual_session")
     .single();
+  if (!casualPlan) throw new Error("no seeded casual_session plan");
   const { data: membershipB } = await adminClient()
     .from("memberships")
     .select("id")
     .eq("user_id", applicantId)
-    .eq("plan_id", casualPlan!.id)
+    .eq("plan_id", casualPlan.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .single();
