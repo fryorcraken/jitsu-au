@@ -44,12 +44,26 @@ test("the memberships screen lists the club's invoices", async ({ page }) => {
 test("a manager can raise a membership, mark it paid, and then can't delete it", async ({
   page,
 }) => {
+  // The period plan, not casual_session: check-in.spec.ts also raises a
+  // casual_session invoice for this same seeded applicant, and the app's
+  // payment reference is deterministic (surname + user id + session date +
+  // plan dates) rather than random — the same plan, same person, same day
+  // produces the identical reference, so two genuinely different rows can
+  // share one, and no locator can then tell them apart. Different plan kinds
+  // never collide (their dates differ), which is a real fix; a fussier
+  // locator on the same plan was not.
+  const { data: periodPlan } = await adminClient()
+    .from("membership_plans")
+    .select("code, name")
+    .eq("kind", "period")
+    .limit(1)
+    .single();
+  if (!periodPlan) throw new Error("no seeded period plan");
+
   await page.goto(`/manager/users/${applicantId}`);
 
   await page.getByRole("button", { name: "Add a membership" }).click();
-  // Selected by the plan's stable code rather than its formatted label (name
-  // + price), which would otherwise tie this to a price nobody is testing.
-  await page.getByLabel("Plan").selectOption("casual_session");
+  await page.getByLabel("Plan").selectOption(periodPlan.code);
   await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
   await page.getByRole("button", { name: "Add membership" }).click();
 
@@ -65,16 +79,12 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
   if (!created) throw new Error("raising the membership did not create a row");
   createdMembershipIds.push(created.id);
 
-  // Matched on the reference rather than the plan name: text like "Casual
-  // class" can also turn up elsewhere on this page (another membership's
-  // "Move to..." dropdown lists every plan by name), but a reference is
-  // unique to this one row.
   const row = page.getByRole("row").filter({ hasText: created.payment_reference });
   await expect(row).toHaveCount(1);
 
   await row.getByRole("button", { name: "Mark as paid" }).click();
   const payDialog = page.getByRole("alertdialog");
-  await expect(payDialog).toContainText("Record payment for Casual class?");
+  await expect(payDialog).toContainText(`Record payment for ${periodPlan.name}?`);
   await payDialog.getByRole("button", { name: "Mark as paid" }).click();
 
   // Paid, so the button that recorded it is gone...

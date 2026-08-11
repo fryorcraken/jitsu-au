@@ -60,6 +60,14 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     // exactly what a real visitor would click, rather than a hand-built URL.
     await visitorPage.getByRole("link", { name: "Sign my waiver" }).click();
 
+    // Filled explicitly rather than trusted to the link's query-param
+    // prefill: the prefill is a nice-to-have for a real visitor, but this
+    // test's job is to prove the submission, not the prefill, and the two
+    // failure modes should never be allowed to look identical.
+    await visitorPage.getByLabel("First name").fill(firstName);
+    await visitorPage.getByLabel("Last name").fill(lastName);
+    await visitorPage.getByLabel("Email").fill(email);
+    await visitorPage.getByLabel("Phone").fill("0400 000 555");
     await visitorPage.getByLabel("Date of birth").fill("1995-05-15");
     await visitorPage.getByLabel("Address").fill("1 Broadway, Ultimo NSW 2007");
     await visitorPage.getByLabel("Contact name").fill("Sam Marsh");
@@ -85,6 +93,13 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     // role="checkbox">`, not a native `<input>` — that selector would match
     // nothing, silently leave a required one unticked, and the server would
     // reject the submission with no heading change to say why.
+    //
+    // Waited for explicitly before counting: `#ack_media` is the one
+    // guaranteed by every template (src/lib/waiver-acknowledgements.ts), and
+    // `.count()` does not itself wait — calling it before the (client-side,
+    // template-fetched) acknowledgements section has rendered would silently
+    // count zero and tick nothing.
+    await visitorPage.locator("#ack_media").waitFor({ state: "visible" });
     const acks = visitorPage.locator('[id^="ack_"]');
     const ackCount = await acks.count();
     for (let i = 0; i < ackCount; i++) await acks.nth(i).check();
