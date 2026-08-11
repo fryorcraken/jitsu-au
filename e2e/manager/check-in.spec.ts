@@ -115,9 +115,9 @@ test("a membership blocked from deletion by a check-in can be freed by moving it
   await page.getByLabel("Plan").selectOption("casual_session");
   await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
   await page.getByRole("button", { name: "Add membership" }).click();
-  const rowB = page.getByRole("row").filter({ hasText: "Casual class" });
-  await expect(rowB).toHaveCount(1);
 
+  // Tracked before any assertion that could throw, so a failed assertion
+  // below still leaves this row queued for afterAll to remove.
   const { data: casualPlan } = await adminClient()
     .from("membership_plans")
     .select("id")
@@ -132,6 +132,13 @@ test("a membership blocked from deletion by a check-in can be freed by moving it
     .limit(1)
     .single();
   if (membershipB) createdMembershipIds.push(membershipB.id);
+
+  // Matched on price as well as name: the Sessions table's "Move to..."
+  // dropdown below will shortly offer Membership B as an option, and its
+  // plan-name text counts toward that row's `hasText` match too — but its
+  // options never show a price.
+  const rowB = page.getByRole("row").filter({ hasText: "Casual class" }).filter({ hasText: "$30" });
+  await expect(rowB).toHaveCount(1);
 
   const sessionsRow = page.getByRole("row").filter({ hasText: "Tuesday class" });
   await expect(sessionsRow).toHaveCount(1);

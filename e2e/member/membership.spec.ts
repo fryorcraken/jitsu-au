@@ -75,5 +75,8 @@ test("a member can buy a plan and is shown how to pay for it", async ({ page }) 
   references.push(created.payment_reference);
 
   expect(created.price_cents).toBe(3000);
-  await expect(page.getByText(created.payment_reference)).toBeVisible();
+  // The reference now shows in two places on this page: the status table's
+  // Reference column (unpaid rows show it there too) and this pay panel's own
+  // amount/reference block, which is the only one rendered as a <dl>.
+  await expect(page.locator("dl").getByText(created.payment_reference)).toBeVisible();
 });

@@ -53,10 +53,8 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
   await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
   await page.getByRole("button", { name: "Add membership" }).click();
 
-  const row = page.getByRole("row").filter({ hasText: "Casual class" });
-  await expect(row).toHaveCount(1);
-  await expect(row).toContainText("$30");
-
+  // Tracked before any assertion that could throw, so a failed assertion
+  // below still leaves this row queued for afterAll to remove.
   const { data: created } = await adminClient()
     .from("memberships")
     .select("id")
@@ -65,6 +63,12 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
     .limit(1)
     .single();
   if (created) createdMembershipIds.push(created.id);
+
+  // Matched on price as well as name: a check-in's "Move to..." dropdown (see
+  // check-in.spec.ts) can also carry the plan name in its text, which
+  // `hasText` alone would catch — its options never show a price.
+  const row = page.getByRole("row").filter({ hasText: "Casual class" }).filter({ hasText: "$30" });
+  await expect(row).toHaveCount(1);
 
   await row.getByRole("button", { name: "Mark as paid" }).click();
   const payDialog = page.getByRole("alertdialog");
