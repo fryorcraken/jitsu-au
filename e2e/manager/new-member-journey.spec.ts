@@ -80,8 +80,12 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     }
 
     // Acknowledgements are template-driven, not fixed, so every rendered one
-    // is ticked rather than naming a specific one.
-    const acks = visitorPage.locator('input[id^="ack_"]');
+    // is ticked rather than naming a specific one. Not `input[id^="ack_"]`:
+    // these are shadcn/Radix Checkboxes, which render as `<button
+    // role="checkbox">`, not a native `<input>` — that selector would match
+    // nothing, silently leave a required one unticked, and the server would
+    // reject the submission with no heading change to say why.
+    const acks = visitorPage.locator('[id^="ack_"]');
     const ackCount = await acks.count();
     for (let i = 0; i < ackCount; i++) await acks.nth(i).check();
 

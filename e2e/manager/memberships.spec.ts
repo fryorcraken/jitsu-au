@@ -57,17 +57,19 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
   // below still leaves this row queued for afterAll to remove.
   const { data: created } = await adminClient()
     .from("memberships")
-    .select("id")
+    .select("id, payment_reference")
     .eq("user_id", applicantId)
     .order("created_at", { ascending: false })
     .limit(1)
     .single();
-  if (created) createdMembershipIds.push(created.id);
+  if (!created) throw new Error("raising the membership did not create a row");
+  createdMembershipIds.push(created.id);
 
-  // Matched on price as well as name: a check-in's "Move to..." dropdown (see
-  // check-in.spec.ts) can also carry the plan name in its text, which
-  // `hasText` alone would catch — its options never show a price.
-  const row = page.getByRole("row").filter({ hasText: "Casual class" }).filter({ hasText: "$30" });
+  // Matched on the reference rather than the plan name: text like "Casual
+  // class" can also turn up elsewhere on this page (another membership's
+  // "Move to..." dropdown lists every plan by name), but a reference is
+  // unique to this one row.
+  const row = page.getByRole("row").filter({ hasText: created.payment_reference });
   await expect(row).toHaveCount(1);
 
   await row.getByRole("button", { name: "Mark as paid" }).click();
