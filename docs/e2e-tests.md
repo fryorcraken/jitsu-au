@@ -126,6 +126,8 @@ artifact so it can be found.
 ## What is deliberately not covered yet
 
 This is the scaffold. It carries one flow per audience to prove the harness
-works end to end; the rest arrive in their own changes. The obvious next ones:
-signing a waiver through to the PDF, a manager approving one and the member's
-login being set up, the membership and invoice flows, and the knowledge base.
+works end to end; the rest arrive in their own changes. The membership and
+invoice flows are now covered (`manager/memberships.spec.ts`,
+`manager/check-in.spec.ts`, `member/membership.spec.ts`) — the obvious next
+ones left are signing a waiver through to the PDF, a manager approving one and
+the member's login being set up, and the knowledge base.

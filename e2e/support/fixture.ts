@@ -105,3 +105,20 @@ export function adminClient(): SupabaseClient {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/**
+ * The seeded applicant's user id, resolved live rather than carried in the
+ * manifest above: `personas` there is only the two people `auth.setup.ts`
+ * signs in (a magic link per entry), and `params` is only the `$segment`
+ * values `pr-screenshots-pages.mjs` needs for a route. The applicant is
+ * neither — never signed in, only ever the target of something a manager
+ * does — so their id comes from the same admin API a magic link does.
+ */
+export async function applicantUserId(): Promise<string> {
+  const email = "applicant@example.com";
+  const { data, error } = await adminClient().auth.admin.listUsers();
+  if (error) throw new Error(`could not look up the seeded applicant: ${error.message}`);
+  const applicant = data.users.find((u) => u.email === email);
+  if (!applicant) throw new Error(`no seeded user with email ${email}`);
+  return applicant.id;
+}
