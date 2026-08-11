@@ -215,7 +215,16 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
 
   await test.step("a manager marks the casual-class invoice as paid", async () => {
     await page.goto(`/manager/users/${newUserId}`);
-    const row = page.getByRole("row").filter({ hasText: casualMembership.payment_reference });
+    // Matched on plan name too, not the reference alone: a brand-new member
+    // has no existing insurance cover, so it was bundled onto this purchase
+    // automatically (mandatory, not a checkbox they could leave off) — that
+    // invoice rides on the SAME reference, so the reference alone now
+    // resolves to two rows.
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: casualMembership.payment_reference })
+      .filter({ hasText: "Casual class" });
+    await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: "Mark as paid" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Mark as paid" }).click();
     await expect(row.getByRole("button", { name: "Mark as paid" })).toHaveCount(0);
@@ -288,7 +297,14 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   });
 
   await test.step("the casual class, superseded and free of the check-in, is cancelled", async () => {
-    const row = page.getByRole("row").filter({ hasText: casualMembership.payment_reference });
+    // Same reason as the "mark as paid" step above: the bundled insurance
+    // invoice still shares this reference, so it takes the plan name too to
+    // land on the casual-class row alone.
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: casualMembership.payment_reference })
+      .filter({ hasText: "Casual class" });
+    await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Cancel membership" }).click();
     await expect(row).toContainText("cancelled");
