@@ -63,6 +63,12 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     // The confirmation screen's own link, carrying what was just typed —
     // exactly what a real visitor would click, rather than a hand-built URL.
     await visitorPage.getByRole("link", { name: "Sign my waiver" }).click();
+    // The page's own fields (names, dates) render immediately, but the
+    // current waiver template — including which acknowledgements exist, if
+    // any — is fetched client-side. Waited for generally rather than for one
+    // assumed-present acknowledgement id: which ones exist is template
+    // content, not something this test should assume.
+    await visitorPage.waitForLoadState("networkidle");
 
     // First/last/email/phone come from the link's own query-param prefill
     // (checked here rather than re-typed): the email field in particular is
@@ -89,18 +95,12 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     }
 
     // Acknowledgements are template-driven, not fixed, so every rendered one
-    // is ticked rather than naming a specific one. Not `input[id^="ack_"]`:
-    // these are shadcn/Radix Checkboxes, which render as `<button
-    // role="checkbox">`, not a native `<input>` — that selector would match
-    // nothing, silently leave a required one unticked, and the server would
-    // reject the submission with no heading change to say why.
-    //
-    // Waited for explicitly before counting: `#ack_media` is the one
-    // guaranteed by every template (src/lib/waiver-acknowledgements.ts), and
-    // `.count()` does not itself wait — calling it before the (client-side,
-    // template-fetched) acknowledgements section has rendered would silently
-    // count zero and tick nothing.
-    await visitorPage.locator("#ack_media").waitFor({ state: "visible" });
+    // is ticked rather than naming a specific one (the network-idle wait
+    // above is what makes it safe to count them now). Not
+    // `input[id^="ack_"]`: these are shadcn/Radix Checkboxes, which render
+    // as `<button role="checkbox">`, not a native `<input>` — that selector
+    // would match nothing, silently leave a required one unticked, and the
+    // server would reject the submission with no heading change to say why.
     const acks = visitorPage.locator('[id^="ack_"]');
     const ackCount = await acks.count();
     for (let i = 0; i < ackCount; i++) await acks.nth(i).check();
