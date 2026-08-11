@@ -409,11 +409,15 @@ export async function recordMembershipPayment(
  *
  * Which of the two goes out follows `paid_at`: unpaid still needs the "pay
  * this" invoice, paid needs the receipt, and either is the wrong email for the
- * other state. A comped casual (`price_cents = 0`) has nothing to invoice.
+ * other state.
  *
- * Best-effort, exactly like every other email in this lifecycle: a check-in
- * must never fail, or even slow down, because an email could not be built or
- * sent.
+ * Awaited by its caller rather than fired-and-forgotten, matching every other
+ * email in this lifecycle (`enrolMember`, `recordMembershipPayment`): the
+ * production deploy target is Cloudflare, where work not awaited before the
+ * response returns is not guaranteed to run at all, and a "guarantee" that can
+ * silently not happen is worse than the door pausing for it. Best-effort only
+ * in the sense that a failed or slow send is caught and logged, never thrown —
+ * see the try/catch below.
  */
 export async function ensureCasualInvoiceEmailed(
   admin: MembershipClient,
@@ -426,7 +430,7 @@ export async function ensureCasualInvoiceEmailed(
       .eq("id", membershipId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (!membership || !membership.user_id || !membership.price_cents) return;
+    if (!membership || !membership.user_id) return;
 
     const [{ data: plan }, { data: profile }, emails] = await Promise.all([
       admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
@@ -441,6 +445,10 @@ export async function ensureCasualInvoiceEmailed(
     if (!email) return;
 
     if (membership.paid_at) {
+      // Not folding in a bundled sibling here, on purpose: a receipt is
+      // already never combined across a bundle anywhere in this app —
+      // `recordMembershipPayment` sends one per row, because a bundle can be
+      // reconciled or marked paid one invoice at a time. This matches that.
       const { sendMembershipPaidEmail } = await import("./membership-email.server");
       await sendMembershipPaidEmail({
         membershipId: membership.id,
@@ -450,19 +458,55 @@ export async function ensureCasualInvoiceEmailed(
         validity: plan ? validityLabel(plan) : "",
         amount: formatCents(membership.price_cents),
       });
-    } else if (membership.payment_reference) {
-      const { sendMembershipPaymentEmail } = await import("./membership-email.server");
-      await sendMembershipPaymentEmail({
-        membershipId: membership.id,
-        memberName: profile ? profileFullName(profile) : "",
-        memberGreetingName: profile ? greetingName(profile) : "",
-        memberEmail: email,
-        planName: plan?.name ?? "your casual class",
-        amount: formatCents(membership.price_cents),
-        reference: membership.payment_reference,
-        admin,
-      });
+      return;
     }
+
+    if (!membership.payment_reference) return;
+
+    // A mandatory insurance invoice can ride on this SAME reference
+    // (`resolveInsuranceCover` + `enrolMember`'s bundling), combined into ONE
+    // invoice email under this membership's id. If that combined send never
+    // went out (the `send_email: false` backfill this guarantee exists for),
+    // sending only this row's amount would under-bill the member for what they
+    // actually owe — so an unpaid sibling on the same reference is folded in
+    // exactly as `enrolMember` combines it.
+    const { data: bundled } = await admin
+      .from("memberships")
+      .select("price_cents, plan_id")
+      .eq("payment_reference", membership.payment_reference)
+      .neq("id", membership.id)
+      .is("paid_at", null);
+    let totalCents = membership.price_cents;
+    let planName = plan?.name ?? "your casual class";
+    if (bundled?.length) {
+      const { data: siblingPlans } = await admin
+        .from("membership_plans")
+        .select("id, name")
+        .in(
+          "id",
+          bundled.map((b) => b.plan_id),
+        );
+      const nameById = new Map((siblingPlans ?? []).map((p) => [p.id, p.name]));
+      for (const row of bundled) {
+        totalCents += row.price_cents;
+        const siblingName = nameById.get(row.plan_id);
+        if (siblingName) planName = `${planName} + ${siblingName}`;
+      }
+    }
+    // Nothing is owed, on this row or anything bundled with it.
+    if (totalCents === 0) return;
+
+    const { sendMembershipPaymentEmail } = await import("./membership-email.server");
+    await sendMembershipPaymentEmail({
+      membershipId: membership.id,
+      memberName: profile ? profileFullName(profile) : "",
+      memberGreetingName: profile ? greetingName(profile) : "",
+      memberEmail: email,
+      planName,
+      amount: formatCents(totalCents),
+      reference: membership.payment_reference,
+      admin,
+    });
   } catch (e) {
     console.error(`[ensureCasualInvoiceEmailed] failed for membership ${membershipId}:`, e);
   }

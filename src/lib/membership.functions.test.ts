@@ -958,12 +958,27 @@ const CASUAL_PLAN = {
   ends_on: null,
 };
 
-function fakeInvoiceEmailAdmin(over: {
-  membership?: Result;
-  plan?: Result;
-  profile?: Result;
-  emails?: Result;
-}) {
+/** One database call, as the fake saw it — same shape as checkin.functions.test.ts's. */
+type InvoiceOp = { table: string; filters: [string, string, unknown][] };
+
+/**
+ * Chainable, because `ensureCasualInvoiceEmailed` reads `memberships` and
+ * `membership_plans` two different ways: once by id (`.eq("id", …)`, single
+ * row) for the credit that was actually spent, and — only when it needs to
+ * fold in a bundled sibling invoice — once by `payment_reference` / `.in(…)`
+ * (a list). Distinguishing on the filters actually used, like
+ * checkin.functions.test.ts's fake, is what lets one fake client serve both.
+ */
+function fakeInvoiceEmailAdmin(
+  over: {
+    membership?: Result;
+    bundled?: Result;
+    plan?: Result;
+    siblingPlans?: Result;
+    profile?: Result;
+    emails?: Result;
+  } = {},
+) {
   const membership =
     over.membership ??
     ok({
@@ -974,26 +989,41 @@ function fakeInvoiceEmailAdmin(over: {
       payment_reference: "JITSU-ADA-1234",
       paid_at: null,
     });
+  const bundled = over.bundled ?? ok([]);
   const plan = over.plan ?? ok(CASUAL_PLAN);
+  const siblingPlans = over.siblingPlans ?? ok([]);
   const profile =
     over.profile ?? ok({ first_name: "Ada", middle_name: null, last_name: "Lovelace" });
   const emails =
     over.emails ?? ok([{ user_id: "user-1", email: "ada@example.com", email_confirmed_at: null }]);
 
-  const admin = {
+  const byId = (filters: InvoiceOp["filters"]) =>
+    filters.some(([col, verb]) => col === "id" && verb === "eq");
+
+  function chain(op: InvoiceOp) {
+    const settle = () => {
+      if (op.table === "memberships")
+        return Promise.resolve(byId(op.filters) ? membership : bundled);
+      if (op.table === "membership_plans")
+        return Promise.resolve(byId(op.filters) ? plan : siblingPlans);
+      return Promise.resolve(profile);
+    };
+    const builder: Record<string, unknown> = {
+      eq: (col: string, val: unknown) => (op.filters.push([col, "eq", val]), builder),
+      neq: (col: string, val: unknown) => (op.filters.push([col, "neq", val]), builder),
+      in: (col: string, val: unknown) => (op.filters.push([col, "in", val]), builder),
+      is: (col: string, val: unknown) => (op.filters.push([col, "is", val]), builder),
+      maybeSingle: () => settle(),
+      then: (resolve: (r: Result) => unknown, reject?: (e: unknown) => unknown) =>
+        settle().then(resolve, reject),
+    };
+    return builder;
+  }
+
+  return {
     rpc: () => Promise.resolve(emails),
-    from: (table: string) => ({
-      select: () => ({
-        eq: () => ({
-          maybeSingle: () =>
-            Promise.resolve(
-              table === "memberships" ? membership : table === "membership_plans" ? plan : profile,
-            ),
-        }),
-      }),
-    }),
+    from: (table: string) => ({ select: () => chain({ table, filters: [] }) }),
   };
-  return admin;
 }
 
 async function ensureInvoiceEmailed(admin: unknown, membershipId = "mem-casual") {
@@ -1062,6 +1092,49 @@ describe("ensureCasualInvoiceEmailed", () => {
     await ensureInvoiceEmailed(admin);
     expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
     expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  // A mandatory insurance invoice can ride on the SAME payment_reference as
+  // the casual credit (`enrolMember`'s bundling). If the combined send never
+  // went out — the `send_email: false` backfill this whole guarantee exists
+  // for — sending only the casual amount would tell the member they owe less
+  // than they actually do.
+  it("folds an unpaid bundled invoice (e.g. insurance) into the amount and plan name", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      bundled: ok([{ price_cents: 6000, plan_id: "plan-insurance" }]),
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        planName: "Casual class + Yearly insurance",
+        amount: "$90",
+      }),
+    );
+  });
+
+  // A comped casual bundled with paid-for insurance still owes the insurance
+  // half, so the zero-price row on its own must not short-circuit the send —
+  // only a genuinely zero TOTAL (nothing bundled, or everything bundled is
+  // also free) should.
+  it("still invoices a bundled sibling even when the casual credit itself is free", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      membership: ok({
+        id: "mem-casual",
+        user_id: "user-1",
+        plan_id: CASUAL_PLAN.id,
+        price_cents: 0,
+        payment_reference: "JITSU-ADA-1234",
+        paid_at: null,
+      }),
+      bundled: ok([{ price_cents: 6000, plan_id: "plan-insurance" }]),
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ planName: "Casual class + Yearly insurance", amount: "$60" }),
+    );
   });
 
   it("sends nothing when the membership no longer exists", async () => {

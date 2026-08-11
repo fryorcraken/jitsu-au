@@ -98,9 +98,15 @@ is idempotent on the membership id (the same key `enrolMember` and
 `recordMembershipPayment` already use), so a credit that was already emailed
 just gets a harmless repeat, not a duplicate in anyone's inbox.
 
-It never blocks or slows the door: like every email in this app, it is
-best-effort, and a check-in is never withheld or delayed because an email could
-not be built or sent (see rule 5 below).
+It never REFUSES a check-in: like every email in this app, a failed or slow
+send is caught and logged, never thrown, so a check-in is never withheld
+because an email could not be built or sent (see rule 5 below). It is,
+however, awaited before the check-in call returns — the same as
+`enrolMember`'s and `recordMembershipPayment`'s own emails — so a slow send
+does add a moment to the door's response. That is a deliberate trade, not an
+oversight: the production deploy target is Cloudflare, where work not awaited
+before the response returns is not guaranteed to run at all, and a
+"guarantee" that can silently not happen defeats the point of this existing.
 
 ## Which class
 
