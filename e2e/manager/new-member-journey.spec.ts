@@ -36,13 +36,17 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
 }) => {
   // `page` is this project's manager session throughout. Two more identities
   // are needed along the way — an anonymous visitor, then the person
-  // themselves once they can sign in — each gets its own browser context so
-  // it never shares storage with the manager's.
+  // themselves once they can sign in — each gets its own browser context, so
+  // it never shares storage with the manager's. An explicit empty storage
+  // state, not the default: this project's `use.storageState` (the saved
+  // manager session) turned out to still apply to a bare `newContext()` call
+  // with no override — a signed-out visitor cannot be assumed otherwise.
+  const NO_SESSION = { cookies: [], origins: [] };
   const email = `e2e-journey-${crypto.randomUUID()}@example.com`;
   const firstName = "Devon";
   const lastName = "Marsh";
 
-  const visitor = await browser.newContext();
+  const visitor = await browser.newContext({ storageState: NO_SESSION });
   const visitorPage = await visitor.newPage();
 
   await test.step("registers interest", async () => {
@@ -60,14 +64,11 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     // exactly what a real visitor would click, rather than a hand-built URL.
     await visitorPage.getByRole("link", { name: "Sign my waiver" }).click();
 
-    // Filled explicitly rather than trusted to the link's query-param
-    // prefill: the prefill is a nice-to-have for a real visitor, but this
-    // test's job is to prove the submission, not the prefill, and the two
-    // failure modes should never be allowed to look identical.
-    await visitorPage.getByLabel("First name").fill(firstName);
-    await visitorPage.getByLabel("Last name").fill(lastName);
-    await visitorPage.getByLabel("Email").fill(email);
-    await visitorPage.getByLabel("Phone").fill("0400 000 555");
+    // First/last/email/phone come from the link's own query-param prefill
+    // (checked here rather than re-typed): the email field in particular is
+    // locked once prefilled, so re-filling it fails outright instead of
+    // being a harmless no-op.
+    await expect(visitorPage.getByLabel("Email")).toHaveValue(email);
     await visitorPage.getByLabel("Date of birth").fill("1995-05-15");
     await visitorPage.getByLabel("Address").fill("1 Broadway, Ultimo NSW 2007");
     await visitorPage.getByLabel("Contact name").fill("Sam Marsh");
@@ -155,7 +156,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     await expect(page.getByText(/Free trial, 0 left/)).toBeVisible();
   });
 
-  const member = await browser.newContext();
+  const member = await browser.newContext({ storageState: NO_SESSION });
   const memberPage = await member.newPage();
 
   await test.step("the new member signs in and buys a casual class", async () => {
@@ -237,9 +238,15 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
 
   await test.step("the person commits to a full training period, and the manager raises it", async () => {
     await page.getByRole("button", { name: "Add a membership" }).click();
-    await page.getByLabel("Plan").selectOption(periodPlan.code);
+    const planSelect = page.getByLabel("Plan");
+    await planSelect.selectOption(periodPlan.code);
     await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
     await page.getByRole("button", { name: "Add membership" }).click();
+    // The click only dispatches the request; the card resets this to blank
+    // only once the write has actually landed. The next step reads the
+    // database for the row this just created, which would otherwise race
+    // the insert.
+    await expect(planSelect).toHaveValue("");
   });
 
   const { data: periodMembership } = await adminClient()

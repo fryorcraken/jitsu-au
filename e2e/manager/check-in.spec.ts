@@ -112,12 +112,17 @@ test("a membership blocked from deletion by a check-in can be freed by moving it
   await expect(rowA.getByRole("button", { name: "Cancel" })).toBeEnabled();
 
   await page.getByRole("button", { name: "Add a membership" }).click();
-  await page.getByLabel("Plan").selectOption("casual_session");
+  const planSelect = page.getByLabel("Plan");
+  await planSelect.selectOption("casual_session");
   await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
   await page.getByRole("button", { name: "Add membership" }).click();
+  // The click only dispatches the request; the card resets this to blank
+  // only once the write has actually landed (`AddMembershipCard`'s success
+  // path). Querying the database before this would race the insert — the
+  // "newest row for this person" read could still return whatever existed
+  // before this one landed.
+  await expect(planSelect).toHaveValue("");
 
-  // Tracked before any assertion that could throw, so a failed assertion
-  // below still leaves this row queued for afterAll to remove.
   const { data: casualPlan } = await adminClient()
     .from("membership_plans")
     .select("id")
