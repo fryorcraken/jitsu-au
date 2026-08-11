@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/site/StatusPill";
-import { coverageClass } from "@/lib/status-colours";
+import { coverageClass, UNREAD_CLASS } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
@@ -80,6 +80,17 @@ function Warnings({ codes }: { codes: string[] }) {
   const text = shown.map((c) => WARNING_TEXT[c] ?? c).join("; ");
   if (!text) return <span className="text-muted-foreground">—</span>;
   return <span className="text-xs text-muted-foreground">{text}</span>;
+}
+
+// `payment_pending` fires on ANY unpaid membership a person holds, not just the
+// one actually covering the class (docs/check-in.md rule 7: "authorised is what
+// covers a class, not having paid"). It has to stand out next to a green
+// coverage pill precisely because it is not a coverage problem — the check-in
+// underneath it is fine, the person is just still owed for. A manager scanning
+// pills for red must not be the only way this is caught.
+function PaymentPendingBadge({ warnings }: { warnings: string[] }) {
+  if (!warnings.includes("payment_pending")) return null;
+  return <Pill label="Unpaid invoice" className={UNREAD_CLASS} preserveCase />;
 }
 
 function CheckInPage() {
@@ -338,14 +349,17 @@ function CheckInPage() {
                     </Link>
                   </td>
                   <td className="px-3 py-2">
-                    <Pill
-                      label={c.coverage === "none" ? "No cover" : (c.plan_name ?? "Membership")}
-                      className={coverageClass(c.coverage)}
-                      preserveCase
-                    />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Pill
+                        label={c.coverage === "none" ? "No cover" : (c.plan_name ?? "Membership")}
+                        className={coverageClass(c.coverage)}
+                        preserveCase
+                      />
+                      <PaymentPendingBadge warnings={c.warnings} />
+                    </div>
                   </td>
                   <td className="px-3 py-2">
-                    <Warnings codes={c.warnings} />
+                    <Warnings codes={c.warnings.filter((w) => w !== "payment_pending")} />
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{fmtTime(c.checked_in_at)}</td>
                   <td className="px-3 py-2 text-right">
@@ -409,17 +423,24 @@ function CheckInPage() {
                     </Link>
                   </td>
                   <td className="px-3 py-2">
-                    <Pill
-                      label={coveragePreviewLabel(r)}
-                      className={coverageClass(r.coverage)}
-                      preserveCase
-                    />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Pill
+                        label={coveragePreviewLabel(r)}
+                        className={coverageClass(r.coverage)}
+                        preserveCase
+                      />
+                      {/* Unconditional, unlike the diagnostic warnings below: an
+                          unpaid invoice is not a reason this check-in would fail,
+                          so it must not be hidden behind a green "covered" pill —
+                          that is the exact case a manager most needs to see it. */}
+                      <PaymentPendingBadge warnings={r.warnings} />
+                    </div>
                     {/* Only when nothing pays for it: "No cover" on its own is a
                         dead end, and this is the row a manager is looking at
                         while the person stands in front of them. */}
                     {r.coverage === "none" && (
                       <div className="mt-1">
-                        <Warnings codes={r.warnings} />
+                        <Warnings codes={r.warnings.filter((w) => w !== "payment_pending")} />
                       </div>
                     )}
                   </td>

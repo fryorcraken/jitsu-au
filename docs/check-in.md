@@ -176,11 +176,15 @@ people in to a class that did not run.
 7. **Being authorised is what covers a class, not having paid.** A membership is
    `active` from the moment it is raised, so a member can train while their
    transfer clears. The door is told: `payment_pending` fires on an unpaid
-   invoice (`paid_at` null, priced, not cancelled), which is a flag next to a
-   covered check-in, never a refusal — see rule 5. It used to key on
-   `status = 'pending'`, which meant the same thing only while raising a
-   membership left it waiting for money; on the current model that would warn
-   about nobody at all.
+   invoice (`paid_at` null, priced, not cancelled) — from ANY membership the
+   person holds, not just whichever one is actually covering the class — and it
+   is a flag next to a covered check-in, never a refusal — see rule 5. An amber
+   "Unpaid invoice" badge sits right next to the coverage pill itself, both
+   before checking someone in (the roster search) and after (Here now), so it
+   cannot be missed behind a green "covered" pill — the exact case a status
+   check would hide it in. It used to key on `status = 'pending'`, which meant
+   the same thing only while raising a membership left it waiting for money; on
+   the current model that would warn about nobody at all.
 8. **No cover always says why.** "Nothing covers this class" is a dead end;
    "a membership starts after this class" or "waiting on a payment" is something
    a manager can act on. Every reason coverage resolution knows is surfaced on
