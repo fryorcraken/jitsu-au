@@ -54,7 +54,7 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
   // locator on the same plan was not.
   const { data: periodPlan } = await adminClient()
     .from("membership_plans")
-    .select("code, name")
+    .select("id, code, name")
     .eq("kind", "period")
     .limit(1)
     .single();
@@ -75,10 +75,17 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
 
   // Tracked before any assertion that could throw, so a failed assertion
   // below still leaves this row queued for afterAll to remove.
+  //
+  // Pinned to the plan just raised, not merely "their newest row": this
+  // applicant is the one every membership spec acts on, so "newest" is only
+  // this row for as long as nothing else in the run leaves them a later one —
+  // and the failure that would cause is the confusing kind, a row from another
+  // test being marked paid here under this test's name.
   const { data: created } = await adminClient()
     .from("memberships")
     .select("id, payment_reference")
     .eq("user_id", applicantId)
+    .eq("plan_id", periodPlan.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .single();

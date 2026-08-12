@@ -301,6 +301,15 @@ test("a manager raises a membership after the trial, checks the person in, and p
   // now" table specifically: the "Check someone in" table below it can list
   // other seeded people who hold this same period plan, and their rows
   // would also match the plan name.
+  //
+  // What each half proves is worth being precise about. The plan name is the
+  // attributable half: it is the pill for the membership this test just
+  // raised, so the class really was covered by it. `payment_pending` is not —
+  // `resolveCoverage` reads it off the WHOLE person ("they are training on an
+  // invoice nobody has paid"), and the first test in this file leaves the same
+  // applicant an unpaid casual invoice sitting there until afterAll. So this
+  // asserts the door warns when the club is owed money, not that it warns
+  // about this particular invoice.
   const hereNow = page
     .getByRole("heading", { name: /Here now/ })
     .locator("xpath=following-sibling::div[1]");
