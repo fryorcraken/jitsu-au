@@ -30,8 +30,14 @@ import {
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm";
 
-/** Shown under a gi picker. Sizes are cut for a wearer's height, so nobody is exactly one. */
-export const GI_SIZE_HINT = "Round up or down depending on your body build.";
+/**
+ * Shown under a gi picker. Gis run generous, so the club's default advice is
+ * to take the size cut for the wearer's height (e.g. 180 cm takes a 5), not
+ * the size above it. Someone with a strong or muscular build should size up
+ * to fit their frame instead.
+ */
+export const GI_SIZE_HINT =
+  "Take the size cut for your height (for example, 180 cm takes a 5), unless you have a strong or muscular build, in which case size up to fit your frame.";
 
 /**
  * Shown under a belt picker. The lead sentence exists because a bare "240 cm"
