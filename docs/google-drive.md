@@ -46,19 +46,12 @@ Both live in the club's own Google Cloud project, and both must come from the
 | `VITE_GOOGLE_OAUTH_CLIENT_ID` | The OAuth **web** client id. The connector runs on this same client |
 | `VITE_GOOGLE_PICKER_API_KEY`  | A browser **API key**, restricted by HTTP referrer to the site      |
 
-The **Picker API** must be enabled on that project. It is a separate API from
-the Drive API, and a disabled one fails exactly like a missing key.
-
 Both are read at build time (`import.meta.env`), so adding the key needs a
-rebuild and a redeploy, not just a settings change.
+rebuild and a redeploy, not just a settings change. The key ships inside the
+site's JavaScript and anyone can read it out of the page source, which is
+normal for a browser key: its restrictions are the only thing protecting it.
 
 > [!NOTE]
-> Restrict the key by **referrer** first. An API restriction that allows only
-> the Picker API is the tighter setting, but reports differ on whether the
-> picker also calls the Drive API with that key, and getting it wrong fails the
-> same silent way as having no key at all. If the picker misbehaves with an API
-> restriction on, widen it before assuming anything else is wrong.
->
 > The claim that `VITE_GOOGLE_OAUTH_CLIENT_ID` is the connector's own client is
 > an **assumption nothing in this repo can check**: the site sends the gateway
 > only `GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY`, and never sees the
@@ -68,6 +61,65 @@ rebuild and a redeploy, not just a settings change.
 Server-side, `GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY` authenticates the
 site to Lovable's connector gateway, which holds the manager's refresh token and
 makes the actual Drive calls (`callAsAppUser`).
+
+### Setting up the Google Cloud project
+
+Once, in the club's own project: the one that **owns the OAuth client**, whose
+number is the digits in front of the client id. Picking the wrong project is
+the easiest mistake here and it fails silently, so check the project picker in
+the console's top bar at every step. Console labels move; the console's own
+search box is quicker than hunting through menus.
+
+**1. Enable two APIs** (search each by name, then Enable):
+
+- **Google Picker API**, for the folder window.
+- **Google Drive API**, for the uploads and for the check that warns you when
+  you are signed in as the wrong Google account. With Drive off that check
+  fails silently and stops warning anybody, while everything else looks fine.
+
+**2. Create the browser API key.** APIs & Services → Credentials → Create
+credentials → API key, then Edit it:
+
+- **Application restrictions**: Websites, with `https://jitsu.au/*` and
+  `https://*.jitsu.au/*`. Referrer restrictions do accept wildcards.
+- **API restrictions**: Restrict key, and tick **both Picker API and Drive
+  API**. Ticking Picker alone may starve the same call the missing key did, and
+  the symptom is identical. To prove the key first, leave the key unrestricted
+  for one test and tighten it after Select works: change one thing at a time.
+- Restriction changes take a few minutes to land.
+
+**3. Check the OAuth client** (Credentials → the web client):
+
+- **Authorised JavaScript origins** needs `https://jitsu.au`. This is what lets
+  the site ask Google for the token the picker runs on, and it is already right
+  if the picker has ever opened. A missing origin does not look like this bug:
+  sign-in fails with `origin_mismatch` and the folder window never opens.
+- Origins take **no wildcards**, so a Lovable preview URL cannot be authorised.
+  **Browsing only works on the live site**; do not debug it on a preview.
+- **Authorised redirect URIs** needs the gateway callback
+  `https://connector-gateway.lovable.dev/api/v1/app-users/oauth2/callback`.
+  If "Connect Google Drive" works today, this is already there.
+
+**4. Check the consent screen.** The three scopes the site asks for
+(`userinfo.email`, `userinfo.profile`, `drive.file`) are all non-sensitive, so
+there is nothing to submit for verification. The picker needs no extra scope;
+if something is asking for one, do not widen to `drive` or `drive.readonly`.
+
+> [!IMPORTANT]
+> **Publishing status matters more than it looks.** While the consent screen is
+> External + **Testing**, every authorisation expires after **7 days**. That
+> includes the connector's stored refresh token, so the club's Drive connection
+> dies about once a week and waivers quietly stop arriving. Publish the app
+> (In production), or use Internal if the club has Workspace.
+
+**5. Add `VITE_GOOGLE_PICKER_API_KEY`** to the Lovable project settings, beside
+`VITE_SUPABASE_URL`, then **rebuild and redeploy**: until a new build ships,
+"Browse in Drive" stays greyed out no matter what the setting says.
+
+**6. Check it.** On `https://jitsu.au/account` as a manager, signed into the
+Google account Drive is connected as: Browse in Drive should be pressable, the
+folder window should open, and clicking a folder once and pressing Select
+should save it.
 
 ## Why the identity is so fussy
 
@@ -108,6 +160,24 @@ to the manager's whole Drive rather than only the files this site touches.
 | "Google's sign-in window could not open"                             | The browser blocked the pop-up. It opens a network round trip after the click, which can be long enough to lose the click's activation                                                                                             |
 | "Could not access that folder from the server"                       | The grant did not reach the connector: wrong Google account, or a client id/appId mismatch                                                                                                                                         |
 | Select greys out and nothing happens                                 | Something on the Cloud project is wrong: the API key, its restrictions, the app id, or the Picker API being disabled. Google reports these in the browser console, never through the callback. Press Cancel on the card to get out |
+
+### Select still does nothing
+
+Google reports every one of these to the **browser console** and none of them to
+the page, so open the console (Chrome `Ctrl/⌘+Shift+J`) _before_ pressing
+Browse, press Cancel on the card to escape the stuck window, and read from the
+top:
+
+| In the console                                  | What it means                                                                                                        |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `API developer key is invalid`                  | Wrong key, or a key from a different Cloud project than the OAuth client                                             |
+| `403 ... has not been used in project <number>` | That API is not enabled on the project                                                                               |
+| `requests from referer ... are blocked`         | The key's website restrictions do not cover this URL                                                                 |
+| `API_KEY_SERVICE_BLOCKED`                       | The key's **API restrictions** exclude the call. Tick both APIs, or unrestrict to confirm                            |
+| `origin_mismatch`                               | The origin is missing from the OAuth client. You would have seen this before the folder window opened, not at Select |
+
+Nothing useful there? Set the key's API restrictions to "Don't restrict key",
+wait five minutes and retry. If Select then works, the restriction was it.
 
 A folder that later disappears is only recreated when it came from a **typed
 name** (`shouldRecreateFolder`). A picked folder is never recreated: its name is
