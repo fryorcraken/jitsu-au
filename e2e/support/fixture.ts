@@ -105,3 +105,34 @@ export function adminClient(): SupabaseClient {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/**
+ * scripts/seed-local-club.mjs's applicant persona. Exported so a spec that
+ * needs to search for them by email (there is nowhere else to read it back
+ * from: they are not in `personas` above) uses this instead of its own copy
+ * of the literal.
+ */
+export const APPLICANT_EMAIL = "applicant@example.com";
+
+/**
+ * The seeded applicant's user id, resolved live rather than carried in the
+ * manifest above: `personas` there is only the two people `auth.setup.ts`
+ * signs in (a magic link per entry), and `params` is only the `$segment`
+ * values `pr-screenshots-pages.mjs` needs for a route. The applicant is
+ * neither — never signed in, only ever the target of something a manager
+ * does.
+ *
+ * Goes through the same `user_id_by_email` RPC the app itself uses to
+ * resolve a person by email (see CLAUDE.md's Supabase-clients table), rather
+ * than `auth.admin.listUsers()` — which paginates (50 users by default) and
+ * would start missing the applicant the moment the seeded club holds more
+ * people than that.
+ */
+export async function applicantUserId(): Promise<string> {
+  const { data, error } = await adminClient().rpc("user_id_by_email", {
+    _email: APPLICANT_EMAIL,
+  });
+  if (error) throw new Error(`could not look up the seeded applicant: ${error.message}`);
+  if (!data) throw new Error(`no seeded user with email ${APPLICANT_EMAIL}`);
+  return data;
+}
