@@ -470,11 +470,17 @@ export async function ensureCasualInvoiceEmailed(
     // sending only this row's amount would under-bill the member for what they
     // actually owe — so an unpaid sibling on the same reference is folded in
     // exactly as `enrolMember` combines it.
+    //
+    // A CANCELLED sibling is excluded, the same rule `isUnpaid` and
+    // `reconcileUnmatched` already use: a manager closed that invoice on
+    // purpose, so it is owed nothing, and folding it back in here would bill
+    // the member for a charge that was deliberately withdrawn.
     const { data: bundled } = await admin
       .from("memberships")
       .select("price_cents, plan_id")
       .eq("payment_reference", membership.payment_reference)
       .neq("id", membership.id)
+      .neq("status", "cancelled")
       .is("paid_at", null);
     let totalCents = membership.price_cents;
     let planName = plan?.name ?? "your casual class";

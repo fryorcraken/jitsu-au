@@ -969,10 +969,29 @@ type InvoiceOp = { table: string; filters: [string, string, unknown][] };
  * (a list). Distinguishing on the filters actually used, like
  * checkin.functions.test.ts's fake, is what lets one fake client serve both.
  */
+/** A candidate row sharing the primary membership's payment_reference. */
+type SiblingRow = {
+  id: string;
+  price_cents: number;
+  plan_id: string;
+  status: string;
+  paid_at: string | null;
+};
+
 function fakeInvoiceEmailAdmin(
   over: {
     membership?: Result;
     bundled?: Result;
+    /**
+     * The FULL candidate set sharing the reference, including rows the
+     * production query is expected to filter out (paid, cancelled, or the
+     * primary row itself). Unlike `bundled` — a canned response returned
+     * as-is — this is run through the SAME predicates the real query sends
+     * (recorded in `op.filters`), so a regression that drops one of those
+     * filters actually changes what a test sees, rather than the fake
+     * silently trusting the code to have filtered correctly.
+     */
+    siblings?: SiblingRow[];
     plan?: Result;
     siblingPlans?: Result;
     profile?: Result;
@@ -990,6 +1009,7 @@ function fakeInvoiceEmailAdmin(
       paid_at: null,
     });
   const bundled = over.bundled ?? ok([]);
+  const siblings = over.siblings;
   const plan = over.plan ?? ok(CASUAL_PLAN);
   const siblingPlans = over.siblingPlans ?? ok([]);
   const profile =
@@ -1000,10 +1020,28 @@ function fakeInvoiceEmailAdmin(
   const byId = (filters: InvoiceOp["filters"]) =>
     filters.some(([col, verb]) => col === "id" && verb === "eq");
 
+  /** Apply the bundled query's own recorded predicates to `siblings`. */
+  function filterSiblings(filters: InvoiceOp["filters"]): Result {
+    if (!siblings) return bundled;
+    const excludedId = filters.find(([c, v]) => c === "id" && v === "neq")?.[2];
+    const excludeCancelled = filters.some(
+      ([c, v, val]) => c === "status" && v === "neq" && val === "cancelled",
+    );
+    const paidOnlyNull = filters.some(([c, v]) => c === "paid_at" && v === "is");
+    return ok(
+      siblings.filter((s) => {
+        if (excludedId != null && s.id === excludedId) return false;
+        if (excludeCancelled && s.status === "cancelled") return false;
+        if (paidOnlyNull && s.paid_at !== null) return false;
+        return true;
+      }),
+    );
+  }
+
   function chain(op: InvoiceOp) {
     const settle = () => {
       if (op.table === "memberships")
-        return Promise.resolve(byId(op.filters) ? membership : bundled);
+        return Promise.resolve(byId(op.filters) ? membership : filterSiblings(op.filters));
       if (op.table === "membership_plans")
         return Promise.resolve(byId(op.filters) ? plan : siblingPlans);
       return Promise.resolve(profile);
@@ -1110,6 +1148,38 @@ describe("ensureCasualInvoiceEmailed", () => {
         membershipId: "mem-casual",
         planName: "Casual class + Yearly insurance",
         amount: "$90",
+      }),
+    );
+  });
+
+  // A manager can cancel one invoice on a shared reference without touching
+  // the other (see docs/memberships.md) — a cancelled insurance invoice next
+  // to a still-unpaid casual credit, say, because the member turned out to
+  // already have cover elsewhere. `isUnpaid` and `reconcileUnmatched` both
+  // treat "cancelled" as owed nothing; this guarantee has to agree, or it
+  // bills the member for a charge that was deliberately withdrawn. Uses
+  // `siblings` rather than `bundled`, so the fake actually applies the query's
+  // own `.neq("status", "cancelled")` predicate instead of the test just
+  // trusting the production code got it right.
+  it("excludes a cancelled sibling from what it folds in", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      siblings: [
+        {
+          id: "sib-insurance",
+          price_cents: 6000,
+          plan_id: "plan-insurance",
+          status: "cancelled",
+          paid_at: null,
+        },
+      ],
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        planName: "Casual class",
+        amount: "$30",
       }),
     );
   });
