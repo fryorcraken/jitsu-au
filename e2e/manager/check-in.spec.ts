@@ -13,6 +13,8 @@ let applicantId: string;
 
 /** Membership rows this file arranges or raises, removed once in afterAll. */
 const createdMembershipIds: string[] = [];
+/** Calendar events this file arranges, removed once in afterAll. */
+const createdEventIds: string[] = [];
 /** The seeded trial's original status/credits, restored once in afterAll. */
 let originalTrial: { id: string; status: string; sessions_remaining: number | null } | null = null;
 
@@ -27,6 +29,9 @@ test.afterAll(async () => {
   await adminClient().from("session_checkins").delete().eq("user_id", applicantId);
   if (createdMembershipIds.length > 0) {
     await adminClient().from("memberships").delete().in("id", createdMembershipIds);
+  }
+  if (createdEventIds.length > 0) {
+    await adminClient().from("calendar_events").delete().in("id", createdEventIds);
   }
   if (originalTrial) {
     await adminClient()
@@ -227,4 +232,86 @@ test("a check-in that outruns the trial's two sessions lands uncovered on the th
   await page.getByRole("button", { name: "Check in" }).click();
   await expect(page.getByText(/nothing covers it\. Added to needs attention\./)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs attention (1)" })).toBeVisible();
+});
+
+test("a manager raises a membership after the trial, checks the person in, and pays the invoice", async ({
+  page,
+}) => {
+  // A class of its own: the five seeded ones are already spoken for by
+  // check-ins the two tests above put against them for this same applicant,
+  // so a fresh one avoids fighting over a check-in row rather than testing
+  // anything about coverage.
+  const { data: event, error: eventErr } = await adminClient()
+    .from("calendar_events")
+    .insert({
+      title: "Drop-in class",
+      starts_at: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+      ends_at: new Date(Date.now() + 3 * 86_400_000 + 2 * 3_600_000).toISOString(),
+    })
+    .select("id")
+    .single();
+  if (eventErr || !event) throw new Error(`could not arrange a class: ${eventErr?.message}`);
+  createdEventIds.push(event.id);
+
+  // The manager raises a real plan now that the trial (spent above) is
+  // behind them — mirrors doing this in person rather than the member
+  // buying it themselves. The period plan, not casual_session: the
+  // recoverable-delete test above leaves its own casual_session invoice for
+  // this same applicant sitting unpaid until this file's afterAll runs, and
+  // the app's payment reference is deterministic (surname + user id + plan
+  // dates), so reusing that plan here would collide with it.
+  const { data: periodPlan } = await adminClient()
+    .from("membership_plans")
+    .select("id, code, name")
+    .eq("kind", "period")
+    .limit(1)
+    .single();
+  if (!periodPlan) throw new Error("no seeded period plan");
+
+  await page.goto(`/manager/users/${applicantId}`);
+  await page.getByRole("button", { name: "Add a membership" }).click();
+  const planSelect = page.getByLabel("Plan");
+  await planSelect.selectOption(periodPlan.code);
+  await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
+  await page.getByRole("button", { name: "Add membership" }).click();
+  // The click only dispatches the request; the card resets this to blank
+  // only once the write has actually landed. Querying the database before
+  // this would race the insert.
+  await expect(planSelect).toHaveValue("");
+
+  const { data: created } = await adminClient()
+    .from("memberships")
+    .select("id, payment_reference")
+    .eq("user_id", applicantId)
+    .eq("plan_id", periodPlan.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  if (!created) throw new Error("raising the membership did not create a row");
+  createdMembershipIds.push(created.id);
+
+  await page.goto("/manager/check-in");
+  await page.locator("#class-picker").selectOption(event.id);
+  await page.getByPlaceholder("Search by name or email").fill(APPLICANT_EMAIL);
+  await page.getByRole("button", { name: "Check in" }).click();
+
+  // Unpaid is not a reason to refuse a check-in either — a membership is
+  // authorised the moment it is raised, regardless of money (see
+  // docs/memberships.md) — but the door warns about it. Scoped to the "Here
+  // now" table specifically: the "Check someone in" table below it can list
+  // other seeded people who hold this same period plan, and their rows
+  // would also match the plan name.
+  const hereNow = page
+    .getByRole("heading", { name: /Here now/ })
+    .locator("xpath=following-sibling::div[1]");
+  const hereRow = hereNow.getByRole("row").filter({ hasText: periodPlan.name });
+  await expect(hereRow).toHaveCount(1);
+  await expect(hereRow).toContainText("waiting on a payment");
+
+  await page.goto(`/manager/users/${applicantId}`);
+  const row = page.getByRole("row").filter({ hasText: created.payment_reference });
+  await expect(row).toHaveCount(1);
+  await row.getByRole("button", { name: "Mark as paid" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Mark as paid" }).click();
+  await expect(row.getByRole("button", { name: "Mark as paid" })).toHaveCount(0);
 });
