@@ -125,6 +125,18 @@ vi.mock("@/integrations/supabase/client.server", () => ({
   },
 }));
 
+/**
+ * The actual send is a server-only network call (`ensureCasualInvoiceEmailed`
+ * tests care only about WHICH of the two it reaches for, and with what), so
+ * the transport is mocked rather than routed through `LOVABLE_API_KEY`.
+ */
+const sendMembershipPaymentEmail = vi.fn().mockResolvedValue({ sent: [], skipped: false });
+const sendMembershipPaidEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
+vi.mock("./membership-email.server", () => ({
+  sendMembershipPaymentEmail: (...args: unknown[]) => sendMembershipPaymentEmail(...args),
+  sendMembershipPaidEmail: (...args: unknown[]) => sendMembershipPaidEmail(...args),
+}));
+
 /** 18:05 Sydney on 5 Aug: signed at the door, minutes after the class began. */
 const SIGNED_AT = "2026-08-05T08:05:00.000Z";
 
@@ -926,5 +938,289 @@ describe("enrolMember on a free plan", () => {
     );
     await enrol(fake);
     expect(fake.updates).toEqual([]);
+  });
+});
+
+// ---- Guaranteeing a casual credit was actually invoiced ----
+//
+// `applyCoverage` in checkin.functions.ts calls this the moment a casual
+// credit is spent, precisely because the email `enrolMember` sends when the
+// membership is RAISED is not a guarantee: `send_email: false` can suppress
+// it, and every email in this lifecycle is best-effort. These pin what a
+// check-in reaches for once a credit has actually been drawn on.
+
+const CASUAL_PLAN = {
+  id: "plan-casual",
+  code: "casual_session",
+  name: "Casual class",
+  kind: "session",
+  session_credits: 1,
+  ends_on: null,
+};
+
+/** One database call, as the fake saw it — same shape as checkin.functions.test.ts's. */
+type InvoiceOp = { table: string; filters: [string, string, unknown][] };
+
+/**
+ * Chainable, because `ensureCasualInvoiceEmailed` reads `memberships` and
+ * `membership_plans` two different ways: once by id (`.eq("id", …)`, single
+ * row) for the credit that was actually spent, and — only when it needs to
+ * fold in a bundled sibling invoice — once by `payment_reference` / `.in(…)`
+ * (a list). Distinguishing on the filters actually used, like
+ * checkin.functions.test.ts's fake, is what lets one fake client serve both.
+ */
+/** A candidate row sharing the primary membership's payment_reference. */
+type SiblingRow = {
+  id: string;
+  price_cents: number;
+  plan_id: string;
+  status: string;
+  paid_at: string | null;
+};
+
+function fakeInvoiceEmailAdmin(
+  over: {
+    membership?: Result;
+    bundled?: Result;
+    /**
+     * The FULL candidate set sharing the reference, including rows the
+     * production query is expected to filter out (paid, cancelled, or the
+     * primary row itself). Unlike `bundled` — a canned response returned
+     * as-is — this is run through the SAME predicates the real query sends
+     * (recorded in `op.filters`), so a regression that drops one of those
+     * filters actually changes what a test sees, rather than the fake
+     * silently trusting the code to have filtered correctly.
+     */
+    siblings?: SiblingRow[];
+    plan?: Result;
+    siblingPlans?: Result;
+    profile?: Result;
+    emails?: Result;
+  } = {},
+) {
+  const membership =
+    over.membership ??
+    ok({
+      id: "mem-casual",
+      user_id: "user-1",
+      plan_id: CASUAL_PLAN.id,
+      price_cents: 3000,
+      payment_reference: "JITSU-ADA-1234",
+      paid_at: null,
+    });
+  const bundled = over.bundled ?? ok([]);
+  const siblings = over.siblings;
+  const plan = over.plan ?? ok(CASUAL_PLAN);
+  const siblingPlans = over.siblingPlans ?? ok([]);
+  const profile =
+    over.profile ?? ok({ first_name: "Ada", middle_name: null, last_name: "Lovelace" });
+  const emails =
+    over.emails ?? ok([{ user_id: "user-1", email: "ada@example.com", email_confirmed_at: null }]);
+
+  const byId = (filters: InvoiceOp["filters"]) =>
+    filters.some(([col, verb]) => col === "id" && verb === "eq");
+
+  /** Apply the bundled query's own recorded predicates to `siblings`. */
+  function filterSiblings(filters: InvoiceOp["filters"]): Result {
+    if (!siblings) return bundled;
+    const excludedId = filters.find(([c, v]) => c === "id" && v === "neq")?.[2];
+    const excludeCancelled = filters.some(
+      ([c, v, val]) => c === "status" && v === "neq" && val === "cancelled",
+    );
+    const paidOnlyNull = filters.some(([c, v]) => c === "paid_at" && v === "is");
+    return ok(
+      siblings.filter((s) => {
+        if (excludedId != null && s.id === excludedId) return false;
+        if (excludeCancelled && s.status === "cancelled") return false;
+        if (paidOnlyNull && s.paid_at !== null) return false;
+        return true;
+      }),
+    );
+  }
+
+  function chain(op: InvoiceOp) {
+    const settle = () => {
+      if (op.table === "memberships")
+        return Promise.resolve(byId(op.filters) ? membership : filterSiblings(op.filters));
+      if (op.table === "membership_plans")
+        return Promise.resolve(byId(op.filters) ? plan : siblingPlans);
+      return Promise.resolve(profile);
+    };
+    const builder: Record<string, unknown> = {
+      eq: (col: string, val: unknown) => (op.filters.push([col, "eq", val]), builder),
+      neq: (col: string, val: unknown) => (op.filters.push([col, "neq", val]), builder),
+      in: (col: string, val: unknown) => (op.filters.push([col, "in", val]), builder),
+      is: (col: string, val: unknown) => (op.filters.push([col, "is", val]), builder),
+      maybeSingle: () => settle(),
+      then: (resolve: (r: Result) => unknown, reject?: (e: unknown) => unknown) =>
+        settle().then(resolve, reject),
+    };
+    return builder;
+  }
+
+  return {
+    rpc: () => Promise.resolve(emails),
+    from: (table: string) => ({ select: () => chain({ table, filters: [] }) }),
+  };
+}
+
+async function ensureInvoiceEmailed(admin: unknown, membershipId = "mem-casual") {
+  const { ensureCasualInvoiceEmailed } = await import("./membership.functions");
+  return ensureCasualInvoiceEmailed(admin as never, membershipId);
+}
+
+describe("ensureCasualInvoiceEmailed", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    sendMembershipPaymentEmail.mockClear();
+    sendMembershipPaidEmail.mockClear();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends the pay-this invoice for an unpaid casual credit", async () => {
+    await ensureInvoiceEmailed(fakeInvoiceEmailAdmin({}));
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        memberEmail: "ada@example.com",
+        planName: "Casual class",
+        amount: "$30",
+        reference: "JITSU-ADA-1234",
+      }),
+    );
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends the receipt instead when the credit was already paid for", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      membership: ok({
+        id: "mem-casual",
+        user_id: "user-1",
+        plan_id: CASUAL_PLAN.id,
+        price_cents: 3000,
+        payment_reference: "JITSU-ADA-1234",
+        paid_at: "2026-08-05T00:00:00.000Z",
+      }),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaidEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        memberEmail: "ada@example.com",
+        planName: "Casual class",
+        amount: "$30",
+      }),
+    );
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing for a comped, zero-priced casual", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      membership: ok({
+        id: "mem-casual",
+        user_id: "user-1",
+        plan_id: CASUAL_PLAN.id,
+        price_cents: 0,
+        payment_reference: "JITSU-ADA-1234",
+        paid_at: null,
+      }),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  // A mandatory insurance invoice can ride on the SAME payment_reference as
+  // the casual credit (`enrolMember`'s bundling). If the combined send never
+  // went out — the `send_email: false` backfill this whole guarantee exists
+  // for — sending only the casual amount would tell the member they owe less
+  // than they actually do.
+  it("folds an unpaid bundled invoice (e.g. insurance) into the amount and plan name", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      bundled: ok([{ price_cents: 6000, plan_id: "plan-insurance" }]),
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        planName: "Casual class + Yearly insurance",
+        amount: "$90",
+      }),
+    );
+  });
+
+  // A manager can cancel one invoice on a shared reference without touching
+  // the other (see docs/memberships.md) — a cancelled insurance invoice next
+  // to a still-unpaid casual credit, say, because the member turned out to
+  // already have cover elsewhere. `isUnpaid` and `reconcileUnmatched` both
+  // treat "cancelled" as owed nothing; this guarantee has to agree, or it
+  // bills the member for a charge that was deliberately withdrawn. Uses
+  // `siblings` rather than `bundled`, so the fake actually applies the query's
+  // own `.neq("status", "cancelled")` predicate instead of the test just
+  // trusting the production code got it right.
+  it("excludes a cancelled sibling from what it folds in", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      siblings: [
+        {
+          id: "sib-insurance",
+          price_cents: 6000,
+          plan_id: "plan-insurance",
+          status: "cancelled",
+          paid_at: null,
+        },
+      ],
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        membershipId: "mem-casual",
+        planName: "Casual class",
+        amount: "$30",
+      }),
+    );
+  });
+
+  // A comped casual bundled with paid-for insurance still owes the insurance
+  // half, so the zero-price row on its own must not short-circuit the send —
+  // only a genuinely zero TOTAL (nothing bundled, or everything bundled is
+  // also free) should.
+  it("still invoices a bundled sibling even when the casual credit itself is free", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      membership: ok({
+        id: "mem-casual",
+        user_id: "user-1",
+        plan_id: CASUAL_PLAN.id,
+        price_cents: 0,
+        payment_reference: "JITSU-ADA-1234",
+        paid_at: null,
+      }),
+      bundled: ok([{ price_cents: 6000, plan_id: "plan-insurance" }]),
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ planName: "Casual class + Yearly insurance", amount: "$60" }),
+    );
+  });
+
+  it("sends nothing when the membership no longer exists", async () => {
+    await ensureInvoiceEmailed(fakeInvoiceEmailAdmin({ membership: ok(null) }));
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the person has no resolvable email, rather than throwing", async () => {
+    await ensureInvoiceEmailed(fakeInvoiceEmailAdmin({ emails: ok([]) }));
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+  });
+
+  it("never lets a failed send escape — the check-in it guards must never fail", async () => {
+    sendMembershipPaymentEmail.mockRejectedValueOnce(new Error("Lovable is down"));
+    await expect(ensureInvoiceEmailed(fakeInvoiceEmailAdmin({}))).resolves.toBeUndefined();
   });
 });

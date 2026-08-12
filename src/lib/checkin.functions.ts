@@ -28,6 +28,7 @@ import type { CheckInWarning } from "@/lib/validation";
 import { attachableMemberships, lapsedMembershipIds, resolveCoverage } from "@/lib/checkin";
 import type { CoverageCandidate, CoverageDecision } from "@/lib/checkin";
 import { topUpHorizon } from "@/lib/calendar.functions";
+import { ensureCasualInvoiceEmailed } from "@/lib/membership.functions";
 import type { ClubUserEmail } from "@/lib/club-users";
 import { userEmails } from "@/lib/supabase-rpc";
 
@@ -220,6 +221,13 @@ async function spendCredit(admin: CheckinClient, decision: CoverageDecision): Pr
  * be driven from a unit test — a `createServerFn` handler cannot be (it dies on
  * "No Start context found in AsyncLocalStorage"). Same seam as
  * `reconcileUnmatched` in membership.functions.ts.
+ *
+ * A casual credit (`coverage: "session"`) also gets `ensureCasualInvoiceEmailed`
+ * here, not just at the point the membership was raised: this is the one place
+ * every casual credit is actually spent, whatever door it came in through
+ * (check-in, attach, or move), so it is the reliable point to guarantee the
+ * member has an invoice or receipt for it — including a credit whose invoice
+ * email was skipped or lost when the membership was raised.
  */
 export async function applyCoverage(
   admin: CheckinClient,
@@ -295,6 +303,14 @@ export async function applyCoverage(
 
   // Only now, and never the membership this check-in just drew on.
   await closeLapsed(admin, candidates, decision.membership_id);
+
+  // Guarantee the casual credit this check-in just spent has an invoice or
+  // receipt in the member's inbox. Best-effort and never awaited into a
+  // failure: see the note on `ensureCasualInvoiceEmailed`.
+  if (decision.coverage === "session" && decision.membership_id) {
+    await ensureCasualInvoiceEmailed(admin, decision.membership_id);
+  }
+
   return decision;
 }
 

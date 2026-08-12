@@ -388,6 +388,137 @@ export async function recordMembershipPayment(
 }
 
 /**
+ * Guarantee a casual credit that a check-in just spent has an invoice or
+ * receipt sitting in the member's inbox, independent of what happened when the
+ * membership itself was raised.
+ *
+ * Reached from `applyCoverage` in checkin.functions.ts — the one place a
+ * casual credit is actually consumed — rather than relying on `enrolMember`
+ * alone, because the two moments can be far apart and the first email is not
+ * guaranteed: a manager can raise the invoice with `send_email: false` (the
+ * backfill case in `createMembershipForUser`), or the send can fail and be
+ * swallowed, since every email in this lifecycle is best-effort. Someone who
+ * actually trains on a casual credit must not be the one left with no record
+ * of what they owe or paid for it.
+ *
+ * Both target emails are idempotent on the membership id
+ * (`membership-payment-<id>` / `membership-paid-<id>`) — the same keys
+ * `enrolMember` and `recordMembershipPayment` already send under — so calling
+ * this a second time for a membership that was already emailed is a safe
+ * provider-side no-op, not a duplicate landing in anyone's inbox.
+ *
+ * Which of the two goes out follows `paid_at`: unpaid still needs the "pay
+ * this" invoice, paid needs the receipt, and either is the wrong email for the
+ * other state.
+ *
+ * Awaited by its caller rather than fired-and-forgotten, matching every other
+ * email in this lifecycle (`enrolMember`, `recordMembershipPayment`): the
+ * production deploy target is Cloudflare, where work not awaited before the
+ * response returns is not guaranteed to run at all, and a "guarantee" that can
+ * silently not happen is worse than the door pausing for it. Best-effort only
+ * in the sense that a failed or slow send is caught and logged, never thrown —
+ * see the try/catch below.
+ */
+export async function ensureCasualInvoiceEmailed(
+  admin: MembershipClient,
+  membershipId: string,
+): Promise<void> {
+  try {
+    const { data: membership, error } = await admin
+      .from("memberships")
+      .select("id, user_id, plan_id, price_cents, payment_reference, paid_at")
+      .eq("id", membershipId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!membership || !membership.user_id) return;
+
+    const [{ data: plan }, { data: profile }, emails] = await Promise.all([
+      admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
+      admin
+        .from("profiles")
+        .select("first_name, middle_name, last_name, preferred_name")
+        .eq("user_id", membership.user_id)
+        .maybeSingle(),
+      emailsByUserId(admin, [membership.user_id]),
+    ]);
+    const email = emails.get(membership.user_id) ?? null;
+    if (!email) return;
+
+    if (membership.paid_at) {
+      // Not folding in a bundled sibling here, on purpose: a receipt is
+      // already never combined across a bundle anywhere in this app —
+      // `recordMembershipPayment` sends one per row, because a bundle can be
+      // reconciled or marked paid one invoice at a time. This matches that.
+      const { sendMembershipPaidEmail } = await import("./membership-email.server");
+      await sendMembershipPaidEmail({
+        membershipId: membership.id,
+        memberGreetingName: profile ? greetingName(profile) : "",
+        memberEmail: email,
+        planName: plan?.name ?? "your casual class",
+        validity: plan ? validityLabel(plan) : "",
+        amount: formatCents(membership.price_cents),
+      });
+      return;
+    }
+
+    if (!membership.payment_reference) return;
+
+    // A mandatory insurance invoice can ride on this SAME reference
+    // (`resolveInsuranceCover` + `enrolMember`'s bundling), combined into ONE
+    // invoice email under this membership's id. If that combined send never
+    // went out (the `send_email: false` backfill this guarantee exists for),
+    // sending only this row's amount would under-bill the member for what they
+    // actually owe — so an unpaid sibling on the same reference is folded in
+    // exactly as `enrolMember` combines it.
+    //
+    // A CANCELLED sibling is excluded, the same rule `isUnpaid` and
+    // `reconcileUnmatched` already use: a manager closed that invoice on
+    // purpose, so it is owed nothing, and folding it back in here would bill
+    // the member for a charge that was deliberately withdrawn.
+    const { data: bundled } = await admin
+      .from("memberships")
+      .select("price_cents, plan_id")
+      .eq("payment_reference", membership.payment_reference)
+      .neq("id", membership.id)
+      .neq("status", "cancelled")
+      .is("paid_at", null);
+    let totalCents = membership.price_cents;
+    let planName = plan?.name ?? "your casual class";
+    if (bundled?.length) {
+      const { data: siblingPlans } = await admin
+        .from("membership_plans")
+        .select("id, name")
+        .in(
+          "id",
+          bundled.map((b) => b.plan_id),
+        );
+      const nameById = new Map((siblingPlans ?? []).map((p) => [p.id, p.name]));
+      for (const row of bundled) {
+        totalCents += row.price_cents;
+        const siblingName = nameById.get(row.plan_id);
+        if (siblingName) planName = `${planName} + ${siblingName}`;
+      }
+    }
+    // Nothing is owed, on this row or anything bundled with it.
+    if (totalCents === 0) return;
+
+    const { sendMembershipPaymentEmail } = await import("./membership-email.server");
+    await sendMembershipPaymentEmail({
+      membershipId: membership.id,
+      memberName: profile ? profileFullName(profile) : "",
+      memberGreetingName: profile ? greetingName(profile) : "",
+      memberEmail: email,
+      planName,
+      amount: formatCents(totalCents),
+      reference: membership.payment_reference,
+      admin,
+    });
+  } catch (e) {
+    console.error(`[ensureCasualInvoiceEmailed] failed for membership ${membershipId}:`, e);
+  }
+}
+
+/**
  * Assign the club's free trial to a person, once ever: called when a manager
  * first approves their waiver (approved = visitor = trial assigned). Skips
  * silently if they ever had a trial membership or no trial plan exists. The

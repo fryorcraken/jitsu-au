@@ -134,7 +134,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     await expect(page.getByRole("button", { name: "Unapprove" })).toBeVisible();
   });
 
-  // The three earliest seeded classes (scripts/seed-local-club.mjs puts five
+  // The four earliest seeded classes (scripts/seed-local-club.mjs puts five
   // on the calendar, at day -14/-7/+1/+8/+15 from seed time). The earliest
   // sits right at the check-in screen's 14-day lookback edge, so if this CI
   // run happens to straddle a UTC midnight between seeding and this step,
@@ -145,13 +145,13 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     .select("id")
     .eq("title", "Tuesday class")
     .order("starts_at", { ascending: true })
-    .limit(3);
-  if (eventsErr || !events || events.length < 3) {
+    .limit(4);
+  if (eventsErr || !events || events.length < 4) {
     throw new Error(
-      `fewer than 3 seeded classes to check the new member in against: ${eventsErr?.message}`,
+      `fewer than 4 seeded classes to check the new member in against: ${eventsErr?.message}`,
     );
   }
-  const [event1, event2, event3] = events.map((e) => e.id);
+  const [event1, event2, event3, event4] = events.map((e) => e.id);
 
   await test.step("a manager checks them in twice, using up the trial", async () => {
     await page.goto("/manager/check-in");
@@ -323,5 +323,101 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     // check-in landed on.
     const periodRow = page.getByRole("row").filter({ hasText: periodMembership.payment_reference });
     await expect(periodRow).toContainText("active");
+  });
+
+  // Real club behaviour: someone on a period plan still occasionally pays for
+  // a one-off extra class (a friend's trial class, a session outside their
+  // usual days). A `casual_session` membership is one credit, so there is no
+  // way to spend the SAME row twice — the only way to prove the check-in
+  // invoice guarantee (`ensureCasualInvoiceEmailed`, reached from
+  // `applyCoverage` in checkin.functions.ts) engages on every casual credit a
+  // person spends, not just their first ever one, is a genuinely SECOND casual
+  // purchase. Run after the plan switch above, so it cannot disturb that
+  // step's "exactly one check-in covered by Casual class" assertion.
+  await test.step("the member buys a second casual class", async () => {
+    const second = await browser.newContext({ storageState: NO_SESSION });
+    const secondPage = await second.newPage();
+    const { data: link, error: linkErr } = await adminClient().auth.admin.generateLink({
+      type: "magiclink",
+      email,
+      options: { redirectTo: `${baseURL}/membership` },
+    });
+    if (linkErr) throw new Error(`could not sign the member back in: ${linkErr.message}`);
+    await secondPage.goto(link.properties.action_link, { waitUntil: "networkidle" });
+    await secondPage.waitForFunction(() =>
+      Object.keys(localStorage).some((key) => key.endsWith("-auth-token")),
+    );
+    await secondPage.getByLabel(/UTS student number/).fill("");
+
+    const heading = secondPage.getByRole("heading", { name: "Casual class", level: 3 });
+    const card = heading.locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
+    // A different session date than the first casual purchase: the payment
+    // reference is deterministic on (surname, user id, session date), so
+    // buying two casual classes dated the same day would land both on the
+    // SAME reference — the exact shape insurance bundling uses on purpose,
+    // but wrong here, where the point is two genuinely separate invoices.
+    await card
+      .getByLabel("Session date")
+      .fill(new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10));
+    await card.getByRole("button", { name: "Choose & pay by transfer" }).click();
+    await expect(
+      secondPage.getByText(
+        "Your invoice is ready. The payment details are at the top of this page.",
+      ),
+    ).toBeVisible();
+    await second.close();
+  });
+
+  const { data: secondCasualMembership } = await adminClient()
+    .from("memberships")
+    .select("id, payment_reference")
+    .eq("user_id", newUserId)
+    .eq("plan_id", casualPlan.id)
+    .neq("id", casualMembership.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  if (!secondCasualMembership)
+    throw new Error("the second casual-class purchase did not create a membership row");
+  // Genuinely a second invoice, not a re-read of the first: a distinct
+  // reference is what a different session date buys, and it is also what
+  // makes the two casual purchases tellable apart on screen.
+  expect(secondCasualMembership.payment_reference).not.toBe(casualMembership.payment_reference);
+
+  await test.step("a manager checks them in on the second casual credit too, and it reaches the invoice guarantee", async () => {
+    await page.goto("/manager/check-in");
+    await page.locator("#class-picker").selectOption(event4);
+    await page.getByPlaceholder("Search by name or email").fill(email);
+    await page.getByRole("button", { name: "Check in" }).click();
+    // One credit, spent, exactly like the first casual purchase — the credit
+    // pack precedence still outranks the now-active period plan.
+    await expect(page.getByText(/Casual class, 0 left/)).toBeVisible();
+
+    // The door screen has no email transport to assert an actual send
+    // against (no LOVABLE_API_KEY in the local stack, by design — see
+    // docs/e2e-tests.md), so what is provable end to end is the part that IS
+    // observable: `applyCoverage` resolved and spent THIS credit
+    // specifically, and reached `ensureCasualInvoiceEmailed` without the door
+    // failing or stalling — on the second casual credit this person has ever
+    // spent, not just the first. `membership.functions.test.ts` pins which
+    // email that guarantee sends and with what.
+    const { data: checkin } = await adminClient()
+      .from("session_checkins")
+      .select("coverage, membership_id, consumed_credit")
+      .eq("user_id", newUserId)
+      .eq("membership_id", secondCasualMembership.id)
+      .maybeSingle();
+    expect(checkin).toMatchObject({
+      coverage: "session",
+      membership_id: secondCasualMembership.id,
+      consumed_credit: true,
+    });
+
+    const { data: spent } = await adminClient()
+      .from("memberships")
+      .select("sessions_remaining, status")
+      .eq("id", secondCasualMembership.id)
+      .maybeSingle();
+    expect(spent).toMatchObject({ sessions_remaining: 0, status: "expired" });
   });
 });

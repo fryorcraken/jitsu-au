@@ -79,6 +79,35 @@ A membership whose **end date has passed** does not cover a class either, and is
 closed on sight. Nothing else in the app enforces an end date, so a check-in is
 where a finished semester finally stops reading as current.
 
+## A casual credit is invoiced when it is spent, not just when it is raised
+
+Every check-in that draws on a **casual credit** (`coverage: "session"` — a
+casual class, or any future credit pack) guarantees the member has an invoice
+or receipt for it, whichever their credit is currently owed:
+`ensureCasualInvoiceEmailed` in `src/lib/membership.functions.ts`, reached from
+`applyCoverage` for the door, an attach and a move alike, since all three are
+the same act of actually spending the credit.
+
+This exists because the email a casual credit's invoice sends when it is
+**raised** (`enrolMember`, see `docs/memberships.md`) is not a guarantee: a
+manager can raise it with `send_email: false` (the backfill case), or the send
+can simply fail, since every email in this lifecycle is best-effort. Someone
+who has already paid before the class, or who bought the credit weeks ago and
+is only now spending it, still gets the email a check-in guarantees — the send
+is idempotent on the membership id (the same key `enrolMember` and
+`recordMembershipPayment` already use), so a credit that was already emailed
+just gets a harmless repeat, not a duplicate in anyone's inbox.
+
+It never REFUSES a check-in: like every email in this app, a failed or slow
+send is caught and logged, never thrown, so a check-in is never withheld
+because an email could not be built or sent (see rule 5 below). It is,
+however, awaited before the check-in call returns — the same as
+`enrolMember`'s and `recordMembershipPayment`'s own emails — so a slow send
+does add a moment to the door's response. That is a deliberate trade, not an
+oversight: the production deploy target is Cloudflare, where work not awaited
+before the response returns is not guaranteed to run at all, and a
+"guarantee" that can silently not happen defeats the point of this existing.
+
 ## Which class
 
 The screen opens on the class that is **on now or next**: today's, the closest in
@@ -147,11 +176,15 @@ people in to a class that did not run.
 7. **Being authorised is what covers a class, not having paid.** A membership is
    `active` from the moment it is raised, so a member can train while their
    transfer clears. The door is told: `payment_pending` fires on an unpaid
-   invoice (`paid_at` null, priced, not cancelled), which is a flag next to a
-   covered check-in, never a refusal — see rule 5. It used to key on
-   `status = 'pending'`, which meant the same thing only while raising a
-   membership left it waiting for money; on the current model that would warn
-   about nobody at all.
+   invoice (`paid_at` null, priced, not cancelled) — from ANY membership the
+   person holds, not just whichever one is actually covering the class — and it
+   is a flag next to a covered check-in, never a refusal — see rule 5. An amber
+   "Unpaid invoice" badge sits right next to the coverage pill itself, both
+   before checking someone in (the roster search) and after (Here now), so it
+   cannot be missed behind a green "covered" pill — the exact case a status
+   check would hide it in. It used to key on `status = 'pending'`, which meant
+   the same thing only while raising a membership left it waiting for money; on
+   the current model that would warn about nobody at all.
 8. **No cover always says why.** "Nothing covers this class" is a dead end;
    "a membership starts after this class" or "waiting on a payment" is something
    a manager can act on. Every reason coverage resolution knows is surfaced on
