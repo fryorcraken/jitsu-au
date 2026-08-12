@@ -359,7 +359,7 @@ function CheckInPage() {
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <Warnings codes={c.warnings.filter((w) => w !== "payment_pending")} />
+                    <Warnings codes={c.warnings} />
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{fmtTime(c.checked_in_at)}</td>
                   <td className="px-3 py-2 text-right">
@@ -440,7 +440,7 @@ function CheckInPage() {
                         while the person stands in front of them. */}
                     {r.coverage === "none" && (
                       <div className="mt-1">
-                        <Warnings codes={r.warnings.filter((w) => w !== "payment_pending")} />
+                        <Warnings codes={r.warnings} />
                       </div>
                     )}
                   </td>
