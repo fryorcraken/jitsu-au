@@ -29,6 +29,7 @@ import {
   verificationClass,
   waiverClass,
 } from "@/lib/status-colours";
+import { lifecycleLabel, membershipStatusLabel } from "@/lib/status-labels";
 import { mediaConsentLabel } from "@/lib/waiver-acknowledgements";
 import { cn } from "@/lib/utils";
 import {
@@ -679,7 +680,8 @@ function ManagerUserPage() {
           <h1 className="text-3xl font-black">{summary.name ?? summary.email ?? "User"}</h1>
           <div className="flex flex-wrap items-center gap-2">
             <Pill
-              label={summary.lifecycle_status}
+              label={lifecycleLabel(summary.lifecycle_status, summary.latest_plan_kind)}
+              preserveCase
               className={lifecycleClass(summary.lifecycle_status)}
             />
             {summary.roles.map((role) => (
@@ -819,7 +821,11 @@ function ManagerUserPage() {
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2 font-medium">{m.plan_name ?? "—"}</td>
                     <td className="px-3 py-2">
-                      <Pill label={m.status} className={membershipClass(m.status)} />
+                      <Pill
+                        label={membershipStatusLabel(m)}
+                        preserveCase
+                        className={membershipClass(m.status)}
+                      />
                     </td>
                     <td className="px-3 py-2">{formatCents(m.price_cents)}</td>
                     <td className="px-3 py-2">{m.payment_reference ?? "—"}</td>
@@ -893,7 +899,7 @@ function ManagerUserPage() {
                             <option value="">Whatever covers it now</option>
                             {memberships.map((m) => (
                               <option key={m.id} value={m.id}>
-                                {m.plan_name ?? "Membership"} ({m.status}
+                                {m.plan_name ?? "Membership"} ({membershipStatusLabel(m)}
                                 {m.sessions_remaining != null
                                   ? `, ${m.sessions_remaining} left`
                                   : ""}
@@ -928,7 +934,7 @@ function ManagerUserPage() {
                               <option value="">Move to...</option>
                               {otherMemberships(c.membership_id).map((m) => (
                                 <option key={m.id} value={m.id}>
-                                  {m.plan_name ?? "Membership"} ({m.status}
+                                  {m.plan_name ?? "Membership"} ({membershipStatusLabel(m)}
                                   {m.sessions_remaining != null
                                     ? `, ${m.sessions_remaining} left`
                                     : ""}

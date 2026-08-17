@@ -81,6 +81,37 @@ the manager screens read the live catalogue now. A price change is edited in
 two places: the plan (immediate, drives what people actually pay) and the
 pricing page copy (a code change, like any other website wording).
 
+## What an ended membership is called
+
+`memberships.status = 'expired'` is one stored word for two different endings,
+and reading it out loud was wrong half the time. A training period or a year of
+insurance really does expire: a date passed. A free trial or a casual class does
+not — it holds a **number of classes**, and it ends when they are used up. So
+the screens name the ending from the plan's **kind**, not from the status:
+
+| The plan ends with | Ended row reads | Where the rule lives                         |
+| ------------------ | --------------- | -------------------------------------------- |
+| session credits    | **Used up**     | `endsWithCredits` in `src/lib/validation.ts` |
+| a date             | **Expired**     | (`creditsRequired` on `PLAN_TYPES`)          |
+
+The person-level funnel phase has the same problem in miniature. `lapsed` is
+derived both for somebody whose paid membership ended and for somebody who came
+to their two free classes and stopped, and only the first has lapsed — the
+second is the club's warmest lead, with no membership to renew. Where their
+newest membership is still the free trial (which is always their oldest, since
+it is assigned at waiver approval, so a trial that is still newest means nothing
+followed it) the phase reads **Trial used up**, and `/membership` tells them
+"You've used your free trial classes. Pick a plan below to keep training."
+instead of offering a renewal.
+
+**The stored vocabulary is deliberately untouched.** `expired` and `lapsed` are
+still what the database, `deriveLifecycleStatus`, the `/manager/users` filter and
+the manager agent API speak; only the words a human reads change. The label maps
+live in `src/lib/status-labels.ts`, the naming counterpart to
+`src/lib/status-colours.ts`, and both are keyed by their status unions so a new
+status fails the typecheck until it has been given a word and a colour. Labels
+come out sentence-cased, so callers pass `preserveCase` to `<Pill>`.
+
 ## Buying a dated plan
 
 The member purchase screen shows one card per still-sellable plan — a dated

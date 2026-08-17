@@ -251,6 +251,10 @@ export const getClubUser = createServerFn({ method: "POST" })
         phone: summary.phone,
         roles: summary.roles,
         lifecycle_status: summary.lifecycle_status,
+        // Which lets the phase be named properly: a `lapsed` person whose
+        // newest membership is still the free trial used up their two classes,
+        // they did not let a membership run out.
+        latest_plan_kind: summary.latest_plan_kind,
         // Classes trained, whatever paid for them: the coaching and grading
         // number, not "credits used". From the exact count, so it agrees with
         // /manager/users however long their history is.
@@ -290,6 +294,9 @@ export const getClubUser = createServerFn({ method: "POST" })
       memberships: membershipRows.map((m) => ({
         id: m.id,
         plan_name: planById.get(m.plan_id)?.name ?? null,
+        // What the status is called depends on it: a plan sold as a number of
+        // classes is "used up" when it ends, not "expired".
+        kind: planById.get(m.plan_id)?.kind ?? null,
         status: m.status,
         price_cents: m.price_cents,
         payment_reference: m.payment_reference,

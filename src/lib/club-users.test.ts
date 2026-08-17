@@ -348,8 +348,26 @@ describe("aggregateClubUsers", () => {
       ],
     });
     expect(u.latest_plan_name).toBe("One semester");
+    expect(u.latest_plan_kind).toBe("period");
     expect(u.latest_membership_status).toBe("active");
     expect(u.membership_count).toBe(2);
+  });
+
+  it("carries the latest plan's kind, which is what names its status on screen", () => {
+    // A used-up trial and a finished semester are both stored as `expired`. The
+    // kind is the only thing that tells the users list which word to print, and
+    // it separates "they came twice and stopped" from "the semester ended".
+    const [trialOnly] = aggregate({
+      profiles: [profile()],
+      waivers: [waiver()],
+      memberships: [membership({ plan_id: "plan-trial", price_cents: 0, status: "expired" })],
+    });
+    expect(trialOnly.lifecycle_status).toBe("lapsed");
+    expect(trialOnly.latest_plan_kind).toBe("trial");
+
+    // A lead has no memberships at all, so there is no kind to report.
+    const [aLead] = aggregate({ profiles: [], emails: [], leads: [lead()] });
+    expect(aLead.latest_plan_kind).toBeNull();
   });
 
   it("computes first-seen as the earliest of profile, waiver and membership dates", () => {

@@ -1760,6 +1760,24 @@ export const PLAN_TYPE_KINDS = Object.keys(PLAN_TYPES) as MembershipPlanKind[];
 export const planTypeOf = (kind: string): PlanTypeSpec =>
   PLAN_TYPES[kind as MembershipPlanKind] ?? PLAN_TYPES.period;
 
+/**
+ * Does a plan of this kind end by running out of classes rather than on a date?
+ *
+ * The free trial and a casual class or pack are sold as a NUMBER of classes:
+ * nothing about them can go out of date, and the only thing that closes one is
+ * spending the last credit. A training period and yearly insurance are the
+ * opposite, sold as a stretch of time. `creditsRequired` already draws exactly
+ * that line ("credits are the only thing that ends this kind"), so this reads it
+ * rather than re-listing the kinds and giving them somewhere to disagree.
+ *
+ * Unknown or missing kinds answer `false`, which is the safe way round: a row
+ * whose plan could not be resolved keeps the generic wording instead of claiming
+ * a class count it may not have.
+ */
+export function endsWithCredits(kind: string | null | undefined): boolean {
+  return kind ? (PLAN_TYPES[kind as MembershipPlanKind]?.creditsRequired ?? false) : false;
+}
+
 /** The fields whose meaning depends on the plan's kind. */
 export type PlanShapeFields = {
   kind: string;

@@ -281,3 +281,65 @@ describe("/membership: how to pay", () => {
     expect(within(card).queryByRole("button", { name: /copy BSB/i })).not.toBeInTheDocument();
   });
 });
+
+// A free trial is two classes, not a date. It cannot expire, and the person
+// holding one has no membership to renew, so neither "expired" nor "lapsed"
+// describes what happened to them.
+describe("/membership: what a finished trial is called", () => {
+  const usedUpTrial = {
+    ...pendingPlan,
+    id: "m9",
+    plan_code: "trial_2_session",
+    plan_name: "Free trial",
+    kind: "trial",
+    status: "expired",
+    price_cents: 0,
+    paid_at: "2026-07-01T00:00:00Z",
+    ends_at: null,
+    sessions_remaining: 0,
+  };
+  const endedSemester = {
+    ...pendingPlan,
+    id: "m10",
+    status: "expired",
+    paid_at: "2026-02-01T00:00:00Z",
+    ends_at: "2026-06-30T00:00:00Z",
+    created_at: "2026-02-01T00:00:00Z",
+  };
+
+  function lapsedWith(memberships: unknown[]) {
+    getMyMemberships.mockResolvedValue({
+      lifecycle: "lapsed",
+      memberships,
+      uts_student_number: null,
+      sessions_attended: 2,
+    });
+  }
+
+  it("says the trial is used up, not expired, and offers a plan instead of a renewal", async () => {
+    lapsedWith([usedUpTrial]);
+    await renderLoaded();
+    expect(screen.getByText("Used up")).toBeVisible();
+    expect(screen.queryByText("Expired")).not.toBeInTheDocument();
+    expect(screen.getByText("Trial used up")).toBeVisible();
+    expect(screen.getByText(/used your free trial classes/i)).toBeVisible();
+    expect(screen.queryByText(/membership has lapsed/i)).not.toBeInTheDocument();
+  });
+
+  it("counts the classes left rather than dating a plan that has no end date", async () => {
+    lapsedWith([usedUpTrial]);
+    await renderLoaded();
+    expect(screen.getByText("0 sessions left")).toBeVisible();
+  });
+
+  it("still says expired, and lapsed, for a training period that ran out of days", async () => {
+    // The stored status is the same word for both. Only the plan's kind tells
+    // them apart, so this is the case that would break if the label ignored it.
+    lapsedWith([endedSemester]);
+    await renderLoaded();
+    expect(screen.getByText("Expired")).toBeVisible();
+    expect(screen.queryByText("Used up")).not.toBeInTheDocument();
+    expect(screen.getByText("Lapsed")).toBeVisible();
+    expect(screen.getByText(/membership has lapsed/i)).toBeVisible();
+  });
+});

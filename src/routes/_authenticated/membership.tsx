@@ -11,6 +11,7 @@ import { Pill } from "@/components/site/StatusPill";
 import { CopyButton } from "@/components/site/CopyButton";
 import { ClubAccountDetails } from "@/components/site/ClubAccountDetails";
 import { lifecycleClass } from "@/lib/status-colours";
+import { membershipStatusLabel } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
 import {
   computeMembershipPrice,
@@ -70,6 +71,28 @@ const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string }> 
     blurb: "Your membership has lapsed. Renew below to keep training.",
   },
 };
+
+// `lapsed` is derived for two different people, and the copy above only fits
+// one of them. Somebody who came to their free classes and used them all has
+// not lapsed and has no membership to renew: nothing of theirs expired, they
+// finished the trial. They are also the person most worth speaking to plainly,
+// so they get their own words.
+const TRIAL_USED_UP = {
+  label: "Trial used up",
+  blurb: "You've used your free trial classes. Pick a plan below to keep training.",
+};
+
+/**
+ * The status card's words for this member.
+ *
+ * The trial is assigned when a waiver is approved, so it is always a person's
+ * oldest membership: one that is still their NEWEST means they never bought
+ * anything after it. `memberships` arrives newest first.
+ */
+function lifecycleCopy(lifecycle: LifecycleStatus, memberships: { kind: string | null }[]) {
+  if (lifecycle === "lapsed" && memberships[0]?.kind === "trial") return TRIAL_USED_UP;
+  return LIFECYCLE_COPY[lifecycle];
+}
 
 /**
  * A one-line nudge to read the code of conduct, shown only to someone who has
@@ -336,7 +359,7 @@ function MembershipPage() {
   }
 
   const lifecycle = mine?.lifecycle ?? "lead";
-  const status = LIFECYCLE_COPY[lifecycle];
+  const status = lifecycleCopy(lifecycle, mine?.memberships ?? []);
   // What the member still owes, as transfers rather than as rows: a bundled
   // plan + insurance is two memberships behind one reference and one payment.
   const unpaid = unpaidInvoices(mine?.memberships ?? []);
@@ -403,7 +426,7 @@ function MembershipPage() {
                     {mine.memberships.map((m) => (
                       <tr key={m.id} className="border-t">
                         <td className="px-3 py-2 font-medium">{m.plan_name ?? "—"}</td>
-                        <td className="px-3 py-2 capitalize">{m.status}</td>
+                        <td className="px-3 py-2">{membershipStatusLabel(m)}</td>
                         <td className="px-3 py-2">{formatCents(m.price_cents)}</td>
                         <td className="px-3 py-2">
                           {isUnpaid(m) ? (
@@ -413,10 +436,12 @@ function MembershipPage() {
                           )}
                         </td>
                         <td className="px-3 py-2">
+                          {/* A plan sold as a number of classes has no date to
+                              run out on, so this column counts instead. */}
                           {m.ends_at
                             ? new Date(m.ends_at).toLocaleDateString("en-AU")
                             : m.sessions_remaining != null
-                              ? `${m.sessions_remaining} sessions`
+                              ? `${m.sessions_remaining} session${m.sessions_remaining === 1 ? "" : "s"} left`
                               : "—"}
                         </td>
                       </tr>

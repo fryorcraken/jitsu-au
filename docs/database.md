@@ -572,7 +572,10 @@ written only by `recordMembershipPayment` (bank reconciliation, or a manager
 marking it paid), and it is what the delete guard reads. `pending` is no longer
 produced by anything and survives only on rows created before the two were
 separated; `isUnpaid` in `src/lib/validation.ts` is the one definition of who
-still owes the club money.
+still owes the club money. `expired` covers two different endings — a date
+passing, and a credit plan's classes running out — so no screen prints it raw:
+what a person reads comes from the plan's kind (see "What an ended membership is
+called" in `docs/memberships.md`).
 Constraint: the student rate requires a `uts_student_number`. The `member` role
 is reconciled against these rows by `syncMemberRole` after every activation,
 cancellation and deletion — it is a label, not the access gate (see the
