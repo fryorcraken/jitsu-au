@@ -34,13 +34,24 @@ describe("membershipStatusLabel", () => {
 });
 
 describe("lifecycleLabel", () => {
+  const trial = (status: string) => ({ status, kind: "trial" });
+
   it("calls a used-up trial what it is, not a lapsed membership", () => {
-    expect(lifecycleLabel("lapsed", "trial")).toBe("Trial used up");
+    expect(lifecycleLabel("lapsed", trial("expired"))).toBe("Trial used up");
+  });
+
+  it("does not claim a CANCELLED trial was used up", () => {
+    // `lapsed` is derived from expired OR cancelled. A trial a manager
+    // cancelled may have both its classes sitting untouched, and its own row
+    // (correctly) reads "Cancelled" right beside this pill.
+    expect(lifecycleLabel("lapsed", trial("cancelled"))).toBe("Lapsed");
   });
 
   it("keeps 'lapsed' for somebody whose paid membership ended", () => {
-    expect(lifecycleLabel("lapsed", "period")).toBe("Lapsed");
-    expect(lifecycleLabel("lapsed", "session")).toBe("Lapsed");
+    expect(lifecycleLabel("lapsed", { status: "expired", kind: "period" })).toBe("Lapsed");
+    expect(lifecycleLabel("lapsed", { status: "expired", kind: "session" })).toBe("Lapsed");
+    expect(lifecycleLabel("lapsed", { status: "expired", kind: null })).toBe("Lapsed");
+    expect(lifecycleLabel("lapsed")).toBe("Lapsed");
     expect(lifecycleLabel("lapsed", null)).toBe("Lapsed");
   });
 
@@ -50,8 +61,8 @@ describe("lifecycleLabel", () => {
     expect(lifecycleLabel("visitor")).toBe("Visitor");
     expect(lifecycleLabel("member")).toBe("Member");
     // A trial is somebody's newest membership all the way through the funnel,
-    // so the kind must not leak into any phase but the ended one.
-    expect(lifecycleLabel("visitor", "trial")).toBe("Visitor");
-    expect(lifecycleLabel("member", "trial")).toBe("Member");
+    // so it must not leak into any phase but the ended one.
+    expect(lifecycleLabel("visitor", trial("active"))).toBe("Visitor");
+    expect(lifecycleLabel("member", trial("expired"))).toBe("Member");
   });
 });

@@ -11,7 +11,7 @@ import { Pill } from "@/components/site/StatusPill";
 import { CopyButton } from "@/components/site/CopyButton";
 import { ClubAccountDetails } from "@/components/site/ClubAccountDetails";
 import { lifecycleClass } from "@/lib/status-colours";
-import { membershipStatusLabel } from "@/lib/status-labels";
+import { lifecycleLabel, membershipStatusLabel, TRIAL_USED_UP_LABEL } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
 import {
   computeMembershipPrice,
@@ -72,25 +72,26 @@ const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string }> 
   },
 };
 
-// `lapsed` is derived for two different people, and the copy above only fits
-// one of them. Somebody who came to their free classes and used them all has
-// not lapsed and has no membership to renew: nothing of theirs expired, they
-// finished the trial. They are also the person most worth speaking to plainly,
-// so they get their own words.
-const TRIAL_USED_UP = {
-  label: "Trial used up",
-  blurb: "You've used your free trial classes. Pick a plan below to keep training.",
-};
-
 /**
  * The status card's words for this member.
  *
- * The trial is assigned when a waiver is approved, so it is always a person's
- * oldest membership: one that is still their NEWEST means they never bought
- * anything after it. `memberships` arrives newest first.
+ * `lapsed` is derived for two different people, and the copy above only fits one
+ * of them. Somebody who came to their free classes and used them all has not
+ * lapsed and has no membership to renew: nothing of theirs expired, they
+ * finished the trial. Which of the two this is comes from `lifecycleLabel`
+ * rather than being decided again here, so the member's card and the manager's
+ * pill cannot end up disagreeing about the same person. Only the blurb is this
+ * page's own. `memberships` arrives newest first.
  */
-function lifecycleCopy(lifecycle: LifecycleStatus, memberships: { kind: string | null }[]) {
-  if (lifecycle === "lapsed" && memberships[0]?.kind === "trial") return TRIAL_USED_UP;
+function lifecycleCopy(
+  lifecycle: LifecycleStatus,
+  memberships: { status: string; kind: string | null }[],
+) {
+  if (lifecycleLabel(lifecycle, memberships[0]) === TRIAL_USED_UP_LABEL)
+    return {
+      label: TRIAL_USED_UP_LABEL,
+      blurb: "You've used your free trial classes. Pick a plan below to keep training.",
+    };
   return LIFECYCLE_COPY[lifecycle];
 }
 

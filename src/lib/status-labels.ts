@@ -51,6 +51,9 @@ export function membershipStatusLabel(m: { status: string; kind?: string | null 
   return MEMBERSHIP[m.status as MembershipStatus] ?? m.status;
 }
 
+/** The one phase label that is not simply its status capitalised. */
+export const TRIAL_USED_UP_LABEL = "Trial used up";
+
 /**
  * The funnel phase, as a manager reads it.
  *
@@ -59,12 +62,21 @@ export function membershipStatusLabel(m: { status: string; kind?: string | null 
  * and never bought anything. Only the first has lapsed. The second is the club's
  * warmest lead, and telling the two apart at a glance is what the column is for.
  *
- * `latestPlanKind` (the newest membership's plan kind) is enough to separate
- * them, because the free trial is assigned when a waiver is approved and is
- * therefore always a person's OLDEST membership. A trial that is still their
- * newest one means nothing ever followed it.
+ * `latest` is their newest membership, which is enough to separate them, because
+ * the free trial is assigned when a waiver is approved and is therefore always a
+ * person's OLDEST membership. A trial that is still their newest one means
+ * nothing ever followed it.
+ *
+ * Both of its fields are asked, not just the kind. `lapsed` is derived from
+ * `expired` OR `cancelled`, and a trial a manager cancelled was not used up: its
+ * classes may be sitting there untouched. Only `expired` on a credit plan means
+ * the last one was spent, since nothing else closes a plan that has no end date.
  */
-export function lifecycleLabel(status: string, latestPlanKind?: string | null): string {
-  if (status === "lapsed" && latestPlanKind === "trial") return "Trial used up";
+export function lifecycleLabel(
+  status: string,
+  latest?: { status: string | null; kind?: string | null } | null,
+): string {
+  if (status === "lapsed" && latest?.kind === "trial" && latest.status === "expired")
+    return TRIAL_USED_UP_LABEL;
   return LIFECYCLE[status as LifecycleStatus] ?? status;
 }

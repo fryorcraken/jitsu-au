@@ -97,12 +97,23 @@ the screens name the ending from the plan's **kind**, not from the status:
 The person-level funnel phase has the same problem in miniature. `lapsed` is
 derived both for somebody whose paid membership ended and for somebody who came
 to their two free classes and stopped, and only the first has lapsed — the
-second is the club's warmest lead, with no membership to renew. Where their
-newest membership is still the free trial (which is always their oldest, since
-it is assigned at waiver approval, so a trial that is still newest means nothing
-followed it) the phase reads **Trial used up**, and `/membership` tells them
-"You've used your free trial classes. Pick a plan below to keep training."
-instead of offering a renewal.
+second is the club's warmest lead, with no membership to renew. The phase reads
+**Trial used up** when their newest membership is a free trial that **expired**,
+and `/membership` tells them "You've used your free trial classes. Pick a plan
+below to keep training." instead of offering a renewal. Both halves of that test
+matter:
+
+- **newest**: the trial is assigned at waiver approval, so it is always a
+  person's oldest membership. One that is still their newest means nothing
+  followed it.
+- **expired**: `lapsed` is derived from `expired` **or** `cancelled`, and a trial
+  a manager cancelled may have both its classes sitting untouched. Nothing but
+  spending the last credit closes a plan with no end date, so `expired` on a
+  credit plan is what "used up" actually means.
+
+`lifecycleLabel` owns that test, and `/membership` calls it rather than
+re-deciding, so the member's card and the manager's pill cannot disagree about
+the same person. Only the blurb is the member page's own.
 
 **The stored vocabulary is deliberately untouched.** `expired` and `lapsed` are
 still what the database, `deriveLifecycleStatus`, the `/manager/users` filter and

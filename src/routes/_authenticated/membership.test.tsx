@@ -332,6 +332,17 @@ describe("/membership: what a finished trial is called", () => {
     expect(screen.getByText("0 sessions left")).toBeVisible();
   });
 
+  it("does not tell somebody whose trial was cancelled that they used it", async () => {
+    // `lapsed` is derived from expired OR cancelled. Both this person's free
+    // classes may be sitting untouched, so "you've used your free trial
+    // classes" would be a plain falsehood about their own account.
+    lapsedWith([{ ...usedUpTrial, status: "cancelled", sessions_remaining: 2 }]);
+    await renderLoaded();
+    expect(screen.getByText("Cancelled")).toBeVisible();
+    expect(screen.queryByText("Trial used up")).not.toBeInTheDocument();
+    expect(screen.queryByText(/used your free trial classes/i)).not.toBeInTheDocument();
+  });
+
   it("still says expired, and lapsed, for a training period that ran out of days", async () => {
     // The stored status is the same word for both. Only the plan's kind tells
     // them apart, so this is the case that would break if the label ignored it.

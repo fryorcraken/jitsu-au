@@ -313,7 +313,10 @@ function ManagerUsersPage() {
                       <td className="px-3 py-2">{r.phone ?? "—"}</td>
                       <td className="px-3 py-2">
                         <Pill
-                          label={lifecycleLabel(r.lifecycle_status, r.latest_plan_kind)}
+                          label={lifecycleLabel(r.lifecycle_status, {
+                            status: r.latest_membership_status,
+                            kind: r.latest_plan_kind,
+                          })}
                           preserveCase
                           className={lifecycleClass(r.lifecycle_status)}
                         />

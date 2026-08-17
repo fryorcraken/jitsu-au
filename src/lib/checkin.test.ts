@@ -347,6 +347,22 @@ describe("attachableMemberships", () => {
     expect(by("old")).toMatchObject({ usable: false, reason: "not valid for this class" });
   });
 
+  // The door reads these as prose ("Free trial · 0 left · used up"), so the
+  // reason is lower-cased, but it is still the club's word for that ending: a
+  // credit plan is used up, only a dated one expires.
+  it("says a spent credit plan is used up, and a dated one expired", () => {
+    const rows = attachableMemberships(
+      [
+        trial({ id: "spent-trial", status: "expired", sessions_remaining: 0 }),
+        semester({ id: "over", status: "expired", ends_at: "2026-06-30T00:00:00.000Z" }),
+      ],
+      AT,
+    );
+    const by = (id: string) => rows.find((r) => r.id === id)!;
+    expect(by("spent-trial")).toMatchObject({ usable: false, reason: "used up" });
+    expect(by("over")).toMatchObject({ usable: false, reason: "expired" });
+  });
+
   // The point of all of it: an uncovered check-in from a class someone really
   // attended can be attached to the trial they were given afterwards.
   it("lets a later-granted trial be attached to an earlier class", () => {

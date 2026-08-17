@@ -251,10 +251,12 @@ export const getClubUser = createServerFn({ method: "POST" })
         phone: summary.phone,
         roles: summary.roles,
         lifecycle_status: summary.lifecycle_status,
-        // Which lets the phase be named properly: a `lapsed` person whose
-        // newest membership is still the free trial used up their two classes,
-        // they did not let a membership run out.
+        // Their newest membership, which is what lets the phase be named
+        // properly: a `lapsed` person whose newest is a free trial that EXPIRED
+        // used up their two classes, they did not let a membership run out. Both
+        // halves are needed, since a trial a manager cancelled is neither.
         latest_plan_kind: summary.latest_plan_kind,
+        latest_membership_status: summary.latest_membership_status,
         // Classes trained, whatever paid for them: the coaching and grading
         // number, not "credits used". From the exact count, so it agrees with
         // /manager/users however long their history is.

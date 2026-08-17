@@ -680,7 +680,10 @@ function ManagerUserPage() {
           <h1 className="text-3xl font-black">{summary.name ?? summary.email ?? "User"}</h1>
           <div className="flex flex-wrap items-center gap-2">
             <Pill
-              label={lifecycleLabel(summary.lifecycle_status, summary.latest_plan_kind)}
+              label={lifecycleLabel(summary.lifecycle_status, {
+                status: summary.latest_membership_status,
+                kind: summary.latest_plan_kind,
+              })}
               preserveCase
               className={lifecycleClass(summary.lifecycle_status)}
             />
