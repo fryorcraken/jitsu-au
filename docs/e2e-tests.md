@@ -94,6 +94,13 @@ actually gets done.
   `getByLabel`), not CSS classes or test ids. If a flow is hard to address that
   way, that is usually the screen missing a label rather than the test needing a
   hook.
+- **A status column is words, not the enum value behind it.** Statuses are
+  stored lowercase but rendered through `src/lib/status-labels.ts`, and
+  `toContainText` is case-sensitive — so it is `"Active"`, not `"active"`. An
+  ended membership is worse than a casing difference: it reads "Used up" or
+  "Expired" depending on the plan behind it (`docs/memberships.md`, "What an
+  ended membership is called"). Read the label off the screen, never off the
+  database row you seeded.
 - **`expectPageRendered` catches a page that rendered a failure boundary.** Both
   the router's error boundary and its 404 arrive inside an ordinary 200
   response, so a status check alone would call a site-wide "This page didn't
