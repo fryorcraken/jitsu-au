@@ -172,6 +172,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         price_cents: m.price_cents,
         is_student: m.is_student,
         uts_student_number: m.uts_student_number,
+        sessions_remaining: m.sessions_remaining,
         created_at: m.created_at,
       })),
       plans: planRows,
@@ -257,6 +258,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         // halves are needed, since a trial a manager cancelled is neither.
         latest_plan_kind: summary.latest_plan_kind,
         latest_membership_status: summary.latest_membership_status,
+        latest_sessions_remaining: summary.latest_sessions_remaining,
         // Classes trained, whatever paid for them: the coaching and grading
         // number, not "credits used". From the exact count, so it agrees with
         // /manager/users however long their history is.

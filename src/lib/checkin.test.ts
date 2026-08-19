@@ -363,6 +363,17 @@ describe("attachableMemberships", () => {
     expect(by("over")).toMatchObject({ usable: false, reason: "expired" });
   });
 
+  it("does not say a credit plan is used up while a class remains on it", () => {
+    // `refundCheckInCredit` puts a credit back without reopening the row unless
+    // that same check-in closed it, so this row really occurs. The door prints
+    // the balance in the same option, which would contradict "used up".
+    const rows = attachableMemberships(
+      [trial({ id: "refunded", status: "expired", sessions_remaining: 1 })],
+      AT,
+    );
+    expect(rows[0]).toMatchObject({ usable: false, reason: "expired" });
+  });
+
   // The point of all of it: an uncovered check-in from a class someone really
   // attended can be attached to the trial they were given afterwards.
   it("lets a later-granted trial be attached to an earlier class", () => {

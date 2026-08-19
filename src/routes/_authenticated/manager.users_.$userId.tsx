@@ -681,8 +681,9 @@ function ManagerUserPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Pill
               label={lifecycleLabel(summary.lifecycle_status, {
-                status: summary.latest_membership_status,
+                status: summary.latest_membership_status ?? "",
                 kind: summary.latest_plan_kind,
+                sessions_remaining: summary.latest_sessions_remaining,
               })}
               preserveCase
               className={lifecycleClass(summary.lifecycle_status)}

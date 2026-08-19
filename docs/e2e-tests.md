@@ -94,13 +94,18 @@ actually gets done.
   `getByLabel`), not CSS classes or test ids. If a flow is hard to address that
   way, that is usually the screen missing a label rather than the test needing a
   hook.
-- **A status column is words, not the enum value behind it.** Statuses are
-  stored lowercase but rendered through `src/lib/status-labels.ts`, and
-  `toContainText` is case-sensitive — so it is `"Active"`, not `"active"`. An
-  ended membership is worse than a casing difference: it reads "Used up" or
-  "Expired" depending on the plan behind it (`docs/memberships.md`, "What an
-  ended membership is called"). Read the label off the screen, never off the
-  database row you seeded.
+- **A membership status or funnel phase is words, not the enum behind it.**
+  Those two go through `src/lib/status-labels.ts`, and `toContainText` is
+  case-sensitive — so it is `"Active"`, not `"active"`. An ended membership is
+  worse than a casing difference: it reads "Used up" or "Expired" depending on
+  the plan behind it and on what is left on the row (`docs/memberships.md`,
+  "What an ended membership is called"). Read the label off the screen, never
+  off the database row you seeded.
+  **Only those two.** Waiver, blog-post and blog-comment pills still render
+  their raw lowercase status through the `capitalize` class, which changes
+  nothing about `textContent` — which is why `e2e/manager/waivers.spec.ts`
+  asserting `"active"` is correct and must not be "fixed" to match the rule
+  above.
 - **`expectPageRendered` catches a page that rendered a failure boundary.** Both
   the router's error boundary and its 404 arrive inside an ordinary 200
   response, so a status check alone would call a site-wide "This page didn't

@@ -187,9 +187,11 @@ function ManagerUsersPage() {
             onChange={(e) => setLifecycle(e.target.value)}
           >
             <option value="all">All statuses</option>
+            {/* The value stays the stored enum (it is what the filter matches
+                on); only the text a manager reads is put through the label. */}
             {lifecycleStatuses.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {lifecycleLabel(s)}
               </option>
             ))}
           </select>
@@ -314,8 +316,9 @@ function ManagerUsersPage() {
                       <td className="px-3 py-2">
                         <Pill
                           label={lifecycleLabel(r.lifecycle_status, {
-                            status: r.latest_membership_status,
+                            status: r.latest_membership_status ?? "",
                             kind: r.latest_plan_kind,
+                            sessions_remaining: r.latest_sessions_remaining,
                           })}
                           preserveCase
                           className={lifecycleClass(r.lifecycle_status)}
@@ -350,6 +353,7 @@ function ManagerUsersPage() {
                                 label={membershipStatusLabel({
                                   status: r.latest_membership_status,
                                   kind: r.latest_plan_kind,
+                                  sessions_remaining: r.latest_sessions_remaining,
                                 })}
                                 preserveCase
                                 className={membershipClass(r.latest_membership_status)}

@@ -89,10 +89,25 @@ insurance really does expire: a date passed. A free trial or a casual class does
 not — it holds a **number of classes**, and it ends when they are used up. So
 the screens name the ending from the plan's **kind**, not from the status:
 
-| The plan ends with | Ended row reads | Where the rule lives                         |
-| ------------------ | --------------- | -------------------------------------------- |
-| session credits    | **Used up**     | `endsWithCredits` in `src/lib/validation.ts` |
-| a date             | **Expired**     | (`creditsRequired` on `PLAN_TYPES`)          |
+| The plan ends with | Ended row reads | When                                      |
+| ------------------ | --------------- | ----------------------------------------- |
+| session credits    | **Used up**     | the row is `expired` AND its balance is 0 |
+| session credits    | **Expired**     | `expired` with classes still on the row   |
+| a date             | **Expired**     | always                                    |
+
+`isUsedUp` in `src/lib/status-labels.ts` owns that test, and which plans are
+sold as classes comes from `endsWithCredits` in `src/lib/validation.ts` (it
+reads `creditsRequired` off `PLAN_TYPES`, so the two cannot drift).
+
+**The balance is asked, not inferred from the status**, and that middle row is
+why. A credit plan can sit `expired` with classes still in it: undoing a
+check-in refunds the credit but reopens the membership only when that same
+check-in is the one that closed it (`refundCheckInCredit` in
+`src/lib/checkin.functions.ts`), so undoing an EARLIER visit gives the class
+back and leaves the row closed. A manager can also expire a never-used trial by
+hand through `edit_invoice` or `setMembershipStatus`. "Expired" was vague enough
+to survive those; "Used up" is a specific claim, printed next to the balance on
+the same row, so it has to agree with it.
 
 The person-level funnel phase has the same problem in miniature. `lapsed` is
 derived both for somebody whose paid membership ended and for somebody who came
@@ -103,17 +118,21 @@ and `/membership` tells them "You've used your free trial classes. Pick a plan
 below to keep training." instead of offering a renewal. Both halves of that test
 matter:
 
-- **newest**: the trial is assigned at waiver approval, so it is always a
-  person's oldest membership. One that is still their newest means nothing
-  followed it.
-- **expired**: `lapsed` is derived from `expired` **or** `cancelled`, and a trial
-  a manager cancelled may have both its classes sitting untouched. Nothing but
-  spending the last credit closes a plan with no end date, so `expired` on a
-  credit plan is what "used up" actually means.
+- **newest**: the trial is assigned at waiver approval, so in practice it is a
+  person's oldest membership and one that is still their newest means nothing
+  followed it. Not an invariant the database enforces: a manager can raise an
+  invoice for an applicant before approving their waiver, which makes the trial
+  the newer row. It costs nothing when it happens, because such a trial is
+  `active` and so is neither `lapsed` nor used up.
+- **used up**: `lapsed` is derived from `expired` **or** `cancelled`, and a
+  cancelled trial may have both its classes sitting untouched. Being `expired`
+  is not proof either, for the reasons above, so the phase asks the same
+  `isUsedUp` the row's own label asks: ended, sold as classes, and none left.
 
-`lifecycleLabel` owns that test, and `/membership` calls it rather than
-re-deciding, so the member's card and the manager's pill cannot disagree about
-the same person. Only the blurb is the member page's own.
+`isTrialUsedUp` owns that test, and both `lifecycleLabel` (the manager's pill)
+and `/membership` (the member's card) call it rather than re-deciding, so the
+two cannot disagree about the same person. Only the blurb is the member page's
+own.
 
 **The stored vocabulary is deliberately untouched.** `expired` and `lapsed` are
 still what the database, `deriveLifecycleStatus`, the `/manager/users` filter and

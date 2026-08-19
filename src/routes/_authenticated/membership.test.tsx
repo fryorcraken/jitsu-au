@@ -343,6 +343,19 @@ describe("/membership: what a finished trial is called", () => {
     expect(screen.queryByText(/used your free trial classes/i)).not.toBeInTheDocument();
   });
 
+  it("does not claim the classes are gone when one was given back", async () => {
+    // Reachable from the check-in screen: undoing a check-in refunds the credit
+    // but reopens the membership only when THAT check-in is the one that closed
+    // it, so undoing an earlier visit leaves `expired` with a class on the row.
+    // The row prints "1 session left" right beside the status.
+    lapsedWith([{ ...usedUpTrial, sessions_remaining: 1 }]);
+    await renderLoaded();
+    expect(screen.getByText("1 session left")).toBeVisible();
+    expect(screen.queryByText("Used up")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trial used up")).not.toBeInTheDocument();
+    expect(screen.queryByText(/used your free trial classes/i)).not.toBeInTheDocument();
+  });
+
   it("still says expired, and lapsed, for a training period that ran out of days", async () => {
     // The stored status is the same word for both. Only the plan's kind tells
     // them apart, so this is the case that would break if the label ignored it.
