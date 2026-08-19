@@ -524,6 +524,27 @@ it before committing: `git checkout bun.lock`. Add/remove dependencies by
 editing `package.json` and letting **Lovable** re-resolve the lockfile — do not
 hand-produce a public-npm lock.
 
+### The TanStack versions are pinned exactly, on purpose
+
+`@tanstack/react-router`, `@tanstack/react-start` and `@tanstack/router-plugin`
+carry **exact versions** in `package.json` (no `^`). Do not put the caret back.
+
+Between Lovable re-resolves, `package.json` is ahead of `bun.lock`, so a caret
+range there is re-resolved on every install — including in CI, days after the
+commit was merged and its checks went green. `@tanstack/react-start` depends on
+an **exact** `@tanstack/react-router`, and it bumps that pin in every patch
+release (1.168.46 wants router 1.170.29, .47 wants 1.170.30, and so on). A
+floating start against a pinned router therefore installs **two copies** of
+`@tanstack/react-router` within days: the app imports the hoisted one, while the
+`server: { handlers }` route option that Start contributes by declaration
+merging lands on the nested one. Typecheck then fails on every API route with
+`'server' does not exist in type ...` on code nobody touched, and `main` is red
+with no commit to blame. That happened on 2026-08-12 and again on 2026-08-14.
+
+So upgrade the three together, to versions that agree, and keep them exact.
+`bun run typecheck` is the check that proves it — a duplicated router is
+invisible to `bun run build`.
+
 ## Conventions & style
 
 - **Formatting (Prettier):** `printWidth: 100`, semicolons, **double quotes**,
