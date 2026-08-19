@@ -10,6 +10,7 @@
 // The rules below are the ones that keep that gap from becoming an outage
 // nobody notices — never open it needlessly, and never leave it silently.
 import { describe, expect, it, vi } from "vitest";
+import { WaiverTemplateError } from "./waiver-template-editor";
 import {
   listWaiverTemplateRows,
   loadWaiverTemplateVersion,
@@ -392,5 +393,110 @@ describe("saveWaiverTemplateVersion", () => {
       ),
     ).rejects.toThrow("no media consent acknowledgement");
     expect(store.writes).toEqual([]);
+  });
+});
+
+// The reason on a refusal is what the agent API turns into a status code, and
+// getting it wrong is not cosmetic: SKILL.md tells agents a 4xx means the
+// request has to change, so an outage reported as one is an outage nobody
+// retries. `version` separates "nothing was written" from "version N exists and
+// is simply not live", which is the difference between retrying the save and
+// finishing with a publish.
+describe("WaiverTemplateError reasons", () => {
+  async function reasonOf(run: () => Promise<unknown>) {
+    try {
+      await run();
+    } catch (e) {
+      expect(e).toBeInstanceOf(WaiverTemplateError);
+      const err = e as WaiverTemplateError;
+      return { reason: err.reason, version: err.version };
+    }
+    throw new Error("expected a refusal");
+  }
+
+  it("calls a missing version not_found rather than invalid", async () => {
+    const { admin } = fakeClient(() => ok(null));
+    expect(await reasonOf(() => promoteWaiverTemplate(admin, "gone"))).toEqual({
+      reason: "not_found",
+      version: undefined,
+    });
+  });
+
+  it("calls a version missing its media acknowledgement invalid", async () => {
+    const { admin } = fakeClient(() =>
+      ok({ id: "v2", version: 2, is_current: false, acknowledgements: [] }),
+    );
+    expect(await reasonOf(() => promoteWaiverTemplate(admin, "v2"))).toEqual({
+      reason: "invalid",
+      version: 2,
+    });
+  });
+
+  it("calls a lost promotion race not_published, naming the version left unlive", async () => {
+    const { admin } = fakeClient((op, all) => {
+      const selects = all.filter((c) => c.verb === "select").length;
+      if (op.verb === "select" && selects === 1)
+        return ok({
+          id: "v2",
+          version: 2,
+          is_current: false,
+          acknowledgements: [{ id: "media", label: "Photos are fine.", required: false }],
+        });
+      if (op.verb === "select" && selects === 2) return ok({ id: "v1" });
+      if (op.verb === "select") return ok({ id: "v3" });
+      if (op.patch?.is_current === true) return { data: null, error: { message: "conflict" } };
+      return ok(null);
+    });
+    expect(await reasonOf(() => promoteWaiverTemplate(admin, "v2"))).toEqual({
+      reason: "not_published",
+      version: 2,
+    });
+  });
+
+  it("calls a refused save invalid, with no version, because nothing was written", async () => {
+    const store = fakeStore([row({ version: 3, is_current: true })]);
+    expect(
+      await reasonOf(() =>
+        saveWaiverTemplateVersion(
+          store.admin,
+          { title: "T", body_md: "B", acknowledgements: [] },
+          null,
+        ),
+      ),
+    ).toEqual({ reason: "invalid", version: undefined });
+  });
+
+  // The one worth the whole class: the row IS there, so a caller repeating the
+  // save files a second copy of the same wording under a new number.
+  it("names the version a save wrote but could not publish", async () => {
+    const store = fakeStore([row({ version: 3, is_current: true })]);
+    const admin = store.admin as unknown as {
+      from: (t: string) => { update: (p: Record<string, unknown>) => unknown };
+    };
+    const realFrom = admin.from;
+    admin.from = (table: string) => {
+      const built = realFrom(table) as Record<string, unknown>;
+      return {
+        ...built,
+        update: (patch: Record<string, unknown>) =>
+          patch.is_current === true
+            ? {
+                eq: () => ({
+                  then: (resolve: (r: { data: null; error: { message: string } }) => unknown) =>
+                    Promise.resolve(resolve({ data: null, error: { message: "storage blip" } })),
+                }),
+              }
+            : (built.update as (p: Record<string, unknown>) => unknown)(patch),
+      } as never;
+    };
+    expect(
+      await reasonOf(() =>
+        saveWaiverTemplateVersion(
+          store.admin,
+          { title: "T", body_md: "B", acknowledgements: [MEDIA_ACK] },
+          null,
+        ),
+      ),
+    ).toEqual({ reason: "not_published", version: 4 });
   });
 });

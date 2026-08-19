@@ -108,7 +108,11 @@ export function projectAgentWaiverTemplate(
     title: template.title,
     is_current: template.is_current,
     status: versionLabel(template, liveVersion),
-    acknowledgements: template.acknowledgements.length,
+    // Named for what it is, not `acknowledgements`: `get_waiver_template`
+    // returns that name holding the actual list, and one field meaning a count
+    // on one action and an array on another is how a caller ends up iterating a
+    // number. Same reason `projectAgentKbArticle` calls its count `versions`.
+    acknowledgement_count: template.acknowledgements.length,
     body_chars: template.body_md.length,
     created_at: template.created_at,
   };
@@ -159,6 +163,7 @@ export const AGENT_MANIFEST: {
         "save_waiver_template writes a new version and PUBLISHES it in the same call, because that is what saving means on the manager screen: there is no draft state. Waivers already signed keep the version they were signed against.",
         "save_waiver_template carries over anything you omit from the version the edit starts from, so acknowledgements can be reworded without resending the body. title and body_md must arrive together, and a call naming neither text nor acknowledgements is refused rather than republishing an identical copy.",
         "Every version must carry the `media` acknowledgement with real wording: it is what records who agreed to photos, and a save or publish without it is refused with 422 rather than quietly ending the club's consent record.",
+        "save_waiver_template and publish_waiver_template answer 503 waiver_template_not_published with a Retry-After when the change did not reach the live waiver (a concurrent promotion, most often). Retry it. When error.details.version is present, that version WAS written and is only unpublished — finish with publish_waiver_template on it rather than saving again, which would file a second draft.",
       ],
     },
     {
@@ -528,7 +533,7 @@ export const AGENT_MANIFEST: {
       name: "save_waiver_template",
       method: "POST",
       summary:
-        "Write a NEW version of the waiver and make it the one everyone signs, from that moment. Saving IS publishing here — there is no draft state, exactly as on the manager screen — so this changes the legal document the club puts in front of people: show a manager what you are changing before you call it. Waivers already signed keep the version they were signed against and are unaffected. Anything you omit is carried over from the version the edit starts from (the live one unless base_version names another), so an acknowledgement can be reworded without resending the body; title and body_md must arrive together.",
+        "Write a NEW version of the waiver and make it the one everyone signs, from that moment. Saving IS publishing here — there is no draft state, exactly as on the manager screen — so this changes the legal document the club puts in front of people: show a manager what you are changing before you call it. Waivers already signed keep the version they were signed against and are unaffected. Anything you omit is carried over from the version the edit starts from (the live one unless base_version names another), so an acknowledgement can be reworded without resending the body; title and body_md must arrive together. A 503 waiver_template_not_published means the version may exist without being live: retry, and if error.details.version names one, publish THAT rather than saving again.",
       params: [
         {
           name: "title",

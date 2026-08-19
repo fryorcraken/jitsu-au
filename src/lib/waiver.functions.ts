@@ -44,7 +44,7 @@ import {
   toDuplicateRefs,
 } from "@/lib/waiver-duplicates";
 import { supersedesMediaConsent } from "@/lib/waiver-approval";
-import { hasMediaAcknowledgement } from "@/lib/waiver-template-editor";
+import { hasMediaAcknowledgement, WaiverTemplateError } from "@/lib/waiver-template-editor";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 
@@ -1038,10 +1038,10 @@ export async function promoteWaiverTemplate(
     .select("id, version, is_current, acknowledgements")
     .eq("id", id)
     .maybeSingle();
-  if (tErr) throw new Error(tErr.message);
+  if (tErr) throw new WaiverTemplateError(tErr.message, "not_published");
   // Both checks happen BEFORE anything is cleared: a bad id or an already-live
   // target must never cost the club its live waiver.
-  if (!target) throw new Error("That waiver version no longer exists.");
+  if (!target) throw new WaiverTemplateError("That waiver version no longer exists.", "not_found");
   if (target.is_current) return { version: target.version };
   // A template can only go live carrying the media-consent acknowledgement.
   // This is the one place every promotion passes through -- `saveWaiverTemplate`
@@ -1050,8 +1050,10 @@ export async function promoteWaiverTemplate(
   // not just a direct promote of an old stored one. See
   // `hasMediaAcknowledgement` for what counts as still carrying it.
   if (!hasMediaAcknowledgement(parseTemplateAcks(target.acknowledgements))) {
-    throw new Error(
+    throw new WaiverTemplateError(
       "This version has no media consent acknowledgement (or its wording is blank), so making it live would stop the club recording who agreed to photos. Add it back before making this version live.",
+      "invalid",
+      target.version,
     );
   }
 
@@ -1060,13 +1062,13 @@ export async function promoteWaiverTemplate(
     .select("id")
     .eq("is_current", true)
     .maybeSingle();
-  if (pErr) throw new Error(pErr.message);
+  if (pErr) throw new WaiverTemplateError(pErr.message, "not_published", target.version);
 
   const { error: clearErr } = await admin
     .from("waiver_templates")
     .update({ is_current: false })
     .eq("is_current", true);
-  if (clearErr) throw new Error(clearErr.message);
+  if (clearErr) throw new WaiverTemplateError(clearErr.message, "not_published", target.version);
 
   const { error: setErr } = await admin
     .from("waiver_templates")
@@ -1086,8 +1088,10 @@ export async function promoteWaiverTemplate(
     .eq("is_current", true)
     .maybeSingle();
   if (nowCurrent) {
-    throw new Error(
+    throw new WaiverTemplateError(
       "Someone else changed the live waiver a moment ago, so this change was not applied. Reload the page to see the current version.",
+      "not_published",
+      target.version,
     );
   }
 
@@ -1101,12 +1105,14 @@ export async function promoteWaiverTemplate(
       // gets a server-side log AND a message that tells the manager the signing
       // page is down rather than a generic failure they would shrug at.
       console.error("[promoteWaiverTemplate] could not restore the live template:", restoreErr);
-      throw new Error(
+      throw new WaiverTemplateError(
         "The waiver version could not be changed, and the club is now left with no live waiver, so nobody can sign. Try again now to fix it.",
+        "not_published",
+        target.version,
       );
     }
   }
-  throw new Error(setErr.message);
+  throw new WaiverTemplateError(setErr.message, "not_published", target.version);
 }
 
 export const setCurrentWaiverTemplate = createServerFn({ method: "POST" })
@@ -1144,8 +1150,9 @@ export async function saveWaiverTemplateVersion(
   createdBy: string | null,
 ): Promise<{ id: string; version: number }> {
   if (!hasMediaAcknowledgement(input.acknowledgements)) {
-    throw new Error(
+    throw new WaiverTemplateError(
       "This version has no media consent acknowledgement (or its wording is blank), so saving it would stop the club recording who agreed to photos. Add it back before saving.",
+      "invalid",
     );
   }
 
@@ -1158,7 +1165,7 @@ export async function saveWaiverTemplateVersion(
     .order("version", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (maxErr) throw new Error(maxErr.message);
+  if (maxErr) throw new WaiverTemplateError(maxErr.message, "not_published");
   const nextVersion = (maxRow?.version ?? 0) + 1;
 
   // Write the new version as a draft, THEN promote it.
@@ -1181,8 +1188,12 @@ export async function saveWaiverTemplateVersion(
     })
     .select("id, version")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new WaiverTemplateError(error.message, "not_published");
 
+  // The version now exists. Whatever the promotion does from here, the caller
+  // has to hear about THAT rather than about a save it should repeat: saving
+  // again would file a second numbered draft, where publishing this one
+  // finishes what this call started.
   await promoteWaiverTemplate(admin, created.id);
   return { id: created.id, version: created.version };
 }

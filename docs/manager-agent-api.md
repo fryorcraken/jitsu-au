@@ -143,6 +143,17 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
     rather than republishing an identical copy under a new number. The result's
     `based_on` names the version an omitted field came from.
 
+  Failures are classified rather than flattened, because SKILL.md tells agents a
+  4xx means the request has to change: a change that did not reach the live
+  waiver (a concurrent promotion, a failed write) is `503
+waiver_template_not_published` with a `Retry-After`, and it carries
+  `error.details.version` when a version WAS written and is merely unpublished —
+  the case where saving again would file a second numbered draft and publishing
+  that version finishes the job. `WaiverTemplateError` in
+  `src/lib/waiver-template-editor.ts` carries the reason (`not_found` |
+  `invalid` | `not_published`) that decides this; the editor screen shows the
+  same message either way.
+
   Every version must carry the `media` acknowledgement with real wording
   (`hasMediaAcknowledgement`), or the club stops recording who agreed to photos;
   both the save and the publish refuse without it. That check now runs **before**

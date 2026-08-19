@@ -76,6 +76,7 @@ import {
   saveKbSection,
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
+import { WaiverTemplateError } from "@/lib/waiver-template-editor";
 import {
   filePaperWaiver,
   listWaiverTemplateRows,
@@ -812,6 +813,38 @@ async function handleListWaiverTemplates() {
   };
 }
 
+/**
+ * How long to wait before repeating a template call that could not publish.
+ * Short: the likeliest cause is another manager promoting at the same moment,
+ * and until one of them lands the club may have no live waiver at all.
+ */
+const TEMPLATE_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * Turn a refused template change into the right status code.
+ *
+ * The distinction that matters is retryable vs not. SKILL.md tells agents that a
+ * 4xx means the request itself has to change, so reporting "nobody can sign
+ * right now, try again" as a 422 is how `/waiver` stays down: the agent stops.
+ * `not_published` is therefore a 503 with a Retry-After, and it carries the
+ * version when one was written — repeating the save would file a second draft,
+ * where publishing that version finishes the job.
+ */
+function templateFailure(e: unknown, refusedCode: string): AgentError {
+  if (e instanceof WaiverTemplateError) {
+    if (e.reason === "not_found") return new AgentError(404, "not_found", e.message);
+    if (e.reason === "invalid") return new AgentError(422, refusedCode, e.message);
+    return new AgentError(
+      503,
+      "waiver_template_not_published",
+      e.message,
+      e.version === undefined ? undefined : { version: e.version, published: false },
+      TEMPLATE_RETRY_AFTER_SECONDS,
+    );
+  }
+  return new AgentError(500, "db_error", e instanceof Error ? e.message : "Could not reach it.");
+}
+
 /** The "there is nothing live" outage, in words a manager can act on. */
 const NO_LIVE_TEMPLATE =
   "There is no live waiver template, so nobody can sign. Make one live with publish_waiver_template.";
@@ -886,14 +919,11 @@ async function handleSaveWaiverTemplate(params: unknown, actingAs: string) {
       url: "/waiver",
     };
   } catch (e) {
-    // saveWaiverTemplateVersion throws plain Errors carrying manager-facing text
-    // (the media-consent refusal, a failed insert, a lost promotion race). Wrap
-    // so the agent gets that wording inside the endpoint's error envelope.
-    throw new AgentError(
-      422,
-      "save_waiver_template_failed",
-      e instanceof Error ? e.message : "Could not save the waiver template.",
-    );
+    // The wording comes from `saveWaiverTemplateVersion`, which speaks to
+    // managers; what is added here is the status code, and it is not one code.
+    // A version that was written but could not be made live is a retry, not a
+    // bad request — see `templateFailure`.
+    throw templateFailure(e, "save_waiver_template_failed");
   }
 }
 
@@ -912,11 +942,7 @@ async function handlePublishWaiverTemplate(params: unknown) {
     const { version } = await promoteWaiverTemplate(db, target.id);
     return { version, published: true as const };
   } catch (e) {
-    throw new AgentError(
-      422,
-      "publish_waiver_template_failed",
-      e instanceof Error ? e.message : "Could not change the live waiver version.",
-    );
+    throw templateFailure(e, "publish_waiver_template_failed");
   }
 }
 

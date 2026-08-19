@@ -645,7 +645,10 @@ describe("projectAgentWaiverTemplate", () => {
     const row = projectAgentWaiverTemplate(version, 4);
     expect(row).not.toHaveProperty("body_md");
     expect(row.body_chars).toBe(version.body_md.length);
-    expect(row.acknowledgements).toBe(2);
+    expect(row.acknowledgement_count).toBe(2);
+    // Not `acknowledgements`: that name holds the real list on
+    // get_waiver_template, and a caller iterating a 2 is the bug this prevents.
+    expect(row).not.toHaveProperty("acknowledgements");
   });
 
   // Same word the manager reads off the editor screen for the same row: an

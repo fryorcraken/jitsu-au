@@ -457,8 +457,9 @@ too, and it is the thing to say out loud before you call it.
 
 ### `list_waiver_templates` — every version, and which is live
 
-Bodies are not included; `body_chars` and the acknowledgement count are, so you
-can tell versions apart without pulling the text of each.
+Bodies are not included; `body_chars` and `acknowledgement_count` are, so you
+can tell versions apart without pulling the text of each. (`get_waiver_template`
+is where `acknowledgements` holds the real list.)
 
 ```bash
 scripts/agent.sh list_waiver_templates '{}'
@@ -513,6 +514,13 @@ scripts/agent.sh save_waiver_template '{"title":"Training Waiver","body_md":"# T
 > - **Show the manager the exact wording before you save**, and say that it goes
 >   live immediately for everyone who signs after it. People who already signed
 >   are unaffected.
+> - **`503 waiver_template_not_published` is not a refusal.** The change did not
+>   reach the live waiver, usually because another manager was promoting at the
+>   same moment, and the club may have no live waiver until somebody lands one.
+>   Obey the `Retry-After` header. If `error.details.version` is there, that
+>   version WAS written and is simply not live: finish with
+>   `publish_waiver_template` on it rather than saving again, which would file a
+>   second numbered draft of the same wording.
 
 ### `publish_waiver_template` — roll back to an earlier version
 

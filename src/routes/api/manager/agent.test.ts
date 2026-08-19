@@ -489,6 +489,24 @@ describe("manager agent route: the waiver template", () => {
     delete process.env.MANAGER_AGENT_API_KEY;
   });
 
+  /**
+   * Build a refusal from the SAME module registry the route will import from.
+   *
+   * `vi.resetModules()` in beforeEach gives each test a fresh registry, so an
+   * error built from a top-level import is an instance of a different class
+   * than the route's `instanceof` check sees, and every mapping would silently
+   * fall through to the 500 branch — the test would pass on a broken mapper
+   * only if the mapper were broken in the same direction.
+   */
+  async function refusal(
+    message: string,
+    reason: "not_found" | "invalid" | "not_published",
+    version?: number,
+  ) {
+    const { WaiverTemplateError } = await import("@/lib/waiver-template-editor");
+    return new WaiverTemplateError(message, reason, version);
+  }
+
   it("lists versions without their bodies, naming the live one", async () => {
     listWaiverTemplateRowsMock.mockResolvedValue([
       { ...LIVE, version: 5, is_current: false, id: "b" },
@@ -565,10 +583,13 @@ describe("manager agent route: the waiver template", () => {
     expect((await res.json()).result.based_on).toBeNull();
   });
 
-  it("reports a refused save in the endpoint's error envelope", async () => {
+  it("reports a refused save as the caller's to fix", async () => {
     loadWaiverTemplateVersionMock.mockResolvedValue(LIVE);
     saveWaiverTemplateVersionMock.mockRejectedValue(
-      new Error("This version has no media consent acknowledgement (or its wording is blank)."),
+      await refusal(
+        "This version has no media consent acknowledgement (or its wording is blank).",
+        "invalid",
+      ),
     );
     const res = await post({
       action: "save_waiver_template",
@@ -578,6 +599,36 @@ describe("manager agent route: the waiver template", () => {
     const body = await res.json();
     expect(body.error.code).toBe("save_waiver_template_failed");
     expect(body.error.message).toContain("media consent");
+  });
+
+  // The one that must not be a 4xx: the skill tells agents a 4xx means the
+  // request has to change, so an unpublished version reported as one leaves
+  // /waiver possibly down with nobody retrying — and a caller that DOES retry
+  // the save files a second draft of wording that is already written.
+  it("reports a version written but not published as a retryable 503", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue(LIVE);
+    saveWaiverTemplateVersionMock.mockRejectedValue(
+      await refusal("Someone else changed the live waiver a moment ago.", "not_published", 5),
+    );
+    const res = await post({
+      action: "save_waiver_template",
+      params: { acknowledgements: [MEDIA] },
+    });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("5");
+    const body = await res.json();
+    expect(body.error.code).toBe("waiver_template_not_published");
+    expect(body.error.details).toEqual({ version: 5, published: false });
+  });
+
+  it("404s a version that vanished between the read and the publish", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue({ ...LIVE, version: 2, is_current: false });
+    promoteWaiverTemplateMock.mockRejectedValue(
+      await refusal("That waiver version no longer exists.", "not_found"),
+    );
+    const res = await post({ action: "publish_waiver_template", params: { version: 2 } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
   });
 
   it("publishes a stored version", async () => {
