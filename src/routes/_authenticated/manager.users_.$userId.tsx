@@ -741,6 +741,9 @@ function ManagerUserPage() {
             <>
               <Field label="Guardian" value={profile.guardian_name} />
               <Field label="Guardian relationship" value={profile.guardian_relationship} />
+              <Field label="Guardian mobile" value={profile.guardian_phone} />
+              <Field label="Guardian email" value={profile.guardian_email} />
+              <Field label="Guardian address" value={profile.guardian_address} />
             </>
           ) : null}
           <Field
@@ -1040,6 +1043,9 @@ function ManagerUserPage() {
                         <>
                           <Field label="Guardian" value={w.guardian_name} />
                           <Field label="Guardian relationship" value={w.guardian_relationship} />
+                          <Field label="Guardian mobile" value={w.guardian_phone} />
+                          <Field label="Guardian email" value={w.guardian_email} />
+                          <Field label="Guardian address" value={w.guardian_address} />
                         </>
                       ) : null}
                       <Field

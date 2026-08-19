@@ -99,9 +99,15 @@ export type _WaiverSubmissionColumns = RequireColumns<
   | "signer_ip"
   | "signer_meta"
   | "user_id"
-  // How the emergency contact is related; for a minor, that contact IS the
-  // guardian who signs, so this doubles as the relationship to the minor.
+  // How the emergency contact is related. For a minor this is no longer the
+  // guardian by definition: the two can be different people, so the guardian
+  // carries their own contact details below.
   | "emergency_contact_relationship"
+  | "guardian_name"
+  | "guardian_relationship"
+  | "guardian_address"
+  | "guardian_phone"
+  | "guardian_email"
 >;
 
 // ---- waiver_templates: the manager-editable acknowledgements ----
@@ -125,6 +131,12 @@ export type _ProfileColumns = RequireColumns<
   | "media_consent_updated_at"
   | "media_consent_updated_by"
   | "emergency_contact_relationship"
+  // The guardian of a minor member, promoted from their approved waiver.
+  | "guardian_name"
+  | "guardian_relationship"
+  | "guardian_address"
+  | "guardian_phone"
+  | "guardian_email"
   | "gi_size"
   | "belt_size"
 >;

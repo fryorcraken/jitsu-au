@@ -148,9 +148,24 @@ is required. The form is the club's **application form**: participant type
 (taken from the date of birth, not asked twice), applicant details, one
 emergency contact with their **relationship**, the five health questions
 answered yes or no, and the signature.
-Anything answered yes has to be explained in the medical details box. For a
-participant under 18 the emergency contact IS the parent or guardian: they are
-asked for once, and the guardian signs at the end. On submit the signer immediately gets the signed PDF and a copy
+Anything answered yes has to be explained in the medical details box.
+
+For a participant under 18 the form adds a **parent or legal guardian** block:
+the person who consents, signs and carries the liability. They are asked for by
+name and relationship, plus their own **address, mobile and email** — each of
+those three optional, meaning "the same as the participant's", so a family at
+one address types nothing. What is stored is the resolved value, never the
+blank, so nobody reading the record a year later has to work out what an empty
+field meant (`resolveWaiverContacts` in `src/lib/waiver-contacts.ts` is the one
+place that resolves it, shared by the live preview, the "you still have to fill
+this in" checklist and the server).
+
+The guardian and the emergency contact are **two people who may be the same
+person, not one person by definition**. A tick above the emergency contact
+("the parent or guardian above is who we should call in an emergency") is on by
+default and hides those three fields, so the common case is asked for once,
+exactly as it was before the split; unticking it asks for the other person.
+The guardian signs at the end. On submit the signer immediately gets the signed PDF and a copy
 by email; managers are notified. Behind the scenes, for a new email: a locked
 login record is created (their email, no way to sign in) and their profile is
 seeded with name + phone. An existing person is left untouched. Either way the

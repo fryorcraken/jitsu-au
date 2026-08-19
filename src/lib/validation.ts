@@ -149,13 +149,24 @@ export type WaiverPersonFields = {
    */
   media_consent: boolean | null;
   emergency_contact_name: string;
-  /** How the emergency contact is related. For a minor this IS the guardian. */
+  /** How the emergency contact is related. Not the guardian by definition. */
   emergency_contact_relationship: string | null;
   emergency_contact_phone: string;
   medical_notes: string | null;
   is_minor: boolean;
+  /**
+   * The parent or legal guardian who signed for a minor, and how to reach
+   * them. They may be a different person from the emergency contact above, so
+   * they carry their own contact details; each is resolved against the
+   * participant's own by `resolveWaiverContacts` before it lands here, so
+   * "same as the participant's" is stored as the value, never as a blank.
+   * All null for an adult.
+   */
   guardian_name: string | null;
   guardian_relationship: string | null;
+  guardian_address: string | null;
+  guardian_phone: string | null;
+  guardian_email: string | null;
 };
 
 /**
@@ -196,6 +207,9 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverProfilePatch
     is_minor: w.is_minor,
     guardian_name: w.guardian_name,
     guardian_relationship: w.guardian_relationship,
+    guardian_address: w.guardian_address,
+    guardian_phone: w.guardian_phone,
+    guardian_email: w.guardian_email,
   };
 }
 
@@ -471,12 +485,18 @@ export const waiverSubmitSchema = z
     // waiver (no `waivers` column, never on the PDF), just context for
     // instructors, so the handler writes it straight onto the profile.
     martial_arts_experience: z.string().trim().max(500).optional().or(z.literal("")),
-    // The emergency contact. For a participant under 18 this person IS the
-    // parent/guardian who signs, which is why the relationship is required for
-    // everyone and reused as the "relationship to minor" on the document.
-    emergency_contact_name: z.string().trim().min(1).max(120),
-    emergency_contact_relationship: z.string().trim().min(1).max(80),
-    emergency_contact_phone: z.string().trim().min(1).max(30),
+    // The emergency contact: who the club rings if something happens in class.
+    // Required for everyone, with one exception -- for a minor whose emergency
+    // contact IS the guardian below, the form does not ask twice and sends
+    // `emergency_contact_is_guardian` instead (see the refine below, and
+    // `resolveWaiverContacts` for what ends up stored).
+    emergency_contact_name: z.string().trim().max(120).optional().or(z.literal("")),
+    emergency_contact_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+    emergency_contact_phone: z.string().trim().max(30).optional().or(z.literal("")),
+    // "The emergency contact is the parent or guardian" -- the form's default
+    // for a minor, and how it stays as short as it was before the guardian got
+    // their own block. Meaningless for an adult, who has no guardian.
+    emergency_contact_is_guardian: z.boolean().optional().default(false),
     // All five health questions, each answered yes or no.
     health_answers: healthAnswersSchema,
     // The one details box the form has always had. Required once any health
@@ -488,9 +508,21 @@ export const waiverSubmitSchema = z
     signature_name: z.string().trim().max(120).optional().or(z.literal("")),
     signature_image: sigImage,
     is_minor: z.boolean().optional().default(false),
-    // No guardian name/relationship here: for a minor they are the emergency
-    // contact fields above, so the server derives them rather than accepting a
-    // second copy that could disagree with the first.
+    // The parent or legal guardian of a minor: the person who signs, and who
+    // the club may have to reach about their child. Asked for in their own
+    // right because they are not always the emergency contact -- the parent at
+    // work interstate and the aunt who does the pickup are two different
+    // people, and the club needs both.
+    //
+    // Name and relationship are required for a minor (see the refine below).
+    // The three contact fields are optional and mean "the same as the
+    // participant's"; `resolveWaiverContacts` fills them in, so what is stored
+    // is always the real value rather than a blank somebody has to interpret.
+    guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
+    guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+    guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
+    guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
+    guardian_email: z.string().trim().email().max(255).optional().or(z.literal("")),
     guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_signature_image: sigImage,
     // Self-reported browser context, stored on the waiver as signing evidence.
@@ -531,6 +563,44 @@ export const waiverSubmitSchema = z
       path: ["guardian_signature"],
     },
   )
+  // A minor's guardian is named on the document and signs it, so those two
+  // fields are required whatever else is or is not the same as somebody else's.
+  .refine((d) => !d.is_minor || Boolean(d.guardian_name?.trim()), {
+    message: "Please give the parent or guardian's name.",
+    path: ["guardian_name"],
+  })
+  .refine((d) => !d.is_minor || Boolean(d.guardian_relationship?.trim()), {
+    message: "Please say how the parent or guardian is related to the participant.",
+    path: ["guardian_relationship"],
+  })
+  // The emergency contact is required of everyone, unless it is the guardian --
+  // in which case the form asked once and copies the answer across, and asking
+  // again would be asking the same person to write themselves down twice.
+  .superRefine((d, ctx) => {
+    if (d.is_minor && d.emergency_contact_is_guardian) return;
+    const fields = [
+      [
+        "emergency_contact_name",
+        d.emergency_contact_name,
+        "Please give an emergency contact name.",
+      ],
+      [
+        "emergency_contact_relationship",
+        d.emergency_contact_relationship,
+        "Please say how the emergency contact is related.",
+      ],
+      [
+        "emergency_contact_phone",
+        d.emergency_contact_phone,
+        "Please give an emergency contact mobile.",
+      ],
+    ] as const;
+    for (const [path, value, message] of fields) {
+      if (!value?.trim()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: [path] });
+      }
+    }
+  })
   // A "yes" nobody explained tells an instructor nothing, so the details box
   // stops being optional the moment any health question is answered yes.
   .refine(
@@ -758,6 +828,17 @@ export const paperWaiverUploadSchema = z
     // the signed page (see the refine below).
     emergency_contact_relationship: z.string().trim().max(80).optional().or(z.literal("")),
     emergency_contact_phone: z.string().trim().min(1).max(30),
+    // The parent or legal guardian who signed a minor's form, when the paper
+    // names one separately from the emergency contact. All optional, including
+    // for a minor: a form filed from the club's old single-block layout has
+    // only one person written on it, and `resolveWaiverContacts` treats that
+    // person as the signer. Blank address/mobile/email mean "the same as the
+    // participant's", exactly as on the online form.
+    guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
+    guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+    guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
+    guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
+    guardian_email: z.string().trim().email().max(255).optional().or(z.literal("")),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
     // The date written on the paper, not the date it was filed. This is the
     // club's record of when they signed, and what the lists order by. It does
@@ -800,7 +881,8 @@ export const paperWaiverUploadSchema = z
   .strict()
   .refine(
     (d) =>
-      !isMinorOn(d.date_of_birth, d.signed_on) || Boolean(d.emergency_contact_relationship?.trim()),
+      !isMinorOn(d.date_of_birth, d.signed_on) ||
+      Boolean(d.guardian_relationship?.trim() || d.emergency_contact_relationship?.trim()),
     {
       message:
         "The participant was under 18 when this was signed, so the guardian's relationship to them is required.",

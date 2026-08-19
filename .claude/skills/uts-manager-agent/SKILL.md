@@ -352,7 +352,12 @@ when the form has no photo/video consent box — omit rather than guessing, sinc
 `false` records a refusal the club never received),
 `emergency_contact_name`, `emergency_contact_relationship`
 (required if the participant was under 18 on `signed_on`, else optional),
-`emergency_contact_phone`, `medical_notes` (optional), `signed_on`
+`emergency_contact_phone`, the guardian of a minor when the paper names one
+apart from the emergency contact (`guardian_name`, `guardian_relationship`,
+`guardian_address`, `guardian_phone`, `guardian_email` — all optional; omit an
+address/mobile/email that is the participant's, and omit the lot for an older
+form with a single contact block, where that contact is taken as the signer),
+`medical_notes` (optional), `signed_on`
 (`YYYY-MM-DD` — the date on the paper, not today), `template_version` (optional
 int, or omit/null for a form you can't place), `scan`: an array of
 `{ "name", "type", "data" }` (1–20 files, `type` is `application/pdf` |

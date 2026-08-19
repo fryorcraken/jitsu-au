@@ -649,8 +649,54 @@ describe("filePaperWaiver", () => {
 
     const row = calls.insert[0] as Record<string, unknown>;
     expect(row.is_minor).toBe(true);
+    // The old paper layout names one person, who is therefore the signer, and
+    // their contact details fall back to the participant's.
     expect(row.guardian_name).toBe("Charles Babbage");
     expect(row.guardian_relationship).toBe("Colleague");
+    expect(row.guardian_phone).toBe(validInput.phone);
+    expect(row.guardian_address).toBe(validInput.address);
+    expect(row.guardian_email).toBe("ada@example.com");
+  });
+
+  // The current paper form names the guardian separately from the emergency
+  // contact, and they can be two different people.
+  it("files a guardian who is not the emergency contact, with their own details", async () => {
+    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const minorInput: PaperWaiverUploadInput = {
+      ...validInput,
+      date_of_birth: "2003-05-01",
+      signed_on: "2019-06-01",
+      guardian_name: "Anne Byron",
+      guardian_relationship: "Mother",
+      guardian_phone: "0400 999 999",
+      guardian_email: "anne@example.com",
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await filePaperWaiver(admin as any, minorInput, MANAGER_ID);
+
+    const row = calls.insert[0] as Record<string, unknown>;
+    expect(row.guardian_name).toBe("Anne Byron");
+    expect(row.guardian_relationship).toBe("Mother");
+    expect(row.guardian_phone).toBe("0400 999 999");
+    expect(row.guardian_email).toBe("anne@example.com");
+    // Not given, so it stands for the participant's.
+    expect(row.guardian_address).toBe(validInput.address);
+    // The emergency contact is untouched: a different person entirely.
+    expect(row.emergency_contact_name).toBe(validInput.emergency_contact_name);
+  });
+
+  it("leaves the guardian columns empty for an adult's paper form", async () => {
+    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await filePaperWaiver(admin as any, validInput, MANAGER_ID);
+
+    const row = calls.insert[0] as Record<string, unknown>;
+    expect(row.is_minor).toBe(false);
+    expect(row.guardian_name).toBeNull();
+    expect(row.guardian_phone).toBeNull();
+    expect(row.guardian_email).toBeNull();
   });
 
   it("rejects a signing date in the future", async () => {

@@ -1120,7 +1120,10 @@ export type Database = {
           emergency_contact_relationship: string | null
           first_name: string
           gi_size: string | null
+          guardian_address: string | null
+          guardian_email: string | null
           guardian_name: string | null
+          guardian_phone: string | null
           guardian_relationship: string | null
           is_minor: boolean
           last_name: string | null
@@ -1148,7 +1151,10 @@ export type Database = {
           emergency_contact_relationship?: string | null
           first_name: string
           gi_size?: string | null
+          guardian_address?: string | null
+          guardian_email?: string | null
           guardian_name?: string | null
+          guardian_phone?: string | null
           guardian_relationship?: string | null
           is_minor?: boolean
           last_name?: string | null
@@ -1176,7 +1182,10 @@ export type Database = {
           emergency_contact_relationship?: string | null
           first_name?: string
           gi_size?: string | null
+          guardian_address?: string | null
+          guardian_email?: string | null
           guardian_name?: string | null
+          guardian_phone?: string | null
           guardian_relationship?: string | null
           is_minor?: boolean
           last_name?: string | null
@@ -1362,7 +1371,10 @@ export type Database = {
           emergency_contact_phone: string
           emergency_contact_relationship: string | null
           first_name: string
+          guardian_address: string | null
+          guardian_email: string | null
           guardian_name: string | null
+          guardian_phone: string | null
           guardian_relationship: string | null
           id: string
           is_minor: boolean
@@ -1394,7 +1406,10 @@ export type Database = {
           emergency_contact_phone: string
           emergency_contact_relationship?: string | null
           first_name: string
+          guardian_address?: string | null
+          guardian_email?: string | null
           guardian_name?: string | null
+          guardian_phone?: string | null
           guardian_relationship?: string | null
           id?: string
           is_minor?: boolean
@@ -1426,7 +1441,10 @@ export type Database = {
           emergency_contact_phone?: string
           emergency_contact_relationship?: string | null
           first_name?: string
+          guardian_address?: string | null
+          guardian_email?: string | null
           guardian_name?: string | null
+          guardian_phone?: string | null
           guardian_relationship?: string | null
           id?: string
           is_minor?: boolean

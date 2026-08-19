@@ -37,6 +37,9 @@ const base: WaiverDocumentProps = {
   isMinor: false,
   guardianName: "",
   guardianRelationship: "",
+  guardianAddress: "",
+  guardianPhone: "",
+  guardianEmail: "",
   guardianSignature: "",
 };
 
@@ -97,6 +100,11 @@ describe("waiver placeholders", () => {
     emergencyContactName: "John",
     emergencyContactRelationship: "Partner",
     emergencyContactPhone: "0411",
+    guardianName: "Pat",
+    guardianRelationship: "Mother",
+    guardianAddress: "2 Harris St",
+    guardianPhone: "0422",
+    guardianEmail: "pat@example.com",
     medicalNotes: "",
     healthAnswers: {
       drugs: false,
@@ -157,14 +165,23 @@ describe("waiver placeholders", () => {
     expect(minor.minor_checkbox).toBe("[X]");
   });
 
-  // For a minor the guardian IS the emergency contact, so the guardian tokens
-  // read off that one block instead of a second copy of the same person.
-  it("fills the guardian tokens from the emergency contact for a minor only", () => {
+  // The guardian is their own person: printing the emergency contact in these
+  // tokens would name the wrong person on a signed legal document whenever the
+  // two are different people.
+  it("fills the guardian tokens from the guardian, for a minor only", () => {
     expect(values.guardian_name).toBe("N/A");
     expect(values.guardian_relationship).toBe("N/A");
+    expect(values.guardian_phone).toBe("N/A");
+    expect(values.guardian_email).toBe("N/A");
+    expect(values.guardian_address).toBe("N/A");
     const minor = buildWaiverPlaceholders({ ...input, isMinor: true });
-    expect(minor.guardian_name).toBe("John");
-    expect(minor.guardian_relationship).toBe("Partner");
+    expect(minor.guardian_name).toBe("Pat");
+    expect(minor.guardian_relationship).toBe("Mother");
+    expect(minor.guardian_phone).toBe("0422");
+    expect(minor.guardian_email).toBe("pat@example.com");
+    expect(minor.guardian_address).toBe("2 Harris St");
+    // ...and never the emergency contact, who may be somebody else entirely.
+    expect(minor.guardian_name).not.toBe(minor.emergency_contact_name);
   });
 
   it("reports whether the body prints a token, so a renderer can fall back", () => {
@@ -274,6 +291,26 @@ describe("WaiverDocument", () => {
     expect(screen.getByText("Parent / guardian consent")).toBeInTheDocument();
     expect(screen.getAllByText("Pat Sample").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Parent")).toBeInTheDocument();
+  });
+
+  // The guardian carries the liability, so the document has to say how to reach
+  // them -- they are not always the emergency contact printed above.
+  it("shows the guardian's own mobile, email and address", () => {
+    render(
+      <WaiverDocument
+        {...base}
+        isMinor
+        guardianName="Pat Sample"
+        guardianRelationship="Parent"
+        guardianPhone="0400 333 444"
+        guardianEmail="pat@example.com"
+        guardianAddress="9 Quay St, Haymarket NSW"
+        guardianSignature="Pat Sample"
+      />,
+    );
+    expect(screen.getByText("0400 333 444")).toBeInTheDocument();
+    expect(screen.getByText("pat@example.com")).toBeInTheDocument();
+    expect(screen.getByText("9 Quay St, Haymarket NSW")).toBeInTheDocument();
   });
 
   it("renders [X]/[ ] template lines as real checkboxes, not literal brackets", () => {

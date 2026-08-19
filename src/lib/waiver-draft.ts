@@ -61,6 +61,14 @@ export type WaiverDraft = {
   ecName: string;
   ecRelationship: string;
   ecPhone: string;
+  /** "The emergency contact is the parent or guardian" (minors only). */
+  ecIsGuardian: boolean;
+  guardianName: string;
+  guardianRelationship: string;
+  /** Blank means "the same as the participant's", which is the form's default. */
+  guardianAddress: string;
+  guardianPhone: string;
+  guardianEmail: string;
   health: HealthDraft;
   medical: string;
   acks: Record<string, boolean>;
@@ -155,6 +163,16 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     ecName: text(draft.ecName),
     ecRelationship: text(draft.ecRelationship),
     ecPhone: text(draft.ecPhone),
+    // Same reasoning as `giSize`: added without a version bump. A draft written
+    // before the guardian had their own block restores with this false, so the
+    // emergency contact it holds stays on screen exactly as it was typed rather
+    // than being hidden behind a tick nobody set.
+    ecIsGuardian: draft.ecIsGuardian === true,
+    guardianName: text(draft.guardianName),
+    guardianRelationship: text(draft.guardianRelationship),
+    guardianAddress: text(draft.guardianAddress),
+    guardianPhone: text(draft.guardianPhone),
+    guardianEmail: text(draft.guardianEmail),
     health: health(draft.health),
     medical: text(draft.medical),
     acks: acks(draft.acks),
@@ -184,6 +202,7 @@ export function draftHasContent(draft: WaiverDraft | null): boolean {
     draft.address,
     draft.ecName,
     draft.ecPhone,
+    draft.guardianName,
     draft.medical,
     draft.martialArtsExperience,
     draft.signatureName,

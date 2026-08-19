@@ -53,6 +53,11 @@ export type WaiverFieldState = {
   ecName: string;
   ecRelationship: string;
   ecPhone: string;
+  /** Under 18, and the emergency contact is the guardian: the form asked for
+   * that person once, so the three fields above are not on screen to fill in. */
+  ecIsGuardian: boolean;
+  guardianName: string;
+  guardianRelationship: string;
   health: HealthAnswerDraft;
   medical: string;
   /** The current template's acknowledgements, labels already substituted. */
@@ -132,10 +137,25 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
   }
   require("address", "Address", state.address);
 
-  // ---- Emergency contact / guardian ----
-  require("emergency_contact_name", "Emergency contact name", state.ecName);
-  require("emergency_contact_relationship", "Emergency contact relationship", state.ecRelationship);
-  require("emergency_contact_phone", "Emergency contact mobile", state.ecPhone);
+  // ---- Parent or guardian (minors only) ----
+  //
+  // The guardian's address, mobile and email are deliberately absent: each is
+  // optional and means "the same as the participant's", so there is nothing
+  // there for somebody to have missed.
+  if (state.isMinor) {
+    require("guardian_name", "Parent or guardian name", state.guardianName);
+    require("guardian_relationship", "Parent or guardian relationship to the participant", state.guardianRelationship);
+  }
+
+  // ---- Emergency contact ----
+  //
+  // Skipped entirely when it is the guardian above: those fields are not on
+  // screen, so listing them would send somebody to a control they cannot see.
+  if (!(state.isMinor && state.ecIsGuardian)) {
+    require("emergency_contact_name", "Emergency contact name", state.ecName);
+    require("emergency_contact_relationship", "Emergency contact relationship", state.ecRelationship);
+    require("emergency_contact_phone", "Emergency contact mobile", state.ecPhone);
+  }
 
   // ---- Health declaration ----
   for (const question of missingHealthAnswers(state.health)) {

@@ -90,7 +90,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "10",
+  version: "11",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -103,6 +103,18 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "11",
+      // Five new optional fields on one action. Nothing that worked before
+      // fails or means anything different, so a client that ignores them is
+      // still correct -- it just files a minor's guardian less completely.
+      breaking: false,
+      notes: [
+        "file_waiver takes the parent or legal guardian of a minor as their own person, separate from the emergency contact: guardian_name, guardian_relationship, guardian_address, guardian_phone and guardian_email, all optional. They are two people who may be the same one, not one person by definition, so a form that names the signer apart from the emergency contact can now be filed as it actually reads. Omit an address, mobile or email that is the participant's (the participant's is stored for the guardian too), and omit the lot for an older form with a single contact block, where that contact is still taken as the signer exactly as before.",
+        "emergency_contact_relationship is still required for a minor, but guardian_relationship now satisfies that requirement instead, so a filing that gives the guardian's relationship and leaves the emergency contact's blank is accepted where it used to be refused.",
+        "guardian_email is evidence on the waiver and is never used to identify anybody. The person record stays keyed on the participant's email, so a guardian_email the club has never seen does not create a second person.",
+      ],
+    },
     {
       version: "10",
       // Authorising a membership and paying for one used to be the same act.
@@ -403,12 +415,40 @@ export const AGENT_MANIFEST: {
           name: "emergency_contact_relationship",
           required: false,
           description:
-            "Optional for an adult; REQUIRED if the participant was under 18 on signed_on, since that contact is the guardian who signed.",
+            "Optional for an adult; REQUIRED if the participant was under 18 on signed_on, unless guardian_relationship is given instead.",
         },
         {
           name: "emergency_contact_phone",
           required: true,
           description: "As written on the form.",
+        },
+        {
+          name: "guardian_name",
+          required: false,
+          description:
+            "The parent or legal guardian who signed a minor's form, when the paper names them separately from the emergency contact. Omit for an older form with only one contact block: that contact is then taken as the signer.",
+        },
+        {
+          name: "guardian_relationship",
+          required: false,
+          description: "How the guardian is related to the participant, e.g. Mother, Father.",
+        },
+        {
+          name: "guardian_address",
+          required: false,
+          description:
+            "The guardian's address. Omit when it is the same as the participant's — the participant's is stored for them.",
+        },
+        {
+          name: "guardian_phone",
+          required: false,
+          description: "The guardian's mobile. Omit when it is the participant's.",
+        },
+        {
+          name: "guardian_email",
+          required: false,
+          description:
+            "The guardian's email. Omit when it is the participant's. Never used to identify the person: the account is always keyed on the participant's email above.",
         },
         {
           name: "medical_notes",
