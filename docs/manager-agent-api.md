@@ -118,6 +118,37 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   check lives in `filePaperWaiver`, so the manager's own upload form gets the
   same speed bump.
 
+- `list_waiver_templates` / `get_waiver_template` / `save_waiver_template` /
+  `publish_waiver_template` — the waiver everyone signs, the agent's equivalent
+  of `/manager/waiver-template`. They go through `listWaiverTemplateRows`,
+  `loadWaiverTemplateVersion`, `saveWaiverTemplateVersion` and
+  `promoteWaiverTemplate` in `src/lib/waiver.functions.ts` — the same functions
+  the editor screen's server functions call, so an agent-published version and a
+  manager's own are the same row written the same way. Three things are worth
+  knowing before touching them:
+  - **They key on the version number, not the row id.** The screen holds the row
+    it just listed; an agent reads a list, decides, and calls back later. The
+    version is unique on the table and is the number a manager reads off the
+    screen and off a signed PDF.
+  - **Saving publishes.** There is no draft state (the screen has none either),
+    so `save_waiver_template` writes a new version and makes it live in one call.
+    Waivers already signed keep the version they were signed against, which is
+    what makes this safe to get wrong and then roll back with
+    `publish_waiver_template`.
+  - **An omitted field is carried over** from the version the edit starts from
+    (the live one, unless `base_version` names another), so rewording one
+    acknowledgement does not mean resending 30000 characters of legal text and
+    risking a body retyped from memory. `title` and `body_md` still travel
+    together, and a call naming neither text nor acknowledgements is refused
+    rather than republishing an identical copy under a new number. The result's
+    `based_on` names the version an omitted field came from.
+
+  Every version must carry the `media` acknowledgement with real wording
+  (`hasMediaAcknowledgement`), or the club stops recording who agreed to photos;
+  both the save and the publish refuse without it. That check now runs **before**
+  the insert rather than only inside `promoteWaiverTemplate`, so a refused save
+  no longer leaves an unwanted draft version behind in the editor's list.
+
 ### `file_waiver`: the parts that have bitten us
 
 - **The two surfaces present that one check differently on purpose, and
@@ -190,7 +221,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"10"`.
+test so the bump is a deliberate edit, and the current value is `"11"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

@@ -134,8 +134,21 @@ vi.mock("@/integrations/supabase/client.server", () => ({
 // the skill tells agents to branch on — 503 retry, 409 stop and confirm — so a
 // silent collapse to 422 turns a transient outage into an abandoned record.
 const filePaperWaiverMock = vi.fn();
+// The waiver-template functions are mocked for the same reason: their own
+// behaviour (refuse before writing, insert then promote) is pinned in
+// waiver-template.functions.test.ts against a store-backed fake. What the route
+// owns, and what these tests pin, is which version an omitted field is carried
+// over FROM, and whether a call that changed nothing says so.
+const listWaiverTemplateRowsMock = vi.fn();
+const loadWaiverTemplateVersionMock = vi.fn();
+const saveWaiverTemplateVersionMock = vi.fn();
+const promoteWaiverTemplateMock = vi.fn();
 vi.mock("@/lib/waiver.functions", () => ({
   filePaperWaiver: (...args: unknown[]) => filePaperWaiverMock(...args),
+  listWaiverTemplateRows: (...args: unknown[]) => listWaiverTemplateRowsMock(...args),
+  loadWaiverTemplateVersion: (...args: unknown[]) => loadWaiverTemplateVersionMock(...args),
+  saveWaiverTemplateVersion: (...args: unknown[]) => saveWaiverTemplateVersionMock(...args),
+  promoteWaiverTemplate: (...args: unknown[]) => promoteWaiverTemplateMock(...args),
 }));
 
 const BREAK_GLASS_KEY = "test-break-glass-key";
@@ -448,5 +461,140 @@ describe("manager agent route", () => {
       const body = await (await post({ action: "file_waiver", params })).json();
       expect(body.result.created).toBe(false);
     });
+  });
+});
+
+describe("manager agent route: the waiver template", () => {
+  const MEDIA = { id: "media", label: "I consent to being photographed.", required: false };
+  const LIVE = {
+    id: "11111111-1111-4111-8111-111111111111",
+    version: 4,
+    title: "Training Waiver",
+    body_md: "The whole legal text, {{full_name}}.",
+    acknowledgements: [MEDIA],
+    is_current: true,
+    created_at: "2026-08-01T00:00:00.000Z",
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env.MANAGER_AGENT_API_KEY = BREAK_GLASS_KEY;
+    currentAdmin = {};
+    listWaiverTemplateRowsMock.mockReset();
+    loadWaiverTemplateVersionMock.mockReset();
+    saveWaiverTemplateVersionMock.mockReset();
+    promoteWaiverTemplateMock.mockReset();
+  });
+  afterEach(() => {
+    delete process.env.MANAGER_AGENT_API_KEY;
+  });
+
+  it("lists versions without their bodies, naming the live one", async () => {
+    listWaiverTemplateRowsMock.mockResolvedValue([
+      { ...LIVE, version: 5, is_current: false, id: "b" },
+      LIVE,
+    ]);
+    const res = await post({ action: "list_waiver_templates", params: {} });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.result.live_version).toBe(4);
+    expect(body.result.count).toBe(2);
+    expect(body.result.templates[0]).not.toHaveProperty("body_md");
+  });
+
+  it("404s a version that does not exist", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue(null);
+    const res = await post({ action: "get_waiver_template", params: { version: 99 } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.message).toContain("99");
+  });
+
+  // The outage, not a tidy empty state: /waiver refuses to render without a live
+  // template, so the reply has to say what to do about it.
+  it("says nobody can sign when nothing is live", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue(null);
+    const res = await post({ action: "get_waiver_template", params: {} });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.message).toMatch(/nobody can sign/);
+  });
+
+  // The carry-over is the whole point of the optional fields: rewording one
+  // acknowledgement must not mean resending 30000 characters of legal text, and
+  // the text it keeps has to come from the version named, not the newest.
+  it("carries the body over from the live version when only acknowledgements change", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue(LIVE);
+    saveWaiverTemplateVersionMock.mockResolvedValue({ id: "new", version: 5 });
+    const reworded = [{ ...MEDIA, label: "I consent to photos and video." }];
+    const res = await post({
+      action: "save_waiver_template",
+      params: { acknowledgements: reworded },
+    });
+    expect(res.status).toBe(200);
+    expect(loadWaiverTemplateVersionMock).toHaveBeenCalledWith(expect.anything(), undefined);
+    expect(saveWaiverTemplateVersionMock.mock.calls[0][1]).toEqual({
+      title: LIVE.title,
+      body_md: LIVE.body_md,
+      acknowledgements: reworded,
+    });
+    const body = await res.json();
+    expect(body.result).toMatchObject({ version: 5, based_on: 4, is_current: true });
+  });
+
+  it("starts from the version named by base_version, not the live one", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue({ ...LIVE, version: 2, is_current: false });
+    saveWaiverTemplateVersionMock.mockResolvedValue({ id: "new", version: 6 });
+    const res = await post({
+      action: "save_waiver_template",
+      params: { acknowledgements: [MEDIA], base_version: 2 },
+    });
+    expect(res.status).toBe(200);
+    expect(loadWaiverTemplateVersionMock).toHaveBeenCalledWith(expect.anything(), 2);
+    expect((await res.json()).result.based_on).toBe(2);
+  });
+
+  // A caller that described a whole version needs nothing to copy from, and a
+  // club whose live template has gone missing must still be able to write one.
+  it("writes a complete version without reading a base", async () => {
+    saveWaiverTemplateVersionMock.mockResolvedValue({ id: "new", version: 1 });
+    const res = await post({
+      action: "save_waiver_template",
+      params: { title: "Training Waiver", body_md: "Text", acknowledgements: [MEDIA] },
+    });
+    expect(res.status).toBe(200);
+    expect(loadWaiverTemplateVersionMock).not.toHaveBeenCalled();
+    expect((await res.json()).result.based_on).toBeNull();
+  });
+
+  it("reports a refused save in the endpoint's error envelope", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue(LIVE);
+    saveWaiverTemplateVersionMock.mockRejectedValue(
+      new Error("This version has no media consent acknowledgement (or its wording is blank)."),
+    );
+    const res = await post({
+      action: "save_waiver_template",
+      params: { acknowledgements: [{ id: "risk", label: "I accept the risks.", required: true }] },
+    });
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.code).toBe("save_waiver_template_failed");
+    expect(body.error.message).toContain("media consent");
+  });
+
+  it("publishes a stored version", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue({ ...LIVE, version: 2, is_current: false });
+    promoteWaiverTemplateMock.mockResolvedValue({ version: 2 });
+    const res = await post({ action: "publish_waiver_template", params: { version: 2 } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({ version: 2, published: true });
+  });
+
+  // Promoting is idempotent, so a retry would otherwise report a second change
+  // to the club's legal document that never happened.
+  it("changes nothing, and says so, for the version already live", async () => {
+    loadWaiverTemplateVersionMock.mockResolvedValue(LIVE);
+    const res = await post({ action: "publish_waiver_template", params: { version: 4 } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({ version: 4, published: false });
+    expect(promoteWaiverTemplateMock).not.toHaveBeenCalled();
   });
 });

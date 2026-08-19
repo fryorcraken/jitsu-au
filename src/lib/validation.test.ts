@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentGetWaiverTemplateSchema,
+  agentPublishWaiverTemplateSchema,
+  agentSaveWaiverTemplateSchema,
   attachCheckInSchema,
   blockCommenterSchema,
   blogCommentSchema,
@@ -2412,5 +2415,67 @@ describe("knowledge base schemas", () => {
     const id = crypto.randomUUID();
     expect(resolveAnnotationSchema.safeParse({ id, resolved: false }).success).toBe(true);
     expect(resolveAnnotationSchema.safeParse({ id }).success).toBe(false);
+  });
+});
+
+describe("manager agent waiver-template schemas", () => {
+  const MEDIA = { id: "media", label: "I consent to being photographed.", required: false };
+
+  it("keys on the version number, not a row id", () => {
+    expect(agentGetWaiverTemplateSchema.parse({ version: 4 })).toEqual({ version: 4 });
+    expect(agentPublishWaiverTemplateSchema.safeParse({ version: 4 }).success).toBe(true);
+    // An agent reads a list and calls back later, so a UUID it happened to hold
+    // is not an identifier this API knows.
+    expect(agentPublishWaiverTemplateSchema.safeParse({ id: crypto.randomUUID() }).success).toBe(
+      false,
+    );
+  });
+
+  it("reads the live version when none is named", () => {
+    expect(agentGetWaiverTemplateSchema.parse({})).toEqual({});
+  });
+
+  it("lets acknowledgements be changed on their own, body carried over", () => {
+    const parsed = agentSaveWaiverTemplateSchema.parse({ acknowledgements: [MEDIA] });
+    expect(parsed.acknowledgements).toEqual([MEDIA]);
+    expect(parsed.title).toBeUndefined();
+    expect(parsed.body_md).toBeUndefined();
+  });
+
+  // A version is written as a whole: a new body under the previous heading is
+  // nobody's intent, and the same rule holds for save_kb_article.
+  it("refuses text arriving half at a time", () => {
+    expect(agentSaveWaiverTemplateSchema.safeParse({ body_md: "New body" }).success).toBe(false);
+    expect(agentSaveWaiverTemplateSchema.safeParse({ title: "New title" }).success).toBe(false);
+    expect(
+      agentSaveWaiverTemplateSchema.safeParse({ title: "New title", body_md: "New body" }).success,
+    ).toBe(true);
+  });
+
+  // Saving publishes, so an empty call would put a byte-identical copy of the
+  // live wording live under a new number and report a change that was not one.
+  it("refuses a save that would change nothing", () => {
+    const result = agentSaveWaiverTemplateSchema.safeParse({ base_version: 2 });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain("publish_waiver_template");
+  });
+
+  // Strict, like paperWaiverUploadSchema: a stripped `base_version` typo would
+  // silently publish an edit made against the wrong wording.
+  it("rejects an unknown param rather than dropping it", () => {
+    expect(
+      agentSaveWaiverTemplateSchema.safeParse({ acknowledgements: [MEDIA], base_verison: 2 })
+        .success,
+    ).toBe(false);
+    expect(agentGetWaiverTemplateSchema.safeParse({ versoin: 2 }).success).toBe(false);
+  });
+
+  it("holds acknowledgements to the same shape the editor screen writes", () => {
+    // No id, so it could never be ticked off against a submission.
+    expect(
+      agentSaveWaiverTemplateSchema.safeParse({
+        acknowledgements: [{ label: "I accept the risks.", required: true }],
+      }).success,
+    ).toBe(false);
   });
 });

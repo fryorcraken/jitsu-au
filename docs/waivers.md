@@ -463,6 +463,16 @@ There are two ways a version becomes live:
   publishes the **stored** text, so unsaved edits in the editor are not part of
   what goes live and the screen says so before it proceeds.
 
+**A manager's agent can do all of this too.** `list_waiver_templates`,
+`get_waiver_template`, `save_waiver_template` and `publish_waiver_template` on
+the manager agent API (`docs/manager-agent-api.md`) are the same two paths
+through the same functions, keyed on the version number instead of the row id.
+Saving publishes there as well, because it does here — the API cannot offer a
+draft state the screen does not have. The one thing an agent gets that the
+screen does not need is the carry-over: an omitted field keeps what the version
+it started from says, so an acknowledgement can be reworded without a caller
+resending the whole legal text from memory.
+
 Promoting never touches waivers already signed. Each one records the
 `template_version` it was signed against and its PDF carries that version's full
 text, so the evidence is fixed at signing time and does not depend on this table.
