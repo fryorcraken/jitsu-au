@@ -587,6 +587,7 @@ export const saveTemplateSchema = z.object({
   body_md: z.string().trim().min(1).max(30000),
   acknowledgements: templateAcknowledgementsSchema.default([]),
 });
+export type SaveTemplateInput = z.infer<typeof saveTemplateSchema>;
 
 // ---- Manager: promote an existing template version to the live one ----
 //

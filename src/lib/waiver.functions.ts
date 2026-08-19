@@ -23,7 +23,12 @@ import {
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "@/lib/validation";
-import type { PaperWaiverUploadInput, SignerMeta } from "@/lib/validation";
+import type {
+  AcknowledgementDef,
+  PaperWaiverUploadInput,
+  SaveTemplateInput,
+  SignerMeta,
+} from "@/lib/validation";
 import { beltSizeForGiSize, type GiSize } from "@/lib/kit-sizes";
 import {
   mediaConsentFromAnswers,
@@ -918,25 +923,93 @@ export const checkWaiverSubmission = createServerFn({ method: "POST" })
 // read back) was invisible in the UI even though the table had always held the
 // full history. Managers can read every row by RLS; this goes through the
 // service role like the rest of the manager reads.
+/**
+ * One stored version of the waiver, as every manager surface reads it.
+ *
+ * The editor screen and the manager agent API project the same row through the
+ * same functions below, so a version an agent reads back is the version a
+ * manager sees on screen — including the acknowledgements, which live in a JSONB
+ * column and are only trustworthy once `parseTemplateAcks` has been over them.
+ */
+export type WaiverTemplateVersion = {
+  id: string;
+  version: number;
+  title: string;
+  body_md: string;
+  acknowledgements: AcknowledgementDef[];
+  is_current: boolean;
+  created_at: string;
+};
+
+type WaiverTemplateRow = {
+  id: string;
+  version: number;
+  title: string;
+  body_md: string;
+  acknowledgements: unknown;
+  is_current: boolean;
+  created_at: string;
+};
+
+function projectWaiverTemplate(row: WaiverTemplateRow): WaiverTemplateVersion {
+  return {
+    id: row.id,
+    version: row.version,
+    title: row.title,
+    body_md: row.body_md,
+    acknowledgements: parseTemplateAcks(row.acknowledgements),
+    is_current: row.is_current,
+    created_at: row.created_at,
+  };
+}
+
+/**
+ * Every stored version, newest first.
+ *
+ * Exported and taking its client as a parameter for the same reason
+ * `promoteWaiverTemplate` is: a `createServerFn` handler only runs inside a Start
+ * request context, and the manager agent API has to reach the same list the
+ * editor screen shows rather than growing a second query of its own.
+ */
+export async function listWaiverTemplateRows(
+  admin: SupabaseClient<Database>,
+): Promise<WaiverTemplateVersion[]> {
+  const { data, error } = await admin
+    .from("waiver_templates")
+    .select("id, version, title, body_md, acknowledgements, is_current, created_at")
+    .order("version", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(projectWaiverTemplate);
+}
+
+/**
+ * One stored version, or the live one when no version is named.
+ *
+ * "The live one" is the row flagged `is_current`, never the highest-numbered
+ * one. Those differ the moment a manager rolls back to earlier wording, and
+ * answering with the newest would have a caller read version 9, edit it, and
+ * publish it over the version 4 the club deliberately went back to.
+ */
+export async function loadWaiverTemplateVersion(
+  admin: SupabaseClient<Database>,
+  version?: number,
+): Promise<WaiverTemplateVersion | null> {
+  const query = admin
+    .from("waiver_templates")
+    .select("id, version, title, body_md, acknowledgements, is_current, created_at");
+  const { data, error } = await (
+    version === undefined ? query.eq("is_current", true) : query.eq("version", version)
+  ).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? projectWaiverTemplate(data) : null;
+}
+
 export const listWaiverTemplates = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
-      .from("waiver_templates")
-      .select("id, version, title, body_md, acknowledgements, is_current, created_at")
-      .order("version", { ascending: false });
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((t) => ({
-      id: t.id,
-      version: t.version,
-      title: t.title,
-      body_md: t.body_md,
-      acknowledgements: parseTemplateAcks(t.acknowledgements),
-      is_current: t.is_current,
-      created_at: t.created_at,
-    }));
+    return listWaiverTemplateRows(supabaseAdmin);
   });
 
 // ---- Manager: promote an existing version to the live one ----
@@ -1047,50 +1120,81 @@ export const setCurrentWaiverTemplate = createServerFn({ method: "POST" })
   });
 
 // ---- Manager: save new template version ----
+
+/**
+ * Write a new version of the waiver and make it the one people sign.
+ *
+ * That is the whole of "save" as the editor screen means it: there is no draft
+ * state, saving publishes, and waivers already signed keep the version they were
+ * signed against. Exported and client-parameterised like `promoteWaiverTemplate`
+ * so the manager agent API saves through exactly this path instead of a second
+ * one that could drift from it.
+ *
+ * `createdBy` is null for a caller that resolves to no auth user (the agent
+ * API's break-glass env key), because the column is a real FK to `auth.users`.
+ *
+ * The media-consent check runs BEFORE the insert. `promoteWaiverTemplate` would
+ * refuse the publish anyway, but only after the row existed, leaving a draft
+ * version nobody asked for sitting in the editor's version list. Refusing first
+ * means a rejected save changes nothing at all.
+ */
+export async function saveWaiverTemplateVersion(
+  admin: SupabaseClient<Database>,
+  input: SaveTemplateInput,
+  createdBy: string | null,
+): Promise<{ id: string; version: number }> {
+  if (!hasMediaAcknowledgement(input.acknowledgements)) {
+    throw new Error(
+      "This version has no media consent acknowledgement (or its wording is blank), so saving it would stop the club recording who agreed to photos. Add it back before saving.",
+    );
+  }
+
+  // A failed read here would number the new template 1 and collide with the
+  // existing version 1, so the manager's save would fail on a duplicate-key
+  // message that says nothing about what actually went wrong.
+  const { data: maxRow, error: maxErr } = await admin
+    .from("waiver_templates")
+    .select("version")
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (maxErr) throw new Error(maxErr.message);
+  const nextVersion = (maxRow?.version ?? 0) + 1;
+
+  // Write the new version as a draft, THEN promote it.
+  //
+  // The obvious order (clear `is_current`, then insert the row with
+  // `is_current = true`) leaves the club with no live waiver if the insert
+  // fails, and there is nothing to roll back to by then. This way a failed
+  // insert changes nothing at all, and a failed promotion leaves the previous
+  // version live with an unused draft behind it — a manager can retry, and
+  // nobody's signing page went down in the meantime.
+  const { data: created, error } = await admin
+    .from("waiver_templates")
+    .insert({
+      version: nextVersion,
+      title: input.title,
+      body_md: input.body_md,
+      acknowledgements: input.acknowledgements,
+      is_current: false,
+      created_by: createdBy,
+    })
+    .select("id, version")
+    .single();
+  if (error) throw new Error(error.message);
+
+  await promoteWaiverTemplate(admin, created.id);
+  return { id: created.id, version: created.version };
+}
+
 export const saveWaiverTemplate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => saveTemplateSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
-
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-    // A failed read here would number the new template 1 and collide with the
-    // existing version 1, so the manager's save would fail on a duplicate-key
-    // message that says nothing about what actually went wrong.
-    const { data: maxRow, error: maxErr } = await supabaseAdmin
-      .from("waiver_templates")
-      .select("version")
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (maxErr) throw new Error(maxErr.message);
-    const nextVersion = (maxRow?.version ?? 0) + 1;
-
-    // Write the new version as a draft, THEN promote it.
-    //
-    // The obvious order (clear `is_current`, then insert the row with
-    // `is_current = true`) leaves the club with no live waiver if the insert
-    // fails, and there is nothing to roll back to by then. This way a failed
-    // insert changes nothing at all, and a failed promotion leaves the previous
-    // version live with an unused draft behind it — a manager can retry, and
-    // nobody's signing page went down in the meantime.
-    const { data: created, error } = await supabaseAdmin
-      .from("waiver_templates")
-      .insert({
-        version: nextVersion,
-        title: data.title,
-        body_md: data.body_md,
-        acknowledgements: data.acknowledgements,
-        is_current: false,
-        created_by: context.userId,
-      })
-      .select("id, version")
-      .single();
-    if (error) throw new Error(error.message);
-
-    await promoteWaiverTemplate(supabaseAdmin, created.id);
-    return { ok: true as const, version: created.version };
+    const { version } = await saveWaiverTemplateVersion(supabaseAdmin, data, context.userId);
+    return { ok: true as const, version };
   });
 
 // ---- Manager: list waivers ----
