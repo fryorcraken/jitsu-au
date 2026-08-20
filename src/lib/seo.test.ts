@@ -16,6 +16,7 @@ import {
   canonicalUrl,
   isProductionHost,
 } from "./seo";
+import { PUBLIC_NOINDEX_PATHS } from "./public-pages";
 import { Route as RootRoute } from "@/routes/__root";
 import { Route as AboutRoute } from "@/routes/about";
 import {
@@ -500,6 +501,25 @@ describe("sitemap coverage of the route files", () => {
       expect(file, `no route file serves ${page.path}`).toBeDefined();
       expect(file!.source).toContain(`rel: "canonical", href: "${canonicalUrl(page.path)}"`);
     }
+  });
+
+  // PUBLIC_NOINDEX_PATHS is the one page list nothing can derive: a noindex
+  // page is deliberately absent from the sitemap, and the test above fails if
+  // it is added there. The end-to-end tour walks it, so a typo in it would
+  // otherwise mean a page silently going unopened and unphotographed.
+  it("keeps the hand-written noindex list honest", () => {
+    for (const path of PUBLIC_NOINDEX_PATHS) {
+      const file = routeFiles.find((r) => r.path === path);
+      expect(file, `no route file serves ${path}`).toBeDefined();
+      expect(
+        /name: "robots", content: "noindex"/.test(file!.source),
+        `${path} is listed as a noindex page but does not set robots: noindex`,
+      ).toBe(true);
+    }
+    const both = PUBLIC_PAGES.map((page) => page.path).filter((path) =>
+      PUBLIC_NOINDEX_PATHS.includes(path),
+    );
+    expect(both, "a page cannot be both indexable and noindex").toEqual([]);
   });
 
   // The root route's <link>s are appended to every page's, not replaced by

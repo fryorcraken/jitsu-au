@@ -10,6 +10,7 @@
 // `src/routes/sitemap[.]xml.ts`) are thin wrappers around the builders below,
 // so the rules stay unit-testable and free of any server import.
 
+import { PUBLIC_PAGES, type SitemapPage } from "./public-pages";
 import { GOOGLE_MAPS_URL, VENUE_NAME, VENUE_PHONE_E164 } from "./venue";
 import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
@@ -82,40 +83,8 @@ export const CLUB_SOCIAL_URLS = [
   "https://www.youtube.com/@sydneyjitsu",
 ] as const;
 
-export type ChangeFrequency = "daily" | "weekly" | "monthly" | "yearly";
-
-export type SitemapPage = {
-  /** Root-relative path, exactly as it appears in the page's canonical link. */
-  path: string;
-  changefreq: ChangeFrequency;
-  /** Relative importance within this site only (0.0 - 1.0). */
-  priority: number;
-};
-
-/**
- * Every publicly indexable page, in the order they should be crawled.
- *
- * A page belongs here when it sets a `rel="canonical"` and does NOT set
- * `robots: noindex`. `seo.test.ts` reads the route files and enforces exactly
- * that, so a new marketing page cannot quietly miss the sitemap.
- */
-export const PUBLIC_PAGES: SitemapPage[] = [
-  { path: "/", changefreq: "weekly", priority: 1.0 },
-  { path: "/classes", changefreq: "monthly", priority: 0.9 },
-  { path: "/first-class", changefreq: "monthly", priority: 0.9 },
-  { path: "/pricing", changefreq: "monthly", priority: 0.9 },
-  { path: "/register-interest", changefreq: "monthly", priority: 0.9 },
-  { path: "/about", changefreq: "monthly", priority: 0.7 },
-  { path: "/instructors", changefreq: "monthly", priority: 0.7 },
-  { path: "/faq", changefreq: "monthly", priority: 0.7 },
-  { path: "/blog", changefreq: "weekly", priority: 0.7 },
-  { path: "/calendar", changefreq: "daily", priority: 0.6 },
-  { path: "/contact", changefreq: "yearly", priority: 0.5 },
-  // Indexable on purpose. A club that publishes the rules it trains by is worth
-  // finding, and the page is readable by anyone: the signing form only appears
-  // for someone the site can already identify.
-  { path: "/code-of-conduct", changefreq: "yearly", priority: 0.4 },
-];
+export type { ChangeFrequency, SitemapPage } from "./public-pages";
+export { PUBLIC_PAGES } from "./public-pages";
 
 /**
  * Paths crawlers should not spend their budget on.
