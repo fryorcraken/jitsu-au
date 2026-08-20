@@ -508,10 +508,14 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     trade for a run that is identical on every branch and every fork.
   - Publishing goes through **GitHub Pages, sourced from GitHub Actions**. A
     Pages deployment replaces the whole site, so the galleries accumulate on the
-    `gh-pages` **store branch** and a second job deploys that whole tree —
-    deleting a pull request's directory therefore needs a redeploy to take
-    effect, which `pr-gallery-cleanup.yml` does. A fork's pull request cannot
-    push that branch, so its comment links the downloadable artifact instead.
+    `gh-pages` **store branch** and `pages-deploy.yml` deploys that whole tree.
+    That deploy is a **separate `workflow_run` workflow on purpose**: the
+    `github-pages` environment only accepts deployments from the default branch,
+    so a deploy job on a pull request's own branch is refused before it starts
+    (no runner, no log, just a red check). The cost is that `workflow_run` only
+    fires from `main`'s copy of the file, so **a change to the deploy cannot be
+    seen working until it is merged**. A fork's pull request cannot push the
+    store branch, so its comment links the downloadable artifact instead.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see "Schema drift" in `docs/database-changes.md`).
