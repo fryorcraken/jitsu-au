@@ -51,8 +51,29 @@ Two ways, and the first wins whenever both are present:
   the waiver, and at that moment the person is an **applicant**: their login is
   banned until a manager approves them, so they cannot sign in at all. The link
   therefore carries an unguessable token (`?t=`), which is how the page knows who
-  is signing. Opening it also proves their address, like every other emailed link
-  in the product.
+  is signing.
+
+> [!IMPORTANT]
+> **This token identifies a signer. It does NOT verify their email**, and it is
+> the one token in the product that does not — every other one is proof of the
+> mailbox it was sent to.
+>
+> The reason is the success screen above: `submitWaiverWithPdf` returns this
+> token **in its HTTP response** so the button works before any email arrives.
+> Waiver signing is public and unauthenticated, so anyone can post any address
+> and be handed a live token for it without reading a single email. A value we
+> give to whoever asked proves nothing about who reads that inbox.
+>
+> So the token is scoped: `mailboxProvingPurposes` in `src/lib/email-verification.ts`
+> excludes `code_of_conduct`, and the three paths that stamp
+> `auth.users.email_confirmed_at` — the public `/api/verify-email/<token>`
+> redemption, the waiver's own `?vt=` proof, and this page's acceptance — all ask
+> that question first. Signing the code of conduct therefore records the
+> agreement and nothing else.
+>
+> Nothing is lost: the waiver confirmation email carries its own "confirm your
+> email address" button, which only ever exists inside that email. See
+> `docs/waivers.md` > Email verification.
 
 A visitor with neither can still **read** the whole document. They are shown how
 to sign (open the link from the email, or sign in) and nothing about whether any

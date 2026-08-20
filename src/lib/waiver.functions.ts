@@ -130,8 +130,14 @@ async function proveSubmittedEmail(
   if (!raw) return false;
   try {
     const { lookupVerificationToken } = await import("@/lib/email-verification.server");
-    const { tokenProvesEmail } = await import("@/lib/email-verification");
-    const token = await lookupVerificationToken(admin, raw);
+    const { tokenProvesEmail, mailboxProvingPurposes } = await import("@/lib/email-verification");
+    // Only a token that reached an inbox can answer this. Notably that excludes
+    // the code-of-conduct token, which this very handler returns to the caller
+    // in its response — without this scope, one submission's response token was
+    // the next submission's proof of the same address.
+    const token = await lookupVerificationToken(admin, raw, {
+      purposes: mailboxProvingPurposes,
+    });
     return Boolean(token && tokenProvesEmail(token.email, submittedEmail));
   } catch (e) {
     console.error("[submitWaiverWithPdf] verification token lookup failed:", e);

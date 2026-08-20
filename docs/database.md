@@ -161,6 +161,25 @@ So the schema a helper lives in follows from who calls it:
 | `has_role`, `has_active_paid_membership`, the `user_emails` family | `public`  | the app calls them over PostgREST (`.rpc(...)`), so they have to stay routable |
 | `event_is_invite_only`, `is_event_invitee`, `is_commenter_blocked` | `private` | only an RLS policy ever calls them, so nothing needs them routable             |
 
+> [!IMPORTANT]
+> **Staying routable is not the same as answering anyone.** A function
+> `authenticated` may execute is reachable as `POST /rest/v1/rpc/<name>` with the
+> anon key and any session, so a `_user_id` parameter it does not check is an
+> oracle about other people. `has_role` and `has_active_paid_membership` both
+> had exactly that: given a uuid — and `blog_comments` publishes `user_id` beside
+> the commenter's name, while `calendar_events` publishes `created_by` — anyone
+> signed in could ask whether a named person was a manager or a paying member.
+>
+> `20260820000000_scope_role_helpers_to_caller.sql` closed it: each now answers
+> only when `_user_id = auth.uid()`, or when there is no `auth.uid()` at all
+> (the service role, which legitimately asks about anybody). RLS policies pass
+> `auth.uid()` and caller-scoped server functions pass their own `context.userId`,
+> so nothing legitimate changed. Both still return FALSE rather than NULL when
+> they refuse — see the RPC-nullability note in `CLAUDE.md`.
+>
+> A new `public` SECURITY DEFINER helper that takes a user id needs the same
+> guard, or it needs to live in `private`.
+
 PostgREST routes `/rest/v1/rpc/*` only to the schemas in its `db-schemas` list
 (`public, graphql_public`), so a function in `private` is unreachable from the
 API while RLS can still call it. `anon`/`authenticated` hold `USAGE` on the
@@ -601,6 +620,8 @@ person has an `active` membership whose plan `kind <> 'trial'` and whose
 PUBLIC/anon and granted to `authenticated` (it is evaluated inside RLS as the
 querying role) + `service_role`. It is acknowledged in
 `supabase/lint/advisors-allowlist.txt` for the same reason as `has_role`.
+Like `has_role`, it answers only about `auth.uid()` unless the caller is the
+service role — see the routable-is-not-answerable note under "Client grants".
 
 ### `calendar_series` — the repeat rule for an event
 

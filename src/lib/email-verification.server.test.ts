@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { redeemVerificationToken } from "./email-verification.server";
-import { verificationExpiry } from "./email-verification";
+import { lookupVerificationToken, redeemVerificationToken } from "./email-verification.server";
+import { mailboxProvingPurposes, verificationExpiry } from "./email-verification";
 
 type TokenRow = {
   id: string;
   user_id: string | null;
   email: string;
+  purpose: string;
   expires_at: string;
   revoked_at: string | null;
 };
@@ -17,6 +18,9 @@ function token(over: Partial<TokenRow> = {}): TokenRow {
     id: "tok-1",
     user_id: null,
     email: "ada@example.com",
+    // A mailbox-proving purpose: this is the "confirm your email address"
+    // button, which only ever exists inside an email we sent.
+    purpose: "waiver",
     expires_at: verificationExpiry(),
     revoked_at: null,
     ...over,
@@ -169,5 +173,89 @@ describe("redeemVerificationToken", () => {
     await redeemVerificationToken(admin, "utsj_raw");
     await redeemVerificationToken(admin, "utsj_raw");
     expect(confirmed).toEqual(["u1", "u1"]);
+  });
+
+  /**
+   * The bug this guards: `submitWaiverWithPdf` returns a live `code_of_conduct`
+   * token in its HTTP response, and waiver signing is public. Before the purpose
+   * check, posting a waiver with somebody else's address and then GETting
+   * /api/verify-email/<that token> stamped their address confirmed — no mailbox
+   * involved. A confirmed address is also what the manager-bootstrap trigger
+   * keys on, so this reached further than a wrong badge.
+   */
+  it("refuses to confirm from a code-of-conduct token, which is handed out in-band", async () => {
+    const { admin, confirmed } = fakeAdmin({
+      row: token({ user_id: "u1", purpose: "code_of_conduct" }),
+      users: { u1: { email: "ada@example.com" } },
+    });
+    await expect(redeemVerificationToken(admin, "utsj_raw")).resolves.toEqual({
+      result: "not_proof",
+      email: "ada@example.com",
+    });
+    expect(confirmed).toEqual([]);
+  });
+
+  it("fails closed on a purpose it does not recognise", async () => {
+    const { admin, confirmed } = fakeAdmin({
+      row: token({ user_id: "u1", purpose: "something_new" }),
+      users: { u1: { email: "ada@example.com" } },
+    });
+    await expect(redeemVerificationToken(admin, "utsj_raw")).resolves.toMatchObject({
+      result: "not_proof",
+    });
+    expect(confirmed).toEqual([]);
+  });
+
+  it.each(["interest", "waiver", "manager_resend", "self_resend", "email_change"])(
+    "still confirms from an emailed %s token",
+    async (purpose) => {
+      const { admin, confirmed } = fakeAdmin({
+        row: token({ user_id: "u1", purpose }),
+        users: { u1: { email: "ada@example.com" } },
+      });
+      await expect(redeemVerificationToken(admin, "utsj_raw")).resolves.toMatchObject({
+        result: "verified",
+      });
+      expect(confirmed).toEqual(["u1"]);
+    },
+  );
+});
+
+/**
+ * The scoping that keeps one flow's token out of another's hands. Both callers
+ * go through here, so this is the seam worth pinning rather than either handler.
+ */
+describe("lookupVerificationToken", () => {
+  it("returns the row when the purpose is one the caller accepts", async () => {
+    const { admin } = fakeAdmin({ row: token({ user_id: "u1", purpose: "waiver" }) });
+    await expect(
+      lookupVerificationToken(admin, "utsj_raw", { purposes: ["interest", "waiver"] }),
+    ).resolves.toMatchObject({ id: "tok-1", email: "ada@example.com", purpose: "waiver" });
+  });
+
+  it("returns null for a live token minted for a different flow", async () => {
+    // The waiver's `vt` proof asks for mailbox-proving purposes only. A
+    // code-of-conduct token is live and well-formed, but it was handed to the
+    // submitter in an HTTP response, so it must not answer this question.
+    const { admin } = fakeAdmin({ row: token({ user_id: "u1", purpose: "code_of_conduct" }) });
+    await expect(
+      lookupVerificationToken(admin, "utsj_raw", { purposes: mailboxProvingPurposes }),
+    ).resolves.toBeNull();
+  });
+
+  it("refuses an interest token offered to the code-of-conduct page", async () => {
+    const { admin } = fakeAdmin({ row: token({ user_id: "u1", purpose: "interest" }) });
+    await expect(
+      lookupVerificationToken(admin, "utsj_raw", { purposes: ["code_of_conduct"] }),
+    ).resolves.toBeNull();
+  });
+
+  it("still rejects an expired token whose purpose is accepted", async () => {
+    const { admin } = fakeAdmin({
+      row: token({ user_id: "u1", purpose: "waiver", expires_at: "2020-01-01T00:00:00.000Z" }),
+    });
+    await expect(
+      lookupVerificationToken(admin, "utsj_raw", { purposes: ["waiver"] }),
+    ).resolves.toBeNull();
   });
 });

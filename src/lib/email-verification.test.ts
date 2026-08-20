@@ -6,8 +6,11 @@ import {
   emailVerificationLabel,
   isEmailVerified,
   isVerificationTokenLive,
+  mailboxProvingPurposes,
+  purposeProvesMailbox,
   tokenProvesEmail,
   verificationExpiry,
+  verificationPurposes,
   verifyRedirectPath,
 } from "./email-verification";
 
@@ -130,5 +133,34 @@ describe("buildVerifyUrl", () => {
     });
     expect(url).toContain("next=%2Faccount");
     expect(url).not.toContain("evil.example");
+  });
+});
+
+describe("purposeProvesMailbox", () => {
+  it("accepts every purpose whose token only ever arrives by email", () => {
+    for (const purpose of ["interest", "waiver", "manager_resend", "self_resend", "email_change"]) {
+      expect(purposeProvesMailbox(purpose)).toBe(true);
+    }
+  });
+
+  it("rejects code_of_conduct, whose token is returned in a waiver's own response", () => {
+    // Not a badge quibble. `submitWaiverWithPdf` is public and hands this token
+    // to whoever posted the form, so treating it as mailbox proof let anyone
+    // confirm any address — and a confirmed address is what the club's
+    // manager-bootstrap trigger keys on.
+    expect(purposeProvesMailbox("code_of_conduct")).toBe(false);
+  });
+
+  it("fails closed on an unknown purpose", () => {
+    expect(purposeProvesMailbox("something_new")).toBe(false);
+    expect(purposeProvesMailbox("")).toBe(false);
+  });
+
+  it("keeps mailboxProvingPurposes a strict subset of the declared purposes", () => {
+    // Guards the filter: a new purpose added to `verificationPurposes` lands in
+    // the proving set by default, so anything that must not prove a mailbox has
+    // to be excluded deliberately, the way code_of_conduct is.
+    expect(mailboxProvingPurposes.every((p) => verificationPurposes.includes(p))).toBe(true);
+    expect(mailboxProvingPurposes).not.toContain("code_of_conduct");
   });
 });

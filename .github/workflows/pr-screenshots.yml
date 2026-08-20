@@ -18,10 +18,10 @@ name: PR screenshots
 # the calendar show the SEEDED content, not what is on jitsu.au today. That is
 # the trade for screenshots that are the same on every run and on every fork.
 #
-# The repository is private, so GitHub will not render images pulled from
-# `raw.githubusercontent.com` inside a comment (they need an authenticated
-# request). The screenshots therefore ship as a build artifact and the comment
-# links to it: download, unzip, open `index.html`.
+# The screenshots ship as a build artifact and the comment links to it, rather
+# than being embedded inline: an Actions artifact is a zip you download, not a
+# URL a comment can render an image from. So: download, unzip, open
+# `index.html`.
 
 on:
   pull_request:
