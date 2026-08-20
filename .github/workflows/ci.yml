@@ -26,6 +26,15 @@ jobs:
         with:
           bun-version: latest
 
+      # This repo is public and `.env` is tracked (Lovable Cloud generates it and
+      # re-commits it, so it cannot just be gitignored). That makes it the easiest
+      # file in the tree to leak a credential through, and nothing else here would
+      # notice. Checked before the install so a leak fails in seconds, and against
+      # what git has rather than the working copy — a local service-role key is
+      # fine, committing one is not. See CLAUDE.md > Environment variables.
+      - name: Check the committed .env holds only publishable values
+        run: bun scripts/check-committed-env.mjs
+
       # Lovable pins tarball URLs to its private mirror (unreachable in CI), so
       # a plain `bun install` 403s here. This helper rewrites the pinned base
       # URL to public npm and installs Lovable's exact locked versions, then

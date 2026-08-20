@@ -13,6 +13,31 @@ review submissions.
 The repo's package name is `tanstack_start_ts` — it was scaffolded from
 Lovable's TanStack Start template.
 
+## This repository is public — read first
+
+Everything you write here is world-readable: the code, the commit history, the
+issues and pull requests, the CI logs, and the screenshot artifacts. Work
+accordingly.
+
+- **Never commit a credential.** A pushed secret is public immediately and is
+  scraped within minutes, so the fix is always to **rotate** it, never to
+  revert the commit — git history keeps it forever. The file most likely to
+  catch you out is `.env`, which is tracked; see "Environment variables".
+- **Write commits, PR bodies and code comments for strangers.** No member names
+  or emails, no tokens, no internal hostnames, no pasted database rows. Real
+  people's data belongs in the database, never in the repo or a PR thread.
+- **RLS and table grants are the entire security boundary**, and now a public
+  one: anyone can read `supabase/migrations/*.sql`, reason precisely about
+  every policy, and probe it with the published `anon` key. Treat a weak policy
+  as a live vulnerability rather than a theoretical one, and see
+  `supabase/lint/client-grants-expected.txt` before granting anything to `anon`
+  or `authenticated`.
+- **Fixture data must stay synthetic** — `@example.com`, `0400 000 xxx`. It is
+  published in the seed script and photographed into screenshot artifacts.
+- CI holds one production credential (`SUPABASE_DB_URL`, used only by
+  `migration-drift.yml`). It is a GitHub secret and that workflow deliberately
+  never runs on `pull_request`; keep it that way. Forks get no secrets.
+
 ## Lovable-managed project — read first
 
 This project is connected to [Lovable](https://lovable.dev).
@@ -406,14 +431,16 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
 - **CI:** `.github/workflows/ci.yml` runs lint → typecheck → test → build on
   Linux with Bun for every PR and pushes to `main`. It installs via
   `bash scripts/bun-install.sh` (see Lock file strategy below), not a plain
-  `bun install`. `.github/workflows/e2e.yml` runs the end-to-end suite
+  `bun install`. Before the install it runs `scripts/check-committed-env.mjs`,
+  which fails if the committed `.env` holds anything but publishable values
+  (see "Environment variables"). `.github/workflows/e2e.yml` runs the end-to-end suite
   alongside it (no repository secrets, same local-stack recipe as the
   screenshots job).
 - **PR screenshots:** `.github/workflows/pr-screenshots.yml` photographs **every
   page** on the branch at desktop and phone widths, uploads the PNGs plus an
   `index.html` contact sheet as an artifact, and posts one sticky PR comment
-  linking to it. The repo is private, so images cannot be embedded in the
-  comment — reviewers download the artifact.
+  linking to it. An Actions artifact is a zip you download, not something a
+  comment can embed, so reviewers download it and open `index.html`.
   - It runs the whole site against a **throwaway local Supabase stack**:
     `supabase start` (Postgres + Auth + PostgREST + Storage) with every
     migration in `supabase/migrations` applied, then
@@ -606,8 +633,40 @@ Non-production hosts (Lovable previews, branch deploys) are served a blanket
 
 ## Environment variables
 
-Configured via Lovable Cloud (`.env` locally; values are secrets, not committed
-meaningfully). The app reads:
+Secrets are configured in **Lovable Cloud project secrets** and injected into
+the server runtime. They are never written to a file in this repo.
+
+> [!IMPORTANT]
+> **`.env` is committed, on purpose, and it points at the live club.** Both
+> halves of that matter, and they cut in opposite directions.
+>
+> **It is Lovable's file.** Every version was written by `gpt-engineer-app[bot]`
+> when Cloud was enabled, and Lovable re-creates it on the next Cloud sync. So
+> do **not** gitignore it or `git rm --cached` it: you get churn commits rather
+> than a removal, and a build that reads the file rather than injected vars
+> fails the "Connect Supabase in Lovable Cloud" check while it is missing. It
+> holds only publishable values — the `anon` key, the Lovable Cloud API URL, the
+> project ref, the Google OAuth **client id** — all of which are baked into the
+> browser bundle anyway and readable from `jitsu.au` with devtools.
+>
+> **Never add a secret to it.** The repo is public, so a committed credential is
+> public the moment it is pushed and has to be rotated, not just reverted.
+> Keeping a service-role key in your **own local** `.env` to run scripts is
+> fine and expected; committing one is not.
+> `scripts/check-committed-env.mjs` enforces this in CI — it audits what git
+> has (not your working copy) against an allowlist of key names and a deny-list
+> of value shapes. A **new key from Lovable fails it by design**: that is the
+> review gate. If the value really is publishable, add it to
+> `PUBLISHABLE_ENV_KEYS` in that script and say why in the commit message.
+>
+> **bun auto-loads `.env`**, so any `bun run …` here talks to the **live club**
+> unless something overrides it. That is why `e2e/support/fixture.ts` and
+> `scripts/seed-local-club.mjs` both refuse a non-loopback Supabase URL, and why
+> `scripts/e2e.sh` stamps the build with the project it was built against —
+> `VITE_SUPABASE_URL` is baked in at build time, so no runtime guard would catch
+> a production-flavoured build. Never point a seeding or e2e script at it.
+
+The app reads:
 
 - Client (Vite, build-time): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`,
   `VITE_SUPABASE_PROJECT_ID`.
