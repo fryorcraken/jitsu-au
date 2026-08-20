@@ -11,7 +11,11 @@ name: End-to-end tests
 # reviewer looks at — the flow as it was walked, not a set of pages photographed
 # cold by a second program. scripts/e2e-gallery.ts lays that out, and the
 # gallery is published to GitHub Pages under `pr-<n>/` so it opens in a browser
-# instead of being downloaded and unzipped.
+# instead of being downloaded and unzipped. Pages is served from GitHub Actions
+# here, which replaces the whole site on every deployment — so the galleries
+# accumulate on a store branch and the `publish-pages` job below deploys that
+# whole tree, rather than each pull request's deployment taking the previous
+# one's gallery down with it.
 #
 # Like the screenshot job, it runs the whole site against a THROWAWAY LOCAL
 # SUPABASE STACK: `supabase start` brings up Postgres, Auth, PostgREST and
@@ -145,10 +149,10 @@ jobs:
           path: gallery
           retention-days: 14
 
-      # One directory per pull request on the Pages branch, so two open pull
+      # One directory per pull request on the store branch, so two open pull
       # requests never overwrite each other. .github/workflows/pr-gallery-cleanup.yml
       # takes it down again when the pull request closes.
-      - name: Publish the gallery to GitHub Pages
+      - name: Add the gallery to the store branch
         if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         env:
@@ -219,3 +223,49 @@ jobs:
         run: |
           echo "::error title=End-to-end tests::A flow or a page failed. See the gallery comment on the pull request."
           exit 1
+
+  # Deploys whatever the store branch now holds — this pull request's gallery
+  # and every other open one's. Separate job because that is how the Pages
+  # actions work (upload here, deploy there), and because it checks the branch
+  # out FRESH: if another pull request's run pushed while this one was walking
+  # the site, this deployment carries their gallery too rather than replacing
+  # the site with a tree that predates it.
+  publish-pages:
+    name: Deploy the galleries
+    needs: e2e
+    # `always()`: a red suite still has a gallery worth looking at — the
+    # screenshot of the step that broke is the point of it.
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    # Pages allows one deployment at a time and this is the only thing that
+    # deploys, so runs queue here rather than cancelling each other: a cancelled
+    # deployment would leave the site without the gallery that was just pushed.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+        # A first-ever run has nothing to deploy: the store branch only exists
+        # once a gallery has been pushed to it.
+        continue-on-error: true
+        id: checkout
+
+      - name: Upload the site
+        if: steps.checkout.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        if: steps.checkout.outcome == 'success'
+        uses: actions/deploy-pages@v4

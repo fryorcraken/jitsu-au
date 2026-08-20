@@ -211,13 +211,19 @@ down when the pull request closes.
 
 Three things about that publish are worth knowing:
 
-- It needs **Pages served from the `gh-pages` branch** (Settings → Pages → Deploy
-  from a branch). Nothing else has to be configured, and no secret is involved:
-  the workflow's own `GITHUB_TOKEN` writes the branch.
-- The branch is rewritten as a **single orphan commit** every time. Screenshots
-  are large and a normal history would keep every version of every picture
-  forever. Two runs racing is handled by `--force-with-lease`: the loser retries
-  rather than overwriting the other's pictures.
+- **Pages is served from GitHub Actions**, which deploys one artifact per
+  deployment and replaces the whole site each time. So the galleries accumulate
+  on a **store branch** (`gh-pages`), and a second job checks that branch out
+  fresh and deploys the whole tree — otherwise this pull request's deployment
+  would take every other open one's gallery down with it. The deploy job checks
+  out fresh rather than reusing what the suite pushed, so a run that finished
+  while this one was walking the site is carried along rather than reverted.
+  No secret is involved: the workflow's own `GITHUB_TOKEN` writes the branch,
+  and the Pages deployment uses the repository's OIDC token.
+- The store branch is rewritten as a **single orphan commit** every time.
+  Screenshots are large and a normal history would keep every version of every
+  picture forever. Two runs racing is handled by `--force-with-lease`: the loser
+  retries rather than overwriting the other's pictures.
 - A **fork's** pull request cannot write that branch, so its comment links the
   downloadable artifact instead. Nothing fails.
 

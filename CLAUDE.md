@@ -506,9 +506,12 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   - The gallery shows **seeded fixture content**: `/blog`, `/pricing` and the
     calendar are the local club, not what is on `jitsu.au` today. That is the
     trade for a run that is identical on every branch and every fork.
-  - Publishing needs **GitHub Pages served from the `gh-pages` branch**
-    (Settings → Pages → Deploy from a branch). A fork's pull request cannot push
-    that branch, so its comment links the downloadable artifact instead.
+  - Publishing goes through **GitHub Pages, sourced from GitHub Actions**. A
+    Pages deployment replaces the whole site, so the galleries accumulate on the
+    `gh-pages` **store branch** and a second job deploys that whole tree —
+    deleting a pull request's directory therefore needs a redeploy to take
+    effect, which `pr-gallery-cleanup.yml` does. A fork's pull request cannot
+    push that branch, so its comment links the downloadable artifact instead.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see "Schema drift" in `docs/database-changes.md`).
