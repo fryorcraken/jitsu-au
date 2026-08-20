@@ -42,10 +42,21 @@ requests, the CI logs, and the screenshot artifacts.
   since the repo began has logged `SUPABASE_DB_URL:` empty and
   `##[warning]SUPABASE_DB_URL is not set — the ... check did NOT run`, while
   still reporting green. So nothing is currently at risk of leaking there, and
-  equally **neither live check has ever run**: no migration-ledger comparison
-  and no live client-grants comparison. Treat `supabase/lint/client-grants-expected.txt`
-  as a statement of intent verified against the migration files only, never
-  against the live database, until that secret is set.
+  equally **the workflow has never checked anything**. Until that secret is set,
+  a green tick on Migration drift means only that the job ran.
+  - Both checks were run **by hand on 2026-08-20**, against the live database
+    through Lovable's SQL access rather than the workflow, and both came back
+    clean: **18 client grants live, 18 expected, 0 unexpected**, and every
+    migration in the repo present in the live ledger. So
+    `supabase/lint/client-grants-expected.txt` is, as of that date, verified
+    against production and not just against the migration files. It goes stale
+    the moment anyone changes a grant by hand, which is exactly what the
+    workflow is for — the by-hand run is a snapshot, not a substitute.
+  - The live ledger also carries one row with no file here
+    (`20260722131544_3de60949-…`, recorded as version `20260722131547`). Its SQL
+    is byte-identical to `20260722000000_memberships.sql`, so it is the
+    duplicate-re-emission case described in `docs/database-changes.md`, not
+    missing schema.
 
 ## Lovable-managed project — read first
 
