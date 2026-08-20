@@ -18,6 +18,9 @@ import {
   deleteInvoiceSchema,
   markInvoicePaidSchema,
   editInvoiceSchema,
+  agentGetWaiverTemplateSchema,
+  agentPublishWaiverTemplateSchema,
+  agentSaveWaiverTemplateSchema,
   deleteKbSectionSchema,
   getKbArticleSchema,
   listAgentInvoicesSchema,
@@ -35,6 +38,7 @@ import type { ManagerAgentAction } from "@/lib/validation";
 import {
   AGENT_ENV_KEY_UPLOADER,
   AGENT_MANIFEST,
+  actorUserId,
   AgentError,
   bearerToken,
   buildInvoicePatch,
@@ -42,6 +46,7 @@ import {
   diffInvoicePatch,
   invoiceEditAudit,
   projectAgentKbArticle,
+  projectAgentWaiverTemplate,
   projectInvoice,
   reconciledEditBlockers,
   reconciledEditMessage,
@@ -72,7 +77,14 @@ import {
   saveKbSection,
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
-import { filePaperWaiver } from "@/lib/waiver.functions";
+import { WaiverTemplateError } from "@/lib/waiver-template-editor";
+import {
+  filePaperWaiver,
+  listWaiverTemplateRows,
+  loadWaiverTemplateVersion,
+  promoteWaiverTemplate,
+  saveWaiverTemplateVersion,
+} from "@/lib/waiver.functions";
 import {
   createMembershipForUser,
   deleteMembershipRow,
@@ -781,6 +793,153 @@ async function handleSaveMembershipPlan(params: unknown) {
   }
 }
 
+// ---- action: list_waiver_templates ----
+async function handleListWaiverTemplates() {
+  const db = await adminClient();
+  const templates = await listWaiverTemplateRows(db);
+  const live = templates.find((t) => t.is_current)?.version ?? null;
+  return {
+    count: templates.length,
+    // Null here is not a tidy empty state: it means nobody can sign right now,
+    // and it is the first thing a caller should look at.
+    live_version: live,
+    templates: templates.map((t) => projectAgentWaiverTemplate(t, live)),
+  };
+}
+
+/**
+ * How long to wait before repeating a template call that could not publish.
+ * Short: the likeliest cause is another manager promoting at the same moment,
+ * and until one of them lands the club may have no live waiver at all.
+ */
+const TEMPLATE_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * Turn a refused template change into the right status code.
+ *
+ * The distinction that matters is retryable vs not. SKILL.md tells agents that a
+ * 4xx means the request itself has to change, so reporting "nobody can sign
+ * right now, try again" as a 422 is how `/waiver` stays down: the agent stops.
+ * `not_published` is therefore a 503 with a Retry-After, and it carries the
+ * version when one was written — repeating the save would file a second draft,
+ * where publishing that version finishes the job.
+ */
+function templateFailure(e: unknown, refusedCode: string): AgentError {
+  if (e instanceof WaiverTemplateError) {
+    if (e.reason === "not_found") return new AgentError(404, "not_found", e.message);
+    if (e.reason === "invalid") return new AgentError(422, refusedCode, e.message);
+    return new AgentError(
+      503,
+      "waiver_template_not_published",
+      e.message,
+      e.version === undefined ? undefined : { version: e.version, published: false },
+      TEMPLATE_RETRY_AFTER_SECONDS,
+    );
+  }
+  return new AgentError(500, "db_error", e instanceof Error ? e.message : "Could not reach it.");
+}
+
+/** The "there is nothing live" outage, in words a manager can act on. */
+const NO_LIVE_TEMPLATE =
+  "There is no live waiver template, so nobody can sign. Make one live with publish_waiver_template.";
+
+// ---- action: get_waiver_template ----
+async function handleGetWaiverTemplate(params: unknown) {
+  const input = agentGetWaiverTemplateSchema.parse(params);
+  const db = await adminClient();
+  const template = await loadWaiverTemplateVersion(db, input.version);
+  if (!template) {
+    throw new AgentError(
+      404,
+      "not_found",
+      input.version === undefined ? NO_LIVE_TEMPLATE : `No waiver version ${input.version}.`,
+    );
+  }
+  return {
+    template: {
+      version: template.version,
+      title: template.title,
+      body_md: template.body_md,
+      acknowledgements: template.acknowledgements,
+      is_current: template.is_current,
+      created_at: template.created_at,
+    },
+  };
+}
+
+// ---- action: save_waiver_template ----
+async function handleSaveWaiverTemplate(params: unknown, actingAs: string) {
+  const input = agentSaveWaiverTemplateSchema.parse(params);
+  const db = await adminClient();
+
+  // The base is read only when it is actually needed: a caller that sends the
+  // title, the body AND the acknowledgements has described a whole version, and
+  // refusing that for want of a live one to copy from would leave a club with no
+  // live template unable to publish its way out through this API.
+  const needsBase =
+    input.title === undefined ||
+    input.body_md === undefined ||
+    input.acknowledgements === undefined;
+  let base: Awaited<ReturnType<typeof loadWaiverTemplateVersion>> = null;
+  if (needsBase || input.base_version !== undefined) {
+    base = await loadWaiverTemplateVersion(db, input.base_version);
+    if (!base) {
+      throw new AgentError(
+        404,
+        "not_found",
+        input.base_version === undefined
+          ? `${NO_LIVE_TEMPLATE} To write one from scratch instead, send title, body_md and acknowledgements together.`
+          : `No waiver version ${input.base_version}.`,
+      );
+    }
+  }
+
+  try {
+    const saved = await saveWaiverTemplateVersion(
+      db,
+      {
+        title: input.title ?? base!.title,
+        body_md: input.body_md ?? base!.body_md,
+        acknowledgements: input.acknowledgements ?? base!.acknowledgements,
+      },
+      actorUserId(actingAs),
+    );
+    // `based_on` is what makes a carry-over auditable: it names the version the
+    // fields this call did not send actually came from.
+    return {
+      version: saved.version,
+      based_on: base?.version ?? null,
+      is_current: true as const,
+      url: "/waiver",
+    };
+  } catch (e) {
+    // The wording comes from `saveWaiverTemplateVersion`, which speaks to
+    // managers; what is added here is the status code, and it is not one code.
+    // A version that was written but could not be made live is a retry, not a
+    // bad request — see `templateFailure`.
+    throw templateFailure(e, "save_waiver_template_failed");
+  }
+}
+
+// ---- action: publish_waiver_template ----
+async function handlePublishWaiverTemplate(params: unknown) {
+  const input = agentPublishWaiverTemplateSchema.parse(params);
+  const db = await adminClient();
+  const target = await loadWaiverTemplateVersion(db, input.version);
+  if (!target) throw new AgentError(404, "not_found", `No waiver version ${input.version}.`);
+  // Read before promoting so the reply can say whether this call changed
+  // anything: `promoteWaiverTemplate` is idempotent and returns the same success
+  // either way, and a retry reporting "published" for a no-op reads as a second
+  // change to the club's legal document.
+  if (target.is_current) return { version: target.version, published: false as const };
+  try {
+    const { version } = await promoteWaiverTemplate(db, target.id);
+    return { version, published: true as const };
+  } catch (e) {
+    throw templateFailure(e, "publish_waiver_template_failed");
+  }
+}
+
 /**
  * Cap on articles returned by `list_kb_articles`. Generous: a club with more
  * pages than this has outgrown a flat list, and the handler warns rather than
@@ -988,6 +1147,14 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleDeleteInvoice(params, actingAs);
     case "file_waiver":
       return handleFileWaiver(params, actingAs);
+    case "list_waiver_templates":
+      return handleListWaiverTemplates();
+    case "get_waiver_template":
+      return handleGetWaiverTemplate(params);
+    case "save_waiver_template":
+      return handleSaveWaiverTemplate(params, actingAs);
+    case "publish_waiver_template":
+      return handlePublishWaiverTemplate(params);
     case "list_membership_plans":
       return handleListMembershipPlans();
     case "save_membership_plan":

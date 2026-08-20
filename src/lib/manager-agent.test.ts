@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_ENV_KEY_UPLOADER,
   AGENT_MANIFEST,
+  actorUserId,
   AgentError,
   bearerToken,
   buildInvoicePatch,
@@ -10,6 +11,7 @@ import {
   INVOICE_EDITABLE_FIELDS,
   invoiceEditAudit,
   projectAgentKbArticle,
+  projectAgentWaiverTemplate,
   projectInvoice,
   RECONCILED_GUARDED_FIELDS,
   reconciledEditBlockers,
@@ -452,7 +454,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("10");
+    expect(AGENT_MANIFEST.version).toBe("11");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -621,5 +623,73 @@ describe("projectAgentKbArticle", () => {
     expect(
       projectAgentKbArticle({ ...article, section_id: null }, live, null, 1).section,
     ).toBeNull();
+  });
+});
+
+describe("projectAgentWaiverTemplate", () => {
+  const version = {
+    version: 4,
+    title: "Training Waiver",
+    body_md: "# Waiver\n\nSigned by {{full_name}}.",
+    acknowledgements: [
+      { id: "media", label: "I consent to being photographed.", required: false },
+      { id: "risk", label: "I accept the risks.", required: true },
+    ],
+    is_current: true,
+    created_at: "2026-08-01T00:00:00Z",
+  };
+
+  // The list is what a caller reads before deciding what to edit, and a club
+  // with a dozen versions of a 30000-character legal document would otherwise
+  // be sending a third of a megabyte to answer "which one is live".
+  it("leaves the body out but says how long it is", () => {
+    const row = projectAgentWaiverTemplate(version, 4);
+    expect(row).not.toHaveProperty("body_md");
+    expect(row.body_chars).toBe(version.body_md.length);
+    expect(row.acknowledgement_count).toBe(2);
+    // Not `acknowledgements`: that name holds the real list on
+    // get_waiver_template, and a caller iterating a 2 is the bug this prevents.
+    expect(row).not.toHaveProperty("acknowledgements");
+  });
+
+  // Same word the manager reads off the editor screen for the same row: an
+  // agent reporting "draft" for what the screen calls "previous" would have a
+  // manager approve a rollback to wording they think was never published.
+  it("labels a version the way the editor screen labels it", () => {
+    expect(projectAgentWaiverTemplate(version, 4).status).toBe("Live");
+    expect(
+      projectAgentWaiverTemplate({ ...version, version: 2, is_current: false }, 4).status,
+    ).toBe("Previous");
+    expect(
+      projectAgentWaiverTemplate({ ...version, version: 7, is_current: false }, 4).status,
+    ).toBe("Draft");
+  });
+
+  it("carries the version number and the live flag a caller branches on", () => {
+    expect(projectAgentWaiverTemplate({ ...version, is_current: false }, 9)).toMatchObject({
+      version: 4,
+      is_current: false,
+      title: "Training Waiver",
+      created_at: "2026-08-01T00:00:00Z",
+    });
+  });
+});
+
+describe("actorUserId", () => {
+  // Every column this feeds `references auth.users`, so the sentinel the
+  // break-glass env key authenticates as must never reach one: the insert would
+  // fail outright, taking a waiver filing or a published article with it.
+  it("refuses the break-glass sentinel, which is no auth user", () => {
+    expect(actorUserId(AGENT_ENV_KEY_UPLOADER)).toBeNull();
+  });
+
+  it("records a real manager", () => {
+    const id = "63ab09b5-20e4-451a-ad8e-08caa0c299a2";
+    expect(actorUserId(id)).toBe(id);
+  });
+
+  it("treats no actor at all as no author", () => {
+    expect(actorUserId(null)).toBeNull();
+    expect(actorUserId("")).toBeNull();
   });
 });

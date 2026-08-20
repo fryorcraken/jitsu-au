@@ -587,6 +587,7 @@ export const saveTemplateSchema = z.object({
   body_md: z.string().trim().min(1).max(30000),
   acknowledgements: templateAcknowledgementsSchema.default([]),
 });
+export type SaveTemplateInput = z.infer<typeof saveTemplateSchema>;
 
 // ---- Manager: promote an existing template version to the live one ----
 //
@@ -598,6 +599,77 @@ export const setCurrentTemplateSchema = z.object({
   id: z.string().uuid(),
 });
 export type SetCurrentTemplateInput = z.infer<typeof setCurrentTemplateSchema>;
+
+// ---- Manager agent API: the same three template actions, keyed by version ----
+//
+// The editor screen keys on the row id because it is holding the row it just
+// listed. An agent is not: it reads a list, decides, and calls back later, so it
+// keys on the VERSION NUMBER — unique on the table, stable, and the same number
+// a manager reads off the screen and off a signed PDF. That is the only
+// difference between these and the two schemas above; every rule about what a
+// version may contain is shared.
+//
+// All three are `.strict()`, like `paperWaiverUploadSchema` and
+// `editInvoiceSchema`: a misspelled `base_version` that Zod quietly stripped
+// would publish an edit against the wrong wording and report success.
+
+/** Read one stored version, or the live one when no version is named. */
+export const agentGetWaiverTemplateSchema = z
+  .object({ version: z.number().int().positive().optional() })
+  .strict();
+export type AgentGetWaiverTemplateInput = z.infer<typeof agentGetWaiverTemplateSchema>;
+
+/**
+ * Write a new version of the waiver and publish it.
+ *
+ * Every field is optional because an omitted one is CARRIED OVER from the
+ * version the edit starts from (the live one, unless `base_version` names
+ * another). That is what the screen does: a manager opens a version, changes one
+ * clause or reworders one acknowledgement, and saves. Without the carry-over,
+ * changing an acknowledgement would mean resending the whole legal text, and the
+ * likeliest outcome of that is a body retyped from memory.
+ *
+ * Two refusals, both about not writing a version nobody meant:
+ *
+ *   * `title` and `body_md` travel together, as in `saveKbArticleSchema` — a
+ *     version is written as a whole, and a body under last version's heading is
+ *     nobody's intent.
+ *   * A call naming no text and no acknowledgements is refused rather than
+ *     publishing a byte-identical copy of the live version under a new number.
+ */
+export const agentSaveWaiverTemplateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    body_md: z.string().trim().min(1).max(30000).optional(),
+    acknowledgements: templateAcknowledgementsSchema.optional(),
+    /** Which stored version this edit starts from. Defaults to the live one. */
+    base_version: z.number().int().positive().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (Boolean(value.title) !== Boolean(value.body_md)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [value.title ? "body_md" : "title"],
+        message: "Saving new text needs both title and body_md: a version is written as a whole.",
+      });
+    }
+    if (!value.title && !value.body_md && !value.acknowledgements) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["body_md"],
+        message:
+          "Nothing to save: send title and body_md, acknowledgements, or both. To make an existing version live again, use publish_waiver_template.",
+      });
+    }
+  });
+export type AgentSaveWaiverTemplateInput = z.infer<typeof agentSaveWaiverTemplateSchema>;
+
+/** Make an existing stored version the live one. */
+export const agentPublishWaiverTemplateSchema = z
+  .object({ version: z.number().int().positive() })
+  .strict();
+export type AgentPublishWaiverTemplateInput = z.infer<typeof agentPublishWaiverTemplateSchema>;
 
 // ---- Manager: approve / unapprove a signed waiver ----
 
@@ -2009,6 +2081,10 @@ export const managerAgentActions = [
   "mark_invoice_paid",
   "delete_invoice",
   "file_waiver",
+  "list_waiver_templates",
+  "get_waiver_template",
+  "save_waiver_template",
+  "publish_waiver_template",
   "list_membership_plans",
   "save_membership_plan",
   "list_kb_sections",

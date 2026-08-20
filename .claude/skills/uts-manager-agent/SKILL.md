@@ -3,13 +3,16 @@ name: uts-manager-agent
 description: >-
   Perform UTS Jitsu manager actions (list members and their status, raise a
   membership for someone, cancel or delete an invoice, edit an invoice's
-  details, file a scanned paper waiver, manage the club's membership dates,
-  publish and reorder the club's knowledge base and read members' comments on
-  it) against the live site via its manager agent HTTP API. Use when a club
+  details, file a scanned paper waiver, edit and publish the waiver template
+  people sign, manage the club's membership dates, publish and reorder the
+  club's knowledge base and read members' comments on it) against the live site
+  via its manager agent HTTP API. Use when a club
   manager asks an agent to look up members/invoices, put a member on a plan or
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), migrate/bulk-file waivers
-  the club holds on paper, add or edit a membership window's start/end dates, or edit a
+  the club holds on paper, reword the waiver or its tick-boxes and publish a new
+  version of it (or roll back to an earlier one), add or edit a membership
+  window's start/end dates, or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them. Requires the UTS_MANAGER_API_URL and
   UTS_MANAGER_API_KEY environment variables.
@@ -442,6 +445,93 @@ scripts/agent.sh file_waiver '{
 >   reach for `confirm_duplicate` to get past it: that disables the check rather
 >   than fixing it, and would let a genuine duplicate through.
 
+### The waiver everyone signs
+
+The document at `/waiver` is **versioned**, and each signed waiver names the
+version it was signed against — that link is the club's legal record, which is
+why old versions are kept forever and why editing never touches them. Exactly
+one version is **live** at a time.
+
+There is **no draft state**: saving publishes. That is true on the manager screen
+too, and it is the thing to say out loud before you call it.
+
+### `list_waiver_templates` — every version, and which is live
+
+Bodies are not included; `body_chars` and `acknowledgement_count` are, so you
+can tell versions apart without pulling the text of each. (`get_waiver_template`
+is where `acknowledgements` holds the real list.)
+
+```bash
+scripts/agent.sh list_waiver_templates '{}'
+```
+
+### `get_waiver_template` — read one version's text
+
+The live version unless you pass `version`.
+
+```bash
+scripts/agent.sh get_waiver_template '{}'
+```
+
+The body is markdown carrying `{{placeholder}}` tokens (`full_name`,
+`date_of_birth`, `signature_name`, `club_name`, the health questions, ...) that
+are filled in per signer. Leave every token you are not deliberately changing
+exactly as it is: a dropped `{{signature_name}}` is a waiver with no signature
+line on it.
+
+### `save_waiver_template` — publish new wording
+
+Writes a **new version** and makes it the one everyone signs from that moment.
+Anything you omit is carried over from the version the edit starts from (the live
+one, unless `base_version` names another), so an acknowledgement can be reworded
+without resending the legal text:
+
+```bash
+scripts/agent.sh save_waiver_template '{
+  "acknowledgements": [
+    {"id":"media","label":"I consent to photos and video of me training being used by the club.","required":false},
+    {"id":"risk","label":"I understand jiu-jitsu carries a risk of injury.","required":true}
+  ]
+}'
+```
+
+Rewriting the text itself needs `title` and `body_md` together — a version is
+written as a whole:
+
+```bash
+scripts/agent.sh save_waiver_template '{"title":"Training Waiver","body_md":"# Training Waiver\n\n..."}'
+```
+
+> [!IMPORTANT]
+>
+> - **Read `get_waiver_template` first and edit what it gives you back.** The
+>   body is replaced wholesale, so a version built without reading first drops
+>   every clause it did not include — from a legal document.
+> - **`acknowledgements` replaces the whole list**, so send it complete. It must
+>   still carry the `media` item with real wording: that tick is what records who
+>   agreed to photos, so a version without it silently ends the club's consent
+>   record and is refused (`422 save_waiver_template_failed`).
+> - **Show the manager the exact wording before you save**, and say that it goes
+>   live immediately for everyone who signs after it. People who already signed
+>   are unaffected.
+> - **`503 waiver_template_not_published` is not a refusal.** The change did not
+>   reach the live waiver, usually because another manager was promoting at the
+>   same moment, and the club may have no live waiver until somebody lands one.
+>   Obey the `Retry-After` header. If `error.details.version` is there, that
+>   version WAS written and is simply not live: finish with
+>   `publish_waiver_template` on it rather than saving again, which would file a
+>   second numbered draft of the same wording.
+
+### `publish_waiver_template` — roll back to an earlier version
+
+Makes a stored version live again. Nothing is rewritten and no new version is
+created; on the version that is already live it does nothing and reports
+`published: false`.
+
+```bash
+scripts/agent.sh publish_waiver_template '{"version": 4}'
+```
+
 ### The knowledge base
 
 Versioned markdown pages served at `/kb/<slug>` that members read and comment on,
@@ -583,6 +673,11 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   before writing it. An article with no `section` lands in "Everything else" at
   the bottom of the sidebar, which is visible but almost certainly not what they
   meant.
+- Never save a waiver version the manager has not read. Fetch
+  `get_waiver_template`, show them the exact wording you propose, and say plainly
+  that saving publishes it to everyone who signs from that moment. It is the
+  club's legal document, and rolling back (`publish_waiver_template`) restores
+  old wording but cannot unsign anybody.
 - Before a `file_waiver` batch, confirm scope with the manager: how many
   records, whether any should be flagged for review rather than filed
   automatically, and that leaving everything pending (not approved) is what
@@ -603,7 +698,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"10"`), and its
+- The manifest's `version` tells generations apart (currently `"11"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

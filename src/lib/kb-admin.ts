@@ -16,6 +16,7 @@ import type {
   KbSectionRow,
 } from "@/lib/kb-types";
 import type { SaveKbArticleInput, SaveKbSectionInput } from "@/lib/validation";
+import { actorUserId } from "@/lib/manager-agent";
 
 /** An article together with the version being read. */
 export type LoadedArticle = {
@@ -233,7 +234,7 @@ export async function saveKbArticle(
   input: SaveKbArticleInput,
   actingAs: string | null,
 ): Promise<{ slug: string; version: number | null; article_id: string; created: boolean }> {
-  const createdBy = actingAs && isUuid(actingAs) ? actingAs : null;
+  const createdBy = actorUserId(actingAs);
   const sectionId = await resolveSectionId(db, input.section);
 
   const { data: existing, error: findErr } = await db
@@ -550,15 +551,4 @@ export function projectAnnotation(row: KbAnnotationRow, authorName: string | nul
     resolved_at: row.resolved_at,
     created_at: row.created_at,
   };
-}
-
-/**
- * Whether a string is a UUID, used to decide if an actor can be recorded as
- * `created_by`. The manager agent's break-glass env key authenticates as
- * `AGENT_ENV_KEY_UPLOADER`, which is deliberately not a UUID and has no auth
- * user behind it — writing it into a `references auth.users` column would fail
- * the insert outright. `filePaperWaiver` makes the same check for the same reason.
- */
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
