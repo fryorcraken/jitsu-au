@@ -64,8 +64,6 @@ export type CodeOfConductSigner = {
   email: string;
   /** True when a session identified them (rather than an emailed token). */
   signedIn: boolean;
-  /** True when an emailed token identified them, so the click proves the address. */
-  fromToken: boolean;
 };
 
 /**
@@ -86,7 +84,6 @@ async function resolveSigner(
   let userId: string | null = null;
   let email: string | null = null;
   let signedIn = false;
-  let fromToken = false;
 
   if (bearer) {
     try {
@@ -105,7 +102,11 @@ async function resolveSigner(
   if (!userId && raw) {
     const { lookupVerificationToken } = await import("@/lib/email-verification.server");
     const { tokenProvesEmail } = await import("@/lib/email-verification");
-    const found = await lookupVerificationToken(admin, raw);
+    // The only token this page is ever linked with. Scoped so an interest or
+    // waiver token cannot be spent here either.
+    const found = await lookupVerificationToken(admin, raw, {
+      purposes: ["code_of_conduct"],
+    });
     if (found) {
       // A lead's token carries no user id, so re-resolve the address. Signing
       // the code of conduct never CREATES a person: someone whose address the
@@ -124,7 +125,6 @@ async function resolveSigner(
         if (got?.user?.email && tokenProvesEmail(found.email, got.user.email)) {
           userId = tokenUserId;
           email = got.user.email;
-          fromToken = true;
           // Best-effort, like every other redemption stamp on this table: a
           // PostgrestBuilder is a lazy thenable, so the .then() is what issues
           // the request and a failure here must not block signing.
@@ -160,7 +160,6 @@ async function resolveSigner(
     greetingName: greetingName(profile) || email,
     email,
     signedIn,
-    fromToken,
   };
 }
 
@@ -296,17 +295,13 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
 
-    // Arriving from the emailed link is itself proof the address is real, so
-    // record it. Best-effort: the agreement is already saved, and a hiccup in a
-    // side benefit must not surface as a failed signature.
-    if (signer.fromToken) {
-      const { error: confirmErr } = await admin.auth.admin.updateUserById(signer.userId, {
-        email_confirm: true,
-      });
-      if (confirmErr) {
-        console.error("[acceptCodeOfConduct] could not record email verification:", confirmErr);
-      }
-    }
+    // Signing does NOT confirm the email address, even though arriving here from
+    // a link looks like proof. The code-of-conduct token is handed back by
+    // `submitWaiverWithPdf` in its HTTP response so the button works straight
+    // after signing a waiver, and waiver signing is public — so anyone could
+    // mint one for any address and spend it here. See `mailboxProvingPurposes`.
+    // The waiver confirmation email carries its own "confirm your email address"
+    // button, which only ever exists inside that email, and that one does.
 
     return { ok: true as const, accepted_at };
   });

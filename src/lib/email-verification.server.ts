@@ -18,6 +18,7 @@ import { normalizeEmail } from "@/lib/validation";
 import {
   buildVerifyUrl,
   isVerificationTokenLive,
+  purposeProvesMailbox,
   tokenProvesEmail,
   verificationExpiry,
   type VerificationPurpose,
@@ -88,15 +89,23 @@ export async function revokeVerificationTokensForEmail(
  * ask "was this address proven?" WITHOUT confirming anything yet: at that point
  * the person may not exist, and the answer decides whether they are created
  * confirmed. Returns null for anything expired, revoked, or unknown.
+ *
+ * **Always pass `purposes`.** A token is a capability, and until this argument
+ * existed the lookup matched on hash alone — so a token minted for one flow
+ * authenticated a completely different one. The code-of-conduct token, which
+ * `submitWaiverWithPdf` hands back in its HTTP response, was therefore a valid
+ * `vt` for the next waiver submission. Naming the purposes a call site accepts
+ * keeps each flow to the tokens it actually issues.
  */
 export async function lookupVerificationToken(
   admin: AdminClient,
   rawToken: string,
-): Promise<{ id: string; user_id: string | null; email: string } | null> {
+  opts: { purposes: readonly VerificationPurpose[] },
+): Promise<{ id: string; user_id: string | null; email: string; purpose: string } | null> {
   const token_hash = await hashToken(rawToken);
   const { data: row, error } = await admin
     .from("email_verification_tokens")
-    .select("id, user_id, email, expires_at, revoked_at")
+    .select("id, user_id, email, purpose, expires_at, revoked_at")
     .eq("token_hash", token_hash)
     .is("revoked_at", null)
     .maybeSingle();
@@ -105,7 +114,9 @@ export async function lookupVerificationToken(
   // present as "nobody is arriving from their email any more".
   if (error) console.error("[email-verification] token lookup failed:", error);
   if (!row || !isVerificationTokenLive(row)) return null;
-  return { id: row.id, user_id: row.user_id, email: row.email };
+  // A token for another flow is as good as no token here.
+  if (!(opts.purposes as readonly string[]).includes(row.purpose)) return null;
+  return { id: row.id, user_id: row.user_id, email: row.email, purpose: row.purpose };
 }
 
 /** What a redemption did, for the caller to log or act on. Never shown to a visitor. */
@@ -116,6 +127,11 @@ export type RedemptionOutcome =
   | { result: "no_person"; email: string }
   /** Live token whose address no longer matches the account's. Deliberately inert. */
   | { result: "stale"; email: string; userId: string }
+  /**
+   * Live token, but minted for a purpose that does not prove the mailbox (see
+   * `mailboxProvingPurposes`). Redeeming it confirms nothing.
+   */
+  | { result: "not_proof"; email: string }
   /** The address is now confirmed (or already was). */
   | { result: "verified"; email: string; userId: string };
 
@@ -135,7 +151,7 @@ export async function redeemVerificationToken(
   const token_hash = await hashToken(rawToken);
   const { data: row, error: lookupErr } = await admin
     .from("email_verification_tokens")
-    .select("id, user_id, email, expires_at, revoked_at")
+    .select("id, user_id, email, purpose, expires_at, revoked_at")
     .eq("token_hash", token_hash)
     .is("revoked_at", null)
     .maybeSingle();
@@ -143,6 +159,14 @@ export async function redeemVerificationToken(
   // regardless, so a broken read would otherwise be entirely silent.
   if (lookupErr) console.error("[email-verification] token lookup failed:", lookupErr);
   if (!row || !isVerificationTokenLive(row)) return { result: "no_token" };
+
+  // This endpoint is a public GET, so it is the cheapest way to turn a token
+  // into a confirmed address: one request, no session, no form. That is fine
+  // for a token only an inbox could hold, and unacceptable for one we handed
+  // to whoever asked — see `mailboxProvingPurposes`.
+  if (!purposeProvesMailbox(row.purpose)) {
+    return { result: "not_proof", email: row.email };
+  }
 
   // Stamp the redemption. Best-effort: a PostgrestBuilder is a lazy thenable,
   // so the .then() is what actually issues the request (and swallows failure).
