@@ -26,7 +26,7 @@ jobs:
         with:
           bun-version: latest
 
-      # This repo is public and `.env` is tracked (Lovable Cloud generates it and
+      # This repo is going public and `.env` is tracked (Lovable generates it and
       # re-commits it, so it cannot just be gitignored). That makes it the easiest
       # file in the tree to leak a credential through, and nothing else here would
       # notice. Checked before the install so a leak fails in seconds, and against

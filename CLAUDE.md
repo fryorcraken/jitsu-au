@@ -13,11 +13,12 @@ review submissions.
 The repo's package name is `tanstack_start_ts` — it was scaffolded from
 Lovable's TanStack Start template.
 
-## This repository is public — read first
+## This repository is going public — read first
 
-Everything you write here is world-readable: the code, the commit history, the
-issues and pull requests, the CI logs, and the screenshot artifacts. Work
-accordingly.
+It is private today and is being opened up. Nothing already committed gets a
+second review when that happens, so work **now** as though everything here is
+already world-readable: the code, the full commit history, the issues and pull
+requests, the CI logs, and the screenshot artifacts.
 
 - **Never commit a credential.** A pushed secret is public immediately and is
   scraped within minutes, so the fix is always to **rotate** it, never to
@@ -649,8 +650,9 @@ the server runtime. They are never written to a file in this repo.
 > project ref, the Google OAuth **client id** — all of which are baked into the
 > browser bundle anyway and readable from `jitsu.au` with devtools.
 >
-> **Never add a secret to it.** The repo is public, so a committed credential is
-> public the moment it is pushed and has to be rotated, not just reverted.
+> **Never add a secret to it.** This repo is going public, so treat a committed
+> credential as public the moment it is pushed: it has to be rotated, not just
+> reverted, because history keeps it.
 > Keeping a service-role key in your **own local** `.env` to run scripts is
 > fine and expected; committing one is not.
 > `scripts/check-committed-env.mjs` enforces this in CI — it audits what git
