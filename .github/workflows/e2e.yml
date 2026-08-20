@@ -11,11 +11,8 @@ name: End-to-end tests
 # reviewer looks at — the flow as it was walked, not a set of pages photographed
 # cold by a second program. scripts/e2e-gallery.ts lays that out, and the
 # gallery is published to GitHub Pages under `pr-<n>/` so it opens in a browser
-# instead of being downloaded and unzipped. Pages is served from GitHub Actions
-# here, which replaces the whole site on every deployment — so the galleries
-# accumulate on a store branch, and .github/workflows/pages-deploy.yml deploys
-# that whole tree once this run finishes, rather than each pull request's
-# deployment taking the previous one's gallery down with it.
+# instead of being downloaded and unzipped. Pages serves the `gh-pages` branch
+# directly, so the push at the end of this job is the publish.
 #
 # Like the screenshot job, it runs the whole site against a THROWAWAY LOCAL
 # SUPABASE STACK: `supabase start` brings up Postgres, Auth, PostgREST and
@@ -149,10 +146,10 @@ jobs:
           path: gallery
           retention-days: 14
 
-      # One directory per pull request on the store branch, so two open pull
-      # requests never overwrite each other. .github/workflows/pr-gallery-cleanup.yml
+      # One directory per pull request on the branch Pages serves, so two open
+      # pull requests never overwrite each other. .github/workflows/pr-gallery-cleanup.yml
       # takes it down again when the pull request closes.
-      - name: Add the gallery to the store branch
+      - name: Publish the gallery
         if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         env:

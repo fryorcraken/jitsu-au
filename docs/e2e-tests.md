@@ -211,36 +211,18 @@ down when the pull request closes.
 
 Three things about that publish are worth knowing:
 
-- **Pages is served from GitHub Actions**, which deploys one artifact per
-  deployment and replaces the whole site each time. So the galleries accumulate
-  on a **store branch** (`gh-pages`), and `.github/workflows/pages-deploy.yml`
-  deploys that whole tree — otherwise this pull request's deployment would take
-  every other open one's gallery down with it. It reads the branch as it is at
-  deploy time rather than reusing what the suite pushed, so a run that finished
-  meanwhile is carried along rather than reverted. No secret is involved: the
-  workflow's own `GITHUB_TOKEN` writes the branch, and the deployment uses the
-  repository's OIDC token.
-- That deploy is a **separate workflow on a `workflow_run` trigger, and it has
-  to be**: the `github-pages` environment only accepts deployments from the
-  default branch, so a job running on a pull request's branch is refused before
-  it starts — no runner, no steps, no log, just a red check. A `workflow_run`
-  workflow runs in the default branch's context, which is allowed. The cost is
-  that it only fires from the copy of the file on `main`, so **the pull request
-  that changes it cannot see its own gallery deployed**. It also takes
-  `workflow_dispatch`, so the site can be redeployed by hand from the Actions
-  tab whenever it and the store branch have drifted apart. (The other way to
-  have it: allow non-default branches to deploy in Settings → Environments →
-  github-pages. That trades a protection for immediacy; this repo keeps the
-  protection.)
-- The store branch is rewritten as a **single orphan commit** every time.
-  Screenshots are large and a normal history would keep every version of every
-  picture forever. Two runs racing is handled by `--force-with-lease`: the loser
-  retries rather than overwriting the other's pictures.
+- **Pages serves the `gh-pages` branch directly** (Settings → Pages → Deploy from
+  a branch), so the push at the end of the run is the publish: there is no
+  deployment step, no environment, and nothing to wait for. No secret is
+  involved either — the workflow's own `GITHUB_TOKEN` writes the branch.
+- The branch is rewritten as a **single orphan commit** every time. Screenshots
+  are large and a normal history would keep every version of every picture
+  forever. Two runs racing is handled by `--force-with-lease`: the loser retries
+  rather than overwriting the other's pictures.
 - A **fork's** pull request gets a read-only token whatever the workflow asks
-  for, so it can neither push the store branch nor post the comment. Its run
-  still walks everything and still uploads the gallery as an artifact; the
-  gallery is on the run's own page rather than on the pull request. Nothing
-  fails.
+  for, so it can neither push the branch nor post the comment. Its run still
+  walks everything and still uploads the gallery as an artifact; the gallery is
+  on the run's own page rather than on the pull request. Nothing fails.
 
 The suite is allowed one retry, for the genuine flake of a browser against a
 server against a database. It is not a licence for a flaky test — anything that

@@ -506,17 +506,15 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   - The gallery shows **seeded fixture content**: `/blog`, `/pricing` and the
     calendar are the local club, not what is on `jitsu.au` today. That is the
     trade for a run that is identical on every branch and every fork.
-  - Publishing goes through **GitHub Pages, sourced from GitHub Actions**. A
-    Pages deployment replaces the whole site, so the galleries accumulate on the
-    `gh-pages` **store branch** and `pages-deploy.yml` deploys that whole tree.
-    That deploy is a **separate `workflow_run` workflow on purpose**: the
-    `github-pages` environment only accepts deployments from the default branch,
-    so a deploy job on a pull request's own branch is refused before it starts
-    (no runner, no log, just a red check). The cost is that `workflow_run` only
-    fires from `main`'s copy of the file, so **a change to the deploy cannot be
-    seen working until it is merged**. A fork's pull request gets a read-only
-    token whatever the workflow asks for, so it neither publishes nor comments:
-    its gallery is the artifact on the run's own page.
+  - Publishing is **GitHub Pages serving the `gh-pages` branch directly**, so
+    the run's push IS the publish — no deployment step, no environment. The
+    branch is rewritten as a single orphan commit each time (screenshots are
+    large; history would keep every version forever) with `--force-with-lease`
+    so a racing run retries rather than overwriting, and
+    `pr-gallery-cleanup.yml` removes a pull request's directory when it closes.
+    A fork's pull request gets a read-only token whatever the workflow asks for,
+    so it neither publishes nor comments: its gallery is the artifact on the
+    run's own page.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see "Schema drift" in `docs/database-changes.md`).

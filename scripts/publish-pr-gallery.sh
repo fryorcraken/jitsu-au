@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
 #
-# Add one pull request's screenshot gallery to the store branch every gallery
-# lives on, or take it down again when the pull request closes.
+# Publish one pull request's screenshot gallery to the branch GitHub Pages
+# serves, or take it down again when the pull request closes.
 #
 #   PR_NUMBER=12 bash scripts/publish-pr-gallery.sh              # publish gallery/
 #   PR_NUMBER=12 PR_GALLERY_REMOVE=1 bash scripts/publish-pr-gallery.sh
 #
 # Every pull request gets its own directory (`pr-<n>/`) on that branch, so two
 # open pull requests never overwrite each other's pictures and a reviewer can
-# open a flow without downloading anything.
-#
-# The branch is NOT what GitHub serves. This repository's Pages source is GitHub
-# Actions, which deploys one artifact per deployment and replaces the whole site
-# each time — so the branch is where the site ACCUMULATES, and the `publish-pages`
-# job in .github/workflows/e2e.yml checks it out afterwards and deploys the whole
-# tree. Without that store, every deployment would take the previous pull
-# request's gallery down with it.
+# open a flow without downloading anything. Pages serves the branch directly,
+# so pushing here IS publishing: there is no deployment step to wait for.
 #
 # The branch is rewritten as a SINGLE ORPHAN COMMIT every time. Screenshots are
 # large and a normal history would keep every version of every picture forever;
@@ -28,7 +22,7 @@
 #   GITHUB_TOKEN        a token with contents: write on this repository
 #   GITHUB_REPOSITORY   owner/repo
 #   PR_NUMBER           the pull request being published
-#   PAGES_BRANCH        branch the galleries accumulate on (default: gh-pages)
+#   PAGES_BRANCH        the branch Pages serves (default: gh-pages)
 #   GALLERY_DIR         what to publish (default: gallery)
 #   PR_GALLERY_REMOVE   set to 1 to delete this pull request's directory instead
 set -euo pipefail
