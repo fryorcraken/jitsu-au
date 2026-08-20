@@ -29,6 +29,7 @@ const emptyForm: WaiverFieldState = {
   ecIsGuardian: false,
   guardianName: "",
   guardianRelationship: "",
+  guardianEmail: "",
   health: {},
   medical: "",
   ackDefs: [],
@@ -234,6 +235,27 @@ describe("missingWaiverFields", () => {
     // Blank means "the same as the participant's", so there is nothing missing.
     it("never asks for the guardian's address, mobile or email", () => {
       expect(missingWaiverFields(minorForm())).toEqual([]);
+    });
+
+    // Optional, but an address that WAS typed still has to be one the server
+    // accepts: `waiverSubmitSchema` rejects a malformed guardian email, and the
+    // point of this module is that the signer hears that here, not as a Zod
+    // dump after a round trip.
+    it("flags a malformed guardian email, but not a blank one", () => {
+      expect(missingWaiverFields(minorForm({ guardianEmail: "" }))).toEqual([]);
+      expect(missingWaiverFields(minorForm({ guardianEmail: "  " }))).toEqual([]);
+      expect(missingWaiverFields(minorForm({ guardianEmail: "kim@example.com" }))).toEqual([]);
+
+      const missing = missingWaiverFields(minorForm({ guardianEmail: "kim@" }));
+      expect(missing.map((f) => f.anchorId)).toEqual(["guardian_email"]);
+      expect(missing[0].hint).toMatch(/name@example\.com/);
+    });
+
+    // The guardian block is off screen for an adult, so pointing somebody at a
+    // control they cannot see would be worse than saying nothing. The page
+    // stops sending the value at the same time, so the server agrees.
+    it("ignores a stale guardian email once the date of birth says adult", () => {
+      expect(missingWaiverFields(form({ isMinor: false, guardianEmail: "kim@" }))).toEqual([]);
     });
 
     // The three emergency contact fields are off screen when the guardian is

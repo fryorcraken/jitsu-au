@@ -538,6 +538,7 @@ function Waiver() {
     ecIsGuardian,
     guardianName,
     guardianRelationship,
+    guardianEmail,
     health,
     medical,
     ackDefs: ackDefs.map((ack) => ({
@@ -652,11 +653,16 @@ function Waiver() {
             emergency_contact_relationship: ecRelationship,
             emergency_contact_phone: ecPhone,
             emergency_contact_is_guardian: ecIsGuardian,
-            guardian_name: guardianName,
-            guardian_relationship: guardianRelationship,
-            guardian_address: guardianAddress,
-            guardian_phone: guardianPhone,
-            guardian_email: guardianEmail,
+            // Only ever sent for a minor. The guardian block is hidden for an
+            // adult but its state survives (a date of birth can be corrected
+            // both ways), and sending a stale value the server still validates
+            // is how a hidden field ends up rejecting a form nobody can see a
+            // problem with.
+            guardian_name: isMinor ? guardianName : "",
+            guardian_relationship: isMinor ? guardianRelationship : "",
+            guardian_address: isMinor ? guardianAddress : "",
+            guardian_phone: isMinor ? guardianPhone : "",
+            guardian_email: isMinor ? guardianEmail : "",
             // Every question is answered by this point (guarded below), so the
             // draft narrows to the five booleans the server requires.
             health_answers: health as HealthAnswers,
@@ -1133,8 +1139,12 @@ function Waiver() {
                     {fieldMessage("guardian_relationship")}
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Leave the next three blank if they're the same as the participant's.
+                {/* One hint, pointed at by all three inputs (aria-describedby),
+                    so somebody who tabs straight into a field hears the rule
+                    rather than only seeing it above the group. */}
+                <p id="guardian_contact_hint" className="text-xs text-muted-foreground">
+                  Leave the guardian's mobile, email and address empty if they're the same as the
+                  participant's. We'll record the participant's details for the guardian.
                 </p>
                 <div className="grid gap-5 sm:grid-cols-2">
                   <div>
@@ -1148,6 +1158,7 @@ function Waiver() {
                       value={guardianPhone}
                       onChange={(e) => setGuardianPhone(e.target.value)}
                       placeholder="Same as the participant's"
+                      aria-describedby="guardian_contact_hint"
                       className="mt-1.5"
                     />
                   </div>
@@ -1162,8 +1173,16 @@ function Waiver() {
                       value={guardianEmail}
                       onChange={(e) => setGuardianEmail(e.target.value)}
                       placeholder="Same as the participant's"
-                      className="mt-1.5"
+                      {...fieldProps("guardian_email")}
+                      // The hint applies whether or not the address is flagged,
+                      // so it is appended rather than replaced by fieldProps.
+                      aria-describedby={
+                        flagged("guardian_email")
+                          ? `guardian_contact_hint ${messageId("guardian_email")}`
+                          : "guardian_contact_hint"
+                      }
                     />
+                    {fieldMessage("guardian_email")}
                   </div>
                 </div>
                 <div>
@@ -1176,6 +1195,7 @@ function Waiver() {
                     value={guardianAddress}
                     onChange={(e) => setGuardianAddress(e.target.value)}
                     placeholder="Same as the participant's"
+                    aria-describedby="guardian_contact_hint"
                     className="mt-1.5"
                   />
                 </div>
