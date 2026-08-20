@@ -21,9 +21,12 @@ interface CopyButtonProps {
  * Copy one string to the clipboard, with a transient "copied" tick.
  *
  * Clipboard access can be refused outright (older browsers, no secure context,
- * a permission prompt the person dismissed), so the failure path matters: every
- * caller keeps the value visible on screen, and the toast tells the person to
- * select it by hand rather than leaving a button that silently does nothing.
+ * a permission prompt the person dismissed), so the failure path matters: the
+ * failure carries the value itself and stays on screen until dismissed, so the
+ * person can always select it by hand. It used to say "select it manually" and
+ * rely on every caller happening to print the value next to the button, which
+ * left anyone whose caller did not (a table row copying a URL it never shows)
+ * with nothing to select.
  */
 export function CopyButton({ text, label, ariaLabel, className }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
@@ -40,7 +43,11 @@ export function CopyButton({ text, label, ariaLabel, className }: CopyButtonProp
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         } catch {
-          toast.error("Couldn't copy. Select and copy manually.");
+          toast.error("Couldn't copy that automatically.", {
+            description: `Select this and copy it by hand: ${text}`,
+            duration: Infinity,
+            closeButton: true,
+          });
         }
       }}
     >

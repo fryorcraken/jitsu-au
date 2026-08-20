@@ -123,8 +123,9 @@ function BlogPostsPage() {
                       {/* Next to the title, not with the row's other actions:
                           those sit off the right edge of a table this wide, so
                           on a phone they need a horizontal scroll to reach.
-                          Only published posts get one, because a draft's URL
-                          is a 404 for everyone who isn't a manager. */}
+                          Only published posts get one: the public route reads
+                          through the anon client with no session, so a draft's
+                          URL is a 404 for everyone, managers included. */}
                       {row.status === "published" && (
                         <CopyButton
                           text={canonicalUrl(`/blog/${row.slug}`)}
