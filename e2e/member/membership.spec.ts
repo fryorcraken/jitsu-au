@@ -2,8 +2,7 @@
 // page: the money side of the member area, next to account.spec.ts's profile
 // side.
 
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "../support/test";
 import { adminClient, readClubFixture } from "../support/fixture";
 import { expectPageRendered } from "../support/page";
 

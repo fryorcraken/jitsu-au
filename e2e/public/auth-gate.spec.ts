@@ -1,7 +1,7 @@
 // Asking for a member screen while signed out sends you to sign in, and
 // remembers where you were going.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../support/test";
 
 test("a signed-out visitor asking for their account is sent to sign in", async ({ page }) => {
   await page.goto("/account");

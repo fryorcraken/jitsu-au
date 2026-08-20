@@ -20,6 +20,12 @@
 #   E2E_SKIP_BUILD=1   reuse the .output build already on disk
 #   E2E_SKIP_SEED=1    reuse the club already in the local stack
 #
+# And one addition, off by default because it copies every screenshot the run
+# took:
+#
+#   E2E_GALLERY=1      build gallery/index.html afterwards — the same page CI
+#                      publishes on a pull request
+#
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -91,4 +97,16 @@ else
   printf '%s' "$API_URL" > "$BUILD_STAMP"
 fi
 
-exec bunx playwright test "$@"
+set +e
+bunx playwright test "$@"
+suite_status=$?
+set -e
+
+# Built from the run's own json report, so it describes whatever just happened —
+# including a failure, whose last screenshot is usually the useful one.
+if [[ "${E2E_GALLERY:-}" == "1" ]]; then
+  bun scripts/e2e-gallery.ts
+  echo "[e2e] gallery: $(pwd)/gallery/index.html"
+fi
+
+exit "$suite_status"

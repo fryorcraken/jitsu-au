@@ -9,6 +9,11 @@ the club has been sent.
 It is the only place SSR, the server functions, RLS, storage and the router's
 own redirects are exercised together, in a browser, against a real database.
 
+It is also where the **pull request's screenshots** come from. Every test is
+photographed as it goes, so what a reviewer opens is the flow this suite walked
+rather than a set of pages photographed cold by a separate program. See
+"Screenshots" below.
+
 ## Running it
 
 ```bash
@@ -24,8 +29,8 @@ each other:
    migration in `supabase/migrations` applied in order, so the flows are walked
    against the schema **this branch** ships.
 2. `scripts/seed-local-club.mjs` — fills it with a manager, a member and an
-   applicant, and writes `.local-club-fixture.json`. This is the **same seed the
-   PR screenshots use**; neither job owns it.
+   applicant, and writes `.local-club-fixture.json`. The club the flows are
+   walked on, and the club a reviewer sees in the screenshots.
 3. `bun add --no-save @playwright/test` at the version pinned in
    `scripts/playwright-version.txt`, plus its chromium.
 4. `NITRO_PRESET=node-server bun run build` — the **production** build, not the
@@ -33,12 +38,15 @@ each other:
    only the build exercises them the way Cloudflare will.
 5. `playwright test`, which serves that build and drives it.
 
-Two escape hatches while iterating on a test rather than on the app:
-`E2E_SKIP_BUILD=1` reuses the build on disk, `E2E_SKIP_SEED=1` reuses the club
-already in the stack. Skipping the build refuses to reuse one made against a
-different Supabase project — `VITE_SUPABASE_URL` is baked in at build time, so
-an `.env`-flavoured build would serve a browser talking to the live club and no
-runtime guard would see it.
+Three switches for iterating on a test rather than on the app: `E2E_SKIP_BUILD=1`
+reuses the build on disk, `E2E_SKIP_SEED=1` reuses the club already in the stack,
+and `E2E_SHOTS=0` skips the screenshots. `E2E_GALLERY=1` goes the other way and
+builds `gallery/index.html` afterwards — the page CI publishes.
+
+Skipping the build refuses to reuse one made against a different Supabase
+project: `VITE_SUPABASE_URL` is baked in at build time, so an `.env`-flavoured
+build would serve a browser talking to the live club and no runtime guard would
+see it.
 
 After a run, `playwright-report/index.html` has the results; a failure carries
 its trace, screenshot and video, and `bunx playwright show-trace` replays it
@@ -56,9 +64,18 @@ e2e/
     fixture.ts              the seeded club + the "local stack only" guard
     auth.setup.ts           signs each persona in once, saves the session
     page.ts                 shared assertions and the nav helper
+    test.ts                 the suite's own `test` — import from here, not @playwright/test
+    screenshots.ts          `step` and `shot`: the pictures a run leaves behind
+    club-state.ts           puts back what walking the site consumed
   public/                   flows anyone can walk (run at desktop AND phone width)
   member/                   flows a signed-in member walks
   manager/                  flows a manager walks
+  tour/                     every page there is, opened and photographed
+scripts/
+  site-pages.ts             which pages the tour walks, and as whom
+  e2e-gallery.ts            turns a run into gallery/index.html
+  e2e-gallery-report.ts     the layout rules, unit-tested on their own
+  publish-pr-gallery.sh     puts a pull request's gallery on the Pages branch
 ```
 
 A spec goes in the directory named after **who walks the flow**. That is what
@@ -112,28 +129,104 @@ actually gets done.
   load" a clean run. It does **not** catch a route that handles its own loader
   error and renders a card in place of its content — assert on the content the
   flow needs.
+- **Import `test` from `../support/test`, not from `@playwright/test`, and use
+  `step` instead of `test.step`.** That is what photographs the flow;
+  `scripts/e2e-conventions.test.ts` fails the unit suite if a spec reaches past
+  either, because the run would still be green and the screen would simply stop
+  appearing in what reviewers look at.
 - **Playwright is not in `package.json`,** deliberately: dependencies there have
   to be re-resolved by Lovable (CLAUDE.md > Lock file strategy) and this is a
   test-only tool. It is installed with `--no-save` at the version in
-  `scripts/playwright-version.txt`, which is also what the PR screenshot job
-  reads, so the two never drift onto different browsers.
+  `scripts/playwright-version.txt`.
 - **The tests are typechecked separately.** They are outside the app's
   `tsconfig.json` (it has no `@playwright/test`), so
   `bunx tsc -p e2e/tsconfig.json` is what checks them, and the e2e workflow runs
   it before the suite.
+
+## Screenshots
+
+A screenshot here is a **byproduct of a test that was going to run anyway**. The
+suite already opens the pages, fills the forms and clicks the buttons; taking a
+picture on the way costs a moment and gives a reviewer the one thing a diff
+cannot show them.
+
+Three pieces, all of them Playwright's own API plus one web API
+(`document.fonts.ready`, so a picture is never taken mid font-swap):
+
+- **`step(page, title, body)`** (`e2e/support/screenshots.ts`) is `test.step`
+  with a picture of where the step left the person. The page is a parameter
+  because a flow like the new-member journey drives three of them — an anonymous
+  visitor, the member, the manager — and which one a step is about is exactly
+  what is worth being explicit on. The shot is taken in a `finally`, so a step
+  that **fails** is photographed too; that picture is usually the most useful one
+  in the run.
+- **`shot(page, name)`** for a screen that a step would otherwise replace before
+  it was seen — the filled-in waiver, say, which is gone the moment it is
+  submitted.
+- **Every test is photographed where it ended**, without asking, by the auto
+  fixture in `e2e/support/test.ts`. A spec with no steps at all still appears.
+
+`e2e/tour/site.spec.ts` is the other half: it opens **every page the site
+serves**, asserts it rendered, and is photographed doing it. The public pages
+come from `src/lib/public-pages.ts` (the sitemap's own list plus the noindex
+pages nothing can derive) and the signed-in ones from the route files themselves
+(`scripts/site-pages.ts`), so a new manager screen is covered the moment its file
+exists. It runs as two projects, `tour` and `tour-mobile`, because a screen that
+breaks on a phone is a broken screen.
+
+Walking the site is not read-only — `/notifications` marks the member's unread
+ones read, a manager inbox stamps its "seen" watermark — so `restoreSeenState`
+(`e2e/support/club-state.ts`) puts those back after each pass. It is a **known
+list**: a new screen that marks something read when it opens has to be added, or
+its unread state will only ever appear in the desktop gallery.
+
+### The gallery
+
+`scripts/e2e-gallery.ts` reads Playwright's own json report (which already knows
+which tests ran, in which project, with which screenshots attached in what
+order), copies the images somewhere publishable and lays them out: the flows
+first, as strips of screens in the order somebody walked them, then every page
+at desktop and phone width. Playwright's HTML report rides along at
+`report/index.html`, which is where a failure's trace and video are — served over
+http, its trace viewer opens inline.
+
+Locally:
+
+```bash
+E2E_GALLERY=1 bun run test:e2e     # -> gallery/index.html
+```
 
 ## CI
 
 `.github/workflows/e2e.yml` runs all of the above on every pull request and on
 pushes to `main`, path-filtered away from documentation-only changes. It needs
 **no repository secrets**: the local stack's keys are the CLI's own development
-keys. The Playwright report is uploaded as an artifact on every run, green or
-red.
+keys.
 
-One retry is allowed, for the genuine flake of a browser against a server
-against a database. It is not a licence for a flaky test — anything that only
-passes on the second attempt is a bug, and the first attempt's trace is in the
-artifact so it can be found.
+On a pull request it then publishes the gallery to **GitHub Pages** under
+`pr-<n>/` (`scripts/publish-pr-gallery.sh`) and posts one sticky comment with the
+flow strips embedded, so reviewing a change means looking at it rather than
+downloading a zip. `.github/workflows/pr-gallery-cleanup.yml` takes the directory
+down when the pull request closes.
+
+Three things about that publish are worth knowing:
+
+- It needs **Pages served from the `gh-pages` branch** (Settings → Pages → Deploy
+  from a branch). Nothing else has to be configured, and no secret is involved:
+  the workflow's own `GITHUB_TOKEN` writes the branch.
+- The branch is rewritten as a **single orphan commit** every time. Screenshots
+  are large and a normal history would keep every version of every picture
+  forever. Two runs racing is handled by `--force-with-lease`: the loser retries
+  rather than overwriting the other's pictures.
+- A **fork's** pull request cannot write that branch, so its comment links the
+  downloadable artifact instead. Nothing fails.
+
+The suite is allowed one retry, for the genuine flake of a browser against a
+server against a database. It is not a licence for a flaky test — anything that
+only passes on the second attempt is a bug, and the first attempt's trace is in
+the report so it can be found. A red suite still produces its gallery and its
+comment, and the job is failed afterwards: the screenshot of the step that broke
+is the most useful thing in the run.
 
 ## What is deliberately not covered yet
 

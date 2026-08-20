@@ -9,7 +9,8 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * Both the router's error boundary and its 404 render INSIDE an ordinary 200
  * response (src/routes/__root.tsx), so a status check alone would call a
  * site-wide "This page didn't load" a clean run. They carry `data-page-state`
- * for exactly this — the same contract the PR screenshots check.
+ * for exactly this — the contract the tour (e2e/tour/site.spec.ts) checks on
+ * every page there is.
  *
  * This is an ABSENCE check, so it passes on a page that has not rendered
  * anything yet. Assert the content the flow needs first, then this. It also

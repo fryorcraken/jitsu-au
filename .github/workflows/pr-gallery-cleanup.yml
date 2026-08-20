@@ -1,0 +1,29 @@
+name: Take down a closed pull request's gallery
+
+# Every pull request's screenshots live in their own directory on the Pages
+# branch (.github/workflows/e2e.yml puts them there). Once the pull request is
+# closed nobody is reviewing it, so the directory comes off — otherwise the
+# branch grows a folder of full-page PNGs per pull request, forever.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Remove the gallery
+    # A fork's pull request never published one: its token cannot write here.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Remove this pull request's directory from the Pages branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_GALLERY_REMOVE: "1"
+        run: bash scripts/publish-pr-gallery.sh

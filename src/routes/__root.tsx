@@ -19,7 +19,7 @@ const FONT_HREF =
   "https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;900&display=swap";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
-// The screenshot run (scripts/pr-screenshots.mjs) treats its presence as a
+// The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
 // failed page: both boundaries are served with an ordinary 200, so a status
 // code alone cannot tell a rendered page from a broken one.
 function NotFoundComponent() {
