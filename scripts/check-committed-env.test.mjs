@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { PUBLISHABLE_ENV_KEYS, auditEnv, jwtPayload, parseEnv } from "./check-committed-env.mjs";
+import {
+  PUBLISHABLE_ENV_KEYS,
+  auditEnv,
+  gitRevisionFor,
+  jwtPayload,
+  parseEnv,
+} from "./check-committed-env.mjs";
 
 /** Build an unsigned JWT carrying `payload`, the shape Supabase keys have. */
 function jwt(payload) {
@@ -47,6 +53,18 @@ describe("jwtPayload", () => {
   it("returns null for anything that is not a JWT", () => {
     expect(jwtPayload("https://example.com")).toBeNull();
     expect(jwtPayload("a.b")).toBeNull();
+  });
+});
+
+describe("gitRevisionFor", () => {
+  it("reads the index under --staged, which is what a commit will contain", () => {
+    // The pre-commit hook depends on this: HEAD would be the PREVIOUS commit,
+    // so a hook reading it would pass the very commit introducing the secret.
+    expect(gitRevisionFor(["--staged"])).toBe(":.env");
+  });
+
+  it("reads HEAD by default, which is what CI checks", () => {
+    expect(gitRevisionFor([])).toBe("HEAD:.env");
   });
 });
 

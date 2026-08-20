@@ -19,6 +19,20 @@
 // stack is fine and expected; only committing it is the problem. Checking the
 // working copy would punish the safe case and miss nothing extra.
 //
+// Which "what git has" depends on who is asking, hence the two modes:
+//
+//   --staged   the index (`:.env`) — what THIS commit is about to contain.
+//              Used by the pre-commit hook in `.githooks/`, so a secret is
+//              caught before the commit object exists and there is nothing to
+//              rotate. `git commit -a` stages tracked edits before hooks run,
+//              so the index is the right thing to read there too.
+//   (default)  HEAD (`HEAD:.env`) — what is already committed. Used by CI.
+//
+// The hook is the fast feedback and CI is the enforcement; keep both. A hook
+// only runs for people who installed it, is skipped by `--no-verify`, and does
+// not exist at all on Lovable's side — and Lovable is the one committing this
+// file. CI is the only check none of that can bypass.
+//
 // Two independent rules, because either alone has a blind spot:
 //
 //   * an allowlist of KEY NAMES — catches a secret whose value shape we do not
@@ -172,12 +186,21 @@ export function auditEnv(text) {
 }
 
 /**
- * The committed `.env`, or null when git tracks no such file (nothing to
- * check, which is a pass).
+ * Which `.env` to audit, as a git revision. `--staged` reads the index (what
+ * this commit will contain), anything else reads HEAD (what is already
+ * committed). Pure, so the mode selection is testable without running git.
  */
-function committedEnv() {
+export function gitRevisionFor(argv) {
+  return argv.includes("--staged") ? ":.env" : "HEAD:.env";
+}
+
+/**
+ * `.env` at `revision`, or null when git has no such file there (nothing to
+ * check, which is a pass — a fresh clone before the first commit, say).
+ */
+function envAt(revision) {
   try {
-    return execFileSync("git", ["show", "HEAD:.env"], {
+    return execFileSync("git", ["show", revision], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
@@ -187,19 +210,27 @@ function committedEnv() {
 }
 
 function main() {
-  const text = committedEnv();
+  const revision = gitRevisionFor(process.argv.slice(2));
+  const staged = revision === ":.env";
+  const subject = staged ? "staged" : "committed";
+
+  const text = envAt(revision);
   if (text === null) {
-    console.log("[env-check] no .env is committed — nothing to check.");
+    console.log(`[env-check] no ${subject} .env — nothing to check.`);
     return;
   }
 
   const findings = auditEnv(text);
   if (findings.length === 0) {
-    console.log("[env-check] committed .env holds only publishable values.");
+    console.log(`[env-check] ${subject} .env holds only publishable values.`);
     return;
   }
 
-  console.error("The committed .env holds something that must not be public.\n");
+  console.error(
+    staged
+      ? "This commit would put something in .env that must not be public.\n"
+      : "The committed .env holds something that must not be public.\n",
+  );
   for (const { line, reason } of findings) {
     console.error(`  .env:${line}  ${reason}`);
   }
@@ -207,6 +238,12 @@ function main() {
     "\nThis repo's .env is tracked because Lovable Cloud generates it. That makes it\n" +
       "the easiest file to leak a secret through. See CLAUDE.md > Environment variables.",
   );
+  if (staged) {
+    console.error(
+      "\nTo unstage it:  git restore --staged .env\n" +
+        "Your working copy is untouched — a local secret is fine, a committed one is not.",
+    );
+  }
   process.exitCode = 1;
 }
 

@@ -96,6 +96,7 @@ Use **Bun** (this is a Bun project — `bun install`, not npm/pnpm).
 | Command                 | Purpose                                |
 | ----------------------- | -------------------------------------- |
 | `bun install`           | Install dependencies                   |
+| `bun run hooks`         | Install the repo's git hooks           |
 | `bun run dev`           | Start the Vite dev server              |
 | `bun run build`         | Production build (Nitro)               |
 | `bun run build:dev`     | Build in development mode              |
@@ -158,6 +159,8 @@ public/                   Served at the site root
 supabase/
   config.toml             Supabase project ref + the local stack CI boots
   migrations/*.sql        Schema + RLS (timestamped, applied in order)
+.githooks/                Versioned git hooks (core.hooksPath; `bun run hooks`)
+  pre-commit              Refuses a commit that puts a secret in .env
 ```
 
 ## Routing conventions (TanStack Start — NOT Next.js/Remix)
@@ -545,7 +548,10 @@ Claude or CI produced.
 public npm — the path structure and integrity hashes are identical and every
 package (including `@lovable.dev/*`) is on public npm — installs Lovable's
 **exact locked versions**, then **restores `bun.lock`** so the rewrite is never
-committed. The 24h supply-chain guard in `bunfig.toml` still applies.
+committed. The 24h supply-chain guard in `bunfig.toml` still applies. It also
+runs `scripts/install-git-hooks.sh`, which points `core.hooksPath` at the
+versioned `.githooks/` (see "Environment variables"); that is a local git config
+change, idempotent, and a no-op outside a git checkout.
 
 **Never commit `bun.lock`.** If a stray `bun install` left it modified, restore
 it before committing: `git checkout bun.lock`. Add/remove dependencies by
@@ -655,11 +661,16 @@ the server runtime. They are never written to a file in this repo.
 > reverted, because history keeps it.
 > Keeping a service-role key in your **own local** `.env` to run scripts is
 > fine and expected; committing one is not.
-> `scripts/check-committed-env.mjs` enforces this in CI — it audits what git
-> has (not your working copy) against an allowlist of key names and a deny-list
-> of value shapes. A **new key from Lovable fails it by design**: that is the
-> review gate. If the value really is publishable, add it to
-> `PUBLISHABLE_ENV_KEYS` in that script and say why in the commit message.
+> `scripts/check-committed-env.mjs` enforces this. It audits what git has (not
+> your working copy) against an allowlist of key names and a deny-list of value
+> shapes, and runs in **two places**: a **pre-commit hook** reading the index,
+> so a secret is refused while there is still nothing to rotate, and **CI**
+> reading HEAD. Keep both — the hook is skipped by `--no-verify`, only runs for
+> people who installed it, and does not exist on Lovable's side, which is where
+> this file is actually written. CI is the only one none of that bypasses.
+> A **new key from Lovable fails it by design**: that is the review gate. If the
+> value really is publishable, add it to `PUBLISHABLE_ENV_KEYS` in that script
+> and say why in the commit message.
 >
 > **bun auto-loads `.env`**, so any `bun run …` here talks to the **live club**
 > unless something overrides it. That is why `e2e/support/fixture.ts` and

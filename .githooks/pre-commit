@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#
+# Refuse a commit that would put a secret in the tracked `.env`.
+#
+# CI checks the same thing (.github/workflows/ci.yml), but by then the commit
+# object exists and, if it was pushed, the credential is out and has to be
+# rotated. This catches it while there is still nothing to rotate.
+#
+# Installed by `bash scripts/install-git-hooks.sh`, which `bun run deps` runs
+# for you. It points core.hooksPath at this directory, so hooks are versioned
+# with the repo rather than living unversioned in .git/hooks.
+#
+# This is a convenience, NOT the enforcement: `--no-verify` skips it, it only
+# runs for people who installed it, and it does not exist on Lovable's side.
+# CI is the backstop. See CLAUDE.md > Environment variables.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+CHECK="scripts/check-committed-env.mjs"
+[[ -f "$CHECK" ]] || exit 0
+
+# Bun is this project's runtime, but a GUI git client may not have it on PATH.
+# The checker is plain ESM with no dependencies, so node runs it identically.
+if command -v bun >/dev/null 2>&1; then
+  exec bun "$CHECK" --staged
+elif command -v node >/dev/null 2>&1; then
+  exec node "$CHECK" --staged
+fi
+
+# Neither runtime: warn rather than block. Refusing every commit because a GUI
+# client has a bare PATH would get the hook uninstalled, and CI still catches
+# the leak before it can merge.
+echo "[env-check] skipped: neither bun nor node is on PATH. CI will still check." >&2
+exit 0

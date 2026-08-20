@@ -37,6 +37,11 @@ if [[ $# -gt 0 ]]; then
   exit 2
 fi
 
+# Versioned git hooks (pre-commit guards the tracked `.env`). Cheap, idempotent,
+# and a no-op outside a git checkout, so it rides along with the normal install
+# rather than needing a separate step people forget. See scripts/install-git-hooks.sh.
+bash scripts/install-git-hooks.sh
+
 LOCK="bun.lock"
 
 if [[ ! -f "$LOCK" ]]; then
