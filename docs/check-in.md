@@ -188,7 +188,11 @@ people in to a class that did not run.
 8. **No cover always says why.** "Nothing covers this class" is a dead end;
    "a membership starts after this class" or "waiting on a payment" is something
    a manager can act on. Every reason coverage resolution knows is surfaced on
-   the roster and in the attach list, rather than logged and swallowed.
+   the roster and in the attach list, rather than logged and swallowed. A closed
+   membership's reason is its label, not its stored status, so a spent class pack
+   reads "used up" and only a dated one reads "expired" (`docs/memberships.md`,
+   "What an ended membership is called"). Lower-cased there, because it is read
+   as prose after the plan name rather than as a pill.
 9. **Sessions attended is not credits used.** It counts classes trained,
    including uncovered ones. How many credits a membership has left is a separate
    number and lives on the membership.

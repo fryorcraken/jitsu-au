@@ -55,6 +55,7 @@ function membership(over: Partial<ClubUserMembership> = {}): ClubUserMembership 
     price_cents: 24500,
     is_student: false,
     uts_student_number: null,
+    sessions_remaining: null,
     created_at: "2026-02-01T00:00:00Z",
     ...over,
   };
@@ -348,8 +349,37 @@ describe("aggregateClubUsers", () => {
       ],
     });
     expect(u.latest_plan_name).toBe("One semester");
+    expect(u.latest_plan_kind).toBe("period");
     expect(u.latest_membership_status).toBe("active");
     expect(u.membership_count).toBe(2);
+  });
+
+  it("carries the latest plan's kind, which is what names its status on screen", () => {
+    // A used-up trial and a finished semester are both stored as `expired`. The
+    // kind is the only thing that tells the users list which word to print, and
+    // it separates "they came twice and stopped" from "the semester ended".
+    const [trialOnly] = aggregate({
+      profiles: [profile()],
+      waivers: [waiver()],
+      memberships: [
+        membership({
+          plan_id: "plan-trial",
+          price_cents: 0,
+          status: "expired",
+          sessions_remaining: 0,
+        }),
+      ],
+    });
+    expect(trialOnly.lifecycle_status).toBe("lapsed");
+    expect(trialOnly.latest_plan_kind).toBe("trial");
+    // The balance rides along with the kind: an ended credit plan only reads as
+    // "used up" once its classes are actually gone, and a refunded check-in can
+    // leave one `expired` with a class still on it.
+    expect(trialOnly.latest_sessions_remaining).toBe(0);
+
+    // A lead has no memberships at all, so there is no kind to report.
+    const [aLead] = aggregate({ profiles: [], emails: [], leads: [lead()] });
+    expect(aLead.latest_plan_kind).toBeNull();
   });
 
   it("computes first-seen as the earliest of profile, waiver and membership dates", () => {

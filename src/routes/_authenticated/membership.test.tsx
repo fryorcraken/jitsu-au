@@ -281,3 +281,89 @@ describe("/membership: how to pay", () => {
     expect(within(card).queryByRole("button", { name: /copy BSB/i })).not.toBeInTheDocument();
   });
 });
+
+// A free trial is two classes, not a date. It cannot expire, and the person
+// holding one has no membership to renew, so neither "expired" nor "lapsed"
+// describes what happened to them.
+describe("/membership: what a finished trial is called", () => {
+  const usedUpTrial = {
+    ...pendingPlan,
+    id: "m9",
+    plan_code: "trial_2_session",
+    plan_name: "Free trial",
+    kind: "trial",
+    status: "expired",
+    price_cents: 0,
+    paid_at: "2026-07-01T00:00:00Z",
+    ends_at: null,
+    sessions_remaining: 0,
+  };
+  const endedSemester = {
+    ...pendingPlan,
+    id: "m10",
+    status: "expired",
+    paid_at: "2026-02-01T00:00:00Z",
+    ends_at: "2026-06-30T00:00:00Z",
+    created_at: "2026-02-01T00:00:00Z",
+  };
+
+  function lapsedWith(memberships: unknown[]) {
+    getMyMemberships.mockResolvedValue({
+      lifecycle: "lapsed",
+      memberships,
+      uts_student_number: null,
+      sessions_attended: 2,
+    });
+  }
+
+  it("says the trial is used up, not expired, and offers a plan instead of a renewal", async () => {
+    lapsedWith([usedUpTrial]);
+    await renderLoaded();
+    expect(screen.getByText("Used up")).toBeVisible();
+    expect(screen.queryByText("Expired")).not.toBeInTheDocument();
+    expect(screen.getByText("Trial used up")).toBeVisible();
+    expect(screen.getByText(/used your free trial classes/i)).toBeVisible();
+    expect(screen.queryByText(/membership has lapsed/i)).not.toBeInTheDocument();
+  });
+
+  it("counts the classes left rather than dating a plan that has no end date", async () => {
+    lapsedWith([usedUpTrial]);
+    await renderLoaded();
+    expect(screen.getByText("0 sessions left")).toBeVisible();
+  });
+
+  it("does not tell somebody whose trial was cancelled that they used it", async () => {
+    // `lapsed` is derived from expired OR cancelled. Both this person's free
+    // classes may be sitting untouched, so "you've used your free trial
+    // classes" would be a plain falsehood about their own account.
+    lapsedWith([{ ...usedUpTrial, status: "cancelled", sessions_remaining: 2 }]);
+    await renderLoaded();
+    expect(screen.getByText("Cancelled")).toBeVisible();
+    expect(screen.queryByText("Trial used up")).not.toBeInTheDocument();
+    expect(screen.queryByText(/used your free trial classes/i)).not.toBeInTheDocument();
+  });
+
+  it("does not claim the classes are gone when one was given back", async () => {
+    // Reachable from the check-in screen: undoing a check-in refunds the credit
+    // but reopens the membership only when THAT check-in is the one that closed
+    // it, so undoing an earlier visit leaves `expired` with a class on the row.
+    // The row prints "1 session left" right beside the status.
+    lapsedWith([{ ...usedUpTrial, sessions_remaining: 1 }]);
+    await renderLoaded();
+    expect(screen.getByText("1 session left")).toBeVisible();
+    expect(screen.queryByText("Used up")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trial used up")).not.toBeInTheDocument();
+    expect(screen.queryByText(/used your free trial classes/i)).not.toBeInTheDocument();
+  });
+
+  it("still says expired, and lapsed, for a training period that ran out of days", async () => {
+    // The stored status is the same word for both. Only the plan's kind tells
+    // them apart, so this is the case that would break if the label ignored it.
+    lapsedWith([endedSemester]);
+    await renderLoaded();
+    expect(screen.getByText("Expired")).toBeVisible();
+    expect(screen.queryByText("Used up")).not.toBeInTheDocument();
+    expect(screen.getByText("Lapsed")).toBeVisible();
+    expect(screen.getByText(/membership has lapsed/i)).toBeVisible();
+  });
+});

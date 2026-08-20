@@ -13,6 +13,9 @@
 // Pure data with no imports beyond types, so it stays unit-testable and can be
 // read by a server-rendered route as happily as by a component. The badge that
 // wears these classes is `@/components/site/StatusPill`.
+//
+// What a status is CALLED is the sibling question, and lives in
+// `./status-labels` for the same reason this file exists.
 import type { VerificationLabel } from "./email-verification";
 import type {
   BlogCommentStatus,

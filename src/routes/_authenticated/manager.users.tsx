@@ -13,6 +13,7 @@ import {
   membershipClass,
   verificationClass,
 } from "@/lib/status-colours";
+import { lifecycleLabel, membershipStatusLabel } from "@/lib/status-labels";
 import { lifecycleStatuses, normalizeEmail } from "@/lib/validation";
 import { emailVerificationLabel } from "@/lib/email-verification";
 import { listClubUsers } from "@/lib/membership.functions";
@@ -186,9 +187,11 @@ function ManagerUsersPage() {
             onChange={(e) => setLifecycle(e.target.value)}
           >
             <option value="all">All statuses</option>
+            {/* The value stays the stored enum (it is what the filter matches
+                on); only the text a manager reads is put through the label. */}
             {lifecycleStatuses.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {lifecycleLabel(s)}
               </option>
             ))}
           </select>
@@ -312,7 +315,12 @@ function ManagerUsersPage() {
                       <td className="px-3 py-2">{r.phone ?? "—"}</td>
                       <td className="px-3 py-2">
                         <Pill
-                          label={r.lifecycle_status}
+                          label={lifecycleLabel(r.lifecycle_status, {
+                            status: r.latest_membership_status ?? "",
+                            kind: r.latest_plan_kind,
+                            sessions_remaining: r.latest_sessions_remaining,
+                          })}
+                          preserveCase
                           className={lifecycleClass(r.lifecycle_status)}
                         />
                       </td>
@@ -342,7 +350,12 @@ function ManagerUsersPage() {
                             <span>{r.latest_plan_name}</span>
                             {r.latest_membership_status ? (
                               <Pill
-                                label={r.latest_membership_status}
+                                label={membershipStatusLabel({
+                                  status: r.latest_membership_status,
+                                  kind: r.latest_plan_kind,
+                                  sessions_remaining: r.latest_sessions_remaining,
+                                })}
+                                preserveCase
                                 className={membershipClass(r.latest_membership_status)}
                               />
                             ) : null}

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
 import { membershipClass } from "@/lib/status-colours";
+import { membershipStatusLabel } from "@/lib/status-labels";
 import { formatCents } from "@/lib/validation";
 import { listMemberships } from "@/lib/membership.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -110,7 +111,11 @@ function ManagerMembershipsPage() {
                     <td className="px-3 py-2">{r.uts_student_number ?? "—"}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.payment_reference}</td>
                     <td className="px-3 py-2">
-                      <Pill label={r.status} className={membershipClass(r.status)} />
+                      <Pill
+                        label={membershipStatusLabel(r)}
+                        preserveCase
+                        className={membershipClass(r.status)}
+                      />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <MembershipRowActions membership={r} onChanged={refresh} />

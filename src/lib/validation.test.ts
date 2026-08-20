@@ -35,6 +35,7 @@ import {
   decodeDataUrlPng,
   deriveExpandedWaivers,
   deriveWaiverListStatuses,
+  endsWithCredits,
   interestSchema,
   isFutureSigningDate,
   isMinorOn,
@@ -1703,6 +1704,27 @@ describe("isUtsStudent", () => {
     expect(isUtsStudent("")).toBe(false);
     expect(isUtsStudent(null)).toBe(false);
     expect(isUtsStudent(undefined)).toBe(false);
+  });
+});
+
+describe("endsWithCredits", () => {
+  // Which plans are sold as a NUMBER of classes rather than a stretch of time.
+  // The naming of every ended membership on screen hangs off this answer.
+  it("is true for the plans that end when their classes run out", () => {
+    expect(endsWithCredits("trial")).toBe(true);
+    expect(endsWithCredits("session")).toBe(true);
+  });
+
+  it("is false for the plans that end on a date", () => {
+    expect(endsWithCredits("period")).toBe(false);
+    expect(endsWithCredits("insurance")).toBe(false);
+  });
+
+  it("is false for an unknown or missing kind, so nothing claims a class count", () => {
+    expect(endsWithCredits("something_new")).toBe(false);
+    expect(endsWithCredits(null)).toBe(false);
+    expect(endsWithCredits(undefined)).toBe(false);
+    expect(endsWithCredits("")).toBe(false);
   });
 });
 

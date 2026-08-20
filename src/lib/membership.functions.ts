@@ -1371,6 +1371,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
         price_cents: m.price_cents,
         is_student: m.is_student,
         uts_student_number: m.uts_student_number,
+        sessions_remaining: m.sessions_remaining,
         created_at: m.created_at,
       })),
       plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
