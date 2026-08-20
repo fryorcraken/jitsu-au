@@ -14,7 +14,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { CopyButton } from "@/components/site/CopyButton";
 import { blogPostClass } from "@/lib/status-colours";
+import { canonicalUrl } from "@/lib/seo";
 import { formatDateTime } from "@/lib/dates";
 import { deleteBlogPost, listAllBlogPosts } from "@/lib/blog.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -110,13 +112,28 @@ function BlogPostsPage() {
               {rows.map((row) => (
                 <tr key={row.id} className="border-t">
                   <td className="p-3 font-medium">
-                    <Link
-                      to="/manager/blog/$id"
-                      params={{ id: row.id }}
-                      className="hover:underline"
-                    >
-                      {row.title}
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <Link
+                        to="/manager/blog/$id"
+                        params={{ id: row.id }}
+                        className="hover:underline"
+                      >
+                        {row.title}
+                      </Link>
+                      {/* Next to the title, not with the row's other actions:
+                          those sit off the right edge of a table this wide, so
+                          on a phone they need a horizontal scroll to reach.
+                          Only published posts get one, because a draft's URL
+                          is a 404 for everyone who isn't a manager. */}
+                      {row.status === "published" && (
+                        <CopyButton
+                          text={canonicalUrl(`/blog/${row.slug}`)}
+                          label="Copy link"
+                          ariaLabel={`Copy link to ${row.title}`}
+                          className="shrink-0"
+                        />
+                      )}
+                    </div>
                   </td>
                   <td className="p-3">
                     <Pill label={row.status} className={blogPostClass(row.status)} />

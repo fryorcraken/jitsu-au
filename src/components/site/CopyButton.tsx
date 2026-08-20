@@ -6,8 +6,14 @@ import { Button } from "@/components/ui/button";
 interface CopyButtonProps {
   /** The exact string put on the clipboard. */
   text: string;
-  /** Button label, e.g. "Copy reference". Also the accessible name. */
+  /** Button label, e.g. "Copy reference". Also the accessible name by default. */
   label: string;
+  /**
+   * Accessible name, when the visible label is not enough on its own. A table
+   * of rows each with a "Copy link" button reads as a dozen identical buttons
+   * to a screen reader; this says which row it belongs to.
+   */
+  ariaLabel?: string;
   className?: string;
 }
 
@@ -19,13 +25,14 @@ interface CopyButtonProps {
  * caller keeps the value visible on screen, and the toast tells the person to
  * select it by hand rather than leaving a button that silently does nothing.
  */
-export function CopyButton({ text, label, className }: CopyButtonProps) {
+export function CopyButton({ text, label, ariaLabel, className }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
+      aria-label={ariaLabel}
       className={className}
       onClick={async () => {
         try {

@@ -115,7 +115,14 @@ convention as every other public form.
 
 `/manager/blog` lists every post regardless of status; "New post" opens the
 composer (`/manager/blog/new`), an existing one opens for editing
-(`/manager/blog/:id`). The composer is a Markdown textarea with a small
+(`/manager/blog/:id`). A published post carries a **Copy link** button next to
+its title, which puts the post's canonical `https://jitsu.au/blog/<slug>`
+address on the clipboard (`canonicalUrl`, so it is the public address whatever
+host the manager is signed in on) ready to paste into a message or a social
+post. It sits with the title rather than with View/Delete because those are off
+the right edge of the table on a phone. A draft has no button: the public route
+serves published posts only, so a draft's URL is a 404 for everyone it is sent
+to. The composer is a Markdown textarea with a small
 formatting toolbar (bold/italic/heading/list/link), an "Insert image" button
 (uploads to `blog-media`, inserts a Markdown image), an "Insert video" dialog
 (YouTube links embed inline; anything else shows as a plain link), a separate
