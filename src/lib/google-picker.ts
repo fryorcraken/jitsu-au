@@ -5,6 +5,15 @@
  * server-side Drive connector uses: `drive.file` grants are recorded per
  * (user, OAuth client, file), not per token, so whatever they pick here
  * becomes reachable by the server-side upload too.
+ *
+ * That "per (user, OAuth client, file)" is the whole reason this file is
+ * fussy about identity. Everything Google checks when the manager presses
+ * Select is checked silently: a missing API key, an app id from another
+ * project, or a browser signed into a different Google account all end the
+ * same way, with a greyed-out Select button and no callback. So the picker is
+ * only offered when both halves of the project are configured
+ * (`VITE_GOOGLE_OAUTH_CLIENT_ID` and `VITE_GOOGLE_PICKER_API_KEY`, with the
+ * Picker API enabled on that project), and the account is checked up front.
  */
 
 import { FOLDER_MIME_TYPE } from "./google-drive.constants";
@@ -27,9 +36,10 @@ export interface GooglePickerView {
   setLabel: (label: string) => GooglePickerView;
 }
 
-interface GooglePickerBuilder {
+export interface GooglePickerBuilder {
   addView: (view: GooglePickerView) => GooglePickerBuilder;
   setOAuthToken: (token: string) => GooglePickerBuilder;
+  setDeveloperKey: (key: string) => GooglePickerBuilder;
   setOrigin: (origin: string) => GooglePickerBuilder;
   setTitle: (title: string) => GooglePickerBuilder;
   setAppId: (appId: string) => GooglePickerBuilder;
@@ -55,9 +65,10 @@ declare global {
           initTokenClient(config: {
             client_id: string;
             scope: string;
+            login_hint?: string;
             callback: (resp: { access_token?: string; error?: string }) => void;
+            error_callback?: (err?: { type?: string; message?: string }) => void;
           }): { requestAccessToken: (opts?: { prompt?: string }) => void };
-          revoke(token: string, done: () => void): void;
         };
       };
       picker: GooglePickerNamespace;
@@ -93,7 +104,53 @@ async function loadPickerLibrary(): Promise<void> {
   await new Promise<void>((resolve) => window.gapi!.load("picker", () => resolve()));
 }
 
-async function requestAccessToken(clientId: string): Promise<string> {
+/**
+ * Fetches Google's two scripts ahead of the manager pressing Browse.
+ *
+ * The sign-in popup has to open inside the click that asked for it, or the
+ * browser treats it as unsolicited and blocks it. Awaiting a script download
+ * first spends the click's transient activation, so the download happens when
+ * the card mounts instead. Failures are ignored on purpose: this is a warm-up,
+ * and `pickDriveFolder` reports for real if the scripts are genuinely missing.
+ */
+export function preloadGooglePicker(): void {
+  void loadScript(GIS_SRC).catch(() => {});
+  void loadPickerLibrary().catch(() => {});
+}
+
+/**
+ * Google's sign-in failures arrive as bare codes (`access_denied`,
+ * `popup_closed`). They now land in an alert that stays on screen, so they have
+ * to be sentences a manager can act on rather than something to paste into a
+ * search box.
+ */
+export function signInErrorMessage(code: string | undefined): string {
+  switch (code) {
+    case "popup_failed_to_open":
+      return "Google's sign-in window could not open. Allow pop-ups for this site and try again.";
+    case "popup_closed":
+      return "Google sign-in was closed before it finished.";
+    case "access_denied":
+      return "Google would not give this site access. Try again and allow it to see the folder you choose.";
+    default:
+      return "Google sign-in did not finish. Try again.";
+  }
+}
+
+/**
+ * `login_hint` is the connected Google account's address. Without it the token
+ * popup silently uses whichever account the browser happens to have as its
+ * default, and a manager signed into two accounts then picks a folder their
+ * *connection* cannot see: `drive.file` access is recorded against (Google
+ * account, OAuth client, file), so the pick looks fine and the server's
+ * read-back 404s.
+ *
+ * `error_callback` is the other half of settling this promise. `callback` only
+ * fires on a token response, so without it a closed or blocked popup leaves
+ * every await below hanging: the button would sit on "Opening..." with nothing
+ * to press, which is the failure this whole file exists to stop.
+ */
+async function requestAccessToken(clientId: string, loginHint?: string): Promise<string> {
   await loadScript(GIS_SRC);
   if (!window.google) throw new Error("Google Identity Services did not load");
   const google = window.google;
@@ -101,16 +158,63 @@ async function requestAccessToken(clientId: string): Promise<string> {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: DRIVE_FILE_SCOPE,
+      ...(loginHint ? { login_hint: loginHint } : {}),
       callback: (resp) => {
         if (resp.error || !resp.access_token) {
-          reject(new Error(resp.error ?? "Google sign-in was cancelled"));
+          reject(new Error(signInErrorMessage(resp.error)));
           return;
         }
         resolve(resp.access_token);
       },
+      error_callback: (err) => reject(new Error(signInErrorMessage(err?.type))),
     });
     client.requestAccessToken();
   });
+}
+
+/** Long enough for a slow phone, short enough that nobody watches a dead button. */
+const ACCOUNT_CHECK_TIMEOUT_MS = 8000;
+
+/**
+ * The account the picker token belongs to, or null if Drive would not say.
+ * `about.get` is readable under `drive.file`, and it is the only way to learn
+ * which account the popup actually signed in as: the token itself carries no
+ * address, and the `userinfo` endpoints need scopes this token does not have.
+ *
+ * This sits between the token and the picker opening, so it is bounded: a
+ * request that stalls rather than fails (captive portal, extension, proxy)
+ * would otherwise hang the browse for good.
+ */
+async function tokenAccountEmail(token: string): Promise<string | null> {
+  try {
+    const res = await fetch("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)", {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(ACCOUNT_CHECK_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { user?: { emailAddress?: string } };
+    return body.user?.emailAddress ?? null;
+  } catch {
+    // A slow or blocked request is not a reason to stop the manager picking:
+    // a mismatch they were not warned about still fails with a readable
+    // message, one step later, from the server.
+    return null;
+  }
+}
+
+/**
+ * The message for "you are picking as the wrong Google account", or null when
+ * there is nothing to complain about. A pick made under the wrong account fails
+ * later, on the server, as an unreadable folder id, so it is worth catching
+ * here where we can still name both accounts.
+ */
+export function accountMismatchMessage(
+  pickerEmail: string | null,
+  connectedEmail: string | null | undefined,
+): string | null {
+  if (!pickerEmail || !connectedEmail) return null;
+  if (pickerEmail.trim().toLowerCase() === connectedEmail.trim().toLowerCase()) return null;
+  return `Google signed you in as ${pickerEmail}, but this site's Drive is connected as ${connectedEmail}. Sign in as ${connectedEmail} and try again, or reconnect Google Drive with ${pickerEmail}.`;
 }
 
 /**
@@ -195,45 +299,100 @@ export function readPickerResponse(
 }
 
 /**
+ * Assembles the picker. Split from `pickDriveFolder` so the builder wiring can
+ * be pinned by a test: everything Google enforces when the manager presses
+ * Select lives here, and getting any of it wrong fails the same silent way.
+ *
+ * `setDeveloperKey` is the one this file was missing. Google documents the
+ * builder as taking a view, an OAuth token, a developer key and a callback,
+ * and a picker without the key is the leading explanation for browsing working
+ * and then Select doing nothing at all. It is not the only candidate: the
+ * Picker API being disabled on the project, or the key's own restrictions
+ * refusing the call, look identical from here, because none of them reach the
+ * callback. The key must come from the same Cloud project as the OAuth client.
+ */
+export function buildFolderPicker(
+  picker: GooglePickerNamespace,
+  opts: {
+    token: string;
+    developerKey: string;
+    appId: string | null;
+    origin: string;
+    onResponse: (data: PickerResponse) => void;
+  },
+): { setVisible: (visible: boolean) => void } {
+  const builder = new picker.PickerBuilder()
+    .setOAuthToken(opts.token)
+    .setDeveloperKey(opts.developerKey)
+    // Restricts the picker's postMessage response channel to this page's
+    // own origin, per Google's Picker integration guidance.
+    .setOrigin(opts.origin)
+    .setTitle("Choose a folder for signed waivers");
+
+  if (opts.appId) builder.setAppId(opts.appId);
+  for (const view of buildFolderViews(picker)) builder.addView(view);
+
+  return builder.setCallback(opts.onResponse).build();
+}
+
+export interface PickDriveFolderOptions {
+  /** OAuth client id, which must be the one the server-side connector runs on. */
+  clientId: string;
+  /** Browser API key from the same Cloud project, with the Picker API enabled. */
+  developerKey: string;
+  /** The Google account this site's Drive is connected as, when we know it. */
+  connectedEmail?: string | null;
+  /**
+   * Called once the dialog is on screen, with a way to give up on it.
+   *
+   * Everything inside that dialog is Google's, and it only talks back on a pick
+   * or a cancel. If it refuses the pick, or shows an error of its own and the
+   * manager dismisses it, nothing reaches us and the browse would wait forever.
+   * The caller uses this to put a way out on our own page.
+   */
+  onOpen?: (close: () => void) => void;
+}
+
+/**
  * Opens Google Picker restricted to folder selection. Resolves with the
  * picked folder, or null if the manager closed the picker without choosing one.
  */
-export async function pickDriveFolder(clientId: string): Promise<PickedDriveFolder | null> {
-  const [, token] = await Promise.all([loadPickerLibrary(), requestAccessToken(clientId)]);
+export async function pickDriveFolder(
+  opts: PickDriveFolderOptions,
+): Promise<PickedDriveFolder | null> {
+  const [, token] = await Promise.all([
+    loadPickerLibrary(),
+    requestAccessToken(opts.clientId, opts.connectedEmail ?? undefined),
+  ]);
   const google = window.google;
   if (!google) throw new Error("Google Identity Services did not load");
 
+  const mismatch = accountMismatchMessage(await tokenAccountEmail(token), opts.connectedEmail);
+  if (mismatch) throw new Error(mismatch);
+
   return new Promise((resolve, reject) => {
     try {
-      // The token is scoped to this one picker session and used nowhere else,
-      // so once the manager has picked (or cancelled) there's no reason for it
-      // to remain valid — revoke it rather than leave it live until Google's
-      // own expiry.
-      const finish = (result: PickedDriveFolder | null) => {
-        google.accounts.oauth2.revoke(token, () => {});
-        resolve(result);
-      };
-
-      const builder = new google.picker.PickerBuilder()
-        .setOAuthToken(token)
-        // Restricts the picker's postMessage response channel to this page's
-        // own origin, per Google's Picker integration guidance.
-        .setOrigin(window.location.origin)
-        .setTitle("Choose a folder for signed waivers");
-
-      const appId = appIdFromClientId(clientId);
-      if (appId) builder.setAppId(appId);
-
-      for (const view of buildFolderViews(google.picker)) builder.addView(view);
-
-      const picker = builder
-        .setCallback((data: PickerResponse) => {
+      // Deliberately no `oauth2.revoke` when we're done. Revoking an access
+      // token revokes the whole grant for this (account, OAuth client) pair:
+      // it would tear up the per-file access the pick just recorded, and the
+      // connector's own refresh token with it, disconnecting Drive entirely.
+      // The token is short-lived and Google expires it on its own.
+      const picker = buildFolderPicker(google.picker, {
+        token,
+        developerKey: opts.developerKey,
+        appId: appIdFromClientId(opts.clientId),
+        origin: window.location.origin,
+        onResponse: (data) => {
           const result = readPickerResponse(google.picker, data);
-          if (result.status === "picked") finish(result.folder);
-          else if (result.status === "cancelled") finish(null);
-        })
-        .build();
+          if (result.status === "picked") resolve(result.folder);
+          else if (result.status === "cancelled") resolve(null);
+        },
+      });
       picker.setVisible(true);
+      opts.onOpen?.(() => {
+        picker.setVisible(false);
+        resolve(null);
+      });
     } catch (e) {
       reject(e instanceof Error ? e : new Error("Failed to open Google Picker"));
     }

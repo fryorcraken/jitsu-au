@@ -5,7 +5,7 @@
 // rejects), and an unset size must go out as `null` rather than "".
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const updateMyProfile = vi.fn().mockResolvedValue({ ok: true, fields: [] });
@@ -72,6 +72,13 @@ vi.mock("@/lib/google-drive.functions", () => ({
   setGoogleDriveFolderFromPicker: vi.fn(),
 }));
 
+// The picker itself is Google's; what this file pins is the wiring into it.
+const mockPickDriveFolder = vi.fn();
+vi.mock("@/lib/google-picker", () => ({
+  pickDriveFolder: (...args: unknown[]) => mockPickDriveFolder(...args),
+  preloadGooglePicker: vi.fn(),
+}));
+
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: { auth: { updateUser: vi.fn() } },
 }));
@@ -80,13 +87,21 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 
+// Mutable so the manager-only cards (Google Drive) can be rendered by the few
+// tests that need them, without a second copy of this whole mock setup.
+const mockRoles = { isManager: false };
+
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({
     user: { id: "u1", email: "ada@example.com", email_confirmed_at: "2026-01-01T00:00:00Z" },
     session: null,
     loading: false,
   }),
-  useRoles: () => ({ roles: ["member"], loading: false, isManager: false }),
+  useRoles: () => ({
+    roles: mockRoles.isManager ? ["manager"] : ["member"],
+    loading: false,
+    isManager: mockRoles.isManager,
+  }),
 }));
 
 const { Route } = await import("./account");
@@ -356,6 +371,122 @@ describe("/account", () => {
     expect(consentCard.queryByRole("button", { name: "Revert" })).toBeNull();
     expect(consentCard.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(updateMyProfile).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Browsing needs an OAuth client id AND a Picker API key from the same Cloud
+   * project. Offered without the key, the Google window opens, browses, and
+   * then silently refuses to hand the folder back, so the manager is better
+   * off being pointed at the name field than at that dead end.
+   */
+  describe("the Google Drive card", () => {
+    async function renderConnected() {
+      mockRoles.isManager = true;
+      const { getGoogleDriveStatus } = await import("@/lib/google-drive.functions");
+      vi.mocked(getGoogleDriveStatus).mockResolvedValue({
+        connected: true,
+        email: "club@jitsu.au",
+        folderId: null,
+        folderName: null,
+      } as never);
+      await renderLoaded();
+      await screen.findByLabelText("Drive folder");
+      return within(card("Google Drive"));
+    }
+
+    function configurePicker() {
+      vi.stubEnv("VITE_GOOGLE_OAUTH_CLIENT_ID", "123456789012-abc.apps.googleusercontent.com");
+      vi.stubEnv("VITE_GOOGLE_PICKER_API_KEY", "AIza-key");
+    }
+
+    afterEach(async () => {
+      mockRoles.isManager = false;
+      const { getGoogleDriveStatus } = await import("@/lib/google-drive.functions");
+      vi.mocked(getGoogleDriveStatus).mockResolvedValue({ connected: false } as never);
+      mockPickDriveFolder.mockReset();
+      vi.unstubAllEnvs();
+    });
+
+    it("offers browsing, and says how to select a folder, once the picker is configured", async () => {
+      configurePicker();
+
+      const driveCard = await renderConnected();
+
+      expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeEnabled();
+      // Picker has no "choose the folder I'm in": opening a folder leaves
+      // Select greyed out, which is what sent the manager round in circles.
+      expect(driveCard.getByText(/click a folder once/i)).toBeInTheDocument();
+    });
+
+    it("disables browsing and points at the name field when the Picker key is missing", async () => {
+      vi.stubEnv("VITE_GOOGLE_OAUTH_CLIENT_ID", "123456789012-abc.apps.googleusercontent.com");
+      vi.stubEnv("VITE_GOOGLE_PICKER_API_KEY", "");
+
+      const driveCard = await renderConnected();
+
+      // Disabled rather than absent: the manager is the person who can fix
+      // this, and a button that vanished tells them nothing to fix.
+      expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeDisabled();
+      expect(driveCard.getByText(/until this site has its google picker key/i)).toBeInTheDocument();
+    });
+
+    it("picks with the site's key, as the account the connection is on", async () => {
+      // Drop `connectedEmail` and the login hint plus the whole wrong-account
+      // check go quietly dead, with every picker test still green.
+      configurePicker();
+      mockPickDriveFolder.mockResolvedValue(null);
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      await waitFor(() => expect(mockPickDriveFolder).toHaveBeenCalledTimes(1));
+      expect(mockPickDriveFolder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientId: "123456789012-abc.apps.googleusercontent.com",
+          developerKey: "AIza-key",
+          connectedEmail: "club@jitsu.au",
+        }),
+      );
+    });
+
+    it("gives the manager a way out while Google's window is open", async () => {
+      // Google's dialog only talks back on a pick or a cancel. If it refuses
+      // the pick, nothing reaches us, and without this the button would sit on
+      // "Opening..." until the page was reloaded. That was the reported bug.
+      configurePicker();
+      mockPickDriveFolder.mockImplementation(
+        (opts: { onOpen?: (close: () => void) => void }) =>
+          new Promise((resolve) => opts.onOpen?.(() => resolve(null))),
+      );
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      const cancel = await screen.findByRole("button", { name: "Cancel" });
+      await user.click(cancel);
+
+      await waitFor(() =>
+        expect(driveCard.getByRole("button", { name: "Browse in Drive" })).toBeEnabled(),
+      );
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    });
+
+    it("keeps a failed pick on screen, where it can be read and retried", async () => {
+      configurePicker();
+      mockPickDriveFolder.mockRejectedValue(new Error("Google sign-in did not finish. Try again."));
+      const { toast } = await import("sonner");
+      vi.mocked(toast.error).mockClear();
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(/google sign-in did not finish/i);
+      // A toast would take the one instruction away after a few seconds.
+      expect(toast.error).not.toHaveBeenCalled();
+    });
   });
 
   // The password rules themselves are pinned in `lib/password-policy.test.ts`.
