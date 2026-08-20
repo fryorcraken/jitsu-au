@@ -234,8 +234,11 @@ Three things about that publish are worth knowing:
   Screenshots are large and a normal history would keep every version of every
   picture forever. Two runs racing is handled by `--force-with-lease`: the loser
   retries rather than overwriting the other's pictures.
-- A **fork's** pull request cannot write that branch, so its comment links the
-  downloadable artifact instead. Nothing fails.
+- A **fork's** pull request gets a read-only token whatever the workflow asks
+  for, so it can neither push the store branch nor post the comment. Its run
+  still walks everything and still uploads the gallery as an artifact; the
+  gallery is on the run's own page rather than on the pull request. Nothing
+  fails.
 
 The suite is allowed one retry, for the genuine flake of a browser against a
 server against a database. It is not a licence for a flaky test — anything that

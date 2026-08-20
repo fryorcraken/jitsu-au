@@ -514,8 +514,9 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     so a deploy job on a pull request's own branch is refused before it starts
     (no runner, no log, just a red check). The cost is that `workflow_run` only
     fires from `main`'s copy of the file, so **a change to the deploy cannot be
-    seen working until it is merged**. A fork's pull request cannot push the
-    store branch, so its comment links the downloadable artifact instead.
+    seen working until it is merged**. A fork's pull request gets a read-only
+    token whatever the workflow asks for, so it neither publishes nor comments:
+    its gallery is the artifact on the run's own page.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see "Schema drift" in `docs/database-changes.md`).

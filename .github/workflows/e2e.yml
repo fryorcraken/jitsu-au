@@ -160,8 +160,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: bash scripts/publish-pr-gallery.sh
 
+      # Same same-repository condition as the publish above, for the same
+      # reason: a fork's pull request gets a READ-ONLY token whatever this
+      # workflow asks for, so the API call would 403. `continue-on-error` would
+      # swallow that, leaving a fork contributor with no comment and no
+      # explanation — better to skip it honestly. Their run still walks
+      # everything and still uploads the gallery as an artifact.
       - name: Comment on the pull request
-        if: always() && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v8
         continue-on-error: true
         env:

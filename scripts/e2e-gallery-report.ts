@@ -331,9 +331,28 @@ function escapeMarkdown(value: string): string {
  * The link to the downloadable artifact is added by the workflow, which is the
  * only thing that knows the URL: it exists only once the upload has happened.
  */
+/**
+ * GitHub refuses a comment body over 65536 characters with a 422, and the
+ * workflow posts with `continue-on-error`, so an oversized comment would not
+ * fail — it would simply never appear. A run big enough to hit that is a run
+ * whose pictures are worth even more, so the comment sheds the inline strips
+ * and keeps its links rather than being lost.
+ */
+const COMMENT_LIMIT = 60_000;
+
 export function buildComment(
   entries: Entry[],
   options: { baseUrl?: string; reportUrl?: string; commit?: string },
+): string {
+  const withImages = renderComment(entries, options, true);
+  if (withImages.length <= COMMENT_LIMIT) return withImages;
+  return renderComment(entries, options, false);
+}
+
+function renderComment(
+  entries: Entry[],
+  options: { baseUrl?: string; reportUrl?: string; commit?: string },
+  embedImages: boolean,
 ): string {
   const { baseUrl, commit } = options;
   const failed = entries.filter((entry) => !entry.ok);
@@ -352,7 +371,7 @@ export function buildComment(
       .map((entry) => {
         const project = entry.project ? ` (\`${entry.project}\`)` : "";
         const title = `**${entry.titlePath.join(" › ")}**${project}${entry.ok ? "" : ` — ❌ ${statusLabel(entry.status)}`}`;
-        if (!baseUrl || entry.shots.length === 0) return title;
+        if (!baseUrl || !embedImages || entry.shots.length === 0) return title;
         return [title, "", imageStrip(entry, baseUrl)].join("\n");
       })
       .join("\n\n");
@@ -364,7 +383,9 @@ export function buildComment(
     "",
     links.join(" · "),
     "",
-    "Every screen below was photographed by the end-to-end suite as it walked the flow, against a seeded local club (fixture people, not the real one).",
+    embedImages
+      ? "Every screen below was photographed by the end-to-end suite as it walked the flow, against a seeded local club (fixture people, not the real one)."
+      : "This run took more screenshots than a comment can hold, so the strips are in the gallery. Every screen was photographed by the end-to-end suite as it walked the flow, against a seeded local club (fixture people, not the real one).",
     "",
     ...flowSections,
     "",

@@ -299,4 +299,25 @@ describe("buildComment", () => {
   it("leads with the failure count when something failed", () => {
     expect(buildComment(entries, {})).toContain("1 failed");
   });
+
+  it("sheds the pictures rather than being refused when a run is enormous", () => {
+    // GitHub 422s a body over 65536 characters and the workflow posts with
+    // continue-on-error, so an oversized comment would not fail — it would
+    // silently never appear.
+    const huge = Array.from({ length: 400 }, (_, index) => ({
+      ...entries[0],
+      titlePath: [`a flow with a reasonably long name, number ${index}`],
+      shots: Array.from({ length: 12 }, (_, shot) => ({
+        name: `a step with a reasonably long name, number ${shot}`,
+        file: `/tmp/${index}-${shot}-with-a-long-attachment-name.png`,
+      })),
+    }));
+
+    const comment = buildComment(huge, { baseUrl: "https://example.test/pr-1" });
+    expect(comment.length).toBeLessThan(65_536);
+    expect(comment).not.toContain("<img");
+    expect(comment).toContain("more screenshots than a comment can hold");
+    // The links are the whole point of the fallback.
+    expect(comment).toContain("[**Open the gallery**](https://example.test/pr-1/index.html)");
+  });
 });

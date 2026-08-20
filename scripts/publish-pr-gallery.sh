@@ -50,41 +50,47 @@ if [[ "${PR_GALLERY_REMOVE:-}" != "1" && ! -d "$GALLERY_DIR" ]]; then
   exit 1
 fi
 
+# Every step below says `|| return 1` for itself, which looks redundant next to
+# `set -e` and is not: the retry loop at the bottom has to inspect this
+# function's exit status, and bash SUSPENDS errexit for the whole dynamic extent
+# of a command whose status is being tested — inside functions and subshells
+# alike. Without the explicit returns, a half-finished copy would fall through
+# to the commit and be published as a success with screenshots missing.
 publish_once() {
   local work
-  work="$(mktemp -d)"
+  work="$(mktemp -d)" || return 1
   trap 'rm -rf "$work"' RETURN
 
   # What the branch is at right now. Empty means it does not exist yet, which
   # is the first run on a repository and not an error.
   local head_sha
-  head_sha="$(git ls-remote "$REMOTE" "refs/heads/${BRANCH}" | cut -f1)"
+  head_sha="$(git ls-remote "$REMOTE" "refs/heads/${BRANCH}" | cut -f1)" || return 1
 
   if [[ -n "$head_sha" ]]; then
-    git clone --quiet --depth 1 --branch "$BRANCH" "$REMOTE" "$work"
+    git clone --quiet --depth 1 --branch "$BRANCH" "$REMOTE" "$work" || return 1
   else
-    git init --quiet "$work"
+    git init --quiet "$work" || return 1
   fi
 
-  rm -rf "${work:?}/${DIR}"
+  rm -rf "${work:?}/${DIR}" || return 1
   if [[ "${PR_GALLERY_REMOVE:-}" != "1" ]]; then
-    mkdir -p "${work}/${DIR}"
-    cp -R "${GALLERY_DIR}/." "${work}/${DIR}/"
+    mkdir -p "${work}/${DIR}" || return 1
+    cp -R "${GALLERY_DIR}/." "${work}/${DIR}/" || return 1
   fi
 
   # Jekyll would drop the underscore-prefixed files Playwright's report ships.
-  touch "${work}/.nojekyll"
-  write_index "$work"
+  touch "${work}/.nojekyll" || return 1
+  write_index "$work" || return 1
 
   (
-    cd "$work"
-    git config user.name "github-actions[bot]"
-    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-    git checkout --quiet --orphan publish
-    git add -A
+    cd "$work" || exit 1
+    git config user.name "github-actions[bot]" || exit 1
+    git config user.email "41898282+github-actions[bot]@users.noreply.github.com" || exit 1
+    git checkout --quiet --orphan publish || exit 1
+    git add -A || exit 1
     # An empty tree (the last pull request's directory just came off) still has
     # the index page and .nojekyll in it, so there is always something to commit.
-    git commit --quiet -m "Screenshots for pull request #${PR_NUMBER}"
+    git commit --quiet -m "Screenshots for pull request #${PR_NUMBER}" || exit 1
     if [[ -n "$head_sha" ]]; then
       git push --quiet --force-with-lease="refs/heads/${BRANCH}:${head_sha}" \
         "$REMOTE" "HEAD:refs/heads/${BRANCH}"
@@ -114,6 +120,8 @@ write_index() {
   } > "${work}/index.html"
 }
 
+# Safe as an `if` condition only because publish_once reports its own failures
+# explicitly — see the comment above it.
 for attempt in 1 2 3; do
   if publish_once; then
     echo "[gallery] published ${DIR} to ${BRANCH}"
