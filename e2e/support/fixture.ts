@@ -1,9 +1,10 @@
 // The seeded local club the end-to-end tests run against, and the guard that
 // keeps them off the hosted project.
 //
-// The manifest is written by scripts/seed-local-club.mjs — the same seed the PR
-// screenshots use, so there is one description of "a club with people in it"
-// rather than two that drift. docs/e2e-tests.md has the run instructions.
+// The manifest is written by scripts/seed-local-club.mjs, so there is one
+// description of "a club with people in it" and the pictures a reviewer sees are
+// of the same club the flows are proved against. docs/e2e-tests.md has the run
+// instructions.
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -118,7 +119,7 @@ export const APPLICANT_EMAIL = "applicant@example.com";
  * The seeded applicant's user id, resolved live rather than carried in the
  * manifest above: `personas` there is only the two people `auth.setup.ts`
  * signs in (a magic link per entry), and `params` is only the `$segment`
- * values `pr-screenshots-pages.mjs` needs for a route. The applicant is
+ * values `scripts/site-pages.ts` needs for a route. The applicant is
  * neither — never signed in, only ever the target of something a manager
  * does.
  *

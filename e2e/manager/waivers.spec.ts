@@ -1,7 +1,6 @@
 // A manager opens the waivers screen and sees what the club has been sent.
 
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "../support/test";
 import { readClubFixture } from "../support/fixture";
 import { expectPageRendered } from "../support/page";
 

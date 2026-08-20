@@ -11,19 +11,25 @@ import { storageStatePath } from "./e2e/support/fixture";
  * screen signed out, sign in and find their account. Full instructions,
  * including how to run it locally, are in docs/e2e-tests.md.
  *
+ * It is also where the pull request's screenshots come from. Every test is
+ * photographed as it goes (e2e/support/screenshots.ts) and the `tour` projects
+ * below open every page there is, so what a reviewer looks at is the flow the
+ * tests walked rather than a set of pages photographed cold by a second
+ * program. scripts/e2e-gallery.mjs turns the run into that gallery.
+ *
  * Three things about the setup are load-bearing:
  *
  *  - It runs the PRODUCTION build (`.output/server/index.mjs`), not the dev
  *    server, because SSR and the server functions are most of what is being
  *    tested and only the build exercises them the way Cloudflare will.
- *  - It runs against the same seeded local Supabase club as the PR screenshots
- *    (scripts/seed-local-club.mjs). Signing in walks a real Supabase magic
- *    link, so the session is stored exactly as a member's is.
+ *  - It runs against a seeded local Supabase club (scripts/seed-local-club.mjs).
+ *    Signing in walks a real Supabase magic link, so the session is stored
+ *    exactly as a member's is.
  *  - It never talks to the hosted project. e2e/support/fixture.ts refuses any
  *    Supabase URL that is not loopback.
  */
 
-/** Kept off 4173 so a screenshot run and an e2e run can share a machine. */
+/** Kept off Vite's own preview port so a dev server can stay up alongside. */
 const PORT = Number(process.env.E2E_PORT ?? 4174);
 
 /** Set to test something already running (a dev server, a preview deploy). */
@@ -51,18 +57,42 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
 
+  // Twice Playwright's default. Every test now also photographs itself, a
+  // full-page screenshot of a long page is not instant, and the flows here are
+  // long on purpose (the new-member journey walks a dozen screens in one test).
+  // A timeout that a slow runner trips is a red build with no bug behind it.
+  timeout: 60_000,
+
+  // The JSON report is what scripts/e2e-gallery.mjs reads to build the picture
+  // gallery: it lists every test, its project, and the screenshots attached to
+  // it, in the order they were taken. Written into `outputDir`, which is
+  // emptied at the START of a run, so nothing here races the HTML reporter
+  // writing its own folder at the end.
   reporter: process.env.CI
-    ? [["github"], ["list"], ["html", { open: "never" }]]
-    : [["list"], ["html", { open: "never" }]],
+    ? [
+        ["github"],
+        ["list"],
+        ["html", { open: "never" }],
+        ["json", { outputFile: "./test-results/report.json" }],
+      ]
+    : [
+        ["list"],
+        ["html", { open: "never" }],
+        ["json", { outputFile: "./test-results/report.json" }],
+      ],
 
   use: {
     baseURL: BASE_URL,
     // Escape hatch for sandboxes that ship a chromium Playwright did not
-    // install (the PR screenshots have the same one). Unset everywhere else,
-    // where the pinned browser is the right one to use.
+    // install. Unset everywhere else, where the pinned browser is the right one
+    // to use.
     launchOptions: { executablePath: process.env.E2E_CHROMIUM || undefined },
-    // Only kept for a failure, so a green run leaves nothing behind and a red
-    // one can be replayed click by click from the report.
+    // The deliberate screenshots are taken by e2e/support/screenshots.ts, which
+    // is what the gallery is built from. These three are Playwright's own
+    // failure record: kept only for a failure, so a green run stays small and a
+    // red one can be replayed click by click from the report — including from
+    // the report published to GitHub Pages, where the trace viewer opens
+    // inline.
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -92,6 +122,22 @@ export default defineConfig({
       // Managers do their admin on a laptop, so that is the only width these
       // are walked at.
       use: { ...devices["Desktop Chrome"], storageState: storageStatePath("manager") },
+    },
+    // Every page the site serves, opened, asserted to have rendered, and
+    // photographed — the job the standalone screenshot script used to do, now
+    // one more thing the suite proves. Both widths, because a manager screen
+    // that breaks on a phone is a manager screen that breaks.
+    {
+      name: "tour",
+      testDir: "./e2e/tour",
+      dependencies: ["setup"],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "tour-mobile",
+      testDir: "./e2e/tour",
+      dependencies: ["setup"],
+      use: { ...devices["Pixel 5"] },
     },
   ],
 

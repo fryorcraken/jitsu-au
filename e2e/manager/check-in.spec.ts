@@ -4,8 +4,7 @@
 // signed in themselves (see applicantUserId in support/fixture.ts) — only
 // ever the person a manager is checking in or fixing up.
 
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "../support/test";
 import { APPLICANT_EMAIL, adminClient, applicantUserId } from "../support/fixture";
 import { expectPageRendered } from "../support/page";
 

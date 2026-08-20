@@ -34,9 +34,10 @@ dist-ssr
 *.sln
 *.sw?
 
-# Output of scripts/pr-screenshots.mjs (uploaded as a CI artifact, never committed)
-screenshots/
-screenshots-*/
+# Output of scripts/e2e-gallery.ts (published to Pages / uploaded as a CI
+# artifact, never committed)
+gallery/
+gallery-*/
 
 # Ids of the people scripts/seed-local-club.mjs put in the local database.
 # Regenerated on every seed, and meaningless against any other database.

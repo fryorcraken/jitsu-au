@@ -3,16 +3,17 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { PUBLIC_PAGES } from "../src/lib/public-pages";
 import {
   fillRouteParams,
   personaFor,
-  planSignedInGroups,
+  publicPaths,
   routeFileToPath,
-  signedInAvailability,
   signedInPaths,
-} from "./pr-screenshots-pages.mjs";
+  signedInPathsByPersona,
+} from "./site-pages";
 
-/** The real route files, the way the entrypoint lists them. Vitest runs at the repo root. */
+/** The real route files, the way the tour lists them. Vitest runs at the repo root. */
 function realRouteFiles() {
   return readdirSync(resolve(process.cwd(), "src/routes"), { recursive: true }).map(String).sort();
 }
@@ -68,13 +69,27 @@ describe("signedInPaths", () => {
   });
 });
 
+describe("publicPaths", () => {
+  it("walks the sitemap first, then the noindex pages nothing else can derive", () => {
+    const paths = publicPaths();
+    expect(paths.slice(0, PUBLIC_PAGES.length)).toEqual(PUBLIC_PAGES.map((page) => page.path));
+    expect(paths).toContain("/waiver");
+    expect(paths).toContain("/auth");
+  });
+
+  it("never lists a page twice, so no shot overwrites another", () => {
+    const paths = publicPaths();
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+});
+
 describe("personaFor", () => {
-  it("shoots manager screens as a manager", () => {
+  it("walks manager screens as a manager", () => {
     expect(personaFor("/manager")).toBe("manager");
     expect(personaFor("/manager/waivers")).toBe("manager");
   });
 
-  it("shoots the member area as a member", () => {
+  it("walks the member area as a member", () => {
     expect(personaFor("/account")).toBe("member");
     expect(personaFor("/kb/welcome")).toBe("member");
   });
@@ -94,7 +109,7 @@ describe("fillRouteParams", () => {
     expect(fillRouteParams("/account", {})).toBe("/account");
   });
 
-  it("reports a missing value rather than photographing a 404", () => {
+  it("reports a missing value rather than walking into a 404", () => {
     expect(fillRouteParams("/kb/$slug", {})).toBeNull();
     expect(fillRouteParams("/kb/$slug", undefined)).toBeNull();
   });
@@ -102,9 +117,9 @@ describe("fillRouteParams", () => {
 
 describe("routeFileToPath, on the shapes src/routes/README.md documents", () => {
   it("refuses a layout file rather than claiming the home page", () => {
-    // `/` would be the home page's own slug, so the member-area render of a
-    // layout would overwrite home.png and the contact sheet would show one
-    // picture under two headings.
+    // `/` would be the home page's own path, so the member-area render of a
+    // layout would be walked and photographed as the home page, and the
+    // gallery would show one picture under two headings.
     expect(routeFileToPath("_authenticated/_layout.tsx")).toBeNull();
     expect(routeFileToPath("_authenticated/_pathless._other.tsx")).toBeNull();
   });
@@ -123,8 +138,8 @@ describe("routeFileToPath, on the shapes src/routes/README.md documents", () => 
 describe("signedInPaths, against the real src/routes tree", () => {
   // The hand-written lists above prove the rules; this proves they still
   // describe this repo. It is the test that catches a new route file whose
-  // shape the derivation mishandles — which is how the screenshot job would
-  // silently stop covering a screen.
+  // shape the derivation mishandles — which is how the tour would silently
+  // stop covering a screen.
   const paths = signedInPaths(realRouteFiles());
 
   it("finds the member area and every manager screen", () => {
@@ -161,54 +176,28 @@ describe("signedInPaths, against the real src/routes tree", () => {
   });
 });
 
-describe("signedInAvailability", () => {
-  it("photographs the public pages alone when there is no seeded stack", () => {
-    expect(signedInAvailability(false, false)).toBe("public-only");
-  });
-
-  it("calls half a setup out rather than quietly shrinking the run", () => {
-    expect(signedInAvailability(false, true)).toBe("no-manifest");
-    expect(signedInAvailability(true, false)).toBe("no-credentials");
-  });
-
-  it("signs in when it has both", () => {
-    expect(signedInAvailability(true, true)).toBe("sign-in");
-  });
-});
-
-describe("planSignedInGroups", () => {
+describe("signedInPathsByPersona", () => {
   const files = [
     "_authenticated/account.tsx",
     "_authenticated/manager.index.tsx",
     "_authenticated/manager.users_.$userId.tsx",
   ];
-  const fixture = {
-    personas: { member: { email: "m@example.com" }, manager: { email: "p@example.com" } },
-    params: { userId: "abc" },
-  };
+  const params = { userId: "abc" };
 
   it("splits the pages by who has to be signed in, parameters filled", () => {
-    expect(planSignedInGroups(files, fixture)).toEqual([
-      { persona: "member", email: "m@example.com", paths: ["/account"] },
-      { persona: "manager", email: "p@example.com", paths: ["/manager", "/manager/users/abc"] },
-    ]);
+    expect(signedInPathsByPersona(files, params)).toEqual({
+      member: ["/account"],
+      manager: ["/manager", "/manager/users/abc"],
+    });
   });
 
   it("fails on a parameter the fixture cannot fill, rather than skipping the screen", () => {
-    expect(() => planSignedInGroups(files, { ...fixture, params: {} })).toThrow(
-      /no fixture value for .*\$userId/,
-    );
+    expect(() => signedInPathsByPersona(files, {})).toThrow(/no fixture value for .*\$userId/);
   });
 
   it("fails when a persona has no pages, which means the derivation broke", () => {
-    expect(() => planSignedInGroups(["_authenticated/manager.index.tsx"], fixture)).toThrow(
+    expect(() => signedInPathsByPersona(["_authenticated/manager.index.tsx"], params)).toThrow(
       /no member pages/,
-    );
-  });
-
-  it("fails when the manifest names nobody to sign in as", () => {
-    expect(() => planSignedInGroups(files, { ...fixture, personas: {} })).toThrow(
-      /names no member/,
     );
   });
 });

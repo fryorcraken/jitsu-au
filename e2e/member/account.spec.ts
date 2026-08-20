@@ -1,7 +1,6 @@
 // A signed-in member opens the member area and finds their own details.
 
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "../support/test";
 import { expectPageRendered } from "../support/page";
 
 test("the member area opens on the member's own account", async ({ page }) => {

@@ -1,8 +1,7 @@
 // A manager works the club's money: seeing invoices, raising one, recording a
 // payment, and cancelling/reopening a membership.
 
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "../support/test";
 import { adminClient, applicantUserId, readClubFixture } from "../support/fixture";
 import { expectPageRendered } from "../support/page";
 

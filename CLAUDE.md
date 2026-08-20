@@ -441,80 +441,80 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   `bun run test` must pass before you push.
 - **End-to-end tests** are a second suite, not part of `bun run test`: Playwright
   driving a real browser over a production build of the site, against a
-  throwaway local Supabase stack seeded by `scripts/seed-local-club.mjs` (the
-  same club the PR screenshots use). They live in `e2e/`, run with
-  `bun run test:e2e`, and cover **flows** — the interest funnel, the sign-in
-  gate, the member area, the manager screens — which is the only place SSR, the
-  server functions, RLS and the router's redirects are exercised together. Where
-  a rule can be proved in a `src/lib/` unit test, prove it there instead; e2e is
-  slow and shares one database. Full spec, including where a new spec goes and
-  the rules for writing one: **`docs/e2e-tests.md`**. Playwright is deliberately
-  **not** in `package.json` (Lock file strategy) — it is installed `--no-save`
-  at the version in `scripts/playwright-version.txt`.
+  throwaway local Supabase stack seeded by `scripts/seed-local-club.mjs`. They
+  live in `e2e/`, run with `bun run test:e2e`, and cover **flows** — the
+  interest funnel, the sign-in gate, the member area, the manager screens —
+  which is the only place SSR, the server functions, RLS and the router's
+  redirects are exercised together. Where a rule can be proved in a `src/lib/`
+  unit test, prove it there instead; e2e is slow and shares one database. Full
+  spec, including where a new spec goes and the rules for writing one:
+  **`docs/e2e-tests.md`**. Playwright is deliberately **not** in `package.json`
+  (Lock file strategy) — it is installed `--no-save` at the version in
+  `scripts/playwright-version.txt`.
 - **CI:** `.github/workflows/ci.yml` runs lint → typecheck → test → build on
   Linux with Bun for every PR and pushes to `main`. It installs via
   `bash scripts/bun-install.sh` (see Lock file strategy below), not a plain
   `bun install`. Before the install it runs `scripts/check-committed-env.mjs`,
   which fails if the committed `.env` holds anything but publishable values
-  (see "Environment variables"). `.github/workflows/e2e.yml` runs the end-to-end suite
-  alongside it (no repository secrets, same local-stack recipe as the
-  screenshots job).
-- **PR screenshots:** `.github/workflows/pr-screenshots.yml` photographs **every
-  page** on the branch at desktop and phone widths, uploads the PNGs plus an
-  `index.html` contact sheet as an artifact, and posts one sticky PR comment
-  linking to it. An Actions artifact is a zip you download, not something a
-  comment can embed, so reviewers download it and open `index.html`.
-  - It runs the whole site against a **throwaway local Supabase stack**:
-    `supabase start` (Postgres + Auth + PostgREST + Storage) with every
-    migration in `supabase/migrations` applied, then
-    `scripts/seed-local-club.mjs` fills it with a manager, a member, an
-    applicant and the rows the manager screens list. **No repository secrets
-    are involved** — the local stack's keys are the CLI's own development keys,
-    read from `supabase status`. The two things this buys are the signed-in
-    screens and a run that is identical on every branch and every fork.
-  - The trade: `/blog`, `/pricing` and the calendar show **seeded fixture
-    content**, not what is on `jitsu.au` today.
-  - The **signed-in** pages are **derived from the route files**
-    (`scripts/pr-screenshots-pages.mjs`): everything under
-    `src/routes/_authenticated/` and `src/routes/kb/`, shot as the manager for
-    `/manager/*` and as the member for the rest. **A new member or manager
-    screen is photographed the moment its route file exists.** A dynamic route
-    (`$userId`) needs an id in the seed's manifest, and one that has none fails
-    the job rather than leaving a gap nobody notices.
-  - The **public** pages are not derived and cannot be: they are `PUBLIC_PAGES`
-    from `src/lib/seo.ts` plus a hand-written list in `pr-screenshots.mjs`
-    (`/waiver`, `/auth`, `/reset-password`, `/thank-you`, `/app`). The extras
-    are `noindex`, and `seo.test.ts` fails if a `noindex` page is added to
-    `PUBLIC_PAGES` — so **a new public noindex page has to be added to that
-    list by hand**. `/update-password`, `/email-settings/$token` and
-    `/blog/$slug` are deliberately not shot; each needs a token only its own
-    email carries.
+  (see "Environment variables"). `.github/workflows/e2e.yml` runs the end-to-end
+  suite alongside it (no repository secrets — the local stack's keys are the
+  Supabase CLI's own development keys).
+- **PR screenshots come out of that same e2e run** — there is no separate
+  screenshot program any more. Every test is photographed as it goes and the
+  `tour` projects open every page there is, so a reviewer sees the flow as it
+  was walked (the form filled in, the confirmation, the manager approving it)
+  rather than a set of pages photographed cold. `scripts/e2e-gallery.ts` lays
+  the run out as one page, the workflow publishes it to **GitHub Pages** under
+  `pr-<n>/`, and one sticky PR comment embeds the flow strips inline. The full
+  spec is in **`docs/e2e-tests.md`**; the things that are not guessable:
+  - **Screenshots only exist where a spec uses the suite's own `test` object and
+    its `step`** (`e2e/support/test.ts`). `scripts/e2e-conventions.test.ts`
+    fails the unit suite if a spec imports `test` from `@playwright/test` or
+    calls the bare `test.step`, because the run would still be green and the
+    screen would just quietly stop appearing.
+  - The **signed-in** pages the tour walks are **derived from the route files**
+    (`scripts/site-pages.ts`): everything under `src/routes/_authenticated/`
+    and `src/routes/kb/`, walked as the manager for `/manager/*` and as the
+    member for the rest. **A new member or manager screen is covered the moment
+    its route file exists.** A dynamic route (`$userId`) needs an id in the
+    seed's manifest, and one that has none fails the run rather than leaving a
+    gap nobody notices.
+  - The **public** pages cannot be derived the same way: they are
+    `PUBLIC_PAGES` plus `PUBLIC_NOINDEX_PATHS` in `src/lib/public-pages.ts`
+    (`/waiver`, `/auth`, `/reset-password`, `/thank-you`, `/app`). The second
+    list is `noindex`, and `seo.test.ts` fails if a `noindex` page is added to
+    `PUBLIC_PAGES` — so **a new public noindex page has to be added there by
+    hand**. `/update-password`, `/email-settings/$token` and `/blog/$slug` are
+    deliberately not walked; each needs a token only its own email carries.
   - Signing in uses an admin-generated **magic link**, so the session is stored
     exactly as a real one is. It needs no redirect configuration: GoTrue accepts
-    any loopback redirect without consulting its allow list, so
-    `PR_SCREENSHOTS_PORT` can move on its own. **Do not add an `[auth]` block to
-    `supabase/config.toml`** for it — `supabase config push` would apply that to
-    the live project.
-  - Photographing **mutates the fixture**: opening `/notifications` marks the
+    any loopback redirect without consulting its allow list, so `E2E_PORT` can
+    move on its own. **Do not add an `[auth]` block to `supabase/config.toml`**
+    for it — `supabase config push` would apply that to the live project.
+  - Walking the site **mutates the fixture**: opening `/notifications` marks the
     member's unread ones read, opening a manager inbox stamps its "seen"
-    watermark. The run puts those back between viewports
-    (`restoreFixtureState`), which is a **known list** — a new screen that marks
+    watermark. `restoreSeenState` (`e2e/support/club-state.ts`) puts those back
+    after each pass, and it is a **known list** — a new screen that marks
     something read on open has to be added to it, or its unread state will only
-    ever appear at the first width.
+    ever appear in the desktop gallery.
   - A page that returns an error status, or that renders the router's error/404
     boundary (both arrive inside an ordinary 200, which is why those boundaries
-    carry `data-page-state`), fails the job. **It does not catch a route that
+    carry `data-page-state`), fails the tour. **It does not catch a route that
     handles its own loader error** and renders a card in place of its content —
     `/blog` and `/waiver` do exactly that, so a green run means every route
     rendered, not that every route has its data.
-  - Run it locally the same way CI does (`supabase start`, seed, build with
-    `NITRO_PRESET=node-server`, `bun scripts/pr-screenshots.mjs`); the header
-    comment in `scripts/pr-screenshots.mjs` has the exact commands. With no
-    seeded stack it falls back to the public pages alone. Half a setup (a
-    manifest without credentials, or the reverse) fails instead: signing in is a
-    service-role admin call, and GoTrue's `generate_link` **creates** the
-    account when it is missing, so a run must never point local fixture ids at
-    the club's real database.
+  - The gallery shows **seeded fixture content**: `/blog`, `/pricing` and the
+    calendar are the local club, not what is on `jitsu.au` today. That is the
+    trade for a run that is identical on every branch and every fork.
+  - Publishing is **GitHub Pages serving the `gh-pages` branch directly**, so
+    the run's push IS the publish — no deployment step, no environment. The
+    branch is rewritten as a single orphan commit each time (screenshots are
+    large; history would keep every version forever) with `--force-with-lease`
+    so a racing run retries rather than overwriting, and
+    `pr-gallery-cleanup.yml` removes a pull request's directory when it closes.
+    A fork's pull request gets a read-only token whatever the workflow asks for,
+    so it neither publishes nor comments: its gallery is the artifact on the
+    run's own page.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
   migration file against the **live** ledger. Not on PRs — it holds a
   production credential (see "Schema drift" in `docs/database-changes.md`).
@@ -870,9 +870,10 @@ Then hold the change to this:
   that anything is happening or has finished, even though a sighted user sees
   the same information those two components already announce correctly.
 - **Look at it.** For a UI change, run the app and open the screen (the `/run`
-  skill launches it), or read the PR-screenshots artifact. Note what that job
-  does _not_ catch: a route that handles its own loader error and renders a card
-  in place of its content still counts as a green screenshot.
+  skill launches it), or open the pull request's gallery — the end-to-end run
+  photographs every screen and every flow it walks. Note what that does _not_
+  catch: a route that handles its own loader error and renders a card in place
+  of its content still counts as a green screenshot.
 - **Say what the person will feel.** If a change adds a step, sends an email,
   slows something down, or briefly breaks a flow mid-rollout, put that in the PR
   body and in any plan you show the user. See "Plans you show the user are
