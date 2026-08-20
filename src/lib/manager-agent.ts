@@ -10,6 +10,7 @@
 import { formatCents } from "@/lib/validation";
 import type { EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
+import { versionLabel } from "@/lib/waiver-template-editor";
 
 /** The columns `list_kb_articles` projects from. */
 export type AgentKbArticle = {
@@ -67,6 +68,56 @@ export function projectAgentKbArticle(
   };
 }
 
+/**
+ * One stored waiver version, as `list_waiver_templates` reports it.
+ *
+ * Deliberately structural rather than importing `WaiverTemplateVersion` from
+ * `waiver.functions.ts`: this module is pure and server-import-free (see the
+ * header), and that one pulls in `createServerFn` and a Supabase client.
+ */
+export type AgentWaiverTemplate = {
+  version: number;
+  title: string;
+  body_md: string;
+  acknowledgements: { id: string; label: string; required: boolean }[];
+  is_current: boolean;
+  created_at: string;
+};
+
+/**
+ * A version as the LIST reports it: no body, and the same Live/Previous/Draft
+ * label the editor screen shows.
+ *
+ * The body is left out because a club with a dozen versions of a 30000-character
+ * legal document would otherwise send a third of a megabyte to answer "which one
+ * is live" — `get_waiver_template` is one call away when the text is wanted.
+ * `body_chars` stays so a caller can tell a real version from a stub without
+ * fetching it.
+ *
+ * `status` reuses `versionLabel`, so an agent and a manager reading the same
+ * version see the same word for it. "Draft" there means "never been live", not
+ * "unpublished work in progress" — saving always publishes, so the only drafts
+ * are versions seeded outside the editor and versions superseded by a rollback.
+ */
+export function projectAgentWaiverTemplate(
+  template: AgentWaiverTemplate,
+  liveVersion: number | null,
+) {
+  return {
+    version: template.version,
+    title: template.title,
+    is_current: template.is_current,
+    status: versionLabel(template, liveVersion),
+    // Named for what it is, not `acknowledgements`: `get_waiver_template`
+    // returns that name holding the actual list, and one field meaning a count
+    // on one action and an array on another is how a caller ends up iterating a
+    // number. Same reason `projectAgentKbArticle` calls its count `versions`.
+    acknowledgement_count: template.acknowledgements.length,
+    body_chars: template.body_md.length,
+    created_at: template.created_at,
+  };
+}
+
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
 export type AgentActionSpec = {
   name: string;
@@ -90,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "11",
+  version: "12",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -104,7 +155,7 @@ export const AGENT_MANIFEST: {
   // new response field — which is what these notes name.
   changes: [
     {
-      version: "11",
+      version: "12",
       // Five new optional fields on one action. Nothing that worked before
       // fails or means anything different, so a client that ignores them is
       // still correct -- it just files a minor's guardian less completely.
@@ -113,6 +164,18 @@ export const AGENT_MANIFEST: {
         "file_waiver takes the parent or legal guardian of a minor as their own person, separate from the emergency contact: guardian_name, guardian_relationship, guardian_address, guardian_phone and guardian_email, all optional. They are two people who may be the same one, not one person by definition, so a form that names the signer apart from the emergency contact can now be filed as it actually reads. Omit an address, mobile or email that is the participant's (the participant's is stored for the guardian too), and omit the lot for an older form with a single contact block, where that contact is still taken as the signer exactly as before.",
         "emergency_contact_relationship is still required for a minor, but guardian_relationship now satisfies that requirement instead, so a filing that gives the guardian's relationship and leaves the emergency contact's blank is accepted where it used to be refused.",
         "guardian_email is evidence on the waiver and is never used to identify anybody. The person record stays keyed on the participant's email, so a guardian_email the club has never seen does not create a second person.",
+      ],
+    },
+    {
+      version: "11",
+      // Purely additive: four new actions, no existing one changed shape.
+      breaking: false,
+      notes: [
+        "New actions list_waiver_templates, get_waiver_template, save_waiver_template and publish_waiver_template: the waiver everyone signs is now editable through this API, the same way /manager/waiver-template edits it. They key on the VERSION NUMBER, not a row id.",
+        "save_waiver_template writes a new version and PUBLISHES it in the same call, because that is what saving means on the manager screen: there is no draft state. Waivers already signed keep the version they were signed against.",
+        "save_waiver_template carries over anything you omit from the version the edit starts from, so acknowledgements can be reworded without resending the body. title and body_md must arrive together, and a call naming neither text nor acknowledgements is refused rather than republishing an identical copy.",
+        "Every version must carry the `media` acknowledgement with real wording: it is what records who agreed to photos, and a save or publish without it is refused with 422 rather than quietly ending the club's consent record.",
+        "save_waiver_template and publish_waiver_template answer 503 waiver_template_not_published with a Retry-After when the change did not reach the live waiver (a concurrent promotion, most often). Retry it. When error.details.version is present, that version WAS written and is only unpublished — finish with publish_waiver_template on it rather than saving again, which would file a second draft.",
       ],
     },
     {
@@ -487,6 +550,71 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
+      name: "list_waiver_templates",
+      method: "POST",
+      summary:
+        "List every stored version of the waiver members sign, newest first, saying which one is LIVE. Versions are the club's legal record: each signed waiver names the version it was signed against, and old versions are kept forever for that reason. Bodies are not included here — read one with get_waiver_template.",
+      params: [],
+    },
+    {
+      name: "get_waiver_template",
+      method: "POST",
+      summary:
+        "Read one version's full markdown and its acknowledgements. Returns the LIVE version unless you name one. Read this before saving an edit: save_waiver_template writes the body as a whole, so an edit built without reading first silently drops every clause it did not include. The body carries {{placeholder}} tokens (full_name, date_of_birth, signature_name, ...) filled in per signer — leave the ones you are not deliberately changing exactly as they are.",
+      params: [
+        {
+          name: "version",
+          required: false,
+          description: "Read a specific version instead of the live one.",
+        },
+      ],
+    },
+    {
+      name: "save_waiver_template",
+      method: "POST",
+      summary:
+        "Write a NEW version of the waiver and make it the one everyone signs, from that moment. Saving IS publishing here — there is no draft state, exactly as on the manager screen — so this changes the legal document the club puts in front of people: show a manager what you are changing before you call it. Waivers already signed keep the version they were signed against and are unaffected. Anything you omit is carried over from the version the edit starts from (the live one unless base_version names another), so an acknowledgement can be reworded without resending the body; title and body_md must arrive together. A 503 waiver_template_not_published means the version may exist without being live: retry, and if error.details.version names one, publish THAT rather than saving again.",
+      params: [
+        {
+          name: "title",
+          required: false,
+          description:
+            "The document's heading. Required with body_md when writing text; omit both to change only the acknowledgements.",
+        },
+        {
+          name: "body_md",
+          required: false,
+          description:
+            "The whole waiver as markdown, up to 30000 characters. This REPLACES the previous body; {{placeholder}} tokens in it are filled in per signer.",
+        },
+        {
+          name: "acknowledgements",
+          required: false,
+          description:
+            "The tick-boxes the signer accepts, as a list of { id, label, required }. REPLACES the previous list, so send it whole. It must still contain the `media` item with real wording: that one also records who agreed to photos, and a version without it is refused. Omit to keep the list as it is.",
+        },
+        {
+          name: "base_version",
+          required: false,
+          description:
+            "Which stored version this edit starts from, and therefore what an omitted field is carried over from. Defaults to the live one. Name an older version to bring back its wording with your edit on top.",
+        },
+      ],
+    },
+    {
+      name: "publish_waiver_template",
+      method: "POST",
+      summary:
+        "Make an existing stored version the live one, for rolling back to wording the club already agreed. Nothing is rewritten and no new version is created. Waivers already signed keep the version they were signed against, so this changes what the NEXT person signs and nothing else. Calling it on the version that is already live does nothing and reports published: false.",
+      params: [
+        {
+          name: "version",
+          required: true,
+          description: "The version number to make live, as reported by list_waiver_templates.",
+        },
+      ],
+    },
+    {
       name: "list_membership_plans",
       method: "POST",
       summary:
@@ -732,6 +860,27 @@ export const AGENT_MANIFEST: {
  * to look up an owner's email for values that look like one.
  */
 export const AGENT_ENV_KEY_UPLOADER = "manager-agent-env-key";
+
+/**
+ * The actor to record as the author of a row, or null when there isn't one.
+ *
+ * Every write this API makes on somebody's behalf lands in a column that
+ * `references auth.users`, and the break-glass env key authenticates as
+ * `AGENT_ENV_KEY_UPLOADER` — deliberately not a UUID, with no auth user behind
+ * it. Writing that sentinel into such a column fails the insert outright, so
+ * each writer asks this instead: record the manager when the token resolved to
+ * one, null when it did not.
+ *
+ * Lives here, with the sentinel it exists because of, rather than as a private
+ * copy in each writer — this is the third caller, which is the point the repo's
+ * own rule says to stop duplicating.
+ */
+export function actorUserId(actingAs: string | null): string | null {
+  if (!actingAs) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actingAs)
+    ? actingAs
+    : null;
+}
 
 /**
  * Classify a raw request body's `action` field before dispatch, distinguishing

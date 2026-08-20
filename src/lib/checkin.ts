@@ -9,6 +9,7 @@
 // and on the server to actually spend it, so the warning a manager reads and the
 // credit that moves can never disagree.
 import { CLUB_TIME_ZONE, clubLocalDate } from "./calendar";
+import { membershipStatusLabel } from "./status-labels";
 import { isUnpaid } from "./validation";
 import type { CheckInWarning, CoverageSource } from "./validation";
 
@@ -305,7 +306,10 @@ export function attachableMemberships(candidates: CoverageCandidate[], at: strin
         decision.coverage !== "none"
           ? null
           : m.status !== "active"
-            ? m.status
+            ? // Lower-cased on purpose: this reason is read as prose beside the
+              // others below ("Free trial · 0 left · used up"), not as a status
+              // pill, so it must not arrive title-cased mid-sentence.
+              membershipStatusLabel(m).toLowerCase()
             : m.sessions_remaining === 0
               ? "no credits left"
               : startsAfter(m, atMs)

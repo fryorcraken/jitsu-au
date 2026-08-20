@@ -91,6 +91,8 @@ export type ClubUserMembership = {
   price_cents: number;
   is_student: boolean;
   uts_student_number: string | null;
+  /** Credits left. Null for a plan that was never sold as a number of classes. */
+  sessions_remaining: number | null;
   created_at: string;
 };
 
@@ -143,7 +145,20 @@ export type ClubUser = {
   gi_size: string | null;
   belt_size: string | null;
   latest_plan_name: string | null;
+  /**
+   * The kind of plan behind `latest_membership_status`, so a screen can name
+   * that status correctly: an ended trial or class pack is "used up", an ended
+   * training period is "expired". Null for a lead, or when the plan row could
+   * not be resolved.
+   */
+  latest_plan_kind: string | null;
   latest_membership_status: MembershipStatus | null;
+  /**
+   * Credits left on that latest membership. Needed alongside the kind because
+   * an ended credit plan is only "used up" if its classes are actually gone: a
+   * refunded check-in can leave one `expired` with a credit still on it.
+   */
+  latest_sessions_remaining: number | null;
   membership_count: number;
   /** Classes this person has been checked in to, all-time. Always 0 for a lead. */
   sessions_attended: number;
@@ -298,7 +313,9 @@ export function aggregateClubUsers(input: {
       gi_size: p.gi_size,
       belt_size: p.belt_size,
       latest_plan_name: latest ? (planById.get(latest.plan_id)?.name ?? null) : null,
+      latest_plan_kind: latest ? (planById.get(latest.plan_id)?.kind ?? null) : null,
       latest_membership_status: latest ? (latest.status as MembershipStatus) : null,
+      latest_sessions_remaining: latest ? latest.sessions_remaining : null,
       membership_count: ms.length,
       sessions_attended: checkinsByUser.get(p.user_id) ?? 0,
       first_seen_at,
@@ -334,7 +351,9 @@ export function aggregateClubUsers(input: {
       gi_size: null,
       belt_size: null,
       latest_plan_name: null,
+      latest_plan_kind: null,
       latest_membership_status: null,
+      latest_sessions_remaining: null,
       membership_count: 0,
       // A lead has never been on the mat: there is no person record to check in.
       sessions_attended: 0,

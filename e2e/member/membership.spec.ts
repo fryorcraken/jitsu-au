@@ -25,11 +25,11 @@ test("the member's status and memberships show on their membership page", async 
   // its planOf helper) — the member's seeded membership is bought on it.
   const periodRow = page.getByRole("row").filter({ hasText: "This semester" });
   await expect(periodRow).toHaveCount(1);
-  await expect(periodRow).toContainText("active");
+  await expect(periodRow).toContainText("Active");
 
   const insuranceRow = page.getByRole("row").filter({ hasText: "Sydney Jitsu yearly membership" });
   await expect(insuranceRow).toHaveCount(1);
-  await expect(insuranceRow).toContainText("active");
+  await expect(insuranceRow).toContainText("Active");
 
   await expectPageRendered(page);
 });

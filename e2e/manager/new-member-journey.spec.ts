@@ -317,12 +317,12 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Cancel membership" }).click();
-    await expect(row).toContainText("cancelled");
+    await expect(row).toContainText("Cancelled");
 
     // The new plan is what pays for them now: active, and it is the one the
     // check-in landed on.
     const periodRow = page.getByRole("row").filter({ hasText: periodMembership.payment_reference });
-    await expect(periodRow).toContainText("active");
+    await expect(periodRow).toContainText("Active");
   });
 
   // Real club behaviour: someone on a period plan still occasionally pays for
@@ -419,5 +419,23 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
       .eq("id", secondCasualMembership.id)
       .maybeSingle();
     expect(spent).toMatchObject({ sessions_remaining: 0, status: "expired" });
+  });
+
+  // The row above is stored as `expired`, but a casual class is one class, not
+  // a stretch of time: nothing about it went out of date, its class was used.
+  // This is the only place the whole path is provable at once — a real credit
+  // spent to zero by a real check-in, then read back off the screen a manager
+  // actually looks at (docs/memberships.md, "What an ended membership is
+  // called"). `toContainText` is case-sensitive, and sentence case is the
+  // point: these labels are words, not enum values.
+  await test.step("the spent casual class reads as used up, not expired", async () => {
+    await page.goto("/manager/memberships");
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: secondCasualMembership.payment_reference })
+      .filter({ hasText: "Casual class" });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("Used up");
+    await expect(row).not.toContainText("Expired");
   });
 });

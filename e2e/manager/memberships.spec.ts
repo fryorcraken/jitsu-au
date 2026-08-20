@@ -35,10 +35,15 @@ test("the memberships screen lists the club's invoices", async ({ page }) => {
   await page.goto("/manager/memberships");
 
   // The seeded member's period-plan invoice: active, and already paid.
+  //
+  // "Active", not "active": the pill renders a WORD from `status-labels.ts`,
+  // not the stored enum value, and `toContainText` is case-sensitive. Whether
+  // an ended membership reads "Expired" or "Used up" depends on its plan too,
+  // so don't assume the status column echoes the database.
   const row = page.getByRole("row").filter({ hasText: "JITSU-000101" });
   await expect(row).toHaveCount(1);
   await expect(row).toContainText(fixture.personas.member.email);
-  await expect(row).toContainText("active");
+  await expect(row).toContainText("Active");
 });
 
 test("a manager can raise a membership, mark it paid, and then can't delete it", async ({
@@ -140,9 +145,9 @@ test("a manager can cancel and reopen a membership", async ({ page }) => {
 
   await row.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Cancel membership" }).click();
-  await expect(row).toContainText("cancelled");
+  await expect(row).toContainText("Cancelled");
 
   await row.getByRole("button", { name: "Reopen" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Reopen" }).click();
-  await expect(row).toContainText("active");
+  await expect(row).toContainText("Active");
 });
