@@ -24,6 +24,13 @@ concurrency:
   group: supabase-lint-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: this workflow only reads the repo. Without this block the
+# job inherits the repository default token scope (often read/write) — and this
+# job runs migrations and linters straight from a pull request's own tree, so
+# there is no reason for that tree to have a write-capable token in scope.
+permissions:
+  contents: read
+
 jobs:
   db-lint:
     name: Advisors + plpgsql_check
