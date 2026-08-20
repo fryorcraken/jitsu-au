@@ -47,6 +47,7 @@ import { supersedesMediaConsent } from "@/lib/waiver-approval";
 import { hasMediaAcknowledgement, WaiverTemplateError } from "@/lib/waiver-template-editor";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
+import { actorUserId } from "@/lib/manager-agent";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -1324,8 +1325,6 @@ export async function countWaiversAwaitingApproval(admin: SupabaseClient<Databas
 // it cannot go through requireSupabaseAuth. Both entry points call the same
 // function after their own auth check, so a scripted migration and a manager's
 // own upload produce identical waivers.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export async function filePaperWaiver(
   admin: SupabaseClient<Database>,
   data: PaperWaiverUploadInput,
@@ -1514,7 +1513,7 @@ export async function filePaperWaiver(
   // Not every caller resolves to a real auth user: the manager agent API's
   // break-glass env-key fallback (docs/manager-agent-api.md) has no owner to look up, so
   // skip the lookup rather than log a spurious not-found error every call.
-  if (UUID_RE.test(uploadedByUserId)) {
+  if (actorUserId(uploadedByUserId)) {
     try {
       const { data: manager } = await admin.auth.admin.getUserById(uploadedByUserId);
       if (manager.user?.email) signer_meta.uploaded_by_email = manager.user.email;

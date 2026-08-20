@@ -38,6 +38,7 @@ import type { ManagerAgentAction } from "@/lib/validation";
 import {
   AGENT_ENV_KEY_UPLOADER,
   AGENT_MANIFEST,
+  actorUserId,
   AgentError,
   bearerToken,
   buildInvoicePatch,
@@ -791,14 +792,6 @@ async function handleSaveMembershipPlan(params: unknown) {
   }
 }
 
-/**
- * A waiver version's `created_by` is a real FK to `auth.users`, and the
- * break-glass env key resolves to a sentinel rather than a user. Same rule as
- * `kb-admin`'s own `isUuid`: record the manager when there is one, null when
- * there is not, never a string the FK will reject.
- */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 // ---- action: list_waiver_templates ----
 async function handleListWaiverTemplates() {
   const db = await adminClient();
@@ -908,7 +901,7 @@ async function handleSaveWaiverTemplate(params: unknown, actingAs: string) {
         body_md: input.body_md ?? base!.body_md,
         acknowledgements: input.acknowledgements ?? base!.acknowledgements,
       },
-      UUID_RE.test(actingAs) ? actingAs : null,
+      actorUserId(actingAs),
     );
     // `based_on` is what makes a carry-over auditable: it names the version the
     // fields this call did not send actually came from.

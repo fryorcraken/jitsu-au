@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_ENV_KEY_UPLOADER,
   AGENT_MANIFEST,
+  actorUserId,
   AgentError,
   bearerToken,
   buildInvoicePatch,
@@ -671,5 +672,24 @@ describe("projectAgentWaiverTemplate", () => {
       title: "Training Waiver",
       created_at: "2026-08-01T00:00:00Z",
     });
+  });
+});
+
+describe("actorUserId", () => {
+  // Every column this feeds `references auth.users`, so the sentinel the
+  // break-glass env key authenticates as must never reach one: the insert would
+  // fail outright, taking a waiver filing or a published article with it.
+  it("refuses the break-glass sentinel, which is no auth user", () => {
+    expect(actorUserId(AGENT_ENV_KEY_UPLOADER)).toBeNull();
+  });
+
+  it("records a real manager", () => {
+    const id = "63ab09b5-20e4-451a-ad8e-08caa0c299a2";
+    expect(actorUserId(id)).toBe(id);
+  });
+
+  it("treats no actor at all as no author", () => {
+    expect(actorUserId(null)).toBeNull();
+    expect(actorUserId("")).toBeNull();
   });
 });
