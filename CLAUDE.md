@@ -35,9 +35,17 @@ requests, the CI logs, and the screenshot artifacts.
   or `authenticated`.
 - **Fixture data must stay synthetic** — `@example.com`, `0400 000 xxx`. It is
   published in the seed script and photographed into screenshot artifacts.
-- CI holds one production credential (`SUPABASE_DB_URL`, used only by
-  `migration-drift.yml`). It is a GitHub secret and that workflow deliberately
-  never runs on `pull_request`; keep it that way. Forks get no secrets.
+- CI is designed to hold exactly one production credential (`SUPABASE_DB_URL`,
+  used only by `migration-drift.yml`), as a GitHub secret, and that workflow
+  deliberately never runs on `pull_request`; keep it that way. Forks get no
+  secrets. **But the secret is not actually configured today** — every drift run
+  since the repo began has logged `SUPABASE_DB_URL:` empty and
+  `##[warning]SUPABASE_DB_URL is not set — the ... check did NOT run`, while
+  still reporting green. So nothing is currently at risk of leaking there, and
+  equally **neither live check has ever run**: no migration-ledger comparison
+  and no live client-grants comparison. Treat `supabase/lint/client-grants-expected.txt`
+  as a statement of intent verified against the migration files only, never
+  against the live database, until that secret is set.
 
 ## Lovable-managed project — read first
 
