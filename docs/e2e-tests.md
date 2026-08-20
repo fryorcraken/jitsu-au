@@ -226,8 +226,10 @@ Three things about that publish are worth knowing:
   it starts — no runner, no steps, no log, just a red check. A `workflow_run`
   workflow runs in the default branch's context, which is allowed. The cost is
   that it only fires from the copy of the file on `main`, so **the pull request
-  that changes it cannot see its own gallery deployed**. (The other way to have
-  it: allow non-default branches to deploy in Settings → Environments →
+  that changes it cannot see its own gallery deployed**. It also takes
+  `workflow_dispatch`, so the site can be redeployed by hand from the Actions
+  tab whenever it and the store branch have drifted apart. (The other way to
+  have it: allow non-default branches to deploy in Settings → Environments →
   github-pages. That trades a protection for immediacy; this repo keeps the
   protection.)
 - The store branch is rewritten as a **single orphan commit** every time.

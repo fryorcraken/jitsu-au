@@ -26,6 +26,11 @@ on:
       - "End-to-end tests"
       - "Take down a closed pull request's gallery"
     types: [completed]
+  # A button in the Actions tab, for the first deployment after this file lands
+  # on the default branch and for any time the site and the store branch have
+  # drifted apart. Dispatch runs on the default branch, so the environment
+  # accepts it for the same reason `workflow_run` is accepted.
+  workflow_dispatch:
 
 # Read the store branch, deploy it. Nothing else.
 permissions:
