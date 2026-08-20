@@ -229,7 +229,9 @@ server against a database. It is not a licence for a flaky test — anything tha
 only passes on the second attempt is a bug, and the first attempt's trace is in
 the report so it can be found. A red suite still produces its gallery and its
 comment, and the job is failed afterwards: the screenshot of the step that broke
-is the most useful thing in the run.
+is the most useful thing in the run. A run **cancelled** by a newer push does
+not, which is the difference between `!cancelled()` and `always()` — otherwise
+being superseded would replace the last good comment with a failure notice.
 
 ## What is deliberately not covered yet
 

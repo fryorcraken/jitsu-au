@@ -118,9 +118,14 @@ jobs:
 
       # Lays the run out as one page: the flows as strips of screens in the
       # order they were walked, then every page at desktop and phone width.
+      # `!cancelled()` rather than `always()`, here and below: a run superseded
+      # by a newer push is cancelled mid-suite, and `always()` would have it
+      # rebuild an empty gallery and overwrite the previous good comment with
+      # "the run failed before it walked anything". Failure still gets all of
+      # this — a red run's screenshots are the most useful thing in it.
       - name: Build the gallery
         id: gallery
-        if: always()
+        if: ${{ !cancelled() }}
         continue-on-error: true
         env:
           PUBLISHABLE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
@@ -138,7 +143,7 @@ jobs:
       # anyone who wants the originals rather than the page.
       - name: Upload the gallery
         id: artifact
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -150,7 +155,7 @@ jobs:
       # pull requests never overwrite each other. .github/workflows/pr-gallery-cleanup.yml
       # takes it down again when the pull request closes.
       - name: Publish the gallery
-        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -164,7 +169,7 @@ jobs:
       # explanation — better to skip it honestly. Their run still walks
       # everything and still uploads the gallery as an artifact.
       - name: Comment on the pull request
-        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         uses: actions/github-script@v8
         continue-on-error: true
         env:
