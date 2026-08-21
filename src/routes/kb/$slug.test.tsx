@@ -121,6 +121,15 @@ describe("/kb/$slug section anchors", () => {
     expect(screen.getByText("#throws")).toBeInTheDocument();
   });
 
+  // A notification about a comment sends the member to /kb/<slug>#comment-<id>.
+  // That is not a stale cross-reference, and saying it is would be alarming.
+  it("says nothing when the fragment is one of the app's own comment links", async () => {
+    renderArticle("#comment-2a0f6e4c-0000-4000-8000-000000000000");
+
+    await screen.findByRole("heading", { name: "Belts", level: 1 });
+    expect(screen.queryByText(/does not have/i)).not.toBeInTheDocument();
+  });
+
   it("says nothing about sections when the reader arrived without a fragment", async () => {
     renderArticle("");
 

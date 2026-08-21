@@ -16,21 +16,22 @@
 // headings in the rest of the article, so it could not tell a second "Grading"
 // from the first. `extractHeadings` does that once over the whole body, and the
 // reader hangs the id it produces on the block.
-import type { Heading, Root, RootContent } from "mdast";
+import type { Heading, Root } from "mdast";
 import { splitHeadingAnchor } from "@/lib/kb-nav";
 
-/** Every node in the tree that is a heading, however deeply it is nested. */
-function headings(nodes: RootContent[]): Heading[] {
-  const found: Heading[] = [];
-  for (const node of nodes) {
-    if (node.type === "heading") found.push(node);
-    // A heading can sit inside a blockquote or a list item, and one written
-    // there carries an anchor just as usefully as one at the top level.
-    if ("children" in node && Array.isArray(node.children)) {
-      found.push(...headings(node.children as RootContent[]));
-    }
-  }
-  return found;
+/**
+ * The headings this plugin may touch: TOP-LEVEL ones only, matching exactly
+ * what `parseHeading` reads.
+ *
+ * Deliberately not recursive. `parseHeading` looks at the first line of a
+ * block, so a heading nested inside a blockquote or a list item never gets an
+ * id at all — and stripping its anchor there would be the worst of both worlds:
+ * the suffix disappears, so it looks like it worked, while the link it promised
+ * points at nothing. Left alone, the braces stay on screen, which is the
+ * article telling its author that an anchor does not belong there.
+ */
+function headings(tree: Root): Heading[] {
+  return tree.children.filter((node): node is Heading => node.type === "heading");
 }
 
 /** A text node that is nothing but the anchor, e.g. the ` {#blue}` after emphasis. */
@@ -38,7 +39,7 @@ const ONLY_ANCHOR = /^[ \t]*\{#[^{}\s]+\}[ \t]*$/;
 
 export function remarkKbAnchors() {
   return (tree: Root) => {
-    for (const heading of headings(tree.children)) {
+    for (const heading of headings(tree)) {
       const last = heading.children.at(-1);
       // The anchor is the last thing on the line, so it is always in the final
       // text node — either at the end of it (`## Grading {#grading}`) or as the

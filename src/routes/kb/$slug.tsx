@@ -37,6 +37,7 @@ import {
   entryBreadcrumbs,
   extractHeadings,
   findHeadingForHash,
+  missingSectionFragment,
   readState,
   type KbNavEntry,
 } from "@/lib/kb-nav";
@@ -121,8 +122,8 @@ function ArticlePage() {
   }, [slug]);
 
   const target = useMemo(() => findHeadingForHash(hash, headings), [hash, headings]);
-  /** What the reader asked for, for a message about a section that is gone. */
-  const missingSection = hash && article && !target ? decodeFragment(hash) : null;
+  /** What the reader asked for, when it is worth saying the section is gone. */
+  const missingSection = article ? missingSectionFragment(hash, headings) : null;
 
   useEffect(() => {
     if (!target) return;
@@ -387,22 +388,6 @@ function ArticlePage() {
       )}
     </article>
   );
-}
-
-/**
- * A URL fragment, as it is worth showing back to somebody: decoded, and short
- * enough that a hand-typed novel in the address bar cannot push the article off
- * the screen.
- */
-function decodeFragment(hash: string): string {
-  const raw = hash.replace(/^#/, "");
-  let text = raw;
-  try {
-    text = decodeURIComponent(raw);
-  } catch {
-    // Not valid percent-encoding, so it is shown exactly as it arrived.
-  }
-  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
 }
 
 /**

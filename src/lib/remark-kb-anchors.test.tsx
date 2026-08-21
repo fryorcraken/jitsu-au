@@ -50,6 +50,14 @@ describe("remarkKbAnchors", () => {
     expect(screen.getByRole("heading", { name: "{#orphan}" })).toBeInTheDocument();
   });
 
+  // `parseHeading` only reads the first line of a block, so a heading nested in
+  // a blockquote or a list item never gets an id. Stripping its suffix would
+  // make a dead link look like a live one.
+  it("leaves an anchor alone where no id is ever minted for it", () => {
+    renderMarkdown("> ## Grading {#grading}");
+    expect(screen.getByRole("heading", { name: "Grading {#grading}" })).toBeInTheDocument();
+  });
+
   it("does not touch braces in a paragraph", () => {
     renderMarkdown("Write {#grading} at the end of a heading to pin its link.");
     expect(screen.getByText(/\{#grading\}/)).toBeInTheDocument();

@@ -294,9 +294,10 @@ export function splitHeadingAnchor(text: string): { text: string; anchor: string
  * a ``` block never reaches here as a heading because `splitBlocks` keeps it
  * whole and its first line is a fence, not a `#`.
  */
-export function parseHeading(
-  blockMarkdown: string,
-): { depth: number; text: string; anchor: string | null } | null {
+/** What `parseHeading` reads off a heading line. */
+type Heading = { depth: number; text: string; anchor: string | null };
+
+export function parseHeading(blockMarkdown: string): Heading | null {
   const firstLine = blockMarkdown.split("\n", 1)[0] ?? "";
   const match = /^ {0,3}(#{1,6})\s+(.*)$/.exec(firstLine);
   if (!match) return null;
@@ -330,30 +331,50 @@ function stripInlineMarkdown(text: string): string {
  * two different belts still gives two working links.
  */
 export function extractHeadings(markdown: string): KbHeading[] {
-  // Uniqueness is checked against every id ALREADY EMITTED, not against a
+  const parsed: { heading: Heading; blockId: string }[] = [];
+  for (const block of splitBlocks(markdown)) {
+    const heading = parseHeading(block.markdown);
+    if (heading) parsed.push({ heading, blockId: block.id });
+  }
+
+  // Uniqueness is checked against every id ALREADY TAKEN, not against a
   // per-base counter. A counter alone collides with a heading that ends in a
   // number the author wrote: "Grading", "Grading 2", "Grading" would mint
   // `grading`, `grading-2`, and `grading-2` again, which puts two links in the
   // contents list pointing at the same place and two elements in the document
   // sharing an id.
   const used = new Set<string>();
-  const headings: KbHeading[] = [];
 
-  for (const block of splitBlocks(markdown)) {
-    const heading = parseHeading(block.markdown);
-    if (!heading) continue;
-    const base = heading.anchor ?? headingSlug(heading.text);
+  // PINNED ANCHORS ARE ALLOCATED FIRST, before anything derived from wording.
+  // A pinned anchor is the author saying "other articles point here", so it has
+  // to win: in document order a later heading whose words happen to slugify to
+  // `grading` would otherwise take that id and push the pinned one to
+  // `grading-2`, silently re-aiming every cross-reference in the club at the
+  // wrong passage. Two headings pinned to the SAME anchor still fall back to
+  // the suffix — that is an article contradicting itself, and the first one
+  // wins.
+  const take = (base: string) => {
     let id = base;
     for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
     used.add(id);
+    return id;
+  };
+
+  const ids: (string | undefined)[] = parsed.map(({ heading }) =>
+    heading.anchor === null ? undefined : take(heading.anchor),
+  );
+
+  const headings: KbHeading[] = [];
+  parsed.forEach(({ heading, blockId }, index) => {
+    const id = ids[index] ?? take(headingSlug(heading.text));
     headings.push({
       depth: heading.depth,
       text: heading.text,
       id,
       pinned: heading.anchor !== null,
-      blockId: block.id,
+      blockId,
     });
-  }
+  });
   return headings;
 }
 
@@ -372,13 +393,45 @@ export function extractHeadings(markdown: string): KbHeading[] {
  * than throwing on a page that was only trying to scroll.
  */
 export function findHeadingForHash(hash: string, headings: KbHeading[]): KbHeading | null {
-  const raw = hash.replace(/^#/, "");
-  if (!raw) return null;
-  let id = raw;
-  try {
-    id = decodeURIComponent(raw);
-  } catch {
-    // A fragment that is not valid percent-encoding is matched as typed.
-  }
+  const id = decodeFragment(hash);
+  if (!id) return null;
   return headings.find((heading) => heading.id === id) ?? null;
+}
+
+/** A URL fragment with its `#` and its percent-encoding taken off. */
+function decodeFragment(hash: string): string {
+  const raw = hash.replace(/^#/, "");
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    // Not valid percent-encoding, so it is used exactly as it arrived.
+    return raw;
+  }
+}
+
+/**
+ * Fragments this app mints for something that is NOT a section of an article.
+ *
+ * A notification about a comment links to `/kb/<slug>#comment-<id>`
+ * (`kbAnnotationHref`), which is an ordinary, working link — telling somebody
+ * who followed one that a section has been renamed away would be both wrong and
+ * alarming.
+ */
+const NOT_A_SECTION = /^comment-/;
+
+/**
+ * The fragment to tell the reader about, when a link named a section this
+ * article does not have. Null when there is nothing worth saying.
+ *
+ * Only a fragment SHAPED like an anchor is worth a message: ids are words and
+ * hyphens, so anything carrying `=` or `&` came from somewhere else entirely
+ * (an auth callback's `#error=...`, a tracking parameter) and is not a broken
+ * cross-reference. Truncated because the fragment is shown back on screen and a
+ * hand-typed novel in the address bar must not push the article off it.
+ */
+export function missingSectionFragment(hash: string, headings: KbHeading[]): string | null {
+  const id = decodeFragment(hash);
+  if (!id || findHeadingForHash(hash, headings)) return null;
+  if (NOT_A_SECTION.test(id) || !/^[A-Za-z0-9-]+$/.test(id)) return null;
+  return id.length > 60 ? `${id.slice(0, 59)}…` : id;
 }

@@ -6,6 +6,7 @@ import {
   entryHref,
   extractHeadings,
   findHeadingForHash,
+  missingSectionFragment,
   flattenKbNav,
   headingSlug,
   kbProgress,
@@ -257,6 +258,20 @@ describe("extractHeadings", () => {
     expect(extractHeadings("## Grading\n\nx.")[0].pinned).toBe(false);
   });
 
+  // The reason pinning exists at all is that other articles point at the
+  // anchor. A heading added later whose words happen to slugify to the same
+  // thing must not take it: every cross-reference in the club would quietly
+  // land on the wrong passage.
+  it("gives a pinned anchor to the heading that pinned it, wherever it sits", () => {
+    const headings = extractHeadings(
+      "## What happens on the day {#grading}\n\nx.\n\n## Grading\n\ny.",
+    );
+    expect(headings.map((h) => [h.text, h.id])).toEqual([
+      ["What happens on the day", "grading"],
+      ["Grading", "grading-2"],
+    ]);
+  });
+
   it("keeps two headings pinned to the same anchor apart", () => {
     const ids = extractHeadings("## A {#same}\n\nx.\n\n## B {#same}\n\ny.").map((h) => h.id);
     expect(ids).toEqual(["same", "same-2"]);
@@ -286,6 +301,40 @@ describe("findHeadingForHash", () => {
 
   it("does not throw on a malformed escape", () => {
     expect(findHeadingForHash("#100%", headings)).toBeNull();
+  });
+});
+
+describe("missingSectionFragment", () => {
+  const headings = extractHeadings("## Grading {#grading}\n\nx.\n\n## Belts\n\ny.");
+
+  it("names the section a stale cross-reference asked for", () => {
+    expect(missingSectionFragment("#throws", headings)).toBe("throws");
+  });
+
+  it("says nothing when the section is there, or no fragment was given", () => {
+    expect(missingSectionFragment("#grading", headings)).toBeNull();
+    expect(missingSectionFragment("", headings)).toBeNull();
+  });
+
+  // A notification about a comment links to /kb/<slug>#comment-<id>
+  // (`kbAnnotationHref`). That link is working as designed, and telling the
+  // member their section was renamed away would be wrong and alarming.
+  it("says nothing about the app's own comment links", () => {
+    expect(
+      missingSectionFragment("#comment-2a0f6e4c-0000-4000-8000-000000000000", headings),
+    ).toBeNull();
+  });
+
+  it("says nothing about a fragment that is not shaped like an anchor", () => {
+    expect(
+      missingSectionFragment("#error=access_denied&error_code=otp_expired", headings),
+    ).toBeNull();
+  });
+
+  it("truncates a very long fragment rather than printing it whole", () => {
+    const long = missingSectionFragment(`#${"a".repeat(200)}`, headings);
+    expect(long).toHaveLength(60);
+    expect(long?.endsWith("…")).toBe(true);
   });
 });
 
