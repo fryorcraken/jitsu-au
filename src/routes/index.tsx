@@ -44,7 +44,7 @@ function Home() {
           <div>
             <span className="inline-flex items-start gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
               <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> UTS
-              students, UTS staff and general public alike
+              students, staff and the public welcome
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
               Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
@@ -52,7 +52,8 @@ function Home() {
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
               Build real self-defence skills in a fun and welcoming environment. We train Japanese
               Jiu-Jitsu in Ultimo and welcome the general public and local community, with special
-              rates for UTS students. Classes are for beginners and experienced martial artists.
+              rates for UTS students. Classes are for beginners and experienced martial artists
+              alike.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
