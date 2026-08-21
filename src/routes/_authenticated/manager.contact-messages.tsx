@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Pill } from "@/components/site/StatusPill";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { UNREAD_CLASS } from "@/lib/status-colours";
 import { formatDateTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
@@ -13,7 +16,6 @@ import {
 } from "@/lib/contact-messages.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
-import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/_authenticated/manager/contact-messages")({
   head: () => ({
@@ -81,7 +83,7 @@ function ContactMessagesPage() {
         }
       })
       .catch((e) => {
-        const message = e instanceof Error ? e.message : "Could not load the contact messages";
+        const message = describeLoadError(e, "Could not load the contact messages");
         if (isCancelled()) return;
         setLoadError(message);
         toast.error(message);
@@ -101,7 +103,7 @@ function ContactMessagesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isManager]);
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <Loading className="p-8" />;
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
@@ -128,15 +130,12 @@ function ContactMessagesPage() {
       )}
 
       {loadError ? (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
-          <p className="text-sm font-medium">The contact messages could not be loaded.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {loadError} This is not the same as having no messages.
-          </p>
-          <Button className="mt-3" size="sm" variant="outline" onClick={() => void load()}>
-            Try again
-          </Button>
-        </div>
+        <LoadFailure
+          what="The contact messages"
+          message={loadError}
+          hint="This is not the same as having no messages."
+          onRetry={() => void load()}
+        />
       ) : messages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages yet.</p>
       ) : (
