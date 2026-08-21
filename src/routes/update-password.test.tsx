@@ -135,6 +135,27 @@ describe("/update-password", () => {
     expect(expiredPanel()).not.toBeInTheDocument();
   });
 
+  it("holds the form when the listener beats getSession to it", async () => {
+    // The other ordering, and the one production hits most: the auth event
+    // lands first and the getSession answer, which knows nothing about it,
+    // arrives afterwards saying there is no session. That answer must not
+    // pull the form out from under somebody already typing into it.
+    let answer: (result: { data: { session: unknown } }) => void = () => {};
+    getSession.mockReturnValue(
+      new Promise<{ data: { session: unknown } }>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    render(<UpdatePassword />);
+    authListener()("PASSWORD_RECOVERY", SESSION);
+    await screen.findByLabelText("New password");
+
+    answer({ data: { session: null } });
+    await waitFor(() => expect(getMyProfile).toHaveBeenCalledTimes(1));
+    expect(passwordField()).toBeInTheDocument();
+    expect(expiredPanel()).not.toBeInTheDocument();
+  });
+
   it("fetches the profile once when the session arrives twice", async () => {
     withSession(SESSION);
     render(<UpdatePassword />);
