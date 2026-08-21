@@ -81,6 +81,20 @@ the manager screens read the live catalogue now. A price change is edited in
 two places: the plan (immediate, drives what people actually pay) and the
 pricing page copy (a code change, like any other website wording).
 
+Its call to action (`MembershipCta`) reads who is looking before it decides
+where to send them, because `/membership` is behind the auth gate and there is
+no self-serve sign-up: a login exists only once a manager has approved your
+waiver. A signed-in member gets "Manage your membership" straight to
+`/membership`. Everyone else gets "Join the club" into `/register-interest`,
+plus a sign-in link carrying `redirect=/membership` for a member who happens to
+be signed out. Until the browser has resolved the session it shows the
+signed-out branch, which is what the server renders anyway and is right for
+almost everyone reading a public pricing page.
+
+**Any other public page linking into `_authenticated` needs the same
+treatment**, for the same reason: the gate behind it has nothing a person
+without a login can do.
+
 ## What an ended membership is called
 
 `memberships.status = 'expired'` is one stored word for two different endings,
