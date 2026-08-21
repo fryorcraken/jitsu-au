@@ -47,6 +47,7 @@ import { supersedesMediaConsent } from "@/lib/waiver-approval";
 import { hasMediaAcknowledgement, WaiverTemplateError } from "@/lib/waiver-template-editor";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
+import { resolveWaiverContacts } from "@/lib/waiver-contacts";
 import { actorUserId } from "@/lib/manager-agent";
 
 const BUCKET = "waivers";
@@ -561,6 +562,28 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
 
+    // The two people beside the participant, worked out once from the raw
+    // fields: a minor's guardian may be someone other than the emergency
+    // contact, and each of the guardian's contact details is optional on the
+    // form because blank means "the same as the participant's". Everything
+    // below -- the frozen row and the PDF -- uses these resolved values, so the
+    // document and the record can never disagree about who signed.
+    const contacts = resolveWaiverContacts({
+      isMinor,
+      address: data.address,
+      phone: data.phone,
+      email,
+      guardianName: data.guardian_name || "",
+      guardianRelationship: data.guardian_relationship || "",
+      guardianAddress: data.guardian_address || "",
+      guardianPhone: data.guardian_phone || "",
+      guardianEmail: data.guardian_email || "",
+      emergencyContactIsGuardian: data.emergency_contact_is_guardian ?? false,
+      emergencyContactName: data.emergency_contact_name || "",
+      emergencyContactRelationship: data.emergency_contact_relationship || "",
+      emergencyContactPhone: data.emergency_contact_phone || "",
+    });
+
     // The person this submission belongs to (see resolvePersonId).
     //
     // If they arrived from the link in their interest confirmation email, that
@@ -662,16 +685,19 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         // template has no media item, which is the state until a manager
         // promotes the draft version that adds one.
         media_consent: mediaConsentFromAnswers(ackDefs, answers),
-        emergency_contact_name: data.emergency_contact_name,
-        emergency_contact_relationship: data.emergency_contact_relationship,
-        emergency_contact_phone: data.emergency_contact_phone,
+        emergency_contact_name: contacts.emergencyContactName,
+        emergency_contact_relationship: contacts.emergencyContactRelationship,
+        emergency_contact_phone: contacts.emergencyContactPhone,
         medical_notes: data.medical_notes || null,
         is_minor: isMinor,
-        // For a minor the emergency contact IS the guardian who signs, so the
-        // guardian columns are filled from that one block rather than from a
-        // second set of inputs that could disagree with it.
-        guardian_name: isMinor ? data.emergency_contact_name : null,
-        guardian_relationship: isMinor ? data.emergency_contact_relationship : null,
+        // Resolved above, never the raw fields: an optional guardian detail is
+        // stored as the value it stands for, so nobody reading this row later
+        // has to work out what a blank meant.
+        guardian_name: contacts.guardianName || null,
+        guardian_relationship: contacts.guardianRelationship || null,
+        guardian_address: contacts.guardianAddress || null,
+        guardian_phone: contacts.guardianPhone || null,
+        guardian_email: contacts.guardianEmail || null,
         signed_at,
         template_version: tpl.version,
         signer_ip,
@@ -790,9 +816,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         address: data.address,
         phone: data.phone,
         email,
-        emergency_contact_name: data.emergency_contact_name,
-        emergency_contact_relationship: data.emergency_contact_relationship,
-        emergency_contact_phone: data.emergency_contact_phone,
+        emergency_contact_name: contacts.emergencyContactName,
+        emergency_contact_relationship: contacts.emergencyContactRelationship,
+        emergency_contact_phone: contacts.emergencyContactPhone,
         medical_notes: data.medical_notes || "",
         health_answers: data.health_answers,
         acknowledgements: resolveAcknowledgements(ackDefs, answers),
@@ -803,8 +829,11 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         template_version: tpl.version,
         club_name: CLUB_NAME,
         is_minor: isMinor,
-        guardian_name: isMinor ? data.emergency_contact_name : "",
-        guardian_relationship: isMinor ? data.emergency_contact_relationship : "",
+        guardian_name: contacts.guardianName,
+        guardian_relationship: contacts.guardianRelationship,
+        guardian_address: contacts.guardianAddress,
+        guardian_phone: contacts.guardianPhone,
+        guardian_email: contacts.guardianEmail,
         guardian_signature: data.guardian_signature || "",
         signature_image_png: sigPng,
         guardian_signature_image_png: gSigPng,
@@ -1422,6 +1451,27 @@ export async function filePaperWaiver(
 
   const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
 
+  // The signer and the emergency contact, resolved the same way the online
+  // form resolves them (see resolveWaiverContacts). Paper filings never set
+  // the "emergency contact is the guardian" flag: they carry whatever the
+  // manager read off the page, and an old form's single contact block falls
+  // through to the guardian by name.
+  const paperContacts = resolveWaiverContacts({
+    isMinor,
+    address: data.address,
+    phone: data.phone,
+    email,
+    guardianName: data.guardian_name || "",
+    guardianRelationship: data.guardian_relationship || "",
+    guardianAddress: data.guardian_address || "",
+    guardianPhone: data.guardian_phone || "",
+    guardianEmail: data.guardian_email || "",
+    emergencyContactIsGuardian: false,
+    emergencyContactName: data.emergency_contact_name,
+    emergencyContactRelationship: data.emergency_contact_relationship || "",
+    emergencyContactPhone: data.emergency_contact_phone,
+  });
+
   // Who this waiver belongs to, if the club already knows the address. Looked up
   // BEFORE the duplicate probe and deliberately without creating anyone: a
   // filing that gets refused below must leave nothing behind, and creating the
@@ -1544,15 +1594,24 @@ export async function filePaperWaiver(
     // ticks to read on a paper form, only a box on a page they are looking at.
     // Null when the paper predates the question.
     media_consent: data.media_consent ?? null,
-    emergency_contact_name: data.emergency_contact_name,
-    emergency_contact_relationship: data.emergency_contact_relationship || null,
-    emergency_contact_phone: data.emergency_contact_phone,
+    // Both contacts come off the same resolved object, so the two halves cannot
+    // drift apart if paper filing ever grows its own "the contact IS the
+    // guardian" flag. Identical to the raw fields today (that flag is false
+    // here, and Zod has already trimmed them), which is the point: nothing
+    // reads `data.emergency_contact_*` past this line.
+    emergency_contact_name: paperContacts.emergencyContactName,
+    emergency_contact_relationship: paperContacts.emergencyContactRelationship || null,
+    emergency_contact_phone: paperContacts.emergencyContactPhone,
     medical_notes: data.medical_notes || null,
     is_minor: isMinor,
-    // As on the online form, a minor's emergency contact IS the guardian
-    // who signed, so the guardian columns come from that one block.
-    guardian_name: isMinor ? data.emergency_contact_name : null,
-    guardian_relationship: isMinor ? data.emergency_contact_relationship || null : null,
+    // The signer, resolved the same way the online form resolves it. A paper
+    // form from the old single-block layout names only one person, so for those
+    // the emergency contact is the guardian, exactly as before.
+    guardian_name: paperContacts.guardianName || null,
+    guardian_relationship: paperContacts.guardianRelationship || null,
+    guardian_address: paperContacts.guardianAddress || null,
+    guardian_phone: paperContacts.guardianPhone || null,
+    guardian_email: paperContacts.guardianEmail || null,
     signed_at,
     template_version: data.template_version ?? null,
     // No IP: nobody connected from anywhere to sign this.

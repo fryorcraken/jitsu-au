@@ -45,6 +45,11 @@ export type WaiverDocumentProps = {
   isMinor: boolean;
   guardianName: string;
   guardianRelationship: string;
+  /** The guardian's own contact details, already resolved against the
+   * participant's (`resolveWaiverContacts`). Minors only. */
+  guardianAddress: string;
+  guardianPhone: string;
+  guardianEmail: string;
   guardianSignature: string;
   guardianSignatureImage?: string;
   /** When true, show a DRAFT watermark and hide the "signed on" footers. */
@@ -152,6 +157,9 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     isMinor,
     guardianName,
     guardianRelationship,
+    guardianAddress,
+    guardianPhone,
+    guardianEmail,
     guardianSignature,
     guardianSignatureImage,
     draft,
@@ -170,6 +178,11 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     emergencyContactName,
     emergencyContactRelationship,
     emergencyContactPhone,
+    guardianName,
+    guardianRelationship,
+    guardianAddress,
+    guardianPhone,
+    guardianEmail,
     medicalNotes,
     healthAnswers,
     signatureName,
@@ -305,6 +318,9 @@ export function WaiverDocument(props: WaiverDocumentProps) {
             <dl className="mt-2">
               <DetailRow label="Guardian name" value={guardianName} />
               <DetailRow label="Relationship to participant" value={guardianRelationship} />
+              <DetailRow label="Guardian mobile" value={guardianPhone} />
+              <DetailRow label="Guardian email" value={guardianEmail} />
+              <DetailRow label="Guardian address" value={guardianAddress} />
             </dl>
             <div className="mt-4">
               <SignatureBlock

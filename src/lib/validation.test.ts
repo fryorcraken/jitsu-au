@@ -432,6 +432,9 @@ describe("waiverToProfileFields", () => {
       is_minor: false,
       guardian_name: null,
       guardian_relationship: null,
+      guardian_address: null,
+      guardian_phone: null,
+      guardian_email: null,
     };
     // Feed it a row with extra waiver-only keys; they must not leak through.
     const patch = waiverToProfileFields({
@@ -442,6 +445,22 @@ describe("waiverToProfileFields", () => {
       email: "ada@example.com",
     } as never);
     expect(patch).toEqual({ ...fields, media_consent: true });
+  });
+
+  // A minor's guardian is a person the club has to be able to reach, so their
+  // contact details are promoted with the rest of the record at approval.
+  it("carries the guardian's contact details onto the profile", () => {
+    const patch = waiverToProfileFields({
+      is_minor: true,
+      guardian_name: "Charles Babbage",
+      guardian_relationship: "Father",
+      guardian_address: "2 Harris St, Ultimo NSW",
+      guardian_phone: "0400 222 222",
+      guardian_email: "charles@example.com",
+    } as never);
+    expect(patch.guardian_address).toBe("2 Harris St, Ultimo NSW");
+    expect(patch.guardian_phone).toBe("0400 222 222");
+    expect(patch.guardian_email).toBe("charles@example.com");
   });
 
   it("carries a declined media consent through as false", () => {
@@ -1419,16 +1438,58 @@ describe("waiverSubmitSchema", () => {
     }
   });
 
-  // The guardian's name and relationship are the emergency contact fields (the
-  // form asks for that person once, and the server copies them across), so a
-  // minor's payload carries no separate guardian identity.
-  it("accepts a minor with only the emergency contact and a guardian signature", () => {
+  /** A minor's payload: the guardian named in their own right, plus a signature. */
+  const validMinor = {
+    ...validAdult,
+    is_minor: true,
+    guardian_name: "Charles Babbage",
+    guardian_relationship: "Father",
+    guardian_signature: "Charles Babbage",
+  };
+
+  it("accepts a minor whose guardian is named, with a guardian signature", () => {
+    expect(waiverSubmitSchema.safeParse(validMinor).success).toBe(true);
+  });
+
+  // The guardian signs the document and is named on it, so neither field can be
+  // left to the emergency contact block any more: the two can be two people.
+  it("requires the guardian's name and relationship for a minor", () => {
+    const { guardian_name: _n, guardian_relationship: _r, ...withoutGuardian } = validMinor;
+    const result = waiverSubmitSchema.safeParse(withoutGuardian);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("guardian_name"))).toBe(true);
+      expect(result.error.issues.some((i) => i.path.includes("guardian_relationship"))).toBe(true);
+    }
+    expect(waiverSubmitSchema.safeParse({ ...validMinor, guardian_name: "  " }).success).toBe(
+      false,
+    );
+  });
+
+  // Each of the guardian's three contact fields means "the same as the
+  // participant's" when blank, so a family at one address types nothing.
+  it("accepts a minor with no guardian address, mobile or email", () => {
     const result = waiverSubmitSchema.safeParse({
-      ...validAdult,
-      is_minor: true,
-      guardian_signature: "Charles Babbage",
+      ...validMinor,
+      guardian_address: "",
+      guardian_phone: "",
+      guardian_email: "",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts the guardian's own contact details, and rejects a malformed email", () => {
+    expect(
+      waiverSubmitSchema.safeParse({
+        ...validMinor,
+        guardian_address: "2 Harris St, Ultimo NSW",
+        guardian_phone: "0400000002",
+        guardian_email: "charles@example.com",
+      }).success,
+    ).toBe(true);
+    expect(
+      waiverSubmitSchema.safeParse({ ...validMinor, guardian_email: "not-an-address" }).success,
+    ).toBe(false);
   });
 
   it("requires the emergency contact's relationship", () => {
@@ -1437,6 +1498,42 @@ describe("waiverSubmitSchema", () => {
     expect(
       waiverSubmitSchema.safeParse({ ...validAdult, emergency_contact_relationship: "  " }).success,
     ).toBe(false);
+  });
+
+  it("requires an emergency contact of an adult, whatever the guardian flag says", () => {
+    const { emergency_contact_name: _n, ...withoutContact } = validAdult;
+    const result = waiverSubmitSchema.safeParse({
+      ...withoutContact,
+      emergency_contact_is_guardian: true,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("emergency_contact_name"))).toBe(true);
+    }
+  });
+
+  // The common case for a minor: one person is both, so the form asks once and
+  // the server fills the emergency contact in from the guardian.
+  it("lets a minor's emergency contact be the guardian instead of a second set of fields", () => {
+    const {
+      emergency_contact_name: _n,
+      emergency_contact_relationship: _r,
+      emergency_contact_phone: _p,
+      ...withoutContact
+    } = validMinor;
+    expect(
+      waiverSubmitSchema.safeParse({ ...withoutContact, emergency_contact_is_guardian: true })
+        .success,
+    ).toBe(true);
+    // ...but not when the form did not say so: an unticked box means the three
+    // fields were on screen and are still required.
+    const result = waiverSubmitSchema.safeParse(withoutContact);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("emergency_contact_phone"))).toBe(
+        true,
+      );
+    }
   });
 
   it("requires every health question to be answered", () => {

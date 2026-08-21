@@ -34,6 +34,10 @@ export type WaiverPdfData = {
   is_minor: boolean;
   guardian_name: string;
   guardian_relationship: string;
+  /** The guardian's own contact details, resolved by `resolveWaiverContacts`. */
+  guardian_address: string;
+  guardian_phone: string;
+  guardian_email: string;
   guardian_signature: string;
   /** Optional PNG bytes for drawn participant signature */
   signature_image_png?: Uint8Array | null;
@@ -292,6 +296,11 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     emergencyContactName: data.emergency_contact_name,
     emergencyContactRelationship: data.emergency_contact_relationship,
     emergencyContactPhone: data.emergency_contact_phone,
+    guardianName: data.guardian_name,
+    guardianRelationship: data.guardian_relationship,
+    guardianAddress: data.guardian_address,
+    guardianPhone: data.guardian_phone,
+    guardianEmail: data.guardian_email,
     medicalNotes: data.medical_notes,
     healthAnswers: data.health_answers,
     signatureName: data.signature_name,
@@ -420,11 +429,17 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
 
   if (data.is_minor) {
     y -= 24;
-    ensureSpace(120);
+    // Heading + five detail rows (28pt each) + the signature block: enough that
+    // the guardian's consent never starts at the very foot of a page with its
+    // signature stranded overleaf.
+    ensureSpace(220);
     drawText("Parent / guardian consent", { size: 13, font: bold, color: primary });
     const gRows: [string, string][] = [
       ["Guardian name", data.guardian_name || ""],
       ["Relationship to participant", data.guardian_relationship || ""],
+      ["Guardian mobile", data.guardian_phone || ""],
+      ["Guardian email", data.guardian_email || ""],
+      ["Guardian address", data.guardian_address || ""],
     ];
     for (const [label, value] of gRows) {
       ensureSpace(16);

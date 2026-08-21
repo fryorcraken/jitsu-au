@@ -28,6 +28,7 @@ import { redeemWaiverEmailVerification } from "@/lib/email-verification.function
 import { applyWaiverPlaceholders, buildWaiverPlaceholders } from "@/lib/waiver-document";
 import { resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { anyHealthConcern, healthQuestions } from "@/lib/waiver-health";
+import { resolveWaiverContacts } from "@/lib/waiver-contacts";
 import {
   ackAnchorId,
   missingFieldsSummary,
@@ -88,6 +89,11 @@ type Prefill = {
   emergency_contact_name?: string | null;
   emergency_contact_relationship?: string | null;
   emergency_contact_phone?: string | null;
+  guardian_name?: string | null;
+  guardian_relationship?: string | null;
+  guardian_address?: string | null;
+  guardian_phone?: string | null;
+  guardian_email?: string | null;
   medical_notes?: string | null;
 };
 
@@ -159,6 +165,18 @@ function Waiver() {
   const [ecName, setEcName] = useState("");
   const [ecRelationship, setEcRelationship] = useState("");
   const [ecPhone, setEcPhone] = useState("");
+  // The parent or legal guardian of a minor: the person who signs and carries
+  // the liability. Separate from the emergency contact, because they are not
+  // always the same person -- but usually they are, so `ecIsGuardian` starts
+  // ticked and the form asks for that person once.
+  const [guardianName, setGuardianName] = useState("");
+  const [guardianRelationship, setGuardianRelationship] = useState("");
+  // Blank means "the same as the participant's", resolved on submit by
+  // `resolveWaiverContacts`. Optional so a family at one address types nothing.
+  const [guardianAddress, setGuardianAddress] = useState("");
+  const [guardianPhone, setGuardianPhone] = useState("");
+  const [guardianEmail, setGuardianEmail] = useState("");
+  const [ecIsGuardian, setEcIsGuardian] = useState(true);
   const [health, setHealth] = useState<HealthDraft>(emptyHealthDraft);
   const [medical, setMedical] = useState("");
   const [signatureName, setSignatureName] = useState("");
@@ -234,6 +252,14 @@ function Waiver() {
         if (r.emergency_contact_name) setEcName(r.emergency_contact_name);
         if (r.emergency_contact_relationship) setEcRelationship(r.emergency_contact_relationship);
         if (r.emergency_contact_phone) setEcPhone(r.emergency_contact_phone);
+        // An emergency contact already on file is a real answer, so show it
+        // rather than hiding it behind the "same as the guardian" tick.
+        if (r.emergency_contact_name || r.emergency_contact_phone) setEcIsGuardian(false);
+        if (r.guardian_name) setGuardianName(r.guardian_name);
+        if (r.guardian_relationship) setGuardianRelationship(r.guardian_relationship);
+        if (r.guardian_address) setGuardianAddress(r.guardian_address);
+        if (r.guardian_phone) setGuardianPhone(r.guardian_phone);
+        if (r.guardian_email) setGuardianEmail(r.guardian_email);
         if (r.medical_notes) setMedical(r.medical_notes);
         // The health questions are deliberately NOT prefilled: they are a
         // declaration about today, and a stale "no" carried over from an older
@@ -312,6 +338,12 @@ function Waiver() {
       setEcName(draft.ecName);
       setEcRelationship(draft.ecRelationship);
       setEcPhone(draft.ecPhone);
+      setEcIsGuardian(draft.ecIsGuardian);
+      setGuardianName(draft.guardianName);
+      setGuardianRelationship(draft.guardianRelationship);
+      setGuardianAddress(draft.guardianAddress);
+      setGuardianPhone(draft.guardianPhone);
+      setGuardianEmail(draft.guardianEmail);
       setHealth((prev) => ({ ...prev, ...draft.health }));
       setMedical(draft.medical);
       setAcks(draft.acks);
@@ -365,6 +397,12 @@ function Waiver() {
       ecName,
       ecRelationship,
       ecPhone,
+      ecIsGuardian,
+      guardianName,
+      guardianRelationship,
+      guardianAddress,
+      guardianPhone,
+      guardianEmail,
       health,
       medical,
       acks,
@@ -392,6 +430,12 @@ function Waiver() {
       ecName,
       ecRelationship,
       ecPhone,
+      ecIsGuardian,
+      guardianName,
+      guardianRelationship,
+      guardianAddress,
+      guardianPhone,
+      guardianEmail,
       health,
       medical,
       acks,
@@ -419,6 +463,26 @@ function Waiver() {
     window.location.assign("/waiver");
   }
 
+  // Who ends up named on the document, worked out by the same pure helper the
+  // server uses: a blank guardian address/mobile/email means "the participant's",
+  // and a ticked "the emergency contact is the guardian" means that one person
+  // fills both roles. Computed here so the preview shows what will be signed.
+  const contacts = resolveWaiverContacts({
+    isMinor,
+    address,
+    phone,
+    email,
+    guardianName,
+    guardianRelationship,
+    guardianAddress,
+    guardianPhone,
+    guardianEmail,
+    emergencyContactIsGuardian: ecIsGuardian,
+    emergencyContactName: ecName,
+    emergencyContactRelationship: ecRelationship,
+    emergencyContactPhone: ecPhone,
+  });
+
   // ---- Live preview (HTML rendering of the waiver, mirrors the PDF) ----
   const previewSignatureImage = signatureMode === "draw" ? signatureImage : "";
   const previewGuardianSignatureImage =
@@ -441,9 +505,14 @@ function Waiver() {
     address,
     phone,
     email,
-    emergencyContactName: ecName,
-    emergencyContactRelationship: ecRelationship,
-    emergencyContactPhone: ecPhone,
+    emergencyContactName: contacts.emergencyContactName,
+    emergencyContactRelationship: contacts.emergencyContactRelationship,
+    emergencyContactPhone: contacts.emergencyContactPhone,
+    guardianName: contacts.guardianName,
+    guardianRelationship: contacts.guardianRelationship,
+    guardianAddress: contacts.guardianAddress,
+    guardianPhone: contacts.guardianPhone,
+    guardianEmail: contacts.guardianEmail,
     medicalNotes: medical,
     healthAnswers: health,
     signatureName: signatureMode === "type" ? signatureName : "",
@@ -466,6 +535,10 @@ function Waiver() {
     ecName,
     ecRelationship,
     ecPhone,
+    ecIsGuardian,
+    guardianName,
+    guardianRelationship,
+    guardianEmail,
     health,
     medical,
     ackDefs: ackDefs.map((ack) => ({
@@ -573,9 +646,23 @@ function Waiver() {
             gi_size: giSize,
             martial_arts_experience: martialArtsExperience,
             sms_whatsapp_consent: smsConsent,
+            // Sent raw, exactly as typed, together with the two flags that
+            // say how to read them: the server resolves them itself rather
+            // than trusting a copy this page made.
             emergency_contact_name: ecName,
             emergency_contact_relationship: ecRelationship,
             emergency_contact_phone: ecPhone,
+            emergency_contact_is_guardian: ecIsGuardian,
+            // Only ever sent for a minor. The guardian block is hidden for an
+            // adult but its state survives (a date of birth can be corrected
+            // both ways), and sending a stale value the server still validates
+            // is how a hidden field ends up rejecting a form nobody can see a
+            // problem with.
+            guardian_name: isMinor ? guardianName : "",
+            guardian_relationship: isMinor ? guardianRelationship : "",
+            guardian_address: isMinor ? guardianAddress : "",
+            guardian_phone: isMinor ? guardianPhone : "",
+            guardian_email: isMinor ? guardianEmail : "",
             // Every question is answered by this point (guarded below), so the
             // draft narrows to the five booleans the server requires.
             health_answers: health as HealthAnswers,
@@ -1017,54 +1104,168 @@ function Waiver() {
               </div>
             </fieldset>
 
-            <fieldset className="space-y-5 border-t pt-6">
-              <legend className="text-sm font-semibold">Emergency contact / guardian</legend>
-              {isMinor && (
+            {isMinor && (
+              <fieldset className="space-y-5 border-t pt-6">
+                <legend className="text-sm font-semibold">Parent or legal guardian</legend>
                 <p className="text-xs text-muted-foreground">
-                  The participant is under 18, so this is the parent or legal guardian who signs at
-                  the end of the form.
+                  The participant is under 18, so a parent or legal guardian consents and signs at
+                  the end of the form. Their details go on the waiver, so we can reach the person
+                  who signed it.
                 </p>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="guardian_name">Parent or guardian name</Label>
+                    <Input
+                      id="guardian_name"
+                      required
+                      maxLength={120}
+                      value={guardianName}
+                      onChange={(e) => setGuardianName(e.target.value)}
+                      {...fieldProps("guardian_name")}
+                    />
+                    {fieldMessage("guardian_name")}
+                  </div>
+                  <div>
+                    <Label htmlFor="guardian_relationship">Relationship to the participant</Label>
+                    <Input
+                      id="guardian_relationship"
+                      required
+                      maxLength={80}
+                      value={guardianRelationship}
+                      onChange={(e) => setGuardianRelationship(e.target.value)}
+                      placeholder="Mother, father, legal guardian"
+                      {...fieldProps("guardian_relationship")}
+                    />
+                    {fieldMessage("guardian_relationship")}
+                  </div>
+                </div>
+                {/* One hint, pointed at by all three inputs (aria-describedby),
+                    so somebody who tabs straight into a field hears the rule
+                    rather than only seeing it above the group. */}
+                <p id="guardian_contact_hint" className="text-xs text-muted-foreground">
+                  Leave the guardian's mobile, email and address empty if they're the same as the
+                  participant's. We'll record the participant's details for the guardian.
+                </p>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="guardian_phone">
+                      Guardian mobile <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      id="guardian_phone"
+                      type="tel"
+                      maxLength={30}
+                      value={guardianPhone}
+                      onChange={(e) => setGuardianPhone(e.target.value)}
+                      placeholder="Same as the participant's"
+                      aria-describedby="guardian_contact_hint"
+                      className="mt-1.5"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="guardian_email">
+                      Guardian email <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      id="guardian_email"
+                      type="email"
+                      maxLength={255}
+                      value={guardianEmail}
+                      onChange={(e) => setGuardianEmail(e.target.value)}
+                      placeholder="Same as the participant's"
+                      {...fieldProps("guardian_email")}
+                      // The hint applies whether or not the address is flagged,
+                      // so it is appended rather than replaced by fieldProps.
+                      aria-describedby={
+                        flagged("guardian_email")
+                          ? `guardian_contact_hint ${messageId("guardian_email")}`
+                          : "guardian_contact_hint"
+                      }
+                    />
+                    {fieldMessage("guardian_email")}
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="guardian_address">
+                    Guardian address <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Input
+                    id="guardian_address"
+                    maxLength={300}
+                    value={guardianAddress}
+                    onChange={(e) => setGuardianAddress(e.target.value)}
+                    placeholder="Same as the participant's"
+                    aria-describedby="guardian_contact_hint"
+                    className="mt-1.5"
+                  />
+                </div>
+              </fieldset>
+            )}
+
+            <fieldset className="space-y-5 border-t pt-6">
+              <legend className="text-sm font-semibold">Emergency contact</legend>
+              {isMinor && (
+                <label className="flex items-start gap-2 text-sm">
+                  <Checkbox
+                    checked={ecIsGuardian}
+                    onCheckedChange={(v) => setEcIsGuardian(v === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    The parent or guardian above is who we should call in an emergency.
+                    <span className="block text-xs text-muted-foreground">
+                      Untick this if someone else looks after the participant at training time.
+                    </span>
+                  </span>
+                </label>
               )}
-              <div className="grid gap-5 sm:grid-cols-3">
-                <div>
-                  <Label htmlFor="emergency_contact_name">Contact name</Label>
-                  <Input
-                    id="emergency_contact_name"
-                    required
-                    maxLength={120}
-                    value={ecName}
-                    onChange={(e) => setEcName(e.target.value)}
-                    {...fieldProps("emergency_contact_name")}
-                  />
-                  {fieldMessage("emergency_contact_name")}
+              {/* Left out of the DOM rather than hidden when the guardian is
+                  the contact: a display:none field is still a field a screen
+                  reader's form controls list can land on, and these hold the
+                  other person's details. The state survives the unmount, so
+                  unticking brings back whatever was typed. */}
+              {isMinor && ecIsGuardian ? null : (
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <Label htmlFor="emergency_contact_name">Contact name</Label>
+                    <Input
+                      id="emergency_contact_name"
+                      required
+                      maxLength={120}
+                      value={ecName}
+                      onChange={(e) => setEcName(e.target.value)}
+                      {...fieldProps("emergency_contact_name")}
+                    />
+                    {fieldMessage("emergency_contact_name")}
+                  </div>
+                  <div>
+                    <Label htmlFor="emergency_contact_relationship">Relationship</Label>
+                    <Input
+                      id="emergency_contact_relationship"
+                      required
+                      maxLength={80}
+                      value={ecRelationship}
+                      onChange={(e) => setEcRelationship(e.target.value)}
+                      placeholder="Parent, partner, friend"
+                      {...fieldProps("emergency_contact_relationship")}
+                    />
+                    {fieldMessage("emergency_contact_relationship")}
+                  </div>
+                  <div>
+                    <Label htmlFor="emergency_contact_phone">Contact mobile</Label>
+                    <Input
+                      id="emergency_contact_phone"
+                      type="tel"
+                      required
+                      maxLength={30}
+                      value={ecPhone}
+                      onChange={(e) => setEcPhone(e.target.value)}
+                      {...fieldProps("emergency_contact_phone")}
+                    />
+                    {fieldMessage("emergency_contact_phone")}
+                  </div>
                 </div>
-                <div>
-                  <Label htmlFor="emergency_contact_relationship">Relationship</Label>
-                  <Input
-                    id="emergency_contact_relationship"
-                    required
-                    maxLength={80}
-                    value={ecRelationship}
-                    onChange={(e) => setEcRelationship(e.target.value)}
-                    placeholder="Parent, partner, friend"
-                    {...fieldProps("emergency_contact_relationship")}
-                  />
-                  {fieldMessage("emergency_contact_relationship")}
-                </div>
-                <div>
-                  <Label htmlFor="emergency_contact_phone">Contact mobile</Label>
-                  <Input
-                    id="emergency_contact_phone"
-                    type="tel"
-                    required
-                    maxLength={30}
-                    value={ecPhone}
-                    onChange={(e) => setEcPhone(e.target.value)}
-                    {...fieldProps("emergency_contact_phone")}
-                  />
-                  {fieldMessage("emergency_contact_phone")}
-                </div>
-              </div>
+              )}
             </fieldset>
 
             <fieldset className="space-y-5 border-t pt-6">
@@ -1174,17 +1375,20 @@ function Waiver() {
                   address={address}
                   phone={phone}
                   email={email}
-                  emergencyContactName={ecName}
-                  emergencyContactRelationship={ecRelationship}
-                  emergencyContactPhone={ecPhone}
+                  emergencyContactName={contacts.emergencyContactName}
+                  emergencyContactRelationship={contacts.emergencyContactRelationship}
+                  emergencyContactPhone={contacts.emergencyContactPhone}
                   medicalNotes={medical}
                   healthAnswers={health}
                   acknowledgements={resolveAcknowledgements(ackDefs, acks)}
                   signatureName={signatureMode === "type" ? signatureName : ""}
                   signatureImage={previewSignatureImage}
                   isMinor={isMinor}
-                  guardianName={ecName}
-                  guardianRelationship={ecRelationship}
+                  guardianName={contacts.guardianName}
+                  guardianRelationship={contacts.guardianRelationship}
+                  guardianAddress={contacts.guardianAddress}
+                  guardianPhone={contacts.guardianPhone}
+                  guardianEmail={contacts.guardianEmail}
                   guardianSignature={guardianSignatureMode === "type" ? guardianSignature : ""}
                   guardianSignatureImage={previewGuardianSignatureImage}
                 />
@@ -1261,9 +1465,12 @@ function Waiver() {
                     Participant is under 18, so a parent or legal guardian signs as well.
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {ecName || "The contact"}
-                    {ecRelationship ? ` (${ecRelationship})` : ""} signs below, taken from the
-                    emergency contact section above. Change it there if someone else is signing.
+                    {contacts.guardianName || "The parent or guardian"}
+                    {contacts.guardianRelationship
+                      ? ` (${contacts.guardianRelationship})`
+                      : ""}{" "}
+                    signs below, taken from the parent or guardian section above. Change it there if
+                    someone else is signing.
                   </p>
                   <div
                     id={WAIVER_ANCHORS.guardianPad}

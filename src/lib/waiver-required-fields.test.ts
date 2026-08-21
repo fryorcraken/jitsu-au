@@ -26,6 +26,10 @@ const emptyForm: WaiverFieldState = {
   ecName: "",
   ecRelationship: "",
   ecPhone: "",
+  ecIsGuardian: false,
+  guardianName: "",
+  guardianRelationship: "",
+  guardianEmail: "",
   health: {},
   medical: "",
   ackDefs: [],
@@ -209,9 +213,72 @@ describe("missingWaiverFields", () => {
   });
 
   describe("participant under 18", () => {
+    /** A minor's form with the guardian named, as the page requires. */
+    const minorForm = (over: Partial<WaiverFieldState> = {}): WaiverFieldState =>
+      form({
+        isMinor: true,
+        guardianName: "Kim Nguyen",
+        guardianRelationship: "Mother",
+        guardianSignatureImage: "data:image/png;base64,BBBB",
+        ...over,
+      });
+
+    // The guardian is named on the document and signs it, so both are asked for
+    // before the emergency contact, which is where the form asks for them.
+    it("asks for the guardian's name and relationship", () => {
+      const missing = missingWaiverFields(
+        minorForm({ guardianName: "", guardianRelationship: "" }),
+      );
+      expect(missing.map((f) => f.anchorId)).toEqual(["guardian_name", "guardian_relationship"]);
+    });
+
+    // Blank means "the same as the participant's", so there is nothing missing.
+    it("never asks for the guardian's address, mobile or email", () => {
+      expect(missingWaiverFields(minorForm())).toEqual([]);
+    });
+
+    // Optional, but an address that WAS typed still has to be one the server
+    // accepts: `waiverSubmitSchema` rejects a malformed guardian email, and the
+    // point of this module is that the signer hears that here, not as a Zod
+    // dump after a round trip.
+    it("flags a malformed guardian email, but not a blank one", () => {
+      expect(missingWaiverFields(minorForm({ guardianEmail: "" }))).toEqual([]);
+      expect(missingWaiverFields(minorForm({ guardianEmail: "  " }))).toEqual([]);
+      expect(missingWaiverFields(minorForm({ guardianEmail: "kim@example.com" }))).toEqual([]);
+
+      const missing = missingWaiverFields(minorForm({ guardianEmail: "kim@" }));
+      expect(missing.map((f) => f.anchorId)).toEqual(["guardian_email"]);
+      expect(missing[0].hint).toMatch(/name@example\.com/);
+    });
+
+    // The guardian block is off screen for an adult, so pointing somebody at a
+    // control they cannot see would be worse than saying nothing. The page
+    // stops sending the value at the same time, so the server agrees.
+    it("ignores a stale guardian email once the date of birth says adult", () => {
+      expect(missingWaiverFields(form({ isMinor: false, guardianEmail: "kim@" }))).toEqual([]);
+    });
+
+    // The three emergency contact fields are off screen when the guardian is
+    // the contact, so listing them would point at controls that are not there.
+    it("skips the emergency contact when it is the guardian", () => {
+      expect(
+        missingWaiverFields(
+          minorForm({ ecIsGuardian: true, ecName: "", ecRelationship: "", ecPhone: "" }),
+        ),
+      ).toEqual([]);
+      const missing = missingWaiverFields(
+        minorForm({ ecIsGuardian: false, ecName: "", ecRelationship: "", ecPhone: "" }),
+      );
+      expect(missing.map((f) => f.anchorId)).toEqual([
+        "emergency_contact_name",
+        "emergency_contact_relationship",
+        "emergency_contact_phone",
+      ]);
+    });
+
     it("asks for a guardian signature, after the applicant's own", () => {
       const missing = missingWaiverFields(
-        form({ isMinor: true, signatureImage: "", guardianSignatureImage: "" }),
+        minorForm({ signatureImage: "", guardianSignatureImage: "" }),
       );
       expect(missing.map((f) => f.anchorId)).toEqual([
         "signature_field",
@@ -220,16 +287,14 @@ describe("missingWaiverFields", () => {
     });
 
     it("points at the guardian name box when the guardian is typing", () => {
-      const missing = missingWaiverFields(form({ isMinor: true, guardianSignatureMode: "type" }));
+      const missing = missingWaiverFields(
+        minorForm({ guardianSignatureMode: "type", guardianSignatureImage: "" }),
+      );
       expect(missing.map((f) => f.anchorId)).toEqual(["guardian_signature_name"]);
     });
 
     it("is satisfied by a guardian signature", () => {
-      expect(
-        missingWaiverFields(
-          form({ isMinor: true, guardianSignatureImage: "data:image/png;base64,BBBB" }),
-        ),
-      ).toEqual([]);
+      expect(missingWaiverFields(minorForm())).toEqual([]);
     });
 
     it("asks for nothing extra from an adult", () => {

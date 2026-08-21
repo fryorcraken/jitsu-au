@@ -53,6 +53,13 @@ export type WaiverFieldState = {
   ecName: string;
   ecRelationship: string;
   ecPhone: string;
+  /** Under 18, and the emergency contact is the guardian: the form asked for
+   * that person once, so the three fields above are not on screen to fill in. */
+  ecIsGuardian: boolean;
+  guardianName: string;
+  guardianRelationship: string;
+  /** Optional, so only its FORMAT is checked, and only when one was typed. */
+  guardianEmail: string;
   health: HealthAnswerDraft;
   medical: string;
   /** The current template's acknowledgements, labels already substituted. */
@@ -132,10 +139,37 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
   }
   require("address", "Address", state.address);
 
-  // ---- Emergency contact / guardian ----
-  require("emergency_contact_name", "Emergency contact name", state.ecName);
-  require("emergency_contact_relationship", "Emergency contact relationship", state.ecRelationship);
-  require("emergency_contact_phone", "Emergency contact mobile", state.ecPhone);
+  // ---- Parent or guardian (minors only) ----
+  //
+  // The guardian's address, mobile and email are never REQUIRED here: each is
+  // optional and blank means "the same as the participant's", so there is
+  // nothing there for somebody to have missed.
+  if (state.isMinor) {
+    require("guardian_name", "Parent or guardian name", state.guardianName);
+    require("guardian_relationship", "Parent or guardian relationship to the participant", state.guardianRelationship);
+    // ...but an address somebody DID type still has to be one the server will
+    // accept. The submission schema rejects a malformed guardian email, and
+    // without this that rejection arrives as a Zod dump after a round trip
+    // instead of as a line under the field, which is the whole thing this
+    // module exists to prevent.
+    if (state.guardianEmail.trim() && !emailField.safeParse(state.guardianEmail).success) {
+      missing.push({
+        anchorId: "guardian_email",
+        label: "Guardian email",
+        hint: "Check the address, it should look like name@example.com",
+      });
+    }
+  }
+
+  // ---- Emergency contact ----
+  //
+  // Skipped entirely when it is the guardian above: those fields are not on
+  // screen, so listing them would send somebody to a control they cannot see.
+  if (!(state.isMinor && state.ecIsGuardian)) {
+    require("emergency_contact_name", "Emergency contact name", state.ecName);
+    require("emergency_contact_relationship", "Emergency contact relationship", state.ecRelationship);
+    require("emergency_contact_phone", "Emergency contact mobile", state.ecPhone);
+  }
 
   // ---- Health declaration ----
   for (const question of missingHealthAnswers(state.health)) {

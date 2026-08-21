@@ -76,15 +76,22 @@ export type WaiverPlaceholderInput = {
   phone: string;
   email: string;
   emergencyContactName: string;
-  /** How the emergency contact is related; the "relationship to minor" too. */
+  /** How the emergency contact is related. Not the guardian by definition. */
   emergencyContactRelationship: string;
   emergencyContactPhone: string;
+  /** The signing parent/guardian of a minor, already resolved
+   * (`resolveWaiverContacts`). All ignored when `isMinor` is false. */
+  guardianName: string;
+  guardianRelationship: string;
+  guardianAddress: string;
+  guardianPhone: string;
+  guardianEmail: string;
   medicalNotes: string;
   /** The five health answers; unanswered ones render as "Not answered". */
   healthAnswers: HealthAnswerDraft;
   signatureName: string;
   clubName: string;
-  /** Under 18: ticks the minor box and fills the guardian tokens. */
+  /** Under 18: ticks the minor box and prints the guardian tokens. */
   isMinor: boolean;
   /** Pre-formatted signing date for `{{signed_date}}` (empty string if unsigned). */
   signedDate: string;
@@ -126,10 +133,15 @@ export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<strin
     // from the date of birth the signer gave.
     adult_checkbox: v.isMinor ? UNTICKED : TICKED,
     minor_checkbox: v.isMinor ? TICKED : UNTICKED,
-    // For a minor the guardian IS the emergency contact, so the guardian tokens
-    // read off that one block rather than a second copy of the same person.
-    guardian_name: v.isMinor ? v.emergencyContactName : "N/A",
-    guardian_relationship: v.isMinor ? v.emergencyContactRelationship : "N/A",
+    // The guardian is their own person now, with their own contact details:
+    // for a family where the parent who signs is not the one we would ring
+    // during class, printing the emergency contact here would name the wrong
+    // person on a legal document. "N/A" for an adult, who has no guardian.
+    guardian_name: v.isMinor ? v.guardianName : "N/A",
+    guardian_relationship: v.isMinor ? v.guardianRelationship : "N/A",
+    guardian_address: v.isMinor ? v.guardianAddress : "N/A",
+    guardian_phone: v.isMinor ? v.guardianPhone : "N/A",
+    guardian_email: v.isMinor ? v.guardianEmail : "N/A",
     signature_name: v.signatureName || v.fullName,
     signed_date: v.signedDate,
     club_name: v.clubName,

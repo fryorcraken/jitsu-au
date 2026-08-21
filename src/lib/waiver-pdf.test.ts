@@ -117,6 +117,9 @@ const base: WaiverPdfData = {
   is_minor: false,
   guardian_name: "",
   guardian_relationship: "",
+  guardian_address: "",
+  guardian_phone: "",
+  guardian_email: "",
   guardian_signature: "",
 };
 
@@ -277,11 +280,38 @@ describe("renderWaiverPdf", () => {
         is_minor: true,
         guardian_name: "Pat Sample",
         guardian_relationship: "Parent",
+        guardian_address: "9 Quay St, Haymarket NSW",
+        guardian_phone: "0400 333 444",
+        guardian_email: "pat@example.com",
         guardian_signature: "Pat Sample",
         guardian_signature_image_png: validPng(),
       }),
     );
     expect(doc.getPageCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  // The guardian is the person who signs and the person the club has to be able
+  // to reach about a child. Their details are drawn by this renderer, not by a
+  // template token, so they appear on every version of the form.
+  it("prints the guardian's mobile, email and address on a minor's document", async () => {
+    const doc = await expectValidPdf(
+      await renderWaiverPdf({
+        ...base,
+        is_minor: true,
+        guardian_name: "Pat Sample",
+        guardian_relationship: "Parent",
+        guardian_address: "9 Quay St, Haymarket NSW",
+        guardian_phone: "0400 333 444",
+        guardian_email: "pat@example.com",
+        guardian_signature: "Pat Sample",
+      }),
+    );
+    const printed = doc
+      .getPages()
+      .flatMap((page) => readPlacements(doc, page).texts.map((t) => t.text));
+    expect(printed).toContain("0400 333 444");
+    expect(printed).toContain("pat@example.com");
+    expect(printed).toContain("9 Quay St, Haymarket NSW");
   });
 
   it("renders a draft (watermarked) PDF and a signed PDF, both valid", async () => {
@@ -343,18 +373,32 @@ describe("renderWaiverPdf", () => {
         is_minor: true,
         guardian_name: "Pat Sample",
         guardian_relationship: "Parent",
+        guardian_address: "9 Quay St, Haymarket NSW",
+        guardian_phone: "0400 333 444",
+        guardian_email: "pat@example.com",
         guardian_signature: "Pat Sample",
         signature_image_png: tallPng(),
         guardian_signature_image_png: tallPng(),
       }),
     );
-    const { texts, images } = readPlacements(doc, doc.getPage(0));
+    // The consent block carries five detail rows now, so it does not always fit
+    // on one page with a tall drawn signature. What must hold either way is the
+    // reading order: the guardian's signature comes after the details it
+    // consents to, never on top of them. Compare by page first, then by height
+    // within a page (PDF y grows upwards, so "below" is a smaller y).
+    const pages = doc.getPages().map((page) => readPlacements(doc, page));
+    const relationshipPage = pages.findIndex((p) => p.texts.some((t) => t.text === "Parent"));
+    expect(relationshipPage).toBeGreaterThanOrEqual(0);
+    // The guardian's is the last signature drawn on the document, so it is the
+    // last image on the last page that carries one.
+    const signaturePage = pages.reduce((acc, p, i) => (p.images.length > 0 ? i : acc), -1);
+    expect(signaturePage).toBeGreaterThanOrEqual(relationshipPage);
 
-    expect(images).toHaveLength(2);
-    const guardianSignature = images[1];
-    const relationship = texts.find((t) => t.text === "Parent");
-    expect(relationship).toBeDefined();
-    expect(guardianSignature.y + guardianSignature.height).toBeLessThan(relationship!.y);
+    if (signaturePage === relationshipPage) {
+      const guardianSignature = pages[signaturePage].images.at(-1)!;
+      const relationship = pages[relationshipPage].texts.find((t) => t.text === "Parent")!;
+      expect(guardianSignature.y + guardianSignature.height).toBeLessThan(relationship.y);
+    }
   });
 
   it("still names the signer when a drawn signature fails to embed", async () => {

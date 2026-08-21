@@ -115,6 +115,14 @@ function UploadPaperWaiverPage() {
   const [contactName, setContactName] = useState("");
   const [contactRelationship, setContactRelationship] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  // The parent or guardian who signed a minor's form, when the paper names them
+  // separately from the emergency contact. All optional: an older form has one
+  // contact block, and that person is then taken as the signer.
+  const [guardianName, setGuardianName] = useState("");
+  const [guardianRelationship, setGuardianRelationship] = useState("");
+  const [guardianAddress, setGuardianAddress] = useState("");
+  const [guardianPhone, setGuardianPhone] = useState("");
+  const [guardianEmail, setGuardianEmail] = useState("");
   const [medicalNotes, setMedicalNotes] = useState("");
 
   useEffect(() => {
@@ -202,6 +210,11 @@ function UploadPaperWaiverPage() {
           emergency_contact_name: contactName,
           emergency_contact_relationship: contactRelationship,
           emergency_contact_phone: contactPhone,
+          guardian_name: guardianName,
+          guardian_relationship: guardianRelationship,
+          guardian_address: guardianAddress,
+          guardian_phone: guardianPhone,
+          guardian_email: guardianEmail,
           medical_notes: medicalNotes,
           signed_on: signedOn,
           template_version: templateVersion.trim() ? Number(templateVersion) : null,
@@ -406,7 +419,7 @@ function UploadPaperWaiverPage() {
                 {!dob
                   ? "This decides whether the form was signed by the applicant or by a guardian."
                   : isMinor
-                    ? "Under 18 on the date signed, so the emergency contact below is the guardian who signed."
+                    ? "Under 18 on the date signed, so the parent or guardian who signed is asked for below."
                     : "18 or over on the date signed, so they signed as the applicant."}
               </p>
             </div>
@@ -498,7 +511,87 @@ function UploadPaperWaiverPage() {
           </div>
         </Section>
 
-        <Section title={isMinor ? "Parent or guardian" : "Emergency contact"}>
+        {isMinor && (
+          <Section title="Parent or guardian who signed">
+            <p className="text-xs text-muted-foreground">
+              The applicant was under 18 when this was signed. Fill in whoever signed the form, if
+              the paper names them apart from the emergency contact. Leave the address, mobile and
+              email blank when they are the applicant's, and leave the whole section blank for an
+              older form that has only one contact block.
+            </p>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="guardian_name">
+                  Name <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="guardian_name"
+                  maxLength={120}
+                  value={guardianName}
+                  onChange={(e) => setGuardianName(e.target.value)}
+                  placeholder="Same as the emergency contact"
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label htmlFor="guardian_relationship">
+                  Relationship <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="guardian_relationship"
+                  maxLength={80}
+                  value={guardianRelationship}
+                  onChange={(e) => setGuardianRelationship(e.target.value)}
+                  placeholder="Mother, father, legal guardian"
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label htmlFor="guardian_phone">
+                  Mobile <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="guardian_phone"
+                  type="tel"
+                  maxLength={30}
+                  value={guardianPhone}
+                  onChange={(e) => setGuardianPhone(e.target.value)}
+                  placeholder="Same as the applicant's"
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label htmlFor="guardian_email">
+                  Email <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  id="guardian_email"
+                  type="email"
+                  maxLength={255}
+                  value={guardianEmail}
+                  onChange={(e) => setGuardianEmail(e.target.value)}
+                  placeholder="Same as the applicant's"
+                  className="mt-1.5"
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="guardian_address">
+                Address <span className="text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="guardian_address"
+                maxLength={300}
+                value={guardianAddress}
+                onChange={(e) => setGuardianAddress(e.target.value)}
+                placeholder="Same as the applicant's"
+                className="mt-1.5"
+              />
+            </div>
+          </Section>
+        )}
+
+        <Section title="Emergency contact">
           <div className="grid gap-5 sm:grid-cols-3">
             <div>
               <Label htmlFor="contact_name">Name</Label>
@@ -539,8 +632,8 @@ function UploadPaperWaiverPage() {
           </div>
           {isMinor && (
             <p className="text-xs text-muted-foreground">
-              The applicant was under 18 when this was signed, so this is the parent or guardian who
-              signed for them, and their relationship is required.
+              Who the club would ring in an emergency. For a form that names only one contact, this
+              is also the person who signed it, and their relationship is required.
             </p>
           )}
         </Section>
