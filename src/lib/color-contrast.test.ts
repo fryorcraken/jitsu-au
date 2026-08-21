@@ -37,9 +37,12 @@ describe("contrast maths", () => {
   });
 
   it("converts oklch to the sRGB a browser would paint", () => {
-    // The two brand colours are written as hex in `@theme inline`, so they are
-    // an independent check that the conversion lands where it should.
-    expect(rgbToHex(oklchToRgb({ l: 0.58, c: 0.11, h: 220 }))).toBe("#0089a7"); // teal
+    // Pinned values, so a change to the matrices has to be deliberate. Note
+    // `--primary` lands on #0089a7 and the brand teal in `@theme inline` is
+    // #008eaa: the token approximates the brand colour by hand, it is not
+    // derived from it, so this is the conversion being pinned, not the two
+    // being reconciled.
+    expect(rgbToHex(oklchToRgb({ l: 0.58, c: 0.11, h: 220 }))).toBe("#0089a7");
     expect(rgbToHex(oklchToRgb({ l: 1, c: 0, h: 0 }))).toBe("#ffffff");
   });
 
