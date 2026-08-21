@@ -81,6 +81,31 @@ the manager screens read the live catalogue now. A price change is edited in
 two places: the plan (immediate, drives what people actually pay) and the
 pricing page copy (a code change, like any other website wording).
 
+**The free trial is two sessions, used at any point during the semester**, and
+that is the most the site may claim. `/first-class` states the terms in full.
+`/pricing` sold the same offer as year-round in three places ("all year long",
+"every day of the year", "always free") and the footer repeated it site-wide
+("all year round"), which promised more than the club honours. Shorter
+statements ("first two sessions free", "your first two are on us") are fine:
+they state the offer without claiming a window. `free-trial-copy.test.ts`
+fails the suite if a year-round claim comes back, and pins the qualifier on
+`/pricing` and `/first-class`.
+
+A plan's own `description` is bound by the same rule and is the one place the
+guard cannot see, because it is **data**: managers type it on
+`/manager/membership-plans` and `/membership` prints it. The trial plan's
+seeded description (`20260722000000_memberships.sql`) predates the rule and
+still reads "Your first two sessions, free all year round.", so signed-in
+members are shown the year-round claim the public pages no longer make.
+Correcting it is a manager edit on that screen, not a code change: editing the
+applied migration would change nothing live and only cause drift.
+
+That is the club's **offer**, not the membership row. The `trial_2_session`
+plan is a credit balance with no expiry (above), so a manager can still check
+someone in on a leftover trial session after the semester ends. The two are
+allowed to differ: the site promises the smaller thing, and the club can
+honour more than it promised.
+
 ## What an ended membership is called
 
 `memberships.status = 'expired'` is one stored word for two different endings,
