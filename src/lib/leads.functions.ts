@@ -16,7 +16,8 @@ import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireManager } from "@/lib/require-manager";
 import { INTEREST_SEEN_KEY, readSeenMarker, stampSeenMarker } from "@/lib/seen-markers";
-import { normalizeEmail } from "@/lib/validation";
+import { LEAD_HAS_PERSON_MESSAGE, deleteLeadSchema, normalizeEmail } from "@/lib/validation";
+import { userIdByEmail } from "@/lib/supabase-rpc";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -170,4 +171,82 @@ export const markInterestRegistrationsSeen = createServerFn({ method: "POST" })
     const admin = await adminClient();
     const result = await acknowledgeInterestRegistrations(admin, context.userId);
     return { ok: true as const, ...result };
+  });
+
+// ---- Manager: delete a lead ----
+//
+// The one erasure the club can make without deciding anything first. A lead
+// signed nothing, owes nothing and has no record hanging off them, so there is
+// no evidence to weigh against destroying it. Everything else a person leaves
+// behind is either a signed waiver or the club's own history, and what happens
+// to those is an open question (docs/erasing-personal-data.md).
+
+/**
+ * Delete every interest-form registration filed under one email address.
+ *
+ * Exported for its own test: the `createServerFn` wrapper below cannot be
+ * called from the unit runner (no Start request context), and the two guards
+ * here are the whole feature.
+ *
+ * Returns how many rows went, so the caller can tell "deleted" from "somebody
+ * else got there first" rather than reporting a no-op as a success.
+ */
+export async function deleteLeadRegistrations(
+  admin: AdminClient,
+  email: string,
+): Promise<{ deleted: number }> {
+  const wanted = normalizeEmail(email);
+
+  // Re-checked here, never trusted from the browser. The list the Delete was
+  // drawn from can be minutes old, and a waiver signed in between turns a lead
+  // into an applicant with a person record, a profile and frozen evidence
+  // behind the same address. Deleting their enquiry then is not tidying up an
+  // untouched form, it is taking a piece out of somebody's record.
+  const { data: personId, error: personErr } = await userIdByEmail(admin, wanted);
+  if (personErr) throw new Error(personErr.message);
+  if (personId) throw new Error(LEAD_HAS_PERSON_MESSAGE);
+
+  // The column stores the address exactly as it was typed, so one person can
+  // hold two rows that differ only in capitalisation, and the directory already
+  // merges them into a single lead. Both have to go, or the row a manager just
+  // deleted comes straight back.
+  //
+  // `ilike` is the prefilter, not the decision. `_` and `%` are wildcards in a
+  // LIKE pattern and both are legal in an email local part, so this can match
+  // MORE rows than it should — `a_b@example.com` also matches `axb@example.com`.
+  // It can never match fewer, so the exact comparison below is what chooses.
+  // Getting that backwards on a destructive path deletes a stranger's enquiry.
+  const { data: rows, error: readErr } = await admin
+    .from("interest_registrations")
+    .select("id, email")
+    .ilike("email", wanted);
+  if (readErr) throw new Error(readErr.message);
+
+  const ids = (rows ?? []).filter((r) => normalizeEmail(r.email) === wanted).map((r) => r.id);
+  if (ids.length === 0) return { deleted: 0 };
+
+  const { error: delErr } = await admin.from("interest_registrations").delete().in("id", ids);
+  if (delErr) throw new Error(delErr.message);
+  return { deleted: ids.length };
+}
+
+/**
+ * Manager: delete a lead, meaning every interest-form registration under their
+ * address, with the name, phone number and message they typed.
+ *
+ * Contact-form messages are NOT touched, even from the same address: they are a
+ * separate inbox with its own screen, and a manager clearing a lead off the
+ * directory has not necessarily read what that person wrote in.
+ */
+export const deleteLead = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => deleteLeadSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { deleted } = await deleteLeadRegistrations(await adminClient(), data.email);
+    // Nothing matched. Almost always a second manager (or a second tab) that
+    // deleted it first, and saying so beats a success message over a row that
+    // was already gone.
+    if (deleted === 0) throw new Error("That enquiry has already been deleted.");
+    return { ok: true as const, deleted };
   });
