@@ -6,6 +6,7 @@ import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { YouTubeEmbed } from "@/components/site/YouTubeEmbed";
 import { Button } from "@/components/ui/button";
 import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
+import { weeklySchedule } from "@/lib/schedule";
 import { VENUE_ADDRESS_SHORT, VENUE_BUILDING, VENUE_NAME } from "@/lib/venue";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
@@ -173,15 +174,7 @@ function Home() {
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
-            {[
-              { day: "Monday", time: "5:30 – 7:00pm" },
-              { day: "Wednesday", time: "6:00 – 7:30pm" },
-              {
-                day: "Saturday",
-                time: "11:00am – 12:30pm",
-                note: "Colour belts only, from September",
-              },
-            ].map((s) => (
+            {weeklySchedule.map((s) => (
               <div key={s.day} className="rounded-xl border bg-card p-6">
                 <div className="flex items-center gap-2 text-primary">
                   <Clock className="h-4 w-4" />
@@ -191,7 +184,7 @@ function Home() {
                 <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
                   <MapPin className="h-3.5 w-3.5" /> ActivateFit Gym, Ultimo
                 </p>
-                {s.note && <p className="mt-3 text-xs text-muted-foreground">{s.note}</p>}
+                <p className="mt-3 text-xs text-muted-foreground">{s.note}</p>
               </div>
             ))}
           </div>
