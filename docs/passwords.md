@@ -174,9 +174,12 @@ exchanging the token in the URL fragment, so a session arriving late takes the
 panel back off. And a session can lapse between opening the link and pressing
 the button, so `updateUser` refusing with a missing session puts the same panel
 back rather than printing GoTrue's own wording under the field.
-`isMissingSessionError()` is what recognises that refusal, and
-`describePasswordError()` has a branch for it as well, for any caller that
-shows the message instead.
+`isMissingSessionError()` is what recognises that refusal.
+
+`describePasswordError()` has a branch for the same refusal, and it is worded
+for `/account`: the change-password card there can hit it when a member's
+sign-in has lapsed, and the answer for them is to sign in again rather than to
+ask for a reset link.
 
 `/auth` sign-in is deliberately untouched. It checks nothing: an existing member
 holding an older, shorter password keeps signing in with it, because these rules

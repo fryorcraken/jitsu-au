@@ -361,10 +361,12 @@ export function isMissingSessionError(message: string): boolean {
  */
 export function describePasswordError(message: string): string {
   const text = message.toLowerCase();
-  // Not a password problem: the link they arrived on is spent. Say that, since
-  // retyping a different password would fail in exactly the same way.
+  // Not a password problem: there is nobody to save it for any more. Worded for
+  // /account, the caller that can actually reach this. /update-password
+  // recognises the same refusal earlier and offers a fresh reset link instead,
+  // since "sign in again" is no use to somebody who came here locked out.
   if (isMissingSessionError(message)) {
-    return "That reset link has expired, so the new password was not saved. Ask for a fresh link and set it again.";
+    return "You have been signed out, so the new password was not saved. Sign in again and set it once more.";
   }
   if (text.includes("known to be weak")) return BREACHED_MESSAGE;
   if (text.includes("should be at least")) {

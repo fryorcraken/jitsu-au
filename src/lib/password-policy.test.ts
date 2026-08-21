@@ -349,11 +349,11 @@ describe("describePasswordError", () => {
     );
   });
 
-  it("explains a spent reset link rather than printing GoTrue's session error", () => {
+  it("says the session is gone rather than printing GoTrue's own wording", () => {
     const rewritten = describePasswordError("Auth session missing!");
     expect(rewritten).not.toContain("Auth session missing");
-    expect(rewritten).toMatch(/expired/i);
-    expect(rewritten).toMatch(/fresh link/i);
+    expect(rewritten).toMatch(/signed out/i);
+    expect(rewritten).toMatch(/not saved/i);
   });
 
   it("contains no em dash, which the copy rules forbid", () => {
