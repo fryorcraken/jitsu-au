@@ -422,6 +422,11 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     `decodeDataUrlPng`). This is the highest-value suite: it pins the honeypot,
     signature-required, and minor/guardian rules.
   - `src/lib/utils.test.ts` — the `cn()` class-merge helper.
+  - `scripts/copy-voice.test.ts` — the two mechanical copy rules from
+    `AGENTS.md` (no em dash in prose, and the two banned constructions),
+    checked against every file under `src/`. It parses rather than greps, so
+    comments and the placeholder-glyph exception are not flagged; the exempt
+    files and the reasoning are in `scripts/copy-voice.ts`.
   - `src/components/ui/button.test.tsx` — a Testing Library smoke test proving
     the jsdom/component setup works (render, variants, click, `asChild`).
 - **Where to add tests:** pure logic belongs in `src/lib/` modules (import and
