@@ -317,11 +317,14 @@ wrote.
 manager writing an article is thinking about the sentence they want emphasised,
 not about Markdown syntax, so bold, italic, code, heading, both kinds of list,
 quote and link are buttons above the textarea, and each one also answers to the
-binding it has in every other editor: Ctrl/⌘ + B, I, E and K, and Ctrl/⌘ + Shift
-
-- 8, 7 and full stop for the lists and the quote. Each button names its own
-  shortcut. What is stored is still plain Markdown, typed by hand where that is
-  faster.
+binding it has in every other editor. Bold is `Ctrl+B`, italic `Ctrl+I`, code
+`Ctrl+E`, link `Ctrl+K`; the two lists and the quote are `Ctrl+Shift` with `8`,
+`7` and the full stop. Each button names its own shortcut. On a Mac they are the
+`⌘` versions, because `Ctrl+B` and `Ctrl+E` move the caret in every text field
+on that system and taking them would break something a person already relies on
+(the shifted ones are read off the physical key, so a non-US layout keeps them
+too). What is stored is still plain Markdown, typed by hand where that is
+faster.
 
 Three things follow from that, and they are the reason the editor is a component
 rather than a bare textarea:

@@ -107,6 +107,13 @@ export function markdownShortcut(
 
 const WORD = /[\p{L}\p{N}_]/u;
 
+/** Where the line holding `at` begins. `lastIndexOf` on its own is wrong here:
+ * asked to search from -1 it clamps to 0 and matches a leading newline, which
+ * put the whole of a body that opens with a blank line one character out. */
+function lineStartAt(text: string, at: number): number {
+  return at === 0 ? 0 : text.lastIndexOf("\n", at - 1) + 1;
+}
+
 /** The word the cursor is sitting in or against, so a shortcut pressed with
  * nothing selected still has something to act on. Empty range when it is not
  * touching a word. */
@@ -177,7 +184,7 @@ const LINE_RULES: Record<"heading" | "bullet" | "numbered" | "quote", LineRule> 
 function toggleLines(doc: MarkdownDoc, kind: keyof typeof LINE_RULES): MarkdownDoc {
   const rule = LINE_RULES[kind];
   const { text } = doc;
-  const lineStart = text.lastIndexOf("\n", doc.start - 1) + 1;
+  const lineStart = lineStartAt(text, doc.start);
   // A selection dragged to the start of the next line ends on a newline; that
   // next line is not part of what the person highlighted.
   const scanFrom = doc.end > doc.start && text[doc.end - 1] === "\n" ? doc.end - 1 : doc.end;
@@ -290,19 +297,32 @@ const LIST_LINE = /^(\s*)(?:([-*+])|(\d+)\.|(>)) (?:(\[[ xX]\]) )?(.*)$/;
  * instead (which is how every editor lets you leave a list).
  *
  * Null hands the key back to the browser, which keeps the native newline and
- * its place in the undo history for the common case.
+ * its place in the undo history for the common case. The whole line is read,
+ * not just the part before the caret: pressing Enter from the front of "- gi"
+ * splits the item in two, and reading only what is behind the caret made that
+ * look like an empty item and ate the text.
  */
 export function continueListOnEnter(doc: MarkdownDoc): MarkdownDoc | null {
   if (doc.start !== doc.end) return null;
   const { text, start } = doc;
-  const lineStart = text.lastIndexOf("\n", start - 1) + 1;
-  const match = LIST_LINE.exec(text.slice(lineStart, start));
+  const lineStart = lineStartAt(text, start);
+  const lineBreak = text.indexOf("\n", start);
+  const lineEnd = lineBreak === -1 ? text.length : lineBreak;
+  const match = LIST_LINE.exec(text.slice(lineStart, lineEnd));
   if (!match) return null;
 
-  const [, indent, bullet, number, quote, task, content] = match;
-  if (content.trim() === "" && !task) {
-    // An empty item: end the list rather than adding another empty one.
-    return { text: text.slice(0, lineStart) + text.slice(start), start: lineStart, end: lineStart };
+  const [whole, indent, bullet, number, quote, task, content] = match;
+  // Caret still inside the marker itself: there is no item to continue yet.
+  if (start < lineStart + (whole.length - content.length)) return null;
+
+  if (content.trim() === "") {
+    // An empty item: end the list rather than adding another empty one. A
+    // checklist counts, or a tick box would be the one thing no keystroke ends.
+    return {
+      text: text.slice(0, lineStart) + text.slice(lineEnd),
+      start: lineStart,
+      end: lineStart,
+    };
   }
   const marker = quote ? "> " : bullet ? `${bullet} ` : `${Number(number) + 1}. `;
   const insert = `\n${indent}${marker}${task ? "[ ] " : ""}`;

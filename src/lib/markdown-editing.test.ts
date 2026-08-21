@@ -67,6 +67,14 @@ describe("applyMarkdownCommand", () => {
     expect(show(applyMarkdownCommand(doc("|gi\n\nbelt|"), "bullet"))).toBe("|- gi\n\n- belt|");
   });
 
+  it("finds the line it is on in a body that opens with a blank line", () => {
+    // `lastIndexOf("\n", -1)` clamps to 0 and matches that leading newline,
+    // which used to put every offset one character out.
+    expect(
+      show(applyMarkdownCommand({ text: "\nGetting started", start: 0, end: 0 }, "heading")),
+    ).toBe("## |\nGetting started");
+  });
+
   it("does not swallow the next line when the selection ends on a line break", () => {
     expect(show(applyMarkdownCommand(doc("|gi\n|belt"), "bullet"))).toBe("|- gi|\nbelt");
   });
@@ -114,6 +122,18 @@ describe("continueListOnEnter", () => {
 
   it("ends the list when the item is empty, rather than adding another", () => {
     expect(show(continueListOnEnter(doc("- gi\n- |"))!)).toBe("- gi\n|");
+  });
+
+  it("splits an item rather than eating it when the caret is at its front", () => {
+    // Reading only what was behind the caret made "- |gi" look like an empty
+    // item, so Enter deleted the bullet AND kept the key, losing the line.
+    expect(show(continueListOnEnter(doc("- |gi"))!)).toBe("- \n- |gi");
+    // Still inside the marker: nothing to continue.
+    expect(continueListOnEnter(doc("-| gi"))).toBeNull();
+  });
+
+  it("ends an empty checklist item too", () => {
+    expect(show(continueListOnEnter(doc("- [ ] |"))!)).toBe("|");
   });
 
   it("hands Enter back to the browser everywhere else", () => {
