@@ -4,7 +4,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 function Harness({ initial }: { initial: string }) {
@@ -66,6 +66,28 @@ describe("MarkdownEditor", () => {
     await user.keyboard("*");
 
     expect(editor()).toHaveValue("keep it *tidy*");
+  });
+
+  it("touches nothing when the command has nothing to do", async () => {
+    // Bullets over a run of blank lines change no text. Applying that as an
+    // empty replacement reads to the browser as a backspace at the end of the
+    // document, and costs the undo history this design exists to keep.
+    const exec = vi.fn(() => false);
+    Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
+    try {
+      const user = userEvent.setup();
+      render(<Harness initial={"\n\n\n"} />);
+      const el = editor();
+      el.focus();
+      el.setSelectionRange(0, 3);
+
+      await user.click(screen.getByRole("button", { name: /^Bullet list/ }));
+
+      expect(exec).not.toHaveBeenCalled();
+      expect(editor()).toHaveValue("\n\n\n");
+    } finally {
+      Reflect.deleteProperty(document, "execCommand");
+    }
   });
 
   it("carries a list on to the next line, and ends it on an empty item", async () => {

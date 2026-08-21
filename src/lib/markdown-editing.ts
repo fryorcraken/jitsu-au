@@ -125,17 +125,27 @@ function wordRangeAt(text: string, at: number): [number, number] {
   return [start, end];
 }
 
+/**
+ * What the command should actually act on: the selection, or the word the
+ * cursor is in, with the whitespace at either edge left out of it.
+ *
+ * Whitespace inside the markers stops Markdown seeing them at all
+ * ("** bold **" renders literally, "[label ]()" glues the link to the next
+ * word), and picking a word by double-clicking takes the space after it in
+ * most browsers, so this is the common case rather than the odd one.
+ */
+function targetRange(doc: MarkdownDoc): [number, number] {
+  const { text } = doc;
+  let [start, end] = doc.start === doc.end ? wordRangeAt(text, doc.start) : [doc.start, doc.end];
+  while (end > start && /\s/.test(text[end - 1])) end--;
+  while (start < end && /\s/.test(text[start])) start++;
+  return [start, end];
+}
+
 /** Wrap, or unwrap, the selection in an inline marker (`**`, `_`, `` ` ``). */
 function toggleInline(doc: MarkdownDoc, marker: string): MarkdownDoc {
   const { text } = doc;
-  let [start, end] = doc.start === doc.end ? wordRangeAt(text, doc.start) : [doc.start, doc.end];
-
-  // Whitespace inside the markers stops Markdown seeing them at all
-  // ("** bold **" renders literally), and picking a word by double-clicking
-  // often takes the space after it. Leave it outside.
-  while (end > start && /\s/.test(text[end - 1])) end--;
-  while (start < end && /\s/.test(text[start])) start++;
-
+  const [start, end] = targetRange(doc);
   const selected = text.slice(start, end);
   const m = marker.length;
 
@@ -178,6 +188,15 @@ const LINE_RULES: Record<"heading" | "bullet" | "numbered" | "quote", LineRule> 
   quote: { match: /^> /, clear: /^> /, make: () => "> " },
 };
 
+/** A line split into its indentation and the rest, because every rule above
+ * applies to what follows the indent. Enter continues an indented item as an
+ * indented item, so the button has to read one the same way rather than
+ * stacking a second marker in front of the spaces. */
+function splitIndent(line: string): [string, string] {
+  const indent = /^[ \t]*/.exec(line)![0];
+  return [indent, line.slice(indent.length)];
+}
+
 /** Add (or remove) a line marker on every line the selection touches, so a
  * selected block becomes one bullet per line rather than one bullet swallowing
  * the lot. */
@@ -193,15 +212,16 @@ function toggleLines(doc: MarkdownDoc, kind: keyof typeof LINE_RULES): MarkdownD
 
   const lines = text.slice(lineStart, lineEnd).split("\n");
   const written = lines.filter((line) => line.trim() !== "");
-  const on = written.length > 0 && written.every((line) => rule.match.test(line));
+  const on = written.length > 0 && written.every((line) => rule.match.test(splitIndent(line)[1]));
 
   let counter = 0;
   const next = lines.map((line) => {
-    if (on) return line.replace(rule.match, "");
+    const [indent, body] = splitIndent(line);
+    if (on) return indent + body.replace(rule.match, "");
     // Blank lines between paragraphs are not list items; prefixing them leaves
     // a trail of empty bullets through the block.
     if (line.trim() === "" && lines.length > 1) return line;
-    return rule.make(counter++) + line.replace(rule.clear, "");
+    return indent + rule.make(counter++) + body.replace(rule.clear, "");
   });
 
   const block = next.join("\n");
@@ -219,7 +239,7 @@ const URL_LIKE = /^(https?:\/\/|mailto:|\/)\S*$/;
 /** `[label](url)`, with the cursor left wherever the person still has to type. */
 function insertLink(doc: MarkdownDoc): MarkdownDoc {
   const { text } = doc;
-  const [start, end] = doc.start === doc.end ? wordRangeAt(text, doc.start) : [doc.start, doc.end];
+  const [start, end] = targetRange(doc);
   const selected = text.slice(start, end);
 
   // A selected address is the address, not the words to show. Leave the label

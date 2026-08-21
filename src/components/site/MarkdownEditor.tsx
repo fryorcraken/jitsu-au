@@ -78,8 +78,15 @@ export function MarkdownEditor({
   function apply(next: MarkdownDoc | null) {
     const el = ref.current;
     if (!el || !next) return;
-    const patch = replacementFor(value, next.text);
     el.focus();
+    // A command with nothing to do (bullets over a run of blank lines) would
+    // otherwise send an empty replacement at the end of the document, which
+    // reads as a backspace and costs the undo history the fallback repairs.
+    if (next.text === value) {
+      el.setSelectionRange(next.start, next.end);
+      return;
+    }
+    const patch = replacementFor(value, next.text);
     el.setSelectionRange(patch.start, patch.end);
     let handled = false;
     try {

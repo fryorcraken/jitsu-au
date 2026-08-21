@@ -46,6 +46,21 @@ describe("applyMarkdownCommand", () => {
     expect(show(applyMarkdownCommand(doc("keep |it |tidy"), "bold"))).toBe("keep **|it|** tidy");
   });
 
+  it("keeps a line's indentation, rather than stacking a marker in front of it", () => {
+    // Enter continues an indented item as an indented one, so the button has
+    // to read that line the same way ("-   - gi" was neither).
+    expect(show(applyMarkdownCommand(doc("|  gi|"), "bullet"))).toBe("|  - gi|");
+    expect(show(applyMarkdownCommand(doc("|  - gi|"), "bullet"))).toBe("|  gi|");
+  });
+
+  it("leaves the text alone when there is nothing the command can do", () => {
+    // Blank lines are not list items, so this is a no-op, and the editor
+    // relies on the text coming back unchanged to keep its hands off the DOM.
+    expect(applyMarkdownCommand({ text: "\n\n\n", start: 0, end: 3 }, "bullet").text).toBe(
+      "\n\n\n",
+    );
+  });
+
   it("makes a heading, a quote and lists out of the lines the selection touches", () => {
     expect(show(applyMarkdownCommand(doc("Get|ting started"), "heading"))).toBe(
       "## Get|ting started",
@@ -88,6 +103,11 @@ describe("applyMarkdownCommand", () => {
       "[|](https://jitsu.au)",
     );
     expect(show(applyMarkdownCommand(doc("see: |"), "link"))).toBe("see: [|]()");
+    // Double-clicking a word takes the space after it in most browsers, and
+    // "[handbook ]()" glues the link to the word that follows.
+    expect(show(applyMarkdownCommand(doc("see |handbook |here"), "link"))).toBe(
+      "see [handbook](|) here",
+    );
   });
 });
 
