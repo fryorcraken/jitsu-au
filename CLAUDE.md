@@ -616,6 +616,26 @@ invisible to `bun run build`.
   carry it only because they are generated that way). That rule has to stay in
   the base layer — layer order, not specificity, is what lets a `cursor-*`
   utility still win over it.
+- **Changing a colour token? The pairs are contrast-checked.**
+  `src/lib/color-contrast.test.ts` reads `styles.css`, converts every
+  `oklch()` token to sRGB and asserts each foreground/background pair clears
+  WCAG AA (4.5:1) in **both** themes, so a palette tweak that makes a label
+  unreadable fails the unit suite rather than shipping. Two things are worth
+  knowing before you move one:
+  - `--destructive` does two jobs. It is the fill behind
+    `text-destructive-foreground` on every delete/revoke button, and it is
+    `text-destructive`, the colour of every form error and failed-submit panel
+    on the page. In dark mode there is no lightness that serves both against a
+    near-white ink, which is why the dark `--destructive-foreground` is a near
+    black (`oklch(0.16 0.05 22)`) while every other dark `-foreground` on a
+    tinted surface is `oklch(0.15 0.03 220)`. Darkening the red instead would
+    fix the buttons and break the error text.
+  - Keep a token inside the sRGB gamut if you care about the number. Out of
+    gamut, the test clips per channel and a browser reduces chroma instead, so
+    the two stop agreeing; `isSrgbGamut` says which side a value is on.
+  - A pair that is knowingly below AA goes on `KNOWN_BELOW_AA` in that file
+    with its reason and its exact current ratio, so it cannot get worse
+    unnoticed and cannot be forgotten. It is an acknowledgement, not a pardon.
 - **SEO:** every public page sets its own `head()` meta (title/description/og)
   **and its own `rel="canonical"`**; manager and other private pages set
   `robots: noindex`. Match the existing pattern when adding pages, and see the
