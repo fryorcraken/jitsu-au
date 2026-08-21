@@ -47,8 +47,10 @@ test("a member who is signed out can still get from pricing to their membership"
 
   await page.getByRole("main").getByRole("link", { name: "Sign in" }).click();
 
-  // Signing in from here lands on the page they were reaching for, rather than
-  // dropping them on their account to find it again.
+  // The link asks to come back to /membership rather than dropping them on
+  // their account to find it again. Only the URL is asserted here: what /auth
+  // then does with the parameter is SignInForms' business, and it currently
+  // honours it on the password form but not on the emailed magic link.
   await expect(page).toHaveURL(/\/auth\?redirect=%2Fmembership$/);
   await expect(page.getByRole("textbox", { name: "Email" })).toBeVisible();
 });

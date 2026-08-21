@@ -87,9 +87,13 @@ no self-serve sign-up: a login exists only once a manager has approved your
 waiver. A signed-in member gets "Manage your membership" straight to
 `/membership`. Everyone else gets "Join the club" into `/register-interest`,
 plus a sign-in link carrying `redirect=/membership` for a member who happens to
-be signed out. Until the browser has resolved the session it shows the
-signed-out branch, which is what the server renders anyway and is right for
-almost everyone reading a public pricing page.
+be signed out. That redirect is honoured when they already have a live session
+and when they sign in with a password; the emailed magic link still finishes on
+`/account`, because `MagicLinkSignIn` hard-codes its `emailRedirectTo` and never
+sees the parameter (true of every `?redirect=` link on the site, not just this
+one). Until the browser has resolved the session it shows the signed-out
+branch, which is what the server renders anyway and is right for almost
+everyone reading a public pricing page.
 
 **Any other public page linking into `_authenticated` needs the same
 treatment**, for the same reason: the gate behind it has nothing a person
