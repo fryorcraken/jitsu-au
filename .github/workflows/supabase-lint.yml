@@ -1,11 +1,22 @@
 name: Supabase lint
 
-# Applies every migration to a throwaway local Postgres, then runs both
-# Supabase linters against it:
+# Applies every migration to a throwaway local Postgres, then checks it three
+# ways:
 #   1. `supabase db lint` (plpgsql_check) — PL/pgSQL function errors.
 #   2. The Security/Performance Advisors (Splinter) — the same checks as the
 #      Supabase dashboard, including function_search_path_mutable. See
 #      supabase/lint/ for the vendored query and the gating policy.
+#   3. Client grants — what `anon` and `authenticated` end up holding once every
+#      migration has run, against supabase/lint/client-grants-expected.txt.
+#
+# (3) is the same checker migration-drift.yml points at the live database, and
+# it answers a different question here: not "does production match the expected
+# set" but "do the migration files, replayed from nothing, produce it". Those
+# can diverge, and until now nothing looked. A table created without the
+# `REVOKE ALL ... FROM anon, authenticated` that Supabase's default privileges
+# make necessary arrives fully open, and it would show up only in the live check
+# — which needs a production credential and so cannot run on a pull request.
+# This one needs no secret, so it runs on the PR that introduces the table.
 #
 # Path-filtered to database changes so frontend-only PRs don't spin up Docker.
 on:
@@ -48,10 +59,12 @@ jobs:
       - uses: actions/checkout@v7
 
       # Guards the gating logic itself (CSV parsing, thresholds, allowlist
-      # matching) with inline fixtures — no database needed, so it runs first
-      # and fails fast if the checker regresses.
-      - name: Self-test the advisor checker
-        run: python3 supabase/lint/check-advisors.py --selftest
+      # matching) with inline fixtures — no database needed, so these run first
+      # and fail fast if a checker regresses.
+      - name: Self-test the lint checkers
+        run: |
+          python3 supabase/lint/check-advisors.py --selftest
+          python3 supabase/lint/check-client-grants.py --selftest
 
       - uses: supabase/setup-cli@v3
         with:
@@ -83,3 +96,45 @@ jobs:
       - name: plpgsql_check (supabase db lint)
         if: always()
         run: supabase db lint --level warning --schema public --fail-on warning
+
+      # What anon and authenticated actually hold once every migration has run.
+      #
+      # Supabase's bootstrap grants ALL on every new table in `public` to both
+      # client roles, and GRANT cannot narrow that — only REVOKE can. So a table
+      # whose migration forgot `REVOKE ALL ON public.<t> FROM anon, authenticated;`
+      # replays fully open, and neither linter above can see it: the vendored
+      # Splinter lints 0026/0027 only ever test SELECT, and `supabase db lint`
+      # does not look at ACLs at all.
+      #
+      # Read pg_class.relacl, NOT information_schema.role_table_grants: the
+      # information_schema views hide grants the connecting role is not party to
+      # and omit MAINTAIN entirely. Same query as migration-drift.yml, so the two
+      # results are directly comparable — a difference between them is a live
+      # database that has drifted from its own migrations, in either direction.
+      #
+      # Grants follow the OBJECT, not the name: a REVOKE survives a later
+      # `ALTER TABLE ... RENAME TO`, so a table can be correctly closed by a
+      # migration that names it something else entirely (kb_articles is closed by
+      # 20260731140000_documents.sql, under its old name). That is exactly why
+      # this is a replay rather than a grep over the migration files.
+      - name: Client grants match the expected set
+        if: always()
+        run: |
+          # `set -o pipefail` is load-bearing: the checker's report is piped into
+          # the run summary, and GitHub's default shell is `bash -e` WITHOUT
+          # pipefail, so without this the pipeline exits with tee's status and a
+          # failing check reports a green tick.
+          set -o pipefail
+          psql "$DB_URL" \
+            -v ON_ERROR_STOP=1 --csv --tuples-only --quiet --pset pager=off \
+            -c "SELECT c.relname, r.rolname, a.privilege_type \
+                  FROM pg_class c \
+                  JOIN pg_namespace n ON n.oid = c.relnamespace \
+                  CROSS JOIN LATERAL aclexplode(c.relacl) a \
+                  JOIN pg_roles r ON r.oid = a.grantee \
+                 WHERE n.nspname = 'public' AND c.relkind = 'r' \
+                   AND r.rolname IN ('anon', 'authenticated') \
+                 ORDER BY 1, 2, 3" \
+            -o "$RUNNER_TEMP/grants.csv"
+          python3 supabase/lint/check-client-grants.py "$RUNNER_TEMP/grants.csv" \
+            | tee -a "$GITHUB_STEP_SUMMARY"

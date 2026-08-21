@@ -526,6 +526,13 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   `public`). Security findings at WARN+ fail the build; performance findings are
   reported only. The vendored query and gating policy live in `supabase/lint/`
   (see its README before changing the threshold or refreshing `splinter.sql`).
+  - It also runs `check-client-grants.py` against that replayed database, so a
+    table whose migration forgot its `REVOKE ALL ... FROM anon, authenticated`
+    fails the pull request that adds it rather than waiting for the live check
+    in `migration-drift.yml` (which holds a production credential and so never
+    runs on a PR). Grants attach to the object, not the name, so a `REVOKE`
+    survives a later `RENAME TO`: grepping the migrations for a table's current
+    name is not a substitute for the replay.
   - The allowlist (`supabase/lint/advisors-allowlist.txt`) only stops CI from
     **failing** on a reviewed finding; it does not remove it. Supabase's live
     **dashboard** advisors have no allowlist concept, so an acknowledged finding

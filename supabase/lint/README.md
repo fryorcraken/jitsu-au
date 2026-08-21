@@ -2,13 +2,16 @@
 
 `.github/workflows/supabase-lint.yml` starts a throwaway local Postgres with
 `supabase db start` (which applies every migration in `../migrations`) and runs
-**both** Supabase linters against it. It is path-filtered to `supabase/**`, so
-frontend-only PRs don't pay for a Docker database.
+both Supabase linters against it, plus the **client grants** check below. It is
+path-filtered to `supabase/**`, so frontend-only PRs don't pay for a Docker
+database.
 
 This directory also holds the **migration drift** check, which is _not_ part of
 that workflow: it runs from `../../.github/workflows/migration-drift.yml` on
 pushes to `main`, on a daily schedule, and on demand — and it talks to the
-**live** database rather than a local one.
+**live** database rather than a local one. That workflow runs the client grants
+check too, against the live ACL; see "Two databases, one grants checker" below
+for why both are worth having.
 
 ## What runs
 
@@ -16,10 +19,42 @@ pushes to `main`, on a daily schedule, and on demand — and it talks to the
 | ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Advisors**        | `splinter.sql` via `psql` → `check-advisors.py`      | The Security/Performance lints from the dashboard's **Database > Advisors**, e.g. `function_search_path_mutable` (a `SECURITY DEFINER` function without a fixed `search_path`). |
 | **plpgsql_check**   | `supabase db lint --schema public --fail-on warning` | Errors in `public` PL/pgSQL function bodies (unused variables, bad SQL, etc.).                                                                                                  |
+| **Client grants**   | `check-client-grants.py` against `pg_class.relacl`   | A table left open to `anon`/`authenticated`. Supabase grants ALL on every new table and `GRANT` cannot narrow that, so a missing `REVOKE` replays fully open.                   |
 | **Migration drift** | `check-migration-drift.py` against the live ledger   | A migration file that has never been applied to the live database. Committing a migration does not apply it — see `docs/database-changes.md`.                                   |
 
 `supabase db lint` is scoped to `public` on purpose: Supabase-managed schemas
 (`storage`, `auth`, …) ship functions that emit warnings we don't control.
+
+## Two databases, one grants checker
+
+`check-client-grants.py` runs in **both** workflows, over the same query and the
+same `client-grants-expected.txt`, and the two runs answer different questions:
+
+- In `supabase-lint.yml`, against the **local replay**: do the migration files,
+  applied from nothing, produce the expected set? This needs no credential, so
+  it runs on the pull request that adds the table.
+- In `migration-drift.yml`, against the **live database**: does production hold
+  the expected set today? This needs the production credential, so it cannot run
+  on a pull request (see below) and only reports after a merge.
+
+Neither subsumes the other. The migrations can be right while production has
+drifted by hand, or production can be right while the migrations would replay
+open — and the second is the one nobody notices, because every database built
+from this directory alone (the two CI stacks, a restore, a re-provision, a
+clone once the repo is public) gets it.
+
+Two things to know before reading a failure:
+
+- **Grants follow the object, not the name.** A `REVOKE` survives a later
+  `ALTER TABLE … RENAME TO`, so the migration that closes a table may name it
+  something else entirely: `kb_articles`, `kb_article_versions` and
+  `kb_annotations` are closed by `20260731140000_documents.sql`, under the names
+  they had before the knowledge base rename. Grepping the migrations for a
+  table's current name therefore reports a missing `REVOKE` that is not missing.
+  Replaying and reading the ACL is the only reliable check, which is why this
+  runs as a replay rather than as a lint over the files.
+- **The replay is Postgres's answer, not a re-reading of the SQL.** If it says a
+  table is open, it is open in every database built from these files.
 
 ## Migration drift
 

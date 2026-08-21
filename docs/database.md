@@ -48,8 +48,13 @@ roles.
 The list below is the complete set of table privileges the client roles hold.
 Most of the app needs none of it: it reaches the database through a server
 function on the service-role client, which bypasses both grants and RLS.
-`supabase/lint/client-grants-expected.txt` pins this list and
-`.github/workflows/migration-drift.yml` checks it against the live database.
+`supabase/lint/client-grants-expected.txt` pins this list, and it is checked
+against **two** databases:
+`.github/workflows/migration-drift.yml` reads the live ACL after a merge, and
+`.github/workflows/supabase-lint.yml` replays every migration into a throwaway
+Postgres and reads the ACL there, on every `supabase/**` pull request. The
+second needs no credential, so a table left open by its migration fails the PR
+that adds it rather than surfacing a merge later.
 
 | Table                    | Role            | Privilege | Why                                                                                                                                                                                               |
 | ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,6 +72,18 @@ function on the service-role client, which bypasses both grants and RLS.
 | `blog_comment_upvotes`   | `authenticated` | `SELECT`  | a person reads their own upvotes, to show a comment as already upvoted                                                                                                                            |
 
 Every other table grants the client roles **nothing**.
+
+> [!NOTE]
+> **A table's `REVOKE` may live under a different name.** Grants attach to the
+> object, not to its name, so a `REVOKE` survives a later
+> `ALTER TABLE … RENAME TO`. The knowledge base is the standing example:
+> `kb_articles`, `kb_article_versions` and `kb_annotations` are closed by
+> `20260731140000_documents.sql`, which revoked them as `documents`,
+> `document_versions` and `document_annotations` before
+> `20260802100000_knowledge_base.sql` renamed all three. Searching the
+> migrations for `REVOKE ... kb_articles` finds nothing and means nothing — a
+> full replay of `supabase/migrations` yields the 18 grants in the table above
+> and not one more, which is what the CI check now asserts.
 
 > [!IMPORTANT]
 > The first five rows are **server** functions, not browser code. They run in
