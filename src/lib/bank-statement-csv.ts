@@ -90,6 +90,8 @@ export type StatementColumns = {
   amountIdx: number;
   descIdx: number;
   refIdx: number;
+  /** A DR/CR column saying which way each row went, when the file has one. */
+  debitFlagIdx: number;
 };
 
 /** The three the import promises to read, in the words the screen uses. */
@@ -110,25 +112,72 @@ const DESCRIPTION_KEYS = ["description", "narrative", "details", "memo", "refere
 const NOT_AN_AMOUNT = ["debit", "withdrawal", "limit", "balance"];
 
 /**
+ * What may sit beside "credit" or "deposit" in a header and still leave it a
+ * money-in column. Anything else in there means the header is about something
+ * other than the money: "Credit Card Surcharge" is a fee, not a payment to us.
+ */
+const CREDIT_HEADER_WORDS = new Set([
+  "credit",
+  "credits",
+  "deposit",
+  "deposits",
+  "amount",
+  "amounts",
+  "money",
+  "in",
+  "total",
+  "aud",
+  "$",
+]);
+
+const CREDIT_WORDS = ["credit", "credits", "deposit", "deposits"];
+
+function isCreditColumn(header: string): boolean {
+  const words = header.split(/[^a-z$]+/).filter(Boolean);
+  if (!words.some((w) => CREDIT_WORDS.includes(w))) return false;
+  return words.every((w) => CREDIT_HEADER_WORDS.has(w));
+}
+
+/** A column saying which way the row went rather than how much: DR/CR. */
+function isDebitCreditFlag(header: string): boolean {
+  if (header.includes("debit") && header.includes("credit")) return true;
+  return /\b(dr|cr)\s*[/|-]\s*(dr|cr)\b/.test(header);
+}
+
+/** How such a column spells "this one went out". Anything else leaves the row alone. */
+const DEBIT_MARKERS = new Set(["d", "dr", "db", "debit", "w", "withdrawal", "-"]);
+
+/** True when this row's DR/CR cell says the money went out. */
+export function isDebitRow(flagCell: string): boolean {
+  return DEBIT_MARKERS.has(flagCell.trim().toLowerCase());
+}
+
+/**
  * Work out which column is which from the header row, by substring.
  *
- * The amount column is the one worth reading twice. Some exports put money out
- * in its own column beside money in ("Debit Amount", "Credit Amount"), and a
- * plain first-match on "amount" picks the debit one: every card purchase in the
- * statement would then import as an incoming credit, and the club would think
- * it had been paid. So nothing naming a debit, a withdrawal, a limit or a
- * balance is ever the amount (that also rules out a "Debit/Credit" indicator
- * column, which holds "DR"/"CR" rather than money), and among what is left a
- * header naming a credit or a deposit wins over a plain "amount".
+ * The amount column is the one worth reading twice, because getting it wrong
+ * means a card purchase imports as a payment to the club. Three shapes of
+ * export have to land right:
+ *
+ *   Amount (signed)                 -> the plain case, negatives dropped later
+ *   Debit Amount | Credit Amount    -> a first-match on "amount" picks the
+ *                                      DEBIT one, so nothing naming a debit, a
+ *                                      withdrawal, a limit or a balance is
+ *                                      ever the amount
+ *   Amount (unsigned) | Debit/Credit-> the sign lives in a separate DR/CR
+ *                                      column, so we find that column here and
+ *                                      `toBankRows` skips the rows it marks out
+ *
+ * Among what is left a header naming a credit or a deposit wins over a plain
+ * "amount", but only when the rest of the header agrees it is a money column:
+ * "Credit Card Surcharge" contains "credit" and is not one.
  */
 export function detectStatementColumns(headerRow: string[]): StatementColumns {
   const header = headerRow.map((h) => h.trim().toLowerCase());
   const find = (...keys: string[]) => header.findIndex((h) => keys.some((k) => h.includes(k)));
   const couldBeAmount = (h: string) => !NOT_AN_AMOUNT.some((k) => h.includes(k));
 
-  const creditIdx = header.findIndex(
-    (h) => couldBeAmount(h) && (h.includes("credit") || h.includes("deposit")),
-  );
+  const creditIdx = header.findIndex((h) => couldBeAmount(h) && isCreditColumn(h));
   const amountIdx =
     creditIdx >= 0 ? creditIdx : header.findIndex((h) => h.includes("amount") && couldBeAmount(h));
 
@@ -136,7 +185,13 @@ export function detectStatementColumns(headerRow: string[]): StatementColumns {
   // key that appears anywhere in the header wins.
   const descIdx = DESCRIPTION_KEYS.map((k) => find(k)).find((i) => i >= 0) ?? -1;
 
-  return { dateIdx: find("date"), amountIdx, descIdx, refIdx: find("reference") };
+  return {
+    dateIdx: find("date"),
+    amountIdx,
+    descIdx,
+    refIdx: find("reference"),
+    debitFlagIdx: header.findIndex(isDebitCreditFlag),
+  };
 }
 
 /** "a Date column" / "the Date and Amount columns" — for the error below. */
@@ -171,6 +226,8 @@ export function toBankRows(rows: string[][]): BankTxnRow[] {
 
   const out: BankTxnRow[] = [];
   for (const r of rows.slice(1)) {
+    // An unsigned amount beside a DR/CR column: the sign is over there.
+    if (columns.debitFlagIdx >= 0 && isDebitRow(r[columns.debitFlagIdx] ?? "")) continue;
     const cents = parseMoneyToCents(r[columns.amountIdx] ?? "");
     if (cents == null || cents <= 0) continue; // only incoming credits can pay a membership
     out.push({

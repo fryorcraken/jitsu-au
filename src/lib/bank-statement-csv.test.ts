@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { detectStatementColumns, normalizeDate, parseCsv, toBankRows } from "./bank-statement-csv";
+import {
+  detectStatementColumns,
+  isDebitRow,
+  normalizeDate,
+  parseCsv,
+  toBankRows,
+} from "./bank-statement-csv";
 
 /**
  * These tests exist because a dropped or mis-read statement line is a member
@@ -204,6 +210,28 @@ describe("toBankRows", () => {
     );
   });
 
+  it("drops the rows a DR/CR column marks as money going out", () => {
+    // The amount is unsigned here: the direction lives in its own column, so
+    // without reading it every card purchase imports as a payment to the club.
+    const statement = [
+      "Date,Description,Amount,Debit/Credit,Balance",
+      "01/08/2026,EFTPOS COLES,45.50,DR,954.50",
+      "02/08/2026,OSKO UTS-0042,120.00,CR,1074.50",
+    ].join("\n");
+    expect(toBankRows(parseCsv(statement))).toEqual([
+      { posted_at: "2026-08-02", amount_cents: 12000, description: "OSKO UTS-0042", reference: "" },
+    ]);
+  });
+
+  it("keeps a row whose DR/CR cell it does not recognise, rather than dropping it", () => {
+    const statement = [
+      "Date,Description,Amount,Debit/Credit",
+      "02/08/2026,OSKO UTS-0042,120.00,",
+      "03/08/2026,OSKO UTS-0043,80.00,something else",
+    ].join("\n");
+    expect(toBankRows(parseCsv(statement)).map((r) => r.amount_cents)).toEqual([12000, 8000]);
+  });
+
   it("reads the credit column, not the debit one, when the export has both", () => {
     const statement = [
       "Date,Description,Debit Amount,Credit Amount",
@@ -225,7 +253,7 @@ describe("detectStatementColumns", () => {
   it("finds each column by substring, whatever the header is called around it", () => {
     expect(
       detectStatementColumns(["Transaction Date", "Narrative", "Amount", "Reference", "Balance"]),
-    ).toEqual({ dateIdx: 0, amountIdx: 2, descIdx: 1, refIdx: 3 });
+    ).toEqual({ dateIdx: 0, amountIdx: 2, descIdx: 1, refIdx: 3, debitFlagIdx: -1 });
   });
 
   it("reports -1 for a column the header row does not have", () => {
@@ -254,12 +282,43 @@ describe("detectStatementColumns", () => {
     expect(detectStatementColumns(["Date", "Closing Balance", "Amount"]).amountIdx).toBe(2);
   });
 
+  it("only prefers a credit header when the rest of it agrees it is a money column", () => {
+    // "Credit Card Surcharge" is a fee column. Letting the substring "credit"
+    // win it would drop every real credit in the file.
+    const header = ["Date", "Description", "Amount", "Credit Card Surcharge"];
+    expect(detectStatementColumns(header).amountIdx).toBe(2);
+    expect(detectStatementColumns(["Date", "Credit (AUD)", "Description"]).amountIdx).toBe(1);
+    expect(detectStatementColumns(["Date", "Total Credits", "Description"]).amountIdx).toBe(1);
+  });
+
+  it("finds a DR/CR indicator column, however the file spells it", () => {
+    expect(detectStatementColumns(["Date", "Amount", "Debit/Credit"]).debitFlagIdx).toBe(2);
+    expect(detectStatementColumns(["Date", "Amount", "DR/CR"]).debitFlagIdx).toBe(2);
+    expect(detectStatementColumns(["Date", "Amount", "Credit or Debit"]).debitFlagIdx).toBe(2);
+    expect(detectStatementColumns(["Date", "Amount", "Description"]).debitFlagIdx).toBe(-1);
+  });
+
   it("prefers a narrative over a reference for the description, whatever their order", () => {
     expect(detectStatementColumns(["Date", "Reference", "Narrative", "Amount"])).toEqual({
       dateIdx: 0,
       amountIdx: 3,
       descIdx: 2,
       refIdx: 1,
+      debitFlagIdx: -1,
     });
+  });
+});
+
+describe("isDebitRow", () => {
+  it("recognises how a statement spells money going out", () => {
+    for (const cell of ["DR", "dr", " Debit ", "D", "db", "W", "withdrawal", "-"]) {
+      expect(isDebitRow(cell)).toBe(true);
+    }
+  });
+
+  it("says no to anything it does not recognise, so a credit is never dropped", () => {
+    for (const cell of ["", "CR", "credit", "C", "+", "transfer"]) {
+      expect(isDebitRow(cell)).toBe(false);
+    }
   });
 });

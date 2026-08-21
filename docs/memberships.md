@@ -323,7 +323,13 @@ Four things are decided rather than obvious:
   export with `Debit Amount` beside `Credit Amount` otherwise resolved to the
   debit one, and every card purchase in the statement imported as money coming
   in. The same rule keeps a `Debit/Credit` indicator column (which holds `DR` /
-  `CR`, not a sum) and a `Credit Limit` out of it.
+  `CR`, not a sum) and a `Credit Limit` out of it. A credit header only wins
+  when the rest of it agrees it is a money column, so `Credit Card Surcharge`
+  is a fee and loses to a plain `Amount`.
+- **When the direction lives in its own DR/CR column, that column is read.**
+  Some exports leave the amount unsigned and put `DR` / `CR` beside it. Rows
+  marked as going out are dropped; a cell we do not recognise leaves its row
+  alone, because dropping a credit is the more expensive mistake.
 - **A date that is not a real calendar date is dropped, not passed on.** A
   US-formatted export reads `08/13/2026` as day 8 of month 13, which clears the
   row schema's regex and then kills the entire import at insert time on a raw
