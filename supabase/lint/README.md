@@ -69,9 +69,12 @@ the job loudly (psql exit 2); it cannot pass silently.
 
 ### Reading the result
 
-Without the secret the job prints a warning, writes a notice to the run summary,
-and **passes**. So a green tick only means "no drift" once the secret is set —
-read the summary, not just the ✅.
+Without the secret both steps write a notice to the run summary and **fail**.
+That is deliberate: an unarmed check that passed made every run green while
+asking the database nothing, which is worse than having no check, because a
+green tick is what stops anyone from looking. So a red job here means either
+real drift or a missing secret, and the summary says which. Never soften the
+guard back to a pass to clear the tick.
 
 A migration legitimately waiting to be applied (the contract phase of an
 expand/contract change, which must land _after_ the code deploys) goes in

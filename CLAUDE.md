@@ -38,12 +38,16 @@ requests, the CI logs, and the screenshot artifacts.
 - CI is designed to hold exactly one production credential (`SUPABASE_DB_URL`,
   used only by `migration-drift.yml`), as a GitHub secret, and that workflow
   deliberately never runs on `pull_request`; keep it that way. Forks get no
-  secrets. **But the secret is not actually configured today** — every drift run
-  since the repo began has logged `SUPABASE_DB_URL:` empty and
-  `##[warning]SUPABASE_DB_URL is not set — the ... check did NOT run`, while
-  still reporting green. So nothing is currently at risk of leaking there, and
-  equally **the workflow has never checked anything**. Until that secret is set,
-  a green tick on Migration drift means only that the job ran.
+  secrets. **But the secret is not actually configured today**, so nothing is
+  currently at risk of leaking there — and equally, **the workflow checked
+  nothing from the repo's first day until 2026-08-21**: every run logged
+  `SUPABASE_DB_URL:` empty and passed anyway. Since then both steps **fail**
+  when the secret is missing, so Migration drift is expected to be **red** until
+  somebody adds it (Settings → Secrets and variables → Actions; the
+  least-privilege role to create is in `supabase/lint/README.md`). A red tick
+  there means "not armed", a green one now means the live database was really
+  asked. Do not soften those guards back to a pass to get the tick green — the
+  quiet green is the bug that hid this for months.
   - Both checks were run **by hand on 2026-08-20**, against the live database
     through Lovable's SQL access rather than the workflow, and both came back
     clean: **18 client grants live, 18 expected, 0 unexpected**, and every
@@ -516,8 +520,13 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     so it neither publishes nor comments: its gallery is the artifact on the
     run's own page.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
-  migration file against the **live** ledger. Not on PRs — it holds a
-  production credential (see "Schema drift" in `docs/database-changes.md`).
+  migration file against the **live** ledger, and the grants `anon` /
+  `authenticated` actually hold against `supabase/lint/client-grants-expected.txt`.
+  Not on PRs — it holds a production credential (see "Schema drift" in
+  `docs/database-changes.md`). Both steps fail if `SUPABASE_DB_URL` is unset, so
+  the job is red until the secret exists; `scripts/migration-drift-workflow.test.ts`
+  pins that, and pins the credential out of every `pull_request`-triggered
+  workflow. Only the checkers' `--selftest` runs on PRs, from `ci.yml`.
 - **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
   `supabase/**`) starts a local Postgres, applies every migration to it (which
   is not the live database, see `docs/database-changes.md`), and runs the
