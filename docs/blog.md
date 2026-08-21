@@ -122,8 +122,10 @@ host the manager is signed in on) ready to paste into a message or a social
 post. It sits with the title rather than with View/Delete because those are off
 the right edge of the table on a phone. A draft has no button: the public route
 serves published posts only, so a draft's URL is a 404 for everyone it is sent
-to. The composer is a Markdown textarea with a small
-formatting toolbar (bold/italic/heading/list/link), an "Insert image" button
+to. The composer is the same Markdown editor the knowledge base
+uses (`MarkdownEditor`, so the toolbar, the keyboard shortcuts and the
+wrap-the-selection behaviour described in `docs/knowledge-base.md` are the same
+on both screens), with an "Insert image" button
 (uploads to `blog-media`, inserts a Markdown image), an "Insert video" dialog
 (YouTube links embed inline; anything else shows as a plain link), a separate
 cover-image uploader, a status picker (draft/published) that warns before

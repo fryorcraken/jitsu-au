@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { MarkdownEditor } from "@/components/site/MarkdownEditor";
 import {
   Select,
   SelectContent,
@@ -144,57 +145,6 @@ export function BlogPostEditor({
   }, [dirty]);
 
   const willUnpublish = initial.status === "published" && status === "draft";
-
-  /** Wrap the current selection in inline Markdown syntax (bold/italic/link). */
-  function wrapSelection(before: string, after: string = before) {
-    const el = bodyRef.current;
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const selected = body.slice(start, end);
-    setBody(`${body.slice(0, start)}${before}${selected}${after}${body.slice(end)}`);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(start + before.length, start + before.length + selected.length);
-    });
-  }
-
-  /** Insert a block marker (e.g. `## `) at the start of the current line,
-   * adding a leading newline only when the cursor isn't already at the start
-   * of a line (so it never inserts a stray blank line at the top of an empty
-   * or freshly-started document). Headings are single-line by definition, so
-   * this ignores the rest of a multi-line selection on purpose. */
-  function insertLinePrefix(prefix: string) {
-    const el = bodyRef.current;
-    const pos = el ? el.selectionStart : body.length;
-    const needsNewline = pos > 0 && body[pos - 1] !== "\n";
-    const insert = `${needsNewline ? "\n" : ""}${prefix}`;
-    setBody(`${body.slice(0, pos)}${insert}${body.slice(pos)}`);
-    requestAnimationFrame(() => {
-      el?.focus();
-      const at = pos + insert.length;
-      el?.setSelectionRange(at, at);
-    });
-  }
-
-  /** Prefix every line touched by the current selection (e.g. turning a
-   * multi-line selection into a multi-item bullet list, one bullet per
-   * line, instead of one bullet swallowing every line as its own text). */
-  function prefixEachLine(prefix: string) {
-    const el = bodyRef.current;
-    const start = el ? el.selectionStart : 0;
-    const end = el ? el.selectionEnd : 0;
-    const lineStart = body.lastIndexOf("\n", start - 1) + 1;
-    let lineEnd = body.indexOf("\n", end);
-    if (lineEnd === -1) lineEnd = body.length;
-    const block = body.slice(lineStart, lineEnd);
-    const prefixed = block
-      .split("\n")
-      .map((line) => `${prefix}${line}`)
-      .join("\n");
-    setBody(`${body.slice(0, lineStart)}${prefixed}${body.slice(lineEnd)}`);
-    requestAnimationFrame(() => el?.focus());
-  }
 
   async function uploadFile(file: File): Promise<{ path: string; url: string } | null> {
     if (!isBlogImageMimeType(file.type)) {
@@ -379,67 +329,50 @@ export function BlogPostEditor({
       </div>
       <div>
         <Label htmlFor="post-body">Body (Markdown)</Label>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          <Button type="button" variant="outline" size="sm" onClick={() => wrapSelection("**")}>
-            Bold
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => wrapSelection("_")}>
-            Italic
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => insertLinePrefix("## ")}>
-            Heading
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => prefixEachLine("- ")}>
-            List
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => wrapSelection("[", "](https://)")}
-          >
-            Link
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={uploadingImage}
-            onClick={() => imageInputRef.current?.click()}
-          >
-            {uploadingImage ? "Uploading..." : "Insert image"}
-          </Button>
-          <input
-            ref={imageInputRef}
-            type="file"
-            className="sr-only"
-            aria-label="Insert image into post body"
-            accept={IMAGE_ACCEPT}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleInsertImage(file);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setVideoUrl("");
-              setVideoDialogOpen(true);
-            }}
-          >
-            Insert video
-          </Button>
-        </div>
-        <Textarea
+        <MarkdownEditor
           id="post-body"
-          ref={bodyRef}
+          textareaRef={bodyRef}
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={setBody}
           rows={18}
-          className="mt-2 font-mono text-sm"
+          tools={
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={uploadingImage}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => imageInputRef.current?.click()}
+              >
+                {uploadingImage ? "Uploading..." : "Insert image"}
+              </Button>
+              <input
+                ref={imageInputRef}
+                type="file"
+                className="sr-only"
+                aria-label="Insert image into post body"
+                accept={IMAGE_ACCEPT}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleInsertImage(file);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setVideoUrl("");
+                  setVideoDialogOpen(true);
+                }}
+              >
+                Insert video
+              </Button>
+            </>
+          }
         />
       </div>
       <div>

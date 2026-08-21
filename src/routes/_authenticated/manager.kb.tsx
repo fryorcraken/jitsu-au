@@ -42,9 +42,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MarkdownEditor } from "@/components/site/MarkdownEditor";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -1543,14 +1543,14 @@ function KnowledgeBaseManager() {
 
                   <div>
                     <Label htmlFor="body">Body (Markdown)</Label>
-                    <Textarea
+                    <MarkdownEditor
                       id="body"
                       value={body}
-                      onChange={(e) => setBody(e.target.value)}
+                      onChange={setBody}
                       rows={22}
-                      className="mt-1.5 font-mono text-sm"
+                      aria-describedby="body-hint"
                     />
-                    <p className="mt-1.5 text-xs text-muted-foreground">
+                    <p id="body-hint" className="mt-1.5 text-xs text-muted-foreground">
                       Members comment paragraph by paragraph. Editing the words of a paragraph
                       detaches its comments, which are then shown as being about earlier wording.
                       Adding or moving paragraphs elsewhere leaves other comments where they are.
