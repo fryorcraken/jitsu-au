@@ -4,7 +4,13 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta } from "@/lib/seo";
 import { scheduleDays, weeklySchedule } from "@/lib/schedule";
-import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL } from "@/lib/venue";
+import {
+  VENUE_ADDRESS_SHORT,
+  VENUE_NAME,
+  VENUE_PHONE_DISPLAY,
+  VENUE_PHONE_TEL,
+  VENUE_STREET_ADDRESS,
+} from "@/lib/venue";
 
 export const Route = createFileRoute("/classes")({
   head: () => ({
@@ -26,8 +32,8 @@ function Classes() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Classes</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">Train with us in Ultimo.</h1>
         <p className="mt-5 text-lg text-muted-foreground">
-          Sessions run at ActivateFit Gym on Harris Street, a modern, well-equipped facility on the
-          main UTS campus, easy to reach from the CBD.
+          Sessions run at {VENUE_NAME}, {VENUE_STREET_ADDRESS}, a modern, well-equipped facility on
+          the main UTS campus, easy to reach from the CBD.
         </p>
       </section>
 
@@ -72,7 +78,9 @@ function Classes() {
             <p className="flex items-center gap-2 text-sm font-semibold text-primary">
               <MapPin className="h-4 w-4" /> Location
             </p>
-            <h2 className="mt-2 text-2xl font-bold">ActivateFit Gym, Harris Street, Ultimo NSW</h2>
+            <h2 className="mt-2 text-2xl font-bold">
+              {VENUE_NAME}, {VENUE_ADDRESS_SHORT}
+            </h2>
             <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <Phone className="h-4 w-4" />{" "}
               <a href={VENUE_PHONE_TEL} className="hover:text-foreground">
