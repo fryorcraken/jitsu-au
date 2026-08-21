@@ -7,7 +7,7 @@ import { renderErrorPage } from "./error-page";
 
 /**
  * `data-page-state` is the contract between the app's failure boundaries and
- * `scripts/pr-screenshots.mjs`, which fails a screenshot run when it finds one.
+ * the end-to-end tour (e2e/tour/site.spec.ts), which fails when it finds one.
  *
  * It has to be an attribute rather than the visible copy: the copy is website
  * prose and may be rewritten at any time, and both boundaries render inside an

@@ -1,7 +1,6 @@
 // A prospective member arrives on the home page and finds their way around.
 
-import { expect, test } from "@playwright/test";
-
+import { expect, test } from "../support/test";
 import { expectPageRendered, siteNavLink } from "../support/page";
 
 test("the home page tells you what the club is and where", async ({ page }) => {

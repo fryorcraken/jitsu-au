@@ -2,8 +2,8 @@
 // client at.
 //
 // Three programs make service-role calls against a seeded local stack — the
-// seed itself, the PR screenshots and the end-to-end tests — and every one of
-// them bypasses RLS, while GoTrue's `generate_link` CREATES an account that
+// seed itself and the end-to-end tests (which take the pull request's
+// screenshots as they go) — and every one of them bypasses RLS, while GoTrue's `generate_link` CREATES an account that
 // does not exist. So the whole thing standing between a mistyped environment
 // variable and fixture members in the club's real database is this predicate.
 //
@@ -12,8 +12,8 @@
 // here is the RULE, so widening it (an IPv6 alias, a CI hostname) cannot be
 // done for one caller and forgotten for the other two.
 //
-// TypeScript, and imported by `.mjs` scripts: both of those run under bun,
-// which loads TS directly (pr-screenshots.mjs already imports src/lib/seo.ts).
+// TypeScript, and imported from both `.mjs` scripts and the Playwright specs:
+// bun and Playwright both load TS directly.
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 

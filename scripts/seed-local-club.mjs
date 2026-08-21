@@ -3,11 +3,10 @@
 // Fill a freshly started LOCAL Supabase stack with enough of a club to sign in
 // to and use.
 //
-// Two jobs run against what this writes: the PR screenshots
-// (scripts/pr-screenshots.mjs) photograph every signed-in screen, and the
-// end-to-end tests (e2e/, docs/e2e-tests.md) drive the flows on them. Neither
-// owns it, which is why it is named after the club rather than after either of
-// them.
+// The end-to-end suite runs against what this writes (e2e/, docs/e2e-tests.md):
+// it walks the flows on these people and photographs them on the way, which is
+// where a pull request's screenshots come from. It is named after the club
+// rather than after the suite because the club is the thing being described.
 //
 //   supabase start                 # Postgres + Auth + PostgREST + Storage
 //   eval "$(supabase status -o env)"
@@ -751,7 +750,7 @@ await insert("interest_registrations", [
 ]);
 
 const fixture = {
-  // Which database these ids exist in. pr-screenshots.mjs refuses to sign in
+  // Which database these ids exist in. e2e/support/fixture.ts refuses to sign in
   // when this does not match its own SUPABASE_URL: the manifest and the
   // credentials arriving from different places is the failure that would put
   // fixture people in the club's real auth.
@@ -763,7 +762,7 @@ const fixture = {
   },
   password: PERSONA_PASSWORD,
   // What the `$param` segments of the dynamic routes need, keyed by the
-  // parameter's own name (see fillRouteParams in pr-screenshots-pages.mjs).
+  // parameter's own name (see fillRouteParams in scripts/site-pages.ts).
   params: {
     userId: users.member,
     id: BLOG.welcome,

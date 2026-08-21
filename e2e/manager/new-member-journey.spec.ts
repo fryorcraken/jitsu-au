@@ -11,8 +11,7 @@
 // the coverage) is produced by walking the real screens in order, the same
 // way it would happen for a real person.
 
-import { expect, test } from "@playwright/test";
-
+import { expect, shot, step, test } from "../support/test";
 import { adminClient } from "../support/fixture";
 import { expectPageRendered } from "../support/page";
 
@@ -49,7 +48,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   const visitor = await browser.newContext({ storageState: NO_SESSION });
   const visitorPage = await visitor.newPage();
 
-  await test.step("registers interest", async () => {
+  await step(visitorPage, "registers interest", async () => {
     await visitorPage.goto("/register-interest");
     await visitorPage.getByLabel("First name").fill(firstName);
     await visitorPage.getByLabel("Last name").fill(lastName);
@@ -59,7 +58,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     await expect(visitorPage.getByRole("heading", { name: /You're on the list/ })).toBeVisible();
   });
 
-  await test.step("signs the waiver", async () => {
+  await step(visitorPage, "signs the waiver", async () => {
     // The confirmation screen's own link, carrying what was just typed —
     // exactly what a real visitor would click, rather than a hand-built URL.
     await visitorPage.getByRole("link", { name: "Sign my waiver" }).click();
@@ -110,6 +109,11 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     await visitorPage.getByRole("tab", { name: "Type" }).click();
     await visitorPage.getByLabel("Type your full name to sign").fill(`${firstName} ${lastName}`);
 
+    // The form as the person leaves it, before it is replaced by the
+    // confirmation. A step's own picture is of where it ENDED, so the only way
+    // a filled-in form reaches the gallery is to ask for it here.
+    await shot(visitorPage, "the waiver, filled in");
+
     await visitorPage.getByRole("button", { name: "Sign and download waiver" }).click();
     await expect(
       visitorPage.getByRole("heading", { name: "Waiver signed", level: 1 }),
@@ -126,7 +130,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   if (idErr || !userId) throw new Error(`the waiver did not create an account: ${idErr?.message}`);
   newUserId = userId;
 
-  await test.step("a manager approves the waiver, which assigns the free trial", async () => {
+  await step(page, "a manager approves the waiver, which assigns the free trial", async () => {
     await page.goto(`/manager/users/${newUserId}`);
     await expectPageRendered(page);
     await page.getByRole("button", { name: "Approve" }).click();
@@ -153,7 +157,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   }
   const [event1, event2, event3, event4] = events.map((e) => e.id);
 
-  await test.step("a manager checks them in twice, using up the trial", async () => {
+  await step(page, "a manager checks them in twice, using up the trial", async () => {
     await page.goto("/manager/check-in");
     await page.locator("#class-picker").selectOption(event1);
     await page.getByPlaceholder("Search by name or email").fill(email);
@@ -169,7 +173,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   const member = await browser.newContext({ storageState: NO_SESSION });
   const memberPage = await member.newPage();
 
-  await test.step("the new member signs in and buys a casual class", async () => {
+  await step(memberPage, "the new member signs in and buys a casual class", async () => {
     const { data: link, error: linkErr } = await adminClient().auth.admin.generateLink({
       type: "magiclink",
       email,
@@ -213,17 +217,21 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   if (!casualMembership)
     throw new Error("the casual-class purchase did not create a membership row");
 
-  await test.step("a manager checks them in a third time, now covered by the casual class", async () => {
-    await page.goto("/manager/check-in");
-    await page.locator("#class-picker").selectOption(event3);
-    await page.getByPlaceholder("Search by name or email").fill(email);
-    await page.getByRole("button", { name: "Check in" }).click();
-    // One credit, spent: the casual class closes itself on the same check-in
-    // that used it, exactly like the trial did above.
-    await expect(page.getByText(/Casual class, 0 left/)).toBeVisible();
-  });
+  await step(
+    page,
+    "a manager checks them in a third time, now covered by the casual class",
+    async () => {
+      await page.goto("/manager/check-in");
+      await page.locator("#class-picker").selectOption(event3);
+      await page.getByPlaceholder("Search by name or email").fill(email);
+      await page.getByRole("button", { name: "Check in" }).click();
+      // One credit, spent: the casual class closes itself on the same check-in
+      // that used it, exactly like the trial did above.
+      await expect(page.getByText(/Casual class, 0 left/)).toBeVisible();
+    },
+  );
 
-  await test.step("a manager marks the casual-class invoice as paid", async () => {
+  await step(page, "a manager marks the casual-class invoice as paid", async () => {
     await page.goto(`/manager/users/${newUserId}`);
     // Matched on plan name too, not the reference alone: a brand-new member
     // has no existing insurance cover, so it was bundled onto this purchase
@@ -255,18 +263,22 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     .single();
   if (!periodPlan) throw new Error("no seeded period plan");
 
-  await test.step("the person commits to a full training period, and the manager raises it", async () => {
-    await page.getByRole("button", { name: "Add a membership" }).click();
-    const planSelect = page.getByLabel("Plan");
-    await planSelect.selectOption(periodPlan.code);
-    await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
-    await page.getByRole("button", { name: "Add membership" }).click();
-    // The click only dispatches the request; the card resets this to blank
-    // only once the write has actually landed. The next step reads the
-    // database for the row this just created, which would otherwise race
-    // the insert.
-    await expect(planSelect).toHaveValue("");
-  });
+  await step(
+    page,
+    "the person commits to a full training period, and the manager raises it",
+    async () => {
+      await page.getByRole("button", { name: "Add a membership" }).click();
+      const planSelect = page.getByLabel("Plan");
+      await planSelect.selectOption(periodPlan.code);
+      await page.getByRole("checkbox", { name: "Email them the payment instructions" }).uncheck();
+      await page.getByRole("button", { name: "Add membership" }).click();
+      // The click only dispatches the request; the card resets this to blank
+      // only once the write has actually landed. The next step reads the
+      // database for the row this just created, which would otherwise race
+      // the insert.
+      await expect(planSelect).toHaveValue("");
+    },
+  );
 
   const { data: periodMembership } = await adminClient()
     .from("memberships")
@@ -287,43 +299,56 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     page.getByRole("row").filter({ hasText: periodMembership.payment_reference }),
   ).toHaveCount(1);
 
-  await test.step("a manager moves the check-in off the casual class and onto the new plan", async () => {
-    // Scoped by the "Covered by" pill (a <span>) rather than by row text: a
-    // plain hasText match would also catch this same row's own "Move to..."
-    // dropdown, whose <option> list mentions every other plan by name too.
-    const sessionsRow = page
-      .getByRole("row")
-      .filter({ has: page.locator("span").filter({ hasText: "Casual class" }) });
-    await expect(sessionsRow).toHaveCount(1);
+  await step(
+    page,
+    "a manager moves the check-in off the casual class and onto the new plan",
+    async () => {
+      // Scoped by the "Covered by" pill (a <span>) rather than by row text: a
+      // plain hasText match would also catch this same row's own "Move to..."
+      // dropdown, whose <option> list mentions every other plan by name too.
+      const sessionsRow = page
+        .getByRole("row")
+        .filter({ has: page.locator("span").filter({ hasText: "Casual class" }) });
+      await expect(sessionsRow).toHaveCount(1);
 
-    const moveSelect = sessionsRow.getByLabel("Membership to move this check-in to");
-    const targetValue = await moveSelect
-      .locator("option", { hasText: periodPlan.name })
-      .getAttribute("value");
-    if (!targetValue) throw new Error("the new plan is not offered as a move target");
-    await moveSelect.selectOption(targetValue);
-    await sessionsRow.getByRole("button", { name: "Move" }).click();
-    await expect(page.getByText(`Moved to ${periodPlan.name}.`)).toBeVisible();
-  });
+      const moveSelect = sessionsRow.getByLabel("Membership to move this check-in to");
+      const targetValue = await moveSelect
+        .locator("option", { hasText: periodPlan.name })
+        .getAttribute("value");
+      if (!targetValue) throw new Error("the new plan is not offered as a move target");
+      await moveSelect.selectOption(targetValue);
+      await sessionsRow.getByRole("button", { name: "Move" }).click();
+      await expect(page.getByText(`Moved to ${periodPlan.name}.`)).toBeVisible();
+    },
+  );
 
-  await test.step("the casual class, superseded and free of the check-in, is cancelled", async () => {
-    // Same reason as the "mark as paid" step above: the bundled insurance
-    // invoice still shares this reference, so it takes the plan name too to
-    // land on the casual-class row alone.
-    const row = page
-      .getByRole("row")
-      .filter({ hasText: casualMembership.payment_reference })
-      .filter({ hasText: "Casual class" });
-    await expect(row).toHaveCount(1);
-    await row.getByRole("button", { name: "Cancel" }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: "Cancel membership" }).click();
-    await expect(row).toContainText("Cancelled");
+  await step(
+    page,
+    "the casual class, superseded and free of the check-in, is cancelled",
+    async () => {
+      // Same reason as the "mark as paid" step above: the bundled insurance
+      // invoice still shares this reference, so it takes the plan name too to
+      // land on the casual-class row alone.
+      const row = page
+        .getByRole("row")
+        .filter({ hasText: casualMembership.payment_reference })
+        .filter({ hasText: "Casual class" });
+      await expect(row).toHaveCount(1);
+      await row.getByRole("button", { name: "Cancel" }).click();
+      await page
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "Cancel membership" })
+        .click();
+      await expect(row).toContainText("Cancelled");
 
-    // The new plan is what pays for them now: active, and it is the one the
-    // check-in landed on.
-    const periodRow = page.getByRole("row").filter({ hasText: periodMembership.payment_reference });
-    await expect(periodRow).toContainText("Active");
-  });
+      // The new plan is what pays for them now: active, and it is the one the
+      // check-in landed on.
+      const periodRow = page
+        .getByRole("row")
+        .filter({ hasText: periodMembership.payment_reference });
+      await expect(periodRow).toContainText("Active");
+    },
+  );
 
   // Real club behaviour: someone on a period plan still occasionally pays for
   // a one-off extra class (a friend's trial class, a session outside their
@@ -334,9 +359,10 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   // person spends, not just their first ever one, is a genuinely SECOND casual
   // purchase. Run after the plan switch above, so it cannot disturb that
   // step's "exactly one check-in covered by Casual class" assertion.
-  await test.step("the member buys a second casual class", async () => {
-    const second = await browser.newContext({ storageState: NO_SESSION });
-    const secondPage = await second.newPage();
+  const second = await browser.newContext({ storageState: NO_SESSION });
+  const secondPage = await second.newPage();
+
+  await step(secondPage, "the member buys a second casual class", async () => {
     const { data: link, error: linkErr } = await adminClient().auth.admin.generateLink({
       type: "magiclink",
       email,
@@ -384,42 +410,46 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   // makes the two casual purchases tellable apart on screen.
   expect(secondCasualMembership.payment_reference).not.toBe(casualMembership.payment_reference);
 
-  await test.step("a manager checks them in on the second casual credit too, and it reaches the invoice guarantee", async () => {
-    await page.goto("/manager/check-in");
-    await page.locator("#class-picker").selectOption(event4);
-    await page.getByPlaceholder("Search by name or email").fill(email);
-    await page.getByRole("button", { name: "Check in" }).click();
-    // One credit, spent, exactly like the first casual purchase — the credit
-    // pack precedence still outranks the now-active period plan.
-    await expect(page.getByText(/Casual class, 0 left/)).toBeVisible();
+  await step(
+    page,
+    "a manager checks them in on the second casual credit too, and it reaches the invoice guarantee",
+    async () => {
+      await page.goto("/manager/check-in");
+      await page.locator("#class-picker").selectOption(event4);
+      await page.getByPlaceholder("Search by name or email").fill(email);
+      await page.getByRole("button", { name: "Check in" }).click();
+      // One credit, spent, exactly like the first casual purchase — the credit
+      // pack precedence still outranks the now-active period plan.
+      await expect(page.getByText(/Casual class, 0 left/)).toBeVisible();
 
-    // The door screen has no email transport to assert an actual send
-    // against (no LOVABLE_API_KEY in the local stack, by design — see
-    // docs/e2e-tests.md), so what is provable end to end is the part that IS
-    // observable: `applyCoverage` resolved and spent THIS credit
-    // specifically, and reached `ensureCasualInvoiceEmailed` without the door
-    // failing or stalling — on the second casual credit this person has ever
-    // spent, not just the first. `membership.functions.test.ts` pins which
-    // email that guarantee sends and with what.
-    const { data: checkin } = await adminClient()
-      .from("session_checkins")
-      .select("coverage, membership_id, consumed_credit")
-      .eq("user_id", newUserId)
-      .eq("membership_id", secondCasualMembership.id)
-      .maybeSingle();
-    expect(checkin).toMatchObject({
-      coverage: "session",
-      membership_id: secondCasualMembership.id,
-      consumed_credit: true,
-    });
+      // The door screen has no email transport to assert an actual send
+      // against (no LOVABLE_API_KEY in the local stack, by design — see
+      // docs/e2e-tests.md), so what is provable end to end is the part that IS
+      // observable: `applyCoverage` resolved and spent THIS credit
+      // specifically, and reached `ensureCasualInvoiceEmailed` without the door
+      // failing or stalling — on the second casual credit this person has ever
+      // spent, not just the first. `membership.functions.test.ts` pins which
+      // email that guarantee sends and with what.
+      const { data: checkin } = await adminClient()
+        .from("session_checkins")
+        .select("coverage, membership_id, consumed_credit")
+        .eq("user_id", newUserId)
+        .eq("membership_id", secondCasualMembership.id)
+        .maybeSingle();
+      expect(checkin).toMatchObject({
+        coverage: "session",
+        membership_id: secondCasualMembership.id,
+        consumed_credit: true,
+      });
 
-    const { data: spent } = await adminClient()
-      .from("memberships")
-      .select("sessions_remaining, status")
-      .eq("id", secondCasualMembership.id)
-      .maybeSingle();
-    expect(spent).toMatchObject({ sessions_remaining: 0, status: "expired" });
-  });
+      const { data: spent } = await adminClient()
+        .from("memberships")
+        .select("sessions_remaining, status")
+        .eq("id", secondCasualMembership.id)
+        .maybeSingle();
+      expect(spent).toMatchObject({ sessions_remaining: 0, status: "expired" });
+    },
+  );
 
   // The row above is stored as `expired`, but a casual class is one class, not
   // a stretch of time: nothing about it went out of date, its class was used.
@@ -428,7 +458,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   // actually looks at (docs/memberships.md, "What an ended membership is
   // called"). `toContainText` is case-sensitive, and sentence case is the
   // point: these labels are words, not enum values.
-  await test.step("the spent casual class reads as used up, not expired", async () => {
+  await step(page, "the spent casual class reads as used up, not expired", async () => {
     await page.goto("/manager/memberships");
     const row = page
       .getByRole("row")

@@ -5,6 +5,15 @@ name: End-to-end tests
 # reach — SSR, the server functions, RLS, the router's own redirects — is
 # exactly what is under test here.
 #
+# It is ALSO where the pull request's screenshots come from. Every test is
+# photographed as it goes and the `tour` projects open every page there is, so
+# one run produces both the proof that the site works and the pictures a
+# reviewer looks at — the flow as it was walked, not a set of pages photographed
+# cold by a second program. scripts/e2e-gallery.ts lays that out, and the
+# gallery is published to GitHub Pages under `pr-<n>/` so it opens in a browser
+# instead of being downloaded and unzipped. Pages serves the `gh-pages` branch
+# directly, so the push at the end of this job is the publish.
+#
 # Like the screenshot job, it runs the whole site against a THROWAWAY LOCAL
 # SUPABASE STACK: `supabase start` brings up Postgres, Auth, PostgREST and
 # Storage, every migration in supabase/migrations is applied to it, and
@@ -27,8 +36,10 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Read the code, write the Pages branch, write the one sticky comment.
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   e2e:
@@ -96,18 +107,127 @@ jobs:
       - name: Build
         run: NITRO_PRESET=node-server bun run build
 
+      # `continue-on-error` so a red suite still produces its gallery and its
+      # comment: the screenshot of the step that failed is the most useful thing
+      # in the run, and a reviewer should not have to dig through a job log for
+      # it. The job is failed at the end instead.
       - name: Run the end-to-end tests
+        id: tests
+        continue-on-error: true
         run: bunx playwright test
 
-      # Traces, screenshots and video for whatever failed. Only useful on a red
-      # run, but uploaded on green too so a flaky retry can still be read back.
-      - name: Upload the report
-        if: always()
+      # Lays the run out as one page: the flows as strips of screens in the
+      # order they were walked, then every page at desktop and phone width.
+      # `!cancelled()` rather than `always()`, here and below: a run superseded
+      # by a newer push is cancelled mid-suite, and `always()` would have it
+      # rebuild an empty gallery and overwrite the previous good comment with
+      # "the run failed before it walked anything". Failure still gets all of
+      # this — a red run's screenshots are the most useful thing in it.
+      - name: Build the gallery
+        id: gallery
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          PUBLISHABLE: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          args=("--commit=${HEAD_SHA:0:7}")
+          # Only claim an address the run will actually be published to. A fork
+          # cannot push the Pages branch, so its comment links nothing rather
+          # than linking a 404.
+          if [ "$PUBLISHABLE" = "true" ]; then args+=("--base-url=$PAGES_URL"); fi
+          bun scripts/e2e-gallery.ts "${args[@]}"
+
+      # Everything the run produced, for a fork (which cannot publish) and for
+      # anyone who wants the originals rather than the page.
+      - name: Upload the gallery
+        id: artifact
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: e2e-report-${{ github.run_id }}
-          path: |
-            playwright-report
-            test-results
+          name: e2e-gallery-${{ github.run_id }}
+          path: gallery
           retention-days: 14
+
+      # One directory per pull request on the branch Pages serves, so two open
+      # pull requests never overwrite each other. .github/workflows/pr-gallery-cleanup.yml
+      # takes it down again when the pull request closes.
+      - name: Publish the gallery
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/publish-pr-gallery.sh
+
+      # Same same-repository condition as the publish above, for the same
+      # reason: a fork's pull request gets a READ-ONLY token whatever this
+      # workflow asks for, so the API call would 403. `continue-on-error` would
+      # swallow that, leaving a fork contributor with no comment and no
+      # explanation — better to skip it honestly. Their run still walks
+      # everything and still uploads the gallery as an artifact.
+      - name: Comment on the pull request
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/github-script@v8
+        continue-on-error: true
+        env:
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+        with:
+          script: |
+            // github-script v8 is ESM, so this is `import`, never `require`.
+            const fs = await import("node:fs");
+            const marker = "<!-- e2e-gallery -->";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // No comment.md means the run never got as far as photographing
+            // anything (no stack, no build), which is a different thing to tell
+            // a reviewer than "a screen is broken".
+            const gallery = fs.existsSync("gallery/comment.md")
+              ? fs.readFileSync("gallery/comment.md", "utf8")
+              : [
+                  "### 📸 What this branch looks like",
+                  "",
+                  `The run failed before it walked anything. [See the job log](${runUrl}).`,
+                ].join("\n");
+
+            const artifactUrl = process.env.ARTIFACT_URL;
+            const footer = artifactUrl
+              ? `<sub>[Download this run](${artifactUrl}) (zip, kept 14 days) · [job log](${runUrl})</sub>`
+              : `<sub>[Job log](${runUrl})</sub>`;
+
+            const body = [marker, gallery, "", footer].join("\n");
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      # The suite's own result, after the comment above has gone out saying what
+      # broke and showing the screen it broke on.
+      - name: Fail if the suite did not pass
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "::error title=End-to-end tests::A flow or a page failed. See the gallery comment on the pull request."
+          exit 1
