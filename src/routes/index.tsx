@@ -175,7 +175,7 @@ function Home() {
               { day: "Wednesday", time: "6:00 – 7:30pm" },
               {
                 day: "Saturday",
-                time: "10:30am – 12:00pm",
+                time: "11:00am – 12:30pm",
                 note: "Colour belts only, from September",
               },
             ].map((s) => (
