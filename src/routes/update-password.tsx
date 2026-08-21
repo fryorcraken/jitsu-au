@@ -118,7 +118,12 @@ function UpdatePasswordPage() {
       <section className="mx-auto max-w-md px-4 py-16">
         <Card>
           <CardHeader>
-            <CardTitle>Set a new password</CardTitle>
+            {/* The heading has to agree with the panel under it: "Set a new
+                password" over "that link has expired" reads as a page arguing
+                with itself, to somebody who is already locked out. */}
+            <CardTitle>
+              {link === "expired" ? "Reset link expired" : "Set a new password"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {link === "checking" && (
@@ -140,7 +145,7 @@ function UpdatePasswordPage() {
                 <p className="text-sm font-medium">That reset link has expired.</p>
                 <p className="text-sm text-muted-foreground">
                   Reset links stop working after a while, and each one only works once. Ask for a
-                  fresh one and it will be in your inbox in a minute.
+                  fresh one and check your inbox.
                 </p>
                 <Button asChild size="sm">
                   <Link to="/reset-password">Send me a new link</Link>

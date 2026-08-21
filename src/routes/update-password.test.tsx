@@ -96,6 +96,10 @@ describe("/update-password", () => {
     render(<UpdatePassword />);
     const panel = await screen.findByRole("alert");
     expect(panel).toHaveTextContent(/expired/i);
+    // The heading has to agree with the panel rather than promising the thing
+    // the panel just said is not possible.
+    expect(screen.queryByText("Set a new password")).not.toBeInTheDocument();
+    expect(screen.getByText("Reset link expired")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /send me a new link/i })).toHaveAttribute(
       "href",
       "/reset-password",
@@ -120,6 +124,7 @@ describe("/update-password", () => {
     render(<UpdatePassword />);
     expect(await screen.findByLabelText("New password")).toBeInTheDocument();
     expect(expiredPanel()).not.toBeInTheDocument();
+    expect(screen.getByText("Set a new password")).toBeInTheDocument();
   });
 
   it("clears the expired panel if the session lands a beat late", async () => {
