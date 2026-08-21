@@ -15,9 +15,9 @@ import { join } from "node:path";
  * all four places. What can be pinned is the claim that must not come back.
  */
 const YEAR_ROUND_CLAIMS = [
-  /all year/i,
+  /all year\b/i,
   /every day of the year/i,
-  /year[- ]round/i,
+  /year[- ]round\b/i,
   /always free/i,
   /free,? always/i,
   /any time of (the )?year/i,
