@@ -398,7 +398,11 @@ describe("club details match the site", () => {
     // ended up naming a 1.8km street with no number on it.
     for (const source of [footer, contact, classes, home]) {
       expect(source).toContain("@/lib/venue");
+      // Neither the full street name nor a restated number. "Harris St" on its
+      // own is left alone: the contact page's directions name the Harris St /
+      // Thomas St corner, which is a landmark, not a second copy of the address.
       expect(source).not.toMatch(/Harris Street/);
+      expect(source).not.toMatch(/\d+\s+Harris/);
     }
     expect(VENUE_ADDRESS).toContain(VENUE_STREET_ADDRESS);
   });
