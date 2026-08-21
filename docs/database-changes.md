@@ -63,9 +63,11 @@ workflows check it. `.github/workflows/migration-drift.yml` reads the **live**
 ACL (after a merge, and only once its credential is set);
 `.github/workflows/supabase-lint.yml` replays every migration into a throwaway
 Postgres and reads the ACL **there**, on every `supabase/**` pull request. So a
-new table that forgets its `REVOKE` fails the PR that adds it. When you add a
-table or a grant, update that file in the same change or both checks fail. Read
-the ACL from **`pg_class.relacl`**, never `information_schema.role_table_grants`:
+new table that forgets its `REVOKE` fails the PR that adds it, which is the one
+of the two you can rely on today: the live check needs a credential that is not
+set, and it pipes its report into the run summary without `pipefail`, so it
+would report green even once it is. When you add a table or a grant, update that
+file in the same change. Read the ACL from **`pg_class.relacl`**, never `information_schema.role_table_grants`:
 the information_schema views only show grants the connecting role is party to (a
 least-privilege reader sees an empty set) and they omit `MAINTAIN` entirely.
 

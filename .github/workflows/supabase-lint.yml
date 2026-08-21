@@ -117,8 +117,12 @@ jobs:
       # migration that names it something else entirely (kb_articles is closed by
       # 20260731140000_documents.sql, under its old name). That is exactly why
       # this is a replay rather than a grep over the migration files.
+      # `!cancelled()` rather than `always()`, matching migration-drift.yml: with
+      # cancel-in-progress on, a superseded run would otherwise reach this step
+      # after its container is gone and fail on a connection error that says
+      # nothing about the schema.
       - name: Client grants match the expected set
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           # `set -o pipefail` is load-bearing: the checker's report is piped into
           # the run summary, and GitHub's default shell is `bash -e` WITHOUT
