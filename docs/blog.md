@@ -144,9 +144,12 @@ come back from the save and become the form's new baseline.
 again** — not on a later edit, and not on an unpublish/republish round trip —
 so a post's publish date and its position in the public list (sorted by
 `published_at`) both stay stable regardless of how many times it's drafted
-and republished. The editor warns before an unpublish and guards against
-losing unsaved work (a confirm on leaving, and a browser close/refresh
-warning) the same way the waiver template editor does.
+and republished. Switching a live post back to Draft puts a notice under the
+status picker saying saving takes it off the public blog and that it can be
+published again any time. There is deliberately no dialog on top of that: the
+same form undoes it in one click. Leaving with unsaved edits DOES ask, since
+nothing brings typed text back, and a browser close/refresh warning covers the
+same ground, the way the waiver template editor does.
 
 ### A manager moderates
 

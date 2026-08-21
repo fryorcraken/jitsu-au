@@ -154,3 +154,27 @@ export function useConfirm(): {
 
   return { confirm, confirmDialog };
 }
+
+/**
+ * The one question four different editors ask, in one place so all four ask it
+ * the same way.
+ *
+ * This one IS a hard stop, even though the click that triggers it (go back,
+ * open another version, start a new article) is otherwise ordinary. What it
+ * guards is text somebody typed and has not saved, and no second click brings
+ * that back: "never lose someone's input" outranks "don't gate a reversible
+ * action" when the thing at stake is the input. It also only ever appears when
+ * the editor is genuinely dirty, so it is not on anybody's common path.
+ *
+ * `what` names the click, and reads on from "Your edits ... have not been
+ * saved." So: "Going back", "Opening this section", "Starting a new article".
+ */
+export function discardUnsavedChanges(what: string): ConfirmRequest {
+  return {
+    title: "Discard your unsaved changes?",
+    description: `Your edits here have not been saved. ${what} loses them, and there is no way to get them back.`,
+    confirmLabel: "Discard changes",
+    cancelLabel: "Keep editing",
+    destructive: true,
+  };
+}

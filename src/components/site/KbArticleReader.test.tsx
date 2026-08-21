@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KbArticleReader } from "./KbArticleReader";
 import type { ReaderAnnotation, ReaderArticle, ReaderViewer } from "./KbArticleReader";
@@ -52,6 +52,7 @@ function renderReader(over: {
   // The write callbacks report success; the component clears its inputs only
   // when they do. Default to success so the ordinary path is what is exercised.
   const onCreate = over.onCreate ?? vi.fn().mockResolvedValue(true);
+  const onDelete = vi.fn().mockResolvedValue(undefined);
   render(
     <KbArticleReader
       article={over.article ?? article}
@@ -59,11 +60,11 @@ function renderReader(over: {
       viewer={over.viewer ?? canAnnotate}
       onCreate={onCreate as never}
       onUpdate={vi.fn().mockResolvedValue(true)}
-      onDelete={vi.fn().mockResolvedValue(undefined)}
+      onDelete={onDelete}
       onResolve={vi.fn().mockResolvedValue(undefined)}
     />,
   );
-  return { onCreate };
+  return { onCreate, onDelete };
 }
 
 describe("KbArticleReader", () => {
@@ -238,5 +239,60 @@ describe("KbArticleReader", () => {
       ],
     });
     expect(screen.queryByRole("button", { name: /Reply/i })).not.toBeInTheDocument();
+  });
+
+  // Deleting a comment takes its replies with it and nothing brings either
+  // back, so it asks first, in the app's own dialog rather than the browser's.
+  it("says the replies go too before deleting a comment, and deletes only when told to", async () => {
+    const user = userEvent.setup();
+    const { onDelete } = renderReader({
+      annotations: [annotation({ is_mine: true, can_edit: true, block_id: null, quote: null })],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Delete this comment?");
+    expect(dialog).toHaveTextContent("Any replies to it go too");
+    expect(onDelete).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Delete comment" }));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("a-1"));
+  });
+
+  it("keeps a comment when the question is answered no", async () => {
+    const user = userEvent.setup();
+    const { onDelete } = renderReader({
+      annotations: [annotation({ is_mine: true, can_edit: true, block_id: null, quote: null })],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    await screen.findByRole("alertdialog");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText("Does this include rash guards?")).toBeInTheDocument();
+  });
+
+  // A reply has nothing hanging off it, so it gets its own, shorter question.
+  it("asks about a reply on its own terms", async () => {
+    const user = userEvent.setup();
+    renderReader({
+      annotations: [
+        annotation({ block_id: null, quote: null }),
+        annotation({
+          id: "a-2",
+          parent_id: "a-1",
+          is_mine: true,
+          can_edit: true,
+          block_id: null,
+          quote: null,
+        }),
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Delete this reply?");
+    expect(screen.getByRole("button", { name: "Delete reply" })).toBeInTheDocument();
   });
 });

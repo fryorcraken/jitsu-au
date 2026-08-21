@@ -19,6 +19,7 @@ import {
 import type { AcknowledgementDef } from "@/lib/validation";
 import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 import { cn } from "@/lib/utils";
 import {
   hasMediaAcknowledgement,
@@ -111,6 +112,7 @@ function EditorPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   const selected = templates.find((t) => t.id === selectedId) ?? null;
 
@@ -157,9 +159,9 @@ function EditorPage() {
   // immediately, before `meaningfulAcks` would silently drop the row on save.
   const mediaAckMissing = !hasMediaAcknowledgement(acks);
 
-  function selectVersion(template: TemplateVersion) {
+  async function selectVersion(template: TemplateVersion) {
     if (template.id === selectedId) return;
-    if (dirty && !window.confirm("Discard your unsaved changes and open this version?")) return;
+    if (dirty && !(await confirm(discardUnsavedChanges("Opening another version")))) return;
     load(template);
   }
 
@@ -169,19 +171,15 @@ function EditorPage() {
     // matters most to the manager who has just rewritten a clause: without this
     // they read "now live", see their own edit still on screen, and believe it
     // is what people are signing.
-    if (
-      dirty &&
-      !window.confirm(
-        `Your unsaved changes are not part of version ${selected.version} and will not go live. Save them as a new version first, or continue to make the stored version ${selected.version} live?`,
-      )
-    )
-      return;
-    if (
-      !window.confirm(
-        `Make version ${selected.version} the waiver everyone signs from now on? Waivers already signed keep the version they were signed against.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Make version ${selected.version} the waiver people sign?`,
+      description: `Everyone who signs from now on signs version ${selected.version}. Waivers already signed keep the version they were signed against.`,
+      footnote: dirty
+        ? `Your unsaved edits are not part of version ${selected.version}, so they will not go live. Save them as a new version first if you want them.`
+        : undefined,
+      confirmLabel: "Make it live",
+    });
+    if (!ok) return;
     setPromoting(true);
     try {
       await promote({ data: { id: selected.id } });
@@ -389,7 +387,7 @@ function EditorPage() {
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => selectVersion(t)}
+                    onClick={() => void selectVersion(t)}
                     aria-current={t.id === selectedId}
                     className={cn(
                       "flex w-full flex-col gap-1 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted",
@@ -470,6 +468,7 @@ function EditorPage() {
           </CardContent>
         </Card>
       </section>
+      {confirmDialog}
     </>
   );
 }

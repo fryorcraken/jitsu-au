@@ -853,10 +853,13 @@ Then hold the change to this:
   option if you want a safety net — a modal gate on it only slows down the 99%
   of clicks that were correct. Save the hard stop for actions that are both
   irreversible and consequential, like the waiver-approval example above, and
-  build that stop as the app's own `AlertDialog` (see `manager.blog.tsx`'s
-  delete confirmation), never the browser's `window.confirm()`. Confirming
-  everything trains people to click through without reading, which is exactly
-  what makes the one confirm that matters stop working.
+  ask it through **`useConfirm`** (`src/hooks/use-confirm.tsx`), the app's own
+  `AlertDialog` asked as `await confirm({ ... })`, never the browser's
+  `window.confirm()`. Confirming everything trains people to click through
+  without reading, which is exactly what makes the one confirm that matters
+  stop working. One thing that IS worth a hard stop despite looking reversible:
+  a click that throws away text somebody typed and has not saved
+  (`discardUnsavedChanges`, in the same file). No second click brings that back.
 - **Mobile first.** Most of this club's traffic is phones. Check at ~375px wide,
   keep tap targets thumb-sized, and never hide something behind hover alone.
 - **Accessibility is part of "done", not a follow-up.** Real `<button>` and `<a>`
