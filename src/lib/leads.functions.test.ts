@@ -304,6 +304,7 @@ function fakeDeleteAdmin(opts: {
           patterns.push(pattern);
           return chain;
         },
+        limit: () => chain,
         delete: () => chain,
         in: (_col: string, values: string[]) => {
           deleted.push(values);
@@ -369,6 +370,24 @@ describe("deleteLeadRegistrations", () => {
     });
     expect(await deleteLeadRegistrations(admin, "a_b@example.com")).toEqual({ deleted: 1 });
     expect(deleted).toEqual([["reg-1"]]);
+  });
+
+  it("deletes what it read when the read hits its cap, rather than throwing", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 500 is the cap. Nobody fills in the interest form this many times, so
+    // reaching it means something odd is happening; the safe direction on a
+    // delete is to take what was read and leave the rest, which puts the lead
+    // back on the list for a second press.
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      id: `reg-${i}`,
+      email: "sam@example.com",
+    }));
+    const { admin, deleted } = fakeDeleteAdmin({ personId: null, rows });
+    expect(await deleteLeadRegistrations(admin, "sam@example.com")).toEqual({ deleted: 500 });
+    expect(deleted[0]).toHaveLength(500);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("reports nothing deleted rather than issuing an empty delete", async () => {

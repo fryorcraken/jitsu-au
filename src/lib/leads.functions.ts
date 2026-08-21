@@ -28,6 +28,14 @@ type AdminClient = SupabaseClient<Database>;
  */
 const NEW_EMAILS_LIMIT = 200;
 
+/**
+ * Registrations read in one pass when deleting a lead. Far above anything real
+ * (this is one person filling in the interest form over and over), and there so
+ * a delete cannot issue an unbounded read. PostgREST caps the response anyway,
+ * so the choice is between a bound we can see and one we cannot.
+ */
+const REGISTRATIONS_PER_LEAD_LIMIT = 500;
+
 async function adminClient(): Promise<AdminClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
@@ -202,6 +210,13 @@ export async function deleteLeadRegistrations(
   // into an applicant with a person record, a profile and frozen evidence
   // behind the same address. Deleting their enquiry then is not tidying up an
   // untouched form, it is taking a piece out of somebody's record.
+  //
+  // What this closes is that staleness, not a race. The check and the delete
+  // are separate round trips with no transaction around them, so a waiver
+  // signed in the sub-second gap between them still loses its lead row. Worth
+  // knowing rather than worth fixing: the address survives on the waiver as
+  // submitted, which is the copy that matters, and this is a manager pressing a
+  // button a handful of times a month.
   const { data: personId, error: personErr } = await userIdByEmail(admin, wanted);
   if (personErr) throw new Error(personErr.message);
   if (personId) throw new Error(LEAD_HAS_PERSON_MESSAGE);
@@ -211,16 +226,30 @@ export async function deleteLeadRegistrations(
   // merges them into a single lead. Both have to go, or the row a manager just
   // deleted comes straight back.
   //
-  // `ilike` is the prefilter, not the decision. `_` and `%` are wildcards in a
-  // LIKE pattern and both are legal in an email local part, so this can match
-  // MORE rows than it should — `a_b@example.com` also matches `axb@example.com`.
-  // It can never match fewer, so the exact comparison below is what chooses.
-  // Getting that backwards on a destructive path deletes a stranger's enquiry.
+  // `ilike` is the prefilter, not the decision. `_` is a single-character
+  // wildcard in a LIKE pattern and is legal in an email local part, so this can
+  // match MORE rows than it should: `a_b@example.com` also matches
+  // `axb@example.com`. It can never match fewer, so the exact comparison below
+  // is what chooses. Getting that backwards on a destructive path deletes a
+  // stranger's enquiry. (`%` is a wildcard too; the form's validator happens to
+  // reject it today, which is not something this should lean on.)
   const { data: rows, error: readErr } = await admin
     .from("interest_registrations")
     .select("id, email")
-    .ilike("email", wanted);
+    .ilike("email", wanted)
+    .limit(REGISTRATIONS_PER_LEAD_LIMIT);
   if (readErr) throw new Error(readErr.message);
+
+  // One person filing this many interest forms is not a thing that happens, so
+  // reaching the cap means something else is going on. Say so and delete what
+  // was read: the rest survive, the lead reappears on the next load, and a
+  // second press takes another bite. Bounded like every other read in this
+  // file, and the safe direction to fail on a delete.
+  if ((rows ?? []).length >= REGISTRATIONS_PER_LEAD_LIMIT) {
+    console.warn(
+      `[deleteLeadRegistrations] capped at ${REGISTRATIONS_PER_LEAD_LIMIT}; older registrations under this address are not deleted yet`,
+    );
+  }
 
   const ids = (rows ?? []).filter((r) => normalizeEmail(r.email) === wanted).map((r) => r.id);
   if (ids.length === 0) return { deleted: 0 };

@@ -25,19 +25,29 @@ needed a grant, a policy or a migration: `interest_registrations` and
 `contact_messages` grant the client roles a bare `INSERT` and nothing else (see
 `docs/database.md`).
 
-Two rules hold that path together, and both are load-bearing:
+Three rules hold that path together, and all of them are load-bearing:
 
 - **A lead delete re-checks that the address has no person behind it**, on the
   server, every time. The directory a manager clicked from can be minutes old,
   and a waiver signed in between turns a lead into an applicant with a profile
   and frozen evidence under the same address. Deleting their enquiry then is not
   clearing an untouched form, it is taking a piece out of somebody's record.
+  What that closes is the staleness, not a race: the check and the delete are
+  separate round trips, so a waiver signed in the sub-second gap between them
+  still loses its lead row. The address survives on the waiver as submitted,
+  which is the copy that matters.
 - **The search is not the decision.** Registrations store the address as typed,
   so one person can hold two rows differing only in capitalisation, and both
   have to go or the lead reappears. The query prefilters with `ilike`, which
-  **over**-matches (`_` and `%` are LIKE wildcards and both are legal in an
-  email local part), and the exact comparison in JS chooses what is deleted.
-  Backwards, that pattern destroys a stranger's enquiry.
+  **over**-matches (`_` is a LIKE wildcard and is legal in an email local part,
+  so `a_b@example.com` also matches `axb@example.com`), and the exact comparison
+  in JS chooses what is deleted. Backwards, that pattern destroys a stranger's
+  enquiry. `%` is a wildcard too, and the interest form's validator happens to
+  reject it today, which is not something the delete should lean on.
+- **The read is capped**, like every other read in that file. One address
+  holding more registrations than the cap logs a warning and leaves the
+  remainder, so the lead reappears and a second press takes another bite. On a
+  delete, doing less than asked is the safe direction to fail.
 
 Everything else about a person is untouched, on purpose. There is no way to
 delete a member, a waiver, a PDF or a login, by design rather than by omission.
