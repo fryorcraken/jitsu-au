@@ -6,6 +6,7 @@ import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { YouTubeEmbed } from "@/components/site/YouTubeEmbed";
 import { Button } from "@/components/ui/button";
 import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
+import { VENUE_ADDRESS_SHORT, VENUE_NAME } from "@/lib/venue";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -161,7 +162,7 @@ function Home() {
             <div>
               <h2 className="text-3xl font-bold md:text-4xl">Train with us this week</h2>
               <p className="mt-2 max-w-xl text-muted-foreground">
-                Classes run at ActivateFit Gym, on Harris Street in Ultimo.
+                Classes run at {VENUE_NAME}, {VENUE_ADDRESS_SHORT}.
               </p>
             </div>
             <Button asChild variant="outline" className="hidden md:inline-flex">
