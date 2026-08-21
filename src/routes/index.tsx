@@ -13,7 +13,7 @@ export const Route = createFileRoute("/")({
     meta: buildPageMeta({
       title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney",
       description:
-        "Beginner-friendly Japanese Jiu-Jitsu at UTS Ultimo, open to everyone and not just UTS students. Classes Mon, Wed & Sat. First two sessions free.",
+        "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
       path: "/",
     }),
     links: [
@@ -42,16 +42,17 @@ function Home() {
         <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/10 via-background to-background" />
         <div className="mx-auto grid max-w-6xl gap-10 px-4 pt-12 pb-16 md:grid-cols-2 md:items-center md:pt-20 md:pb-24">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Open to everyone, UTS or not
+            <span className="inline-flex items-start gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
+              <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> UTS
+              students, UTS staff and general public alike
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
               Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
               Build real self-defence skills in a fun and welcoming environment. We train Japanese
-              Jiu-Jitsu in Ultimo, and you don't need to be a UTS student to join us. Classes are
-              for beginners and experienced martial artists alike.
+              Jiu-Jitsu in Ultimo and welcome the general public and local community, with special
+              rates for UTS students. Classes are for beginners and experienced martial artists.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
@@ -131,7 +132,7 @@ function Home() {
             {
               icon: Users,
               title: "Open to everyone",
-              body: "You don't need to be a UTS student. All levels welcome, at your own pace.",
+              body: "UTS students, staff and the general public train together. All levels welcome, at your own pace.",
             },
             {
               icon: Dumbbell,
