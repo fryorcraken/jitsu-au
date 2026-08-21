@@ -82,7 +82,10 @@ function loadScript(src: string): Promise<void> {
     script.src = src;
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    script.onerror = () =>
+      reject(
+        new Error("Could not load Google's folder picker. Check your connection and try again."),
+      );
     document.head.appendChild(script);
   });
 }
@@ -235,7 +238,7 @@ export async function pickDriveFolder(clientId: string): Promise<PickedDriveFold
         .build();
       picker.setVisible(true);
     } catch (e) {
-      reject(e instanceof Error ? e : new Error("Failed to open Google Picker"));
+      reject(e instanceof Error ? e : new Error("Could not open the folder picker. Try again."));
     }
   });
 }

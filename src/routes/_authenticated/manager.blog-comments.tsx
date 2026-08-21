@@ -342,7 +342,7 @@ function BlogCommentsPage() {
                 <p className="text-sm text-amber-600 dark:text-amber-500">
                   This comment has {hideTargetReplyCount}{" "}
                   {hideTargetReplyCount === 1 ? "reply" : "replies"}. Hiding it also removes{" "}
-                  {hideTargetReplyCount === 1 ? "that reply" : "those replies"} from the post — they
+                  {hideTargetReplyCount === 1 ? "that reply" : "those replies"} from the post. They
                   stay marked visible, they just have nowhere left to show.
                 </p>
               )}
@@ -376,9 +376,9 @@ function BlogCommentsPage() {
           <DialogHeader>
             <DialogTitle>Block {blockTarget?.author_name} from commenting?</DialogTitle>
             <DialogDescription>
-              This is the extreme option — it stops them commenting anywhere on the blog from now
-              on. It does not hide comments they've already posted (use "Hide" on this row for just
-              this one).
+              This is the extreme option. It stops them commenting anywhere on the blog from now on.
+              It does not hide comments they've already posted (use "Hide" on this row for just this
+              one).
             </DialogDescription>
           </DialogHeader>
           <div>

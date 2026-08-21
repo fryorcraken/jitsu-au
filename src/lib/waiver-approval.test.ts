@@ -109,11 +109,13 @@ describe("approvalFailureMessage", () => {
   });
 
   it("falls back for a thrown non-Error", () => {
-    expect(approvalFailureMessage("boom")).toBe("Failed to update approval");
+    expect(approvalFailureMessage("boom")).toBe("Could not update the approval. Try again.");
   });
 
   it("falls back rather than showing a blank toast", () => {
-    expect(approvalFailureMessage(new Error("   "))).toBe("Failed to update approval");
+    expect(approvalFailureMessage(new Error("   "))).toBe(
+      "Could not update the approval. Try again.",
+    );
   });
 });
 

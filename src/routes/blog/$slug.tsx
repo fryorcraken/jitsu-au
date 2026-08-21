@@ -151,8 +151,8 @@ function UpvoteButton({
       aria-pressed={upvoted}
       aria-label={
         upvoted
-          ? `Remove your upvote — ${comment.upvote_count} upvotes`
-          : `Upvote — ${comment.upvote_count} upvotes`
+          ? `Remove your upvote (${comment.upvote_count} upvotes)`
+          : `Upvote (${comment.upvote_count} upvotes)`
       }
       className={cn(
         "flex min-h-8 items-center gap-1 rounded-md border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",

@@ -76,7 +76,7 @@ export async function runApproval({
 
 /** The approval itself failed, so nothing was written. */
 export function approvalFailureMessage(e: unknown): string {
-  return reason(e) ?? "Failed to update approval";
+  return reason(e) ?? "Could not update the approval. Try again.";
 }
 
 /**

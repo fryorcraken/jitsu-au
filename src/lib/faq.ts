@@ -15,7 +15,7 @@ export const faqItems: FaqItem[] = [
   {
     id: "trial-offer",
     q: "Is there a trial offer?",
-    a: "Absolutely. Your first two sessions are on us. It's a great opportunity to experience our training firsthand and see if it's the right fit.",
+    a: "Yes. Your first two sessions are free. Come along and see what you think.",
   },
   {
     id: "equipment",
@@ -30,7 +30,7 @@ export const faqItems: FaqItem[] = [
   {
     id: "experience",
     q: "Do I need prior martial arts experience?",
-    a: "Not at all. Our training is structured for every skill level, from complete beginner to experienced practitioner. We support your progress at your own pace.",
+    a: "No. Plenty of our members had never done a martial art before they walked in. You will be shown the basics from the start.",
   },
   {
     id: "vs-other-martial-arts",

@@ -468,7 +468,7 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
   // DRAFT watermark on every page
   if (data.draft) {
     for (const p of pages) {
-      p.drawText("DRAFT — NOT SIGNED", {
+      p.drawText("DRAFT: NOT SIGNED", {
         x: 60,
         y: 380,
         size: 60,

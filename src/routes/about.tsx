@@ -27,7 +27,7 @@ const pillars = [
   },
   {
     title: "An inclusive community",
-    body: "Our classes cater to individuals of all levels, whether you're a complete beginner or have previous martial arts experience. We encourage questions and create an environment where everyone progresses at their own pace.",
+    body: "Everyone trains together, whatever they have done before. Ask questions, go at your own pace.",
   },
   {
     title: "Fitness through martial arts",

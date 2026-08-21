@@ -810,7 +810,7 @@ function WaiversCard() {
       const { url } = await getUrl({ data: { id } });
       window.open(url, "_blank", "noopener");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to get PDF");
+      toast.error(e instanceof Error ? e.message : "Could not open the PDF. Try again.");
     }
   }
 
@@ -983,7 +983,7 @@ function GoogleDriveCard() {
       toast.success(saved.email ? `Connected as ${saved.email}` : "Google Drive connected");
       await refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to connect");
+      toast.error(e instanceof Error ? e.message : "Could not connect Google Drive. Try again.");
     } finally {
       setBusy(false);
     }
@@ -996,7 +996,7 @@ function GoogleDriveCard() {
       toast.success("Google Drive disconnected");
       await refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to disconnect");
+      toast.error(e instanceof Error ? e.message : "Could not disconnect Google Drive. Try again.");
     } finally {
       setBusy(false);
     }
@@ -1012,7 +1012,7 @@ function GoogleDriveCard() {
       setSavedFolderName(result.folderName);
       toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to set the Drive folder");
+      toast.error(e instanceof Error ? e.message : "Could not save the folder name. Try again.");
     } finally {
       setFolderBusy(false);
     }
@@ -1034,7 +1034,11 @@ function GoogleDriveCard() {
       setFolderNameInput(result.folderName);
       toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to pick a folder");
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : "Could not open the folder picker. Type the folder name instead.",
+      );
     } finally {
       setPickerBusy(false);
     }

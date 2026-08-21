@@ -373,7 +373,8 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
     const { data: pdfBlob, error: dlErr } = await supabaseAdmin.storage
       .from("waivers")
       .download(waiver.pdf_path);
-    if (dlErr || !pdfBlob) throw new Error(dlErr?.message ?? "Failed to download PDF.");
+    if (dlErr || !pdfBlob)
+      throw new Error(dlErr?.message ?? "Could not download the PDF. Try again.");
     const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
 
     let folderId = conn.metadata.folderId as string | undefined;

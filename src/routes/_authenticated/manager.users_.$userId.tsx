@@ -524,7 +524,7 @@ function ManagerUserPage() {
           ...prev,
           [waiver.id]: {
             at: Date.now(),
-            error: e instanceof Error ? e.message : "Failed to load the PDF",
+            error: e instanceof Error ? e.message : "Could not load the PDF. Try again.",
           },
         }));
       } finally {
@@ -641,7 +641,7 @@ function ManagerUserPage() {
       setPdfs((prev) => ({ ...prev, [id]: { url, at: Date.now() } }));
       window.open(url, "_blank", "noopener");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to get PDF");
+      toast.error(e instanceof Error ? e.message : "Could not open the PDF. Try again.");
     }
   }
 

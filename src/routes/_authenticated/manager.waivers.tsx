@@ -103,7 +103,7 @@ function WaiversPage() {
       const { url } = await getUrl({ data: { id } });
       window.open(url, "_blank", "noopener");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to get PDF");
+      toast.error(e instanceof Error ? e.message : "Could not open the PDF. Try again.");
     }
   }
 
