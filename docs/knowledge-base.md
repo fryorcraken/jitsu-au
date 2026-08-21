@@ -313,6 +313,32 @@ and not two: the reading order down the left, the markdown body in the main
 window, a live preview underneath, and "Save as new version" publishing what you
 wrote.
 
+**The body has a formatting toolbar, and the shortcuts that go with it.** A
+manager writing an article is thinking about the sentence they want emphasised,
+not about Markdown syntax, so bold, italic, code, heading, both kinds of list,
+quote and link are buttons above the textarea, and each one also answers to the
+binding it has in every other editor: Ctrl/⌘ + B, I, E and K, and Ctrl/⌘ + Shift
+
+- 8, 7 and full stop for the lists and the quote. Each button names its own
+  shortcut. What is stored is still plain Markdown, typed by hand where that is
+  faster.
+
+Three things follow from that, and they are the reason the editor is a component
+rather than a bare textarea:
+
+- **Typing a wrapping character over a selection wraps it**, rather than
+  deleting it. Highlighting a phrase and reaching for `*`, `_`, `` ` ``, a quote
+  mark or a bracket puts it around the phrase, and the phrase stays selected so
+  a second press nests it (`*tidy*`, then `**tidy**`).
+- **Enter carries a list on**, numbering as it goes, and on an item with nothing
+  typed in it takes the marker away instead, which is how a list is left.
+- **Undo still works.** Edits are applied through the browser's own editing
+  machinery, so Ctrl/⌘ + Z takes the bold off rather than doing nothing or
+  jumping back further than anyone meant.
+
+Pressing a button with nothing selected acts on the word the cursor is in, and
+pressing it again takes the formatting off.
+
 **The reading order is the navigation for this screen.** It is on the left
 because that is what it is for: picking what to edit, and arranging what members
 read. Everything that CHANGES a thing (its title, its text, its settings,
@@ -449,6 +475,8 @@ it as a marketing page or a blog post instead.
 | Block splitting, anchoring, permissions     | `src/lib/kb.ts` (pure, tested)                      |
 | Sections, reading order, progress, headings | `src/lib/kb-nav.ts` (pure, tested)                  |
 | Editor decisions (dirty, widening, reorder) | `src/lib/kb-editor.ts` (pure, tested)               |
+| Toolbar, shortcuts, what a keystroke does   | `src/lib/markdown-editing.ts` (pure, tested)        |
+| The body textarea itself                    | `src/components/site/MarkdownEditor.tsx`            |
 | Saving, versioning, promotion, sections     | `src/lib/kb-admin.ts`                               |
 | Reader/annotation/progress server functions | `src/lib/kb.functions.ts`                           |
 | Wire schemas                                | `src/lib/validation.ts`                             |
