@@ -21,9 +21,11 @@ import { Route as RootRoute } from "@/routes/__root";
 import { Route as AboutRoute } from "@/routes/about";
 import {
   GOOGLE_MAPS_URL,
+  VENUE_ADDRESS,
   VENUE_PHONE_DISPLAY,
   VENUE_PHONE_E164,
   VENUE_PHONE_TEL,
+  VENUE_STREET_ADDRESS,
   WHATSAPP_URL,
 } from "./venue";
 
@@ -314,10 +316,24 @@ describe("buildClubJsonLd", () => {
 
   it("carries a postal address a search engine can place on a map", () => {
     const address = club.address as Record<string, string>;
+    // `streetAddress` is pinned to the literal on purpose. A bare street name
+    // is not an address: Harris Street runs about 1.8km, so a schema saying
+    // "Harris Street" places the club anywhere along it. Deriving the
+    // expectation from `venue.ts` would have accepted that too.
+    expect(address.streetAddress).toBe("745 Harris Street");
+    expect(address.streetAddress).toBe(VENUE_STREET_ADDRESS);
     expect(address.addressLocality).toBe("Ultimo");
     expect(address.addressRegion).toBe("NSW");
     expect(address.postalCode).toBe("2007");
     expect(address.addressCountry).toBe("AU");
+  });
+
+  it("gives the training location the same address as the club", () => {
+    const location = club.location as Record<string, unknown>;
+    expect(location.name).toBe("ActivateFit Gym");
+    // Two copies of the address in one document that disagree is worse than
+    // one, so they are built from the same parts.
+    expect(location.address).toEqual(club.address);
   });
 
   it("serialises to valid JSON for the ld+json script tag", () => {
@@ -343,6 +359,9 @@ describe("buildClubJsonLd", () => {
 
   it("points hasMap at the same deep link the site links out to", () => {
     expect(club.hasMap).toBe(GOOGLE_MAPS_URL);
+    // And that link searches an address with a number in it, so it drops a pin
+    // on the building rather than leaning on a business name resolving.
+    expect(decodeURIComponent(GOOGLE_MAPS_URL)).toContain("745 Harris Street");
   });
 });
 
@@ -353,6 +372,8 @@ describe("club details match the site", () => {
   const footer = readFileSync(join(srcDir, "components", "site", "SiteFooter.tsx"), "utf8");
   const contact = readFileSync(join(srcDir, "routes", "contact.tsx"), "utf8");
   const instructors = readFileSync(join(srcDir, "routes", "instructors.tsx"), "utf8");
+  const classes = readFileSync(join(srcDir, "routes", "classes.tsx"), "utf8");
+  const home = readFileSync(join(srcDir, "routes", "index.tsx"), "utf8");
 
   it("uses the phone number the footer and contact page dial", () => {
     // Pinned to the literal digits, deliberately.
@@ -368,6 +389,18 @@ describe("club details match the site", () => {
     expect(VENUE_PHONE_TEL).toBe("tel:0493631759");
     expect(VENUE_PHONE_DISPLAY).toBe("0493 631 759");
     expect(WHATSAPP_URL).toBe("https://wa.me/61493631759");
+  });
+
+  it("shows the same street address the structured data claims", () => {
+    // Every page that tells a visitor where the club is reads the constant
+    // instead of restating the street, which is what keeps the pages, the map
+    // links and the schema from drifting apart. Restating it is how the site
+    // ended up naming a 1.8km street with no number on it.
+    for (const source of [footer, contact, classes, home]) {
+      expect(source).toContain("@/lib/venue");
+      expect(source).not.toMatch(/Harris Street/);
+    }
+    expect(VENUE_ADDRESS).toContain(VENUE_STREET_ADDRESS);
   });
 
   it("has the footer and contact page read that number rather than restate it", () => {
