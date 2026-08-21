@@ -13,6 +13,12 @@ import { join } from "node:path";
  * There is no single string to import: each page states the offer in the voice
  * and the length that page needs, and the same sentence would read wrong in
  * all four places. What can be pinned is the claim that must not come back.
+ *
+ * The scan reaches the app's own source and nothing else, so it is a guard,
+ * not proof. Copy that lives as **data** is invisible to it: a membership
+ * plan's `description` is typed into `/manager/membership-plans` and rendered
+ * on `/membership`, and the trial plan's seeded one still claims the offer
+ * runs all year (`docs/memberships.md`).
  */
 const YEAR_ROUND_CLAIMS = [
   /all year\b/i,

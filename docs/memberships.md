@@ -91,6 +91,15 @@ they state the offer without claiming a window. `free-trial-copy.test.ts`
 fails the suite if a year-round claim comes back, and pins the qualifier on
 `/pricing` and `/first-class`.
 
+A plan's own `description` is bound by the same rule and is the one place the
+guard cannot see, because it is **data**: managers type it on
+`/manager/membership-plans` and `/membership` prints it. The trial plan's
+seeded description (`20260722000000_memberships.sql`) predates the rule and
+still reads "Your first two sessions, free all year round.", so signed-in
+members are shown the year-round claim the public pages no longer make.
+Correcting it is a manager edit on that screen, not a code change: editing the
+applied migration would change nothing live and only cause drift.
+
 That is the club's **offer**, not the membership row. The `trial_2_session`
 plan is a credit balance with no expiry (above), so a manager can still check
 someone in on a leftover trial session after the semester ends. The two are
