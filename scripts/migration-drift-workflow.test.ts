@@ -41,6 +41,28 @@ function missingSecretGuards(source: string): string[] {
   );
 }
 
+/**
+ * What triggers a workflow: everything above `jobs:`, with comments removed.
+ *
+ * The comments matter — migration-drift.yml's header explains at length why it
+ * avoids `pull_request`, and a rule that read those would report the workflow
+ * that follows the rule most carefully.
+ */
+function triggers(source: string): string {
+  return source
+    .split(/^jobs:/m)[0]
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)#.*$/, "$1"))
+    .join("\n");
+}
+
+/**
+ * Matched without the trailing colon on purpose: GitHub accepts `on: [push,
+ * pull_request]` and a bare `on: pull_request` as well as the block form, and a
+ * rule that only saw `pull_request:` would pass on both.
+ */
+const PULL_REQUEST_TRIGGER = /\bpull_request(_target)?\b/;
+
 describe("the migration drift workflow", () => {
   it("has a step for each live check", () => {
     // A rename that made the regexes below match nothing would turn every rule
@@ -68,8 +90,7 @@ describe("the migration drift workflow", () => {
   });
 
   it("never runs on a pull request, so the credential stays away from unreviewed code", () => {
-    const triggers = read(DRIFT_WORKFLOW).split(/^jobs:/m)[0];
-    expect(triggers).not.toMatch(/^\s*pull_request(_target)?:/m);
+    expect(triggers(read(DRIFT_WORKFLOW))).not.toMatch(PULL_REQUEST_TRIGGER);
   });
 });
 
@@ -82,8 +103,7 @@ describe("the other workflows", () => {
     const offenders = workflowFiles().filter((file) => {
       const source = read(file);
       if (!source.includes("secrets.SUPABASE_DB_URL")) return false;
-      const triggers = source.split(/^jobs:/m)[0];
-      return /^\s*pull_request(_target)?:/m.test(triggers);
+      return PULL_REQUEST_TRIGGER.test(triggers(source));
     });
     expect(
       offenders,
