@@ -781,9 +781,11 @@ Practical rules:
   for most things: form rules in `src/lib/validation.ts`, server work in
   `src/lib/*.functions.ts` (`createServerFn` + Zod), writes from the browser
   through `useResilientSubmit`, RPC shapes in `src/lib/supabase-rpc.ts`, page
-  chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`. If
-  your change seems to need a _second_ way to do one of these, that is a design
-  decision to raise with the user, not a shortcut to take quietly.
+  chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`, and
+  the club facts every page repeats in `src/lib/venue.ts` (name, address,
+  phone), `src/lib/schedule.ts` (the weekly class times) and `src/lib/faq.ts`.
+  If your change seems to need a _second_ way to do one of these, that is a
+  design decision to raise with the user, not a shortcut to take quietly.
 - **Extracting logic into a pure module is usually the whole "make it easy"
   step.** `validation.ts` and `submit-resilience.ts` exist because behaviour was
   pulled out of handlers and components until it could be tested directly. Do

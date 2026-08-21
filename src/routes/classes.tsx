@@ -3,27 +3,21 @@ import { ArrowRight, Clock, MapPin, Phone } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta } from "@/lib/seo";
+import { scheduleDays, weeklySchedule } from "@/lib/schedule";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL } from "@/lib/venue";
 
 export const Route = createFileRoute("/classes")({
   head: () => ({
     meta: buildPageMeta({
       title: "Classes & Schedule | UTS Jitsu",
-      description:
-        "Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. Monday, Wednesday and Saturday.",
-      ogDescription: "Monday, Wednesday and Saturday classes at ActivateFit Gym, Ultimo.",
+      description: `Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. ${scheduleDays}.`,
+      ogDescription: `${scheduleDays} classes at ActivateFit Gym, Ultimo.`,
       path: "/classes",
     }),
     links: [{ rel: "canonical", href: "https://jitsu.au/classes" }],
   }),
   component: Classes,
 });
-
-const schedule = [
-  { day: "Monday", time: "5:30 – 7:00pm", note: "All levels welcome" },
-  { day: "Wednesday", time: "6:00 – 7:30pm", note: "All levels welcome" },
-  { day: "Saturday", time: "11:00am – 12:30pm", note: "Colour belts only, from September" },
-];
 
 function Classes() {
   return (
@@ -39,7 +33,7 @@ function Classes() {
 
       <section className="mx-auto max-w-6xl px-4">
         <div className="grid gap-4 md:grid-cols-3">
-          {schedule.map((s) => (
+          {weeklySchedule.map((s) => (
             <div key={s.day} className="rounded-xl border bg-card p-6">
               <div className="flex items-center gap-2 text-primary">
                 <Clock className="h-4 w-4" />
