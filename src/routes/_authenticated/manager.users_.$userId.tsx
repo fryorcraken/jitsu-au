@@ -49,8 +49,9 @@ import {
 } from "@/lib/club-user.functions";
 import { attachCheckInCoverage, transferCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
-import { runApproval } from "@/lib/waiver-approval";
+import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useConfirm } from "@/hooks/use-confirm";
 
 export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
   head: () => ({
@@ -447,6 +448,7 @@ function ManagerUserPage() {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [pdfs, setPdfs] = useState<Record<string, SignedUrlEntry>>({});
   const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set());
+  const { confirm, confirmDialog } = useConfirm();
   // Only the newest load's result may land: back-to-back approvals each trigger
   // their own refetch. (A different person is a different component instance —
   // see remountDeps above.)
@@ -614,7 +616,15 @@ function ManagerUserPage() {
     });
   }
 
-  async function setApproval(id: string, status: WaiverApprovalStatus) {
+  async function setApproval(
+    waiver: { id: string; full_name: string },
+    status: WaiverApprovalStatus,
+  ) {
+    // Approving emails the person and opens their login, and nothing on this
+    // page can take either back. Revoking only flips the row's status, so it
+    // goes through on the click.
+    if (status === "approved" && !(await confirm(approvalConfirmation(waiver.full_name)))) return;
+    const id = waiver.id;
     markApproving(id, true);
     // Statuses are derived per person (active vs superseded), so refresh by
     // refetching the whole person rather than patching one waiver. `load`
@@ -1007,21 +1017,17 @@ function ManagerUserPage() {
                   </CollapsibleTrigger>
                   <div className="flex flex-wrap items-center gap-2">
                     {w.status === "pending" ? (
-                      <Button
-                        size="sm"
-                        onClick={() => setApproval(w.id, "approved")}
-                        disabled={busy}
-                      >
+                      <Button size="sm" onClick={() => setApproval(w, "approved")} disabled={busy}>
                         {busy ? "Approving..." : "Approve"}
                       </Button>
                     ) : (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setApproval(w.id, "pending")}
+                        onClick={() => setApproval(w, "pending")}
                         disabled={busy}
                       >
-                        {busy ? "Updating..." : "Unapprove"}
+                        {busy ? "Updating..." : "Revoke approval"}
                       </Button>
                     )}
                     {w.has_pdf ? (
@@ -1114,6 +1120,7 @@ function ManagerUserPage() {
           })
         )}
       </div>
+      {confirmDialog}
     </section>
   );
 }

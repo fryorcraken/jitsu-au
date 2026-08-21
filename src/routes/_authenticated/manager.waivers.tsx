@@ -7,7 +7,7 @@ import { Pill } from "@/components/site/StatusPill";
 import { waiverClass } from "@/lib/status-colours";
 import { formatDateTime } from "@/lib/dates";
 import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
-import { runApproval } from "@/lib/waiver-approval";
+import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
 import type { WaiverApprovalStatus } from "@/lib/validation";
 import {
   getGoogleDriveStatus,
@@ -15,6 +15,7 @@ import {
   uploadWaiverToDrive,
 } from "@/lib/google-drive.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Download, Cloud, CloudCheck, Upload } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/manager/waivers")({
@@ -64,6 +65,7 @@ function WaiversPage() {
   const [driveFolderReady, setDriveFolderReady] = useState(false);
   const [uploads, setUploads] = useState<Record<string, DriveUpload>>({});
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const { confirm, confirmDialog } = useConfirm();
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -107,7 +109,12 @@ function WaiversPage() {
     }
   }
 
-  async function setApproval(id: string, status: WaiverApprovalStatus) {
+  async function setApproval(row: Row, status: WaiverApprovalStatus) {
+    // Approving emails the person and opens their login, and nothing on this
+    // page can take either back. Revoking only flips the row's status, so it
+    // goes through on the click.
+    if (status === "approved" && !(await confirm(approvalConfirmation(row.full_name)))) return;
+    const id = row.id;
     setApprovingId(id);
     // Statuses are derived per person (active vs superseded), so refresh by
     // refetching the list rather than patching one row locally.
@@ -228,7 +235,7 @@ function WaiversPage() {
                           {r.status === "pending" ? (
                             <Button
                               size="sm"
-                              onClick={() => setApproval(r.id, "approved")}
+                              onClick={() => setApproval(r, "approved")}
                               disabled={approvingId === r.id}
                             >
                               {approvingId === r.id ? "Approving..." : "Approve"}
@@ -237,10 +244,10 @@ function WaiversPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => setApproval(r.id, "pending")}
+                              onClick={() => setApproval(r, "pending")}
                               disabled={approvingId === r.id}
                             >
-                              {approvingId === r.id ? "Updating..." : "Unapprove"}
+                              {approvingId === r.id ? "Updating..." : "Revoke approval"}
                             </Button>
                           )}
                           {r.pdf_path ? (
@@ -283,6 +290,7 @@ function WaiversPage() {
           </div>
         )}
       </section>
+      {confirmDialog}
     </>
   );
 }

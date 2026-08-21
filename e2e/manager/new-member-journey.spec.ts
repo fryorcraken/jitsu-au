@@ -133,9 +133,13 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   await step(page, "a manager approves the waiver, which assigns the free trial", async () => {
     await page.goto(`/manager/users/${newUserId}`);
     await expectPageRendered(page);
-    await page.getByRole("button", { name: "Approve" }).click();
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
+    // Approving emails the member and opens their login, so it asks first and
+    // says so. The photograph of this step is that dialog.
+    await expect(page.getByRole("alertdialog")).toContainText("starts their free trial");
+    await page.getByRole("button", { name: "Approve waiver" }).click();
     // The button relabels once its own click lands — no toast text to guess.
-    await expect(page.getByRole("button", { name: "Unapprove" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Revoke approval" })).toBeVisible();
   });
 
   // The four earliest seeded classes (scripts/seed-local-club.mjs puts five

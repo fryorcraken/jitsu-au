@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  approvalConfirmation,
   approvalFailureMessage,
   approvalRefreshFailureMessage,
   runApproval,
@@ -182,5 +183,41 @@ describe("approvalRefreshFailureMessage", () => {
     expect(approvalRefreshFailureMessage(new Error(""))).toBe(
       "Saved, but the page could not be refreshed.",
     );
+  });
+});
+
+describe("approvalConfirmation", () => {
+  const copy = approvalConfirmation("Sam Tanaka");
+
+  it("asks about the person in front of the manager", () => {
+    expect(copy.title).toBe("Approve Sam Tanaka's waiver?");
+  });
+
+  it("names every outward-facing thing a first approval does", () => {
+    // The three steps that reach past this site: the email, the login and the
+    // trial. A manager who has not been told about the email cannot choose not
+    // to send it, and it is the one that cannot be pulled back.
+    expect(copy.details).toEqual([
+      "emails them to say their account is ready",
+      "unlocks their login so they can sign in",
+      "starts their free trial",
+    ]);
+  });
+
+  it("says plainly that revoking approval does not take any of it back", () => {
+    expect(copy.footnote).toContain("cannot be unsent");
+    expect(copy.footnote).toContain("does not take back the email, the login or the trial");
+  });
+
+  it("names the action on the button rather than saying OK", () => {
+    expect(copy.confirmLabel).toBe("Approve waiver");
+  });
+
+  it("keeps the em dash out of copy a manager reads", () => {
+    // AGENTS.md: no em dashes in user-facing copy, this screen included.
+    const everything = [copy.title, copy.description, copy.footnote, copy.confirmLabel]
+      .concat(copy.details)
+      .join(" ");
+    expect(everything).not.toContain("\u2014");
   });
 });

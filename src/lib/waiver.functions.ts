@@ -1787,7 +1787,7 @@ export const uploadPaperWaiver = createServerFn({ method: "POST" })
 // onto the person's profile (the club's current record), and if they are still
 // a locked applicant (banned auth user, no credentials) the ban is lifted and
 // they're emailed to say their account is active (applicant -> visitor).
-// Unapprove only reverts the waiver's status; the profile and login are left
+// Revoking approval only reverts the waiver's status; the profile and login are left
 // as they are.
 export const setWaiverApproval = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

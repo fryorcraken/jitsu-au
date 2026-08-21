@@ -97,8 +97,8 @@ system. (The contact form stores a message, not a person.)
    in an hour, so it is usually dead by the time it is read, while this one
    still works whenever they get to it. Approving a newer waiver later
    refreshes the profile again (no repeat activation email, no second trial).
-   Unapprove only reverts the waiver's status; profile, login and trial stay
-   as they are.
+   Revoking approval only reverts the waiver's status; profile, login and
+   trial stay as they are.
    The trial is dated from the day the waiver was **signed**, not the day it
    was approved, so the row records when the entitlement was really earned: a
    form filled in at the gym may not be approved until hours or days later.
@@ -395,15 +395,24 @@ step happens. See `docs/notifications.md` for the two items and how each clears.
 
 The manager waivers screen lists submissions newest first with the submitted
 name/email, date, template version, status badge (pending / active /
-superseded), the PDF, and Approve / Unapprove. Approve = promote + unlock +
-assign the trial (see rule 6). The applicant becomes a visitor.
+superseded), the PDF, and Approve / Revoke approval. Approve = promote + unlock
+
+- assign the trial (see rule 6). The applicant becomes a visitor.
+
+Approve asks first, in the app's own dialog (`useConfirm`), naming the three
+things a first approval does that nothing here can take back: the email, the
+login, the trial. The wording is `approvalConfirmation` in
+`src/lib/waiver-approval.ts`, so both approval screens ask in the same words.
+Revoking is not gated: it flips the row back to pending and re-approving
+restores it, which is why the button no longer says "Unapprove". It never
+undid the email, the login or the trial, and the old label promised it did.
 
 For one person there is a user page (`/manager/users/:userId`, reached from the
 directory), which is where a review normally happens: the profile (the club's
 current record), their memberships, and every submission they ever made, newest
 first. Each submission is a collapsible panel holding the frozen submission in
 full, the signing record (IP + browser context), when it was approved and by
-whom, Approve / Unapprove, and the signed PDF embedded inline. The approver is
+whom, Approve / Revoke approval, and the signed PDF embedded inline. The approver is
 shown by name, or by their login address if they have no profile of their own;
 an approval recorded before the club started keeping that (or one whose
 approver's account is gone) reads as unknown rather than as nobody. The submissions themselves load with the page; the

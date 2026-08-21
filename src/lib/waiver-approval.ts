@@ -129,3 +129,38 @@ export function supersedesMediaConsent({
   if (profileMediaConsentUpdatedAt === null) return true;
   return new Date(waiverSignedAt).getTime() > new Date(profileMediaConsentUpdatedAt).getTime();
 }
+
+// ---- What a manager is told before they approve ----
+//
+// Approving is the one manager action on this site that reaches a person
+// directly and cannot be pulled back: it emails them. Both screens ask the
+// same question in the same words, because it is the same action and the
+// wording is the part that has to be right. Kept here, next to the sequence it
+// describes, so a change to what approving DOES has the sentence about it in
+// the same file.
+
+/**
+ * The confirmation shown before a first approval, ready to hand to `useConfirm`.
+ *
+ * The list is hedged with "if it is their first approved waiver" because that
+ * is the truth: the unban, the email and the trial are all skipped for someone
+ * who can already log in, and the screen cannot tell which case this is
+ * without asking the server. Over-promising here is the safer error. A manager
+ * who expects an email that does not go out loses nothing, while one who does
+ * not expect it has already sent it.
+ */
+export function approvalConfirmation(name: string) {
+  return {
+    title: `Approve ${name}'s waiver?`,
+    description:
+      "This copies what they signed onto their member record. If it is their first approved waiver, it also:",
+    details: [
+      "emails them to say their account is ready",
+      "unlocks their login so they can sign in",
+      "starts their free trial",
+    ],
+    footnote:
+      "That email cannot be unsent. Revoking approval afterwards puts the waiver back to pending, but it does not take back the email, the login or the trial.",
+    confirmLabel: "Approve waiver",
+  };
+}
