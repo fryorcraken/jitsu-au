@@ -81,6 +81,22 @@ the manager screens read the live catalogue now. A price change is edited in
 two places: the plan (immediate, drives what people actually pay) and the
 pricing page copy (a code change, like any other website wording).
 
+**The free trial is two sessions, used at any point during the semester**, and
+that is the most the site may claim. `/first-class` states the terms in full.
+`/pricing` sold the same offer as year-round in three places ("all year long",
+"every day of the year", "always free") and the footer repeated it site-wide
+("all year round"), which promised more than the club honours. Shorter
+statements ("first two sessions free", "your first two are on us") are fine:
+they state the offer without claiming a window. `free-trial-copy.test.ts`
+fails the suite if a year-round claim comes back, and pins the qualifier on
+`/pricing` and `/first-class`.
+
+That is the club's **offer**, not the membership row. The `trial_2_session`
+plan is a credit balance with no expiry (above), so a manager can still check
+someone in on a leftover trial session after the semester ends. The two are
+allowed to differ: the site promises the smaller thing, and the club can
+honour more than it promised.
+
 ## What an ended membership is called
 
 `memberships.status = 'expired'` is one stored word for two different endings,

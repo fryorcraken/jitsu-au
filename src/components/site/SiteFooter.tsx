@@ -19,7 +19,7 @@ export function SiteFooter() {
           </div>
           <p className="mt-3 max-w-sm text-sm text-muted-foreground">
             Practical Japanese Jiu-Jitsu in the heart of Sydney. Beginners welcome. First two
-            sessions are free, all year round.
+            sessions are free.
           </p>
         </div>
         <div>
