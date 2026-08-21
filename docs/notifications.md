@@ -186,9 +186,9 @@ for using Actions ("pg_cron is not available") was never checked: it was inferre
 from the extension being absent from this repo's migrations, which says nothing
 about what the project offers. `pg_available_extensions` lists pg_cron 1.6.4.
 
-**It is not armed by the migration**, and as of this writing it never has been:
-the two Vault secrets do not exist, `NOTIFICATION_DIGEST_KEY` is unset, and no
-digest email has ever gone out. The job fires nightly and raises, so the
+**It is not armed by the migration**, and as of 2026-08-21 it never has been:
+both Vault secrets are absent, `NOTIFICATION_DIGEST_KEY` is unset, and no digest
+email has ever gone out (checked against the live project, see the runbook). The job fires nightly and raises, so the
 scheduler records it as failed. "Arming the digest: the runbook" below is the
 whole procedure, including what to do with the backlog first.
 
@@ -298,11 +298,27 @@ more slowly, which is why this is worth doing and not urgent.
 Nothing here can be done from this repo, and both halves have to be in place
 before a single email goes out. The key exists in two places and must match.
 
-**1. Set the server env var.** In the **Lovable Cloud project secrets**, add
-`NOTIFICATION_DIGEST_KEY`. Generate it fresh, treat it as a credential, and do
-not put it in `.env` (which is committed, see CLAUDE.md). Anything unguessable
-works; `openssl rand -hex 32` is fine. Redeploy so the server picks it up, then
-confirm the endpoint has stopped refusing everything:
+Checked against the live project through Lovable on **2026-08-21**, read-only:
+`NOTIFICATION_DIGEST_KEY` is not set (the project has three secrets and this is
+not one of them), neither Vault secret exists, and so no digest email has ever
+been sent. pg_cron is installed and job `notification-digest` is active on
+`0 20 * * *` with the expected command; pg_net is installed with its extension
+home in `extensions` and its functions in `net`, which is what the migration
+asserts. The five runs from 17 to 21 August all recorded **succeeded**, return
+message `1 row`, having done nothing. The backlog stood at **34 rows**, from
+2026-08-10 12:53 UTC to 2026-08-20 03:09 UTC.
+
+**1. Set the server env var.** In Lovable, **Project Settings → Secrets**, add
+`NOTIFICATION_DIGEST_KEY`. That screen is the only place it goes: there is no
+separate environment-variable screen, and it must not go in `.env` (which is
+committed, see CLAUDE.md). Generate it yourself and treat it as a credential;
+`openssl rand -hex 32` is fine. You need the identical string in Vault at step 3,
+so generate it somewhere you can copy it from.
+
+Preview and the published site read the same secret store, but the deployed
+`jitsu.au` build only picks up a new value on the next publish, so **publish
+(Publish → Update) before going further**. Then confirm the endpoint has stopped
+refusing everything:
 
 ```sh
 curl -si -X POST https://jitsu.au/api/notifications/digest      # expect 401, NOT 503
@@ -330,9 +346,9 @@ Everything stays on each person's `/notifications` page: `emailed_at` governs th
 inbox only, never the page. The alternative is to let them send, which is a
 product decision and not a default.
 
-**3. Add the two Vault secrets** (Supabase → Integrations → Vault, or the SQL
-editor). The key must match step 1 **exactly**, and the URL must be the
-`jitsu.au` origin, not the `*.lovable.app` one:
+**3. Add the two Vault secrets.** There is no Vault UI on Lovable Cloud, so this
+is SQL. The key must match step 1 **exactly**, and the URL must be the `jitsu.au`
+origin, not the `*.lovable.app` one:
 
 ```sql
 SELECT vault.create_secret(
@@ -367,6 +383,11 @@ SELECT count(*) FROM public.notifications WHERE emailed_at IS NULL;
 notifications page is the standing version of that second query: the "daily email
 summary has stopped" item disappears once the backlog is cleared and stays away
 while it is being kept clear.
+
+Do the two halves in this order, env var first. While Vault is empty the job
+returns without posting anything, so there is no window where something unwanted
+happens. The reverse order gives a night of the job POSTing into a 503, which is
+harmless but pointless.
 
 Rotating the key later means changing it in **both** places in the same sitting
 (`vault.update_secret` for the Vault copy), or every run 401s until they agree.
