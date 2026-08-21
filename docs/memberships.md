@@ -323,6 +323,51 @@ own), and reconciliation, activation and cancellation follow the same
 `edit_invoice` / bank-reconciliation flow as any other plan — see
 `.claude/skills/uts-manager-agent/SKILL.md` and `/manager/reconciliation`.
 
+### Reading the statement CSV
+
+The file a manager drops on `/manager/reconciliation` is parsed by
+`src/lib/bank-statement-csv.ts` (in `src/lib/`, not in the route, so every case
+below is a unit test in `bank-statement-csv.test.ts`). It handles quoted fields
+with commas in them, doubled `""` inside a quoted field, `\r\n` and lone `\r`
+endings, a leading BOM, blank lines, and a last row with no newline after it.
+Dates are read day-first (`01/08/2026` is 1 August) or as ISO, with any time
+after them ignored. Amounts go through `parseMoneyToCents`, so `$1,234.50` is
+fine.
+
+Four things are decided rather than obvious:
+
+- **The header row is the first row of the file**, and the import **refuses a
+  file whose Date, Amount or Description column it cannot find**, naming the
+  ones it could not. Every one of those is resolved by substring
+  (`transaction date` matches `date`), and a missing one used to import zero
+  rows and say "no credit transactions found", which reads exactly like a quiet
+  month. A bank that prints its account summary above the headings is the same
+  failure, so the message says to delete anything above them.
+- **A credit or deposit column wins over a plain amount column, and nothing
+  naming a debit, a withdrawal, a limit or a balance is ever the amount.** An
+  export with `Debit Amount` beside `Credit Amount` otherwise resolved to the
+  debit one, and every card purchase in the statement imported as money coming
+  in. The same rule keeps a `Debit/Credit` indicator column (which holds `DR` /
+  `CR`, not a sum) and a `Credit Limit` out of it. A credit header only wins
+  when the rest of it agrees it is a money column, so `Credit Card Surcharge`
+  is a fee and loses to a plain `Amount`.
+- **When the direction lives in its own DR/CR column, that column is read.**
+  Some exports leave the amount unsigned and put `DR` / `CR` beside it. Rows
+  marked as going out are dropped; a cell we do not recognise leaves its row
+  alone, because dropping a credit is the more expensive mistake.
+- **A date that is not a real calendar date is dropped, not passed on.** A
+  US-formatted export reads `08/13/2026` as day 8 of month 13, which clears the
+  row schema's regex and then kills the entire import at insert time on a raw
+  Postgres range error. The row keeps its amount and description and shows no
+  date, which is the same as any other date we cannot read. That means a wholly
+  US-formatted export imports dateless rather than being refused: worth
+  revisiting if one ever turns up.
+- **Only positive amounts are kept**, because only an incoming credit can pay a
+  membership. Reference is optional. The description is taken from the first of
+  `description`, `narrative`, `details`, `memo`, `reference` that the file has,
+  in that order rather than in column order, so a file carrying both a bare
+  reference and a human-readable narrative shows the narrative to the manager.
+
 ## Paying an invoice
 
 The member sees everything they need to pay on `/membership` itself: a **How to
