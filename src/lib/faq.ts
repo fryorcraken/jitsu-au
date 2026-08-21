@@ -5,13 +5,18 @@
 // homepage. Keep every question/answer here so the two never drift.
 
 export type FaqItem = {
-  /** Stable slug used to select items (e.g. the homepage trio) without matching on prose. */
+  /** Stable slug used to select items (e.g. the homepage set) without matching on prose. */
   id: string;
   q: string;
   a: string;
 };
 
 export const faqItems: FaqItem[] = [
+  {
+    id: "open-to-public",
+    q: "Do I need to be a UTS student to join?",
+    a: "No. The club is open to everyone. UTS students, UTS staff and people with no connection to the university all train in the same classes. The gym has its own street entrance on Harris Street, and reception just asks you to sign the sign-in sheet, so there's no student card to show. Students pay a lower fee, everyone else pays the public rate.",
+  },
   {
     id: "trial-offer",
     q: "Is there a trial offer?",
@@ -44,11 +49,19 @@ export const faqItems: FaqItem[] = [
   },
 ];
 
-// The three most reassuring questions to surface on the homepage, where
-// hesitation actually strikes. Deliberately chosen to COMPLEMENT the "Your
-// first class" page (which already covers gear + what to wear), so the gear /
-// clothing questions are intentionally excluded here to avoid redundancy.
-export const homepageFaqIds = ["experience", "trial-offer", "jjj-vs-bjj"] as const;
+// The most reassuring questions to surface on the homepage, where hesitation
+// actually strikes. Deliberately chosen to COMPLEMENT the "Your first class"
+// page (which already covers gear + what to wear), so the gear / clothing
+// questions are intentionally excluded here to avoid redundancy.
+//
+// "open-to-public" leads because the club's name reads as a university club,
+// and someone who assumes they are not eligible leaves without asking.
+export const homepageFaqIds = [
+  "open-to-public",
+  "experience",
+  "trial-offer",
+  "jjj-vs-bjj",
+] as const;
 
 export const homepageFaqItems: FaqItem[] = homepageFaqIds.map((id) => {
   const item = faqItems.find((f) => f.id === id);

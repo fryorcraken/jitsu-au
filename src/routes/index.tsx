@@ -13,7 +13,7 @@ export const Route = createFileRoute("/")({
     meta: buildPageMeta({
       title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney",
       description:
-        "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+        "Beginner-friendly Japanese Jiu-Jitsu at UTS Ultimo, open to everyone and not just UTS students. Classes Mon, Wed & Sat. First two sessions free.",
       path: "/",
     }),
     links: [
@@ -43,16 +43,16 @@ function Home() {
         <div className="mx-auto grid max-w-6xl gap-10 px-4 pt-12 pb-16 md:grid-cols-2 md:items-center md:pt-20 md:pb-24">
           <div>
             <span className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Now enrolling for the
-              semester
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Now enrolling. Everyone
+              welcome, UTS or not
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
               Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
-              Build real self-defence skills in a fun and welcoming environment. Japanese Jiu-Jitsu
-              at the UTS Ultimo campus. Classes are for beginners and experienced martial artists
-              alike.
+              Build real self-defence skills in a fun and welcoming environment. We train Japanese
+              Jiu-Jitsu in Ultimo, and you don't need to be a UTS student to join us. Classes are
+              for beginners and experienced martial artists alike.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
@@ -131,8 +131,8 @@ function Home() {
             },
             {
               icon: Users,
-              title: "Inclusive community",
-              body: "All levels welcome. We move at your pace, together.",
+              title: "Open to everyone",
+              body: "You don't need to be a UTS student. All levels welcome, at your own pace.",
             },
             {
               icon: Dumbbell,
@@ -161,7 +161,8 @@ function Home() {
             <div>
               <h2 className="text-3xl font-bold md:text-4xl">Train with us this week</h2>
               <p className="mt-2 max-w-xl text-muted-foreground">
-                Classes run at ActivateFit Gym, on Harris Street in Ultimo.
+                Classes run at ActivateFit Gym, on Harris Street in Ultimo. You enter from the
+                street, and there's no student card to show at reception.
               </p>
             </div>
             <Button asChild variant="outline" className="hidden md:inline-flex">
