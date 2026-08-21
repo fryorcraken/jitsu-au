@@ -1178,7 +1178,7 @@ Two things that fail silently every morning rather than loudly once:
   that one 302s, and pg_net does not follow redirects.
 
 The migration deliberately **does not arm the job**. It fires nightly and returns
-immediately with a `RAISE WARNING` until both secrets exist:
+immediately until both secrets exist:
 
 ```sql
 SELECT vault.create_secret(
@@ -1186,6 +1186,15 @@ SELECT vault.create_secret(
 SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
   'notification_digest_key');
 ```
+
+`20260821000000_notification_digest_fails_loudly.sql` replaces the function body
+so that the unarmed branch **raises** instead of warning and returning, naming
+whichever secret is missing. A plpgsql function that returns is one pg_cron
+records as `succeeded`, so until that migration every unarmed night went into
+`cron.job_run_details` as a success. It now goes in as a failure, which is what
+it is. Arming the job is what clears it; a club that does not want the digest at
+all should `cron.unschedule('notification-digest')` rather than leave it red.
+The runbook for arming it is in `docs/notifications.md`.
 
 ---
 

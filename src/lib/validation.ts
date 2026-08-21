@@ -1506,19 +1506,35 @@ export type ManagerNotification = {
     | "define_membership_window"
     | "unread_contact_messages"
     | "waivers_awaiting_approval"
-    | "new_interest_registrations";
+    | "new_interest_registrations"
+    | "notification_digest_stalled";
   title: string;
   body: string;
-  href: string;
+} & (
+  | {
+      href: string;
+      /**
+       * What the item's button says. Carried here rather than fixed in the
+       * dashboard, because the right verb depends on the item: unset training
+       * dates really do need fixing, an unanswered message needs reading.
+       * Required alongside `href`, not optional-with-a-default, so adding a kind
+       * of notification cannot silently inherit a verb that does not fit it.
+       */
+      actionLabel: string;
+    }
   /**
-   * What the item's button says. Carried here rather than fixed in the
-   * dashboard, because the right verb depends on the item: unset training dates
-   * really do need fixing, an unanswered message needs reading. Required, not
-   * optional-with-a-default, so adding a kind of notification cannot silently
-   * inherit a verb that does not fit it.
+   * An item with nowhere to send anybody. The pair is all-or-nothing rather
+   * than two independent optionals, so an item can carry a destination with no
+   * verb or a verb with no destination only by failing the typecheck.
+   *
+   * Only one kind uses this today, and the reason is the whole point of it: a
+   * stalled digest is fixed outside the site entirely, so every button the
+   * dashboard could offer would be a lie. Confirming everything trains people
+   * to click through without reading, and a button that does nothing trains
+   * them to ignore buttons. `notifications.tsx` renders the card without one.
    */
-  actionLabel: string;
-};
+  | { href?: undefined; actionLabel?: undefined }
+);
 
 /**
  * The membership-window notifications: training is unsellable while no dated
@@ -1564,7 +1580,9 @@ export function sellableWindowNotifications<
 
 /**
  * " on 06/08/2026" for a notification body, resolved to the CLUB's day rather
- * than the server's, or "" when the timestamp could not be read.
+ * than the server's, or "" when the timestamp could not be read. `preposition`
+ * is there because the backlog item reads " since 06/08/2026"; the day itself
+ * is worked out identically and there is no reason for two of these.
  *
  * These strings are built inside `listMyNotifications`, so they render on the
  * server (UTC) while the screen each one links to formats the same timestamp in
@@ -1574,8 +1592,8 @@ export function sellableWindowNotifications<
  * on, which is exactly what `formatDateOnly` is for, and being pure it also
  * drops the dependency on the runtime having full ICU.
  */
-function clubDaySuffix(at: string | null | undefined): string {
-  return at ? ` on ${formatDateOnly(clubLocalDate(new Date(at), CLUB_TIME_ZONE))}` : "";
+function clubDaySuffix(at: string | null | undefined, preposition: string = "on"): string {
+  return at ? ` ${preposition} ${formatDateOnly(clubLocalDate(new Date(at), CLUB_TIME_ZONE))}` : "";
 }
 
 /**
@@ -1726,6 +1744,62 @@ export function contactMessageNotifications(input: {
 }
 
 /**
+ * How long a notification may sit unemailed before the daily summary counts as
+ * broken. The digest runs once a day, so anything under 24 hours is simply
+ * waiting for tonight's run and is not news. 36 gives a run a full extra half
+ * day to be late, delayed or retried before a manager is told about it, and
+ * still catches a digest that has missed two mornings.
+ */
+export const DIGEST_STALL_HOURS = 36;
+
+/**
+ * The daily summary has stopped going out.
+ *
+ * This asserts on the OUTCOME, not on the mechanism, which is the only kind of
+ * check that works here. The digest is a pg_cron job that POSTs to
+ * `/api/notifications/digest` with pg_net, and pg_net is fire and forget: the
+ * job records `succeeded` whether the site answered 200, 401, 503 or nothing at
+ * all, so the scheduler's own view of itself is worthless. Every failure mode
+ * (Vault secret missing, key drifted from the env var, endpoint unconfigured
+ * and answering 503, site down, DNS or TLS failing, request timing out) shows
+ * up the same way here: rows keep their NULL `emailed_at` and the backlog ages.
+ *
+ * Deliberately carries no button. Nothing on this site can fix it: both halves
+ * of the chain live outside the repo, in Supabase Vault and the Lovable Cloud
+ * project secrets. See docs/notifications.md for the runbook.
+ *
+ * It also cannot be dismissed, which is the point of an attention item and is
+ * worth saying out loud here because this one can stay up for a long time. It
+ * clears when the digest actually sends, or when somebody stamps the backlog as
+ * emailed to start clean. A club that decides not to email at all clears it the
+ * same way. Hiding it while members silently get no email is the one outcome
+ * this exists to prevent.
+ */
+export function digestStalledNotifications(input: {
+  stalled: number;
+  oldestAt?: string | null;
+}): ManagerNotification[] {
+  const { stalled, oldestAt } = input;
+  if (stalled <= 0) return [];
+  const since = clubDaySuffix(oldestAt, "since");
+  const waiting =
+    stalled === 1
+      ? `One notification has been waiting to be emailed${since}, and nobody has had it.`
+      : `${stalled} notifications have been waiting to be emailed, the oldest${since}. Nobody has had them.`;
+  return [
+    {
+      type: "notification_digest_stalled",
+      title: "The daily email summary has stopped going out",
+      // Says what is safe before what is broken: the people affected have lost
+      // an email, not the thing the email was about. Then where the fix is,
+      // because it is not here and a manager hunting the site for a switch
+      // would be hunting for something that does not exist.
+      body: `${waiting} Nothing is lost, everyone can still see them on their own notifications page. Starting the summary again is done outside the site, so pass this on to whoever set it up.`,
+    },
+  ];
+}
+
+/**
  * The order a manager meets the "needs attention" items in.
  *
  * Sorted by who is held up and for how long:
@@ -1734,9 +1808,15 @@ export function contactMessageNotifications(input: {
  *    presses the button. They are stuck, and only this list says so.
  * 2. **Unanswered messages.** Somebody is waiting on a reply, but nothing about
  *    them is blocked in the meantime.
- * 3. **New interest registrations.** Nobody is waiting on anything. It is news,
- *    and it sits below the two items that are work.
- * 4. **The membership window.** A chore that announces itself weeks ahead.
+ * 3. **The stalled digest.** Nobody is blocked from training, but every member
+ *    the club owes an email is quietly not getting one, and it has been that
+ *    way for at least a day and a half. It sits below the two items where a
+ *    named person is waiting on a specific manager action, and above the two
+ *    where nobody is affected yet. Its own body says the fix is not on this
+ *    site; that is a reason to rank it honestly, not to bury it.
+ * 4. **New interest registrations.** Nobody is waiting on anything. It is news,
+ *    and it sits below the items that are work.
+ * 5. **The membership window.** A chore that announces itself weeks ahead.
  *
  * Kept as a function rather than an inline spread in the handler so the priority
  * is a decision with a test on it, not an accident of argument order.
@@ -1744,12 +1824,14 @@ export function contactMessageNotifications(input: {
 export function composeManagerNotifications(sources: {
   waiverApprovals: ManagerNotification[];
   contactMessages: ManagerNotification[];
+  digestStalled: ManagerNotification[];
   interestRegistrations: ManagerNotification[];
   membershipWindows: ManagerNotification[];
 }): ManagerNotification[] {
   return [
     ...sources.waiverApprovals,
     ...sources.contactMessages,
+    ...sources.digestStalled,
     ...sources.interestRegistrations,
     ...sources.membershipWindows,
   ];

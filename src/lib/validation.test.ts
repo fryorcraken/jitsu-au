@@ -18,6 +18,7 @@ import {
   composeManagerNotifications,
   markContactMessagesSeenSchema,
   contactMessageNotifications,
+  digestStalledNotifications,
   contactSchema,
   coverageSources,
   listContactMessagesSchema,
@@ -1184,32 +1185,97 @@ describe("waiverApprovalNotifications", () => {
   });
 });
 
+describe("digestStalledNotifications", () => {
+  it("says nothing while the backlog is empty", () => {
+    expect(digestStalledNotifications({ stalled: 0 })).toEqual([]);
+    expect(digestStalledNotifications({ stalled: -1 })).toEqual([]);
+  });
+
+  it("carries no button, because nothing on this site can fix it", () => {
+    // The whole point of the item. Both halves of the digest chain live outside
+    // the repo (a Supabase Vault secret and a project env var), so every
+    // destination the dashboard could offer would send a manager somewhere that
+    // cannot help. Before this kind existed, `href` and `actionLabel` were
+    // required and an item like this could not be expressed at all.
+    const [n] = digestStalledNotifications({ stalled: 4, oldestAt: "2026-08-05T23:00:00.000Z" });
+    expect(n.href).toBeUndefined();
+    expect(n.actionLabel).toBeUndefined();
+  });
+
+  it("names the count and the oldest waiting row", () => {
+    const [n] = digestStalledNotifications({ stalled: 34, oldestAt: "2026-08-05T23:00:00.000Z" });
+    expect(n.type).toBe("notification_digest_stalled");
+    expect(n.body).toContain("34 notifications");
+    // 9am Sydney on the 6th is still the 5th in UTC, and this string is built on
+    // the server. Same rule as the contact-message item above.
+    expect(n.body).toContain("since 06/08/2026");
+  });
+
+  it("reads as one thing for a backlog of one", () => {
+    const [n] = digestStalledNotifications({ stalled: 1, oldestAt: "2026-08-05T23:00:00.000Z" });
+    expect(n.body).toContain("One notification has been waiting");
+    expect(n.body).not.toContain("1 notifications");
+  });
+
+  it("still renders when the oldest row could not be read", () => {
+    // The count is what the item cannot do without. The oldest timestamp comes
+    // from a second query that is allowed to fail on its own, so a missing date
+    // must make the copy vaguer rather than produce "the oldest since ."
+    for (const oldestAt of [null, undefined]) {
+      const [n] = digestStalledNotifications({ stalled: 7, oldestAt });
+      expect(n.body).toContain("7 notifications");
+      expect(n.body).not.toMatch(/since\s*\./);
+      expect(n.body).not.toContain("undefined");
+    }
+  });
+
+  it("tells the reader nothing is lost, and where the fix is", () => {
+    // A manager reading this has just been told the club's email is broken. The
+    // two things they need are that the people affected can still see what they
+    // missed, and that hunting this site for a switch is wasted time.
+    const [n] = digestStalledNotifications({ stalled: 2, oldestAt: "2026-08-05T23:00:00.000Z" });
+    expect(n.body).toContain("Nothing is lost");
+    expect(n.body).toContain("outside the site");
+  });
+
+  it("writes copy without an em dash", () => {
+    // AGENTS.md: no em dashes in user-facing copy, and this item is on screen.
+    const [n] = digestStalledNotifications({ stalled: 2, oldestAt: "2026-08-05T23:00:00.000Z" });
+    expect(`${n.title} ${n.body}`).not.toContain("\u2014");
+  });
+});
+
 describe("composeManagerNotifications", () => {
   const waivers = waiverApprovalNotifications({ pending: 1, latestName: "Ada" });
   const contact = contactMessageNotifications({ unread: 1, latestName: "Sam" });
   const leads = interestRegistrationNotifications({ unread: 1, latestName: "Kim" });
   const windows = sellableWindowNotifications([], "2026-08-03T10:00:00.000Z");
+  const digest = digestStalledNotifications({ stalled: 3, oldestAt: "2026-08-01T22:00:00.000Z" });
   const quiet = {
     waiverApprovals: [],
     contactMessages: [],
+    digestStalled: [],
     interestRegistrations: [],
     membershipWindows: [],
   };
 
   it("orders the queue by who is held up, and for how long", () => {
     // A signed waiver blocks somebody from starting, an unanswered message has
-    // somebody waiting on a reply, a new registration has nobody waiting on
+    // somebody waiting on a reply, a stalled digest has every member quietly
+    // missing email but nobody blocked, a new registration has nobody waiting on
     // anything, and the training window is a chore that announces itself weeks
     // ahead. This is the whole reason the order is a function.
     const all = composeManagerNotifications({
       waiverApprovals: waivers,
       contactMessages: contact,
+      digestStalled: digest,
       interestRegistrations: leads,
       membershipWindows: windows,
     });
     expect(all.map((n) => n.type)).toEqual([
       "waivers_awaiting_approval",
       "unread_contact_messages",
+      "notification_digest_stalled",
       "new_interest_registrations",
       "define_membership_window",
     ]);
@@ -1228,6 +1294,9 @@ describe("composeManagerNotifications", () => {
     expect(
       composeManagerNotifications({ ...quiet, interestRegistrations: leads }).map((n) => n.type),
     ).toEqual(["new_interest_registrations"]);
+    expect(
+      composeManagerNotifications({ ...quiet, digestStalled: digest }).map((n) => n.type),
+    ).toEqual(["notification_digest_stalled"]);
     expect(composeManagerNotifications(quiet)).toEqual([]);
   });
 });

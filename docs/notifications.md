@@ -186,15 +186,11 @@ for using Actions ("pg_cron is not available") was never checked: it was inferre
 from the extension being absent from this repo's migrations, which says nothing
 about what the project offers. `pg_available_extensions` lists pg_cron 1.6.4.
 
-**It is not armed by the migration.** The job fires nightly and returns
-immediately, with a warning in the Postgres log, until both Vault secrets exist:
-
-```sql
-SELECT vault.create_secret(
-  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
-SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
-  'notification_digest_key');
-```
+**It is not armed by the migration**, and as of this writing it never has been:
+the two Vault secrets do not exist, `NOTIFICATION_DIGEST_KEY` is unset, and no
+digest email has ever gone out. The job fires nightly and raises, so the
+scheduler records it as failed. "Arming the digest: the runbook" below is the
+whole procedure, including what to do with the backlog first.
 
 Two traps worth stating, because both fail silently every morning rather than
 loudly once:
@@ -250,9 +246,130 @@ SELECT count(*) FROM public.notifications WHERE emailed_at IS NULL;        -- ba
 ```
 
 That last query is the one worth watching: a number that climbs day over day
-means the digest has stopped, whatever the scheduler thinks. Closing this
-properly wants a second job that reads back the response and raises on a non-2xx
-so the failure lands in `cron.job_run_details`. Not built yet.
+means the digest has stopped, whatever the scheduler thinks.
+
+#### What now watches it
+
+Two changes, and the split between them is the point. One makes the scheduler
+stop lying; the other stops relying on the scheduler at all.
+
+- **An unarmed run is now recorded as failed**
+  (`20260821000000_notification_digest_fails_loudly.sql`). The fail-closed branch
+  raises instead of returning, naming whichever Vault secret is missing, so
+  `cron.job_run_details` says `failed` for a job that emailed nobody. This is
+  narrow on purpose: it only catches the half of the problem the database can
+  see. An armed job still records success no matter what the site answered.
+- **A stalled digest is an attention item on `/notifications`.** Any notification
+  row that has sat unemailed for more than `DIGEST_STALL_HOURS` (36) raises "The
+  daily email summary has stopped going out", with the backlog size and the date
+  of the oldest row. This asserts on the **outcome**, not the mechanism, which is
+  the only check that survives pg_net being fire and forget: Vault secret
+  missing, key drifted from the env var, endpoint answering 503 because
+  `NOTIFICATION_DIGEST_KEY` is unset, site down, DNS or TLS failing, request
+  timing out. All of them look identical from here, which is exactly what makes
+  the check cheap and total.
+
+36 hours rather than 24: the run is daily, so anything younger is waiting for
+tonight, and a run that is a few hours late is not news. Two missed mornings is.
+
+Three things about that item are deliberate and will look like bugs otherwise:
+
+- **It has no button.** Both halves of the fix live outside this repo, in
+  Supabase Vault and the Lovable Cloud project secrets, so every destination the
+  page could offer would be one that cannot help. `ManagerNotification` carries
+  `href` and `actionLabel` as an all-or-nothing pair for this reason.
+- **It cannot be dismissed**, like every attention item, and unlike the others it
+  can stay up for weeks. It clears when the digest actually sends, or when
+  somebody stamps the backlog as emailed. That is the correct behaviour while
+  members are silently getting no email.
+- **It fires while the digest has simply never been armed**, which is the state
+  the club is in today. That is not a false positive: the rows are owed and
+  nobody has had them.
+
+Still not built: a second job that reads `net._http_response` back and raises on
+a non-2xx, so an ARMED failure lands in `cron.job_run_details` the same night
+rather than a day and a half later on the notifications page. It needs somewhere
+durable to keep the verdict, since pg_net garbage-collects that table after
+`pg_net.ttl` (6 hours by default). The backlog check covers the same failures
+more slowly, which is why this is worth doing and not urgent.
+
+### Arming the digest: the runbook
+
+Nothing here can be done from this repo, and both halves have to be in place
+before a single email goes out. The key exists in two places and must match.
+
+**1. Set the server env var.** In the **Lovable Cloud project secrets**, add
+`NOTIFICATION_DIGEST_KEY`. Generate it fresh, treat it as a credential, and do
+not put it in `.env` (which is committed, see CLAUDE.md). Anything unguessable
+works; `openssl rand -hex 32` is fine. Redeploy so the server picks it up, then
+confirm the endpoint has stopped refusing everything:
+
+```sh
+curl -si -X POST https://jitsu.au/api/notifications/digest      # expect 401, NOT 503
+```
+
+503 means the env var still is not reaching the server. 401 means it is, and the
+endpoint is now asking for the right token. Do not send the real token here
+unless you mean to run a digest immediately.
+
+**2. Decide what happens to the backlog, BEFORE step 3.** The digest sweeps
+every row with a NULL `emailed_at` and no age limit, so arming it releases the
+whole backlog in one go, as one email per person. Old announcements arriving in
+a burst is the kind of send that gets a domain marked as spam, and the club
+depends on that domain for magic links and account activation. To start clean:
+
+```sql
+-- Stamp the backlog as emailed without sending it. Run this BEFORE arming.
+UPDATE public.notifications
+   SET emailed_at = now()
+ WHERE emailed_at IS NULL
+   AND created_at < now() - interval '36 hours';
+```
+
+Everything stays on each person's `/notifications` page: `emailed_at` governs the
+inbox only, never the page. The alternative is to let them send, which is a
+product decision and not a default.
+
+**3. Add the two Vault secrets** (Supabase → Integrations → Vault, or the SQL
+editor). The key must match step 1 **exactly**, and the URL must be the
+`jitsu.au` origin, not the `*.lovable.app` one:
+
+```sql
+SELECT vault.create_secret(
+  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
+SELECT vault.create_secret('<the same value as NOTIFICATION_DIGEST_KEY>',
+  'notification_digest_key');
+```
+
+**4. Prove it works, without waiting for 20:00 UTC.** Run the job by hand and
+read the response back inside pg_net's 6-hour TTL:
+
+```sql
+SELECT private.run_notification_digest();          -- raises if a secret is missing
+SELECT id, status_code, content, error_msg, created
+  FROM net._http_response ORDER BY created DESC LIMIT 1;
+```
+
+`status_code` 200 with a body like `{"ok":true,"considered":N,...}` is the
+answer you want. 401 means the two copies of the key differ. 503 means step 1 did
+not take. A row with `error_msg` and no status is a network or TLS failure. A
+302 means the URL is the `*.lovable.app` host, which pg_net will not follow.
+
+**5. Confirm the next scheduled run.** The morning after:
+
+```sql
+SELECT status, return_message, start_time FROM cron.job_run_details
+ WHERE jobname = 'notification-digest' ORDER BY start_time DESC LIMIT 3;
+SELECT count(*) FROM public.notifications WHERE emailed_at IS NULL;
+```
+
+`succeeded` with a backlog that is not climbing is a working digest. The
+notifications page is the standing version of that second query: the "daily email
+summary has stopped" item disappears once the backlog is cleared and stays away
+while it is being kept clear.
+
+Rotating the key later means changing it in **both** places in the same sitting
+(`vault.update_secret` for the Vault copy), or every run 401s until they agree.
 
 ### A post goes live
 
@@ -290,11 +407,11 @@ choice to a member would be a lie about what they can turn on.
 - **No per-thread mute.** The switches are per kind. If one thread turns noisy,
   the answer today is to turn thread activity off.
 - **No in-app bell or toast.** The sidebar badge is the only in-app signal.
-- **The attention list has four checks**: waivers waiting for approval, unanswered
-  contact messages, new interest registrations, and the club's training dates
-  running out. Unmatched bank transactions and unpaid invoices are the obvious
-  next entries and the shape supports them, but widening the manager queue
-  further is separate work.
+- **The attention list has five checks**: waivers waiting for approval, unanswered
+  contact messages, a stalled daily digest, new interest registrations, and the
+  club's training dates running out. Unmatched bank transactions and unpaid
+  invoices are the obvious next entries and the shape supports them, but widening
+  the manager queue further is separate work.
 - **Signing up notifies managers by email at the moment it happens** (a new-lead
   email on registration, a copy of the waiver on signing), and none of that is
   changed by the attention items. Neither item claims a copy was emailed: those
@@ -330,22 +447,24 @@ Two consequences worth knowing:
 
 ## Where the code lives
 
-| Concern                      | File                                                                   |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| The rules (pure, tested)     | `src/lib/notifications.ts`                                             |
-| The attention list           | `src/lib/manager-notifications.functions.ts`                           |
-| Contact messages             | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`     |
-| Interest registrations       | `src/lib/leads.functions.ts`                                           |
-| Waivers waiting on a manager | `countWaiversAwaitingApproval` in `src/lib/waiver.functions.ts`        |
-| The club-wide watermarks     | `src/lib/seen-markers.ts`                                              |
-| Who hears about what         | `src/lib/notification-events.server.ts`                                |
-| Sending, and the digest run  | `src/lib/notification-email.server.ts`                                 |
-| Page and settings server fns | `src/lib/notifications.functions.ts`                                   |
-| The shared query             | `src/hooks/useNotifications.ts`                                        |
-| The page                     | `src/routes/_authenticated/notifications.tsx`                          |
-| The signed-out settings      | `src/routes/email-settings/$token.tsx`                                 |
-| The switches                 | `src/components/site/NotificationSwitches.tsx`                         |
-| The sidebar badge            | `src/components/site/MemberLayout.tsx`                                 |
-| The digest endpoint          | `src/routes/api/notifications/digest.ts`                               |
-| The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`      |
-| Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx` |
+| Concern                      | File                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| The rules (pure, tested)     | `src/lib/notifications.ts`                                                |
+| The attention list           | `src/lib/manager-notifications.functions.ts`                              |
+| Contact messages             | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`        |
+| Interest registrations       | `src/lib/leads.functions.ts`                                              |
+| Waivers waiting on a manager | `countWaiversAwaitingApproval` in `src/lib/waiver.functions.ts`           |
+| The club-wide watermarks     | `src/lib/seen-markers.ts`                                                 |
+| Who hears about what         | `src/lib/notification-events.server.ts`                                   |
+| Sending, and the digest run  | `src/lib/notification-email.server.ts`                                    |
+| Page and settings server fns | `src/lib/notifications.functions.ts`                                      |
+| The shared query             | `src/hooks/useNotifications.ts`                                           |
+| The page                     | `src/routes/_authenticated/notifications.tsx`                             |
+| The signed-out settings      | `src/routes/email-settings/$token.tsx`                                    |
+| The switches                 | `src/components/site/NotificationSwitches.tsx`                            |
+| The sidebar badge            | `src/components/site/MemberLayout.tsx`                                    |
+| The digest endpoint          | `src/routes/api/notifications/digest.ts`                                  |
+| The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`         |
+| Failing loudly when unarmed  | `supabase/migrations/20260821000000_notification_digest_fails_loudly.sql` |
+| The stalled-digest item      | `digestStalledNotifications` in `src/lib/validation.ts`                   |
+| Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx`    |
