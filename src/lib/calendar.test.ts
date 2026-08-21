@@ -241,7 +241,10 @@ describe("defaultEndForStart", () => {
 
 describe("DEFAULT_EVENT_LOCATION", () => {
   it("is the gym the club trains at, spelled out to the building", () => {
-    // Composed from the shared venue name, so a rename reaches the calendar too.
-    expect(DEFAULT_EVENT_LOCATION).toBe("ActivateFit Gym, UTS Building 4, 745 Harris St, Ultimo");
+    // Composed from the shared venue constants, so a rename or a corrected
+    // address reaches the calendar too instead of being restated here.
+    expect(DEFAULT_EVENT_LOCATION).toBe(
+      "ActivateFit Gym, UTS Building 4, 745 Harris Street, Ultimo NSW 2007",
+    );
   });
 });

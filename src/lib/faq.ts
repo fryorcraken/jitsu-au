@@ -20,7 +20,7 @@ export const faqItems: FaqItem[] = [
   {
     id: "open-to-public",
     q: "Do I need to be a UTS student to join?",
-    a: "No. The club is open to everyone. UTS students, UTS staff and people with no connection to the university all train in the same classes. The gym is inside UTS Building 4 on Harris Street, which is open to the public, so there's no student card to show at the door. Students pay a lower fee, everyone else pays the public rate.",
+    a: "No. The club is open to everyone. UTS students, UTS staff and people with no connection to the university all train in the same classes. The gym is inside UTS Building 4, which is open to the public, so there's no student card to show at the door. Students pay a lower fee, everyone else pays the public rate.",
   },
   {
     id: "equipment",
