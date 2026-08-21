@@ -5,6 +5,7 @@ import {
   entryBreadcrumbs,
   entryHref,
   extractHeadings,
+  findHeadingForHash,
   flattenKbNav,
   headingSlug,
   kbProgress,
@@ -157,18 +158,45 @@ describe("headingSlug", () => {
 
 describe("parseHeading", () => {
   it("reads the level and the text", () => {
-    expect(parseHeading("## The blue belt")).toEqual({ depth: 2, text: "The blue belt" });
+    expect(parseHeading("## The blue belt")).toEqual({
+      depth: 2,
+      text: "The blue belt",
+      anchor: null,
+    });
   });
 
   it("strips inline markdown so a table of contents reads as words", () => {
     expect(parseHeading("### The **blue** `belt` and [more](/x)")).toEqual({
       depth: 3,
       text: "The blue belt and more",
+      anchor: null,
     });
   });
 
   it("ignores a closing run of hashes", () => {
-    expect(parseHeading("## Grading ##")).toEqual({ depth: 2, text: "Grading" });
+    expect(parseHeading("## Grading ##")).toEqual({ depth: 2, text: "Grading", anchor: null });
+  });
+
+  it("reads a pinned anchor and keeps it out of the heading text", () => {
+    expect(parseHeading("## How grading works {#grading}")).toEqual({
+      depth: 2,
+      text: "How grading works",
+      anchor: "grading",
+    });
+  });
+
+  it("puts a pinned anchor through the same slug rules as a derived one", () => {
+    expect(parseHeading("## Fees {#Fees & Costs}")?.anchor).toBeNull();
+    expect(parseHeading("## Fees {#Fees_2026}")?.anchor).toBe("fees-2026");
+  });
+
+  it("leaves a heading that is nothing but an anchor alone", () => {
+    // Stripping it would leave a heading with no words in it at all.
+    expect(parseHeading("## {#orphan}")).toEqual({
+      depth: 2,
+      text: "{#orphan}",
+      anchor: null,
+    });
   });
 
   it("is not fooled by a hash that is not a heading", () => {
@@ -211,6 +239,53 @@ describe("extractHeadings", () => {
 
   it("finds nothing in an article that is all prose", () => {
     expect(extractHeadings("Just a paragraph.\n\nAnd another.")).toEqual([]);
+  });
+
+  // The whole point of pinning: another article links to `#grading`, and the
+  // link survives the club rewriting the heading above it.
+  it("uses a pinned anchor instead of the wording, and says it was pinned", () => {
+    const headings = extractHeadings("## What happens at a grading {#grading}\n\nDetails.");
+    expect(headings[0].id).toBe("grading");
+    expect(headings[0].pinned).toBe(true);
+    expect(headings[0].text).toBe("What happens at a grading");
+
+    const reworded = extractHeadings("## Your first grading day {#grading}\n\nDetails.");
+    expect(reworded[0].id).toBe("grading");
+  });
+
+  it("marks an id taken from the wording as not pinned", () => {
+    expect(extractHeadings("## Grading\n\nx.")[0].pinned).toBe(false);
+  });
+
+  it("keeps two headings pinned to the same anchor apart", () => {
+    const ids = extractHeadings("## A {#same}\n\nx.\n\n## B {#same}\n\ny.").map((h) => h.id);
+    expect(ids).toEqual(["same", "same-2"]);
+  });
+});
+
+describe("findHeadingForHash", () => {
+  const headings = extractHeadings("## Grading {#grading}\n\nx.\n\n## Belts\n\ny.");
+
+  it("finds the heading a fragment names, with or without the hash", () => {
+    expect(findHeadingForHash("#grading", headings)?.text).toBe("Grading");
+    expect(findHeadingForHash("belts", headings)?.text).toBe("Belts");
+  });
+
+  it("decodes a percent-encoded fragment", () => {
+    expect(findHeadingForHash("%23belts".replace("%23", "#"), headings)?.text).toBe("Belts");
+    expect(findHeadingForHash("#bel%74s", headings)?.text).toBe("Belts");
+  });
+
+  // A cross-reference written months ago against wording that has since been
+  // rewritten. Null is what makes the reader SAY so instead of landing silently
+  // at the top of a long article.
+  it("reports nothing for a section the article no longer has", () => {
+    expect(findHeadingForHash("#throws", headings)).toBeNull();
+    expect(findHeadingForHash("", headings)).toBeNull();
+  });
+
+  it("does not throw on a malformed escape", () => {
+    expect(findHeadingForHash("#100%", headings)).toBeNull();
   });
 });
 

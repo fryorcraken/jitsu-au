@@ -235,6 +235,12 @@ export type KbHeading = {
   text: string;
   /** The `id` to link to, unique within the article. */
   id: string;
+  /**
+   * Whether the author pinned this id with `{#an-anchor}` rather than letting it
+   * fall out of the wording. Shown to managers, because a pinned anchor is the
+   * one that survives rewording the heading.
+   */
+  pinned: boolean;
   /** The `kb.ts` block this heading opens, so the reader can hang the id on it. */
   blockId: string;
 };
@@ -255,6 +261,31 @@ export function headingSlug(text: string): string {
 }
 
 /**
+ * The anchor a heading pins for itself, and the heading text without it.
+ *
+ * `## Grading {#grading}` is the attribute syntax Pandoc, Docusaurus and
+ * markdown-it-attrs all spell the same way, which is as close to idiomatic as
+ * Markdown gets for this: the heading still reads as a heading everywhere else,
+ * and anything that does not understand the suffix shows it rather than losing
+ * the heading.
+ *
+ * It exists because the id a heading gets otherwise is its own wording, so
+ * rewording "Grading" to "How grading works" silently breaks every link another
+ * article aimed at it. A pinned anchor is the author saying "other pages point
+ * here", and it survives the rewrite.
+ *
+ * The id is put through `headingSlug` rather than taken literally, so there is
+ * one id vocabulary and an anchor can never carry a space or a `#` into a URL.
+ * A heading that is NOTHING but an anchor (`## {#x}`) is left alone: stripping
+ * it would leave an empty heading, so the braces are treated as the text.
+ */
+export function splitHeadingAnchor(text: string): { text: string; anchor: string | null } {
+  const match = /^(.*?)[ \t]*\{#([^{}\s]+)\}[ \t]*$/.exec(text);
+  if (!match || !match[1].trim()) return { text, anchor: null };
+  return { text: match[1], anchor: headingSlug(match[2]) };
+}
+
+/**
  * Read a heading off the start of a block, with the inline markdown stripped.
  *
  * `## The **blue** belt` is the heading "The blue belt": the emphasis is styling,
@@ -263,13 +294,19 @@ export function headingSlug(text: string): string {
  * a ``` block never reaches here as a heading because `splitBlocks` keeps it
  * whole and its first line is a fence, not a `#`.
  */
-export function parseHeading(blockMarkdown: string): { depth: number; text: string } | null {
+export function parseHeading(
+  blockMarkdown: string,
+): { depth: number; text: string; anchor: string | null } | null {
   const firstLine = blockMarkdown.split("\n", 1)[0] ?? "";
   const match = /^ {0,3}(#{1,6})\s+(.*)$/.exec(firstLine);
   if (!match) return null;
-  const text = stripInlineMarkdown(match[2].replace(/\s+#+\s*$/, "")).trim();
+  // The pinned anchor comes off BEFORE the inline markdown is stripped, so a
+  // `{#id}` is never mistaken for part of a link or a code span, and what is
+  // left is the heading a reader sees.
+  const withoutAnchor = splitHeadingAnchor(match[2].replace(/\s+#+\s*$/, ""));
+  const text = stripInlineMarkdown(withoutAnchor.text).trim();
   if (!text) return null;
-  return { depth: match[1].length, text };
+  return { depth: match[1].length, text, anchor: withoutAnchor.anchor };
 }
 
 function stripInlineMarkdown(text: string): string {
@@ -305,11 +342,43 @@ export function extractHeadings(markdown: string): KbHeading[] {
   for (const block of splitBlocks(markdown)) {
     const heading = parseHeading(block.markdown);
     if (!heading) continue;
-    const base = headingSlug(heading.text);
+    const base = heading.anchor ?? headingSlug(heading.text);
     let id = base;
     for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
     used.add(id);
-    headings.push({ depth: heading.depth, text: heading.text, id, blockId: block.id });
+    headings.push({
+      depth: heading.depth,
+      text: heading.text,
+      id,
+      pinned: heading.anchor !== null,
+      blockId: block.id,
+    });
   }
   return headings;
+}
+
+/**
+ * The heading a URL fragment points at, or null when nothing in the article
+ * answers to it.
+ *
+ * Null is a state the reader has to SHOW rather than ignore. A cross-reference
+ * from another article is a link somebody wrote by hand months ago, against
+ * wording that may since have been rewritten; landing silently at the top of a
+ * long syllabus looks exactly like the link having worked, and the reader hunts
+ * for a section that is no longer called that.
+ *
+ * The fragment is decoded first, so a heading with a percent-encoded character
+ * in its id still matches, and a malformed escape is treated as no match rather
+ * than throwing on a page that was only trying to scroll.
+ */
+export function findHeadingForHash(hash: string, headings: KbHeading[]): KbHeading | null {
+  const raw = hash.replace(/^#/, "");
+  if (!raw) return null;
+  let id = raw;
+  try {
+    id = decodeURIComponent(raw);
+  } catch {
+    // A fragment that is not valid percent-encoding is matched as typed.
+  }
+  return headings.find((heading) => heading.id === id) ?? null;
 }

@@ -36,6 +36,7 @@ import {
   adjacentEntries,
   entryBreadcrumbs,
   extractHeadings,
+  findHeadingForHash,
   readState,
   type KbNavEntry,
 } from "@/lib/kb-nav";
@@ -97,6 +98,49 @@ function ArticlePage() {
   }, [redirectTo]);
 
   const headings = useMemo(() => (article ? extractHeadings(article.body_md) : []), [article]);
+
+  /**
+   * The `#section` a reader arrived with, and the heading it names.
+   *
+   * The browser cannot do this on its own here: the article is fetched after the
+   * page loads, so at the moment the browser looks for the fragment there is
+   * nothing in the document to scroll to, and a cross-reference from another
+   * article lands silently at the top of the syllabus. Tracked in state rather
+   * than read at render because `window` does not exist during SSR and a
+   * same-page jump (the contents list, another article's `#link`) changes the
+   * fragment without React hearing about it.
+   */
+  const [hash, setHash] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.hash,
+  );
+  useEffect(() => {
+    const sync = () => setHash(window.location.hash);
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, [slug]);
+
+  const target = useMemo(() => findHeadingForHash(hash, headings), [hash, headings]);
+  /** What the reader asked for, for a message about a section that is gone. */
+  const missingSection = hash && article && !target ? decodeFragment(hash) : null;
+
+  useEffect(() => {
+    if (!target) return;
+    // After paint: the block carrying the id is rendered by this same commit,
+    // and scrolling before the browser has laid it out lands short of it.
+    const frame = requestAnimationFrame(() => {
+      const element = document.getElementById(target.id);
+      if (!element) return;
+      element.scrollIntoView({ block: "start" });
+      // Move the reading position too, not just the viewport. Without this a
+      // screen reader carries on from wherever it was, and the next Tab starts
+      // at the top of the page, so following a cross-reference puts a keyboard
+      // reader somewhere other than where the link said.
+      element.setAttribute("tabindex", "-1");
+      element.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [target, article?.version]);
   const crumbs = entryBreadcrumbs(nav, slug);
   const { previous, next } = adjacentEntries(nav, slug);
   const entry = crumbs?.entry ?? null;
@@ -247,6 +291,20 @@ function ArticlePage() {
         )}
       </header>
 
+      {missingSection && (
+        <p
+          role="status"
+          className="mb-6 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground"
+        >
+          The link you followed points at a section this article does not have:{" "}
+          <code className="font-mono">#{missingSection}</code>. It was probably renamed after that
+          link was written.{" "}
+          {headings.length >= MIN_HEADINGS_FOR_CONTENTS
+            ? "On this page, below, lists the sections it has now."
+            : "The whole article is below."}
+        </p>
+      )}
+
       {headings.length >= MIN_HEADINGS_FOR_CONTENTS && (
         <Collapsible defaultOpen className="mb-8 rounded-lg border">
           <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium">
@@ -329,6 +387,22 @@ function ArticlePage() {
       )}
     </article>
   );
+}
+
+/**
+ * A URL fragment, as it is worth showing back to somebody: decoded, and short
+ * enough that a hand-typed novel in the address bar cannot push the article off
+ * the screen.
+ */
+function decodeFragment(hash: string): string {
+  const raw = hash.replace(/^#/, "");
+  let text = raw;
+  try {
+    text = decodeURIComponent(raw);
+  } catch {
+    // Not valid percent-encoding, so it is shown exactly as it arrived.
+  }
+  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
 }
 
 /**
