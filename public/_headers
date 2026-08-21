@@ -1,0 +1,22 @@
+# Response headers for anything the platform serves without going through the
+# app's request middleware, which is where src/lib/security-headers.ts sets the
+# same values on every response the server itself builds.
+#
+# Cloudflare reads this file when it serves this project's assets. If it turns
+# out to be ignored here, nothing is lost: the middleware is the real fix and
+# covers every route. Confirm with `curl -I https://jitsu.au/` once deployed.
+#
+# Keep these in step with TOKEN_PATH_PREFIXES in src/lib/security-headers.ts.
+# security-headers.test.ts fails if the two disagree.
+
+/*
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/api/calendar/*
+  Referrer-Policy: no-referrer
+
+/api/verify-email/*
+  Referrer-Policy: no-referrer
+
+/email-settings/*
+  Referrer-Policy: no-referrer
