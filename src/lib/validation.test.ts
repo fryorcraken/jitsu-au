@@ -1220,12 +1220,17 @@ describe("digestStalledNotifications", () => {
   it("still renders when the oldest row could not be read", () => {
     // The count is what the item cannot do without. The oldest timestamp comes
     // from a second query that is allowed to fail on its own, so a missing date
-    // must make the copy vaguer rather than produce "the oldest since ."
+    // has to drop the clause that names it rather than leave the stump. The
+    // plural line used to read "..., the oldest. Nobody has had them." here,
+    // which a loose "does not contain a dangling since" check waved through.
     for (const oldestAt of [null, undefined]) {
-      const [n] = digestStalledNotifications({ stalled: 7, oldestAt });
-      expect(n.body).toContain("7 notifications");
-      expect(n.body).not.toMatch(/since\s*\./);
-      expect(n.body).not.toContain("undefined");
+      const [one] = digestStalledNotifications({ stalled: 1, oldestAt });
+      expect(one.body).toContain("One notification has been waiting to be emailed, and nobody");
+      const [many] = digestStalledNotifications({ stalled: 7, oldestAt });
+      expect(many.body).toContain(
+        "7 notifications have been waiting to be emailed, and nobody has had them.",
+      );
+      expect(many.body).not.toContain("the oldest");
     }
   });
 

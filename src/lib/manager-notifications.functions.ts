@@ -64,35 +64,30 @@ async function membershipWindowNotifications(
  * its scheduler reports success no matter what the site answered. See
  * `digestStalledNotifications` and docs/notifications.md.
  *
+ * Three reads, in order, and each one only happens because the last said it had
+ * to: how big the backlog is, whether anything has been emailed at all lately,
+ * and how old the oldest waiting row is. A healthy club stops at the first.
+ *
+ * Exported for its own tests, the same as the three `countX` sources it sits
+ * alongside. `managerAttentionItems` is its only caller in the app.
+ *
  * Read here rather than in `notifications.functions.ts`, which owns every other
  * query against this table, on purpose: that module imports this one, and a
  * count reaching back the other way would put an import cycle between the page
  * and the list it renders. `membershipWindowNotifications` above already sets
  * the precedent that a source can do its own reading here.
  */
-async function digestBacklogNotifications(
+export async function digestBacklogNotifications(
   admin: MembershipClient,
   now: Date,
 ): Promise<ManagerNotification[]> {
   const cutoff = new Date(now.getTime() - DIGEST_STALL_HOURS * 3_600_000).toISOString();
-  const overdue = admin
+
+  const { count, error } = await admin
     .from("notifications")
     .select("id", { count: "exact", head: true })
     .is("emailed_at", null)
     .lt("created_at", cutoff);
-  const oldest = admin
-    .from("notifications")
-    .select("created_at")
-    .is("emailed_at", null)
-    .lt("created_at", cutoff)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  const [{ count, error }, { data: first, error: oldestError }] = await Promise.all([
-    overdue,
-    oldest,
-  ]);
   // Degrade rather than throw, exactly as the three counts below do: a failed
   // read here must not empty the queue around it. Reporting nothing is the safe
   // direction for this one specifically, since the alternative is telling a
@@ -102,7 +97,40 @@ async function digestBacklogNotifications(
     return [];
   }
   const stalled = count ?? 0;
+  // The quiet case is the common one, so it costs one query and stops here.
   if (stalled === 0) return [];
+
+  // A backlog alone does not mean the digest has stopped, and this is the
+  // difference between an alarm and a false alarm that can never be cleared.
+  // `sendDailyDigests` stamps per person and swallows one recipient's failure,
+  // so an address that bounces every night keeps ITS rows unstamped for good
+  // while everybody else is served. Those rows would otherwise pin an
+  // undismissable "the summary has stopped" item on a digest that is working.
+  //
+  // So: also require that NOTHING at all has been emailed inside the same
+  // window. Every row a run considers is stamped, including the ones a
+  // preference suppressed, so a single working run leaves evidence here even if
+  // it sent no mail. No evidence plus an ageing backlog is the real thing.
+  const { count: emailedRecently, error: recentError } = await admin
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .gte("emailed_at", cutoff);
+  if (recentError) {
+    console.error("[notifications] could not check for recent digest sends:", recentError);
+    return [];
+  }
+  if ((emailedRecently ?? 0) > 0) return [];
+
+  const { data: first, error: oldestError } = await admin
+    .from("notifications")
+    .select("created_at")
+    .is("emailed_at", null)
+    .lt("created_at", cutoff)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  // The count is the part the item cannot do without; a missing date only makes
+  // the copy vaguer, so this one degrades without giving up the item.
   if (oldestError) {
     console.error("[notifications] could not read the oldest unemailed row:", oldestError);
   }

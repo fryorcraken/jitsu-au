@@ -1782,10 +1782,16 @@ export function digestStalledNotifications(input: {
   const { stalled, oldestAt } = input;
   if (stalled <= 0) return [];
   const since = clubDaySuffix(oldestAt, "since");
+  // The plural line names the oldest row's date, so it needs a second form for
+  // when there is no date to name: the timestamp comes from a query that is
+  // allowed to fail on its own, and "the oldest. Nobody has had them." is not a
+  // sentence. The singular reads correctly either way.
   const waiting =
     stalled === 1
       ? `One notification has been waiting to be emailed${since}, and nobody has had it.`
-      : `${stalled} notifications have been waiting to be emailed, the oldest${since}. Nobody has had them.`;
+      : since
+        ? `${stalled} notifications have been waiting to be emailed, the oldest${since}. Nobody has had them.`
+        : `${stalled} notifications have been waiting to be emailed, and nobody has had them.`;
   return [
     {
       type: "notification_digest_stalled",
