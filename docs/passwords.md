@@ -155,6 +155,29 @@ without holding up the form. If that fetch fails the check falls back to the
 email alone. The reason it bothers is that the field is showing a rule that
 mentions your name, and a screen should not list a rule it is not applying.
 
+### When the reset link has expired
+
+Reset links time out, and each one only works once, so a fair share of people
+reach `/update-password` with no recovery session at all. That screen therefore
+has three states rather than one: it says it is checking while the Supabase
+client works out whether the link carried a session, and then either shows the
+form or shows a panel saying the link has expired.
+
+It does not show both. Rendering the form without a session hands somebody who
+is already locked out a form that cannot succeed, and a toast saying so fades
+while the form stays. The panel stays put instead, and carries the two ways
+back: a button to `/reset-password` for a fresh link, and a link to `/auth` to
+sign in with an emailed link and skip the password.
+
+A session can also land a beat after the page does, because the client is still
+exchanging the token in the URL fragment, so a session arriving late takes the
+panel back off. And a session can lapse between opening the link and pressing
+the button, so `updateUser` refusing with a missing session puts the same panel
+back rather than printing GoTrue's own wording under the field.
+`isMissingSessionError()` is what recognises that refusal, and
+`describePasswordError()` has a branch for it as well, for any caller that
+shows the message instead.
+
 `/auth` sign-in is deliberately untouched. It checks nothing: an existing member
 holding an older, shorter password keeps signing in with it, because these rules
 apply when a password is **set**, never when one is used. Nobody is locked out

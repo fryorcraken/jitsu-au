@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkPassword,
   describePasswordError,
+  isMissingSessionError,
   hasVariety,
   isTooLong,
   meetsLength,
@@ -294,6 +295,28 @@ describe("checkPassword", () => {
   });
 });
 
+describe("isMissingSessionError", () => {
+  // Every one of these means the same thing to the person on /update-password:
+  // the link they arrived on is spent, and no password they type will save.
+  it.each([
+    "Auth session missing!",
+    "AuthSessionMissingError: Auth session missing!",
+    "session_not_found",
+    "Session from session_id claim in JWT does not exist",
+    "JWT expired",
+  ])("recognises %s", (message) => {
+    expect(isMissingSessionError(message)).toBe(true);
+  });
+
+  it.each([
+    "Password is known to be weak and easy to guess, please choose a different one.",
+    "Password should be at least 8 characters.",
+    "New password should be different from the old password.",
+  ])("leaves a password refusal alone: %s", (message) => {
+    expect(isMissingSessionError(message)).toBe(false);
+  });
+});
+
 describe("describePasswordError", () => {
   it("turns Supabase's bare weak-password refusal into something actionable", () => {
     const supabaseMessage =
@@ -321,7 +344,16 @@ describe("describePasswordError", () => {
   });
 
   it("passes an unrecognised message through rather than swallowing it", () => {
-    expect(describePasswordError("Auth session missing!")).toBe("Auth session missing!");
+    expect(describePasswordError("Database error saving new user")).toBe(
+      "Database error saving new user",
+    );
+  });
+
+  it("explains a spent reset link rather than printing GoTrue's session error", () => {
+    const rewritten = describePasswordError("Auth session missing!");
+    expect(rewritten).not.toContain("Auth session missing");
+    expect(rewritten).toMatch(/expired/i);
+    expect(rewritten).toMatch(/fresh link/i);
   });
 
   it("contains no em dash, which the copy rules forbid", () => {
@@ -329,6 +361,7 @@ describe("describePasswordError", () => {
       describePasswordError("Password is known to be weak and easy to guess."),
       describePasswordError("Password should be at least 8 characters."),
       describePasswordError("Password cannot be longer than 72 characters"),
+      describePasswordError("Auth session missing!"),
       passwordProblem("short"),
       passwordProblem("aaaaaaaaaaaaaaaaaa"),
       passwordProblem("utsjitsu training club"),

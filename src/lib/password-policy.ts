@@ -328,6 +328,29 @@ export function passwordProblem(password: string, context: PasswordContext = {})
 }
 
 /**
+ * Whether Supabase is saying there is no session to change a password on.
+ *
+ * This is what a spent recovery link produces at submit time: the token in the
+ * emailed link timed out or was already used, so `updateUser` has nobody to
+ * update. It is not a password problem at all, and the screen that gets this
+ * should stop showing a form and offer a new link instead.
+ *
+ * Matched loosely, and on several wordings, because they come from GoTrue and
+ * the client rather than from us: the browser client raises its own "Auth
+ * session missing!" before any request goes out, while a session revoked on the
+ * server comes back as `session_not_found` or an expired JWT.
+ */
+export function isMissingSessionError(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    text.includes("session missing") ||
+    text.includes("session_not_found") ||
+    text.includes("session from session_id claim in jwt does not exist") ||
+    text.includes("jwt expired")
+  );
+}
+
+/**
  * Supabase's own password refusals, rewritten for the person reading them.
  *
  * The strings are matched loosely on purpose: they come from GoTrue, we do not
@@ -338,6 +361,11 @@ export function passwordProblem(password: string, context: PasswordContext = {})
  */
 export function describePasswordError(message: string): string {
   const text = message.toLowerCase();
+  // Not a password problem: the link they arrived on is spent. Say that, since
+  // retyping a different password would fail in exactly the same way.
+  if (isMissingSessionError(message)) {
+    return "That reset link has expired, so the new password was not saved. Ask for a fresh link and set it again.";
+  }
   if (text.includes("known to be weak")) return BREACHED_MESSAGE;
   if (text.includes("should be at least")) {
     return `A bit short. Use at least ${PASSWORD_MIN_LENGTH} characters.`;
