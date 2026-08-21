@@ -56,6 +56,14 @@ describe("homepage FAQ selection", () => {
 });
 
 describe("who can join", () => {
+  // The homepage order comes from `homepageFaqIds`, so leading there costs
+  // /faq nothing. Keep the trial offer first in the array itself: /faq renders
+  // it in order, and so does the FAQPage JSON-LD built from it.
+  it("leaves the trial offer first on the full FAQ page", () => {
+    expect(faqItems[0].id).toBe("trial-offer");
+    expect(faqItems[1].id).toBe("open-to-public");
+  });
+
   it("answers the eligibility question with a plain no, not a qualified one", () => {
     const item = faqItems.find((f) => f.id === "open-to-public");
     expect(item).toBeDefined();

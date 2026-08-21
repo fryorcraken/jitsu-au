@@ -13,14 +13,14 @@ export type FaqItem = {
 
 export const faqItems: FaqItem[] = [
   {
-    id: "open-to-public",
-    q: "Do I need to be a UTS student to join?",
-    a: "No. The club is open to everyone. UTS students, UTS staff and people with no connection to the university all train in the same classes. The gym has its own street entrance on Harris Street, and reception just asks you to sign the sign-in sheet, so there's no student card to show. Students pay a lower fee, everyone else pays the public rate.",
-  },
-  {
     id: "trial-offer",
     q: "Is there a trial offer?",
     a: "Absolutely. Your first two sessions are on us. It's a great opportunity to experience our training firsthand and see if it's the right fit.",
+  },
+  {
+    id: "open-to-public",
+    q: "Do I need to be a UTS student to join?",
+    a: "No. The club is open to everyone. UTS students, UTS staff and people with no connection to the university all train in the same classes. The gym has its own street entrance on Harris Street, so you don't need to be enrolled at UTS to get to class. Students pay a lower fee, everyone else pays the public rate.",
   },
   {
     id: "equipment",
@@ -55,7 +55,9 @@ export const faqItems: FaqItem[] = [
 // questions are intentionally excluded here to avoid redundancy.
 //
 // "open-to-public" leads because the club's name reads as a university club,
-// and someone who assumes they are not eligible leaves without asking.
+// and someone who assumes they are not eligible leaves without asking. It sits
+// second in `faqItems` above, though: /faq renders that array in order (and
+// emits its FAQPage JSON-LD from it), and the trial offer keeps that slot.
 export const homepageFaqIds = [
   "open-to-public",
   "experience",

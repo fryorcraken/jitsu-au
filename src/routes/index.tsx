@@ -43,8 +43,7 @@ function Home() {
         <div className="mx-auto grid max-w-6xl gap-10 px-4 pt-12 pb-16 md:grid-cols-2 md:items-center md:pt-20 md:pb-24">
           <div>
             <span className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Now enrolling. Everyone
-              welcome, UTS or not
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Open to everyone, UTS or not
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
               Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
@@ -161,8 +160,8 @@ function Home() {
             <div>
               <h2 className="text-3xl font-bold md:text-4xl">Train with us this week</h2>
               <p className="mt-2 max-w-xl text-muted-foreground">
-                Classes run at ActivateFit Gym, on Harris Street in Ultimo. You enter from the
-                street, and there's no student card to show at reception.
+                Classes run at ActivateFit Gym, on Harris Street in Ultimo. You enter straight from
+                the street, so you don't need campus access to get to class.
               </p>
             </div>
             <Button asChild variant="outline" className="hidden md:inline-flex">
