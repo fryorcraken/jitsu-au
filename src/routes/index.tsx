@@ -160,8 +160,8 @@ function Home() {
             <div>
               <h2 className="text-3xl font-bold md:text-4xl">Train with us this week</h2>
               <p className="mt-2 max-w-xl text-muted-foreground">
-                Classes run at ActivateFit Gym, on Harris Street in Ultimo. You enter straight from
-                the street, so you don't need campus access to get to class.
+                Classes run at ActivateFit Gym, inside UTS Building 4 on Harris Street in Ultimo.
+                The building is open to the public, so anyone can come to class.
               </p>
             </div>
             <Button asChild variant="outline" className="hidden md:inline-flex">
