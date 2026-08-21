@@ -69,13 +69,13 @@ describe("days written out for a sentence", () => {
 // green suite either way. A page that hardcodes a weekday is writing a third
 // copy, so it fails here rather than in front of a prospective member.
 describe("no page keeps its own copy of the schedule", () => {
-  const ROUTES_DIR = resolve(process.cwd(), "src", "routes");
+  const ROUTES_DIR = resolve(import.meta.dirname, "..", "routes");
   const WEEKDAY_LITERAL =
     /"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"|'(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)'/;
 
   const routeFiles = readdirSync(ROUTES_DIR, { recursive: true })
     .map(String)
-    .filter((file) => file.endsWith(".tsx"))
+    .filter((file) => /\.tsx?$/.test(file) && file !== "routeTree.gen.ts")
     .sort();
 
   it("has route files to check", () => {
