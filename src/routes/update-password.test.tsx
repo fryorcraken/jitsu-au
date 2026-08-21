@@ -54,7 +54,9 @@ vi.mock("@/components/site/SiteLayout", () => ({
 const { Route } = await import("./update-password");
 const UpdatePassword = (Route as unknown as { component: () => ReactNode }).component;
 
-const SESSION = { user: { id: "u1", email: "ada@example.com" } };
+// The local part is long enough for the "not built out of your email" rule to
+// bite: tokens under four characters are dropped, so "ada@" would prove nothing.
+const SESSION = { user: { id: "u1", email: "adalovelace@example.com" } };
 
 /** Hands the page a session the way the Supabase client would, whenever it asks. */
 function withSession(session: unknown) {
@@ -154,6 +156,21 @@ describe("/update-password", () => {
     await waitFor(() => expect(getMyProfile).toHaveBeenCalledTimes(1));
     expect(passwordField()).toBeInTheDocument();
     expect(expiredPanel()).not.toBeInTheDocument();
+  });
+
+  it("keeps the form usable when the profile fetch fails", async () => {
+    // The profile only sharpens the "not built out of your name" rule, so
+    // losing it must not cost somebody the form. The email the session carries
+    // still feeds the check.
+    withSession(SESSION);
+    getMyProfile.mockRejectedValue(new Error("network"));
+    render(<UpdatePassword />);
+    expect(await screen.findByLabelText("New password")).toBeInTheDocument();
+    expect(expiredPanel()).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("New password"), "adalovelace kettle");
+    await userEvent.click(screen.getByRole("button", { name: "Update password" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/anyone who knows you could guess/i);
+    expect(updateUser).not.toHaveBeenCalled();
   });
 
   it("fetches the profile once when the session arrives twice", async () => {
