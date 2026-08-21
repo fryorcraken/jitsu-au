@@ -130,8 +130,8 @@ function ReconciliationPage() {
           <CardHeader>
             <CardTitle>Import a statement</CardTitle>
             <CardDescription>
-              Export your account transactions as CSV. We read the date, amount and description
-              columns and keep incoming credits only.
+              Export your account transactions as CSV, with the column headings in the first row. We
+              read the date, amount and description columns and keep incoming credits only.
             </CardDescription>
           </CardHeader>
           <CardContent>

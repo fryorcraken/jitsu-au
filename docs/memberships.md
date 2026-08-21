@@ -298,6 +298,33 @@ own), and reconciliation, activation and cancellation follow the same
 `edit_invoice` / bank-reconciliation flow as any other plan — see
 `.claude/skills/uts-manager-agent/SKILL.md` and `/manager/reconciliation`.
 
+### Reading the statement CSV
+
+The file a manager drops on `/manager/reconciliation` is parsed by
+`src/lib/bank-statement-csv.ts` (in `src/lib/`, not in the route, so every case
+below is a unit test in `bank-statement-csv.test.ts`). It handles quoted fields
+with commas in them, doubled `""` inside a quoted field, `\r\n` and lone `\r`
+endings, a leading BOM, blank lines, and a last row with no newline after it.
+Dates are read day-first (`01/08/2026` is 1 August) or as ISO. Amounts go
+through `parseMoneyToCents`, so `$1,234.50` is fine.
+
+Three things are decided rather than obvious:
+
+- **The header row is the first row of the file**, and the import **refuses a
+  file whose Date, Amount or Description column it cannot find**, naming the
+  ones it could not. Every one of those is resolved by substring
+  (`transaction date` matches `date`), and a missing one used to import zero
+  rows and say "no credit transactions found", which reads exactly like a quiet
+  month. A bank that prints its account summary above the headings is the same
+  failure, so the message says to delete anything above them.
+- **A credit or deposit column wins over a plain amount column, and a debit or
+  withdrawal column is never the amount.** An export with `Debit Amount` beside
+  `Credit Amount` otherwise resolved to the debit one, and every card purchase
+  in the statement imported as money coming in.
+- **Only positive amounts are kept**, because only an incoming credit can pay a
+  membership. Reference is optional: when there is no reference column the
+  description carries the reference, which is what matching reads anyway.
+
 ## Paying an invoice
 
 The member sees everything they need to pay on `/membership` itself: a **How to

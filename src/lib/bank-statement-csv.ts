@@ -60,25 +60,90 @@ export function normalizeDate(value: string): string {
   return "";
 }
 
-/** Map parsed CSV into the bank-row shape, keeping only positive credits. */
-export function toBankRows(rows: string[][]): BankTxnRow[] {
-  if (rows.length < 2) return [];
-  const header = rows[0].map((h) => h.trim().toLowerCase());
+/**
+ * Which cell of a statement row holds what. `-1` means the header row named no
+ * column we could recognise as that one.
+ */
+export type StatementColumns = {
+  dateIdx: number;
+  amountIdx: number;
+  descIdx: number;
+  refIdx: number;
+};
+
+/** The three the import promises to read, in the words the screen uses. */
+const REQUIRED_COLUMNS = [
+  ["Date", "dateIdx"],
+  ["Amount", "amountIdx"],
+  ["Description", "descIdx"],
+] as const;
+
+/**
+ * Work out which column is which from the header row, by substring.
+ *
+ * The amount column is the one worth reading twice. Some exports put money out
+ * in its own column beside money in ("Debit Amount", "Credit Amount"), and a
+ * plain first-match on "amount" picks the debit one: every card purchase in the
+ * statement would then import as an incoming credit, and the club would think
+ * it had been paid. So a header naming credit or deposit wins outright, and a
+ * header naming debit or withdrawal is never the amount column.
+ */
+export function detectStatementColumns(headerRow: string[]): StatementColumns {
+  const header = headerRow.map((h) => h.trim().toLowerCase());
   const find = (...keys: string[]) => header.findIndex((h) => keys.some((k) => h.includes(k)));
-  const dateIdx = find("date");
-  const amountIdx = find("amount", "credit", "deposit");
-  const descIdx = find("description", "narrative", "details", "reference", "memo");
-  const refIdx = find("reference");
+  const moneyOut = (h: string) => h.includes("debit") || h.includes("withdrawal");
+
+  const creditIdx = find("credit", "deposit");
+  const amountIdx =
+    creditIdx >= 0 ? creditIdx : header.findIndex((h) => h.includes("amount") && !moneyOut(h));
+
+  return {
+    dateIdx: find("date"),
+    amountIdx,
+    descIdx: find("description", "narrative", "details", "reference", "memo"),
+    refIdx: find("reference"),
+  };
+}
+
+/** "a Date column" / "the Date and Amount columns" — for the error below. */
+function columnList(missing: string[]): string {
+  if (missing.length === 1)
+    return `${/^[AEIOU]/.test(missing[0]) ? "an" : "a"} ${missing[0]} column`;
+  const last = missing[missing.length - 1];
+  return `the ${missing.slice(0, -1).join(", ")} and ${last} columns`;
+}
+
+/**
+ * Map parsed CSV into the bank-row shape, keeping only positive credits.
+ *
+ * Throws when a column it needs is not in the header row. Returning nothing
+ * would be the quieter option and it is the wrong one: an export with columns
+ * named differently, or with the bank's account summary printed above the
+ * headings, then imports zero rows and reads as "nothing came in this month".
+ * Someone finds out weeks later, when a member who paid gets chased for it.
+ */
+export function toBankRows(rows: string[][]): BankTxnRow[] {
+  if (rows.length === 0) {
+    throw new Error("That file is empty. Export the statement from your bank again and try that.");
+  }
+  const columns = detectStatementColumns(rows[0]);
+  const missing = REQUIRED_COLUMNS.filter(([, key]) => columns[key] < 0).map(([label]) => label);
+  if (missing.length > 0) {
+    throw new Error(
+      `We could not find ${columnList(missing)} in that file. The first row has to be the column ` +
+        `headings from your bank, so delete anything printed above them and try again.`,
+    );
+  }
 
   const out: BankTxnRow[] = [];
   for (const r of rows.slice(1)) {
-    const cents = amountIdx >= 0 ? parseMoneyToCents(r[amountIdx] ?? "") : null;
+    const cents = parseMoneyToCents(r[columns.amountIdx] ?? "");
     if (cents == null || cents <= 0) continue; // only incoming credits can pay a membership
     out.push({
-      posted_at: dateIdx >= 0 ? normalizeDate(r[dateIdx] ?? "") : "",
+      posted_at: normalizeDate(r[columns.dateIdx] ?? ""),
       amount_cents: cents,
-      description: descIdx >= 0 ? (r[descIdx] ?? "").trim() : "",
-      reference: refIdx >= 0 ? (r[refIdx] ?? "").trim() : "",
+      description: (r[columns.descIdx] ?? "").trim(),
+      reference: columns.refIdx >= 0 ? (r[columns.refIdx] ?? "").trim() : "",
     });
   }
   return out;

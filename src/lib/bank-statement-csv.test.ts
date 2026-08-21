@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { normalizeDate, parseCsv, toBankRows } from "./bank-statement-csv";
+import { detectStatementColumns, normalizeDate, parseCsv, toBankRows } from "./bank-statement-csv";
 
 /**
  * These tests exist because a dropped or mis-read statement line is a member
  * chased for money they already sent. So the failure paths matter more than the
  * happy one: what a file with the wrong column names does, what a preamble row
  * above the header does, what an export that puts debits in their own column
- * does. Where the answer today is wrong, the test says so and pins it anyway,
- * so the change that fixes it shows up as a change here.
+ * does. The four cases at the bottom used to pass silently and now refuse the
+ * file by name, which is the whole point of the exercise.
  */
 
 describe("parseCsv", () => {
@@ -152,36 +152,80 @@ describe("toBankRows", () => {
     ]);
   });
 
-  it("returns nothing for an empty file or a header with no rows under it", () => {
-    expect(toBankRows(parseCsv(""))).toEqual([]);
+  it("returns nothing for a header row with no transactions under it", () => {
     expect(toBankRows(parseCsv("Date,Description,Amount\n"))).toEqual([]);
   });
 
-  // ---- The failure paths. Today all three are silent. ----
-
-  it("BUG (#65): imports nothing, silently, when no column matches 'amount'", () => {
-    expect(toBankRows(parseCsv("Date,Description,Money In\n01/08/2026,PAY,10\n"))).toEqual([]);
+  it("refuses an empty file rather than calling it a statement with no credits", () => {
+    expect(() => toBankRows(parseCsv(""))).toThrow(/empty/i);
   });
 
-  it("BUG (#65): imports rows with no date, silently, when no column matches 'date'", () => {
-    expect(toBankRows(parseCsv("Posted,Description,Amount\n01/08/2026,PAY,10\n"))).toEqual([
-      { posted_at: "", amount_cents: 1000, description: "PAY", reference: "" },
-    ]);
+  // ---- The failure paths (#65). Each one used to be silent. ----
+
+  it("names the Amount column when no header matches it", () => {
+    expect(() => toBankRows(parseCsv("Date,Description,Money In\n01/08/2026,PAY,10\n"))).toThrow(
+      /could not find an Amount column/,
+    );
   });
 
-  it("BUG (#65): reads a preamble line as the header and imports nothing", () => {
+  it("names the Date column when no header matches it", () => {
+    expect(() => toBankRows(parseCsv("Posted,Description,Amount\n01/08/2026,PAY,10\n"))).toThrow(
+      /could not find a Date column/,
+    );
+  });
+
+  it("names the Description column when no header matches it", () => {
+    expect(() => toBankRows(parseCsv("Date,Amount\n01/08/2026,10\n"))).toThrow(
+      /could not find a Description column/,
+    );
+  });
+
+  it("lists every missing column, and says to delete a preamble above the headings", () => {
     const withPreamble = ["Account 12345678", "Date,Description,Amount", "01/08/2026,PAY,10"].join(
       "\n",
     );
-    expect(toBankRows(parseCsv(withPreamble))).toEqual([]);
+    expect(() => toBankRows(parseCsv(withPreamble))).toThrow(
+      /the Date, Amount and Description columns.*delete anything printed above them/s,
+    );
   });
 
-  it("BUG (#65): reads the debit column as the amount when it is named 'Debit Amount'", () => {
-    const rows = toBankRows(
-      parseCsv("Date,Description,Debit Amount,Credit Amount\n01/08/2026,EFTPOS COLES,45.50,\n"),
-    );
-    expect(rows).toEqual([
-      { posted_at: "2026-08-01", amount_cents: 4550, description: "EFTPOS COLES", reference: "" },
+  it("reads the credit column, not the debit one, when the export has both", () => {
+    const statement = [
+      "Date,Description,Debit Amount,Credit Amount",
+      "01/08/2026,EFTPOS COLES,45.50,",
+      "02/08/2026,OSKO UTS-0042,,120.00",
+    ].join("\n");
+    expect(toBankRows(parseCsv(statement))).toEqual([
+      {
+        posted_at: "2026-08-02",
+        amount_cents: 12000,
+        description: "OSKO UTS-0042",
+        reference: "",
+      },
     ]);
+  });
+});
+
+describe("detectStatementColumns", () => {
+  it("finds each column by substring, whatever the header is called around it", () => {
+    expect(
+      detectStatementColumns(["Transaction Date", "Narrative", "Amount", "Reference", "Balance"]),
+    ).toEqual({ dateIdx: 0, amountIdx: 2, descIdx: 1, refIdx: 3 });
+  });
+
+  it("reports -1 for a column the header row does not have", () => {
+    expect(detectStatementColumns(["Date", "Description", "Amount"]).refIdx).toBe(-1);
+    expect(detectStatementColumns([]).dateIdx).toBe(-1);
+  });
+
+  it("prefers a credit or deposit column over a plain amount one", () => {
+    expect(detectStatementColumns(["Date", "Amount", "Credit"]).amountIdx).toBe(2);
+    expect(detectStatementColumns(["Date", "Amount", "Deposits"]).amountIdx).toBe(2);
+  });
+
+  it("never picks a debit or withdrawal column as the amount", () => {
+    expect(detectStatementColumns(["Date", "Debit Amount"]).amountIdx).toBe(-1);
+    expect(detectStatementColumns(["Date", "Withdrawal Amount"]).amountIdx).toBe(-1);
+    expect(detectStatementColumns(["Date", "Debit Amount", "Credit Amount"]).amountIdx).toBe(2);
   });
 });
