@@ -204,8 +204,13 @@ Read `src/routes/README.md` before touching routes. Key points:
   top-level `import` `client.server.ts` (service-role key) from them. Instead
   lazy-load inside the handler:
   `const { supabaseAdmin } = await import("@/integrations/supabase/client.server")`.
-- Forms include a honeypot field `hp` (a hidden input that must stay empty);
-  handlers early-return on a filled `hp`.
+- Forms include a honeypot field `hp` (a hidden input that must stay empty).
+  The schema for it is `honeypot` in `src/lib/validation.ts` and it is
+  **required**, not optional: a browser always sends `""` because the form
+  carries the input, so a request that omits the field never came from the
+  form and fails validation outright. Handlers early-return a fake success on
+  a _filled_ `hp`. Every form that writes must send `hp` or it cannot submit at
+  all.
 
 ## Supabase clients — pick the right one
 

@@ -382,6 +382,25 @@ export function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
  */
 export const clientSubmissionId = z.string().uuid().optional().or(z.literal(""));
 
+/**
+ * The hidden field every write-from-a-form path carries, spelled once here so
+ * all seven agree.
+ *
+ * **Required, not optional.** A browser always sends it, empty, because the
+ * form has the input in it. A script hand-rolling a POST against the endpoint
+ * has no reason to invent a field it cannot see, so it omits `hp` entirely —
+ * and while this was `.optional()`, omitting it was a clean pass through the
+ * trap. That is the exact shape of request the honeypot exists to catch, and
+ * it was the only one getting through. Requiring the field means the lazy
+ * script fails validation and only a bot that fills the form in faithfully
+ * reaches a handler, which is what the `if (data.hp)` early-returns are for.
+ *
+ * Nothing about the browser's side changes: `""` still passes, and every call
+ * site already sends it. Keep it that way — a new form that forgets `hp` is a
+ * form that cannot be submitted at all.
+ */
+export const honeypot = z.string().max(0);
+
 // ---- Interest registration ----
 
 export const interestSchema = z.object({
@@ -392,7 +411,7 @@ export const interestSchema = z.object({
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
   message: z.string().trim().max(1000).optional().or(z.literal("")),
-  hp: z.string().max(0).optional(), // honeypot — must stay empty
+  hp: honeypot,
 });
 
 // ---- Contact message ----
@@ -411,7 +430,7 @@ export const contactSchema = z.object({
   email: z.string().trim().email().max(255),
   subject: z.string().trim().max(150).regex(singleLine).optional().or(z.literal("")),
   message: z.string().trim().min(1).max(2000),
-  hp: z.string().max(0).optional(), // honeypot
+  hp: honeypot,
 });
 
 /**
@@ -541,7 +560,7 @@ export const waiverSubmitSchema = z
     // person record is created already verified. Never required, and never
     // trusted for anything beyond that: it is re-checked server-side.
     vt: z.string().trim().max(120).optional().or(z.literal("")),
-    hp: z.string().max(0).optional(),
+    hp: honeypot,
   })
   .refine(
     (d) =>
@@ -778,7 +797,7 @@ export const codeOfConductAcceptSchema = z.object({
   // rule the waiver applies to its template version.
   version: z.number().int().positive(),
   client_meta: waiverClientMetaSchema.optional(),
-  hp: z.string().max(0).optional(), // honeypot
+  hp: honeypot,
 });
 export type CodeOfConductAcceptInput = z.infer<typeof codeOfConductAcceptSchema>;
 
@@ -1772,7 +1791,7 @@ export const startMembershipSchema = z
     // same payment reference). The server makes its own call from the
     // member's current cover — a member with none cannot turn this off.
     include_insurance: z.boolean().optional().default(false),
-    hp: z.string().max(0).optional(), // honeypot — must stay empty
+    hp: honeypot,
   })
   .refine((d) => !d.is_student || Boolean(d.uts_student_number && d.uts_student_number.trim()), {
     message: "A UTS student number is required to take the student rate.",
@@ -2917,7 +2936,7 @@ export const createAnnotationSchema = z.object({
   /** Set to reply to an existing shared annotation. */
   parent_id: z.string().uuid().optional(),
   body: z.string().trim().min(1).max(5000),
-  hp: z.string().max(0).optional().or(z.literal("")),
+  hp: honeypot,
 });
 export type CreateAnnotationInput = z.infer<typeof createAnnotationSchema>;
 
@@ -3043,7 +3062,7 @@ export const blogCommentSchema = z.object({
   post_id: z.string().uuid(),
   parent_comment_id: z.string().uuid().optional(),
   body: z.string().trim().min(1).max(2000),
-  hp: z.string().max(0).optional(), // honeypot — must stay empty
+  hp: honeypot,
 });
 export type BlogCommentInput = z.infer<typeof blogCommentSchema>;
 

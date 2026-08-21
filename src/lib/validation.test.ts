@@ -208,18 +208,24 @@ describe("blogCommentSchema", () => {
   const postId = "11111111-1111-1111-1111-111111111111";
 
   it("accepts a plain top-level comment", () => {
-    const parsed = blogCommentSchema.parse({ post_id: postId, body: "Great post!" });
+    const parsed = blogCommentSchema.parse({ post_id: postId, body: "Great post!", hp: "" });
     expect(parsed.parent_comment_id).toBeUndefined();
   });
 
   it("rejects an empty body", () => {
-    expect(() => blogCommentSchema.parse({ post_id: postId, body: "" })).toThrow();
+    expect(() => blogCommentSchema.parse({ post_id: postId, body: "", hp: "" })).toThrow();
   });
 
   it("rejects a filled honeypot", () => {
     expect(() =>
       blogCommentSchema.parse({ post_id: postId, body: "Great post!", hp: "spam" }),
     ).toThrow();
+  });
+
+  it("rejects a comment that leaves the honeypot out altogether", () => {
+    // The bypass this schema used to have. A hand-rolled POST omits a field it
+    // cannot see, and while `hp` was optional that sailed straight through.
+    expect(() => blogCommentSchema.parse({ post_id: postId, body: "Great post!" })).toThrow();
   });
 });
 
@@ -777,9 +783,12 @@ describe("decodeDataUrlPng", () => {
 });
 
 describe("interestSchema", () => {
+  // Mirrors what the form actually posts, honeypot included: `hp` is required,
+  // so a fixture without it is not a submission any browser could make.
   const valid = {
     name: "Sam Trainee",
     email: "sam@example.com",
+    hp: "",
   };
 
   it("accepts a minimal valid submission", () => {
@@ -818,6 +827,14 @@ describe("interestSchema", () => {
     expect(interestSchema.safeParse({ ...valid, hp: "bot" }).success).toBe(false);
   });
 
+  it("rejects a submission that omits the honeypot", () => {
+    // A browser always sends `hp`, empty, because the form has the input in it.
+    // A script posting JSON by hand does not, which is the request the trap is
+    // for. This case passed before `hp` became required.
+    const { hp: _hp, ...withoutHp } = valid;
+    expect(interestSchema.safeParse(withoutHp).success).toBe(false);
+  });
+
   it("allows an empty honeypot", () => {
     expect(interestSchema.safeParse({ ...valid, hp: "" }).success).toBe(true);
   });
@@ -849,10 +866,22 @@ describe("contactSchema", () => {
     name: "Sam",
     email: "sam@example.com",
     message: "Hello, when do beginner classes run?",
+    hp: "",
   };
 
   it("accepts a valid message", () => {
     expect(contactSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects a filled honeypot", () => {
+    expect(contactSchema.safeParse({ ...valid, hp: "bot" }).success).toBe(false);
+  });
+
+  it("rejects a message that omits the honeypot", () => {
+    // Contact fans out to every manager's inbox, so the cheap-script path is
+    // the one worth closing. Omitting `hp` used to be a clean pass.
+    const { hp: _hp, ...withoutHp } = valid;
+    expect(contactSchema.safeParse(withoutHp).success).toBe(false);
   });
 
   it("requires a non-empty message", () => {
@@ -1254,6 +1283,7 @@ describe("waiverSubmitSchema", () => {
     emergency_contact_phone: "0400000001",
     health_answers: noConcerns,
     signature_name: "Ada Lovelace",
+    hp: "",
   };
 
   it("accepts a valid adult waiver with a typed signature", () => {
@@ -1574,6 +1604,14 @@ describe("waiverSubmitSchema", () => {
   it("rejects a filled honeypot", () => {
     expect(waiverSubmitSchema.safeParse({ ...validAdult, hp: "bot" }).success).toBe(false);
   });
+
+  it("rejects a waiver that omits the honeypot", () => {
+    // The most expensive endpoint on the site: each accepted submission makes
+    // an auth user, renders a PDF and sends mail. Omitting `hp` used to reach
+    // all of that.
+    const { hp: _hp, ...withoutHp } = validAdult;
+    expect(waiverSubmitSchema.safeParse(withoutHp).success).toBe(false);
+  });
 });
 
 describe("saveTemplateSchema", () => {
@@ -1692,7 +1730,7 @@ describe("managerEmailChangeSchema", () => {
 });
 
 describe("codeOfConductAcceptSchema", () => {
-  const valid = { agree: true as const, signature_name: "Ada Lovelace", version: 1 };
+  const valid = { agree: true as const, signature_name: "Ada Lovelace", version: 1, hp: "" };
 
   it("accepts an agreement signed with a typed name", () => {
     const r = codeOfConductAcceptSchema.safeParse({ ...valid, token: " tok " });
@@ -1736,11 +1774,21 @@ describe("codeOfConductAcceptSchema", () => {
       email: "someone@example.com",
       user_id: "11111111-1111-1111-1111-111111111111",
     });
-    expect(r.success && Object.keys(r.data).sort()).toEqual(["agree", "signature_name", "version"]);
+    expect(r.success && Object.keys(r.data).sort()).toEqual([
+      "agree",
+      "hp",
+      "signature_name",
+      "version",
+    ]);
   });
 
   it("drops a submission with the honeypot filled", () => {
     expect(codeOfConductAcceptSchema.safeParse({ ...valid, hp: "bot" }).success).toBe(false);
+  });
+
+  it("drops a submission that omits the honeypot", () => {
+    const { hp: _hp, ...withoutHp } = valid;
+    expect(codeOfConductAcceptSchema.safeParse(withoutHp).success).toBe(false);
   });
 });
 
@@ -2481,7 +2529,7 @@ describe("knowledge base schemas", () => {
   });
 
   it("createAnnotationSchema requires a visibility and a body", () => {
-    const base = { slug, article_version: 1, body: "Worth clarifying." };
+    const base = { slug, article_version: 1, body: "Worth clarifying.", hp: "" };
     expect(createAnnotationSchema.safeParse({ ...base, visibility: "private" }).success).toBe(true);
     expect(createAnnotationSchema.safeParse({ ...base, visibility: "shared" }).success).toBe(true);
     expect(createAnnotationSchema.safeParse(base).success).toBe(false);
@@ -2498,6 +2546,7 @@ describe("knowledge base schemas", () => {
       article_version: 2,
       visibility: "shared",
       body: "Reads well overall.",
+      hp: "",
     });
     expect(parsed.block_id).toBeUndefined();
   });
@@ -2513,8 +2562,19 @@ describe("knowledge base schemas", () => {
     expect(createAnnotationSchema.safeParse(input).success).toBe(false);
   });
 
+  it("createAnnotationSchema rejects an annotation that omits the honeypot", () => {
+    expect(
+      createAnnotationSchema.safeParse({
+        slug,
+        article_version: 1,
+        visibility: "shared" as const,
+        body: "Reads well.",
+      }).success,
+    ).toBe(false);
+  });
+
   it("createAnnotationSchema requires a positive version, so an anchor is never versionless", () => {
-    const base = { slug, visibility: "shared" as const, body: "b" };
+    const base = { slug, visibility: "shared" as const, body: "b", hp: "" };
     expect(createAnnotationSchema.safeParse({ ...base, article_version: 0 }).success).toBe(false);
     expect(createAnnotationSchema.safeParse(base).success).toBe(false);
   });
