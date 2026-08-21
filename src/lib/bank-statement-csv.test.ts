@@ -93,10 +93,25 @@ describe("normalizeDate", () => {
     expect(normalizeDate("03/04/2026")).toBe("2026-04-03");
   });
 
+  it("ignores a time printed after the date", () => {
+    expect(normalizeDate("01/08/2026 09:15 AM")).toBe("2026-08-01");
+    expect(normalizeDate("01/08/2026T09:15")).toBe("2026-08-01");
+  });
+
   it("returns an empty string for anything it cannot read", () => {
     expect(normalizeDate("")).toBe("");
     expect(normalizeDate("01 Aug 2026")).toBe("");
     expect(normalizeDate("not a date")).toBe("");
+  });
+
+  it("returns an empty string rather than an impossible date", () => {
+    // A US-formatted export: day 8 of month 13. Passing "2026-13-08" on would
+    // clear the row schema's regex and kill the whole import at insert time.
+    expect(normalizeDate("08/13/2026")).toBe("");
+    expect(normalizeDate("99/99/9999")).toBe("");
+    expect(normalizeDate("30/02/2026")).toBe("");
+    expect(normalizeDate("2026-02-30")).toBe("");
+    expect(normalizeDate("29/02/2028")).toBe("2028-02-29"); // a real leap day
   });
 });
 
@@ -227,5 +242,24 @@ describe("detectStatementColumns", () => {
     expect(detectStatementColumns(["Date", "Debit Amount"]).amountIdx).toBe(-1);
     expect(detectStatementColumns(["Date", "Withdrawal Amount"]).amountIdx).toBe(-1);
     expect(detectStatementColumns(["Date", "Debit Amount", "Credit Amount"]).amountIdx).toBe(2);
+  });
+
+  it("never picks a column that is not money moving: an indicator, a limit, a balance", () => {
+    // "Debit/Credit" holds DR/CR, "Credit Limit" is a ceiling, neither is a sum.
+    const indicator = ["Date", "Description", "Amount", "Debit/Credit"];
+    expect(detectStatementColumns(indicator).amountIdx).toBe(2);
+    expect(
+      detectStatementColumns(["Date", "Description", "Credit Limit", "Amount"]).amountIdx,
+    ).toBe(3);
+    expect(detectStatementColumns(["Date", "Closing Balance", "Amount"]).amountIdx).toBe(2);
+  });
+
+  it("prefers a narrative over a reference for the description, whatever their order", () => {
+    expect(detectStatementColumns(["Date", "Reference", "Narrative", "Amount"])).toEqual({
+      dateIdx: 0,
+      amountIdx: 3,
+      descIdx: 2,
+      refIdx: 1,
+    });
   });
 });

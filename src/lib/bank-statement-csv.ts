@@ -47,14 +47,35 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-/** Normalize a date cell to YYYY-MM-DD (accepts ISO or AU dd/mm/yyyy). */
+/** True for a real calendar date, so an impossible one never leaves this file. */
+function isRealDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false;
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * Normalize a date cell to YYYY-MM-DD (accepts ISO or AU dd/mm/yyyy), or "" for
+ * anything it cannot read as a real date.
+ *
+ * The range check is not fussiness. A US-formatted export reads `08/13/2026` as
+ * day 8 of month 13, and `2026-13-08` clears `bankTxnRowSchema`'s regex happily,
+ * so the whole import then dies at insert time on a raw Postgres range error
+ * with nothing on screen worth reading. An unreadable date costs the row its
+ * date; it must not cost the manager the import.
+ */
 export function normalizeDate(value: string): string {
   const t = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
-  const m = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/.exec(t);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (iso) {
+    const [, y, mo, d] = iso;
+    return isRealDate(Number(y), Number(mo), Number(d)) ? t.slice(0, 10) : "";
+  }
+  // A day-first date, optionally followed by a time we have no use for.
+  const m = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})(?:[ T].*)?$/.exec(t);
   if (m) {
     const [, d, mo, y] = m;
     const year = y.length === 2 ? `20${y}` : y;
+    if (!isRealDate(Number(year), Number(mo), Number(d))) return "";
     return `${year}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
   return "";
@@ -79,30 +100,43 @@ const REQUIRED_COLUMNS = [
 ] as const;
 
 /**
+ * Headers in the order we would rather read the description from. Reference is
+ * last on purpose: it is better than nothing, but a bank that gives us both
+ * wrote the narrative for a human to read and the reference for a machine.
+ */
+const DESCRIPTION_KEYS = ["description", "narrative", "details", "memo", "reference"];
+
+/** Never the amount, whatever else the header says. */
+const NOT_AN_AMOUNT = ["debit", "withdrawal", "limit", "balance"];
+
+/**
  * Work out which column is which from the header row, by substring.
  *
  * The amount column is the one worth reading twice. Some exports put money out
  * in its own column beside money in ("Debit Amount", "Credit Amount"), and a
  * plain first-match on "amount" picks the debit one: every card purchase in the
  * statement would then import as an incoming credit, and the club would think
- * it had been paid. So a header naming credit or deposit wins outright, and a
- * header naming debit or withdrawal is never the amount column.
+ * it had been paid. So nothing naming a debit, a withdrawal, a limit or a
+ * balance is ever the amount (that also rules out a "Debit/Credit" indicator
+ * column, which holds "DR"/"CR" rather than money), and among what is left a
+ * header naming a credit or a deposit wins over a plain "amount".
  */
 export function detectStatementColumns(headerRow: string[]): StatementColumns {
   const header = headerRow.map((h) => h.trim().toLowerCase());
   const find = (...keys: string[]) => header.findIndex((h) => keys.some((k) => h.includes(k)));
-  const moneyOut = (h: string) => h.includes("debit") || h.includes("withdrawal");
+  const couldBeAmount = (h: string) => !NOT_AN_AMOUNT.some((k) => h.includes(k));
 
-  const creditIdx = find("credit", "deposit");
+  const creditIdx = header.findIndex(
+    (h) => couldBeAmount(h) && (h.includes("credit") || h.includes("deposit")),
+  );
   const amountIdx =
-    creditIdx >= 0 ? creditIdx : header.findIndex((h) => h.includes("amount") && !moneyOut(h));
+    creditIdx >= 0 ? creditIdx : header.findIndex((h) => h.includes("amount") && couldBeAmount(h));
 
-  return {
-    dateIdx: find("date"),
-    amountIdx,
-    descIdx: find("description", "narrative", "details", "reference", "memo"),
-    refIdx: find("reference"),
-  };
+  // By key, not by column order: whichever of these the file has, the earliest
+  // key that appears anywhere in the header wins.
+  const descIdx = DESCRIPTION_KEYS.map((k) => find(k)).find((i) => i >= 0) ?? -1;
+
+  return { dateIdx: find("date"), amountIdx, descIdx, refIdx: find("reference") };
 }
 
 /** "a Date column" / "the Date and Amount columns" — for the error below. */
