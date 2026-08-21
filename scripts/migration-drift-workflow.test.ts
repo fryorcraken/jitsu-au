@@ -80,6 +80,9 @@ describe("the migration drift workflow", () => {
 
   it("fails rather than passing when the secret is missing", () => {
     const guards = missingSecretGuards(read(DRIFT_WORKFLOW));
+    // Without this the loop below passes by finding no work, which is the same
+    // shape of false green the workflow itself was fixed for.
+    expect(guards.length).toBeGreaterThan(0);
     for (const guard of guards) {
       expect(
         guard,
