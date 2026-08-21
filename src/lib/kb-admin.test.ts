@@ -257,12 +257,13 @@ describe("saveKbArticle", () => {
     expect(promote).toHaveLength(1);
   });
 
-  // The break-glass agent key authenticates as a non-UUID sentinel with no auth
-  // user behind it; writing it into a `references auth.users` column fails the
-  // insert outright.
-  it("records no author when the actor is not a real user id", async () => {
+  // `created_by` is a real FK to auth.users, so a caller with nobody behind it
+  // records no author rather than a stand-in. Every caller in the app resolves
+  // to a real manager (the manager agent API has no environment-key fallback any
+  // more), which is exactly why a non-id must never be invented for this column.
+  it("records no author when there is no actor", async () => {
     const { db, calls } = saveHarness({ existing: null, maxVersion: 0 });
-    await saveKbArticle(db, baseInput, "manager-agent-env-key");
+    await saveKbArticle(db, baseInput, null);
     expect(inserts(calls, "kb_articles")[0].values).toMatchObject({ created_by: null });
     expect(inserts(calls, "kb_article_versions")[0].values).toMatchObject({ created_by: null });
   });
@@ -333,16 +334,6 @@ describe("saveKbArticle", () => {
     await expect(
       saveKbArticle(db, { ...baseInput, expect_new: true }, null),
     ).resolves.toMatchObject({ created: true, version: 1 });
-  });
-
-  // The break-glass agent key authenticates as a non-UUID sentinel with no auth
-  // user behind it; writing it into a `references auth.users` column fails the
-  // insert outright.
-  it("records no author when the actor is not a real user id", async () => {
-    const { db, calls } = saveHarness({ existing: null, maxVersion: 0 });
-    await saveKbArticle(db, baseInput, "manager-agent-env-key");
-    expect(inserts(calls, "kb_articles")[0].values).toMatchObject({ created_by: null });
-    expect(inserts(calls, "kb_article_versions")[0].values).toMatchObject({ created_by: null });
   });
 });
 

@@ -33,9 +33,9 @@ of truth for the current action set.
 
 - `UTS_MANAGER_API_URL` — the site's base URL, e.g. `https://jitsu.au`
 - `UTS_MANAGER_API_KEY` — a manager agent token. A manager mints one at
-  **`/manager/api-tokens`** on the site (it's shown once — copy it then). A
-  server-side `MANAGER_AGENT_API_KEY` env var also works as a break-glass
-  fallback.
+  **`/manager/api-tokens`** on the site (it's shown once — copy it then). That is
+  the only kind of token the endpoint accepts: there is no server-side
+  environment-variable fallback, so a lost token means minting a new one.
 
 The endpoint is `POST $UTS_MANAGER_API_URL/api/manager/agent`. Every request
 sends `Authorization: Bearer $UTS_MANAGER_API_KEY`.

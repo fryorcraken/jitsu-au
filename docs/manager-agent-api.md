@@ -18,11 +18,17 @@ driven directly by the bundled skill.
   `_authenticated/manager.api-tokens.tsx`). Only a SHA-256 hash is stored
   (`manager_api_tokens` table); the raw token is shown once at creation. On each
   request the endpoint looks the token up by hash, confirms it isn't revoked, and
-  re-checks the owner still holds the `manager` role. A `MANAGER_AGENT_API_KEY`
-  env var is accepted as an **optional break-glass fallback** (e.g. bootstrap /
-  CI); it is not required. The endpoint runs actions with the service-role
-  client, so a token grants manager-level access to the exposed actions — treat
-  it as a secret.
+  re-checks the owner still holds the `manager` role. The endpoint runs actions
+  with the service-role client, so a token grants manager-level access to the
+  exposed actions — treat it as a secret.
+  - **A minted token is the only credential this endpoint accepts.** There is no
+    environment-variable fallback and there should not be one: an env key cannot
+    be revoked without a redeploy, is stored in plaintext, never expires, is not
+    re-checked against the owner's role, and belongs to nobody — so anything it
+    wrote (a filed waiver, a published article) named no auth user. If every
+    token is lost, a manager signs in and mints another at `/manager/api-tokens`;
+    that needs only a manager login, which is why no separate break-glass
+    mechanism is warranted. Please do not add one back.
   - Token management server functions: `src/lib/manager-api-tokens.functions.ts`
     (`listApiTokens` / `createApiToken` / `revokeApiToken`); token crypto +
     the paste-able agent prompt: `src/lib/manager-api-tokens.ts`.
@@ -109,9 +115,9 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   **pending**: it never approves, emails anyone, or marks the email verified
   — approving is a separate, deliberate manager action because it promotes
   the record, unlocks the login, emails them that their account is active and
-  assigns the free trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is the
-  token's owner, or the `AGENT_ENV_KEY_UPLOADER` sentinel for the break-glass
-  env key, which has no owner to resolve. Filing a waiver the person already
+  assigns the free trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is always
+  the token's owner: a waiver is legal evidence, so every filing names the
+  manager who vouched for the scan. Filing a waiver the person already
   has for the same `signed_on` is refused with `409 duplicate_waiver` (the
   colliding rows come back in `error.existing`); `confirm_duplicate` files it
   anyway, for the corrected re-scan that is a genuine second document. The

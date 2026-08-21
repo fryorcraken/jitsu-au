@@ -854,35 +854,6 @@ export const AGENT_MANIFEST: {
 };
 
 /**
- * The `uploaded_by` recorded on a waiver filed through the break-glass
- * `MANAGER_AGENT_API_KEY` fallback, which authenticates without resolving to
- * any real auth user. Not a UUID on purpose: `filePaperWaiver` only attempts
- * to look up an owner's email for values that look like one.
- */
-export const AGENT_ENV_KEY_UPLOADER = "manager-agent-env-key";
-
-/**
- * The actor to record as the author of a row, or null when there isn't one.
- *
- * Every write this API makes on somebody's behalf lands in a column that
- * `references auth.users`, and the break-glass env key authenticates as
- * `AGENT_ENV_KEY_UPLOADER` — deliberately not a UUID, with no auth user behind
- * it. Writing that sentinel into such a column fails the insert outright, so
- * each writer asks this instead: record the manager when the token resolved to
- * one, null when it did not.
- *
- * Lives here, with the sentinel it exists because of, rather than as a private
- * copy in each writer — this is the third caller, which is the point the repo's
- * own rule says to stop duplicating.
- */
-export function actorUserId(actingAs: string | null): string | null {
-  if (!actingAs) return null;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actingAs)
-    ? actingAs
-    : null;
-}
-
-/**
  * Classify a raw request body's `action` field before dispatch, distinguishing
  * an absent field from a present-but-invalid one — otherwise both report
  * "unknown_action" and a caller who built the body wrong (forgot the field

@@ -704,10 +704,6 @@ The app reads:
   `VITE_SUPABASE_PROJECT_ID`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
-- Server, optional: `MANAGER_AGENT_API_KEY` — break-glass bearer token for the
-  manager agent API (`/api/manager/agent`). Normally managers mint revocable
-  tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
-  env var is just an optional fallback (see `docs/manager-agent-api.md`).
 - Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
   notification digest (`POST /api/notifications/digest`). **Unset means the
   endpoint refuses everything**, so no digest goes out until it is configured.

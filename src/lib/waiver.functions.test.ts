@@ -1236,16 +1236,20 @@ describe("filePaperWaiver", () => {
     expect(meta.uploaded_by_email).toBe("manager@example.com");
   });
 
-  it("skips the uploader lookup for a non-UUID caller (the agent API's break-glass key)", async () => {
-    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+  // There is no longer a caller that files a waiver without a real auth user
+  // behind it: the manager agent API dropped its environment-key fallback, so
+  // every filing names the manager who vouched for the scan. The lookup is
+  // therefore attempted every time, and an address it cannot find is a missing
+  // decoration, not a filing that skipped the question.
+  it("still names the uploader when their address cannot be resolved", async () => {
+    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER, getUserByIdEmail: null });
     const { filePaperWaiver } = await import("./waiver.functions");
-    const { AGENT_ENV_KEY_UPLOADER } = await import("./manager-agent");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await filePaperWaiver(admin as any, validInput, AGENT_ENV_KEY_UPLOADER);
-    expect(calls.getUserById).toEqual([]);
+    await filePaperWaiver(admin as any, validInput, MANAGER_ID);
+    expect(calls.getUserById).toEqual([MANAGER_ID]);
     const row = calls.insert[0] as Record<string, unknown>;
     const meta = row.signer_meta as Record<string, unknown>;
-    expect(meta.uploaded_by).toBe(AGENT_ENV_KEY_UPLOADER);
+    expect(meta.uploaded_by).toBe(MANAGER_ID);
     expect(meta).not.toHaveProperty("uploaded_by_email");
   });
 
