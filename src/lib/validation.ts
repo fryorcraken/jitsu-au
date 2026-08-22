@@ -404,6 +404,23 @@ export const clientSubmissionId = z.string().uuid().optional().or(z.literal(""))
  * files and holds the other half of the bargain: that the decoy each form
  * renders is one something filling in a form would actually fill, and that its
  * value reaches the payload instead of a hardcoded `""`.
+ *
+ * **Why all seven, including the ones behind a login.** Three of these
+ * (`startMembershipSchema`, `createAnnotationSchema`, `blogCommentSchema`) are
+ * only reachable with a session, where an anonymous bot cannot get to them at
+ * all, so the trap catches nothing there. They carry it anyway, because the
+ * alternative is a rule with an exception list: every future schema would need
+ * someone to decide which side of the line it falls on, and the way to get that
+ * wrong is to call a public form authenticated. A uniform rule fails safe; a
+ * remembered one does not.
+ *
+ * The cost that would argue the other way is a non-browser caller failing on a
+ * field it cannot see. That cannot happen through the manager agent API, which
+ * has its own schemas for the same operations and no honeypot on any of them
+ * (`createMembershipSchema`, `paperWaiverUploadSchema`, and the rest in
+ * `manager-agent.ts`). Anything machine-to-machine belongs on that seam, not on
+ * a form schema. If a genuine non-browser caller for one of these seven ever
+ * appears, that is the signal to give it its own schema, not to loosen this one.
  */
 export const honeypot = z.string().max(0);
 
@@ -458,6 +475,40 @@ export const markContactMessagesSeenSchema = z.object({
   seen_at: z.string().datetime({ offset: true }),
 });
 export type MarkContactMessagesSeenInput = z.infer<typeof markContactMessagesSeenSchema>;
+
+// ---- Deleting an enquiry ----
+//
+// An enquiry is the one thing a person leaves behind that the club has no
+// reason to keep once it has been dealt with: nothing was signed, nothing is
+// owed, and no record hangs off it. Everything else a person creates is either
+// evidence (a signed waiver) or the club's own history (memberships,
+// attendance), and destroying those is a decision the club has not made yet.
+// See docs/erasing-personal-data.md.
+
+/** Manager: delete one message from the contact inbox. */
+export const deleteContactMessageSchema = z.object({ id: z.string().uuid() }).strict();
+export type DeleteContactMessageInput = z.infer<typeof deleteContactMessageSchema>;
+
+/**
+ * Manager: delete every interest-form registration filed under one address.
+ *
+ * Keyed by email rather than by row id because that is what a lead IS: the
+ * directory merges every registration sharing an address into one person, so
+ * deleting "this lead" has to mean all of them. Deleting one row of two would
+ * leave the same person on the list with the older enquiry showing.
+ */
+export const deleteLeadSchema = z.object({ email: z.string().trim().email().max(255) }).strict();
+export type DeleteLeadInput = z.infer<typeof deleteLeadSchema>;
+
+/**
+ * Why a lead the screen offered a Delete for turns out not to be one.
+ *
+ * Read by a manager, so it says what the refusal means rather than naming the
+ * check: an address with a person behind it is somebody who signed something,
+ * and their enquiry is part of that record now.
+ */
+export const LEAD_HAS_PERSON_MESSAGE =
+  "That address belongs to someone the club has a record for, so this is more than an enquiry now. It can't be deleted here.";
 
 /**
  * Where the club-wide "messages seen up to here" marker should land.

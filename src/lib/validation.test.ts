@@ -21,6 +21,8 @@ import {
   contactSchema,
   coverageSources,
   listContactMessagesSchema,
+  deleteContactMessageSchema,
+  deleteLeadSchema,
   interestRegistrationNotifications,
   sellableWindowNotifications,
   unreadSince,
@@ -1002,6 +1004,44 @@ describe("markContactMessagesSeenSchema", () => {
     expect(markContactMessagesSeenSchema.safeParse({ seen_at: "2026-08-05" }).success).toBe(false);
     expect(markContactMessagesSeenSchema.safeParse({ seen_at: "" }).success).toBe(false);
     expect(markContactMessagesSeenSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("deleteContactMessageSchema", () => {
+  it("takes a message id and nothing else", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    expect(deleteContactMessageSchema.safeParse({ id }).success).toBe(true);
+    expect(deleteContactMessageSchema.safeParse({ id: "not-a-uuid" }).success).toBe(false);
+    expect(deleteContactMessageSchema.safeParse({}).success).toBe(false);
+    // Strict, like the other manager delete inputs: an extra field on a
+    // destructive call means the caller and the handler disagree about what is
+    // being deleted, which is not a thing to shrug off on this path.
+    expect(deleteContactMessageSchema.safeParse({ id, email: "sam@example.com" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("deleteLeadSchema", () => {
+  it("takes one email address, trimmed, and nothing else", () => {
+    expect(deleteLeadSchema.parse({ email: "  sam@example.com  " })).toEqual({
+      email: "sam@example.com",
+    });
+    expect(deleteLeadSchema.safeParse({ email: "not-an-email" }).success).toBe(false);
+    expect(deleteLeadSchema.safeParse({ email: "" }).success).toBe(false);
+    expect(deleteLeadSchema.safeParse({}).success).toBe(false);
+    expect(
+      deleteLeadSchema.safeParse({ email: "sam@example.com", also: "everything" }).success,
+    ).toBe(false);
+  });
+
+  it("does not lowercase: the address is matched case-insensitively later", () => {
+    // Pinned so nobody "tidies" this into a `.toLowerCase()` transform and
+    // quietly changes what `deleteLeadRegistrations` is handed. Normalizing is
+    // that function's job, next to the exact comparison that depends on it.
+    expect(deleteLeadSchema.parse({ email: "Sam@Example.com" })).toEqual({
+      email: "Sam@Example.com",
+    });
   });
 });
 
