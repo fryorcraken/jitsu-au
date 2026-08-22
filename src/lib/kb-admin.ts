@@ -16,7 +16,6 @@ import type {
   KbSectionRow,
 } from "@/lib/kb-types";
 import type { SaveKbArticleInput, SaveKbSectionInput } from "@/lib/validation";
-import { actorUserId } from "@/lib/manager-agent";
 import { extractHeadings } from "@/lib/kb-nav";
 
 /** An article together with the version being read. */
@@ -235,7 +234,6 @@ export async function saveKbArticle(
   input: SaveKbArticleInput,
   actingAs: string | null,
 ): Promise<{ slug: string; version: number | null; article_id: string; created: boolean }> {
-  const createdBy = actorUserId(actingAs);
   const sectionId = await resolveSectionId(db, input.section);
 
   const { data: existing, error: findErr } = await db
@@ -324,7 +322,7 @@ export async function saveKbArticle(
         position: input.position ?? 0,
         nav_title: input.nav_title || null,
         link_path: input.link_path || null,
-        created_by: createdBy,
+        created_by: actingAs,
       })
       .select("*")
       .single();
@@ -421,7 +419,7 @@ export async function saveKbArticle(
         body_md: text.body_md,
         change_note: input.change_note || null,
         is_current: false,
-        created_by: createdBy,
+        created_by: actingAs,
       })
       .select("id, version")
       .single();

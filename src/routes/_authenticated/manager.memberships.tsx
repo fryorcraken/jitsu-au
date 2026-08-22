@@ -1,9 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
 import { membershipClass } from "@/lib/status-colours";
 import { membershipStatusLabel } from "@/lib/status-labels";
@@ -28,23 +31,34 @@ function ManagerMembershipsPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return fetchList()
+        .then((data) => {
+          setRows(data as Row[]);
+          setLoadError(null);
+        })
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load the memberships");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [fetchList],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    fetchList()
-      .then((data) => {
-        setRows(data as Row[]);
-        setLoading(false);
-      })
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to load memberships");
-        setLoading(false);
-      });
-  }, [isManager, fetchList]);
+    void load();
+  }, [isManager, load]);
 
   async function refresh() {
     setRows((await fetchList()) as Row[]);
@@ -80,7 +94,14 @@ function ManagerMembershipsPage() {
         </div>
 
         {loading ? (
-          <p>Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="The memberships"
+            message={loadError}
+            hint="This is not the same as nobody being on a plan, so do not raise one from here until it loads."
+            onRetry={() => void load()}
+          />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No memberships yet.</p>
         ) : (

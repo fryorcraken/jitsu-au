@@ -175,6 +175,7 @@ src/
   start.ts                createStart(): global function + request middleware
   styles.css              Tailwind v4 entry + design tokens
 public/                   Served at the site root
+  _headers                Static-asset response headers (see Security headers)
   manifest.webmanifest    PWA manifest (start_url /app, icons, shortcuts)
   sw.js                   Service worker (pages network-only, assets cached)
   offline.html            Shown when a page is opened with no connection
@@ -702,6 +703,36 @@ Two non-obvious rules:
 Non-production hosts (Lovable previews, branch deploys) are served a blanket
 `Disallow: /`, so a preview never competes with `jitsu.au` in search results.
 
+## Security headers
+
+`src/lib/security-headers.ts` holds every response header the app sets for
+safety reasons, and `start.ts` applies it as the outermost request middleware,
+so it covers SSR pages, API route handlers, server-function RPCs and the error
+page alike. `public/_headers` states the same rules again for the static assets
+the platform serves without going through the server; Nitro merges that file
+into `.output/public/_headers` at build time, alongside its own `/assets/*`
+rule.
+
+Today that is `Referrer-Policy`, and the reason is three routes that carry a
+token in the URL **path**: `/api/calendar/<token>`, `/api/verify-email/<token>`
+and `/email-settings/<token>`. A calendar app and a mail client cannot send an
+Authorization header or a POST body, so on those three the token has to be in
+the URL, which makes it the browser's job not to pass that URL on. The site
+sends `strict-origin-when-cross-origin` everywhere and `no-referrer` on those
+three prefixes (the only value that also keeps the path out of a **same-origin**
+`Referer`), plus `Cache-Control: no-store` on them unless the route set its own.
+
+- **Adding a route that takes a token in its path?** Add its prefix to
+  `TOKEN_PATH_PREFIXES` and to `public/_headers`. `security-headers.test.ts`
+  fails if the two disagree.
+- **A route's own headers win.** The middleware only fills in `cache-control`
+  when the route did not set one, so the calendar feed keeps the
+  `private, max-age=300` its subscribers poll against.
+- CSP, HSTS and `X-Frame-Options` are **not** set here. Lovable owns the
+  Cloudflare deploy and the platform already sends `strict-transport-security`
+  and `x-content-type-options`; check what is already on the response with
+  `curl -I https://jitsu.au/` before adding anything that could overlap.
+
 ## Environment variables
 
 Secrets are configured in **Lovable Cloud project secrets** and injected into
@@ -749,10 +780,6 @@ The app reads:
   `VITE_SUPABASE_PROJECT_ID`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
-- Server, optional: `MANAGER_AGENT_API_KEY` — break-glass bearer token for the
-  manager agent API (`/api/manager/agent`). Normally managers mint revocable
-  tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
-  env var is just an optional fallback (see `docs/manager-agent-api.md`).
 - Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
   notification digest (`POST /api/notifications/digest`). **Unset means the
   endpoint refuses everything**, so no digest goes out until it is configured.
@@ -881,9 +908,28 @@ Then hold the change to this:
   that catches a fetch error with only `toast.error(...)` and then renders an
   empty table is indistinguishable from "there's nothing here" once the toast
   fades — the manager has no way to tell a genuinely empty list from a broken
-  one. Keep the error on screen (a `loadError`-style state) with a retry
-  action; `manager.contact-messages.tsx` is the pattern to copy, not the
-  `toast.error()` + empty-table pattern most manager list pages default to.
+  one. Hold a `loadError` state and render **`components/site/LoadFailure`** in
+  place of the content: it is the panel, the "this is not the same as having
+  none" line, the `role="alert"`, and the retry button, so no screen writes its
+  own. `manager.contact-messages.tsx` is the shortest example. Use
+  `describeLoadError(e, "…")` for the message rather than an inline
+  `instanceof Error` ternary, so an Error with an empty body still says
+  something.
+  - Where an empty screen is not merely ambiguous but **invites a destructive
+    action** — an editor that would save blanks over a live document, an "add"
+    form for a list that failed to load — put the panel in place of the whole
+    screen rather than beside it, and say in the copy why not to work around
+    it. `manager.waiver-template.tsx`, `manager.membership-plans.tsx` and
+    `manager.settings.tsx` all do this.
+  - A query-backed screen has the same trap in a different shape:
+    `useQuery`'s `isLoading` is **false** once a query has rejected, so a hook
+    that reports only `isLoading` leaves the page on "Loading..." for good.
+    Surface `isError` too (`useKbNav` is the worked example).
+- **A bare `Loading...` is not a loading state.** Use
+  **`components/site/Loading`**, which carries the `role="status"` /
+  `aria-live="polite"` wiring `AuthPending` and `SubmitStatus` already have.
+  Without it a screen-reader user gets no signal that a page started fetching
+  or finished.
 - **Never lose someone's input.** A failed submit keeps the form filled and
   offers the retry. Ask for as little as possible in the first place, and prefill
   what we already know (the waiver does this with `getMyLatestWaiver`). Every

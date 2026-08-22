@@ -30,6 +30,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
@@ -40,7 +42,7 @@ import type { KbNavEntry, KbNavSection } from "@/lib/kb-nav";
 import { searchKnowledgeBase } from "@/lib/kb.functions";
 
 export function KbLayout({ children }: { children: React.ReactNode }) {
-  const { nav, loading } = useKbNav();
+  const { nav, loading, error, refetch } = useKbNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
@@ -63,7 +65,7 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
             <SheetContent side="left" className="w-[85vw] max-w-xs overflow-y-auto p-0">
               <SheetTitle className="border-b px-4 py-4 text-base">Knowledge base</SheetTitle>
               <div className="p-4">
-                <KbNavList nav={nav} loading={loading} />
+                <KbNavList nav={nav} loading={loading} error={error} onRetry={refetch} />
               </div>
             </SheetContent>
           </Sheet>
@@ -97,7 +99,7 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
       <div className="mx-auto flex w-full max-w-7xl flex-1 gap-8 px-4 py-8">
         <aside className="hidden w-60 shrink-0 lg:block">
           <div className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
-            <KbNavList nav={nav} loading={loading} />
+            <KbNavList nav={nav} loading={loading} error={error} onRetry={refetch} />
           </div>
         </aside>
         <main className="min-w-0 flex-1">{children}</main>
@@ -120,7 +122,17 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
 }
 
 /** The sidebar itself, shared by the desktop rail and the phone drawer. */
-function KbNavList({ nav, loading }: { nav: KbNavSection[]; loading: boolean }) {
+function KbNavList({
+  nav,
+  loading,
+  error,
+  onRetry,
+}: {
+  nav: KbNavSection[];
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
   const location = useLocation();
 
   // Above everything, including the loading and empty states: the way out is
@@ -145,7 +157,24 @@ function KbNavList({ nav, loading }: { nav: KbNavSection[]; loading: boolean }) 
     return (
       <>
         {backToMemberSpace}
-        <p className="text-sm text-muted-foreground">Loading...</p>
+        <Loading />
+      </>
+    );
+  }
+
+  // The third answer the sidebar used to fold into the second one: the list
+  // could not be fetched. Left as an empty knowledge base, a reader has no
+  // reason to try again and no way to.
+  if (error) {
+    return (
+      <>
+        {backToMemberSpace}
+        <LoadFailure
+          what="The contents"
+          message={error}
+          hint="The articles are still there."
+          onRetry={onRetry}
+        />
       </>
     );
   }

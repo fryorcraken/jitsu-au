@@ -7,6 +7,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Check, ExternalLink, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
 import { useKbNav } from "@/hooks/useKbNav";
 import { flattenKbNav, kbProgress, readState } from "@/lib/kb-nav";
 
@@ -18,7 +20,7 @@ export const Route = createFileRoute("/kb/")({
 });
 
 function KnowledgeBaseIndex() {
-  const { nav, loading } = useKbNav();
+  const { nav, loading, error, refetch } = useKbNav();
   const progress = kbProgress(nav);
   const started = progress.read > 0 || progress.updated > 0;
   // Where to send them: the next thing they have not read, or the very first
@@ -104,9 +106,22 @@ function KnowledgeBaseIndex() {
         </div>
       )}
 
-      {loading && <p className="mt-10 text-sm text-muted-foreground">Loading...</p>}
+      {loading && <Loading className="mt-10" />}
 
-      {!loading && !nav.length && (
+      {/* Before the empty state, and instead of it. "There is nothing here for
+          you to read yet" is a claim about the club, and a member who is told
+          it because a fetch failed has no reason to ever come back. */}
+      {!loading && error && (
+        <LoadFailure
+          className="mt-10"
+          what="The knowledge base"
+          message={error}
+          hint="It is still there. This is a problem reaching it, not an empty knowledge base."
+          onRetry={refetch}
+        />
+      )}
+
+      {!loading && !error && !nav.length && (
         <p className="mt-10 text-sm text-muted-foreground">
           There is nothing here for you to read yet. If you think there should be, tell a coach.
         </p>
