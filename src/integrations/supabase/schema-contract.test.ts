@@ -196,6 +196,21 @@ export type _UserEmailsReturnsConfirmation = RequireColumns<
   "user_id" | "email" | "email_confirmed_at"
 >;
 
+/**
+ * The digest's one credential, read from Supabase Vault instead of a second
+ * copy in a server env var. A scalar function, so there are no column names to
+ * pin — this just asserts the RPC still exists and takes no arguments, so a
+ * rename shows up here rather than as a 503 nobody can explain.
+ *
+ * Deliberately not the nullability (same reasoning as `_UserEmailsReturns
+ * Confirmation` above): the generator prints every function return as non-null
+ * regardless of the truth, and NULL is this function's ordinary "not armed yet"
+ * result. That shape is pinned in `src/lib/supabase-rpc.test.ts` instead.
+ */
+export type _NotificationDigestKeyHasNoArgs = Expect<
+  Equals<Database["public"]["Functions"]["notification_digest_key"]["Args"], never>
+>;
+
 // ---- session_checkins: attendance and what paid for it ----
 export type _CheckinColumns = RequireColumns<
   Tables["session_checkins"]["Row"],

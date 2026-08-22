@@ -745,13 +745,16 @@ The app reads:
   `VITE_SUPABASE_PROJECT_ID`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
-- Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
-  notification digest (`POST /api/notifications/digest`). **Unset means the
-  endpoint refuses everything**, so no digest goes out until it is configured.
-  The schedule is a **pg_cron job in the database**, not a GitHub Action; it
-  reads the matching token and the site URL from **Supabase Vault**
-  (`notification_digest_key` / `notification_digest_url`) and fails closed until
-  both exist. See `docs/notifications.md`.
+  The manager agent API (`/api/manager/agent`) takes no env var either: a
+  minted, hashed `manager_api_tokens` row is the only credential it accepts (see
+  `docs/manager-agent-api.md`).
+
+The daily notification digest (`POST /api/notifications/digest`) takes **no env
+var**. Its bearer token lives in exactly one place, **Supabase Vault**
+(`notification_digest_key`), minted by a migration rather than typed by anyone;
+the endpoint reads it through a service-role RPC and pg_cron reads the same row
+to send it. **Unset means the endpoint refuses everything**, so no digest goes
+out until the secret exists. See `docs/notifications.md`.
 
 Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 

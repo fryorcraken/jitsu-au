@@ -1169,8 +1169,8 @@ coding agents.
 
 **`private.run_notification_digest() → void`** — `SECURITY DEFINER`,
 `SET search_path = ''`, `REVOKE ALL ... FROM PUBLIC`. The job names only this
-function, never the token. The function reads both values from Supabase Vault and
-`net.http_post`s to the endpoint.
+function, never the token. The function reads the bearer token from Supabase
+Vault and `net.http_post`s it to a literal `https://jitsu.au/...` URL.
 
 Keeping the token out of `cron.job.command` is defence in depth rather than a
 plugged hole: pg_cron 1.4+ puts RLS on `cron.job` with `USING (username =
@@ -1186,23 +1186,61 @@ on: `private` is not routable by PostgREST, so nothing there is reachable as an
 RPC. A function that makes the site email every member belongs on that side of
 the line whether a policy calls it or not.
 
-Two things that fail silently every morning rather than loudly once:
+One thing that failed silently every morning rather than loudly once: read
+**`vault.decrypted_secrets.decrypted_secret`**, never `vault.secrets.secret` —
+the latter is ciphertext, and sending it as a bearer token earns a 401.
 
-- Read **`vault.decrypted_secrets.decrypted_secret`**, never
-  `vault.secrets.secret` — the latter is ciphertext, and sending it as a bearer
-  token earns a 401.
-- Point at the **`jitsu.au`** origin, not the published `*.lovable.app` host:
-  that one 302s, and pg_net does not follow redirects.
+**Third body, as of `20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql`,
+and the one live today.** Two earlier defects are gone by construction rather
+than by a runbook step someone has to remember:
 
-The migration deliberately **does not arm the job**. It fires nightly and returns
-immediately with a `RAISE WARNING` until both secrets exist:
+- **Only one Vault secret, `notification_digest_key`.** There used to be a
+  second, `notification_digest_url`, holding the destination the function
+  `net.http_post`s to — which meant it was possible to set it to the published
+  `*.lovable.app` host by mistake, which 302s to `jitsu.au` and which pg_net
+  does not follow. The URL is now a literal inside the function body, so that
+  mistake can no longer happen.
+- **The secret is minted by the migration itself**, with
+  `vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'),
+'notification_digest_key')`, guarded so it only runs once (an existing secret
+  is left alone). Vault genuinely absent (`to_regclass('vault.secrets') IS
+NULL` — no Postgres this repo currently runs anywhere, but a bare, non-
+  Supabase Postgres in principle) is a safe `RAISE NOTICE` and skip. Otherwise
+  the call is made directly, with no signature pre-check: an earlier draft
+  guessed `create_secret` took 3 arguments and pre-checked exactly that
+  signature with `to_regprocedure`, which returned NULL against this project's
+  actual Vault (a 4-argument `(secret, name, description, key_id)` function
+  with defaults on the last three) — `to_regprocedure` matches the DECLARED
+  signature, not what is callable given defaults, so that check would have
+  silently skipped minting on **both CI and the live database**, reporting
+  success while doing nothing. Letting the call itself resolve avoids
+  hardcoding a signature that is not stable across Vault releases: if Vault
+  can resolve a 2-argument call under any overload it runs, and if it genuinely
+  cannot, Postgres raises on its own, loudly, at apply time. A closing
+  assertion checks, whichever branch ran, that `vault.secrets` now actually
+  holds the row when Vault is present at all. Nobody ever sees, types, or
+  copies the value.
 
-```sql
-SELECT vault.create_secret(
-  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
-SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
-  'notification_digest_key');
-```
+**`public.notification_digest_key() → text`** is the other new piece: a
+`SECURITY DEFINER` lookup into `vault.decrypted_secrets`, same shape as
+`user_id_by_email` / `user_emails` (`20260723000000_profiles.sql`) —
+`REVOKE EXECUTE ... FROM PUBLIC, anon, authenticated`, `GRANT EXECUTE ... TO
+service_role`. This is what the endpoint (`src/routes/api/notifications/digest.ts`)
+reads instead of a server env var: the same Vault row pg_cron reads, through the
+service-role admin client, cached in the route module after the first
+successful read. There is no longer a second copy of the key to keep in sync —
+see `src/lib/supabase-rpc.ts` for why this RPC gets a typed wrapper (its real
+return is nullable; the generated type says otherwise) rather than being called
+directly.
+
+`20260821000000_notification_digest_fails_loudly.sql` made the unarmed branch
+**raise** instead of warning and returning, naming the missing secret, and that
+behaviour is unchanged by the third body above. A plpgsql function that returns
+is one pg_cron records as `succeeded`, so before that migration every unarmed
+night went into `cron.job_run_details` as a success; it now goes in as a
+failure, which is what it is. Arming the job is what clears it; a club that does
+not want the digest at all should `cron.unschedule('notification-digest')`
+rather than leave it red. The runbook for arming it is in `docs/notifications.md`.
 
 ---
 

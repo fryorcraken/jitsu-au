@@ -23,6 +23,11 @@
 // a wrapper. `has_role` and `has_active_paid_membership` are `SELECT EXISTS(...)`
 // and never return NULL; `clear_email_confirmation` returns void and its callers
 // read only `error`. Those are all fine called directly.
+//
+// `notification_digest_key` joins `user_id_by_email` in needing one: it is
+// `SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = ... LIMIT 1`,
+// so it returns NULL exactly when nobody has minted the secret yet — the state
+// this app started in, and the state the endpoint's 503 branch exists for.
 import type { Database } from "@/integrations/supabase/types";
 import type { ClubUserEmail } from "./club-users";
 
@@ -52,9 +57,27 @@ export type PostgrestErrorLike = {
 type RpcCapable = {
   rpc: <N extends RpcName>(
     fn: N,
-    args: RpcArgs<N>,
+    args?: RpcArgs<N>,
   ) => PromiseLike<{ data: unknown; error: PostgrestErrorLike | null }>;
 };
+
+/**
+ * The argument list for an RPC: empty for a function the generator prints as
+ * `Args: never` (its way of saying "this one takes none"), otherwise the single
+ * checked argument object.
+ *
+ * A tuple rather than an optional parameter on `callRpc`, because an optional
+ * parameter would let EVERY wrapper below omit its arguments and still compile,
+ * throwing away the one guarantee this module exists to provide. As a tuple, a
+ * zero-argument RPC is called with nothing and every other one still has to
+ * pass exactly what the live schema declares.
+ *
+ * `[RpcArgs<N>] extends [never]`, not a bare `RpcArgs<N> extends never`: a naked
+ * conditional over `never` distributes to `never` for every branch, so the bare
+ * form would report EVERY RPC as taking no arguments. Wrapping both sides in a
+ * tuple switches off that distribution.
+ */
+type RpcArgsList<N extends RpcName> = [RpcArgs<N>] extends [never] ? [] : [args: RpcArgs<N>];
 
 /**
  * Call an RPC, keeping the generated argument checking and dropping only the
@@ -69,7 +92,8 @@ type RpcCapable = {
  * `.call(db, ...)` rather than a plain call because the real method reads
  * `this` — it delegates to the client's REST handle.
  */
-function callRpc<N extends RpcName>(db: RpcCapable, fn: N, args: RpcArgs<N>) {
+function callRpc<N extends RpcName>(db: RpcCapable, fn: N, ...rest: RpcArgsList<N>) {
+  const [args] = rest as [RpcArgs<N>?];
   return db.rpc.call(db, fn, args) as PromiseLike<{
     data: unknown;
     error: PostgrestErrorLike | null;
@@ -114,4 +138,17 @@ export async function userEmails(
 ): Promise<RpcResult<ClubUserEmail[]>> {
   const { data, error } = await callRpc(db, "user_emails", { _user_ids: userIds });
   return { data: (data as ClubUserEmail[] | null) ?? null, error };
+}
+
+/**
+ * Read the daily digest's bearer token out of Supabase Vault.
+ *
+ * **Returns null when the secret has not been minted or has been removed**,
+ * which is the digest endpoint's "not configured" state and the reason
+ * `src/routes/api/notifications/digest.ts` answers 503 rather than 401 for it.
+ * The generated type says `string`, which would make that branch unreachable.
+ */
+export async function notificationDigestKey(db: RpcCapable): Promise<RpcResult<string | null>> {
+  const { data, error } = await callRpc(db, "notification_digest_key");
+  return { data: (data as string | null) ?? null, error };
 }

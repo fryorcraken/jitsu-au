@@ -676,6 +676,11 @@ await insert("notification_preferences", {
   thread_activity: false,
 });
 
+// Every row here is stamped `emailed_at`, which is what a club whose daily
+// digest is working looks like. Left NULL they would age past
+// DIGEST_STALL_HOURS and put a permanent "the daily email summary has stopped"
+// item on the manager's notifications page in every run and every screenshot,
+// which is a fault this fixture does not have. See docs/notifications.md.
 await insert("notifications", [
   {
     user_id: users.member,
@@ -686,6 +691,7 @@ await insert("notifications", [
     body: "New term, new mats, and a beginners' block starting in week one.",
     href: "/blog/welcome-to-semester-two",
     created_at: at(-9),
+    emailed_at: at(-8),
   },
   {
     user_id: users.member,
@@ -698,6 +704,7 @@ await insert("notifications", [
     href: "/blog/welcome-to-semester-two",
     created_at: at(-8),
     read_at: at(-7),
+    emailed_at: at(-8, 10),
   },
   {
     user_id: users.manager,
@@ -709,6 +716,7 @@ await insert("notifications", [
     body: "Does this mean I should take my wedding ring off, or is taping it enough?",
     href: "/kb/mat-etiquette",
     created_at: at(-5),
+    emailed_at: at(-4),
   },
 ]);
 
