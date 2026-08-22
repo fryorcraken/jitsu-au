@@ -180,6 +180,7 @@ public/                   Served at the site root
   sw.js                   Service worker (pages network-only, assets cached)
   offline.html            Shown when a page is opened with no connection
   icons/                  Generated PWA icons (scripts/generate-pwa-icons.mjs)
+  fonts/                  Self-hosted Nunito Sans (woff2) + its OFL licence (docs/fonts.md)
 supabase/
   config.toml             Supabase project ref + the local stack CI boots
   migrations/*.sql        Schema + RLS (timestamped, applied in order)
