@@ -111,7 +111,15 @@ describe("/manager/users", () => {
     // A manager pressing this is entitled to think it removes everything about
     // the person. It does not: their contact-form messages live in another
     // inbox, and the confirm has to say so before the click, not after.
-    expect(dialog.getByText(/deleted from Contact messages/)).toBeVisible();
+    //
+    // Pinned as "does not touch it" rather than a looser match on the inbox's
+    // name. The first wording here read "...is separate, and is deleted from
+    // Contact messages", which says the opposite of what the code does, and a
+    // test matching only /deleted from Contact messages/ passed on it happily.
+    // A confirm for something irreversible is wrong if it merely mentions the
+    // right nouns, so assert the claim, not the vocabulary.
+    expect(dialog.getByText(/does not touch it/)).toBeVisible();
+    expect(dialog.getByText(/stays in Contact messages until you delete it there/)).toBeVisible();
   });
 
   it("takes the lead off the list once the server confirms", async () => {
