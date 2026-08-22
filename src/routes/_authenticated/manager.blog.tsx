@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadError } from "@/components/site/LoadError";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,10 @@ function BlogPostsPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept on screen, unlike a toast: an empty post list and a post list that
+  // could not be read look identical once a toast has faded, and only one of
+  // them means there is nothing to write about.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Row | null>(null);
 
@@ -47,13 +52,19 @@ function BlogPostsPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return fetchList()
+      .then(setRows)
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "Could not load posts."))
+      .finally(() => setLoading(false));
+  }, [fetchList]);
+
   useEffect(() => {
     if (!isManager) return;
-    fetchList()
-      .then(setRows)
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load posts"))
-      .finally(() => setLoading(false));
-  }, [isManager, fetchList]);
+    void load();
+  }, [isManager, load]);
 
   async function onDelete(row: Row) {
     setDeletingId(row.id);
@@ -70,6 +81,18 @@ function BlogPostsPage() {
   }
 
   if (loading) return <LoadingPanel />;
+  if (loadError) {
+    return (
+      <section className="mx-auto max-w-5xl px-4 py-10">
+        <LoadError
+          what="The posts"
+          detail={loadError}
+          notEmpty="This is not the same as having no posts to show."
+          onRetry={() => void load()}
+        />
+      </section>
+    );
+  }
 
   return (
     <section className="mx-auto max-w-5xl space-y-6 px-4 py-10">

@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { LoadError } from "@/components/site/LoadError";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,10 @@ function EditBlogPostPage() {
 
   const [post, setPost] = useState<PostRow | null>(null);
   const [loading, setLoading] = useState(true);
+  // Kept on screen, unlike a toast: without it a failed load and "someone
+  // deleted this post" both land on the same blank editor, with no way to
+  // tell the two apart or to try again.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -34,13 +39,19 @@ function EditBlogPostPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return fetchPost({ data: { id } })
+      .then(setPost)
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "Could not load that post."))
+      .finally(() => setLoading(false));
+  }, [id, fetchPost]);
+
   useEffect(() => {
     if (!isManager) return;
-    fetchPost({ data: { id } })
-      .then(setPost)
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load that post"))
-      .finally(() => setLoading(false));
-  }, [isManager, id, fetchPost]);
+    void load();
+  }, [isManager, load]);
 
   function goBack() {
     if (dirty && !window.confirm("Discard your unsaved changes?")) return;
@@ -109,6 +120,13 @@ function EditBlogPostPage() {
   );
 
   if (loading) return <LoadingPanel />;
+  if (loadError) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-10">
+        <LoadError what="This post" detail={loadError} onRetry={() => void load()} />
+      </section>
+    );
+  }
   if (!post || !initial) return null;
 
   return (

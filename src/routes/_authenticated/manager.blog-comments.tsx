@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadError } from "@/components/site/LoadError";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,10 @@ function BlogCommentsPage() {
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [blocked, setBlocked] = useState<BlockedRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept on screen, unlike a toast: an empty moderation queue and one that
+  // could not be read look identical once a toast has faded, and only one of
+  // them means there is nothing left for a manager to check.
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Two separate id-spaces — a comment id and its author's user id are never
   // the same value, but keying both actions off one shared `busyId` state
   // meant blocking an author never disabled anything in the Blocked
@@ -66,20 +71,29 @@ function BlogCommentsPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  function refresh() {
+  // Just the fetch, no loading/error state of its own: also called after a
+  // successful hide/unhide/block/unblock to bring the tables back in step,
+  // where a full-page loading state would just be flicker over rows already
+  // on screen. Those callers keep their own toast on failure, unchanged.
+  const refresh = useCallback(() => {
     return Promise.all([
       fetchComments({ data: {} }).then(setComments),
       fetchBlocked().then(setBlocked),
     ]);
-  }
+  }, [fetchComments, fetchBlocked]);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return refresh()
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "Could not load comments."))
+      .finally(() => setLoading(false));
+  }, [refresh]);
 
   useEffect(() => {
     if (!isManager) return;
-    refresh()
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load comments"))
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isManager]);
+    void load();
+  }, [isManager, load]);
 
   async function confirmHide() {
     if (!hideTarget) return;
@@ -140,6 +154,18 @@ function BlogCommentsPage() {
   }
 
   if (loading) return <LoadingPanel />;
+  if (loadError) {
+    return (
+      <section className="mx-auto max-w-6xl px-4 py-10">
+        <LoadError
+          what="The comments"
+          detail={loadError}
+          notEmpty="This is not the same as having no comments to moderate."
+          onRetry={() => void load()}
+        />
+      </section>
+    );
+  }
 
   const blockedUserIds = new Set(blocked.map((b) => b.user_id));
   const replyCountByParent = countRepliesByParent(comments);

@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
-import { useEffect, useState } from "react";
+import { LoadError } from "@/components/site/LoadError";
+import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,10 @@ function WaiversPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept on screen, unlike a toast: an empty waiver list and a list that could
+  // not be read look identical once the toast has faded, and only one of them
+  // means nobody has signed.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
   const [driveFolderReady, setDriveFolderReady] = useState(false);
@@ -70,17 +75,23 @@ function WaiversPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  useEffect(() => {
-    if (!isManager) return;
-    fetchList()
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return fetchList()
       .then((data) => {
         setRows(data as Row[]);
         setLoading(false);
       })
       .catch((e) => {
-        toast.error(e.message);
+        setLoadError(e instanceof Error ? e.message : "Failed to load waivers.");
         setLoading(false);
       });
+  }, [fetchList]);
+
+  useEffect(() => {
+    if (!isManager) return;
+    void load();
     fetchDriveStatus()
       .then((s) => {
         setDriveConnected(s.connected);
@@ -97,7 +108,7 @@ function WaiversPage() {
         setUploads(map);
       })
       .catch(() => {});
-  }, [isManager, fetchList, fetchDriveStatus, fetchDriveUploads]);
+  }, [isManager, load, fetchDriveStatus, fetchDriveUploads]);
 
   async function download(id: string) {
     try {
@@ -187,6 +198,13 @@ function WaiversPage() {
 
         {loading ? (
           <LoadingPanel className="p-0" />
+        ) : loadError ? (
+          <LoadError
+            what="The waivers"
+            detail={loadError}
+            notEmpty="This is not the same as nobody having signed one."
+            onRetry={() => void load()}
+          />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No waivers signed yet.</p>
         ) : (

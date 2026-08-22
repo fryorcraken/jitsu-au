@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
-import { useEffect, useMemo, useState } from "react";
+import { LoadError } from "@/components/site/LoadError";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -110,6 +111,10 @@ function EditorPage() {
   const [body, setBody] = useState("");
   const [acks, setAcks] = useState<AcknowledgementDef[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept on screen, unlike a toast: a blank editor caused by a failed load and
+  // a template list that is genuinely still empty look identical once the
+  // toast fades.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
 
@@ -122,24 +127,34 @@ function EditorPage() {
     setAcks(template.acknowledgements ?? []);
   }
 
-  useEffect(() => {
-    fetchTemplates()
+  // Named apart from `load` above (which loads one template's fields into the
+  // editor, not the list from the server) so the retry button below has
+  // something unambiguous to call.
+  const loadTemplates = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return fetchTemplates()
       .then((rows) => {
         setTemplates(rows);
         // Open on the live version when there is one, otherwise the newest
         // draft, so a template seeded outside the editor is never invisible.
         const opening = rows.find((t) => t.is_current) ?? rows[0];
         if (opening) load(opening);
+        setLoading(false);
       })
       .catch((e) => {
         // A non-manager is redirected by the effect below; anything else is
         // worth saying out loud rather than leaving a blank editor.
         if (!(e instanceof Error) || !e.message.includes("Forbidden")) {
-          toast.error(e instanceof Error ? e.message : "Could not load waiver versions");
+          setLoadError(e instanceof Error ? e.message : "Could not load waiver versions.");
         }
-      })
-      .finally(() => setLoading(false));
+        setLoading(false);
+      });
   }, [fetchTemplates]);
+
+  useEffect(() => {
+    void loadTemplates();
+  }, [loadTemplates]);
 
   // Editing a version and saving writes a NEW version, so an unsaved edit is
   // lost by switching away from it. Warn rather than discard silently.
@@ -256,6 +271,18 @@ function EditorPage() {
       <>
         <LoadingPanel />
       </>
+    );
+
+  if (loadError)
+    return (
+      <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
+        <LoadError
+          what="The waiver template"
+          detail={loadError}
+          notEmpty="This is not the same as no template existing yet."
+          onRetry={() => void loadTemplates()}
+        />
+      </section>
     );
 
   return (

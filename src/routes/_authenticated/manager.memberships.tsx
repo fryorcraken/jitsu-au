@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
-import { useEffect, useState } from "react";
+import { LoadError } from "@/components/site/LoadError";
+import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -29,23 +30,33 @@ function ManagerMembershipsPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept on screen rather than toasted: an empty table and a table that could
+  // not be read look the same once a toast has gone, and a manager reading
+  // "no memberships" acts very differently from one who knows the list failed.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  useEffect(() => {
-    if (!isManager) return;
-    fetchList()
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return fetchList()
       .then((data) => {
         setRows(data as Row[]);
         setLoading(false);
       })
       .catch((e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to load memberships");
+        setLoadError(e instanceof Error ? e.message : "Failed to load memberships.");
         setLoading(false);
       });
-  }, [isManager, fetchList]);
+  }, [fetchList]);
+
+  useEffect(() => {
+    if (!isManager) return;
+    void load();
+  }, [isManager, load]);
 
   async function refresh() {
     setRows((await fetchList()) as Row[]);
@@ -82,6 +93,13 @@ function ManagerMembershipsPage() {
 
         {loading ? (
           <LoadingPanel className="p-0" />
+        ) : loadError ? (
+          <LoadError
+            what="The memberships"
+            detail={loadError}
+            notEmpty="This is not the same as nobody holding a membership."
+            onRetry={() => void load()}
+          />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No memberships yet.</p>
         ) : (

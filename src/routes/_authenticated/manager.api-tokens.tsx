@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadError } from "@/components/site/LoadError";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
@@ -44,6 +45,10 @@ function ApiTokensPage() {
 
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept on screen, unlike a toast: an empty token list and one that could
+  // not be read look identical once a toast has faded, and only one of them
+  // means there is nothing here to revoke.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [creating, setCreating] = useState(false);
   // The raw token is shown exactly once, right after creation.
@@ -57,16 +62,25 @@ function ApiTokensPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  const load = useCallback(() => {
-    fetchTokens()
-      .then((rows) => setTokens(rows))
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load tokens"))
-      .finally(() => setLoading(false));
+  // Just the fetch, no loading/error state of its own: also called after a
+  // successful create or revoke to bring the list back in step, where a
+  // full-page loading state would just be flicker over rows already on
+  // screen. Those callers keep their own toast on failure, unchanged.
+  const refreshTokens = useCallback(() => {
+    return fetchTokens().then((rows) => setTokens(rows));
   }, [fetchTokens]);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return refreshTokens()
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "Failed to load tokens."))
+      .finally(() => setLoading(false));
+  }, [refreshTokens]);
 
   useEffect(() => {
     if (!isManager) return;
-    load();
+    void load();
   }, [isManager, load]);
 
   async function onCreate() {
@@ -79,7 +93,9 @@ function ApiTokensPage() {
       const created = await create({ data: { label: label.trim() } });
       setFreshToken({ label: created.label, token: created.token });
       setLabel("");
-      load();
+      refreshTokens().catch((e) =>
+        toast.error(e instanceof Error ? e.message : "Failed to load tokens"),
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create token");
     } finally {
@@ -187,7 +203,14 @@ function ApiTokensPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {tokens.length === 0 ? (
+            {loadError ? (
+              <LoadError
+                what="Your tokens"
+                detail={loadError}
+                notEmpty="This is not the same as having no tokens, and a token you cannot see here is still working."
+                onRetry={() => void load()}
+              />
+            ) : tokens.length === 0 ? (
               <p className="text-sm text-muted-foreground">No tokens yet.</p>
             ) : (
               <ul className="divide-y">
