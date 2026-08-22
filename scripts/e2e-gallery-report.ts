@@ -136,6 +136,18 @@ export function pageGroups(entries: Entry[]): { path: string; byProject: Map<str
   return [...byPath.entries()].map(([path, byProject]) => ({ path, byProject }));
 }
 
+/**
+ * The `id` of a page's section in the gallery, so a review can link straight at
+ * the screen it is talking about.
+ *
+ * `slugify` alone will not do: the home page's path is "/", which has no
+ * alphanumerics left after slugging and would collide with every other
+ * path that slugs to nothing.
+ */
+export function pageAnchor(path: string): string {
+  return path === "/" ? "page-home" : `page-${slugify(path)}`;
+}
+
 /** Every project that walked the tour, in first-seen order. */
 export function tourProjects(entries: Entry[]): string[] {
   return [...new Set(entries.filter(isTourEntry).map((entry) => entry.project))];
@@ -211,7 +223,7 @@ export function buildGalleryHtml(entries: Entry[], meta: { title: string; subtit
           );
         })
         .join("\n");
-      return `<section class="page"><h2>${escapeHtml(path)}</h2><div class="shots">${figures}</div></section>`;
+      return `<section class="page" id="${escapeHtml(pageAnchor(path))}"><h2>${escapeHtml(path)}</h2><div class="shots">${figures}</div></section>`;
     })
     .join("\n");
 

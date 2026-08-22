@@ -46,8 +46,10 @@ entry takes a title and a start time and nothing else:
   it is the manager's answer and is left alone; the only thing that overrides it
   is a start that moves past it, which would make the entry backwards.
 - **Location** is pre-filled with the club's gym (ActivateFit Gym, UTS Building 4,
-  745 Harris St, Ultimo). Somewhere else, or nowhere booked yet: overwrite or
-  clear it.
+  745 Harris Street, Ultimo NSW 2007), built from the shared venue constants in
+  `src/lib/venue.ts` so it is the same address the public pages, the map links
+  and the structured data give. Somewhere else, or nowhere booked yet: overwrite
+  or clear it.
 
 Both are only defaults on the add form. Editing an existing date shows what that
 date actually has, so an entry with no location keeps having none.
