@@ -589,11 +589,52 @@ scripts/agent.sh list_kb_articles '{}'
 
 ### `get_kb_article` — read one article's markdown
 
-Returns the live version unless you pass `version`.
+Returns the live version unless you pass `version`, plus `sections`: every
+heading in it, with the link that goes straight to that heading.
 
 ```bash
-scripts/agent.sh get_kb_article '{"slug":"our-history"}'
+scripts/agent.sh get_kb_article '{"slug":"belts"}'
 ```
+
+```json
+{
+  "sections": [
+    {
+      "id": "grading",
+      "text": "How grading works",
+      "depth": 2,
+      "pinned": true,
+      "url": "/kb/belts#grading"
+    },
+    { "id": "fees", "text": "Fees", "depth": 3, "pinned": false, "url": "/kb/belts#fees" }
+  ]
+}
+```
+
+### Linking to a section of another article
+
+An article points at one section of another with an **ordinary markdown link**
+carrying the heading's anchor. There is no special syntax:
+
+```markdown
+Bring the fee in cash, see [the fees](/kb/belts#fees).
+```
+
+Read the article you are pointing at with `get_kb_article` and copy the `url`
+out of its `sections`. Do not work the fragment out from the heading yourself:
+it is the heading's own words lowercased and hyphenated, which is right until
+somebody rewords the heading, and a wrong one fails silently.
+
+**Pin the heading you just linked to** by ending it with `{#anchor}`, the
+attribute syntax Pandoc and Docusaurus use. The anchor then stays put however
+the heading is reworded, and readers never see the suffix:
+
+```markdown
+## How grading works {#grading}
+```
+
+`sections[].pinned` says which anchors are already pinned. `#section` on its own
+links within the same article.
 
 ### `save_kb_article` — write, or place in the sidebar
 
@@ -644,6 +685,9 @@ scripts/agent.sh save_kb_article '{
 >   is; passing `members` on what was a managers-only draft publishes it to every
 >   member of the club. New articles default to `members`. There is no `public`
 >   level: the whole knowledge base needs a login.
+> - **A cross-reference is not checked when you save it.** A link to an article
+>   or a section that does not exist is stored exactly as written, and only a
+>   reader following it finds out. Read the target before linking to it.
 > - **`link_path` takes site-relative paths only** (`/faq`, not
 >   `https://...`), needs a `nav_title`, and cannot be combined with
 >   `title`/`body_md`. An article that already has versions cannot be turned
@@ -703,7 +747,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"11"`), and its
+- The manifest's `version` tells generations apart (currently `"13"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

@@ -16,6 +16,7 @@ import type {
   KbSectionRow,
 } from "@/lib/kb-types";
 import type { SaveKbArticleInput, SaveKbSectionInput } from "@/lib/validation";
+import { extractHeadings } from "@/lib/kb-nav";
 
 /** An article together with the version being read. */
 export type LoadedArticle = {
@@ -498,6 +499,17 @@ export function projectArticle({ article, version }: LoadedArticle) {
     annotations_enabled: article.annotations_enabled,
     nav_title: article.nav_title,
     updated_at: version.created_at,
+    // The anchors this article offers, so an agent writing a cross-reference
+    // into another article does not have to re-derive a fragment from the
+    // heading wording and get it subtly wrong. `pinned` marks the ones written
+    // as `## Heading {#anchor}`, which are the ones that survive a rewording.
+    sections: extractHeadings(version.body_md).map((heading) => ({
+      id: heading.id,
+      text: heading.text,
+      depth: heading.depth,
+      pinned: heading.pinned,
+      url: `/kb/${article.slug}#${heading.id}`,
+    })),
   };
 }
 

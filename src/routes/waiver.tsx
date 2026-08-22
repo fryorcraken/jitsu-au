@@ -197,6 +197,9 @@ function Waiver() {
    * drops off the list instead of waiting for another press to be re-checked.
    */
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  // The honeypot's live value. Deliberately not part of the saved draft: a
+  // person never types in it, so there is nothing to bring back.
+  const [hp, setHp] = useState("");
 
   const fullName = useMemo(
     () =>
@@ -689,7 +692,7 @@ function Waiver() {
             // by this submission. Re-checked server-side against the email
             // actually submitted, so editing the email field forfeits it.
             vt: verificationToken ?? "",
-            hp: "",
+            hp,
           },
         });
         // Only the server gets to say this is signed. The old code showed a
@@ -850,7 +853,15 @@ function Waiver() {
             noValidate
             className="space-y-6 rounded-2xl border bg-card p-6 md:p-8"
           >
-            <input type="hidden" name="hp" value="" />
+            <input
+              type="text"
+              name="hp"
+              tabIndex={-1}
+              autoComplete="off"
+              className="hidden"
+              value={hp}
+              onChange={(e) => setHp(e.target.value)}
+            />
 
             {restored && (
               <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">

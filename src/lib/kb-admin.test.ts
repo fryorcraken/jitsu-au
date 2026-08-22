@@ -11,10 +11,12 @@ import { describe, expect, it } from "vitest";
 import {
   deleteKbSection,
   listSharedAnnotations,
+  projectArticle,
   promoteArticleVersion,
   saveKbArticle,
   saveKbSection,
 } from "./kb-admin";
+import type { KbArticleRow, KbArticleVersionRow } from "./kb-types";
 import type { KbClient } from "./kb-types";
 import type { SaveKbArticleInput } from "./validation";
 
@@ -652,5 +654,47 @@ describe("saveKbArticle link entry transitions", () => {
       saveKbArticle(db, { slug: "common-questions", nav_title: "" }, null),
     ).rejects.toThrow(/a link needs a name to show in the sidebar/);
     expect(writes(calls)).toHaveLength(0);
+  });
+});
+
+describe("projectArticle", () => {
+  // An agent asked to cross-reference an article needs the fragment, and the
+  // one thing it must not do is derive it from the heading's wording itself:
+  // that is how a link ends up pointing at a section that does not exist.
+  const loaded = (body: string) => ({
+    article: {
+      slug: "belts",
+      visibility: "members",
+      annotations_enabled: true,
+      nav_title: null,
+    } as unknown as KbArticleRow,
+    version: {
+      title: "Belts",
+      body_md: body,
+      version: 4,
+      is_current: true,
+      change_note: null,
+      created_at: "2026-08-01T00:00:00Z",
+    } as unknown as KbArticleVersionRow,
+  });
+
+  it("reports every heading with a link that goes straight to it", () => {
+    const projected = projectArticle(
+      loaded("## How grading works {#grading}\n\nText.\n\n### Fees\n\nMore."),
+    );
+    expect(projected.sections).toEqual([
+      {
+        id: "grading",
+        text: "How grading works",
+        depth: 2,
+        pinned: true,
+        url: "/kb/belts#grading",
+      },
+      { id: "fees", text: "Fees", depth: 3, pinned: false, url: "/kb/belts#fees" },
+    ]);
+  });
+
+  it("reports an empty list for an article with no headings", () => {
+    expect(projectArticle(loaded("Just prose.")).sections).toEqual([]);
   });
 });
