@@ -70,6 +70,7 @@ import {
 } from "@/lib/kb.functions";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
+import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 import type { ArticleVisibility } from "@/lib/kb";
 import { buildKbNav, extractHeadings, UNSECTIONED_TITLE } from "@/lib/kb-nav";
 import type { KbNavEntry } from "@/lib/kb-nav";
@@ -260,6 +261,7 @@ function KnowledgeBaseManager() {
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   /**
    * The arrangement a drag is producing, held while it is in flight and until
@@ -461,7 +463,7 @@ function KnowledgeBaseManager() {
     // even when `slug` already names this article, so the early return above
     // would leave the click doing nothing.
     if (!opts.force && !retrying && next === slug && !creating && !sectionEdit) return;
-    if (unsaved && !window.confirm("Discard your unsaved changes and open this?")) {
+    if (unsaved && !(await confirm(discardUnsavedChanges("Opening this")))) {
       return;
     }
     setSectionEdit(null);
@@ -589,9 +591,9 @@ function KnowledgeBaseManager() {
     }
   }
 
-  function startNew(nextKind: EntryKind) {
-    const what = nextKind === "link" ? "add a link" : "start a new article";
-    if (unsaved && !window.confirm(`Discard your unsaved changes and ${what}?`)) return;
+  async function startNew(nextKind: EntryKind) {
+    const what = nextKind === "link" ? "Adding a link" : "Starting a new article";
+    if (unsaved && !(await confirm(discardUnsavedChanges(what)))) return;
     claim();
     setSectionEdit(null);
     setCreating(true);
@@ -619,9 +621,9 @@ function KnowledgeBaseManager() {
   }
 
   /** Open a section in the main window, where it is renamed and deleted. */
-  function openSection(row: SectionRow) {
+  async function openSection(row: SectionRow) {
     if (sectionEdit?.slug === row.slug) return;
-    if (unsaved && !window.confirm("Discard your unsaved changes and open this section?")) {
+    if (unsaved && !(await confirm(discardUnsavedChanges("Opening this section")))) {
       return;
     }
     claim();
@@ -721,9 +723,11 @@ function KnowledgeBaseManager() {
     const widening = wideningVisibility(baseVisibility, visibility);
     if (
       widening &&
-      !window.confirm(
-        `This will change who can read "${title}" from ${widening.from} to ${widening.to}. Everyone in the wider group will be able to read every word of it, including any earlier wording still in the current version. Continue?`,
-      )
+      !(await confirm({
+        title: `Let ${visibilityAudience[widening.to].toLowerCase()} read "${title}"?`,
+        description: `Only ${visibilityAudience[widening.from].toLowerCase()} can read it right now. Saving opens it to everyone in the wider group, including any earlier wording still in the current version.`,
+        confirmLabel: "Save and open it up",
+      }))
     ) {
       return;
     }
@@ -823,21 +827,15 @@ function KnowledgeBaseManager() {
     // matters most to the manager who has just rewritten a passage: without it
     // they read "now live", see their own edit still in the box, and believe it
     // is what members are reading.
-    if (
-      dirty &&
-      !window.confirm(
-        `Your unsaved changes will be discarded, and they are not part of version ${version.version} so they will not go live. Save them as a new version first, or continue to publish the stored version ${version.version} and lose them?`,
-      )
-    ) {
-      return;
-    }
-    if (
-      !window.confirm(
-        `Publish version ${version.version}? ${visibilityAudience[baseVisibility ?? visibility]} will read it from now on. Comments stay attached to the version they were written against.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Publish version ${version.version}?`,
+      description: `${visibilityAudience[baseVisibility ?? visibility]} read it from now on. Comments stay attached to the version they were written against.`,
+      footnote: dirty
+        ? `Your unsaved edits are discarded by this, and they are not part of version ${version.version} so they will not go live either. Save them as a new version first if you want to keep them.`
+        : undefined,
+      confirmLabel: "Publish it",
+    });
+    if (!ok) return;
     const token = claim();
     const target = slug;
     setPromoting(true);
@@ -1184,15 +1182,16 @@ function KnowledgeBaseManager() {
 
   async function onDeleteSection(target: SectionRow) {
     const inside = articles.filter((a) => a.section === target.slug).length;
-    if (
-      !window.confirm(
-        inside
-          ? `Delete the section "${target.title}"? The ${inside} entr${inside === 1 ? "y" : "ies"} in it are kept, and drop to the "Everything else" group at the bottom of the sidebar until you file them somewhere.`
-          : `Delete the section "${target.title}"?`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete the section "${target.title}"?`,
+      description: inside
+        ? `The ${inside} entr${inside === 1 ? "y" : "ies"} in it are kept, and drop to the "Everything else" group at the bottom of the sidebar until you file them somewhere.`
+        : "It is empty, so nothing members read changes.",
+      footnote: "The section itself goes for good.",
+      confirmLabel: "Delete section",
+      destructive: true,
+    });
+    if (!ok) return;
     const token = claim();
     setBusy(true);
     try {
@@ -1283,7 +1282,7 @@ function KnowledgeBaseManager() {
             type="button"
             variant="outline"
             disabled={saving || promoting || busy || ordering}
-            onClick={() => startNew("article")}
+            onClick={() => void startNew("article")}
           >
             <Plus className="mr-1.5 h-4 w-4" />
             New article
@@ -1296,7 +1295,7 @@ function KnowledgeBaseManager() {
             type="button"
             variant="outline"
             disabled={saving || promoting || busy || ordering}
-            onClick={() => startNew("link")}
+            onClick={() => void startNew("link")}
           >
             <Link2 className="mr-1.5 h-4 w-4" />
             New link
@@ -1369,7 +1368,7 @@ function KnowledgeBaseManager() {
                         sectionCount={groups.filter((g) => g.slug !== "").length}
                         onOpen={() => {
                           const row = sections.find((s) => s.slug === group.slug);
-                          if (row) openSection(row);
+                          if (row) void openSection(row);
                         }}
                       >
                         {group.entries.map((entry, entryIndex) => (
@@ -1563,20 +1562,22 @@ function KnowledgeBaseManager() {
                       variant="outline"
                       size="sm"
                       disabled={saving || busy}
+                      // No confirm: this only swaps what the editor is
+                      // showing. Nothing members read changes until a save, and
+                      // leaving without saving puts the link back.
                       onClick={() => {
-                        if (
-                          !window.confirm(
-                            "Turn this link into an article? It keeps its place in the reading order, and you write its text here. The link is only replaced when you save.",
-                          )
-                        ) {
-                          return;
-                        }
                         setKind("article");
                         setLinkPath("");
                       }}
                     >
                       Turn this into an article
                     </Button>
+                  )}
+                  {stored?.link_path && (
+                    <p className="text-xs text-muted-foreground">
+                      It keeps its place in the reading order, and you write its text here. The link
+                      is only replaced when you save.
+                    </p>
                   )}
                 </div>
               ) : (
@@ -1950,6 +1951,7 @@ function KnowledgeBaseManager() {
           )}
         </div>
       </div>
+      {confirmDialog}
     </section>
   );
 }

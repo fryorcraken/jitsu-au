@@ -21,6 +21,7 @@ import { formatDate } from "@/lib/dates";
 import { groupThreads, resolveAnchors, splitBlocks } from "@/lib/kb";
 import type { AnnotationVisibility } from "@/lib/kb";
 import { extractHeadings, type KbHeading } from "@/lib/kb-nav";
+import { useConfirm } from "@/hooks/use-confirm";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 
 /** One annotation, exactly as `listAnnotations` returns it. */
@@ -531,6 +532,7 @@ function AnnotationCard({
   // the card, so reopening the editor later showed stale text.
   const [draft, setDraft] = useState(annotation.body);
   const [draftFor, setDraftFor] = useState(annotation.body);
+  const { confirm, confirmDialog } = useConfirm();
   if (draftFor !== annotation.body && !editing) {
     setDraftFor(annotation.body);
     setDraft(annotation.body);
@@ -613,13 +615,26 @@ function AnnotationCard({
             <button
               type="button"
               disabled={busy}
-              onClick={() => {
+              onClick={async () => {
                 // Replies cascade with their root, so a thread's author deleting
-                // it takes the conversation. Ask first.
-                const warning = annotation.parent_id
-                  ? "Delete this reply?"
-                  : "Delete this comment and any replies to it?";
-                if (window.confirm(warning)) void onDelete(annotation.id);
+                // it takes the conversation with it. Nothing brings either back.
+                const ok = await confirm(
+                  annotation.parent_id
+                    ? {
+                        title: "Delete this reply?",
+                        description: "It comes off the thread for everyone who can see it.",
+                        confirmLabel: "Delete reply",
+                        destructive: true,
+                      }
+                    : {
+                        title: "Delete this comment?",
+                        description:
+                          "Any replies to it go too, for everyone who can see them. There is no way to get the thread back.",
+                        confirmLabel: "Delete comment",
+                        destructive: true,
+                      },
+                );
+                if (ok) void onDelete(annotation.id);
               }}
               className="flex items-center gap-1 hover:text-foreground"
             >
@@ -640,6 +655,7 @@ function AnnotationCard({
           )}
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

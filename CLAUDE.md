@@ -35,27 +35,26 @@ requests, the CI logs, and the screenshot artifacts.
   or `authenticated`.
 - **Fixture data must stay synthetic** — `@example.com`, `0400 000 xxx`. It is
   published in the seed script and photographed into screenshot artifacts.
-- CI is designed to hold exactly one production credential (`SUPABASE_DB_URL`,
-  used only by `migration-drift.yml`), as a GitHub secret, and that workflow
-  deliberately never runs on `pull_request`; keep it that way. Forks get no
-  secrets. **But the secret is not actually configured today**, so nothing is
-  currently at risk of leaking there — and equally, **the workflow checked
-  nothing from the repo's first day until 2026-08-21**: every run logged
-  `SUPABASE_DB_URL:` empty and passed anyway. Since then both steps **fail**
-  when the secret is missing, so Migration drift is expected to be **red** until
-  somebody adds it (Settings → Secrets and variables → Actions; the
-  least-privilege role to create is in `supabase/lint/README.md`). A red tick
-  there means "not armed", a green one now means the live database was really
-  asked. Do not soften those guards back to a pass to get the tick green — the
-  quiet green is the bug that hid this for months.
-  - Both checks were run **by hand on 2026-08-20**, against the live database
-    through Lovable's SQL access rather than the workflow, and both came back
-    clean: **18 client grants live, 18 expected, 0 unexpected**, and every
-    migration in the repo present in the live ledger. So
-    `supabase/lint/client-grants-expected.txt` is, as of that date, verified
-    against production and not just against the migration files. It goes stale
-    the moment anyone changes a grant by hand, which is exactly what the
-    workflow is for — the by-hand run is a snapshot, not a substitute.
+- **CI holds no production credential at all, and cannot.** It never reaches
+  the live database: Lovable Cloud keeps the Supabase password and connection
+  string out of the project UI, and the database is IPv6-only while
+  GitHub-hosted runners are IPv4-only. So there is nothing here for a leak to
+  expose, and equally no CI job can tell you anything about production. Forks
+  get no secrets either. There was a `migration-drift.yml` workflow until
+  2026-08-22 that pretended otherwise: it needed a `SUPABASE_DB_URL` secret that
+  can never exist, so from the repo's first day it passed while checking
+  nothing. Do not add it, or anything like it, back without first establishing
+  that a reachable credential exists — `supabase/lint/README.md` has the full
+  finding and the security constraint that would still apply.
+  - The two live checks survive as **scripts you run by hand** through Lovable's
+    SQL access (`supabase/lint/README.md` has the queries). Last run
+    **2026-08-22**: **68 migration files, 0 unapplied**, and **18 client grants
+    live, 18 expected, 0 unexpected**. So
+    `supabase/lint/client-grants-expected.txt` is verified against production as
+    of that date, not just against the migration files. It goes stale the moment
+    anyone changes a grant by hand in the Lovable UI, which produces no commit
+    and no signal — so re-run them after applying a migration and before a
+    release. Nothing does it for you.
   - The live ledger also carries one row with no file here
     (`20260722131544_3de60949-…`, recorded as version `20260722131547`). Its SQL
     is byte-identical to `20260722000000_memberships.sql`, so it is the
@@ -537,14 +536,13 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     A fork's pull request gets a read-only token whatever the workflow asks for,
     so it neither publishes nor comments: its gallery is the artifact on the
     run's own page.
-- **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
-  migration file against the **live** ledger, and the grants `anon` /
-  `authenticated` actually hold against `supabase/lint/client-grants-expected.txt`.
-  Not on PRs — it holds a production credential (see "Schema drift" in
-  `docs/database-changes.md`). Both steps fail if `SUPABASE_DB_URL` is unset, so
-  the job is red until the secret exists; `scripts/migration-drift-workflow.test.ts`
-  pins that, and pins the credential out of every `pull_request`-triggered
-  workflow. Only the checkers' `--selftest` runs on PRs, from `ci.yml`.
+- **Migration drift and client grants: no CI job.** Both compare the **live**
+  database against the repo (every migration applied; the grants `anon` /
+  `authenticated` hold matching `supabase/lint/client-grants-expected.txt`), and
+  neither can run in CI on this project — see the bullet under "This repository
+  is going public" above, and `supabase/lint/README.md` for the queries to run
+  them by hand. `ci.yml` runs both checkers' `--selftest`, which is the only
+  automated thing standing behind them.
 - **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
   `supabase/**`) starts a local Postgres, applies every migration to it (which
   is not the live database, see `docs/database-changes.md`), and runs the
@@ -947,10 +945,13 @@ Then hold the change to this:
   option if you want a safety net — a modal gate on it only slows down the 99%
   of clicks that were correct. Save the hard stop for actions that are both
   irreversible and consequential, like the waiver-approval example above, and
-  build that stop as the app's own `AlertDialog` (see `manager.blog.tsx`'s
-  delete confirmation), never the browser's `window.confirm()`. Confirming
-  everything trains people to click through without reading, which is exactly
-  what makes the one confirm that matters stop working.
+  ask it through **`useConfirm`** (`src/hooks/use-confirm.tsx`), the app's own
+  `AlertDialog` asked as `await confirm({ ... })`, never the browser's
+  `window.confirm()`. Confirming everything trains people to click through
+  without reading, which is exactly what makes the one confirm that matters
+  stop working. One thing that IS worth a hard stop despite looking reversible:
+  a click that throws away text somebody typed and has not saved
+  (`discardUnsavedChanges`, in the same file). No second click brings that back.
 - **Mobile first.** Most of this club's traffic is phones. Check at ~375px wide,
   keep tap targets thumb-sized, and never hide something behind hover alone.
 - **Accessibility is part of "done", not a follow-up.** Real `<button>` and `<a>`

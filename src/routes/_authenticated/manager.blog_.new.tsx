@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { BlogPostEditor, type BlogPostEditorValue } from "@/components/site/BlogPostEditor";
 import { createBlogPost } from "@/lib/blog.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 
 export const Route = createFileRoute("/_authenticated/manager/blog_/new")({
   head: () => ({
@@ -21,13 +22,14 @@ function NewBlogPostPage() {
   const create = useServerFn(createBlogPost);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  function goBack() {
-    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+  async function goBack() {
+    if (dirty && !(await confirm(discardUnsavedChanges("Going back")))) return;
     navigate({ to: "/manager/blog" });
   }
 
@@ -74,11 +76,12 @@ function NewBlogPostPage() {
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-black">New post</h1>
-        <Button variant="outline" onClick={goBack}>
+        <Button variant="outline" onClick={() => void goBack()}>
           Back to posts
         </Button>
       </div>
       <BlogPostEditor initial={initial} saving={saving} onSave={onSave} onDirtyChange={setDirty} />
+      {confirmDialog}
     </section>
   );
 }

@@ -9,6 +9,7 @@ import { describeLoadError } from "@/lib/load-error";
 import { BlogPostEditor, type BlogPostEditorValue } from "@/components/site/BlogPostEditor";
 import { getBlogPostForEdit, updateBlogPost } from "@/lib/blog.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 
 export const Route = createFileRoute("/_authenticated/manager/blog_/$id")({
   head: () => ({
@@ -32,6 +33,7 @@ function EditBlogPostPage() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const { confirm, confirmDialog } = useConfirm();
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -57,8 +59,8 @@ function EditBlogPostPage() {
     void load();
   }, [isManager, load]);
 
-  function goBack() {
-    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+  async function goBack() {
+    if (dirty && !(await confirm(discardUnsavedChanges("Going back")))) return;
     navigate({ to: "/manager/blog" });
   }
 
@@ -137,7 +139,7 @@ function EditBlogPostPage() {
           hint="It has not been changed or deleted, so there is nothing to rewrite."
           onRetry={() => void load()}
         />
-        <Button variant="outline" onClick={goBack}>
+        <Button variant="outline" onClick={() => void goBack()}>
           Back to posts
         </Button>
       </section>
@@ -149,7 +151,7 @@ function EditBlogPostPage() {
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-black">Edit post</h1>
-        <Button variant="outline" onClick={goBack}>
+        <Button variant="outline" onClick={() => void goBack()}>
           Back to posts
         </Button>
       </div>
@@ -160,6 +162,7 @@ function EditBlogPostPage() {
         onSave={onSave}
         onDirtyChange={setDirty}
       />
+      {confirmDialog}
     </section>
   );
 }
