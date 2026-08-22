@@ -391,13 +391,19 @@ export const clientSubmissionId = z.string().uuid().optional().or(z.literal(""))
  * has no reason to invent a field it cannot see, so it omits `hp` entirely —
  * and while this was `.optional()`, omitting it was a clean pass through the
  * trap. That is the exact shape of request the honeypot exists to catch, and
- * it was the only one getting through. Requiring the field means the lazy
- * script fails validation and only a bot that fills the form in faithfully
- * reaches a handler, which is what the `if (data.hp)` early-returns are for.
+ * it was the only one getting through.
+ *
+ * So both a filled `hp` and an absent one are refused here, at the validator.
+ * The `if (data.hp)` early-returns in the seven handlers are therefore
+ * unreachable: `.max(0)` has already thrown by the time a handler runs. They
+ * are left in place as the net if this ever loosens, not because they fire.
  *
  * Nothing about the browser's side changes: `""` still passes, and every call
  * site already sends it. Keep it that way — a new form that forgets `hp` is a
- * form that cannot be submitted at all.
+ * form that cannot be submitted at all. `honeypot.test.ts` reads the route
+ * files and holds the other half of the bargain: that the decoy each form
+ * renders is one something filling in a form would actually fill, and that its
+ * value reaches the payload instead of a hardcoded `""`.
  */
 export const honeypot = z.string().max(0);
 

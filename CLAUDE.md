@@ -204,13 +204,21 @@ Read `src/routes/README.md` before touching routes. Key points:
   top-level `import` `client.server.ts` (service-role key) from them. Instead
   lazy-load inside the handler:
   `const { supabaseAdmin } = await import("@/integrations/supabase/client.server")`.
-- Forms include a honeypot field `hp` (a hidden input that must stay empty).
-  The schema for it is `honeypot` in `src/lib/validation.ts` and it is
-  **required**, not optional: a browser always sends `""` because the form
-  carries the input, so a request that omits the field never came from the
-  form and fails validation outright. Handlers early-return a fake success on
-  a _filled_ `hp`. Every form that writes must send `hp` or it cannot submit at
-  all.
+- Forms include a honeypot field `hp`, a decoy input a person never sees and
+  that must therefore arrive empty. Its schema is `honeypot` in
+  `src/lib/validation.ts` (`z.string().max(0)`), spelled once and used by all
+  seven write paths, and it is **required**: a browser always sends `""`
+  because the form carries the input, so a request that omits the field never
+  came from a form, and both that and a _filled_ `hp` fail validation. The
+  `if (data.hp)` early-returns in the handlers are therefore unreachable today
+  and stay only as a net if the schema is ever loosened. Two rules keep the
+  trap working, and both were broken in places before 2026-08-21:
+  - **Every form that writes must send `hp`**, or it cannot submit at all.
+  - **The input has to be one a form-filler would actually fill**: a
+    `type="text"` field hidden with `className="hidden"` and kept out of the
+    tab order with `tabIndex={-1}`, whose value is read into the payload. A
+    `type="hidden"` input, or a payload that hardcodes `hp: ""`, is a honeypot
+    that can never catch anything. `register-interest.tsx` is the pattern.
 
 ## Supabase clients — pick the right one
 

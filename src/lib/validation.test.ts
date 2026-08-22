@@ -1747,9 +1747,9 @@ describe("codeOfConductAcceptSchema", () => {
     // handler at all. An agreement from somebody who did not agree is not
     // evidence of anything.
     expect(codeOfConductAcceptSchema.safeParse({ ...valid, agree: false }).success).toBe(false);
-    expect(codeOfConductAcceptSchema.safeParse({ signature_name: "Ada", version: 1 }).success).toBe(
-      false,
-    );
+    expect(
+      codeOfConductAcceptSchema.safeParse({ signature_name: "Ada", version: 1, hp: "" }).success,
+    ).toBe(false);
   });
 
   it("requires a signature", () => {
@@ -1760,7 +1760,7 @@ describe("codeOfConductAcceptSchema", () => {
 
   it("requires the version that was read", () => {
     expect(
-      codeOfConductAcceptSchema.safeParse({ agree: true, signature_name: "Ada" }).success,
+      codeOfConductAcceptSchema.safeParse({ agree: true, signature_name: "Ada", hp: "" }).success,
     ).toBe(false);
     expect(codeOfConductAcceptSchema.safeParse({ ...valid, version: 0 }).success).toBe(false);
   });
