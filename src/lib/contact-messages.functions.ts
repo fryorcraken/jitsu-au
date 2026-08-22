@@ -123,23 +123,40 @@ export const markContactMessagesSeen = createServerFn({ method: "POST" })
  * dashboard count simply drops by one, which is the honest reading: nobody is
  * waiting on it any more.
  */
+/** Thrown when the filter matched nothing, so the caller cannot report a delete. */
+export const MESSAGE_ALREADY_GONE = "That message has already been deleted.";
+
+/**
+ * Delete one message by id, and refuse to claim a delete that did not happen.
+ *
+ * Exported for its own test, the same reason `deleteLeadRegistrations` is: the
+ * `createServerFn` wrapper below cannot be reached from the unit runner, and
+ * the guard here is the whole of what makes this safe to put behind a button.
+ */
+export async function deleteContactMessageRow(
+  admin: AdminClient,
+  id: string,
+): Promise<{ id: string }> {
+  // `select()` so the delete reports what it actually matched. PostgREST
+  // returns no error for a filter that hit nothing, and telling a manager a
+  // message is deleted when it was never there is the wrong way round on a
+  // screen whose whole job is not giving false reassurance.
+  const { data: gone, error } = await admin
+    .from("contact_messages")
+    .delete()
+    .eq("id", id)
+    .select("id");
+  if (error) throw new Error(error.message);
+  if (!gone || gone.length === 0) throw new Error(MESSAGE_ALREADY_GONE);
+  return { id };
+}
+
 export const deleteContactMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => deleteContactMessageSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
-    const admin = await adminClient();
-    // `select()` so the delete reports what it actually matched. PostgREST
-    // returns no error for a filter that hit nothing, and telling a manager a
-    // message is deleted when it was never there is the wrong way round on a
-    // screen whose whole job is not giving false reassurance.
-    const { data: gone, error } = await admin
-      .from("contact_messages")
-      .delete()
-      .eq("id", data.id)
-      .select("id");
-    if (error) throw new Error(error.message);
-    if (!gone || gone.length === 0) throw new Error("That message has already been deleted.");
+    await deleteContactMessageRow(await adminClient(), data.id);
     return { ok: true as const, id: data.id };
   });
 
