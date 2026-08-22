@@ -31,6 +31,16 @@ Both are **variable** fonts with a `wght` axis running 200 to 1000, so one file
 per subset covers every weight the site uses. Google's own CSS gives the game
 away here: it returns the same URL for 400, 600, 700 and 900.
 
+Each subset is declared **four times**, once per weight, rather than once with
+`font-weight: 200 1000`. That looks like duplication and is not. Google served
+those four weights and no others, so `font-weight: 500` has always matched the
+400 face, CSS picking the nearest declared weight. Declare the axis as a range
+and the browser renders a real 500 instead, which is heavier, and `font-medium`
+is used on hundreds of elements around the site. The public pages come out
+pixel-identical to the Google-hosted build with four declarations and visibly
+different with a range, so the four stay until somebody decides, on purpose,
+that the site wants more weights. `src/lib/fonts.test.ts` pins this.
+
 The `@font-face` rules are at the top of `src/styles.css`, with the
 `unicode-range` for each subset. The ranges matter: the browser fetches
 `latin-ext` only for a page that actually contains an accented character, which
@@ -70,7 +80,8 @@ otherwise, so this is not routine maintenance.
    `@font-face` rules in `src/styles.css`. They change between font versions,
    and a stale range means a character silently renders in the fallback font.
 
-5. Check the weight axis still covers what the site asks for:
+5. Check the weight axis still covers the four weights declared above (a
+   narrower axis would silently snap them together):
 
    ```
    python3 -c "from fontTools.ttLib import TTFont; f=TTFont('public/fonts/nunito-sans-latin.woff2'); print([(a.axisTag, a.minValue, a.maxValue) for a in f['fvar'].axes])"

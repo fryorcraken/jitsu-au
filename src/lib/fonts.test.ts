@@ -51,6 +51,32 @@ describe("the typeface is self-hosted", () => {
     }
   });
 
+  it("declares the four weights Google served, not the file's whole axis", () => {
+    // The files are variable and would happily render a 500. Google's
+    // stylesheet declared 400/600/700/900 only, so `font-weight: 500` has
+    // always matched the 400 face, and `font-medium` is used on hundreds of
+    // elements. Widening these to a range re-weights all of them, which is a
+    // design change wearing the clothes of a hosting change.
+    const css = readFileSync(join(root, "src/styles.css"), "utf8");
+    const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]);
+
+    // Per subset, not across all of them: dropping 900 from latin while
+    // latin-ext still declares it would leave the overall set looking right,
+    // and headings would quietly render at 700 for anyone reading English.
+    const byFile: Record<string, string[]> = {};
+    for (const face of faces) {
+      const src = face.match(/url\("([^"]+)"\)/)?.[1];
+      const weight = face.match(/font-weight:\s*([^;]+);/)?.[1].trim();
+      expect(src, "a @font-face with no src").toBeTruthy();
+      (byFile[src!] ??= []).push(weight!);
+    }
+
+    expect(Object.keys(byFile).length).toBeGreaterThan(0);
+    for (const [file, weights] of Object.entries(byFile)) {
+      expect(weights.slice().sort(), file).toEqual(["400", "600", "700", "900"]);
+    }
+  });
+
   it("keeps a real fallback stack, so a failed fetch is not invisible text", () => {
     const css = readFileSync(join(root, "src/styles.css"), "utf8");
     for (const token of ["--font-sans:", "--font-display:"]) {
