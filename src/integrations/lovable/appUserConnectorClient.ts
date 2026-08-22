@@ -33,7 +33,7 @@ export async function connectAppUser(opts: {
     return {
       success: false,
       connectorId,
-      error: e instanceof Error ? e.message : "Failed to start OAuth",
+      error: e instanceof Error ? e.message : "Could not start the connection. Try again.",
     };
   }
   popup.location.href = authorizationUrl;

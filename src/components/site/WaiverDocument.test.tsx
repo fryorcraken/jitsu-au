@@ -264,7 +264,7 @@ describe("WaiverDocument", () => {
 
   it("shows the draft watermark and hides the signed footer when draft", () => {
     render(<WaiverDocument {...base} draft />);
-    expect(screen.getByText(/Draft — not signed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Draft, not signed/i)).toBeInTheDocument();
     expect(screen.getByText("Draft preview")).toBeInTheDocument();
     expect(screen.queryByText(/Electronically signed on/)).not.toBeInTheDocument();
   });
@@ -272,7 +272,7 @@ describe("WaiverDocument", () => {
   it("shows the signed footer when not a draft", () => {
     render(<WaiverDocument {...base} />);
     expect(screen.getByText(/Electronically signed on/)).toBeInTheDocument();
-    expect(screen.queryByText(/Draft — not signed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Draft, not signed/i)).not.toBeInTheDocument();
   });
 
   it("renders the guardian block only for minors", () => {

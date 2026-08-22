@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ClubAccountDetails } from "@/components/site/ClubAccountDetails";
 import { getClubSettings, saveClubSettings } from "@/lib/membership.functions";
 import { invoiceMarkdownComponents } from "@/lib/invoice-markdown";
+import { describeLoadError } from "@/lib/load-error";
 import { clubPaymentDetailsSchema, formatBsb } from "@/lib/validation";
 import type { ClubPaymentDetails } from "@/lib/validation";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -108,7 +109,7 @@ function SettingsPage() {
         // unpublished one; swallowing that here would put the empty form back on
         // screen and hand a manager the overwrite it was protecting them from.
         setLoadFailed(true);
-        toast.error(e instanceof Error ? e.message : "Failed to load settings");
+        toast.error(describeLoadError(e, "Could not load the club's settings"));
       })
       .finally(() => setLoading(false));
   }, [isManager, fetchSettings]);

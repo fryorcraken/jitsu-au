@@ -212,7 +212,7 @@ export function WaiverDocument(props: WaiverDocumentProps) {
           className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden"
         >
           <span className="-rotate-[30deg] select-none whitespace-nowrap text-4xl font-black uppercase tracking-widest text-slate-200/70 sm:text-5xl">
-            Draft — not signed
+            Draft, not signed
           </span>
         </div>
       ) : null}
