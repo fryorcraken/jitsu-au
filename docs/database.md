@@ -753,17 +753,30 @@ can't send an auth header. There is **no public/anon feed** — a personal feed
 carries members-only events only while that person is a paid member, so a
 subscriber never silently misses one.
 
-`token` exists because `/calendar` shows the member their link on every visit
-rather than once at creation (`20260728180000`), and a hash cannot be reversed.
-The hash column stays and is still what the feed route looks up. Rows minted
-before that migration have `token IS NULL`; the server re-mints those in place
-the next time their owner opens the page, which retires the old URL.
+`token` exists because `/calendar` and `/account` show the member their link on
+every visit rather than once at creation (`20260728180000`), and a hash cannot be
+reversed. The hash column stays and is still what the feed route looks up. Rows
+minted before that migration have `token IS NULL`; the server re-mints those in
+place the next time their owner opens the page, which retires the old URL.
 
-**RLS:** a person reads their own token row; minting and feed lookup run through
-the service role; `authenticated` gets SELECT only, so a client cannot clear its
-own `revoked_at`. The owner's row now carries the live token, which is what the
-page shows them anyway. There is no member-facing rotate or revoke: the link is
-permanent, the way a private ICS address is in any calendar app.
+`revoked_at` is what **replacing a link** writes. A member pressing "Replace
+link" retires their live row (`revoked_at = now()`, and `token` set back to
+NULL, since a row that is nobody's live link has no reason to keep the raw
+secret) and inserts a fresh one, which is why the one-live-per-person partial
+index is on `revoked_at IS NULL`. The old row is kept rather than deleted so its
+`token_hash` still resolves: the feed route looks a token up **without** filtering
+on `revoked_at` and answers a revoked one with **410 Gone** and a sentence saying
+it was replaced, instead of the 404 that would read as a typo. That branch is
+`feedTokenVerdict` in `src/lib/calendar-feed-token.ts`. No schema change was
+needed for any of this, and nothing else in the app ever sets `revoked_at`:
+nothing expires a link, and a manager cannot replace somebody else's. See
+`docs/calendar.md`.
+
+**RLS:** a person reads their own token row; minting, replacing and feed lookup
+all run through the service role; `authenticated` gets SELECT only, so a client
+cannot clear its own `revoked_at` and resurrect a link it just replaced. The
+owner's live row carries the raw token, which is what the page shows them
+anyway.
 
 ---
 

@@ -204,9 +204,14 @@ export const setRsvp = createServerFn({ method: "POST" })
 
 // ---- Member: personal ICS feed link ----
 // One link per person, minted on first ask and shown every time afterwards, so
-// the raw token is stored (see 20260728180000). There is no rotate or turn-off:
-// the link is a permanent, private subscription address like any other calendar
-// app's. The hash is still written and is what the feed route looks up.
+// the raw token is stored (see 20260728180000). The hash is still written and is
+// what the feed route looks up.
+//
+// The link is permanent until its owner asks for a new one. Nothing expires it
+// and nothing else retires it, because the only thing a member notices when a
+// calendar link stops working is that they stopped hearing about training. The
+// one exception is replaceMyCalendarFeedUrl below, which exists precisely so
+// that breaking the old link is something a person chose.
 //
 // POST rather than GET because the first call for a person writes their row.
 export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
@@ -257,6 +262,55 @@ export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
       throw new Error(insertError.message);
     }
     return feedUrl(raw);
+  });
+
+/**
+ * Replace the caller's calendar link: retire the one they have and mint a new
+ * one, returning the new URL.
+ *
+ * The token cannot leave the URL path, so this is the only way a leaked link is
+ * ever made harmless, and it is deliberately the member's own call to make.
+ * A manager cannot do it for somebody: it silently stops that person's calendar
+ * updating, and they are the one who has to re-subscribe, so the club asks them
+ * instead. See docs/calendar.md.
+ *
+ * The old row is kept, revoked rather than deleted, so the old address can tell
+ * whoever opens it that it was replaced instead of reading as a typo. Its raw
+ * token is cleared on the way past: the column only exists so the page can show
+ * a member their live link, and a row that is no longer anyone's live link has
+ * no reason to keep the secret. The hash stays, and is what the feed matches on.
+ */
+export const replaceMyCalendarFeedUrl = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const admin = await adminClient();
+    const origin = await requestOrigin();
+
+    // Retire first: calendar_feed_tokens_one_live_idx allows one live row per
+    // person, so inserting before revoking would just collide.
+    const { error: revokeError } = await admin
+      .from("calendar_feed_tokens")
+      .update({ revoked_at: new Date().toISOString(), token: null })
+      .eq("user_id", context.userId)
+      .is("revoked_at", null);
+    if (revokeError) throw new Error(revokeError.message);
+
+    const raw = generateRawToken();
+    const { error: insertError } = await admin.from("calendar_feed_tokens").insert({
+      user_id: context.userId,
+      token: raw,
+      token_hash: await hashToken(raw),
+      token_prefix: tokenPreview(raw),
+    });
+    // Deliberately not swallowed the way the mint path's race is. There, losing
+    // the race means someone else already made you a link; here it would mean
+    // the old link is revoked and no new one exists, and the member has to be
+    // told so they reload rather than walking off with a dead address. That
+    // state heals itself: getMyCalendarFeedUrl mints a link for anyone with no
+    // live row, so the next page load hands them a working one.
+    if (insertError) throw new Error(insertError.message);
+
+    return { url: `${origin}/api/calendar/${raw}` };
   });
 
 // ================= Manager =================
