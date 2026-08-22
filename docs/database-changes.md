@@ -58,9 +58,11 @@ it before writing a migration that touches grants. Three things bite repeatedly:
   reachable paths the moment one does, bypassing rules that only live in the
   server functions.
 
-`supabase/lint/client-grants-expected.txt` pins the allowed set and
-`.github/workflows/migration-drift.yml` checks it against the live ACL. When you
-add a table or a grant, update that file in the same change or the check fails.
+`supabase/lint/client-grants-expected.txt` pins the allowed set, and
+`supabase/lint/check-client-grants.py` compares it against the live ACL when
+somebody runs it — there is no CI job, see `supabase/lint/README.md`. When you
+add a table or a grant, update that file in the same change, and run the check
+after the migration goes live.
 Read the live ACL from **`pg_class.relacl`**, never
 `information_schema.role_table_grants`: the information_schema views only show
 grants the connecting role is party to (a least-privilege reader sees an empty
@@ -130,21 +132,17 @@ way) means updating the PR and asking again.
 
 **How drift gets caught now** (both are backstops, not substitutes for the rule):
 
-- `supabase/lint/check-migration-drift.py`, run by
-  `.github/workflows/migration-drift.yml` on pushes to `main`, on a daily
-  schedule, and on demand. It compares `supabase/migrations/*.sql` against the
-  live ledger and fails when a file has no matching row. Contract-phase
-  migrations that must land _after_ a deploy go in
-  `supabase/lint/migration-drift-allowlist.txt` with a note.
-  - It **does not run on pull requests, by design** — it holds a production
-    credential, and a same-repo PR branch (how Lovable and every agent push
-    here) would receive that secret while running a script the PR itself can
-    edit. So drift surfaces a merge later, not in the PR. Only the checker's
-    `--selftest` runs on PRs, from `ci.yml`.
-  - Without the `SUPABASE_DB_URL` secret it **fails**, so a green tick always
-    means the live database was actually asked. The secret is not configured
-    yet, so expect this job to be red until somebody adds it; the run summary
-    says whether the failure is a missing secret or real drift.
+- `supabase/lint/check-migration-drift.py`, which compares
+  `supabase/migrations/*.sql` against the live ledger and fails when a file has
+  no matching row. Contract-phase migrations that must land _after_ a deploy go
+  in `supabase/lint/migration-drift-allowlist.txt` with a note.
+  - **Nothing runs it for you.** There is no workflow: CI cannot reach the live
+    database on this project (Lovable Cloud does not expose the credential, and
+    the database is IPv6-only against IPv4-only runners), so this is a script
+    somebody runs through Lovable's SQL access. `supabase/lint/README.md` has
+    the query and the full finding. Only the checker's `--selftest` runs in CI.
+  - Because it is manual, **the rule above is the guard, not this**. Run it
+    after applying a migration, and before a release.
   - It proves a **ledger row exists**, not that the SQL ran. Since step 4 above
     writes that row by hand, a recorded-but-unapplied migration still passes.
     Step 5 (verify the object exists) is the part only a human/agent can do.
