@@ -1203,17 +1203,23 @@ than by a runbook step someone has to remember:
 - **The secret is minted by the migration itself**, with
   `vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'),
   'notification_digest_key')`, guarded so it only runs once (an existing secret
-  is left alone). The guard distinguishes two different reasons the call might
-  not be possible, and treats them oppositely: Vault genuinely absent (`to_
-  regclass('vault.secrets') IS NULL`, this repo's own CI — a local Postgres
-  with no Vault) is a safe `RAISE NOTICE` and skip, the same defensive pattern
-  `20260807000000` already uses for `net.http_post`; Vault present but without
-  the `create_secret(text,text,text)` overload this call assumes is NOT safe to
-  skip, and `RAISE EXCEPTION`s instead, naming what it actually found — a
-  silent skip there would report success while minting nothing, exactly the
-  failure this whole migration exists to eliminate. A closing assertion checks,
-  whichever branch ran, that `vault.secrets` now actually holds the row when
-  Vault is present at all. Nobody ever sees, types, or copies the value.
+  is left alone). Vault genuinely absent (`to_regclass('vault.secrets') IS
+  NULL` — no Postgres this repo currently runs anywhere, but a bare, non-
+  Supabase Postgres in principle) is a safe `RAISE NOTICE` and skip. Otherwise
+  the call is made directly, with no signature pre-check: an earlier draft
+  guessed `create_secret` took 3 arguments and pre-checked exactly that
+  signature with `to_regprocedure`, which returned NULL against this project's
+  actual Vault (a 4-argument `(secret, name, description, key_id)` function
+  with defaults on the last three) — `to_regprocedure` matches the DECLARED
+  signature, not what is callable given defaults, so that check would have
+  silently skipped minting on **both CI and the live database**, reporting
+  success while doing nothing. Letting the call itself resolve avoids
+  hardcoding a signature that is not stable across Vault releases: if Vault
+  can resolve a 2-argument call under any overload it runs, and if it genuinely
+  cannot, Postgres raises on its own, loudly, at apply time. A closing
+  assertion checks, whichever branch ran, that `vault.secrets` now actually
+  holds the row when Vault is present at all. Nobody ever sees, types, or
+  copies the value.
 
 **`public.notification_digest_key() → text`** is the other new piece: a
 `SECURITY DEFINER` lookup into `vault.decrypted_secrets`, same shape as

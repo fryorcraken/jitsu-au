@@ -101,51 +101,45 @@ BEGIN
 END;
 $$;
 
--- Two DIFFERENT reasons `vault.create_secret` might be uncallable, and only
--- one of them is safe to shrug off:
+-- ⚠️ CI'S LOCAL POSTGRES HAS VAULT. Do not assume otherwise: an earlier draft
+-- of this block assumed the opposite (this repo's own CI "has no Vault"), and
+-- that was simply wrong. The `ghcr.io/supabase/postgres` image
+-- `.github/workflows/supabase-lint.yml` and `e2e.yml` both run has Vault
+-- installed, so `to_regclass('vault.secrets')` below is NOT NULL in CI and
+-- the mint branch genuinely executes there. The only Postgres this guards
+-- against is a bare, non-Supabase one that never installed Vault at all — a
+-- hypothetical this repo does not currently run anywhere, kept as a guard
+-- because it costs nothing and a bare `supabase db start`-alike could exist
+-- one day without it.
 --
---   * Vault is not installed at all — `vault.secrets` does not exist. That is
---     this repo's own CI (`supabase db start` / `supabase start` against a
---     throwaway local Postgres — see .github/workflows/supabase-lint.yml and
---     e2e.yml), which has no Vault and is expected never to. Skip and say so.
---   * Vault IS installed, but not with the `create_secret(text,text,text)`
---     3-arg (secret, name, description) overload this call assumes — a
---     version skew this project has not seen but a future Vault release
---     could introduce. This is NOT safe to skip: reporting success while
---     minting nothing is exactly the "a green migration means the code ran,
---     not that the work happened" failure this whole PR exists to fix. Raise
---     instead, naming every overload actually found, so applying this fails
---     loudly while a human is watching rather than leaving the digest looking
---     armed when `vault.secrets` never got a row.
+-- WHAT NOT TO DO: the first version of this call pre-checked one exact
+-- signature with `to_regprocedure('vault.create_secret(text,text,text)')`,
+-- guessing Vault's `create_secret` takes 3 arguments. It does not — the
+-- version this project's Postgres image ships takes FOUR,
+-- `(new_secret text, new_name text DEFAULT NULL, new_description text
+-- DEFAULT '', new_key_id uuid DEFAULT NULL)` — and `to_regprocedure` matches
+-- on the DECLARED signature, not on what is callable given defaults, so it
+-- returned NULL against a perfectly healthy Vault. That first version would
+-- have silently skipped minting on CI *and on the live database*, reporting
+-- success while doing nothing — precisely the failure this whole migration
+-- exists to eliminate, reintroduced by guessing an exact arity. An
+-- exact-signature pre-check is exactly the kind of thing a future Vault
+-- release breaks again the same way.
 --
--- `to_regclass`, not `to_regprocedure`, for the presence check: `vault.secrets`
--- is a TABLE, and to_regclass is the catalog lookup for relations (tables,
--- views, etc.), the counterpart to to_regprocedure for routines.
---
--- The `IF`/`ELSIF` branches are also why a Vault-less Postgres does not fail
--- this migration at all: PL/pgSQL only parses and plans the SQL inside a DO
--- block's branch the first time that branch actually executes, so
--- `vault.secrets` and `vault.create_secret` are never resolved when the guard
--- steers around them — the same lazy-compilation property the `net.http_post`
--- assertion block in 20260807000000 relies on.
+-- THE FIX: do not pre-check the signature at all. Just call the function
+-- with the two arguments this secret actually needs (`new_description` and
+-- `new_key_id` both default, and this secret needs neither). If Vault can
+-- resolve a `(text, text)` call under any overload, it runs. If it genuinely
+-- cannot, PostgreSQL raises on its own — loudly, by name, at apply time —
+-- which is the fail-loud behaviour this needs without hardcoding a signature
+-- that is not stable across Vault releases.
 DO $$
-DECLARE
-  found_in TEXT;
 BEGIN
   IF to_regclass('vault.secrets') IS NULL THEN
     RAISE NOTICE
-      'vault is not installed; skipping notification_digest_key creation (expected on a Postgres with no Vault, e.g. this repo''s own CI)';
+      'vault is not installed; skipping notification_digest_key creation (no vault.secrets relation found)';
   ELSIF EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'notification_digest_key') THEN
     RAISE NOTICE 'notification_digest_key already exists in Vault; leaving it as is';
-  ELSIF to_regprocedure('vault.create_secret(text,text,text)') IS NULL THEN
-    SELECT string_agg(DISTINCT n.nspname || '.' || p.proname
-                      || '(' || pg_get_function_arguments(p.oid) || ')', '; ')
-      INTO found_in
-      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE p.proname = 'create_secret';
-    RAISE EXCEPTION
-      'vault is installed but vault.create_secret(text,text,text) was not found (found: %). notification_digest_key was NOT created; update this migration before relying on it.',
-      COALESCE(found_in, 'nothing named create_secret');
   ELSE
     PERFORM vault.create_secret(
       encode(extensions.gen_random_bytes(32), 'hex'),
