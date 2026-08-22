@@ -144,7 +144,7 @@ jobs:
       - name: Upload the gallery
         id: artifact
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true
         with:
           name: e2e-gallery-${{ github.run_id }}
@@ -170,7 +170,7 @@ jobs:
       # everything and still uploads the gallery as an artifact.
       - name: Comment on the pull request
         if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         continue-on-error: true
         env:
           ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
