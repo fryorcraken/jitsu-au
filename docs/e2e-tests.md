@@ -125,10 +125,10 @@ actually gets done.
   above.
 - **`expectPageRendered` catches a page that rendered a failure boundary.** Both
   the router's error boundary and its 404 arrive inside an ordinary 200
-  response, so a status check alone would call a site-wide "This page didn't
-  load" a clean run. It does **not** catch a route that handles its own loader
-  error and renders a card in place of its content — assert on the content the
-  flow needs.
+  response (which is why both carry `data-page-state`), so a status check alone
+  would call a site-wide "This page didn't load" a clean run. It does **not**
+  catch a route that handles its own loader error and renders a card in place of
+  its content — assert on the content the flow needs.
 - **Import `test` from `../support/test`, not from `@playwright/test`, and use
   `step` instead of `test.step`.** That is what photographs the flow;
   `scripts/e2e-conventions.test.ts` fails the unit suite if a spec reaches past
@@ -173,6 +173,15 @@ pages nothing can derive) and the signed-in ones from the route files themselves
 (`scripts/site-pages.ts`), so a new manager screen is covered the moment its file
 exists. It runs as two projects, `tour` and `tour-mobile`, because a screen that
 breaks on a phone is a broken screen.
+
+A dynamic route (`$userId`) needs an id in the seed's manifest, and one that has
+none fails the run rather than leaving a gap nobody notices.
+`/update-password`, `/email-settings/$token` and `/blog/$slug` are deliberately
+not walked: each needs a token only its own email carries.
+
+What the gallery shows is **seeded fixture content** — `/blog`, `/pricing` and
+the calendar are the local club, not what is on `jitsu.au` today. That is the
+trade for a run that is identical on every branch and every fork.
 
 Walking the site is not read-only — `/notifications` marks the member's unread
 ones read, a manager inbox stamps its "seen" watermark — so `restoreSeenState`

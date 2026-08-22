@@ -104,6 +104,15 @@ system. (The contact form stores a message, not a person.)
    form filled in at the gym may not be approved until hours or days later.
    Approving late never costs anyone a session either way — a trial is a
    balance of credits and no date gates it at check-in (`docs/check-in.md`).
+
+   **Rule 6 is where what approval does is written down.** Six other places
+   lean on it and cite it rather than own it: `CLAUDE.md` (the `profiles`
+   bullet), `docs/database.md` (the schema it writes), `docs/notifications.md`
+   (the manager's confirm copy), `docs/knowledge-base.md` (why the waiver email
+   carries no knowledge base link), `docs/manager-agent-api.md` and
+   `.claude/skills/uts-manager-agent/SKILL.md` (`file_waiver` never approves).
+   Change this rule and re-read those six.
+
 7. **Full name is never stored**; it is composed from first/middle/last. The
    optional **preferred name** is stored separately (on the submission and, once
    approved, on the profile). One rule governs it everywhere: **address a person
