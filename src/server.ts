@@ -61,8 +61,16 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
-    const { pathname } = new URL(request.url);
+    // Parsed inside the guard, not above it. Before the security headers this
+    // function never touched the URL, so the try covered everything it did; a
+    // `new URL()` hoisted out would be the one fallible call that could throw
+    // past it, and the reply to that is whatever bare error the runtime makes,
+    // with none of the headers this file exists to guarantee. `new URL()` is
+    // hard to make throw on a real request, which is the argument for keeping
+    // it cheap to be right rather than for assuming it cannot.
+    let pathname = "/";
     try {
+      pathname = new URL(request.url).pathname;
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response, pathname);

@@ -91,6 +91,42 @@ describe("applySecurityHeaders", () => {
   });
 });
 
+describe("applySecurityHeaders, when setting a header throws", () => {
+  /** A response whose `headers.set` throws whatever it is given. */
+  function throwingResponse(error: unknown): Response {
+    const headers = {
+      set() {
+        throw error;
+      },
+      has: () => false,
+      get: () => null,
+      forEach: () => {},
+      [Symbol.iterator]: function* () {},
+    };
+    return {
+      headers,
+      body: null,
+      status: 200,
+      statusText: "OK",
+    } as unknown as Response;
+  }
+
+  it("rebuilds the response for the immutable-headers guard", () => {
+    // What `Response.redirect()` does. The rebuild is correct here.
+    const out = applySecurityHeaders(throwingResponse(new TypeError("immutable")), "/about");
+    expect(out.headers.get("referrer-policy")).toBe(DEFAULT_REFERRER_POLICY);
+  });
+
+  it("rethrows anything that is not a TypeError instead of rebuilding", () => {
+    // The rebuild path re-wraps the body, and the SSR response's body is a live
+    // stream bound to the request for cleanup: re-wrapping it cuts that binding
+    // and the symptom is a truncated or leaked response, not a visible error.
+    // A bare `catch` sent every failure down that path. This one has to escape.
+    const boom = new RangeError("something else went wrong");
+    expect(() => applySecurityHeaders(throwingResponse(boom), "/about")).toThrow(boom);
+  });
+});
+
 describe("public/_headers", () => {
   // The static file the platform reads and the middleware the app runs have to
   // agree, or a response gets one policy in one deploy path and another in the
@@ -130,5 +166,32 @@ describe("public/_headers", () => {
       const pathname = `${rule.pattern.replace(/\*$/, "")}sample-token`;
       expect(rule.headers["referrer-policy"], rule.pattern).toBe(referrerPolicyFor(pathname));
     }
+  });
+
+  // The referrer policy was the only thing held to the module here, while
+  // `setHeaders` sets a second header the file did not carry at all. This file
+  // exists for responses the middleware never saw, so its no-store is the only
+  // no-store those responses get: leaving it out meant a URL with a credential
+  // in its path could be cached by whatever default the platform applies, which
+  // is the exact risk the module's no-store is there to close.
+  it("keeps a token URL out of a cache, except the feed that sets its own", () => {
+    for (const rule of rules.slice(1)) {
+      const prefix = rule.pattern.replace(/\*$/, "");
+      if (prefix === "/api/calendar/") {
+        // A calendar client polls this every few minutes and the route answers
+        // with `private, max-age=300`. `private` already keeps it out of shared
+        // caches, and no-store would make every poll a miss.
+        expect(rule.headers["cache-control"], rule.pattern).toBeUndefined();
+        continue;
+      }
+      expect(rule.headers["cache-control"], rule.pattern).toBe("no-store");
+    }
+  });
+
+  it("leaves the site-wide rule to whatever each response chose", () => {
+    // Only the token paths get a caching rule from this file. A blanket
+    // no-store over `/*` would strip the asset caching Nitro generates into
+    // this same file at build time.
+    expect(rules[0]?.headers["cache-control"]).toBeUndefined();
   });
 });

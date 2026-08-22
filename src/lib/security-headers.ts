@@ -27,9 +27,11 @@
  * caches. The calendar feed sets `private, max-age=300` on purpose (a calendar
  * client polls it), so it keeps that.
  *
- * `public/_headers` states the same referrer rules for anything the platform
- * serves without going through this middleware. `security-headers.test.ts`
- * fails if the two drift apart.
+ * `public/_headers` states the same rules, referrer policy and no-store both,
+ * for anything the platform serves without going through this middleware.
+ * `security-headers.test.ts` fails if the two drift apart. The no-store matters
+ * more there than here: that file covers the case where this middleware never
+ * ran, so nothing else would keep a URL with a credential in it out of a cache.
  */
 
 /** What everything gets: the origin cross-site, the full URL same-site. */
@@ -79,9 +81,18 @@ export function applySecurityHeaders(response: Response, pathname: string): Resp
   try {
     setHeaders(response.headers, pathname);
     return response;
-  } catch {
+  } catch (error) {
     // `Response.redirect()` and `Response.error()` hand back headers with an
     // immutable guard, so the only way to add to one is to build a new one.
+    //
+    // Only for that. A bare `catch` here sent EVERY failure down the rebuild
+    // path, the SSR response included, and that response's body is a live
+    // stream bound to the request for cleanup: re-wrapping it cuts the binding,
+    // and the symptom is a truncated or leaked response rather than an error
+    // anybody sees. The comment above already says this response must be
+    // mutated in place, so the control flow should enforce it rather than rely
+    // on nothing else ever throwing.
+    if (!(error instanceof TypeError)) throw error;
     const headers = new Headers(response.headers);
     setHeaders(headers, pathname);
     return new Response(response.body, {
