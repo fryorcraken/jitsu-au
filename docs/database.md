@@ -1372,6 +1372,13 @@ length + email format). Each row is a **lead**: kept exactly as submitted,
 creating no person record. The manager directory merges leads in by normalized
 email until the email belongs to a person (they signed the waiver).
 
+A manager can **delete a lead** from `/manager/users` (`deleteLead`), which
+removes every registration under that address, since the directory merges them
+into one row. Refused, on the server, when the address belongs to a person: they
+have signed something, and their enquiry is part of that record. This is the
+only erasure the product has, and why it stops here is
+`docs/erasing-personal-data.md`.
+
 ### `contact_messages`
 
 `id` PK, `name`, `email`, `subject`, `message`, `client_submission_id`,
@@ -1380,7 +1387,10 @@ email until the email belongs to a person (they signed the waiver).
 Insert-only for both client roles, and it stays that way: managers read it
 through `listContactMessages` (`src/lib/contact-messages.functions.ts`) on the
 **service-role** client behind the manager gate, so `/manager/contact-messages`
-needed no read grant, no new policy and no migration.
+needed no read grant, no new policy and no migration. The same is true of
+`deleteContactMessage`, which removes one message for good: there is no copy
+elsewhere in the product, so a manager confirms what goes before it goes (see
+`docs/erasing-personal-data.md`).
 
 Submitting also emails the sender an acknowledgement and every manager the
 message itself (`src/lib/contact-email.server.ts`, best-effort: a send failure

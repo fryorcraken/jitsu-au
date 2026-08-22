@@ -95,7 +95,14 @@
   --accent: oklch(0.78 0.13 200);
   --accent-foreground: oklch(0.15 0.03 220);
   --destructive: oklch(0.7 0.19 22);
-  --destructive-foreground: oklch(0.98 0 0);
+  /* Dark ink, not the near-white the other dark tokens use. This red is
+     lightened (L 0.70 against light mode's 0.58) so that `text-destructive`
+     stays readable on the dark page, which is most of what the token does:
+     every form error, every failed-submit panel. White on top of that red is
+     2.75:1, below even the 3:1 large-text floor, so the pair that has to give
+     is the foreground. Near-black on vivid red still reads as danger, and
+     `color-contrast.test.ts` holds both roles above 4.5:1. */
+  --destructive-foreground: oklch(0.16 0.05 22);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.72 0.12 210);
