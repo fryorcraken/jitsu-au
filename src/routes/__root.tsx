@@ -15,9 +15,6 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
 
-const FONT_HREF =
-  "https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;900&display=swap";
-
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
 // failed page: both boundaries are served with an ordinary 200, so a status
@@ -143,28 +140,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "icon", href: "/favicon.png", type: "image/png" },
       { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png", sizes: "180x180" },
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      // Preload (not `rel="stylesheet"`) so the fetch starts immediately without
-      // holding back first paint of every headline on a cross-origin CSS
-      // round-trip, on top of the app's own stylesheet. The script below turns
-      // it into a real stylesheet once loaded.
+      // The typeface is served from this origin (see the @font-face rules in
+      // src/styles.css), so there is no third party to preconnect to and no
+      // cross-origin stylesheet to fetch before the font files are discovered.
+      // Preloading the latin file starts it with the stylesheet rather than
+      // after it. `crossOrigin` is required even same-origin: a font fetch is
+      // always CORS, and without it the browser downloads the file twice.
+      //
+      // latin-ext is deliberately not preloaded. Most pages contain no
+      // character that needs it, and the browser skips the file entirely on
+      // those; preloading would make every visitor pay for it.
       {
         rel: "preload",
-        as: "style",
-        href: FONT_HREF,
-      },
-    ],
-    scripts: [
-      {
-        // TanStack Router's `links` config renders through React, which drops
-        // inline `onload="..."` attributes (they read as suspicious event-handler
-        // props and get silently stripped) — so the classic "preload as=style,
-        // swap rel on load" trick has to be wired up imperatively here instead.
-        // The link starts as `media="print"` (fetches but doesn't apply/block)
-        // and flips to `media="all"` once loaded, applying the already-cached
-        // response.
-        children: `(function(){var l=document.createElement("link");l.rel="stylesheet";l.media="print";l.href=${JSON.stringify(FONT_HREF)};l.onload=function(){l.media="all"};document.head.appendChild(l)})();`,
+        as: "font",
+        type: "font/woff2",
+        href: "/fonts/nunito-sans-latin.woff2",
+        crossOrigin: "anonymous",
       },
     ],
   }),
