@@ -766,16 +766,20 @@ link" retires their live row (`revoked_at = now()`, and `token` set back to
 NULL, since a row that is nobody's live link has no reason to keep the raw
 secret) and inserts a fresh one, which is why the one-live-per-person partial
 index is on `revoked_at IS NULL`. The legacy re-mint above takes the same shape,
-so a revoked row is the only way a link ever ends. The old row is kept rather than deleted so its
-`token_hash` still resolves: the feed route looks a token up **without** filtering
-on `revoked_at` and answers a revoked one with **410 Gone** and a sentence saying
-it was replaced, instead of the 404 that would read as a typo. That branch is
-`feedTokenVerdict` in `src/lib/calendar-feed-token.ts`. No schema change was
-needed for any of this. Nothing expires a link on age, and a manager cannot
-replace somebody else's: `replaceMyCalendarFeedUrl` and the legacy re-mint are
-the only two writers of `revoked_at`. Retired rows are never pruned, so they
-accumulate one per replace; that is deliberate, since a cap would have to decide
-how long a retired address may keep explaining itself. See `docs/calendar.md`.
+so a revoked row is the only way a link ever ends.
+
+The old row is kept rather than deleted so its `token_hash` still resolves: the
+feed route looks a token up **without** filtering on `revoked_at` and answers a
+revoked one with **410 Gone** and a sentence saying it was replaced, instead of
+the 404 that would read as a typo. That branch is `feedTokenVerdict` in
+`src/lib/calendar-feed-token.ts`.
+
+Replacing needed no schema change; the columns and indexes above were already
+here. Nothing expires a link on age, and a manager cannot replace somebody
+else's: `replaceMyCalendarFeedUrl` and the legacy re-mint are the only two
+writers of `revoked_at`. Retired rows are never pruned, so they accumulate one
+per replace; that is deliberate, since a cap would have to decide how long a
+retired address may keep explaining itself. See `docs/calendar.md`.
 
 **RLS:** a person reads their own token row; minting, replacing and feed lookup
 all run through the service role; `authenticated` gets SELECT only, so a client
