@@ -6,11 +6,13 @@
 //
 // Auth is an opaque bearer token rather than a manager's Supabase JWT: agents
 // can't run the email/password login flow, and this endpoint only ever exposes
-// the whitelisted manager actions below. Tokens are manager-issued and revocable
-// (the manager_api_tokens table, minted from /manager/api-tokens); an optional
-// MANAGER_AGENT_API_KEY env var is accepted as a break-glass fallback. All DB
-// access uses the service-role admin client, so it is lazy-imported inside the
-// handler (route files are bundled to the client — never top-level import it).
+// the whitelisted manager actions below. A minted, hashed manager_api_tokens row
+// is the ONLY thing that authenticates here — there is no environment-variable
+// fallback, so every request resolves to a named manager who still holds the
+// role today, and losing a token means minting another at /manager/api-tokens.
+// All DB access uses the service-role admin client, so it is lazy-imported
+// inside the handler (route files are bundled to the client — never top-level
+// import it).
 import { createFileRoute } from "@tanstack/react-router";
 import { ZodError } from "zod";
 import {
@@ -36,9 +38,7 @@ import {
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
-  AGENT_ENV_KEY_UPLOADER,
   AGENT_MANIFEST,
-  actorUserId,
   AgentError,
   bearerToken,
   buildInvoicePatch,
@@ -50,7 +50,6 @@ import {
   projectInvoice,
   reconciledEditBlockers,
   reconciledEditMessage,
-  safeEqual,
 } from "@/lib/manager-agent";
 import {
   DuplicateCheckFailedError,
@@ -159,22 +158,19 @@ async function adminClient(): Promise<MembershipClient> {
 }
 
 /**
- * Authenticate the request. Accepts either a manager-issued token (looked up by
- * SHA-256 hash in manager_api_tokens, whose owner must still be a manager) or,
- * as a break-glass fallback, the MANAGER_AGENT_API_KEY env var. Throws
- * AgentError on any failure. On success, best-effort stamps last_used_at.
+ * Authenticate the request. A manager-issued token is the only credential this
+ * endpoint accepts: looked up by SHA-256 hash in manager_api_tokens, unrevoked,
+ * and owned by somebody who still holds the manager role. Throws AgentError on
+ * any failure. On success, best-effort stamps last_used_at.
  *
- * Returns who is acting: the token owner's user id for a manager-issued token,
- * or AGENT_ENV_KEY_UPLOADER for the break-glass key, which has no owner to
- * resolve. `file_waiver` records this as the waiver's `uploaded_by`.
+ * Returns who is acting — always the token owner's user id, so every row this
+ * API writes on somebody's behalf names a real auth user. `file_waiver` records
+ * it as the waiver's `uploaded_by`, which is why that matters: a waiver is legal
+ * evidence, and one filed by nobody is weaker evidence.
  */
 async function authenticate(request: Request): Promise<string> {
   const token = bearerToken(request.headers.get("authorization"));
   if (!token) throw new AgentError(401, "unauthorized", "Missing bearer token.");
-
-  // Break-glass env key (optional; constant-time compared).
-  const envKey = process.env.MANAGER_AGENT_API_KEY;
-  if (envKey && safeEqual(token, envKey)) return AGENT_ENV_KEY_UPLOADER;
 
   const db = await adminClient();
   const tokenHash = await hashToken(token);
@@ -902,7 +898,7 @@ async function handleSaveWaiverTemplate(params: unknown, actingAs: string) {
         body_md: input.body_md ?? base!.body_md,
         acknowledgements: input.acknowledgements ?? base!.acknowledgements,
       },
-      actorUserId(actingAs),
+      actingAs,
     );
     // `based_on` is what makes a carry-over auditable: it names the version the
     // fields this call did not send actually came from.

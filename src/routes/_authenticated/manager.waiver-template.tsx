@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -10,6 +10,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Trash2 } from "lucide-react";
 import {
   listWaiverTemplates,
@@ -110,6 +113,10 @@ function EditorPage() {
   const [body, setBody] = useState("");
   const [acks, setAcks] = useState<AcknowledgementDef[]>([]);
   const [loading, setLoading] = useState(true);
+  // The editor must never open blank over a live legal document. An empty body
+  // here looks like a template nobody has written yet, and saving from that
+  // state publishes an empty waiver as the thing people sign.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const { confirm, confirmDialog } = useConfirm();
@@ -123,9 +130,12 @@ function EditorPage() {
     setAcks(template.acknowledgements ?? []);
   }
 
-  useEffect(() => {
-    fetchTemplates()
+  // Named so the failure panel's "Try again" repeats exactly what mount does.
+  const loadTemplates = useCallback(() => {
+    setLoading(true);
+    return fetchTemplates()
       .then((rows) => {
+        setLoadError(null);
         setTemplates(rows);
         // Open on the live version when there is one, otherwise the newest
         // draft, so a template seeded outside the editor is never invisible.
@@ -133,14 +143,21 @@ function EditorPage() {
         if (opening) load(opening);
       })
       .catch((e) => {
-        // A non-manager is redirected by the effect below; anything else is
-        // worth saying out loud rather than leaving a blank editor.
+        // A non-manager is redirected by the effect below; anything else stops
+        // the editor rendering at all, rather than leaving a blank body that
+        // saves over the live waiver.
         if (!(e instanceof Error) || !e.message.includes("Forbidden")) {
-          toast.error(e instanceof Error ? e.message : "Could not load waiver versions");
+          const message = describeLoadError(e, "Could not load waiver versions");
+          setLoadError(message);
+          toast.error(message);
         }
       })
       .finally(() => setLoading(false));
   }, [fetchTemplates]);
+
+  useEffect(() => {
+    void loadTemplates();
+  }, [loadTemplates]);
 
   // Editing a version and saving writes a NEW version, so an unsaved edit is
   // lost by switching away from it. Warn rather than discard silently.
@@ -248,11 +265,22 @@ function EditorPage() {
     setBody((b) => `${b}${b.endsWith(" ") || b === "" ? "" : " "}{{${name}}}`);
   }
 
-  if (loading)
+  if (loading) return <Loading className="p-8" />;
+
+  // Deliberately in place of the whole editor, not beside it. Saving writes a
+  // new live version out of whatever is in these fields, so an editor rendered
+  // over a failed load is a loaded gun: the body would be empty and the save
+  // would publish that.
+  if (loadError)
     return (
-      <>
-        <div className="p-8">Loading...</div>
-      </>
+      <section className="mx-auto max-w-2xl px-4 py-10">
+        <LoadFailure
+          what="The waiver template"
+          message={loadError}
+          hint="Nothing has changed, and the version people sign is still live. Do not edit from here until it loads: saving would publish an empty waiver over it."
+          onRetry={() => void loadTemplates()}
+        />
+      </section>
     );
 
   return (

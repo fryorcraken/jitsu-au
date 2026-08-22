@@ -7,7 +7,7 @@
 // feature actually has: several articles rather than one, a visibility setting,
 // and a feedback panel.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -40,6 +40,9 @@ import {
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -245,6 +248,9 @@ function KnowledgeBaseManager() {
    * confident wrong answer on the panel a manager uses to decide whether members'
    * feedback has been dealt with.
    */
+  // The article and section lists themselves, as opposed to `failed` below,
+  // which is about one opened article's version and comment panels.
+  const [listError, setListError] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ article: boolean; versions: boolean; feedback: boolean }>({
     article: false,
     versions: false,
@@ -400,8 +406,9 @@ function KnowledgeBaseManager() {
   }, [rolesLoading, isManager, user, navigate]);
 
   /** Load the lists, and open the first article so the screen is never empty. */
-  useEffect(() => {
-    Promise.all([fetchArticles(), fetchSections()])
+  const loadLists = useCallback(() => {
+    setLoading(true);
+    return Promise.all([fetchArticles(), fetchSections()])
       .then(([rows, sectionRows]) => {
         setArticles(rows);
         setSections(sectionRows);
@@ -416,16 +423,24 @@ function KnowledgeBaseManager() {
         // this article was next saved.
         if (firstArticle) void openDocument(firstArticle.slug, { articles: rows });
       })
+      .then(() => setListError(null))
       .catch((e) => {
-        // A non-manager is redirected by the effect above; anything else is
-        // worth saying out loud rather than leaving a blank screen.
+        // A non-manager is redirected by the effect above; anything else stays
+        // on screen. "Nothing here yet. Create the first article." over a
+        // failed read invites a manager to write one that already exists.
         if (!(e instanceof Error) || !e.message.includes("Forbidden")) {
-          toast.error(e instanceof Error ? e.message : "Could not load articles");
+          const message = describeLoadError(e, "Could not load articles");
+          setListError(message);
+          toast.error(message);
         }
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchArticles, fetchSections]);
+
+  useEffect(() => {
+    void loadLists();
+  }, [loadLists]);
 
   /** Put the placement fields on screen from a list row. */
   function applyPlacement(summary: ArticleSummary | undefined) {
@@ -1239,7 +1254,7 @@ function KnowledgeBaseManager() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <Loading className="p-8" />;
 
   // The same `isSectionDirty` the discard prompt consults, so "there is nothing
   // to save" and "there is nothing to lose" can never disagree.
@@ -1308,10 +1323,20 @@ function KnowledgeBaseManager() {
                 tells members it was updated.
               </p>
 
-              {articles.length === 0 && sections.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Nothing here yet. Create the first article.
-                </p>
+              {listError ? (
+                <LoadFailure
+                  what="The knowledge base"
+                  message={listError}
+                  hint="This is not the same as it being empty, so do not write an article from here: it may already exist."
+                  onRetry={() => void loadLists()}
+                />
+              ) : (
+                articles.length === 0 &&
+                sections.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Nothing here yet. Create the first article.
+                  </p>
+                )
               )}
 
               <DndContext
@@ -1694,7 +1719,7 @@ function KnowledgeBaseManager() {
                         ? "Create and publish"
                         : "Save as new version"}
                 </Button>
-                {busy && <span className="text-xs text-muted-foreground">Loading...</span>}
+                {busy && <Loading className="text-xs" />}
                 {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
               </div>
             </>

@@ -4,6 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { formatCents, isUnpaid } from "@/lib/validation";
 import { parseCsv, toBankRows } from "@/lib/bank-statement-csv";
 import {
@@ -38,6 +41,10 @@ function ReconciliationPage() {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Without this the card below reports "Everything imported has been matched."
+  // to a manager whose transactions never arrived. On a screen about money that
+  // is not an ambiguous empty state, it is the wrong answer stated confidently.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // What a statement line can settle is an UNPAID invoice, which is what this
   // screen is for. Filtering on `status === "pending"` used to mean the same
@@ -58,12 +65,28 @@ function ReconciliationPage() {
     [fetchTxns, fetchMemberships],
   );
 
+  // Wrapped so the "Try again" button runs the same fetch the mount effect does,
+  // error state and all. `reload()` on its own is also called after an import
+  // and after a manual match, where a failure is reported by those handlers.
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return reload()
+        .then(() => setLoadError(null))
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load the transactions");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [reload],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    reload()
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load"))
-      .finally(() => setLoading(false));
-  }, [isManager, reload]);
+    void load();
+  }, [isManager, load]);
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -147,7 +170,14 @@ function ReconciliationPage() {
         </Card>
 
         {loading ? (
-          <p>Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="The imported transactions"
+            message={loadError}
+            hint="Nothing here is reconciled or unreconciled until this loads, so do not treat the missing list as an all-clear."
+            onRetry={() => void load()}
+          />
         ) : (
           <Card>
             <CardHeader>

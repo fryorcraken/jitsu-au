@@ -780,10 +780,6 @@ The app reads:
   `VITE_SUPABASE_PROJECT_ID`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
-- Server, optional: `MANAGER_AGENT_API_KEY` — break-glass bearer token for the
-  manager agent API (`/api/manager/agent`). Normally managers mint revocable
-  tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
-  env var is just an optional fallback (see `docs/manager-agent-api.md`).
 - Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
   notification digest (`POST /api/notifications/digest`). **Unset means the
   endpoint refuses everything**, so no digest goes out until it is configured.
@@ -912,9 +908,28 @@ Then hold the change to this:
   that catches a fetch error with only `toast.error(...)` and then renders an
   empty table is indistinguishable from "there's nothing here" once the toast
   fades — the manager has no way to tell a genuinely empty list from a broken
-  one. Keep the error on screen (a `loadError`-style state) with a retry
-  action; `manager.contact-messages.tsx` is the pattern to copy, not the
-  `toast.error()` + empty-table pattern most manager list pages default to.
+  one. Hold a `loadError` state and render **`components/site/LoadFailure`** in
+  place of the content: it is the panel, the "this is not the same as having
+  none" line, the `role="alert"`, and the retry button, so no screen writes its
+  own. `manager.contact-messages.tsx` is the shortest example. Use
+  `describeLoadError(e, "…")` for the message rather than an inline
+  `instanceof Error` ternary, so an Error with an empty body still says
+  something.
+  - Where an empty screen is not merely ambiguous but **invites a destructive
+    action** — an editor that would save blanks over a live document, an "add"
+    form for a list that failed to load — put the panel in place of the whole
+    screen rather than beside it, and say in the copy why not to work around
+    it. `manager.waiver-template.tsx`, `manager.membership-plans.tsx` and
+    `manager.settings.tsx` all do this.
+  - A query-backed screen has the same trap in a different shape:
+    `useQuery`'s `isLoading` is **false** once a query has rejected, so a hook
+    that reports only `isLoading` leaves the page on "Loading..." for good.
+    Surface `isError` too (`useKbNav` is the worked example).
+- **A bare `Loading...` is not a loading state.** Use
+  **`components/site/Loading`**, which carries the `role="status"` /
+  `aria-live="polite"` wiring `AuthPending` and `SubmitStatus` already have.
+  Without it a screen-reader user gets no signal that a page started fetching
+  or finished.
 - **Never lose someone's input.** A failed submit keeps the form filled and
   offers the retry. Ask for as little as possible in the first place, and prefill
   what we already know (the waiver does this with `getMyLatestWaiver`). Every

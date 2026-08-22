@@ -1,9 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { waiverClass } from "@/lib/status-colours";
 import { formatDateTime } from "@/lib/dates";
 import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
@@ -60,6 +63,7 @@ function WaiversPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
   const [driveFolderReady, setDriveFolderReady] = useState(false);
@@ -71,17 +75,27 @@ function WaiversPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return fetchList()
+        .then((data) => {
+          setRows(data as Row[]);
+          setLoadError(null);
+        })
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load the waivers");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [fetchList],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    fetchList()
-      .then((data) => {
-        setRows(data as Row[]);
-        setLoading(false);
-      })
-      .catch((e) => {
-        toast.error(e.message);
-        setLoading(false);
-      });
+    void load();
     fetchDriveStatus()
       .then((s) => {
         setDriveConnected(s.connected);
@@ -98,7 +112,7 @@ function WaiversPage() {
         setUploads(map);
       })
       .catch(() => {});
-  }, [isManager, fetchList, fetchDriveStatus, fetchDriveUploads]);
+  }, [isManager, load, fetchDriveStatus, fetchDriveUploads]);
 
   async function download(id: string) {
     try {
@@ -192,7 +206,14 @@ function WaiversPage() {
         ) : null}
 
         {loading ? (
-          <p>Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="The signed waivers"
+            message={loadError}
+            hint="This is not the same as nobody having signed one, so nothing here is waiting on you until it loads."
+            onRetry={() => void load()}
+          />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No waivers signed yet.</p>
         ) : (

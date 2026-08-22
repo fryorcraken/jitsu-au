@@ -4,6 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +46,7 @@ function ApiTokensPage() {
 
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [creating, setCreating] = useState(false);
   // The raw token is shown exactly once, right after creation.
@@ -57,9 +61,17 @@ function ApiTokensPage() {
   }, [rolesLoading, isManager, user, navigate]);
 
   const load = useCallback(() => {
+    setLoading(true);
     fetchTokens()
-      .then((rows) => setTokens(rows))
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load tokens"))
+      .then((rows) => {
+        setTokens(rows);
+        setLoadError(null);
+      })
+      .catch((e) => {
+        const message = describeLoadError(e, "Could not load the tokens");
+        setLoadError(message);
+        toast.error(message);
+      })
       .finally(() => setLoading(false));
   }, [fetchTokens]);
 
@@ -97,13 +109,7 @@ function ApiTokensPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <>
-        <div className="p-8">Loading...</div>
-      </>
-    );
-  }
+  if (loading) return <Loading className="p-8" />;
 
   return (
     <>
@@ -186,7 +192,14 @@ function ApiTokensPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {tokens.length === 0 ? (
+            {loadError ? (
+              <LoadFailure
+                what="The tokens"
+                message={loadError}
+                hint="This is not the same as having none, so a token you issued earlier may well still be live."
+                onRetry={load}
+              />
+            ) : tokens.length === 0 ? (
               <p className="text-sm text-muted-foreground">No tokens yet.</p>
             ) : (
               <ul className="divide-y">
