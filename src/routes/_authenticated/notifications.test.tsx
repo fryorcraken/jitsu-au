@@ -165,6 +165,29 @@ describe("/notifications", () => {
     expect(screen.queryByRole("link", { name: /fix it/i })).not.toBeInTheDocument();
   });
 
+  it("renders an item with no action as a statement, not a dead button", async () => {
+    // A stalled digest is fixed in the project's own settings, outside this site
+    // entirely, so there is nowhere to send anybody. The item still has to be on
+    // screen: the whole failure it reports is that nothing said anything.
+    mockPayload({
+      attention: [
+        {
+          type: "notification_digest_stalled" as const,
+          title: "The daily email summary has stopped going out",
+          body: "34 notifications have been waiting to be emailed, the oldest since 05/08/2026.",
+        },
+      ],
+      isManager: true,
+    });
+    render(<NotificationsPage />);
+
+    expect(
+      await screen.findByText("The daily email summary has stopped going out"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /mark all as read/i })).not.toBeInTheDocument();
+  });
+
   it("shows both steps of signing up, one to read and one to approve", async () => {
     // Somebody signing up used to reach this page not at all. Registering is
     // news and offers only a reading verb; a signed waiver is work and blocks

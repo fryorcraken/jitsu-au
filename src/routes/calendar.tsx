@@ -7,7 +7,8 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Loading } from "@/components/site/Loading";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { getCalendar, getMyCalendarFeedUrl, getMyRsvps, setRsvp } from "@/lib/calendar.functions";
+import { getCalendar, getMyRsvps, setRsvp } from "@/lib/calendar.functions";
+import { CalendarLinkPanel } from "@/components/site/CalendarLinkPanel";
 import type { RsvpResponse } from "@/lib/validation";
 import { buildPageMeta } from "@/lib/seo";
 
@@ -67,7 +68,6 @@ function CalendarPage() {
   const loadCalendar = useServerFn(getCalendar);
   const loadRsvps = useServerFn(getMyRsvps);
   const saveRsvp = useServerFn(setRsvp);
-  const loadFeedUrl = useServerFn(getMyCalendarFeedUrl);
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [signedIn, setSignedIn] = useState(false);
@@ -75,8 +75,6 @@ function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [rsvps, setRsvps] = useState<Record<string, RsvpResponse | undefined>>({});
   const [savingRsvp, setSavingRsvp] = useState<Set<string>>(new Set());
-  const [feedUrl, setFeedUrl] = useState<string | null>(null);
-  const [feedFailed, setFeedFailed] = useState(false);
 
   const refreshRsvps = useCallback(() => {
     loadRsvps()
@@ -95,20 +93,13 @@ function CalendarPage() {
         setSignedIn(data.signed_in);
         setSeesMembersOnly(data.sees_members_only);
         setLoading(false);
-        if (data.signed_in) {
-          refreshRsvps();
-          // The link is minted on first ask and shown on every visit after that,
-          // so there is nothing for the member to press to get one.
-          loadFeedUrl()
-            .then(({ url }) => setFeedUrl(url))
-            .catch(() => setFeedFailed(true));
-        }
+        if (data.signed_in) refreshRsvps();
       })
       .catch((e) => {
         toast.error(e instanceof Error ? e.message : "Could not load the calendar");
         setLoading(false);
       });
-  }, [loadCalendar, loadFeedUrl, refreshRsvps]);
+  }, [loadCalendar, refreshRsvps]);
 
   async function respond(eventId: string, response: RsvpResponse) {
     // Per-event, so replying to one event doesn't re-enable another's buttons.
@@ -127,18 +118,6 @@ function CalendarPage() {
         next.delete(eventId);
         return next;
       });
-    }
-  }
-
-  async function copyFeedUrl() {
-    if (!feedUrl) return;
-    try {
-      await navigator.clipboard.writeText(feedUrl);
-      toast.success("Calendar link copied.");
-    } catch {
-      // Clipboard access can be blocked (older browsers, no secure context).
-      // The link is on screen either way, so this is only a convenience.
-      toast.error("Could not copy it. Select the link and copy it by hand.");
     }
   }
 
@@ -175,22 +154,7 @@ function CalendarPage() {
                   ? " Your link includes members-only events."
                   : " Members-only events are included once you have a paid membership."}
               </p>
-              {feedUrl ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <code className="min-w-0 flex-1 overflow-x-auto rounded bg-background px-3 py-2 text-xs">
-                    {feedUrl}
-                  </code>
-                  <Button size="sm" variant="outline" onClick={copyFeedUrl}>
-                    Copy
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {feedFailed
-                    ? "We could not load your link just now. Refresh the page to try again."
-                    : "Loading your link..."}
-                </p>
-              )}
+              <CalendarLinkPanel />
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">

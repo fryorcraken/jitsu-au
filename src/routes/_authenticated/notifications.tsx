@@ -139,9 +139,15 @@ function NotificationsPage() {
                   <p className="font-medium">{n.title}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
                 </div>
-                <Button asChild size="sm" variant="outline">
-                  <Link to={n.href}>{n.actionLabel}</Link>
-                </Button>
+                {/* Not every item has somewhere to send you. A stalled digest
+                    is fixed in the project's own settings, outside this site
+                    entirely, so it renders as a statement rather than a button
+                    that would go nowhere useful. See `ManagerNotification`. */}
+                {n.href && n.actionLabel && (
+                  <Button asChild size="sm" variant="outline">
+                    <Link to={n.href}>{n.actionLabel}</Link>
+                  </Button>
+                )}
               </div>
             ))}
           </CardContent>

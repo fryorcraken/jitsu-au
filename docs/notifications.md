@@ -171,11 +171,13 @@ saved, and must never fail because telling somebody about it did.
 ### The daily summary
 
 A **pg_cron job in the database** POSTs to `/api/notifications/digest` once a
-day. `private.run_notification_digest()` reads the site URL and the bearer token
-out of Supabase Vault and calls out with pg_net; the schedule itself never holds
-the token, since anyone who can read `cron.job` can read a command string. The
-endpoint groups every row with no `emailed_at` by person, drops the kinds they
-have switched off, and sends one email to whoever has anything left.
+day. `private.run_notification_digest()` reads a bearer token out of Supabase
+Vault and calls out with pg_net to a literal `jitsu.au` URL; the schedule itself
+never holds the token, since anyone who can read `cron.job` can read a command
+string. The endpoint reads the SAME token back out of Vault, through a
+service-role RPC, and compares it against whatever the request sent. The
+endpoint then groups every row with no `emailed_at` by person, drops the kinds
+they have switched off, and sends one email to whoever has anything left.
 
 This ran as a GitHub Actions workflow first, and moving it was a correction, not
 a preference. Scheduling production work from CI put a credential that makes the
@@ -186,24 +188,34 @@ for using Actions ("pg_cron is not available") was never checked: it was inferre
 from the extension being absent from this repo's migrations, which says nothing
 about what the project offers. `pg_available_extensions` lists pg_cron 1.6.4.
 
-**It is not armed by the migration.** The job fires nightly and returns
-immediately, with a warning in the Postgres log, until both Vault secrets exist:
+**One token, one home, checked here on 2026-08-21 against the live project: it
+was never set.** The first design after moving off GitHub Actions asked for the
+SAME random string in two different places — a server env var
+(`NOTIFICATION_DIGEST_KEY`, read by the endpoint) and a Supabase Vault secret
+(read by pg_cron) — and required them to match forever. The club owner could not
+find the Lovable screen that sets a server env var (it is not where the docs
+said, on a Pro plan), so it was never set. Both Vault secrets stayed absent too,
+the job fired nightly and raised, and five nights (then several more) of
+`cron.job_run_details` recorded a failure nobody was looking at. 34 notifications
+sat unemailed from 2026-08-10 to 2026-08-20 before anyone noticed.
 
-```sql
-SELECT vault.create_secret(
-  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
-SELECT vault.create_secret('<same value as NOTIFICATION_DIGEST_KEY>',
-  'notification_digest_key');
-```
+**As of `20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql` there is
+nothing left to type in twice.** The migration mints the one Vault secret itself
+— a random value nobody ever sees, types, or copies — and the endpoint reads it
+back through `public.notification_digest_key()`, the same service-role RPC
+`private.run_notification_digest()` reads for the scheduler's side. There is no
+server env var for this any more; see "Arming the digest" below for what setup
+now actually takes. The destination URL is a literal in the function body for
+the same reason: it used to be a second Vault secret
+(`notification_digest_url`), which meant it was possible to set it to the
+published `*.lovable.app` host by mistake — that one 302s to `jitsu.au`, and
+pg_net does not follow redirects. That mistake can no longer happen.
 
-Two traps worth stating, because both fail silently every morning rather than
-loudly once:
-
-- Read `vault.decrypted_secrets.decrypted_secret`, never `vault.secrets.secret`.
-  The latter is the ciphertext, and using it sends an `Authorization` header of
-  base64 noise that earns a 401.
-- Use the `jitsu.au` origin, not the published `*.lovable.app` host. That one
-  302s to `jitsu.au`, and pg_net does not follow redirects.
+One trap that still fails silently every morning rather than loudly once: read
+`vault.decrypted_secrets.decrypted_secret`, never `vault.secrets.secret`. The
+latter is the ciphertext, and using it sends an `Authorization` header of
+base64 noise that earns a 401 — which is now true on both sides of the
+comparison, since the endpoint reads the same view.
 
 Two things about the stamping are worth knowing, because they are what keep it
 honest:
@@ -229,9 +241,11 @@ fire and forget: it queues the request, `PERFORM` discards the request id, and
 the function returns successfully no matter what the site answered. So
 `cron.job_run_details` records **succeeded** for every one of these:
 
-- `NOTIFICATION_DIGEST_KEY` unset or rotated server-side, so the endpoint answers
-  503 or 401 forever
-- the Vault secret drifting from the env var, giving 401 every morning
+- the Vault secret missing, so the endpoint answers 503 forever
+- the Vault secret rotated after the endpoint last cached it (it caches in
+  module scope after the first successful read, so a rotation needs a
+  redeploy to take effect there — see "Rotating the key" below), giving 401
+  until the next deploy
 - the site being down, DNS or TLS failing, or the request timing out
 
 In all of them nobody is emailed, `emailed_at` stays NULL, the backlog grows, and
@@ -250,9 +264,178 @@ SELECT count(*) FROM public.notifications WHERE emailed_at IS NULL;        -- ba
 ```
 
 That last query is the one worth watching: a number that climbs day over day
-means the digest has stopped, whatever the scheduler thinks. Closing this
-properly wants a second job that reads back the response and raises on a non-2xx
-so the failure lands in `cron.job_run_details`. Not built yet.
+means the digest has stopped, whatever the scheduler thinks.
+
+#### What now watches it
+
+Two changes, and the split between them is the point. One makes the scheduler
+stop lying; the other stops relying on the scheduler at all.
+
+- **An unarmed run is now recorded as failed**
+  (`20260821000000_notification_digest_fails_loudly.sql`). The fail-closed branch
+  raises instead of returning, naming whichever Vault secret is missing, so
+  `cron.job_run_details` says `failed` for a job that emailed nobody. This is
+  narrow on purpose: it only catches the half of the problem the database can
+  see. An armed job still records success no matter what the site answered.
+- **A stalled digest is an attention item on `/notifications`.** Any notification
+  row that has sat unemailed for more than `DIGEST_STALL_HOURS` (36) raises "The
+  daily email summary has stopped going out", with the backlog size and the date
+  of the oldest row. This asserts on the **outcome**, not the mechanism, which is
+  the only check that survives pg_net being fire and forget: Vault secret
+  missing, a rotation the endpoint has not picked up yet, site down, DNS or TLS
+  failing, request timing out. All of them look identical from here, which is
+  exactly what makes the check cheap and total.
+
+36 hours rather than 24: the run is daily, so anything younger is waiting for
+tonight, and a run that is a few hours late is not news. Two missed mornings is.
+
+Three things about that item are deliberate and will look like bugs otherwise:
+
+- **It has no button.** The fix lives outside this repo, in Supabase Vault, so
+  every destination the page could offer would be one that cannot help.
+  `ManagerNotification` carries `href` and `actionLabel` as an all-or-nothing
+  pair for this reason.
+- **It cannot be dismissed**, like every attention item, and unlike the others it
+  can stay up for weeks. It clears when the digest actually sends, or when
+  somebody stamps the backlog as emailed. That is the correct behaviour while
+  members are silently getting no email.
+- **It fires while the digest has simply never been armed**, which is the state
+  the club is in today. That is not a false positive: the rows are owed and
+  nobody has had them.
+
+Still not built: a second job that reads `net._http_response` back and raises on
+a non-2xx, so an ARMED failure lands in `cron.job_run_details` the same night
+rather than a day and a half later on the notifications page. It needs somewhere
+durable to keep the verdict, since pg_net garbage-collects that table after
+`pg_net.ttl` (6 hours by default). The backlog check covers the same failures
+more slowly, which is why this is worth doing and not urgent.
+
+### Arming the digest: the runbook
+
+Both of the steps this used to describe have now been done, on **2026-08-22**.
+What follows is the record of what was actually run, so the next person can tell
+what state the club is in rather than guessing from a set of instructions.
+
+**The state before, checked read-only through Lovable on 2026-08-21.**
+`NOTIFICATION_DIGEST_KEY` was not set (the project had three secrets and this was
+not one of them), neither Vault secret existed, and no digest email had ever been
+sent. pg_cron was installed with job `notification-digest` active on `0 20 * * *`;
+pg_net was installed with its extension home in `extensions` and its functions in
+`net`, which is what the migration asserts. The five runs from 17 to 21 August all
+recorded **succeeded** having done nothing. The backlog stood at **34 rows**, from
+2026-08-10 12:53 UTC to 2026-08-20 03:09 UTC.
+
+**1. The backlog was cleared, before the migration was applied.** The digest
+sweeps every row with a NULL `emailed_at` and no age limit, so the first armed run
+would have released the whole backlog at once, as one email per person. Old
+announcements arriving in a burst is the kind of send that gets a domain marked as
+spam, and the club depends on that domain for magic links and account activation.
+So the club owner chose to stamp it rather than send it:
+
+```sql
+-- Run 2026-08-22. 34 rows updated; 0 left unemailed afterwards.
+UPDATE public.notifications
+   SET emailed_at = now()
+ WHERE emailed_at IS NULL
+   AND created_at < now() - interval '36 hours';
+```
+
+Nothing was lost. Every one of those notifications is still on its owner's
+`/notifications` page: `emailed_at` governs the inbox only, never the page. The
+36-hour bound was deliberate, so that anything genuinely recent would still be
+emailed normally on the first working run. On the day, all 34 were older than
+that, so it made no practical difference.
+
+**2. The migration was applied, under `docs/database-changes.md`'s gate** (the
+owner approved it, then the SQL ran against the live database, then the ledger was
+recorded and PostgREST reloaded). Confirmed afterwards: `vault.secrets` holds one
+`notification_digest_key` row, `public.notification_digest_key()` exists owned by
+`postgres` with `prosecdef` true and an ACL of `postgres=X/postgres` plus
+`service_role=X/postgres` (so `anon` and `authenticated` hold no EXECUTE), and the
+Supabase advisors reported nothing new.
+
+> [!NOTE]
+> **The `SECURITY DEFINER`-reads-Vault question is settled, and not by assumption.**
+> Whether a function owned by `postgres` may read `vault.decrypted_secrets` on this
+> project could not be tested directly: Lovable's SQL channel runs as a restricted
+> role that holds no EXECUTE on either function, which is the grant working rather
+> than a Vault failure. The proof is in `cron.job_run_details` instead. The original
+> function body (`20260807000000`) ran both of its `SELECT ... FROM
+vault.decrypted_secrets` statements **before** its missing-secret guard, and every
+> nightly run recorded `succeeded`. A permission failure would have raised `42501`
+> and recorded `failed`. So the read has been permitted all along.
+
+To confirm the secret is there at any later date:
+
+```sql
+SELECT name, created_at FROM vault.secrets WHERE name = 'notification_digest_key';
+```
+
+One row is the secret existing; there is nothing to compare it against, since
+there is no second copy any more.
+
+**What is still outstanding: the first real send has not been proved yet.** The
+code that reads the key from Vault had not been deployed at the time the migration
+was applied, so the endpoint was still answering 503 from the old env-var path.
+Steps 3 and 4 below are the remaining verification, and they need a deploy of the
+merged code first.
+
+**3. Prove it works, without waiting for 20:00 UTC.** Run the job by hand and
+read the response back inside pg_net's 6-hour TTL:
+
+```sql
+SELECT private.run_notification_digest();          -- raises if the secret is missing
+SELECT id, status_code, content, error_msg, created
+  FROM net._http_response ORDER BY created DESC LIMIT 1;
+```
+
+`status_code` 200 with a body like `{"ok":true,"considered":N,...}` is the
+answer you want. **401 here means the endpoint's cached copy is stale** — it
+reads Vault once and holds the value in memory for the life of the server
+process, so a secret minted after the last deploy needs a redeploy (Publish →
+Update) before the endpoint will see it; a fresh `jitsu.au` build reads Vault
+again on its first request. 503 means the secret genuinely is not in Vault. A
+row with `error_msg` and no status is a network or TLS failure.
+
+**4. Confirm the next scheduled run.** The morning after:
+
+```sql
+SELECT status, return_message, start_time FROM cron.job_run_details
+ WHERE jobname = 'notification-digest' ORDER BY start_time DESC LIMIT 3;
+SELECT count(*) FROM public.notifications WHERE emailed_at IS NULL;
+```
+
+`succeeded` with a backlog that is not climbing is a working digest. The
+notifications page is the standing version of that second query: the "daily email
+summary has stopped" item disappears once the backlog is cleared and stays away
+while it is being kept clear.
+
+#### Rotating the key
+
+`SELECT vault.update_secret(id, '<new value>') FROM vault.secrets WHERE name =
+'notification_digest_key';` changes the one copy that exists. pg_cron reads it
+fresh on every run, so the scheduler side is immediate. The endpoint side is
+not: it caches the value in module scope after its first read, so **rotating
+without a redeploy leaves the deployed site checking against the old value**
+until the next publish. Rotate, then publish, in that order — the reverse gives
+a window where every run 401s.
+
+**Publishing shrinks that window, it does not close it.** The cache is
+per-worker-isolate, and Cloudflare gives no guarantee that every edge isolate
+picks up a new deploy at the same instant: an already-warm isolate can keep
+answering with the OLD key until it happens to cycle, independent of when the
+publish finished. So an old key can still be accepted for a while after
+"rotate, then publish" — this is why rotating at all is worth doing (new
+requests move to the new key as isolates cycle), not a claim that the old one
+stops working the moment you publish.
+
+That matters most for the reason anyone rotates a shared secret outside routine
+hygiene: it leaked. Say what this credential actually buys somebody who still
+has the old value during that tail: one POST that triggers a mail send, gated
+by the same per-person-per-day idempotency key everyone else's runs use, and
+nothing else — no read access to member data, no write path. Small blast
+radius, but the docs should not imply the old key stops working the instant you
+publish, because it does not.
 
 ### A post goes live
 
@@ -346,11 +529,11 @@ way back means we genuinely do not know.
 - **No per-thread mute.** The switches are per kind. If one thread turns noisy,
   the answer today is to turn thread activity off.
 - **No in-app bell or toast.** The sidebar badge is the only in-app signal.
-- **The attention list has four checks**: waivers waiting for approval, unanswered
-  contact messages, new interest registrations, and the club's training dates
-  running out. Unmatched bank transactions and unpaid invoices are the obvious
-  next entries and the shape supports them, but widening the manager queue
-  further is separate work.
+- **The attention list has five checks**: waivers waiting for approval, unanswered
+  contact messages, a stalled daily digest, new interest registrations, and the
+  club's training dates running out. Unmatched bank transactions and unpaid
+  invoices are the obvious next entries and the shape supports them, but widening
+  the manager queue further is separate work.
 - **Signing up notifies managers by email at the moment it happens** (a new-lead
   email on registration, a copy of the waiver on signing), and none of that is
   changed by the attention items. Neither item claims a copy was emailed: those
@@ -386,24 +569,28 @@ Two consequences worth knowing:
 
 ## Where the code lives
 
-| Concern                      | File                                                                   |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| The rules (pure, tested)     | `src/lib/notifications.ts`                                             |
-| The attention list           | `src/lib/manager-notifications.functions.ts`                           |
-| Contact messages             | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`     |
-| Interest registrations       | `src/lib/leads.functions.ts`                                           |
-| Waivers waiting on a manager | `countWaiversAwaitingApproval` in `src/lib/waiver.functions.ts`        |
-| The club-wide watermarks     | `src/lib/seen-markers.ts`                                              |
-| Who hears about what         | `src/lib/notification-events.server.ts`                                |
-| Sending, and the digest run  | `src/lib/notification-email.server.ts`                                 |
-| Page and settings server fns | `src/lib/notifications.functions.ts`                                   |
-| The shared query             | `src/hooks/useNotifications.ts`                                        |
-| The page                     | `src/routes/_authenticated/notifications.tsx`                          |
-| The signed-out settings      | `src/routes/email-settings/index.tsx`                                  |
-| The link exchange            | `src/routes/email-settings/$token.ts`                                  |
-| The settings cookie          | `src/lib/email-settings-session.ts`                                    |
-| The switches                 | `src/components/site/NotificationSwitches.tsx`                         |
-| The sidebar badge            | `src/components/site/MemberLayout.tsx`                                 |
-| The digest endpoint          | `src/routes/api/notifications/digest.ts`                               |
-| The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`      |
-| Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx` |
+| Concern                      | File                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| The rules (pure, tested)     | `src/lib/notifications.ts`                                                    |
+| The attention list           | `src/lib/manager-notifications.functions.ts`                                  |
+| Contact messages             | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`            |
+| Interest registrations       | `src/lib/leads.functions.ts`                                                  |
+| Waivers waiting on a manager | `countWaiversAwaitingApproval` in `src/lib/waiver.functions.ts`               |
+| The club-wide watermarks     | `src/lib/seen-markers.ts`                                                     |
+| Who hears about what         | `src/lib/notification-events.server.ts`                                       |
+| Sending, and the digest run  | `src/lib/notification-email.server.ts`                                        |
+| Page and settings server fns | `src/lib/notifications.functions.ts`                                          |
+| The shared query             | `src/hooks/useNotifications.ts`                                               |
+| The page                     | `src/routes/_authenticated/notifications.tsx`                                 |
+| The signed-out settings      | `src/routes/email-settings/index.tsx`                                         |
+| The link exchange            | `src/routes/email-settings/$token.ts`                                         |
+| The settings cookie          | `src/lib/email-settings-session.ts`                                           |
+| The switches                 | `src/components/site/NotificationSwitches.tsx`                                |
+| The sidebar badge            | `src/components/site/MemberLayout.tsx`                                        |
+| The digest endpoint          | `src/routes/api/notifications/digest.ts`                                      |
+| The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`             |
+| Failing loudly when unarmed  | `supabase/migrations/20260821000000_notification_digest_fails_loudly.sql`     |
+| One key, minted once         | `supabase/migrations/20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql` |
+| The key's typed RPC wrapper  | `notificationDigestKey` in `src/lib/supabase-rpc.ts`                          |
+| The stalled-digest item      | `digestStalledNotifications` in `src/lib/validation.ts`                       |
+| Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx`        |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { userEmails, userIdByEmail } from "./supabase-rpc";
+import { notificationDigestKey, userEmails, userIdByEmail } from "./supabase-rpc";
 import type { ClubUserEmail } from "./club-users";
 
 /**
@@ -33,16 +33,24 @@ export type _ConfirmationStampIsNullable = Expect<
   Equals<NonNullable<ClubUserEmail["email_confirmed_at"]> | null, string | null>
 >;
 
+/** Absent from Vault resolves to null, which is the digest's "unarmed" state. */
+export type _NotificationDigestKeyIsNullable = Expect<
+  Equals<Awaited_<ReturnType<typeof notificationDigestKey>>["data"], string | null>
+>;
+
 /**
  * A stand-in for a Supabase client's `.rpc()`. Records what it was called with
  * and hands back whatever PostgREST would have.
  */
 function fakeClient(result: { data: unknown; error: { message: string } | null }) {
-  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  // `args` is optional because a zero-argument RPC is now called with none at
+  // all rather than with an empty object (see `RpcArgsList` in supabase-rpc.ts),
+  // so the fake has to be able to record that it received nothing.
+  const calls: { fn: string; args: Record<string, unknown> | undefined }[] = [];
   return {
     calls,
     client: {
-      rpc(fn: string, args: Record<string, unknown>) {
+      rpc(fn: string, args?: Record<string, unknown>) {
         calls.push({ fn, args });
         return Promise.resolve(result);
       },
@@ -107,5 +115,33 @@ describe("userEmails", () => {
 
     const idClient = fakeClient({ data: undefined, error: null });
     expect((await userIdByEmail(idClient.client, "nobody@example.com")).data).toBeNull();
+  });
+});
+
+describe("notificationDigestKey", () => {
+  it("passes no arguments to the RPC", async () => {
+    const { client, calls } = fakeClient({ data: "shh", error: null });
+    const { data } = await notificationDigestKey(client);
+    // Literally none: not an empty object. PostgREST is happy either way, but
+    // the generated `Args: never` is the schema saying this function takes no
+    // arguments, and the call should say the same thing.
+    expect(calls).toEqual([{ fn: "notification_digest_key", args: undefined }]);
+    expect(data).toBe("shh");
+  });
+
+  it("returns null when the secret has not been minted", async () => {
+    // The generated type calls this `string`. Absent-from-Vault is the state
+    // the digest endpoint's 503 branch exists for.
+    const { client } = fakeClient({ data: null, error: null });
+    const { data, error } = await notificationDigestKey(client);
+    expect(data).toBeNull();
+    expect(error).toBeNull();
+  });
+
+  it("hands the error back rather than throwing", async () => {
+    const { client } = fakeClient({ data: null, error: { message: "boom" } });
+    const { data, error } = await notificationDigestKey(client);
+    expect(data).toBeNull();
+    expect(error?.message).toBe("boom");
   });
 });

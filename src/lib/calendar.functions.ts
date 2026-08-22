@@ -204,9 +204,18 @@ export const setRsvp = createServerFn({ method: "POST" })
 
 // ---- Member: personal ICS feed link ----
 // One link per person, minted on first ask and shown every time afterwards, so
-// the raw token is stored (see 20260728180000). There is no rotate or turn-off:
-// the link is a permanent, private subscription address like any other calendar
-// app's. The hash is still written and is what the feed route looks up.
+// the raw token is stored (see 20260728180000). The hash is still written and is
+// what the feed route looks up.
+//
+// A link lasts until somebody replaces it. Nothing expires one on age or on a
+// password change, because the only thing a member notices when a calendar link
+// quietly stops working is that they stopped hearing about training.
+//
+// TWO things retire one, and both go through the same retire-and-mint shape so
+// the retired address always answers "this was replaced" rather than reading as
+// a typo: replaceMyCalendarFeedUrl below, which is a person choosing to break
+// their own link, and the legacy branch in getMyCalendarFeedUrl, which has to
+// because it cannot show a link it only ever stored the hash of.
 //
 // POST rather than GET because the first call for a person writes their row.
 export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
@@ -225,25 +234,27 @@ export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (existing?.token) return feedUrl(existing.token);
 
-    const raw = generateRawToken();
-    const token_hash = await hashToken(raw);
-    const token_prefix = tokenPreview(raw);
-
     if (existing) {
-      // A link minted while only the hash was stored: the original is not
-      // recoverable, so it is re-minted in place. Anything still subscribed to
-      // that old URL stops updating.
-      const { error: updateError } = await admin
+      // A link minted while only the hash was stored (before 20260728180000):
+      // the raw token is not recoverable, so there is nothing to show and it has
+      // to be replaced. Retired the same way a member-initiated replace retires
+      // one, rather than overwritten in place, so its address answers "this link
+      // was replaced" instead of the 404 that reads as a typo. Anything still
+      // subscribed to it stops updating either way.
+      const { error: retireError } = await admin
         .from("calendar_feed_tokens")
-        .update({ token: raw, token_hash, token_prefix })
+        .update({ revoked_at: new Date().toISOString() })
         .eq("id", existing.id);
-      if (updateError) throw new Error(updateError.message);
-      return feedUrl(raw);
+      if (retireError) throw new Error(retireError.message);
     }
 
-    const { error: insertError } = await admin
-      .from("calendar_feed_tokens")
-      .insert({ user_id: context.userId, token: raw, token_hash, token_prefix });
+    const raw = generateRawToken();
+    const { error: insertError } = await admin.from("calendar_feed_tokens").insert({
+      user_id: context.userId,
+      token: raw,
+      token_hash: await hashToken(raw),
+      token_prefix: tokenPreview(raw),
+    });
     if (insertError) {
       // Two first-ever loads racing (two tabs): the one-live-token-per-person
       // index rejects the loser, so use the row the winner just wrote.
@@ -254,9 +265,77 @@ export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
         .is("revoked_at", null)
         .maybeSingle();
       if (raced?.token) return feedUrl(raced.token);
+      // Nothing to fall back on, and the retire above already happened, so this
+      // person would be left with NO live link and a dead address, from a page
+      // load that was only meant to show them something. There is no
+      // transaction around the two statements, so put the old row back by hand
+      // before reporting the failure: the next load then finds it and takes the
+      // same branch again, rather than the member's calendar silently stopping.
+      if (existing) {
+        await admin.from("calendar_feed_tokens").update({ revoked_at: null }).eq("id", existing.id);
+      }
       throw new Error(insertError.message);
     }
     return feedUrl(raw);
+  });
+
+/**
+ * Replace the caller's calendar link: retire the one they have and mint a new
+ * one, returning the new URL.
+ *
+ * The token cannot leave the URL path, so this is the only way a leaked link is
+ * ever made harmless, and it is deliberately the member's own call to make.
+ * A manager cannot do it for somebody: it silently stops that person's calendar
+ * updating, and they are the one who has to re-subscribe, so the club asks them
+ * instead. See docs/calendar.md.
+ *
+ * The old row is kept, revoked rather than deleted, so the old address can tell
+ * whoever opens it that it was replaced instead of reading as a typo. Its raw
+ * token is cleared on the way past: the column only exists so the page can show
+ * a member their live link, and a row that is no longer anyone's live link has
+ * no reason to keep the secret. The hash stays, and is what the feed matches on.
+ *
+ * Retired rows are never pruned, so every call writes a row nothing removes, and
+ * nothing rate-limits the call: a signed-in account, or a stolen session, can
+ * loop it. Left uncapped for now because a club this size will not notice, and
+ * because a cap has to decide how long a retired address may keep explaining
+ * itself before it goes back to answering like a typo. That is a judgement, not
+ * a guarantee, so revisit it if the table ever grows.
+ */
+export const replaceMyCalendarFeedUrl = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const admin = await adminClient();
+    const origin = await requestOrigin();
+
+    // Retire first: calendar_feed_tokens_one_live_idx allows one live row per
+    // person, so inserting before revoking would just collide.
+    const { error: revokeError } = await admin
+      .from("calendar_feed_tokens")
+      .update({ revoked_at: new Date().toISOString(), token: null })
+      .eq("user_id", context.userId)
+      .is("revoked_at", null);
+    if (revokeError) throw new Error(revokeError.message);
+
+    const raw = generateRawToken();
+    const { error: insertError } = await admin.from("calendar_feed_tokens").insert({
+      user_id: context.userId,
+      token: raw,
+      token_hash: await hashToken(raw),
+      token_prefix: tokenPreview(raw),
+    });
+    // Deliberately not swallowed the way the mint path's race is. There, losing
+    // the race means someone else already made you a link; here it means the old
+    // link is retired and no new one exists, which is the one state a member
+    // must not be left in believing nothing happened. There is no transaction
+    // around the two statements, so a getMyCalendarFeedUrl landing in the gap
+    // (the panel is mounted on two pages, so a second tab is enough) mints a row
+    // and makes this insert collide. Either way the caller reacts by asking what
+    // its live link is now, and getMyCalendarFeedUrl mints one for anyone left
+    // without one, so the state heals rather than persisting.
+    if (insertError) throw new Error(insertError.message);
+
+    return { url: `${origin}/api/calendar/${raw}` };
   });
 
 // ================= Manager =================

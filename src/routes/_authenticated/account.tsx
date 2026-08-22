@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Pill } from "@/components/site/StatusPill";
 import { NewPasswordField } from "@/components/site/NewPasswordField";
+import { CalendarLinkPanel } from "@/components/site/CalendarLinkPanel";
 import { describePasswordError, passwordProblem, type BreachStatus } from "@/lib/password-policy";
 import {
   BELT_SIZE_HINT,
@@ -235,6 +236,22 @@ function AccountPage() {
       <WaiversCard />
 
       <CodeOfConductCard />
+
+      <SectionHeading>Calendar</SectionHeading>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Your calendar link</CardTitle>
+          <CardDescription>
+            The private link that keeps the club calendar in your own calendar app. Anyone who has
+            it can see what's on, so keep it to yourself. If it has ended up somewhere it shouldn't,
+            replace it and the old one stops working.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CalendarLinkPanel />
+        </CardContent>
+      </Card>
 
       <SectionHeading>Sign-in</SectionHeading>
 
