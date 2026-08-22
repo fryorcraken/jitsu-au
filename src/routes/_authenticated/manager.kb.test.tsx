@@ -91,6 +91,9 @@ const stray = {
   nav_title: null,
 };
 
+// Every write here drops the reader side's cached articles and sidebar. That
+// needs a query client, which this suite renders without.
+vi.mock("@/hooks/useKbArticle", () => ({ useInvalidateKbReader: () => vi.fn() }));
 vi.mock("@/lib/kb.functions", () => ({
   listManagerArticles: () => Promise.resolve([article, houseRules, syllabus, firstClass, stray]),
   listManagerSections: () =>

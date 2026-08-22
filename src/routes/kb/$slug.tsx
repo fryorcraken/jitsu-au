@@ -11,7 +11,7 @@
 // Rendered client-side rather than in the loader: the annotation layer needs to
 // know who is reading, and the reader's bearer token reaches a server function
 // through `attachSupabaseAuth` on an RPC from the browser, not during SSR.
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,10 +32,10 @@ import { KbArticleReader } from "@/components/site/KbArticleReader";
 import { Loading } from "@/components/site/Loading";
 import type { NewAnnotation } from "@/components/site/KbArticleReader";
 import { useKbNav } from "@/hooks/useKbNav";
+import { kbAnnotationsQueryKey, useKbArticle, useKbArticlePrefetch } from "@/hooks/useKbArticle";
 import {
   createAnnotation,
   deleteAnnotation,
-  getKbArticle,
   listAnnotations,
   markKbArticleRead,
   resolveAnnotation,
@@ -65,11 +65,12 @@ export const Route = createFileRoute("/kb/$slug")({
 
 function ArticlePage() {
   const { slug } = Route.useParams();
-  const { loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { nav } = useKbNav();
+  const prefetchArticle = useKbArticlePrefetch();
 
-  const fetchArticle = useServerFn(getKbArticle);
   const fetchAnnotations = useServerFn(listAnnotations);
   const create = useServerFn(createAnnotation);
   const update = useServerFn(updateAnnotation);
@@ -78,34 +79,31 @@ function ArticlePage() {
 
   const [busy, setBusy] = useState(false);
 
-  // Wait for auth to settle before asking. The server resolves the reader from
-  // the request's bearer token, so asking too early reads a members-only article
-  // as a signed-out visitor and renders "not available to you" at somebody who
-  // is, in fact, signed in.
-  const articleQ = useQuery({
-    queryKey: ["kb-article", slug],
-    queryFn: () => fetchArticle({ data: { slug } }),
-    enabled: !authLoading,
-    retry: false,
-  });
+  const articleQ = useKbArticle(slug);
 
   const article = articleQ.data?.article ?? null;
   const viewer = articleQ.data?.viewer ?? null;
   const redirectTo = articleQ.data?.redirect_to ?? null;
 
+  // Alongside the article, not after it. This used to wait for the article to
+  // arrive, which made two slow round trips into one slow round trip followed by
+  // another: the comments could not start until the text had landed, even though
+  // all they need is the slug the router already has. They are also the reason
+  // the comment rail arrived late on a page that otherwise looked finished.
   const annotationsQ = useQuery({
-    queryKey: ["kb-annotations", slug],
+    queryKey: kbAnnotationsQueryKey(user?.id ?? null, slug),
     queryFn: () => fetchAnnotations({ data: { slug } }),
-    enabled: !authLoading && Boolean(article),
+    enabled: !authLoading,
   });
 
   // A link entry has no page of its own. The sidebar sends readers straight to
   // the destination, so this only fires for a URL somebody saved or shared
-  // before the entry became a link. A full navigation rather than a router push:
-  // the destination lives outside this shell, under the marketing chrome.
+  // before the entry became a link. `link_path` is validated site-relative
+  // (`kbLinkPathSchema`), so the router can do it without reloading the app,
+  // and `replace` keeps the signpost out of the back button.
   useEffect(() => {
-    if (redirectTo) window.location.replace(redirectTo);
-  }, [redirectTo]);
+    if (redirectTo) void navigate({ to: redirectTo, replace: true });
+  }, [redirectTo, navigate]);
 
   const headings = useMemo(() => (article ? extractHeadings(article.body_md) : []), [article]);
 
@@ -125,10 +123,25 @@ function ArticlePage() {
   );
   useEffect(() => {
     const sync = () => setHash(window.location.hash);
-    sync();
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
-  }, [slug]);
+  }, []);
+  // Deliberately on EVERY commit, with no dependency list.
+  //
+  // There are two ways the fragment changes here and neither covers the other.
+  // A plain `#section` anchor (the contents list) fires `hashchange` but leaves
+  // the router's own location untouched; a cross-reference to another article is
+  // a router navigation, which fires no `hashchange` at all. Keying this to the
+  // router's hash instead would miss the case where the two have drifted apart
+  // and a navigation asks for the fragment the router already believes it is on.
+  // Reading `window.location.hash` after each render catches both, and costs a
+  // string comparison: React bails out of `setHash` when the value is unchanged,
+  // so this settles on the first render that sees a new fragment and cannot
+  // chain. That bail-out is exactly what the lint rule below cannot see.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setHash(window.location.hash);
+  });
 
   const target = useMemo(() => findHeadingForHash(hash, headings), [hash, headings]);
   /** What the reader asked for, when it is worth saying the section is gone. */
@@ -206,7 +219,7 @@ function ArticlePage() {
   }, [slug, article?.version, viewer?.signed_in, markRead, queryClient]);
 
   const refreshAnnotations = () =>
-    queryClient.invalidateQueries({ queryKey: ["kb-annotations", slug] });
+    queryClient.invalidateQueries({ queryKey: kbAnnotationsQueryKey(user?.id ?? null, slug) });
 
   /**
    * Run a write, refresh the thread list, and report failures in words.
@@ -233,7 +246,20 @@ function ArticlePage() {
   }
 
   if (authLoading || articleQ.isPending || redirectTo) {
-    return <Loading />;
+    // Not a bare spinner in place of the page. The sidebar already knows this
+    // article's section and title, so the frame a reader clicked towards can be
+    // on screen while the text is fetched, and moving between two articles stops
+    // looking like the whole page was thrown away and rebuilt.
+    return (
+      <article>
+        <ArticleCrumbs
+          section={crumbs?.section?.slug ? crumbs.section.title : null}
+          title={entry?.title ?? null}
+        />
+        {entry?.title && <h1 className="mb-8 text-3xl font-bold md:text-4xl">{entry.title}</h1>}
+        <Loading />
+      </article>
+    );
   }
 
   if (articleQ.isError || !article || !viewer) {
@@ -264,19 +290,10 @@ function ArticlePage() {
 
   return (
     <article>
-      <nav aria-label="Breadcrumb" className="mb-4 flex flex-wrap items-center gap-1 text-sm">
-        <Link to="/kb" className="text-muted-foreground hover:text-foreground">
-          Knowledge base
-        </Link>
-        {crumbs?.section?.slug && (
-          <>
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-muted-foreground">{crumbs.section.title}</span>
-          </>
-        )}
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="font-medium">{article.title}</span>
-      </nav>
+      <ArticleCrumbs
+        section={crumbs?.section?.slug ? crumbs.section.title : null}
+        title={article.title}
+      />
 
       <header className="mb-8">
         <div className="flex flex-wrap items-center gap-2">
@@ -399,11 +416,40 @@ function ArticlePage() {
           aria-label="More in the knowledge base"
           className="mt-12 grid gap-3 border-t pt-6 sm:grid-cols-2"
         >
-          <AdjacentLink entry={previous} direction="previous" />
-          <AdjacentLink entry={next} direction="next" />
+          <AdjacentLink entry={previous} direction="previous" onPrefetch={prefetchArticle} />
+          <AdjacentLink entry={next} direction="next" onPrefetch={prefetchArticle} />
         </nav>
       )}
     </article>
+  );
+}
+
+/**
+ * Where in the knowledge base this article sits.
+ *
+ * Shared by the loading state and the article itself, so the two agree: the
+ * trail is drawn from the sidebar's copy of the contents, which is already in
+ * hand before the article's own text has been asked for.
+ */
+function ArticleCrumbs({ section, title }: { section: string | null; title: string | null }) {
+  return (
+    <nav aria-label="Breadcrumb" className="mb-4 flex flex-wrap items-center gap-1 text-sm">
+      <Link to="/kb" className="text-muted-foreground hover:text-foreground">
+        Knowledge base
+      </Link>
+      {section && (
+        <>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">{section}</span>
+        </>
+      )}
+      {title && (
+        <>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="font-medium">{title}</span>
+        </>
+      )}
+    </nav>
   );
 }
 
@@ -417,9 +463,12 @@ function ArticlePage() {
 function AdjacentLink({
   entry,
   direction,
+  onPrefetch,
 }: {
   entry: KbNavEntry | null;
   direction: "previous" | "next";
+  /** Start fetching the neighbour as soon as the reader shows interest in it. */
+  onPrefetch: (slug: string) => void;
 }) {
   const isNext = direction === "next";
   if (!entry) return <div className={isNext ? "sm:col-start-2" : undefined} />;
@@ -444,11 +493,20 @@ function AdjacentLink({
     .join(" ");
 
   return entry.link_path ? (
-    <a href={entry.link_path} className={className}>
+    // A link entry points at a page on the marketing site. `link_path` is
+    // validated site-relative, so the router takes it without reloading the app.
+    <Link to={entry.link_path} className={className}>
       {inner}
-    </a>
+    </Link>
   ) : (
-    <Link to="/kb/$slug" params={{ slug: entry.slug }} className={className}>
+    <Link
+      to="/kb/$slug"
+      params={{ slug: entry.slug }}
+      className={className}
+      onMouseEnter={() => onPrefetch(entry.slug)}
+      onFocus={() => onPrefetch(entry.slug)}
+      onTouchStart={() => onPrefetch(entry.slug)}
+    >
       {inner}
     </Link>
   );

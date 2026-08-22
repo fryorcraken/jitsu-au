@@ -469,7 +469,23 @@ export async function loadKbArticle(
 ): Promise<LoadedArticle | null> {
   const article = await loadKbArticleRow(db, slug);
   if (!article) return null;
+  return loadKbArticleVersion(db, article, version);
+}
 
+/**
+ * The version half of `loadKbArticle`, for a caller that already holds the row.
+ *
+ * The reader path reads the row first, to tell a link entry from an article
+ * before it asks for any text, and used to hand the slug to `loadKbArticle`
+ * afterwards — which fetched the same row a second time. That is a whole
+ * round trip to the database on the most-visited screen in the feature, for a
+ * row already in memory.
+ */
+export async function loadKbArticleVersion(
+  db: KbClient,
+  article: KbArticleRow,
+  version?: number,
+): Promise<LoadedArticle | null> {
   let query = db.from("kb_article_versions").select("*").eq("article_id", article.id);
   query = version === undefined ? query.eq("is_current", true) : query.eq("version", version);
   const { data: versionRow, error: verErr } = await query.maybeSingle();

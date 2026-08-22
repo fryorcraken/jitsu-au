@@ -1,6 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import ReactMarkdown from "react-markdown";
+
+// Article bodies link to other articles constantly, and those links go through
+// the ROUTER now rather than the browser. Stood in for here, marked so a test
+// can tell a router link from a plain anchor.
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    to,
+    hash,
+    children,
+    ...props
+  }: {
+    to: string;
+    hash?: string;
+    children: React.ReactNode;
+  }) => (
+    <a href={hash ? `${to}#${hash}` : to} data-router-link="" {...props}>
+      {children}
+    </a>
+  ),
+}));
+
 import { kbMarkdownComponents } from "./kb-markdown";
 import { remarkKbTables } from "./remark-kb-tables";
 

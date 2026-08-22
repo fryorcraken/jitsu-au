@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 import {
   deleteKbSection,
   listSharedAnnotations,
+  loadKbArticle,
+  loadKbArticleVersion,
   projectArticle,
   promoteArticleVersion,
   saveKbArticle,
@@ -696,5 +698,52 @@ describe("projectArticle", () => {
 
   it("reports an empty list for an article with no headings", () => {
     expect(projectArticle(loaded("Just prose.")).sections).toEqual([]);
+  });
+});
+
+describe("loadKbArticleVersion", () => {
+  const ARTICLE = { id: "a-1", slug: "belts", visibility: "members" } as unknown as KbArticleRow;
+  const VERSION = { article_id: "a-1", version: 3, is_current: true, body_md: "# Belts" };
+
+  /** Answer whichever table is being read, and record every read. */
+  const client = () => fakeClient((op) => (op.table === "kb_articles" ? ok(ARTICLE) : ok(VERSION)));
+
+  // The reader reads the article row first, to tell a link entry from a real
+  // page before it asks for any text. It then used to hand the SLUG to
+  // `loadKbArticle`, which read that same row a second time: a whole extra
+  // round trip to the database on the most-visited screen in the feature.
+  it("does not re-read the article row a caller already holds", async () => {
+    const { db, calls } = client();
+    const loaded = await loadKbArticleVersion(db, ARTICLE);
+
+    expect(loaded?.version).toEqual(VERSION);
+    expect(calls.filter((c) => c.table === "kb_articles")).toHaveLength(0);
+    expect(calls.filter((c) => c.table === "kb_article_versions")).toHaveLength(1);
+  });
+
+  it("asks for the live version by default and a named one when given it", async () => {
+    const live = client();
+    await loadKbArticleVersion(live.db, ARTICLE);
+    expect(live.calls[0].filters).toContainEqual(["is_current", true]);
+
+    const pinned = client();
+    await loadKbArticleVersion(pinned.db, ARTICLE, 2);
+    expect(pinned.calls[0].filters).toContainEqual(["version", 2]);
+    expect(pinned.calls[0].filters).not.toContainEqual(["is_current", true]);
+  });
+
+  // The by-slug path still reads both, and still reports "nothing to show" for
+  // an article with no live version (a half-failed save, or a link entry).
+  it("keeps loadKbArticle reading the row and then its version", async () => {
+    const { db, calls } = client();
+    const loaded = await loadKbArticle(db, "belts");
+
+    expect(loaded?.article).toEqual(ARTICLE);
+    expect(calls.map((c) => c.table)).toEqual(["kb_articles", "kb_article_versions"]);
+  });
+
+  it("returns null when the article has no version at all", async () => {
+    const { db } = fakeClient((op) => (op.table === "kb_articles" ? ok(ARTICLE) : ok(null)));
+    expect(await loadKbArticle(db, "belts")).toBeNull();
   });
 });

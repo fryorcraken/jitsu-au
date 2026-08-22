@@ -24,6 +24,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 vi.mock("@/hooks/useKbNav", () => ({ useKbNav: () => mockUseKbNav() }));
+vi.mock("@/hooks/useKbArticle", () => ({ useKbArticlePrefetch: () => vi.fn() }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: "u1" }, loading: false }) }));
 vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: [], isLoading: false }) }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: () => vi.fn() }));
