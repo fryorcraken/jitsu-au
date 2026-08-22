@@ -118,6 +118,21 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   check lives in `filePaperWaiver`, so the manager's own upload form gets the
   same speed bump.
 
+- `list_kb_sections` / `save_kb_section` / `delete_kb_section` /
+  `list_kb_articles` / `get_kb_article` / `save_kb_article` / `list_kb_comments`
+  — the knowledge base, the agent's equivalent of `/manager/kb`. Both go through
+  `src/lib/kb-admin.ts`, so an agent-published article and a manager's own are
+  the same row written the same way. The rules that are not guessable are in
+  `docs/knowledge-base.md`; the one that belongs here is **cross-references**:
+  an article links to a section of another with an ordinary markdown link
+  carrying the heading's anchor (`[the fees](/kb/belts#fees)`), and
+  `get_kb_article` reports every anchor the article has in `sections`
+  (`id`, `text`, `depth`, `pinned`, `url`). Take the `url` from there rather
+  than deriving a fragment from the heading's wording, which is right until
+  somebody rewords the heading. Ending a heading with the attribute syntax
+  `## How grading works {#grading}` pins its anchor so the rewording does not
+  break the link; the suffix is stripped before a reader sees it, and
+  `sections[].pinned` says which anchors were set that way.
 - `list_waiver_templates` / `get_waiver_template` / `save_waiver_template` /
   `publish_waiver_template` — the waiver everyone signs, the agent's equivalent
   of `/manager/waiver-template`. They go through `listWaiverTemplateRows`,
@@ -232,7 +247,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"12"`.
+test so the bump is a deliberate edit, and the current value is `"13"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call
