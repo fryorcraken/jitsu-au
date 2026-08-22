@@ -6,7 +6,7 @@
 // absolute UTC instants for each date, handling DST via the Intl API (no
 // timezone dependency).
 
-import { VENUE_NAME } from "./venue";
+import { VENUE_ADDRESS, VENUE_NAME } from "./venue";
 
 export const CLUB_TIME_ZONE = "Australia/Sydney";
 
@@ -115,11 +115,11 @@ export const DEFAULT_EVENT_DURATION_MINUTES = 60;
 
 /**
  * Where the club trains, pre-filled on a new calendar entry. Built from the
- * shared venue name so a rename reaches the calendar too; the rest is more
- * specific than the marketing address because it has to get someone from the
- * street to the mats.
+ * shared venue constants, which now carry the building and street number this
+ * line used to restate on its own. It has to get someone from the street to the
+ * mats, and so does every other surface, so there is one address for all of them.
  */
-export const DEFAULT_EVENT_LOCATION = `${VENUE_NAME}, UTS Building 4, 745 Harris St, Ultimo`;
+export const DEFAULT_EVENT_LOCATION = `${VENUE_NAME}, ${VENUE_ADDRESS}`;
 
 /**
  * Read a `datetime-local` value ("YYYY-MM-DDTHH:MM", seconds optional) as plain

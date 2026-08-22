@@ -1,12 +1,12 @@
 # Table privileges `anon` and `authenticated` are allowed to hold in `public`.
 #
 # One `table:grantee:privilege` per line. check-client-grants.py FAILS on
-# anything held and not listed here. It runs twice, over two different
-# databases: against the LIVE ACL from migration-drift.yml (after a merge, and
-# only once its credential is set), and against a from-scratch REPLAY of
-# supabase/migrations from supabase-lint.yml (on every `supabase/**` pull
-# request, no credential needed). Both must agree with this file — the
-# migrations being right does not make production right, or the reverse.
+# anything held and not listed here. It is pointed at two different databases:
+# a from-scratch REPLAY of supabase/migrations, from supabase-lint.yml on every
+# `supabase/**` pull request (no credential needed), and the LIVE ACL, by hand
+# through Lovable's SQL access because CI cannot reach that database at all
+# (supabase/lint/README.md). Both must agree with this file — the migrations
+# being right does not make production right, or the reverse.
 # `service_role` is out of scope — it bypasses RLS by design and every server
 # function needs it.
 #

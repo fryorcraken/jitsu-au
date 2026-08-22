@@ -58,18 +58,18 @@ it before writing a migration that touches grants. Three things bite repeatedly:
   reachable paths the moment one does, bypassing rules that only live in the
   server functions.
 
-`supabase/lint/client-grants-expected.txt` pins the allowed set, and two
-workflows check it. `.github/workflows/migration-drift.yml` reads the **live**
-ACL (after a merge, and only once its credential is set);
+`supabase/lint/client-grants-expected.txt` pins the allowed set, and
+`supabase/lint/check-client-grants.py` is pointed at two databases.
 `.github/workflows/supabase-lint.yml` replays every migration into a throwaway
-Postgres and reads the ACL **there**, on every `supabase/**` pull request. So a
-new table that forgets its `REVOKE` fails the PR that adds it, which is the one
-of the two you can rely on today: the live check needs a credential that is not
-set, and it pipes its report into the run summary without `pipefail`, so it
-would report green even once it is. When you add a table or a grant, update that
-file in the same change. Read the ACL from **`pg_class.relacl`**, never `information_schema.role_table_grants`:
-the information_schema views only show grants the connecting role is party to (a
-least-privilege reader sees an empty set) and they omit `MAINTAIN` entirely.
+Postgres and checks the ACL **there**, on every `supabase/**` pull request, so a
+new table that forgets its `REVOKE` fails the PR that adds it. Checking the
+**live** ACL is the same script run by hand, because CI cannot reach that
+database at all — see `supabase/lint/README.md`. When you add a table or a
+grant, update that file in the same change, and run the live check by hand after
+the migration goes live. Read the ACL from **`pg_class.relacl`**, never
+`information_schema.role_table_grants`: the information_schema views only show
+grants the connecting role is party to (a least-privilege reader sees an empty
+set) and they omit `MAINTAIN` entirely.
 
 Note that the `REVOKE` follows the object rather than its name: it survives a
 later `ALTER TABLE … RENAME TO`, so the migration that closes a table may name
@@ -142,19 +142,17 @@ way) means updating the PR and asking again.
 
 **How drift gets caught now** (both are backstops, not substitutes for the rule):
 
-- `supabase/lint/check-migration-drift.py`, run by
-  `.github/workflows/migration-drift.yml` on pushes to `main`, on a daily
-  schedule, and on demand. It compares `supabase/migrations/*.sql` against the
-  live ledger and fails when a file has no matching row. Contract-phase
-  migrations that must land _after_ a deploy go in
-  `supabase/lint/migration-drift-allowlist.txt` with a note.
-  - It **does not run on pull requests, by design** — it holds a production
-    credential, and a same-repo PR branch (how Lovable and every agent push
-    here) would receive that secret while running a script the PR itself can
-    edit. So drift surfaces a merge later, not in the PR. Only the checker's
-    `--selftest` runs on PRs, from `ci.yml`.
-  - Without the `SUPABASE_DB_URL` secret it warns and passes, so a green tick
-    only means "no drift" once the secret is set — the job summary says which.
+- `supabase/lint/check-migration-drift.py`, which compares
+  `supabase/migrations/*.sql` against the live ledger and fails when a file has
+  no matching row. Contract-phase migrations that must land _after_ a deploy go
+  in `supabase/lint/migration-drift-allowlist.txt` with a note.
+  - **Nothing runs it for you.** There is no workflow: CI cannot reach the live
+    database on this project (Lovable Cloud does not expose the credential, and
+    the database is IPv6-only against IPv4-only runners), so this is a script
+    somebody runs through Lovable's SQL access. `supabase/lint/README.md` has
+    the query and the full finding. Only the checker's `--selftest` runs in CI.
+  - Because it is manual, **the rule above is the guard, not this**. Run it
+    after applying a migration, and before a release.
   - It proves a **ledger row exists**, not that the SQL ran. Since step 4 above
     writes that row by hand, a recorded-but-unapplied migration still passes.
     Step 5 (verify the object exists) is the part only a human/agent can do.

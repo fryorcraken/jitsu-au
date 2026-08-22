@@ -48,13 +48,13 @@ roles.
 The list below is the complete set of table privileges the client roles hold.
 Most of the app needs none of it: it reaches the database through a server
 function on the service-role client, which bypasses both grants and RLS.
-`supabase/lint/client-grants-expected.txt` pins this list, and it is checked
-against **two** databases:
-`.github/workflows/migration-drift.yml` reads the live ACL after a merge, and
-`.github/workflows/supabase-lint.yml` replays every migration into a throwaway
-Postgres and reads the ACL there, on every `supabase/**` pull request. The
-second needs no credential, so a table left open by its migration fails the PR
-that adds it rather than surfacing a merge later.
+`supabase/lint/client-grants-expected.txt` pins this list, and
+`supabase/lint/check-client-grants.py` is pointed at two databases. Against the
+**local replay** it runs in CI, on every `supabase/**` pull request
+(`.github/workflows/supabase-lint.yml` replays every migration into a throwaway
+Postgres), so a table left open by its own migration fails the PR that adds it.
+Against the **live** database it is run by hand — CI cannot reach that one at
+all (see `supabase/lint/README.md`).
 
 | Table                    | Role            | Privilege | Why                                                                                                                                                                                               |
 | ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1380,6 +1380,13 @@ length + email format). Each row is a **lead**: kept exactly as submitted,
 creating no person record. The manager directory merges leads in by normalized
 email until the email belongs to a person (they signed the waiver).
 
+A manager can **delete a lead** from `/manager/users` (`deleteLead`), which
+removes every registration under that address, since the directory merges them
+into one row. Refused, on the server, when the address belongs to a person: they
+have signed something, and their enquiry is part of that record. This is the
+only erasure the product has, and why it stops here is
+`docs/erasing-personal-data.md`.
+
 ### `contact_messages`
 
 `id` PK, `name`, `email`, `subject`, `message`, `client_submission_id`,
@@ -1388,7 +1395,10 @@ email until the email belongs to a person (they signed the waiver).
 Insert-only for both client roles, and it stays that way: managers read it
 through `listContactMessages` (`src/lib/contact-messages.functions.ts`) on the
 **service-role** client behind the manager gate, so `/manager/contact-messages`
-needed no read grant, no new policy and no migration.
+needed no read grant, no new policy and no migration. The same is true of
+`deleteContactMessage`, which removes one message for good: there is no copy
+elsewhere in the product, so a manager confirms what goes before it goes (see
+`docs/erasing-personal-data.md`).
 
 Submitting also emails the sender an acknowledgement and every manager the
 message itself (`src/lib/contact-email.server.ts`, best-effort: a send failure

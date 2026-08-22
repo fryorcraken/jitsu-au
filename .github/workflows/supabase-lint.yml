@@ -9,14 +9,15 @@ name: Supabase lint
 #   3. Client grants — what `anon` and `authenticated` end up holding once every
 #      migration has run, against supabase/lint/client-grants-expected.txt.
 #
-# (3) is the same checker migration-drift.yml points at the live database, and
-# it answers a different question here: not "does production match the expected
-# set" but "do the migration files, replayed from nothing, produce it". Those
-# can diverge, and until now nothing looked. A table created without the
+# (3) is the same checker that is run BY HAND against the live database, asking
+# a different question here: not "does production match the expected set" but
+# "do the migration files, replayed from nothing, produce it". Those can
+# diverge, and until now nothing looked. A table created without the
 # `REVOKE ALL ... FROM anon, authenticated` that Supabase's default privileges
-# make necessary arrives fully open, and it would show up only in the live check
-# — which needs a production credential and so cannot run on a pull request.
-# This one needs no secret, so it runs on the PR that introduces the table.
+# make necessary arrives fully open, and nothing automated would say so — the
+# live check needs a credential this project cannot give CI (supabase/lint/
+# README.md), and the Splinter lints in (2) only ever test SELECT. The replay is
+# a throwaway container, so this needs no secret and runs on the PR itself.
 #
 # Path-filtered to database changes so frontend-only PRs don't spin up Docker.
 on:
@@ -108,19 +109,19 @@ jobs:
       #
       # Read pg_class.relacl, NOT information_schema.role_table_grants: the
       # information_schema views hide grants the connecting role is not party to
-      # and omit MAINTAIN entirely. Same query as migration-drift.yml, so the two
-      # results are directly comparable — a difference between them is a live
-      # database that has drifted from its own migrations, in either direction.
+      # and omit MAINTAIN entirely. Same query supabase/lint/README.md gives for
+      # the by-hand live run, so the two results are directly comparable — a
+      # difference between them is a live database that has drifted from its own
+      # migrations, in either direction.
       #
       # Grants follow the OBJECT, not the name: a REVOKE survives a later
       # `ALTER TABLE ... RENAME TO`, so a table can be correctly closed by a
       # migration that names it something else entirely (kb_articles is closed by
       # 20260731140000_documents.sql, under its old name). That is exactly why
       # this is a replay rather than a grep over the migration files.
-      # `!cancelled()` rather than `always()`, matching migration-drift.yml: with
-      # cancel-in-progress on, a superseded run would otherwise reach this step
-      # after its container is gone and fail on a connection error that says
-      # nothing about the schema.
+      # `!cancelled()` rather than `always()`: with cancel-in-progress on, a
+      # superseded run would otherwise reach this step after its container is
+      # gone and fail on a connection error that says nothing about the schema.
       - name: Client grants match the expected set
         if: ${{ !cancelled() }}
         run: |

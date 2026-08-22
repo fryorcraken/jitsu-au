@@ -15,6 +15,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireManager } from "@/lib/require-manager";
 import { CONTACT_SEEN_KEY, readSeenMarker, stampSeenMarker } from "@/lib/seen-markers";
 import {
+  deleteContactMessageSchema,
   listContactMessagesSchema,
   markContactMessagesSeenSchema,
   unreadSince,
@@ -102,6 +103,44 @@ export const markContactMessagesSeen = createServerFn({ method: "POST" })
       context.userId,
     );
     return { ok: true as const, marker, skipped };
+  });
+
+// ---- Manager: delete a message ----
+//
+// The contact inbox is the one place the club holds something a person wrote
+// with nothing else attached to it: no account, no waiver, no membership. Once
+// a message has been dealt with there is no reason to keep their name, address
+// and words on file, and until now there was no way not to. See
+// docs/erasing-personal-data.md.
+
+/**
+ * Delete one message, for good. There is no copy anywhere else in the product,
+ * so this is the whole record of it going.
+ *
+ * The club-wide seen marker is deliberately left where it is. It is a
+ * watermark over timestamps, not a set of message ids, so deleting a row
+ * neither breaks it nor needs it moved. If the message was still unread the
+ * dashboard count simply drops by one, which is the honest reading: nobody is
+ * waiting on it any more.
+ */
+export const deleteContactMessage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => deleteContactMessageSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const admin = await adminClient();
+    // `select()` so the delete reports what it actually matched. PostgREST
+    // returns no error for a filter that hit nothing, and telling a manager a
+    // message is deleted when it was never there is the wrong way round on a
+    // screen whose whole job is not giving false reassurance.
+    const { data: gone, error } = await admin
+      .from("contact_messages")
+      .delete()
+      .eq("id", data.id)
+      .select("id");
+    if (error) throw new Error(error.message);
+    if (!gone || gone.length === 0) throw new Error("That message has already been deleted.");
+    return { ok: true as const, id: data.id };
   });
 
 /**

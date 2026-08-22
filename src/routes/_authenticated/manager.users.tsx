@@ -4,7 +4,20 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Pill } from "@/components/site/StatusPill";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { formatDate } from "@/lib/dates";
 import {
   ROLE_CLASS,
@@ -17,7 +30,7 @@ import { lifecycleLabel, membershipStatusLabel } from "@/lib/status-labels";
 import { lifecycleStatuses, normalizeEmail } from "@/lib/validation";
 import { emailVerificationLabel } from "@/lib/email-verification";
 import { listClubUsers } from "@/lib/membership.functions";
-import { markInterestRegistrationsSeen } from "@/lib/leads.functions";
+import { deleteLead, markInterestRegistrationsSeen } from "@/lib/leads.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
 
@@ -41,10 +54,12 @@ function ManagerUsersPage() {
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchList = useServerFn(listClubUsers);
   const markLeadsSeen = useServerFn(markInterestRegistrationsSeen);
+  const removeLead = useServerFn(deleteLead);
   const { refresh: refreshNotifications } = useNotifications();
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Who registered interest since a manager last opened this screen, captured
   // before the watermark moved. Normalized addresses: a lead is keyed by the
   // address they typed, a person by their auth email.
@@ -57,22 +72,38 @@ function ManagerUsersPage() {
   const [student, setStudent] = useState<string>("all");
   const [sort, setSort] = useState<SortKey>("name");
 
+  // The lead a manager has asked to delete, held until they confirm. The row
+  // stays in the table until the server says the rows are gone, so a refusal
+  // leaves the directory exactly as it was.
+  const [pendingDelete, setPendingDelete] = useState<Row | null>(null);
+  const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
+
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return fetchList()
+        .then((data) => {
+          setRows(data as Row[]);
+          setLoadError(null);
+        })
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load the members");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [fetchList],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    fetchList()
-      .then((data) => {
-        setRows(data as Row[]);
-        setLoading(false);
-      })
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to load users");
-        setLoading(false);
-      });
-  }, [isManager, fetchList]);
+    void load();
+  }, [isManager, load]);
 
   // This screen is where new interest registrations are read, so opening it is
   // what clears them off the "needs attention" list. Club-wide, like the contact
@@ -148,6 +179,28 @@ function ManagerUsersPage() {
     }
     return sorted;
   }, [rows, search, lifecycle, role, waiver, student, sort]);
+
+  async function onDeleteLead(row: Row) {
+    if (!row.email) return;
+    const email = row.email;
+    setDeletingEmail(email);
+    try {
+      await removeLead({ data: { email } });
+      const wanted = normalizeEmail(email);
+      setRows((prev) =>
+        prev.filter((r) => r.user_id || !r.email || normalizeEmail(r.email) !== wanted),
+      );
+      toast.success("Enquiry deleted");
+    } catch (e) {
+      // Nothing was lost: the row is still in the table and still in the
+      // database. The likeliest refusal is that this address now belongs to
+      // somebody who has signed a waiver, and the message says so.
+      toast.error(e instanceof Error ? e.message : "Could not delete that enquiry");
+    } finally {
+      setDeletingEmail(null);
+      setPendingDelete(null);
+    }
+  }
 
   return (
     <>
@@ -239,7 +292,14 @@ function ManagerUsersPage() {
         </div>
 
         {loading ? (
-          <p>Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="The member list"
+            message={loadError}
+            hint="This is not the same as the club having no members."
+            onRetry={() => void load()}
+          />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No users yet.</p>
         ) : (
@@ -266,6 +326,9 @@ function ManagerUsersPage() {
                     <th className="px-3 py-2">Sessions</th>
                     <th className="px-3 py-2">Latest membership</th>
                     <th className="px-3 py-2">First seen</th>
+                    <th className="px-3 py-2">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -365,6 +428,28 @@ function ManagerUsersPage() {
                         )}
                       </td>
                       <td className="px-3 py-2">{formatDate(r.first_seen_at)}</td>
+                      {/* Only a lead can be deleted from here. Everyone else has
+                          a signed waiver, a membership or attendance behind
+                          them, and what the club is allowed to destroy of that
+                          is still an open question, so the button is not drawn
+                          rather than drawn and refused. */}
+                      <td className="px-3 py-2 text-right">
+                        {!r.user_id && r.email ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            // Named after whose enquiry it deletes: one row of
+                            // a long directory, and nothing about a button
+                            // called "Delete" says which row it belongs to.
+                            aria-label={`Delete the enquiry from ${r.name ?? r.email}`}
+                            disabled={deletingEmail === r.email}
+                            onClick={() => setPendingDelete(r)}
+                          >
+                            {deletingEmail === r.email ? "Deleting..." : "Delete"}
+                          </Button>
+                        ) : null}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -373,6 +458,34 @@ function ManagerUsersPage() {
           </>
         )}
       </section>
+
+      <AlertDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete the enquiry from {pendingDelete?.name ?? pendingDelete?.email}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes every interest form filed under {pendingDelete?.email}, with the name,
+              phone number and message on it, and takes them off this list. The club keeps no copy,
+              and it can't be undone. Anything they sent through the contact form is separate, and
+              is deleted from Contact messages.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => pendingDelete && onDeleteLead(pendingDelete)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

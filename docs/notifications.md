@@ -280,6 +280,12 @@ existed, one that has been rotated, and a malformed one all render the same
 page. Anything else would make the endpoint a way to probe which links the club
 has issued.
 
+Because the token is in the URL, the page is served with
+`Referrer-Policy: no-referrer` and `Cache-Control: no-store`, so the link never
+travels in a `Referer` header (the footer has outbound links) and never lands in
+a shared or on-disk cache. That is set for every token path at once; see
+"Security headers" in `CLAUDE.md`.
+
 The signed-out page deliberately omits the manager switch. With no session it
 cannot tell whether the person holds the role, and offering a manager-only
 choice to a member would be a lie about what they can turn on.

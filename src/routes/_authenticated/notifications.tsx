@@ -7,6 +7,7 @@ import { AlertTriangle, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { NotificationSwitches } from "@/components/site/NotificationSwitches";
+import { Loading } from "@/components/site/Loading";
 import { useNotifications } from "@/hooks/useNotifications";
 import type { EmailPreferenceKey } from "@/lib/notifications";
 import {
@@ -163,7 +164,7 @@ function NotificationsPage() {
           )}
         </CardHeader>
         <CardContent>
-          {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+          {loading && <Loading />}
           {data && data.items.length === 0 && (
             <p className="text-sm text-muted-foreground">
               Nothing yet. Replies to your comments will show up here.
@@ -211,8 +212,15 @@ function NotificationsPage() {
               disabled={savingPrefs}
               isManager={data?.isManager}
             />
+          ) : failed ? (
+            // Without this the switches sat on "Loading..." for good after a
+            // failed read, which reads as a page still working rather than one
+            // that has already given up. The retry is in the panel above.
+            <p className="text-sm text-muted-foreground" role="status">
+              Your email choices could not be loaded, so they are not shown. Nothing has changed.
+            </p>
           ) : (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <Loading />
           )}
         </CardContent>
       </Card>
