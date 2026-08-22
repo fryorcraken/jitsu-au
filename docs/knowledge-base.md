@@ -125,6 +125,45 @@ the entry became a link.
   that, because the sidebar already owns the left from `lg` and three columns on
   a 1024px laptop leaves a reading column too narrow for a syllabus.
 
+### Linking to a section, in this article or another one
+
+An article can point at one **section** of another, which is what makes the
+knowledge base a handbook rather than a stack of pages: the syllabus can send a
+reader to the fees part of the grading article without them having to find it.
+
+- **Every heading has an anchor**, and it is the heading's own words, lowercased
+  with anything else turned into hyphens. `## How grading works` answers to
+  `#how-grading-works`. Two headings with the same words get `-2`, `-3`.
+- **Link to one with an ordinary Markdown link.** `[the fees](/kb/belts#fees)`
+  from another article, `[the fees](#fees)` inside the same one. There is no
+  special syntax, because there does not need to be.
+- **Pin an anchor by ending the heading with `{#your-anchor}`**, the attribute
+  syntax Pandoc and Docusaurus use: `## How grading works {#grading}` answers to
+  `#grading` for as long as that suffix is there, whatever the heading is
+  reworded to. Otherwise the anchor is the wording, so rewriting a heading
+  quietly breaks every link aimed at it. Pin the ones other articles point at.
+  The suffix never reaches the reader; `remark-kb-anchors` takes it off.
+- **The reader gets there.** An article's text is fetched after the page loads,
+  so by the time the browser looks for the fragment there is nothing in the
+  document with that id yet: `/kb/$slug` scrolls to it once the text is on
+  screen, and moves focus there too, so a keyboard or a screen reader carries on
+  from the section rather than from the top of the page.
+- **A link at a section that is gone says so.** Renamed heading, deleted
+  passage: the reader is told which fragment could not be found and pointed at
+  "On this page" for what the article has now, rather than being dropped
+  silently at the top of a syllabus.
+- **Every heading offers its own link.** "Link to this section" sits under the
+  heading in the reader (always on a touch screen, on hover or focus on a wide
+  one) and copies the whole address, so a member can paste one into a message
+  and a manager can paste one into another article.
+
+Two things to know before relying on it. Adding `{#anchor}` to a heading
+**changes that block's text**, so comments anchored to the heading itself detach
+the same way any other edit to a passage detaches them (they are shown under "On
+earlier wording", not lost). And nothing validates a cross-reference at save
+time: a link to `/kb/no-such-article#x` is an ordinary broken link until
+somebody follows it.
+
 **Markdown tables render.** `| Belt | Time |` is a table, in the reader and in
 the manager's preview, and a wide one scrolls inside its own box rather than
 scrolling the page sideways on a phone. Alignment markers (`| :-: |`) work, and
@@ -412,6 +451,15 @@ sections and all, and it is rearranged by dragging.
   site. An existing link entry can be turned back into an article, and the
   editor says the link is only replaced when you save.
 
+**"Link to a section" lists what this article offers.** Every heading in the
+body being edited, with the exact link another article should use
+(`/kb/belts#fees`), a Copy button on each, and a `Pinned` badge on the ones
+written as `## Heading {#anchor}`. It reads off the text in the editor rather
+than the saved version, so a heading just typed can be linked to straight away
+and a manager can see what renaming one did to its link before publishing it.
+That panel is the only place the fragment is discoverable: it comes out of the
+heading's wording, which is not something to ask anybody to derive by hand.
+
 Everything here does the same thing to the same data as the agent API, through
 the same code (`kb-admin.ts`). Neither is the "real" one.
 
@@ -438,6 +486,13 @@ Four things that bite:
 - **Omitting a field leaves it alone.** That is what stops an agent editing the
   text of a managers-only draft from publishing it to the world, or moving it to
   the top of the sidebar, by not mentioning a field.
+- **Cross-references are read off `get_kb_article`, not derived.** Its result
+  carries `sections`: every heading in the version read, with its `id`, `text`,
+  `depth`, `pinned` flag and a ready-made `url` (`/kb/belts#fees`). Read the
+  article being pointed at and use that `url`. An anchor worked out from the
+  heading's wording is right until it is not, and a wrong one fails silently.
+  Pin any heading being linked to (`## How grading works {#grading}`) so the
+  link survives the club rewording it later.
 - **An unknown `section` is refused**, unlike everything else. Accepting it would
   drop the article into "Everything else", and a typo there is invisible until
   somebody notices an article has gone missing from its group. Send an empty
@@ -485,6 +540,7 @@ it as a marketing page or a blog post instead.
 | Wire schemas                                | `src/lib/validation.ts`                             |
 | Article typography                          | `src/lib/kb-markdown.tsx`                           |
 | Markdown tables                             | `src/lib/remark-kb-tables.ts` (pure, tested)        |
+| Section anchors (`{#id}` stripping)         | `src/lib/remark-kb-anchors.ts` (pure, tested)       |
 | Shell (top bar, sidebar, search, progress)  | `src/components/site/KbLayout.tsx`                  |
 | Reader UI                                   | `src/components/site/KbArticleReader.tsx`           |
 | Sign-in gate + reader routes                | `src/routes/kb/route.tsx`, `index.tsx`, `$slug.tsx` |

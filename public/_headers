@@ -1,0 +1,36 @@
+# Response headers for anything the platform serves without going through the
+# app's request middleware, which is where src/lib/security-headers.ts sets the
+# same values on every response the server itself builds.
+#
+# Cloudflare reads this file when it serves this project's assets. If it turns
+# out to be ignored here, nothing is lost: the middleware is the real fix and
+# covers every route. Confirm with `curl -I https://jitsu.au/` once deployed.
+#
+# Keep these in step with TOKEN_PATH_PREFIXES in src/lib/security-headers.ts.
+# security-headers.test.ts fails if the two disagree, on the referrer policy and
+# on the no-store below.
+#
+# The token paths carry Cache-Control: no-store for the same reason the
+# middleware sets it, and it matters MORE here: this file is what covers the
+# case where a response never reached the middleware, so the middleware's own
+# no-store never ran. A URL with a credential in its path landing in a shared
+# or on-disk cache is the thing being prevented.
+#
+# /api/calendar/* is the deliberate exception. A calendar client polls that feed
+# every few minutes, so the route sets `private, max-age=300` itself and the
+# middleware leaves a route's own choice alone. `private` already keeps it out
+# of shared caches, and no-store here would turn every poll into a miss.
+
+/*
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/api/calendar/*
+  Referrer-Policy: no-referrer
+
+/api/verify-email/*
+  Referrer-Policy: no-referrer
+  Cache-Control: no-store
+
+/email-settings/*
+  Referrer-Policy: no-referrer
+  Cache-Control: no-store

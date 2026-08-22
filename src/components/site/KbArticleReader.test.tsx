@@ -74,6 +74,33 @@ describe("KbArticleReader", () => {
     expect(screen.getByText("Wash your gi.")).toBeInTheDocument();
   });
 
+  // Another article links to a section of this one, so the block that opens a
+  // section has to carry the id that link aims at.
+  it("puts each heading's anchor on the passage that opens it", () => {
+    renderReader({
+      article: { ...article, body_md: "# House rules\n\nWash your gi.\n\n## Nails {#nails}" },
+    });
+    expect(document.getElementById("house-rules")?.textContent).toContain("House rules");
+    expect(document.getElementById("nails")?.textContent).toContain("Nails");
+  });
+
+  it("offers a link to a section, and copies the whole address for pasting", async () => {
+    renderReader({});
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const link = screen.getByRole("link", { name: /Link to this section, House rules/i });
+    expect(link).toHaveAttribute("href", "#house-rules");
+    await userEvent.click(link);
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("#house-rules"));
+    expect(await screen.findByText("Link copied")).toBeInTheDocument();
+  });
+
+  it("offers no section link on a passage that is not a heading", () => {
+    renderReader({ article: { ...article, body_md: "Just prose, no headings." } });
+    expect(screen.queryByRole("link", { name: /Link to this section/i })).not.toBeInTheDocument();
+  });
+
   it("tells a signed-out reader to sign in rather than showing a composer", () => {
     renderReader({
       viewer: { signed_in: false, user_id: null, is_manager: false, can_annotate: false },

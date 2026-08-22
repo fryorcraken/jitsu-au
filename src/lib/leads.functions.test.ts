@@ -272,3 +272,150 @@ describe("acknowledgeInterestRegistrations", () => {
     expect(upserts).toEqual([]);
   });
 });
+
+/**
+ * A second fake, on purpose. The one above answers `from()` from a queue and
+ * knows nothing about `rpc`, `ilike` or `delete`, and widening it would make
+ * every existing test read as if it cared about deletion. This one records the
+ * two things the delete has to get right: the pattern it searched with, and the
+ * exact ids it asked to remove.
+ */
+function fakeDeleteAdmin(opts: {
+  personId?: string | null;
+  rows?: Array<{ id: string; email: string }>;
+  rpcError?: { message: string } | null;
+  readError?: { message: string } | null;
+  deleteError?: { message: string } | null;
+}) {
+  const patterns: string[] = [];
+  const deleted: string[][] = [];
+  const rpcCalls: Array<[string, unknown]> = [];
+  const admin = {
+    rpc(fn: string, args: unknown) {
+      rpcCalls.push([fn, args]);
+      return Promise.resolve({ data: opts.personId ?? null, error: opts.rpcError ?? null });
+    },
+    from() {
+      const read = { data: opts.rows ?? [], error: opts.readError ?? null };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chain: any = {
+        select: () => chain,
+        ilike: (_col: string, pattern: string) => {
+          patterns.push(pattern);
+          return chain;
+        },
+        limit: () => chain,
+        delete: () => chain,
+        in: (_col: string, values: string[]) => {
+          deleted.push(values);
+          return Promise.resolve({ data: null, error: opts.deleteError ?? null });
+        },
+        then: (
+          onFulfilled?: (value: typeof read) => unknown,
+          onRejected?: (reason: unknown) => unknown,
+        ) => Promise.resolve(read).then(onFulfilled, onRejected),
+      };
+      return chain;
+    },
+  };
+  return { admin: admin as unknown as SupabaseClient<Database>, patterns, deleted, rpcCalls };
+}
+
+describe("deleteLeadRegistrations", () => {
+  it("refuses an address that belongs to a person, and deletes nothing", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { LEAD_HAS_PERSON_MESSAGE } = await import("./validation");
+    const { admin, deleted } = fakeDeleteAdmin({
+      personId: "user-1",
+      rows: [{ id: "reg-1", email: "sam@example.com" }],
+    });
+    // The list the Delete was drawn from can be minutes old. Somebody who
+    // signed a waiver in the meantime has a profile and frozen evidence behind
+    // this address, and their enquiry is part of that record now.
+    await expect(deleteLeadRegistrations(admin, "sam@example.com")).rejects.toThrow(
+      LEAD_HAS_PERSON_MESSAGE,
+    );
+    expect(deleted).toEqual([]);
+  });
+
+  it("deletes every registration under the address, whatever the capitalisation", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { admin, deleted, patterns } = fakeDeleteAdmin({
+      personId: null,
+      rows: [
+        { id: "reg-1", email: "Sam@Example.com" },
+        { id: "reg-2", email: "sam@example.com" },
+      ],
+    });
+    // The directory merges both rows into one lead, so deleting "this lead" has
+    // to take both. Leaving the older one behind puts the person straight back
+    // on the list a manager just cleared them from.
+    expect(await deleteLeadRegistrations(admin, "  SAM@example.com ")).toEqual({ deleted: 2 });
+    expect(deleted).toEqual([["reg-1", "reg-2"]]);
+    // Searched with the normalized address, not the one that was typed.
+    expect(patterns).toEqual(["sam@example.com"]);
+  });
+
+  it("ignores rows the search over-matched on a LIKE wildcard", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { admin, deleted } = fakeDeleteAdmin({
+      personId: null,
+      rows: [
+        { id: "reg-1", email: "a_b@example.com" },
+        // `_` is a single-character wildcard in a LIKE pattern and is legal in
+        // an email, so the prefilter hands back a stranger's enquiry too. If the
+        // query were ever allowed to decide, this row would be destroyed.
+        { id: "reg-2", email: "axb@example.com" },
+      ],
+    });
+    expect(await deleteLeadRegistrations(admin, "a_b@example.com")).toEqual({ deleted: 1 });
+    expect(deleted).toEqual([["reg-1"]]);
+  });
+
+  it("deletes what it read when the read hits its cap, rather than throwing", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 500 is the cap. Nobody fills in the interest form this many times, so
+    // reaching it means something odd is happening; the safe direction on a
+    // delete is to take what was read and leave the rest, which puts the lead
+    // back on the list for a second press.
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      id: `reg-${i}`,
+      email: "sam@example.com",
+    }));
+    const { admin, deleted } = fakeDeleteAdmin({ personId: null, rows });
+    expect(await deleteLeadRegistrations(admin, "sam@example.com")).toEqual({ deleted: 500 });
+    expect(deleted[0]).toHaveLength(500);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("reports nothing deleted rather than issuing an empty delete", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { admin, deleted } = fakeDeleteAdmin({ personId: null, rows: [] });
+    expect(await deleteLeadRegistrations(admin, "nobody@example.com")).toEqual({ deleted: 0 });
+    expect(deleted).toEqual([]);
+  });
+
+  it("throws on a failed person lookup instead of deleting anyway", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { admin, deleted } = fakeDeleteAdmin({
+      rpcError: { message: "boom" },
+      rows: [{ id: "reg-1", email: "sam@example.com" }],
+    });
+    // Fail closed. The check that just failed is the only thing standing
+    // between this and deleting part of a member's record.
+    await expect(deleteLeadRegistrations(admin, "sam@example.com")).rejects.toThrow("boom");
+    expect(deleted).toEqual([]);
+  });
+
+  it("throws when the delete itself fails, rather than reporting a count", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { admin } = fakeDeleteAdmin({
+      personId: null,
+      rows: [{ id: "reg-1", email: "sam@example.com" }],
+      deleteError: { message: "nope" },
+    });
+    await expect(deleteLeadRegistrations(admin, "sam@example.com")).rejects.toThrow("nope");
+  });
+});

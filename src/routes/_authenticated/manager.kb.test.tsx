@@ -103,7 +103,7 @@ vi.mock("@/lib/kb.functions", () => ({
     Promise.resolve({
       slug: data.slug,
       title: data.slug === article.slug ? article.title : data.slug,
-      body_md: `# ${data.slug}`,
+      body_md: `# ${data.slug}\n\nText.\n\n## How grading works {#grading}`,
       version: article.version,
       is_current_version: true,
       change_note: null,
@@ -146,6 +146,27 @@ describe("/manager/kb autoload", () => {
 
     await screen.findByLabelText(/sidebar label/i);
     expect(screen.queryByText(/unsaved changes/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("/manager/kb section links", () => {
+  // The fragment is the part a manager cannot guess: it comes out of the
+  // heading's wording, so the editor has to tell them what it currently is.
+  it("lists the link to every heading in the article", async () => {
+    render(<KnowledgeBaseManager />);
+
+    await screen.findByLabelText(/sidebar label/i);
+    expect(screen.getByText("/kb/our-history#our-history")).toBeInTheDocument();
+    // The worked example is built from this article's own first heading, so its
+    // link text and its target agree.
+    expect(screen.getByText("[our-history](/kb/our-history#our-history)")).toBeInTheDocument();
+    expect(screen.getByText("/kb/our-history#grading")).toBeInTheDocument();
+    // The pinned one is marked, because that is the link that survives the
+    // heading being reworded.
+    expect(screen.getByText("Pinned")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Copy the link to How grading works/i }),
+    ).toBeInTheDocument();
   });
 });
 

@@ -328,6 +328,29 @@ export function passwordProblem(password: string, context: PasswordContext = {})
 }
 
 /**
+ * Whether Supabase is saying there is no session to change a password on.
+ *
+ * This is what a spent recovery link produces at submit time: the token in the
+ * emailed link timed out or was already used, so `updateUser` has nobody to
+ * update. It is not a password problem at all, and the screen that gets this
+ * should stop showing a form and offer a new link instead.
+ *
+ * Matched loosely, and on several wordings, because they come from GoTrue and
+ * the client rather than from us: the browser client raises its own "Auth
+ * session missing!" before any request goes out, while a session revoked on the
+ * server comes back as `session_not_found` or an expired JWT.
+ */
+export function isMissingSessionError(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    text.includes("session missing") ||
+    text.includes("session_not_found") ||
+    text.includes("session from session_id claim in jwt does not exist") ||
+    text.includes("jwt expired")
+  );
+}
+
+/**
  * Supabase's own password refusals, rewritten for the person reading them.
  *
  * The strings are matched loosely on purpose: they come from GoTrue, we do not
@@ -338,6 +361,13 @@ export function passwordProblem(password: string, context: PasswordContext = {})
  */
 export function describePasswordError(message: string): string {
   const text = message.toLowerCase();
+  // Not a password problem: there is nobody to save it for any more. Worded for
+  // /account, the caller that can actually reach this. /update-password
+  // recognises the same refusal earlier and offers a fresh reset link instead,
+  // since "sign in again" is no use to somebody who came here locked out.
+  if (isMissingSessionError(message)) {
+    return "You have been signed out, so the new password was not saved. Sign in again and set it once more.";
+  }
   if (text.includes("known to be weak")) return BREACHED_MESSAGE;
   if (text.includes("should be at least")) {
     return `A bit short. Use at least ${PASSWORD_MIN_LENGTH} characters.`;

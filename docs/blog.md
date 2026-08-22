@@ -108,8 +108,9 @@ same `createServerFn` pattern used everywhere else in the app — not something
 only reachable through the web UI. `postComment` checks, in order: the post is
 published, the commenter isn't in `blog_blocked_commenters`, and — for a
 reply — the parent comment belongs to the same post and is itself top-level.
-A honeypot field (`hp`) silently no-ops a submission a bot filled in, the same
-convention as every other public form.
+A honeypot field (`hp`) refuses a submission that filled the decoy in, and
+equally one that omits the field, the same convention as every other form that
+writes (see `honeypot` in `src/lib/validation.ts`).
 
 ### A manager writes and publishes a post
 
