@@ -214,14 +214,10 @@ export function BlogPostEditor({
       toast.error(check.error.issues[0]?.message ?? "Check the form for errors.");
       return;
     }
-    if (
-      willUnpublish &&
-      !window.confirm(
-        "This post is currently published. Saving as Draft will remove it from the public blog. Continue?",
-      )
-    ) {
-      return;
-    }
+    // Deliberately no confirm here. Taking a post off the blog is undone by
+    // publishing it again from this same form, and the notice under the status
+    // picker already says what saving will do, before the click rather than
+    // after it. A modal on top of that is friction on a reversible action.
     onSave(value);
   }
 
@@ -387,8 +383,8 @@ export function BlogPostEditor({
           </SelectContent>
         </Select>
         {willUnpublish && (
-          <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">
-            Saving will remove this post from the public blog.
+          <p role="status" className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">
+            Saving takes this post off the public blog. You can publish it again any time.
           </p>
         )}
       </div>

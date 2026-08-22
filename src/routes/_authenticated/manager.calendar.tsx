@@ -9,6 +9,7 @@ import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   CLUB_TIME_ZONE,
   DEFAULT_EVENT_LOCATION,
@@ -129,6 +130,7 @@ function ManagerCalendarPage() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
   const [form, setForm] = useState({ ...emptyEntry });
   // Whether "Ends" holds the manager's own answer rather than the one derived
   // from "Starts". Kept out of `form` because it describes the editing session,
@@ -305,13 +307,15 @@ function ManagerCalendarPage() {
 
   async function stopRepeats(ev: EventRow) {
     if (!ev.series_id) return;
-    if (
-      !window.confirm(
-        `Stop "${ev.title}" repeating? Future dates are removed. Past ones stay on the record.`,
-      )
-    ) {
-      return;
-    }
+    // Not reversible by clicking again: the future dates go, and putting them
+    // back means setting the repeat up from scratch.
+    const ok = await confirm({
+      title: `Stop "${ev.title}" repeating?`,
+      description:
+        "Every future date comes off the calendar. Dates that have already happened stay on the record, with their check-ins.",
+      confirmLabel: "Stop repeating",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await endRepeat({ data: { series_id: ev.series_id } });
@@ -325,7 +329,15 @@ function ManagerCalendarPage() {
   }
 
   async function remove(ev: EventRow) {
-    if (!window.confirm(`Delete "${ev.title}"? Cancel it instead to keep the record.`)) return;
+    const ok = await confirm({
+      title: `Delete "${ev.title}"?`,
+      description:
+        "This takes it off the calendar completely, as though it had never been on it. There is no way to get it back.",
+      footnote: "To call the class off and keep the record of it, cancel it instead.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await removeEvent({ data: { id: ev.id } });
@@ -859,6 +871,7 @@ function ManagerCalendarPage() {
           </div>
         )}
       </div>
+      {confirmDialog}
     </section>
   );
 }
