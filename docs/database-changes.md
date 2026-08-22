@@ -59,14 +59,24 @@ it before writing a migration that touches grants. Three things bite repeatedly:
   server functions.
 
 `supabase/lint/client-grants-expected.txt` pins the allowed set, and
-`supabase/lint/check-client-grants.py` compares it against the live ACL when
-somebody runs it — there is no CI job, see `supabase/lint/README.md`. When you
-add a table or a grant, update that file in the same change, and run the check
-after the migration goes live.
-Read the live ACL from **`pg_class.relacl`**, never
+`supabase/lint/check-client-grants.py` is pointed at two databases.
+`.github/workflows/supabase-lint.yml` replays every migration into a throwaway
+Postgres and checks the ACL **there**, on every `supabase/**` pull request, so a
+new table that forgets its `REVOKE` fails the PR that adds it. Checking the
+**live** ACL is the same script run by hand, because CI cannot reach that
+database at all — see `supabase/lint/README.md`. When you add a table or a
+grant, update that file in the same change, and run the live check by hand after
+the migration goes live. Read the ACL from **`pg_class.relacl`**, never
 `information_schema.role_table_grants`: the information_schema views only show
 grants the connecting role is party to (a least-privilege reader sees an empty
 set) and they omit `MAINTAIN` entirely.
+
+Note that the `REVOKE` follows the object rather than its name: it survives a
+later `ALTER TABLE … RENAME TO`, so the migration that closes a table may name
+it something else (`kb_articles`, `kb_article_versions` and `kb_annotations` are
+closed by `20260731140000_documents.sql`, under their pre-rename names).
+Grepping the migrations for a table's current name is not a check — the replay
+is.
 
 ## Schema drift: committing a migration does NOT apply it
 
