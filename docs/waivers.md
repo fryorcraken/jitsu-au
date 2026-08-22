@@ -395,9 +395,8 @@ step happens. See `docs/notifications.md` for the two items and how each clears.
 
 The manager waivers screen lists submissions newest first with the submitted
 name/email, date, template version, status badge (pending / active /
-superseded), the PDF, and Approve / Revoke approval. Approve = promote + unlock
-
-- assign the trial (see rule 6). The applicant becomes a visitor.
+superseded), the PDF, and Approve / Revoke approval. Approve = promote + unlock +
+assign the trial (see rule 6). The applicant becomes a visitor.
 
 Approve asks first, in the app's own dialog (`useConfirm`), naming the three
 things a first approval does that nothing here can take back: the email, the
