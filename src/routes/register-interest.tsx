@@ -13,6 +13,7 @@ import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { submitInterest } from "@/lib/submissions.functions";
 import { buildPageMeta } from "@/lib/seo";
+import { beginnerDaysShort } from "@/lib/schedule";
 
 export const Route = createFileRoute("/register-interest")({
   head: () => ({
@@ -129,8 +130,8 @@ function RegisterInterest() {
             <p className="text-sm font-medium">Not ready? No problem.</p>
             <p className="mt-1 text-sm text-muted-foreground">
               We'll email you the link and you can sign before you come, or we'll sort it at the
-              gym. Either way, just turn up to any beginners class (Mon or Wed). Your first two are
-              free.
+              gym. Either way, just turn up to any beginners class ({beginnerDaysShort}). Your first
+              two are free.
             </p>
           </div>
 

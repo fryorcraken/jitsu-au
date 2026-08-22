@@ -1,7 +1,14 @@
 import { Link } from "@tanstack/react-router";
 import { Instagram, Youtube, Phone, MessageCircle } from "lucide-react";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
-import { GOOGLE_MAPS_URL, VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
+import {
+  GOOGLE_MAPS_URL,
+  VENUE_ADDRESS,
+  VENUE_NAME,
+  VENUE_PHONE_DISPLAY,
+  VENUE_PHONE_TEL,
+  WHATSAPP_URL,
+} from "@/lib/venue";
 
 export function SiteFooter() {
   return (
@@ -19,7 +26,7 @@ export function SiteFooter() {
           </div>
           <p className="mt-3 max-w-sm text-sm text-muted-foreground">
             Practical Japanese Jiu-Jitsu in the heart of Sydney. Beginners welcome. First two
-            sessions are free, all year round.
+            sessions are free.
           </p>
         </div>
         <div>
@@ -119,7 +126,7 @@ export function SiteFooter() {
             rel="noopener noreferrer"
             className="hover:text-foreground"
           >
-            ActivateFit Gym, Harris Street, Ultimo NSW
+            {VENUE_NAME}, {VENUE_ADDRESS}
           </a>
         </div>
       </div>
