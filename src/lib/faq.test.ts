@@ -17,8 +17,8 @@ describe("faq content", () => {
 });
 
 describe("homepage FAQ selection", () => {
-  it("surfaces exactly three reassuring questions", () => {
-    expect(homepageFaqItems).toHaveLength(3);
+  it("surfaces exactly four reassuring questions", () => {
+    expect(homepageFaqItems).toHaveLength(4);
   });
 
   it("only references ids that exist in the source of truth", () => {
@@ -45,5 +45,29 @@ describe("homepage FAQ selection", () => {
     expect(homepageFaqIds).toContain("experience");
     expect(homepageFaqIds).toContain("trial-offer");
     expect(homepageFaqIds).toContain("jjj-vs-bjj");
+  });
+
+  // The club's name reads as a university club, so someone from the public can
+  // assume they are not eligible and leave without ever asking. This question
+  // has to be on the homepage, and first in the list, for them to see it.
+  it("leads with the question about joining without being a UTS student", () => {
+    expect(homepageFaqIds[0]).toBe("open-to-public");
+  });
+});
+
+describe("who can join", () => {
+  // The homepage order comes from `homepageFaqIds`, so leading there costs
+  // /faq nothing. Keep the trial offer first in the array itself: /faq renders
+  // it in order, and so does the FAQPage JSON-LD built from it.
+  it("leaves the trial offer first on the full FAQ page", () => {
+    expect(faqItems[0].id).toBe("trial-offer");
+    expect(faqItems[1].id).toBe("open-to-public");
+  });
+
+  it("answers the eligibility question with a plain no, not a qualified one", () => {
+    const item = faqItems.find((f) => f.id === "open-to-public");
+    expect(item).toBeDefined();
+    expect(item!.q).toMatch(/UTS student/i);
+    expect(item!.a).toMatch(/^No\./);
   });
 });

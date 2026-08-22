@@ -6,6 +6,8 @@ import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { YouTubeEmbed } from "@/components/site/YouTubeEmbed";
 import { Button } from "@/components/ui/button";
 import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
+import { weeklySchedule } from "@/lib/schedule";
+import { VENUE_ADDRESS_SHORT, VENUE_BUILDING, VENUE_NAME } from "@/lib/venue";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -42,16 +44,17 @@ function Home() {
         <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/10 via-background to-background" />
         <div className="mx-auto grid max-w-6xl gap-10 px-4 pt-12 pb-16 md:grid-cols-2 md:items-center md:pt-20 md:pb-24">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Now enrolling for the
-              semester
+            <span className="inline-flex items-start gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium text-primary">
+              <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /> UTS
+              students, staff and public members welcome
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.05] tracking-tight md:text-6xl">
               Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
-              Build real self-defence skills in a fun and welcoming environment. Japanese Jiu-Jitsu
-              at the UTS Ultimo campus. Classes are for beginners and experienced martial artists
+              Build real self-defence skills in a fun and welcoming environment. We train Japanese
+              Jiu-Jitsu in Ultimo and welcome the general public and local community, with special
+              rates for UTS students. Classes are for beginners and experienced martial artists
               alike.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
@@ -131,8 +134,8 @@ function Home() {
             },
             {
               icon: Users,
-              title: "Inclusive community",
-              body: "All levels welcome. We move at your pace, together.",
+              title: "Open to everyone",
+              body: "UTS students, staff and the general public train together. All levels welcome, at your own pace.",
             },
             {
               icon: Dumbbell,
@@ -161,7 +164,8 @@ function Home() {
             <div>
               <h2 className="text-3xl font-bold md:text-4xl">Train with us this week</h2>
               <p className="mt-2 max-w-xl text-muted-foreground">
-                Classes run at ActivateFit Gym, on Harris Street in Ultimo.
+                Classes run at {VENUE_NAME}, {VENUE_ADDRESS_SHORT}. It's inside {VENUE_BUILDING},
+                which is open to the public, so anyone can come to class.
               </p>
             </div>
             <Button asChild variant="outline" className="hidden md:inline-flex">
@@ -170,15 +174,7 @@ function Home() {
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
-            {[
-              { day: "Monday", time: "5:30 – 7:00pm" },
-              { day: "Wednesday", time: "6:00 – 7:30pm" },
-              {
-                day: "Saturday",
-                time: "11:00am – 12:30pm",
-                note: "Colour belts only, from September",
-              },
-            ].map((s) => (
+            {weeklySchedule.map((s) => (
               <div key={s.day} className="rounded-xl border bg-card p-6">
                 <div className="flex items-center gap-2 text-primary">
                   <Clock className="h-4 w-4" />
@@ -188,7 +184,7 @@ function Home() {
                 <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
                   <MapPin className="h-3.5 w-3.5" /> ActivateFit Gym, Ultimo
                 </p>
-                {s.note && <p className="mt-3 text-xs text-muted-foreground">{s.note}</p>}
+                <p className="mt-3 text-xs text-muted-foreground">{s.note}</p>
               </div>
             ))}
           </div>

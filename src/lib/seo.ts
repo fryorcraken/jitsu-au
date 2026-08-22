@@ -11,7 +11,15 @@
 // so the rules stay unit-testable and free of any server import.
 
 import { PUBLIC_PAGES, type SitemapPage } from "./public-pages";
-import { GOOGLE_MAPS_URL, VENUE_NAME, VENUE_PHONE_E164 } from "./venue";
+import {
+  GOOGLE_MAPS_URL,
+  VENUE_NAME,
+  VENUE_PHONE_E164,
+  VENUE_POSTCODE,
+  VENUE_STATE,
+  VENUE_STREET_ADDRESS,
+  VENUE_SUBURB,
+} from "./venue";
 import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
@@ -199,6 +207,23 @@ export function buildRobotsTxt(host: string | null | undefined): string {
 }
 
 /**
+ * The club's postal address, built from the parts in `venue.ts` so the schema
+ * cannot say one thing while the pages say another. `streetAddress` carries the
+ * street number: a bare street name is not an address a search engine can place
+ * on a map, and Harris Street is nearly two kilometres long.
+ */
+function postalAddress(): Record<string, string> {
+  return {
+    "@type": "PostalAddress",
+    streetAddress: VENUE_STREET_ADDRESS,
+    addressLocality: VENUE_SUBURB,
+    addressRegion: VENUE_STATE,
+    postalCode: VENUE_POSTCODE,
+    addressCountry: "AU",
+  };
+}
+
+/**
  * Structured data describing the club, emitted once on the home page.
  *
  * This is what lets a search engine understand that jitsu.au is a martial arts
@@ -244,25 +269,11 @@ export function buildClubJsonLd(): Record<string, unknown> {
     founder: { "@type": "Person", name: "Franck Royer" },
     areaServed: { "@type": "City", name: "Sydney" },
     hasMap: GOOGLE_MAPS_URL,
-    address: {
-      "@type": "PostalAddress",
-      streetAddress: "Harris Street",
-      addressLocality: "Ultimo",
-      addressRegion: "NSW",
-      postalCode: "2007",
-      addressCountry: "AU",
-    },
+    address: postalAddress(),
     location: {
       "@type": "Place",
       name: VENUE_NAME,
-      address: {
-        "@type": "PostalAddress",
-        streetAddress: "Harris Street",
-        addressLocality: "Ultimo",
-        addressRegion: "NSW",
-        postalCode: "2007",
-        addressCountry: "AU",
-      },
+      address: postalAddress(),
     },
     sameAs: [...CLUB_SOCIAL_URLS],
   };
