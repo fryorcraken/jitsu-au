@@ -49,6 +49,10 @@ function CodeOfConduct() {
   const [agreed, setAgreed] = useState(false);
   const [signatureName, setSignatureName] = useState("");
   const [saving, setSaving] = useState(false);
+  // The honeypot's live value. A person never touches it (it is display:none
+  // and out of the tab order), so anything in it came from something filling
+  // the form in wholesale.
+  const [hp, setHp] = useState("");
   const [justSigned, setJustSigned] = useState<string | null>(null);
 
   // Wait for auth to settle before asking: the session's bearer token is what
@@ -95,7 +99,7 @@ function CodeOfConduct() {
             platform: navigator.platform ?? "",
             languages: [...(navigator.languages ?? [])].slice(0, 10),
           },
-          hp: "",
+          hp,
         },
       });
       setJustSigned(res.accepted_at ?? new Date().toISOString());
@@ -148,7 +152,15 @@ function CodeOfConduct() {
             />
           ) : (
             <form onSubmit={onSubmit} className="space-y-5 rounded-2xl border bg-card p-6 md:p-8">
-              <input type="hidden" name="hp" value="" />
+              <input
+                type="text"
+                name="hp"
+                tabIndex={-1}
+                autoComplete="off"
+                className="hidden"
+                value={hp}
+                onChange={(e) => setHp(e.target.value)}
+              />
               <div>
                 <h2 className="text-xl font-bold">Agree to the code</h2>
                 <p className="mt-1 text-sm text-muted-foreground">

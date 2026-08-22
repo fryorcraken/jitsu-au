@@ -48,6 +48,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MarkdownEditor } from "@/components/site/MarkdownEditor";
+import { CopyButton } from "@/components/site/CopyButton";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -70,7 +71,7 @@ import {
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
 import type { ArticleVisibility } from "@/lib/kb";
-import { buildKbNav, UNSECTIONED_TITLE } from "@/lib/kb-nav";
+import { buildKbNav, extractHeadings, UNSECTIONED_TITLE } from "@/lib/kb-nav";
 import type { KbNavEntry } from "@/lib/kb-nav";
 import {
   isArticleDirty,
@@ -332,6 +333,15 @@ function KnowledgeBaseManager() {
    */
   const unsaved = sectionEdit ? isSectionDirty({ title: sectionTitle }, sectionEdit) : dirty;
   const liveVersion = versions.find((v) => v.is_current)?.version ?? null;
+
+  /**
+   * The sections this article offers other articles a link to.
+   *
+   * Read off the text in the editor rather than the saved version, so a heading
+   * just typed can be linked to straight away and a manager can see what
+   * renaming one did to its link before publishing it.
+   */
+  const sectionAnchors = useMemo(() => extractHeadings(body), [body]);
 
   /**
    * The knowledge base as a member will read it, built from the manager's own
@@ -1214,6 +1224,22 @@ function KnowledgeBaseManager() {
     [kind, navTitle, title],
   );
 
+  /** The address this article will have, which is what a link to it must use. */
+  const articleSlug = slug || proposedSlug;
+
+  /**
+   * The worked example above the anchor list, built from THIS article's first
+   * heading.
+   *
+   * A fixed label ("how grading works") pointed at whatever the real first
+   * heading happened to be, so on most articles the words and the target
+   * disagreed ("[how grading works](/kb/about-us#our-mission)") — an example of
+   * the syntax that contradicts itself.
+   */
+  const anchorExample = sectionAnchors[0]
+    ? `[${sectionAnchors[0].text}](${anchorPath(articleSlug, sectionAnchors[0].id)})`
+    : "[how grading works](/kb/belts#grading)";
+
   /**
    * How the reading order can be dragged.
    *
@@ -1828,6 +1854,61 @@ function KnowledgeBaseManager() {
             </Card>
           )}
 
+          {/* How one article points at a section of another. Managers asked for
+              cross-references, and the fragment is the part they cannot guess:
+              it comes from the wording of the heading, so this is where they
+              find out what it currently is and copy it. */}
+          {!sectionEdit && kind === "article" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Link to a section</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Paste one of these into another article as an ordinary Markdown link, for example{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">{anchorExample}</code>.
+                  Add{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">{"{#your-anchor}"}</code>{" "}
+                  to the end of a heading to pin its link, and it will keep working even if you
+                  reword the heading later.
+                </p>
+                {sectionAnchors.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    This article has no headings yet, so there is nothing to link to inside it.
+                    Start a line with ## to make one.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {sectionAnchors.map((heading) => (
+                      <li
+                        key={heading.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+                        style={{ marginLeft: `${(heading.depth - 1) * 0.75}rem` }}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">{heading.text}</span>
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
+                            {anchorPath(articleSlug, heading.id)}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          {/* Says which links survive a rewrite and which do not,
+                              which is the whole reason to pin one. */}
+                          {heading.pinned && <Badge variant="outline">Pinned</Badge>}
+                          <CopyButton
+                            text={anchorPath(articleSlug, heading.id)}
+                            label="Copy"
+                            ariaLabel={`Copy the link to ${heading.text}`}
+                          />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {!sectionEdit && (
             <Card>
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
@@ -1871,6 +1952,18 @@ function KnowledgeBaseManager() {
       </div>
     </section>
   );
+}
+
+/**
+ * The link that points at one section of an article.
+ *
+ * Falls back to the bare fragment while an article is being composed and has no
+ * slug yet, which is honest: a `/kb/#grading` with the slug missing is a link
+ * that goes to the wrong place, and half a link a manager can see is unfinished
+ * is better than a whole one that is wrong.
+ */
+function anchorPath(slug: string, id: string): string {
+  return slug ? `/kb/${slug}#${id}` : `#${id}`;
 }
 
 /**

@@ -16,6 +16,7 @@
 // a manager's markdown never produces a second `<h1>` competing with the page's
 // own title, keeping the heading outline correct for assistive tech.
 import type { Components } from "react-markdown";
+import { remarkKbAnchors } from "@/lib/remark-kb-anchors";
 import { remarkKbTables } from "@/lib/remark-kb-tables";
 
 /**
@@ -26,7 +27,7 @@ import { remarkKbTables } from "@/lib/remark-kb-tables";
  * that renders for a member but not in the preview a manager checked it in is
  * the version of this bug that is hardest to notice.
  */
-export const kbRemarkPlugins = [remarkKbTables];
+export const kbRemarkPlugins = [remarkKbTables, remarkKbAnchors];
 
 export const kbMarkdownComponents: Components = {
   h1: ({ children }) => (
