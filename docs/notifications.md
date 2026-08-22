@@ -285,14 +285,14 @@ screen: a calendar app subscribes to a URL and has nowhere else to put it, and
 the verification link is single use and dead within the hour.
 
 The cookie is `HttpOnly`, `SameSite=Lax`, `Secure` on https, scoped to `/` and
-good for **thirty minutes**. Every one of those choices, including why `Lax`
+good for **six hours**. Every one of those choices, including why `Lax`
 rather than `Strict` and why `/` rather than a narrower path, is written down in
 `src/lib/email-settings-session.ts`. Four consequences worth knowing:
 
 - **Nothing expires the emailed link itself.** It stays exchangeable for as long
   as the row lives in `notification_tokens`, so an old email still works. What
-  runs out is the half-hour session it hands you.
-- **That half hour is the browser's, not ours.** The cookie carries the same
+  runs out is the six-hour session it hands you.
+- **Those six hours are the browser's, not ours.** The cookie carries the same
   token the link does and nothing checks its age server-side, so a wholesale
   copy of a cookie jar keeps working until the token is rotated. Enforcing an
   age would mean signing an issued-at, which means a server secret to configure

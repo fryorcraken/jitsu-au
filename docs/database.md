@@ -1149,7 +1149,7 @@ NULL**), `token_hash` (unique), `token_prefix`, `created_at`. Powers the
 settings link in every email footer. That link is `/email-settings/<token>`,
 which is an exchange rather than a page: it swaps the token for a short-lived
 cookie and redirects to `/email-settings`. Nothing here expires, so an old
-email stays exchangeable; the half-hour lifetime is on the cookie. See
+email stays exchangeable; the six-hour lifetime is on the cookie. See
 `docs/notifications.md`.
 
 The raw token is stored for the same reason `calendar_feed_tokens` stores one:

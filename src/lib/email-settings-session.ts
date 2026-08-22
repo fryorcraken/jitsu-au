@@ -30,16 +30,18 @@
  *   `/_serverFn/...`. Scoping the cookie to that framework-internal path would
  *   be tighter, but it would also break silently and confusingly the day the
  *   base path moved. `/` costs a HttpOnly cookie riding along on same-site
- *   requests for half an hour, which is the cheaper of the two failure modes.
+ *   requests for six hours, which is the cheaper of the two failure modes.
  *
- * The lifetime is deliberately short. This is a signed-out credential on a
- * device we know nothing about, and half an hour is far longer than anybody
- * needs to read four switches. It expiring while the page is open is a state
- * the page renders, not an error it swallows.
+ * The lifetime is deliberately capped, not endless. This is a signed-out
+ * credential on a device we know nothing about, so it should not outlive the
+ * day somebody clicked the link — six hours covers reading it on a break and
+ * coming back to finish later, without becoming a session that just sits
+ * there indefinitely. It expiring while the page is open is a state the page
+ * renders, not an error it swallows.
  *
  * Two limits worth knowing, both deliberate:
  *
- * - **The half hour is the browser's, not ours.** The cookie carries the same
+ * - **The six hours is the browser's, not ours.** The cookie carries the same
  *   token the emailed link does, and `notification_tokens` rows do not expire,
  *   so anything that copies a cookie jar wholesale (a restored backup, a
  *   profile copy, an extension) keeps working until the token is rotated.
@@ -61,8 +63,8 @@
 /** The cookie the exchange endpoint sets and the server functions read. */
 export const EMAIL_SETTINGS_COOKIE = "uts_email_settings";
 
-/** How long the exchanged token stays usable. Thirty minutes. */
-export const EMAIL_SETTINGS_MAX_AGE_SECONDS = 30 * 60;
+/** How long the exchanged token stays usable. Six hours. */
+export const EMAIL_SETTINGS_MAX_AGE_SECONDS = 6 * 60 * 60;
 
 /** Where the exchange endpoint sends people once the cookie is set. */
 export const EMAIL_SETTINGS_PATH = "/email-settings";
