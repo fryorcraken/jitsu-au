@@ -59,10 +59,22 @@ describe("the typeface is self-hosted", () => {
     // design change wearing the clothes of a hosting change.
     const css = readFileSync(join(root, "src/styles.css"), "utf8");
     const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]);
-    const weights = faces.map((face) => face.match(/font-weight:\s*([^;]+);/)?.[1].trim());
 
-    expect(faces.length).toBeGreaterThan(0);
-    expect(new Set(weights)).toEqual(new Set(["400", "600", "700", "900"]));
+    // Per subset, not across all of them: dropping 900 from latin while
+    // latin-ext still declares it would leave the overall set looking right,
+    // and headings would quietly render at 700 for anyone reading English.
+    const byFile: Record<string, string[]> = {};
+    for (const face of faces) {
+      const src = face.match(/url\("([^"]+)"\)/)?.[1];
+      const weight = face.match(/font-weight:\s*([^;]+);/)?.[1].trim();
+      expect(src, "a @font-face with no src").toBeTruthy();
+      (byFile[src!] ??= []).push(weight!);
+    }
+
+    expect(Object.keys(byFile).length).toBeGreaterThan(0);
+    for (const [file, weights] of Object.entries(byFile)) {
+      expect(weights.slice().sort(), file).toEqual(["400", "600", "700", "900"]);
+    }
   });
 
   it("keeps a real fallback stack, so a failed fetch is not invisible text", () => {
