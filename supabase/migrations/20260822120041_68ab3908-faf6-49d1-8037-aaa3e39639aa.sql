@@ -1,3 +1,16 @@
+-- NOTE ON THIS FILE'S NAME. The timestamp and uuid are Lovable's, not a human's.
+-- This SQL was applied to the live database by hand (through Lovable's SQL
+-- access) on 2026-08-22, before the pull request that introduced it merged, per
+-- the apply gate in docs/database-changes.md. Lovable then re-emitted the
+-- applied SQL as a migration of its own under this filename and recorded THAT
+-- version in the live ledger -- the duplicate-re-emission case docs/database-
+-- changes.md describes. The branch's own copy, 20260822000000_notification_
+-- digest_key_single_source.sql, was byte-identical in SQL and has been deleted
+-- rather than kept alongside this one: only this filename has a ledger row, so
+-- keeping both would leave the by-hand drift check reporting a file with no
+-- ledger entry AND a ledger entry with no file. The commentary below is that
+-- file's, preserved because it is the reasoning, not decoration.
+--
 -- Collapse the digest's two copies of one credential into one.
 --
 -- WHY. `private.run_notification_digest()` (20260807000000, then

@@ -208,10 +208,7 @@ export type _UserEmailsReturnsConfirmation = RequireColumns<
  * result. That shape is pinned in `src/lib/supabase-rpc.test.ts` instead.
  */
 export type _NotificationDigestKeyHasNoArgs = Expect<
-  Equals<
-    Database["public"]["Functions"]["notification_digest_key"]["Args"],
-    Record<PropertyKey, never>
-  >
+  Equals<Database["public"]["Functions"]["notification_digest_key"]["Args"], never>
 >;
 
 // ---- session_checkins: attendance and what paid for it ----

@@ -242,10 +242,10 @@ A person = an **auth user** (their email lives on `auth.users`, the ONLY email
 store) + a **`profiles` row keyed by that user id** (the person fields; no
 email column anywhere in `public`). An applicant is a **locked** auth user
 (banned, no credentials) created at first waiver submission; a manager's
-**approval** copies the submission's details onto the profile, lifts the ban,
-and emails them that their account is active (see `docs/waivers.md`). A waiver is a **frozen
-submission**: exactly what was typed, the signed PDF, template version, real
-signer IP and signing context, and its approval state.
+**approval** promotes the submission onto the profile and opens the account
+(`docs/waivers.md`, rule 6, is where what approval does is written down). A
+waiver is a **frozen submission**: exactly what was typed, the signed PDF,
+template version, real signer IP and signing context, and its approval state.
 
 - **Signing is public**: no login; only an email is required. Submissions are
   unlimited; the person's **active** waiver is the latest approved one
@@ -1190,7 +1190,7 @@ One thing that failed silently every morning rather than loudly once: read
 **`vault.decrypted_secrets.decrypted_secret`**, never `vault.secrets.secret` —
 the latter is ciphertext, and sending it as a bearer token earns a 401.
 
-**Third body, as of `20260822000000_notification_digest_key_single_source.sql`,
+**Third body, as of `20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql`,
 and the one live today.** Two earlier defects are gone by construction rather
 than by a runbook step someone has to remember:
 
@@ -1202,9 +1202,9 @@ than by a runbook step someone has to remember:
   mistake can no longer happen.
 - **The secret is minted by the migration itself**, with
   `vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'),
-  'notification_digest_key')`, guarded so it only runs once (an existing secret
+'notification_digest_key')`, guarded so it only runs once (an existing secret
   is left alone). Vault genuinely absent (`to_regclass('vault.secrets') IS
-  NULL` — no Postgres this repo currently runs anywhere, but a bare, non-
+NULL` — no Postgres this repo currently runs anywhere, but a bare, non-
   Supabase Postgres in principle) is a safe `RAISE NOTICE` and skip. Otherwise
   the call is made directly, with no signature pre-check: an earlier draft
   guessed `create_secret` took 3 arguments and pre-checked exactly that
@@ -1494,7 +1494,8 @@ behaviour it already had.
 The person's one identity record, managed by Supabase Auth (not in our
 migrations) — **the only place any email lives**. An applicant's auth user is
 created **locked** (banned, no credentials) by waiver submission; approval
-lifts the ban. There is no self-serve sign-up. Two triggers fire:
+lifts the ban. There is no self-serve sign-up (`docs/waivers.md`, rules 6 and
+9). Two triggers fire:
 
 - `handle_new_user_role` — grants `manager` to a confirmed whitelisted address.
 - `ensure_profile` — inserts the `profiles` row for every new auth user, with a

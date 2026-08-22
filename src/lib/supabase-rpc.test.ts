@@ -43,11 +43,14 @@ export type _NotificationDigestKeyIsNullable = Expect<
  * and hands back whatever PostgREST would have.
  */
 function fakeClient(result: { data: unknown; error: { message: string } | null }) {
-  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  // `args` is optional because a zero-argument RPC is now called with none at
+  // all rather than with an empty object (see `RpcArgsList` in supabase-rpc.ts),
+  // so the fake has to be able to record that it received nothing.
+  const calls: { fn: string; args: Record<string, unknown> | undefined }[] = [];
   return {
     calls,
     client: {
-      rpc(fn: string, args: Record<string, unknown>) {
+      rpc(fn: string, args?: Record<string, unknown>) {
         calls.push({ fn, args });
         return Promise.resolve(result);
       },
@@ -119,7 +122,10 @@ describe("notificationDigestKey", () => {
   it("passes no arguments to the RPC", async () => {
     const { client, calls } = fakeClient({ data: "shh", error: null });
     const { data } = await notificationDigestKey(client);
-    expect(calls).toEqual([{ fn: "notification_digest_key", args: {} }]);
+    // Literally none: not an empty object. PostgREST is happy either way, but
+    // the generated `Args: never` is the schema saying this function takes no
+    // arguments, and the call should say the same thing.
+    expect(calls).toEqual([{ fn: "notification_digest_key", args: undefined }]);
     expect(data).toBe("shh");
   });
 

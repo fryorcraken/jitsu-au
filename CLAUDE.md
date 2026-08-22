@@ -330,20 +330,16 @@ Core tables:
   `public`; the server resolves emails via the service-role-only
   `user_id_by_email` / `user_emails` RPCs. A person = a (possibly **locked**,
   i.e. banned/no-credentials) auth user + their profile, created at waiver
-  submission (interest registrations are leads only — just rows). A **manager
-  approving a waiver** copies the submission's details onto the profile, lifts
-  the ban, emails them that their account is active, and assigns the free trial. The funnel phase
-  (`lead | applicant | visitor | member | lapsed`) is always derived
-  (`deriveLifecycleStatus`). There is no self-serve sign-up.
+  submission (interest registrations are leads only — just rows). The funnel
+  phase (`lead | applicant | visitor | member | lapsed`) is always derived
+  (`deriveLifecycleStatus`). What a manager's approval does to a person, and why
+  there is no self-serve sign-up: `docs/waivers.md`, rules 6 and 9.
 - `waivers` — frozen submissions: the person fields **as submitted** (email
   included, as evidence), plus `user_id` (→ profiles), `pdf_path`,
   `template_version`, `signer_ip` + `signer_meta` (real IP + browser context,
-  forensic record), approval fields, timestamps. No `full_name` (composed on
-  read), no stored signatures/acknowledgements (they live in the PDF). Signing
-  is public (no login, email required), unlimited, and runs through the
-  service-role client. The displayed pending/active/superseded status is
-  derived (latest approved per person = active). Product flows:
-  `docs/waivers.md`.
+  forensic record), approval fields, timestamps. Signing is public (no login,
+  email required), unlimited, and runs through the service-role client. Product
+  flows: `docs/waivers.md`.
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.
@@ -356,32 +352,20 @@ Core tables:
   `/kb/<slug>` that members read and annotate, grouped into ordered sections.
   **Signed-in only**, reached from the member area: `/kb` redirects a signed-out
   visitor to `/auth`, `canReadArticle` refuses them every article, and article
-  `visibility` is `members | managers` with no public level. That order (section
-  `position`, then article `position`) is the single source of the sidebar, the
-  index page and the previous/next links, so it is the onboarding path members
-  walk. Versioning copies `waiver_templates` (save writes a new version and
-  promotes it; one `is_current` per article). Annotations are anchored to a
-  **block** by a hash of that block's text, not its position, so editing one
-  passage detaches only its own comments. Annotation `visibility` is `private`
-  (readable by its author alone, **managers included**) or `shared` (a thread).
-  An article row carrying `link_path` is not an article at all but a sidebar
-  **link entry** pointing at a page elsewhere on the site (`/first-class`,
-  `/faq`), with no versions of its own. `kb_article_reads` is one row per person
-  per article recording which version they read, so the sidebar can tick off the
-  path; it is owner-scoped and **no manager screen reads it**. Managers edit all
-  of this at `/manager/kb` or through the manager agent API, which do the same
-  things to the same data. Product flows: `docs/knowledge-base.md`.
+  `visibility` is `members | managers` with no public level. Versioning copies
+  `waiver_templates` (save writes a new version and promotes it; one
+  `is_current` per article). Managers edit all of this at `/manager/kb` or
+  through the manager agent API, which do the same things to the same data.
+  Product flows: `docs/knowledge-base.md`.
 - `notifications` / `notification_preferences` / `notification_tokens` — the
   `/notifications` page, the sidebar badge and the emails behind them. One
   `notifications` row per person per event drives **both** the in-app list
   (`read_at`) and the email (`emailed_at`), so there is no separate outbox, and
   a unique index on `(user_id, kind, subject_id)` makes every writer safe to
   call twice. The manager "needs attention" items are **not** stored: they stay
-  derived from `membership_plans` and clear by being fixed, which is why they
-  have no read state. Preferences are **nullable booleans** on purpose (NULL =
-  "never chose", resolved against `NOTIFICATION_DEFAULTS`) and govern **email
-  only** — every row is written regardless. A **private** `kb_annotation`
-  notifies nobody, managers included. Product flows: `docs/notifications.md`.
+  derived and clear by being fixed, which is why they have no read state.
+  Preferences govern **email only** — every row is written regardless. Product
+  flows: `docs/notifications.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix,
@@ -443,11 +427,9 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     `decodeDataUrlPng`). This is the highest-value suite: it pins the honeypot,
     signature-required, and minor/guardian rules.
   - `src/lib/utils.test.ts` — the `cn()` class-merge helper.
-  - `scripts/copy-voice.test.ts` — the two mechanical copy rules from
-    `AGENTS.md` (no em dash in prose, and the two banned constructions),
-    checked against every file under `src/`. It parses rather than greps, so
-    comments and the placeholder-glyph exception are not flagged; the exempt
-    files and the reasoning are in `scripts/copy-voice.ts`.
+  - `scripts/copy-voice.test.ts` — the two mechanical copy rules, checked
+    against every file under `src/`. What it does and does not catch:
+    `AGENTS.md`, "Two of these rules are checked, not trusted".
   - `src/components/ui/button.test.tsx` — a Testing Library smoke test proving
     the jsdom/component setup works (render, variants, click, `asChild`).
 - **Where to add tests:** pure logic belongs in `src/lib/` modules (import and
@@ -491,56 +473,20 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   was walked (the form filled in, the confirmation, the manager approving it)
   rather than a set of pages photographed cold. `scripts/e2e-gallery.ts` lays
   the run out as one page, the workflow publishes it to **GitHub Pages** under
-  `pr-<n>/`, and one sticky PR comment embeds the flow strips inline. The full
-  spec is in **`docs/e2e-tests.md`**; the things that are not guessable:
+  `pr-<n>/`, and one sticky PR comment embeds the flow strips inline. Full spec:
+  **`docs/e2e-tests.md`**. The three things that bite from outside that file:
   - **Screenshots only exist where a spec uses the suite's own `test` object and
-    its `step`** (`e2e/support/test.ts`). `scripts/e2e-conventions.test.ts`
-    fails the unit suite if a spec imports `test` from `@playwright/test` or
-    calls the bare `test.step`, because the run would still be green and the
-    screen would just quietly stop appearing.
-  - The **signed-in** pages the tour walks are **derived from the route files**
-    (`scripts/site-pages.ts`): everything under `src/routes/_authenticated/`
-    and `src/routes/kb/`, walked as the manager for `/manager/*` and as the
-    member for the rest. **A new member or manager screen is covered the moment
-    its route file exists.** A dynamic route (`$userId`) needs an id in the
-    seed's manifest, and one that has none fails the run rather than leaving a
-    gap nobody notices.
-  - The **public** pages cannot be derived the same way: they are
-    `PUBLIC_PAGES` plus `PUBLIC_NOINDEX_PATHS` in `src/lib/public-pages.ts`
-    (`/waiver`, `/auth`, `/reset-password`, `/thank-you`, `/app`). The second
-    list is `noindex`, and `seo.test.ts` fails if a `noindex` page is added to
-    `PUBLIC_PAGES` — so **a new public noindex page has to be added there by
-    hand**. `/update-password`, `/email-settings/$token` and `/blog/$slug` are
-    deliberately not walked; each needs a token only its own email carries.
-  - Signing in uses an admin-generated **magic link**, so the session is stored
-    exactly as a real one is. It needs no redirect configuration: GoTrue accepts
-    any loopback redirect without consulting its allow list, so `E2E_PORT` can
-    move on its own. **Do not add an `[auth]` block to `supabase/config.toml`**
+    its `step`** (`e2e/support/test.ts`), which `scripts/e2e-conventions.test.ts`
+    enforces — otherwise the run stays green and the screen quietly stops
+    appearing.
+  - The **signed-in** pages the tour walks are **derived from the route files**,
+    so **a new member or manager screen is covered the moment its route file
+    exists**. The **public** ones cannot be derived that way: they are
+    `PUBLIC_PAGES` plus `PUBLIC_NOINDEX_PATHS` in `src/lib/public-pages.ts`, and
+    **a new public noindex page has to be added there by hand** (see SEO below).
+  - Signing in uses an admin-generated **magic link**, which needs no redirect
+    configuration. **Do not add an `[auth]` block to `supabase/config.toml`**
     for it — `supabase config push` would apply that to the live project.
-  - Walking the site **mutates the fixture**: opening `/notifications` marks the
-    member's unread ones read, opening a manager inbox stamps its "seen"
-    watermark. `restoreSeenState` (`e2e/support/club-state.ts`) puts those back
-    after each pass, and it is a **known list** — a new screen that marks
-    something read on open has to be added to it, or its unread state will only
-    ever appear in the desktop gallery.
-  - A page that returns an error status, or that renders the router's error/404
-    boundary (both arrive inside an ordinary 200, which is why those boundaries
-    carry `data-page-state`), fails the tour. **It does not catch a route that
-    handles its own loader error** and renders a card in place of its content —
-    `/blog` and `/waiver` do exactly that, so a green run means every route
-    rendered, not that every route has its data.
-  - The gallery shows **seeded fixture content**: `/blog`, `/pricing` and the
-    calendar are the local club, not what is on `jitsu.au` today. That is the
-    trade for a run that is identical on every branch and every fork.
-  - Publishing is **GitHub Pages serving the `gh-pages` branch directly**, so
-    the run's push IS the publish — no deployment step, no environment. The
-    branch is rewritten as a single orphan commit each time (screenshots are
-    large; history would keep every version forever) with `--force-with-lease`
-    so a racing run retries rather than overwriting, and
-    `pr-gallery-cleanup.yml` removes a pull request's directory when it closes.
-    A fork's pull request gets a read-only token whatever the workflow asks for,
-    so it neither publishes nor comments: its gallery is the artifact on the
-    run's own page.
 - **Migration drift and live client grants: no CI job.** Both compare the
   **live** database against the repo (every migration applied; the grants `anon`
   / `authenticated` hold matching `supabase/lint/client-grants-expected.txt`),
@@ -699,10 +645,12 @@ served by two routes whose filenames escape the dot so the router does not read
 it as a path separator (`robots[.]txt.ts` → `/robots.txt`,
 `sitemap[.]xml.ts` → `/sitemap.xml`).
 
-**Adding a public page? Add it to `PUBLIC_PAGES` in `src/lib/seo.ts`.**
+**Adding a public page? Add it to `src/lib/public-pages.ts`** — `PUBLIC_PAGES`
+if it is indexable, `PUBLIC_NOINDEX_PATHS` if it sets `robots: noindex`.
 `src/lib/seo.test.ts` reads the route files and fails if an indexable page is
-missing from the sitemap (or a `noindex` one is listed), so this is enforced,
-not just documented.
+missing from the sitemap (or a `noindex` one is listed), so the first list is
+enforced. The second cannot be derived from anything, so a new noindex page has
+to be added there by hand or nothing ever looks at it.
 
 Two non-obvious rules:
 
@@ -797,9 +745,9 @@ The app reads:
   `VITE_SUPABASE_PROJECT_ID`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
-The manager agent API (`/api/manager/agent`) takes no env var either: a
-minted, hashed `manager_api_tokens` row is the only credential it accepts (see
-`docs/manager-agent-api.md`).
+  The manager agent API (`/api/manager/agent`) takes no env var either: a
+  minted, hashed `manager_api_tokens` row is the only credential it accepts (see
+  `docs/manager-agent-api.md`).
 
 The daily notification digest (`POST /api/notifications/digest`) takes **no env
 var**. Its bearer token lives in exactly one place, **Supabase Vault**
