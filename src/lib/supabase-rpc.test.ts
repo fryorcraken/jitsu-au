@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { userEmails, userIdByEmail } from "./supabase-rpc";
+import { notificationDigestKey, userEmails, userIdByEmail } from "./supabase-rpc";
 import type { ClubUserEmail } from "./club-users";
 
 /**
@@ -31,6 +31,11 @@ export type _UserEmailsReturnsClubUserEmails = Expect<
 /** ...and that type keeps a nullable confirmation stamp. */
 export type _ConfirmationStampIsNullable = Expect<
   Equals<NonNullable<ClubUserEmail["email_confirmed_at"]> | null, string | null>
+>;
+
+/** Absent from Vault resolves to null, which is the digest's "unarmed" state. */
+export type _NotificationDigestKeyIsNullable = Expect<
+  Equals<Awaited_<ReturnType<typeof notificationDigestKey>>["data"], string | null>
 >;
 
 /**
@@ -107,5 +112,30 @@ describe("userEmails", () => {
 
     const idClient = fakeClient({ data: undefined, error: null });
     expect((await userIdByEmail(idClient.client, "nobody@example.com")).data).toBeNull();
+  });
+});
+
+describe("notificationDigestKey", () => {
+  it("passes no arguments to the RPC", async () => {
+    const { client, calls } = fakeClient({ data: "shh", error: null });
+    const { data } = await notificationDigestKey(client);
+    expect(calls).toEqual([{ fn: "notification_digest_key", args: {} }]);
+    expect(data).toBe("shh");
+  });
+
+  it("returns null when the secret has not been minted", async () => {
+    // The generated type calls this `string`. Absent-from-Vault is the state
+    // the digest endpoint's 503 branch exists for.
+    const { client } = fakeClient({ data: null, error: null });
+    const { data, error } = await notificationDigestKey(client);
+    expect(data).toBeNull();
+    expect(error).toBeNull();
+  });
+
+  it("hands the error back rather than throwing", async () => {
+    const { client } = fakeClient({ data: null, error: { message: "boom" } });
+    const { data, error } = await notificationDigestKey(client);
+    expect(data).toBeNull();
+    expect(error?.message).toBe("boom");
   });
 });

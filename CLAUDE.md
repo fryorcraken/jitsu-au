@@ -784,13 +784,13 @@ The app reads:
   manager agent API (`/api/manager/agent`). Normally managers mint revocable
   tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
   env var is just an optional fallback (see `docs/manager-agent-api.md`).
-- Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
-  notification digest (`POST /api/notifications/digest`). **Unset means the
-  endpoint refuses everything**, so no digest goes out until it is configured.
-  The schedule is a **pg_cron job in the database**, not a GitHub Action; it
-  reads the matching token and the site URL from **Supabase Vault**
-  (`notification_digest_key` / `notification_digest_url`) and fails closed until
-  both exist. See `docs/notifications.md`.
+
+The daily notification digest (`POST /api/notifications/digest`) takes **no env
+var**. Its bearer token lives in exactly one place, **Supabase Vault**
+(`notification_digest_key`), minted by a migration rather than typed by anyone;
+the endpoint reads it through a service-role RPC and pg_cron reads the same row
+to send it. **Unset means the endpoint refuses everything**, so no digest goes
+out until the secret exists. See `docs/notifications.md`.
 
 Missing Supabase vars throw a clear "Connect Supabase in Lovable Cloud" error.
 

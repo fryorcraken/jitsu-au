@@ -171,11 +171,13 @@ saved, and must never fail because telling somebody about it did.
 ### The daily summary
 
 A **pg_cron job in the database** POSTs to `/api/notifications/digest` once a
-day. `private.run_notification_digest()` reads the site URL and the bearer token
-out of Supabase Vault and calls out with pg_net; the schedule itself never holds
-the token, since anyone who can read `cron.job` can read a command string. The
-endpoint groups every row with no `emailed_at` by person, drops the kinds they
-have switched off, and sends one email to whoever has anything left.
+day. `private.run_notification_digest()` reads a bearer token out of Supabase
+Vault and calls out with pg_net to a literal `jitsu.au` URL; the schedule itself
+never holds the token, since anyone who can read `cron.job` can read a command
+string. The endpoint reads the SAME token back out of Vault, through a
+service-role RPC, and compares it against whatever the request sent. The
+endpoint then groups every row with no `emailed_at` by person, drops the kinds
+they have switched off, and sends one email to whoever has anything left.
 
 This ran as a GitHub Actions workflow first, and moving it was a correction, not
 a preference. Scheduling production work from CI put a credential that makes the
@@ -186,20 +188,34 @@ for using Actions ("pg_cron is not available") was never checked: it was inferre
 from the extension being absent from this repo's migrations, which says nothing
 about what the project offers. `pg_available_extensions` lists pg_cron 1.6.4.
 
-**It is not armed by the migration**, and as of 2026-08-21 it never has been:
-both Vault secrets are absent, `NOTIFICATION_DIGEST_KEY` is unset, and no digest
-email has ever gone out (checked against the live project, see the runbook). The job fires nightly and raises, so the
-scheduler records it as failed. "Arming the digest: the runbook" below is the
-whole procedure, including what to do with the backlog first.
+**One token, one home, checked here on 2026-08-21 against the live project: it
+was never set.** The first design after moving off GitHub Actions asked for the
+SAME random string in two different places — a server env var
+(`NOTIFICATION_DIGEST_KEY`, read by the endpoint) and a Supabase Vault secret
+(read by pg_cron) — and required them to match forever. The club owner could not
+find the Lovable screen that sets a server env var (it is not where the docs
+said, on a Pro plan), so it was never set. Both Vault secrets stayed absent too,
+the job fired nightly and raised, and five nights (then several more) of
+`cron.job_run_details` recorded a failure nobody was looking at. 34 notifications
+sat unemailed from 2026-08-10 to 2026-08-20 before anyone noticed.
 
-Two traps worth stating, because both fail silently every morning rather than
-loudly once:
+**As of `20260822000000_notification_digest_key_single_source.sql` there is
+nothing left to type in twice.** The migration mints the one Vault secret itself
+— a random value nobody ever sees, types, or copies — and the endpoint reads it
+back through `public.notification_digest_key()`, the same service-role RPC
+`private.run_notification_digest()` reads for the scheduler's side. There is no
+server env var for this any more; see "Arming the digest" below for what setup
+now actually takes. The destination URL is a literal in the function body for
+the same reason: it used to be a second Vault secret
+(`notification_digest_url`), which meant it was possible to set it to the
+published `*.lovable.app` host by mistake — that one 302s to `jitsu.au`, and
+pg_net does not follow redirects. That mistake can no longer happen.
 
-- Read `vault.decrypted_secrets.decrypted_secret`, never `vault.secrets.secret`.
-  The latter is the ciphertext, and using it sends an `Authorization` header of
-  base64 noise that earns a 401.
-- Use the `jitsu.au` origin, not the published `*.lovable.app` host. That one
-  302s to `jitsu.au`, and pg_net does not follow redirects.
+One trap that still fails silently every morning rather than loudly once: read
+`vault.decrypted_secrets.decrypted_secret`, never `vault.secrets.secret`. The
+latter is the ciphertext, and using it sends an `Authorization` header of
+base64 noise that earns a 401 — which is now true on both sides of the
+comparison, since the endpoint reads the same view.
 
 Two things about the stamping are worth knowing, because they are what keep it
 honest:
@@ -225,9 +241,11 @@ fire and forget: it queues the request, `PERFORM` discards the request id, and
 the function returns successfully no matter what the site answered. So
 `cron.job_run_details` records **succeeded** for every one of these:
 
-- `NOTIFICATION_DIGEST_KEY` unset or rotated server-side, so the endpoint answers
-  503 or 401 forever
-- the Vault secret drifting from the env var, giving 401 every morning
+- the Vault secret missing, so the endpoint answers 503 forever
+- the Vault secret rotated after the endpoint last cached it (it caches in
+  module scope after the first successful read, so a rotation needs a
+  redeploy to take effect there — see "Rotating the key" below), giving 401
+  until the next deploy
 - the site being down, DNS or TLS failing, or the request timing out
 
 In all of them nobody is emailed, `emailed_at` stays NULL, the backlog grows, and
@@ -264,20 +282,19 @@ stop lying; the other stops relying on the scheduler at all.
   daily email summary has stopped going out", with the backlog size and the date
   of the oldest row. This asserts on the **outcome**, not the mechanism, which is
   the only check that survives pg_net being fire and forget: Vault secret
-  missing, key drifted from the env var, endpoint answering 503 because
-  `NOTIFICATION_DIGEST_KEY` is unset, site down, DNS or TLS failing, request
-  timing out. All of them look identical from here, which is exactly what makes
-  the check cheap and total.
+  missing, a rotation the endpoint has not picked up yet, site down, DNS or TLS
+  failing, request timing out. All of them look identical from here, which is
+  exactly what makes the check cheap and total.
 
 36 hours rather than 24: the run is daily, so anything younger is waiting for
 tonight, and a run that is a few hours late is not news. Two missed mornings is.
 
 Three things about that item are deliberate and will look like bugs otherwise:
 
-- **It has no button.** Both halves of the fix live outside this repo, in
-  Supabase Vault and the Lovable Cloud project secrets, so every destination the
-  page could offer would be one that cannot help. `ManagerNotification` carries
-  `href` and `actionLabel` as an all-or-nothing pair for this reason.
+- **It has no button.** The fix lives outside this repo, in Supabase Vault, so
+  every destination the page could offer would be one that cannot help.
+  `ManagerNotification` carries `href` and `actionLabel` as an all-or-nothing
+  pair for this reason.
 - **It cannot be dismissed**, like every attention item, and unlike the others it
   can stay up for weeks. It clears when the digest actually sends, or when
   somebody stamps the backlog as emailed. That is the correct behaviour while
@@ -295,47 +312,36 @@ more slowly, which is why this is worth doing and not urgent.
 
 ### Arming the digest: the runbook
 
-Nothing here can be done from this repo, and both halves have to be in place
-before a single email goes out. The key exists in two places and must match.
+Down to two steps, both because `20260822000000_notification_digest_key_
+single_source.sql` mints the one secret this now needs itself — nobody
+generates it, types it anywhere, or keeps two copies in sync. Applying that
+migration (`docs/database-changes.md`'s apply gate: a human approves the PR,
+then the SQL runs against the live database) **is** the arming step for the key
+half of this. What is left is a product decision the migration cannot make for
+anyone, and confirming the result.
 
 Checked against the live project through Lovable on **2026-08-21**, read-only:
-`NOTIFICATION_DIGEST_KEY` is not set (the project has three secrets and this is
-not one of them), neither Vault secret exists, and so no digest email has ever
-been sent. pg_cron is installed and job `notification-digest` is active on
+`NOTIFICATION_DIGEST_KEY` was not set (the project had three secrets and this
+was not one of them), neither Vault secret existed, and so no digest email had
+ever been sent. pg_cron is installed and job `notification-digest` is active on
 `0 20 * * *` with the expected command; pg_net is installed with its extension
 home in `extensions` and its functions in `net`, which is what the migration
 asserts. The five runs from 17 to 21 August all recorded **succeeded**, return
 message `1 row`, having done nothing. The backlog stood at **34 rows**, from
-2026-08-10 12:53 UTC to 2026-08-20 03:09 UTC.
+2026-08-10 12:53 UTC to 2026-08-20 03:09 UTC. This is the state
+`20260822000000` was written against; re-check it before applying, since more
+nights may have passed.
 
-**1. Set the server env var.** In Lovable, **Project Settings → Secrets**, add
-`NOTIFICATION_DIGEST_KEY`. That screen is the only place it goes: there is no
-separate environment-variable screen, and it must not go in `.env` (which is
-committed, see CLAUDE.md). Generate it yourself and treat it as a credential;
-`openssl rand -hex 32` is fine. You need the identical string in Vault at step 3,
-so generate it somewhere you can copy it from.
-
-Preview and the published site read the same secret store, but the deployed
-`jitsu.au` build only picks up a new value on the next publish, so **publish
-(Publish → Update) before going further**. Then confirm the endpoint has stopped
-refusing everything:
-
-```sh
-curl -si -X POST https://jitsu.au/api/notifications/digest      # expect 401, NOT 503
-```
-
-503 means the env var still is not reaching the server. 401 means it is, and the
-endpoint is now asking for the right token. Do not send the real token here
-unless you mean to run a digest immediately.
-
-**2. Decide what happens to the backlog, BEFORE step 3.** The digest sweeps
-every row with a NULL `emailed_at` and no age limit, so arming it releases the
-whole backlog in one go, as one email per person. Old announcements arriving in
-a burst is the kind of send that gets a domain marked as spam, and the club
-depends on that domain for magic links and account activation. To start clean:
+**1. Decide what happens to the backlog, BEFORE applying the migration.** The
+digest sweeps every row with a NULL `emailed_at` and no age limit, so the first
+armed run releases the whole backlog in one go, as one email per person. Old
+announcements arriving in a burst is the kind of send that gets a domain marked
+as spam, and the club depends on that domain for magic links and account
+activation. To start clean:
 
 ```sql
--- Stamp the backlog as emailed without sending it. Run this BEFORE arming.
+-- Stamp the backlog as emailed without sending it. Run this BEFORE applying
+-- 20260822000000_notification_digest_key_single_source.sql.
 UPDATE public.notifications
    SET emailed_at = now()
  WHERE emailed_at IS NULL
@@ -343,35 +349,40 @@ UPDATE public.notifications
 ```
 
 Everything stays on each person's `/notifications` page: `emailed_at` governs the
-inbox only, never the page. The alternative is to let them send, which is a
-product decision and not a default.
+inbox only, never the page. The alternative is to let the backlog send, which is
+a product decision and not a default.
 
-**3. Add the two Vault secrets.** There is no Vault UI on Lovable Cloud, so this
-is SQL. The key must match step 1 **exactly**, and the URL must be the `jitsu.au`
-origin, not the `*.lovable.app` one:
+**2. Apply the migration, following `docs/database-changes.md`'s gate** (a human
+approves the PR first, then the SQL runs against the live database, then the
+ledger is recorded and PostgREST is reloaded). It mints the Vault secret and
+replaces `private.run_notification_digest()` in the same statement set. Confirm
+it landed:
 
 ```sql
-SELECT vault.create_secret(
-  'https://jitsu.au/api/notifications/digest', 'notification_digest_url');
-SELECT vault.create_secret('<the same value as NOTIFICATION_DIGEST_KEY>',
-  'notification_digest_key');
+SELECT name, created_at FROM vault.secrets WHERE name = 'notification_digest_key';
 ```
 
-**4. Prove it works, without waiting for 20:00 UTC.** Run the job by hand and
+One row is the secret existing; there is nothing to compare it against, since
+there is no second copy any more.
+
+**3. Prove it works, without waiting for 20:00 UTC.** Run the job by hand and
 read the response back inside pg_net's 6-hour TTL:
 
 ```sql
-SELECT private.run_notification_digest();          -- raises if a secret is missing
+SELECT private.run_notification_digest();          -- raises if the secret is missing
 SELECT id, status_code, content, error_msg, created
   FROM net._http_response ORDER BY created DESC LIMIT 1;
 ```
 
 `status_code` 200 with a body like `{"ok":true,"considered":N,...}` is the
-answer you want. 401 means the two copies of the key differ. 503 means step 1 did
-not take. A row with `error_msg` and no status is a network or TLS failure. A
-302 means the URL is the `*.lovable.app` host, which pg_net will not follow.
+answer you want. **401 here means the endpoint's cached copy is stale** — it
+reads Vault once and holds the value in memory for the life of the server
+process, so a secret minted after the last deploy needs a redeploy (Publish →
+Update) before the endpoint will see it; a fresh `jitsu.au` build reads Vault
+again on its first request. 503 means the secret genuinely is not in Vault. A
+row with `error_msg` and no status is a network or TLS failure.
 
-**5. Confirm the next scheduled run.** The morning after:
+**4. Confirm the next scheduled run.** The morning after:
 
 ```sql
 SELECT status, return_message, start_time FROM cron.job_run_details
@@ -384,13 +395,15 @@ notifications page is the standing version of that second query: the "daily emai
 summary has stopped" item disappears once the backlog is cleared and stays away
 while it is being kept clear.
 
-Do the two halves in this order, env var first. While Vault is empty the job
-returns without posting anything, so there is no window where something unwanted
-happens. The reverse order gives a night of the job POSTing into a 503, which is
-harmless but pointless.
+#### Rotating the key
 
-Rotating the key later means changing it in **both** places in the same sitting
-(`vault.update_secret` for the Vault copy), or every run 401s until they agree.
+`SELECT vault.update_secret(id, '<new value>') FROM vault.secrets WHERE name =
+'notification_digest_key';` changes the one copy that exists. pg_cron reads it
+fresh on every run, so the scheduler side is immediate. The endpoint side is
+not: it caches the value in module scope after its first read, so **rotating
+without a redeploy leaves the deployed site checking against the old value**
+until the next publish. Rotate, then publish, in that order — the reverse gives
+a window where every run 401s.
 
 ### A post goes live
 
@@ -493,5 +506,7 @@ Two consequences worth knowing:
 | The digest endpoint          | `src/routes/api/notifications/digest.ts`                                  |
 | The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`         |
 | Failing loudly when unarmed  | `supabase/migrations/20260821000000_notification_digest_fails_loudly.sql` |
+| One key, minted once         | `supabase/migrations/20260822000000_notification_digest_key_single_source.sql` |
+| The key's typed RPC wrapper  | `notificationDigestKey` in `src/lib/supabase-rpc.ts`                      |
 | The stalled-digest item      | `digestStalledNotifications` in `src/lib/validation.ts`                   |
 | Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx`    |

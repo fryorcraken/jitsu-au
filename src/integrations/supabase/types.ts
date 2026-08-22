@@ -1493,6 +1493,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      notification_digest_key: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
       user_emails: {
         Args: { _user_ids: string[] }
         Returns: {
