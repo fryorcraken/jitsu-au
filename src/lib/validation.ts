@@ -3168,21 +3168,11 @@ export const notificationPreferencesSchema = z.object({
 });
 export type NotificationPreferencesInput = z.infer<typeof notificationPreferencesSchema>;
 
-/** The same patch, arriving from the signed-out settings link in an email
- * footer. The token IS the authentication, so it is required and the handler
- * resolves the person from it rather than from a session. */
-export const notificationPreferencesByTokenSchema = notificationPreferencesSchema.extend({
-  token: z.string().trim().min(1).max(200),
-});
-export type NotificationPreferencesByTokenInput = z.infer<
-  typeof notificationPreferencesByTokenSchema
->;
-
-/** Read the switches behind a footer link, before anything is changed. */
-export const notificationTokenSchema = z.object({
-  token: z.string().trim().min(1).max(200),
-});
-export type NotificationTokenInput = z.infer<typeof notificationTokenSchema>;
+// There is no second, token-carrying version of this schema any more. The
+// signed-out settings page sends exactly the patch above: its token travels in
+// a cookie set by /email-settings/<token>, never in the body, and the bounds
+// that schema used to enforce are now on the cookie
+// (src/lib/email-settings-session.ts).
 
 /** Mark notifications read. An empty/absent list means "all of mine", which is
  * what the "Mark all as read" button sends; naming ids is what opening the page

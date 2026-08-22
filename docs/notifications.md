@@ -269,26 +269,54 @@ so it could not have carried "has this been announced".
 ### Turning email off
 
 The switches are on `/notifications` for somebody signed in, and at
-`/email-settings/<token>` for somebody who clicked the link at the bottom of an
-email. Both render `NotificationSwitches`, so the two can never offer different
+`/email-settings` for somebody who clicked the link at the bottom of an email.
+Both render `NotificationSwitches`, so the two can never offer different
 choices.
 
-The token rides in the URL path because an email client cannot send an
-`Authorization` header, the same as `/api/calendar/<token>` and
-`/api/verify-email/<token>`. The response is **uniform**: a token that never
-existed, one that has been rotated, and a malformed one all render the same
-page. Anything else would make the endpoint a way to probe which links the club
-has issued.
+**The emailed link is not the page.** It points at
+`/email-settings/<token>`, which is a server handler with no screen of its own:
+it puts the token in a short-lived cookie, redirects to a plain
+`/email-settings`, and that is where the switches are. So the credential is
+never in the address bar, never in the back button, and never in anything
+anybody pastes. The token rides in the URL for that one hop because an email
+client cannot send an `Authorization` header, the same constraint as
+`/api/calendar/<token>` and `/api/verify-email/<token>`. Those two keep it on
+screen: a calendar app subscribes to a URL and has nowhere else to put it, and
+the verification link is single use and dead within the hour.
 
-Because the token is in the URL, the page is served with
-`Referrer-Policy: no-referrer` and `Cache-Control: no-store`, so the link never
-travels in a `Referer` header (the footer has outbound links) and never lands in
-a shared or on-disk cache. That is set for every token path at once; see
-"Security headers" in `CLAUDE.md`.
+The cookie is `HttpOnly`, `SameSite=Lax`, `Secure` on https, scoped to `/` and
+good for **thirty minutes**. Every one of those choices, including why `Lax`
+rather than `Strict` and why `/` rather than a narrower path, is written down in
+`src/lib/email-settings-session.ts`. Two consequences worth knowing:
+
+- **Nothing expires the emailed link itself.** It stays exchangeable for as long
+  as the row lives in `notification_tokens`, so an old email still works. What
+  runs out is the half-hour session it hands you.
+- **`SameSite=Lax` is what makes the save safe.** The two server functions are
+  POSTs authenticated by that cookie, and a cross-site POST does not carry a Lax
+  cookie, so a page on another origin cannot flip somebody's switches for them.
+
+The response is **uniform** at both hops. A token that never existed, one that
+has been rotated, a malformed one and no cookie at all all end up on the same
+screen. Anything else would make this a way to probe which links the club has
+issued. The exchange endpoint touches no database at all, so a stream of guesses
+costs a redirect and nothing more.
+
+`/email-settings/` still carries `Referrer-Policy: no-referrer` and
+`Cache-Control: no-store`, because the exchange hop still has a token in its
+path. The `no-store` matters more than it used to: a cached redirect would hand
+one person's `Set-Cookie` to the next. That is set for every token path at once;
+see "Security headers" in `CLAUDE.md`.
 
 The signed-out page deliberately omits the manager switch. With no session it
 cannot tell whether the person holds the role, and offering a manager-only
 choice to a member would be a lie about what they can turn on.
+
+It renders four states, not one: loading, the switches, "this link is no longer
+live" (arrived with nothing usable), and "this page has been open too long" (the
+session ran out while they sat on it). A save that cannot reach us leaves the
+switch where it was and keeps a retry on screen, because somebody who thinks
+they turned emails off and did not finds out from their inbox a week later.
 
 ## What is deliberately not built
 
@@ -349,7 +377,9 @@ Two consequences worth knowing:
 | Page and settings server fns | `src/lib/notifications.functions.ts`                                   |
 | The shared query             | `src/hooks/useNotifications.ts`                                        |
 | The page                     | `src/routes/_authenticated/notifications.tsx`                          |
-| The signed-out settings      | `src/routes/email-settings/$token.tsx`                                 |
+| The signed-out settings      | `src/routes/email-settings/index.tsx`                                  |
+| The link exchange            | `src/routes/email-settings/$token.ts`                                  |
+| The settings cookie          | `src/lib/email-settings-session.ts`                                    |
 | The switches                 | `src/components/site/NotificationSwitches.tsx`                         |
 | The sidebar badge            | `src/components/site/MemberLayout.tsx`                                 |
 | The digest endpoint          | `src/routes/api/notifications/digest.ts`                               |

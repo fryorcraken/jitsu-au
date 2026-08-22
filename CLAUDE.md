@@ -507,10 +507,10 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     gap nobody notices.
   - The **public** pages cannot be derived the same way: they are
     `PUBLIC_PAGES` plus `PUBLIC_NOINDEX_PATHS` in `src/lib/public-pages.ts`
-    (`/waiver`, `/auth`, `/reset-password`, `/thank-you`, `/app`). The second
-    list is `noindex`, and `seo.test.ts` fails if a `noindex` page is added to
-    `PUBLIC_PAGES` — so **a new public noindex page has to be added there by
-    hand**. `/update-password`, `/email-settings/$token` and `/blog/$slug` are
+    (`/waiver`, `/auth`, `/reset-password`, `/thank-you`, `/app`,
+    `/email-settings`). The second list is `noindex`, and `seo.test.ts` fails if
+    a `noindex` page is added to `PUBLIC_PAGES` — so **a new public noindex page
+    has to be added there by hand**. `/update-password` and `/blog/$slug` are
     deliberately not walked; each needs a token only its own email carries.
   - Signing in uses an admin-generated **magic link**, so the session is stored
     exactly as a real one is. It needs no redirect configuration: GoTrue accepts
@@ -738,6 +738,13 @@ the URL, which makes it the browser's job not to pass that URL on. The site
 sends `strict-origin-when-cross-origin` everywhere and `no-referrer` on those
 three prefixes (the only value that also keeps the path out of a **same-origin**
 `Referer`), plus `Cache-Control: no-store` on them unless the route set its own.
+
+Only the first two of those are pages. `/email-settings/<token>` is an
+**exchange**: it puts the token in a short-lived cookie and redirects to a plain
+`/email-settings`, so nobody ever reads a screen with the token in the address
+bar. Its `no-store` is load-bearing rather than precautionary, because a cached
+redirect would hand one person's `Set-Cookie` to the next. The cookie's own
+attributes and lifetime are in `src/lib/email-settings-session.ts`.
 
 - **Adding a route that takes a token in its path?** Add its prefix to
   `TOKEN_PATH_PREFIXES` and to `public/_headers`. `security-headers.test.ts`
