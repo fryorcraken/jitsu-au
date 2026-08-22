@@ -398,6 +398,23 @@ export const clientSubmissionId = z.string().uuid().optional().or(z.literal(""))
  * Nothing about the browser's side changes: `""` still passes, and every call
  * site already sends it. Keep it that way — a new form that forgets `hp` is a
  * form that cannot be submitted at all.
+ *
+ * **Why all seven, including the ones behind a login.** Three of these
+ * (`startMembershipSchema`, `createAnnotationSchema`, `blogCommentSchema`) are
+ * only reachable with a session, where an anonymous bot cannot get to them at
+ * all, so the trap catches nothing there. They carry it anyway, because the
+ * alternative is a rule with an exception list: every future schema would need
+ * someone to decide which side of the line it falls on, and the way to get that
+ * wrong is to call a public form authenticated. A uniform rule fails safe; a
+ * remembered one does not.
+ *
+ * The cost that would argue the other way is a non-browser caller failing on a
+ * field it cannot see. That cannot happen through the manager agent API, which
+ * has its own schemas for the same operations and no honeypot on any of them
+ * (`createMembershipSchema`, `paperWaiverUploadSchema`, and the rest in
+ * `manager-agent.ts`). Anything machine-to-machine belongs on that seam, not on
+ * a form schema. If a genuine non-browser caller for one of these seven ever
+ * appears, that is the signal to give it its own schema, not to loosen this one.
  */
 export const honeypot = z.string().max(0);
 
