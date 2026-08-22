@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -10,6 +10,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Trash2 } from "lucide-react";
 import {
   listWaiverTemplates,
@@ -19,6 +22,7 @@ import {
 import type { AcknowledgementDef } from "@/lib/validation";
 import { buildHealthPlaceholders, healthQuestions } from "@/lib/waiver-health";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 import { cn } from "@/lib/utils";
 import {
   hasMediaAcknowledgement,
@@ -109,8 +113,13 @@ function EditorPage() {
   const [body, setBody] = useState("");
   const [acks, setAcks] = useState<AcknowledgementDef[]>([]);
   const [loading, setLoading] = useState(true);
+  // The editor must never open blank over a live legal document. An empty body
+  // here looks like a template nobody has written yet, and saving from that
+  // state publishes an empty waiver as the thing people sign.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   const selected = templates.find((t) => t.id === selectedId) ?? null;
 
@@ -121,9 +130,12 @@ function EditorPage() {
     setAcks(template.acknowledgements ?? []);
   }
 
-  useEffect(() => {
-    fetchTemplates()
+  // Named so the failure panel's "Try again" repeats exactly what mount does.
+  const loadTemplates = useCallback(() => {
+    setLoading(true);
+    return fetchTemplates()
       .then((rows) => {
+        setLoadError(null);
         setTemplates(rows);
         // Open on the live version when there is one, otherwise the newest
         // draft, so a template seeded outside the editor is never invisible.
@@ -131,14 +143,21 @@ function EditorPage() {
         if (opening) load(opening);
       })
       .catch((e) => {
-        // A non-manager is redirected by the effect below; anything else is
-        // worth saying out loud rather than leaving a blank editor.
+        // A non-manager is redirected by the effect below; anything else stops
+        // the editor rendering at all, rather than leaving a blank body that
+        // saves over the live waiver.
         if (!(e instanceof Error) || !e.message.includes("Forbidden")) {
-          toast.error(e instanceof Error ? e.message : "Could not load waiver versions");
+          const message = describeLoadError(e, "Could not load waiver versions");
+          setLoadError(message);
+          toast.error(message);
         }
       })
       .finally(() => setLoading(false));
   }, [fetchTemplates]);
+
+  useEffect(() => {
+    void loadTemplates();
+  }, [loadTemplates]);
 
   // Editing a version and saving writes a NEW version, so an unsaved edit is
   // lost by switching away from it. Warn rather than discard silently.
@@ -157,9 +176,9 @@ function EditorPage() {
   // immediately, before `meaningfulAcks` would silently drop the row on save.
   const mediaAckMissing = !hasMediaAcknowledgement(acks);
 
-  function selectVersion(template: TemplateVersion) {
+  async function selectVersion(template: TemplateVersion) {
     if (template.id === selectedId) return;
-    if (dirty && !window.confirm("Discard your unsaved changes and open this version?")) return;
+    if (dirty && !(await confirm(discardUnsavedChanges("Opening another version")))) return;
     load(template);
   }
 
@@ -169,19 +188,15 @@ function EditorPage() {
     // matters most to the manager who has just rewritten a clause: without this
     // they read "now live", see their own edit still on screen, and believe it
     // is what people are signing.
-    if (
-      dirty &&
-      !window.confirm(
-        `Your unsaved changes are not part of version ${selected.version} and will not go live. Save them as a new version first, or continue to make the stored version ${selected.version} live?`,
-      )
-    )
-      return;
-    if (
-      !window.confirm(
-        `Make version ${selected.version} the waiver everyone signs from now on? Waivers already signed keep the version they were signed against.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Make version ${selected.version} the waiver people sign?`,
+      description: `Everyone who signs from now on signs version ${selected.version}. Waivers already signed keep the version they were signed against.`,
+      footnote: dirty
+        ? `Your unsaved edits are not part of version ${selected.version}, so they will not go live. Save them as a new version first if you want them.`
+        : undefined,
+      confirmLabel: "Make it live",
+    });
+    if (!ok) return;
     setPromoting(true);
     try {
       await promote({ data: { id: selected.id } });
@@ -250,11 +265,22 @@ function EditorPage() {
     setBody((b) => `${b}${b.endsWith(" ") || b === "" ? "" : " "}{{${name}}}`);
   }
 
-  if (loading)
+  if (loading) return <Loading className="p-8" />;
+
+  // Deliberately in place of the whole editor, not beside it. Saving writes a
+  // new live version out of whatever is in these fields, so an editor rendered
+  // over a failed load is a loaded gun: the body would be empty and the save
+  // would publish that.
+  if (loadError)
     return (
-      <>
-        <div className="p-8">Loading...</div>
-      </>
+      <section className="mx-auto max-w-2xl px-4 py-10">
+        <LoadFailure
+          what="The waiver template"
+          message={loadError}
+          hint="Nothing has changed, and the version people sign is still live. Do not edit from here until it loads: saving would publish an empty waiver over it."
+          onRetry={() => void loadTemplates()}
+        />
+      </section>
     );
 
   return (
@@ -389,7 +415,7 @@ function EditorPage() {
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => selectVersion(t)}
+                    onClick={() => void selectVersion(t)}
                     aria-current={t.id === selectedId}
                     className={cn(
                       "flex w-full flex-col gap-1 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted",
@@ -470,6 +496,7 @@ function EditorPage() {
           </CardContent>
         </Card>
       </section>
+      {confirmDialog}
     </>
   );
 }

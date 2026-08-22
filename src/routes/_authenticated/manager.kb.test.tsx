@@ -10,7 +10,7 @@
 // blank values, and stored THOSE blank values as the baseline — so nothing on
 // screen looked dirty, and the next "Save as new version" wrote the blanks
 // straight to the database. This pins that autoload shows the real placement.
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -103,7 +103,7 @@ vi.mock("@/lib/kb.functions", () => ({
     Promise.resolve({
       slug: data.slug,
       title: data.slug === article.slug ? article.title : data.slug,
-      body_md: `# ${data.slug}`,
+      body_md: `# ${data.slug}\n\nText.\n\n## How grading works {#grading}`,
       version: article.version,
       is_current_version: true,
       change_note: null,
@@ -146,6 +146,27 @@ describe("/manager/kb autoload", () => {
 
     await screen.findByLabelText(/sidebar label/i);
     expect(screen.queryByText(/unsaved changes/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("/manager/kb section links", () => {
+  // The fragment is the part a manager cannot guess: it comes out of the
+  // heading's wording, so the editor has to tell them what it currently is.
+  it("lists the link to every heading in the article", async () => {
+    render(<KnowledgeBaseManager />);
+
+    await screen.findByLabelText(/sidebar label/i);
+    expect(screen.getByText("/kb/our-history#our-history")).toBeInTheDocument();
+    // The worked example is built from this article's own first heading, so its
+    // link text and its target agree.
+    expect(screen.getByText("[our-history](/kb/our-history#our-history)")).toBeInTheDocument();
+    expect(screen.getByText("/kb/our-history#grading")).toBeInTheDocument();
+    // The pinned one is marked, because that is the link that survives the
+    // heading being reworded.
+    expect(screen.getByText("Pinned")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Copy the link to How grading works/i }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -274,22 +295,38 @@ describe("/manager/kb section editing", () => {
   // about whichever one is VISIBLE. Consulting the article's dirty flag alone
   // would throw away a half-typed section name without a word.
   it("warns before throwing away a half-typed section name", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    try {
-      render(<KnowledgeBaseManager />);
+    render(<KnowledgeBaseManager />);
 
-      await screen.findByLabelText(/sidebar label/i);
-      await userEvent.click(screen.getByRole("button", { name: "About the club" }));
-      await userEvent.type(screen.getByLabelText(/name/i), " and its people");
-      expect(screen.getByRole("button", { name: /save the name/i })).toBeEnabled();
+    await screen.findByLabelText(/sidebar label/i);
+    await userEvent.click(screen.getByRole("button", { name: "About the club" }));
+    await userEvent.type(screen.getByLabelText(/name/i), " and its people");
+    expect(screen.getByRole("button", { name: /save the name/i })).toBeEnabled();
 
-      await userEvent.click(screen.getByRole("button", { name: /^Syllabus/ }));
-      expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/discard your unsaved changes/i));
-      // The prompt was declined, so the section editor is still on screen.
-      expect(screen.getByLabelText(/name/i)).toHaveValue("About the club and its people");
-    } finally {
-      confirm.mockRestore();
-    }
+    await userEvent.click(screen.getByRole("button", { name: /^Syllabus/ }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent(/discard your unsaved changes/i);
+
+    // Keeping the edits is the way out, and it leaves the section editor as it
+    // was rather than half-navigated.
+    await userEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByLabelText(/name/i)).toHaveValue("About the club and its people");
+  });
+
+  it("throws the half-typed name away once, and only once, it is confirmed", async () => {
+    render(<KnowledgeBaseManager />);
+
+    await screen.findByLabelText(/sidebar label/i);
+    await userEvent.click(screen.getByRole("button", { name: "About the club" }));
+    await userEvent.type(screen.getByLabelText(/name/i), " and its people");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Syllabus/ }));
+    await screen.findByRole("alertdialog");
+    await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    // The click that was held up goes through: the section editor is gone.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /save the name/i })).not.toBeInTheDocument(),
+    );
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KbArticleReader } from "./KbArticleReader";
 import type { ReaderAnnotation, ReaderArticle, ReaderViewer } from "./KbArticleReader";
@@ -52,6 +52,7 @@ function renderReader(over: {
   // The write callbacks report success; the component clears its inputs only
   // when they do. Default to success so the ordinary path is what is exercised.
   const onCreate = over.onCreate ?? vi.fn().mockResolvedValue(true);
+  const onDelete = vi.fn().mockResolvedValue(undefined);
   render(
     <KbArticleReader
       article={over.article ?? article}
@@ -59,11 +60,11 @@ function renderReader(over: {
       viewer={over.viewer ?? canAnnotate}
       onCreate={onCreate as never}
       onUpdate={vi.fn().mockResolvedValue(true)}
-      onDelete={vi.fn().mockResolvedValue(undefined)}
+      onDelete={onDelete}
       onResolve={vi.fn().mockResolvedValue(undefined)}
     />,
   );
-  return { onCreate };
+  return { onCreate, onDelete };
 }
 
 describe("KbArticleReader", () => {
@@ -71,6 +72,33 @@ describe("KbArticleReader", () => {
     renderReader({});
     expect(screen.getByRole("heading", { name: "House rules" })).toBeInTheDocument();
     expect(screen.getByText("Wash your gi.")).toBeInTheDocument();
+  });
+
+  // Another article links to a section of this one, so the block that opens a
+  // section has to carry the id that link aims at.
+  it("puts each heading's anchor on the passage that opens it", () => {
+    renderReader({
+      article: { ...article, body_md: "# House rules\n\nWash your gi.\n\n## Nails {#nails}" },
+    });
+    expect(document.getElementById("house-rules")?.textContent).toContain("House rules");
+    expect(document.getElementById("nails")?.textContent).toContain("Nails");
+  });
+
+  it("offers a link to a section, and copies the whole address for pasting", async () => {
+    renderReader({});
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const link = screen.getByRole("link", { name: /Link to this section, House rules/i });
+    expect(link).toHaveAttribute("href", "#house-rules");
+    await userEvent.click(link);
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("#house-rules"));
+    expect(await screen.findByText("Link copied")).toBeInTheDocument();
+  });
+
+  it("offers no section link on a passage that is not a heading", () => {
+    renderReader({ article: { ...article, body_md: "Just prose, no headings." } });
+    expect(screen.queryByRole("link", { name: /Link to this section/i })).not.toBeInTheDocument();
   });
 
   it("tells a signed-out reader to sign in rather than showing a composer", () => {
@@ -238,5 +266,60 @@ describe("KbArticleReader", () => {
       ],
     });
     expect(screen.queryByRole("button", { name: /Reply/i })).not.toBeInTheDocument();
+  });
+
+  // Deleting a comment takes its replies with it and nothing brings either
+  // back, so it asks first, in the app's own dialog rather than the browser's.
+  it("says the replies go too before deleting a comment, and deletes only when told to", async () => {
+    const user = userEvent.setup();
+    const { onDelete } = renderReader({
+      annotations: [annotation({ is_mine: true, can_edit: true, block_id: null, quote: null })],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Delete this comment?");
+    expect(dialog).toHaveTextContent("Any replies to it go too");
+    expect(onDelete).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Delete comment" }));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("a-1"));
+  });
+
+  it("keeps a comment when the question is answered no", async () => {
+    const user = userEvent.setup();
+    const { onDelete } = renderReader({
+      annotations: [annotation({ is_mine: true, can_edit: true, block_id: null, quote: null })],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    await screen.findByRole("alertdialog");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText("Does this include rash guards?")).toBeInTheDocument();
+  });
+
+  // A reply has nothing hanging off it, so it gets its own, shorter question.
+  it("asks about a reply on its own terms", async () => {
+    const user = userEvent.setup();
+    renderReader({
+      annotations: [
+        annotation({ block_id: null, quote: null }),
+        annotation({
+          id: "a-2",
+          parent_id: "a-1",
+          is_mine: true,
+          can_edit: true,
+          block_id: null,
+          quote: null,
+        }),
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Delete this reply?");
+    expect(screen.getByRole("button", { name: "Delete reply" })).toBeInTheDocument();
   });
 });

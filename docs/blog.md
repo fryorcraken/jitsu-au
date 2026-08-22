@@ -108,8 +108,9 @@ same `createServerFn` pattern used everywhere else in the app — not something
 only reachable through the web UI. `postComment` checks, in order: the post is
 published, the commenter isn't in `blog_blocked_commenters`, and — for a
 reply — the parent comment belongs to the same post and is itself top-level.
-A honeypot field (`hp`) silently no-ops a submission a bot filled in, the same
-convention as every other public form.
+A honeypot field (`hp`) refuses a submission that filled the decoy in, and
+equally one that omits the field, the same convention as every other form that
+writes (see `honeypot` in `src/lib/validation.ts`).
 
 ### A manager writes and publishes a post
 
@@ -144,9 +145,12 @@ come back from the save and become the form's new baseline.
 again** — not on a later edit, and not on an unpublish/republish round trip —
 so a post's publish date and its position in the public list (sorted by
 `published_at`) both stay stable regardless of how many times it's drafted
-and republished. The editor warns before an unpublish and guards against
-losing unsaved work (a confirm on leaving, and a browser close/refresh
-warning) the same way the waiver template editor does.
+and republished. Switching a live post back to Draft puts a notice under the
+status picker saying saving takes it off the public blog and that it can be
+published again any time. There is deliberately no dialog on top of that: the
+same form undoes it in one click. Leaving with unsaved edits DOES ask, since
+nothing brings typed text back, and a browser close/refresh warning covers the
+same ground, the way the waiver template editor does.
 
 ### A manager moderates
 

@@ -3,9 +3,13 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   CLUB_TIME_ZONE,
   DEFAULT_EVENT_LOCATION,
@@ -126,6 +130,7 @@ function ManagerCalendarPage() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
   const [form, setForm] = useState({ ...emptyEntry });
   // Whether "Ends" holds the manager's own answer rather than the one derived
   // from "Starts". Kept out of `form` because it describes the editing session,
@@ -151,21 +156,27 @@ function ManagerCalendarPage() {
   const [openRsvpEvent, setOpenRsvpEvent] = useState<string | null>(null);
   const [rsvpRows, setRsvpRows] = useState<RsvpRow[]>([]);
   const [rsvpLoading, setRsvpLoading] = useState(false);
+  const [rsvpError, setRsvpError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const reload = useCallback(() => {
+    setLoading(true);
     return fetchEvents()
       .then((e) => {
         setEvents(e as EventRow[]);
-        setLoading(false);
+        setLoadError(null);
       })
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Could not load the calendar");
-        setLoading(false);
-      });
+        const message = describeLoadError(err, "Could not load the calendar");
+        setLoadError(message);
+        toast.error(message);
+      })
+      .finally(() => setLoading(false));
   }, [fetchEvents]);
 
   useEffect(() => {
@@ -296,13 +307,15 @@ function ManagerCalendarPage() {
 
   async function stopRepeats(ev: EventRow) {
     if (!ev.series_id) return;
-    if (
-      !window.confirm(
-        `Stop "${ev.title}" repeating? Future dates are removed. Past ones stay on the record.`,
-      )
-    ) {
-      return;
-    }
+    // Not reversible by clicking again: the future dates go, and putting them
+    // back means setting the repeat up from scratch.
+    const ok = await confirm({
+      title: `Stop "${ev.title}" repeating?`,
+      description:
+        "Every future date comes off the calendar. Dates that have already happened stay on the record, with their check-ins.",
+      confirmLabel: "Stop repeating",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await endRepeat({ data: { series_id: ev.series_id } });
@@ -316,7 +329,15 @@ function ManagerCalendarPage() {
   }
 
   async function remove(ev: EventRow) {
-    if (!window.confirm(`Delete "${ev.title}"? Cancel it instead to keep the record.`)) return;
+    const ok = await confirm({
+      title: `Delete "${ev.title}"?`,
+      description:
+        "This takes it off the calendar completely, as though it had never been on it. There is no way to get it back.",
+      footnote: "To call the class off and keep the record of it, cancel it instead.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await removeEvent({ data: { id: ev.id } });
@@ -328,13 +349,20 @@ function ManagerCalendarPage() {
     }
   }
 
-  async function toggleRsvpList(eventId: string) {
+  function toggleRsvpList(eventId: string) {
     if (openRsvpEvent === eventId) {
       setOpenRsvpEvent(null);
       return;
     }
     setOpenRsvpEvent(eventId);
+    void loadRsvps(eventId);
+  }
+
+  // Split out of the toggle so "Try again" refetches the open row rather than
+  // collapsing it, which is what calling the toggle again would do.
+  async function loadRsvps(eventId: string) {
     setRsvpRows([]);
+    setRsvpError(null);
     setRsvpLoading(true);
     try {
       const rows = await fetchRsvps({ data: { event_id: eventId } });
@@ -345,7 +373,9 @@ function ManagerCalendarPage() {
         return current;
       });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not load who's coming");
+      const message = describeLoadError(e, "Could not load who's coming");
+      setRsvpError(message);
+      toast.error(message);
       setRsvpRows([]);
     } finally {
       setRsvpLoading(false);
@@ -546,7 +576,14 @@ function ManagerCalendarPage() {
       <div className="space-y-4">
         <h2 className="text-xl font-bold">What's coming up</h2>
         {loading ? (
-          <p className="text-muted-foreground">Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="The calendar"
+            message={loadError}
+            hint="This is not the same as the calendar being empty, so adding an entry from here risks putting on a class twice."
+            onRetry={() => void reload()}
+          />
         ) : events.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing on the calendar yet.</p>
         ) : (
@@ -794,7 +831,14 @@ function ManagerCalendarPage() {
                         <tr className="border-t bg-muted/30">
                           <td colSpan={6} className="px-3 py-3">
                             {rsvpLoading ? (
-                              <p className="text-xs text-muted-foreground">Loading...</p>
+                              <Loading className="text-xs" />
+                            ) : rsvpError ? (
+                              <LoadFailure
+                                what="Who is coming"
+                                message={rsvpError}
+                                hint="Nobody is listed because the replies could not be read."
+                                onRetry={() => void loadRsvps(ev.id)}
+                              />
                             ) : rsvpRows.length === 0 ? (
                               <p className="text-xs text-muted-foreground">
                                 Nobody has replied yet.
@@ -827,6 +871,7 @@ function ManagerCalendarPage() {
           </div>
         )}
       </div>
+      {confirmDialog}
     </section>
   );
 }

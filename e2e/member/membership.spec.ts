@@ -14,6 +14,19 @@ test.afterAll(async () => {
   await adminClient().from("memberships").delete().in("payment_reference", references);
 });
 
+// How a signed-in member reaches this page from the public site. The pricing
+// page's call to action swaps once the browser knows who is reading, so this is
+// the half of that swap a unit test cannot see happen in a real session.
+test("the pricing page takes a signed-in member to their membership page", async ({ page }) => {
+  await page.goto("/pricing");
+
+  await page.getByRole("main").getByRole("link", { name: "Manage your membership" }).click();
+
+  await expect(page).toHaveURL(/\/membership$/);
+  await expect(page.getByText("You're an active member. See you on the mat!")).toBeVisible();
+  await expectPageRendered(page);
+});
+
 test("the member's status and memberships show on their membership page", async ({ page }) => {
   await page.goto("/membership");
 

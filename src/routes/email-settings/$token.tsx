@@ -24,6 +24,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { Loading } from "@/components/site/Loading";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NotificationSwitches } from "@/components/site/NotificationSwitches";
@@ -104,7 +105,7 @@ function EmailSettingsPage() {
           </p>
         </div>
 
-        {state === "loading" && <p className="text-sm text-muted-foreground">Loading...</p>}
+        {state === "loading" && <Loading />}
 
         {state === "unavailable" && (
           <Card>

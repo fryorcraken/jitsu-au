@@ -214,7 +214,7 @@ def main():
     # cannot see the ACL than a schema with no client grants at all — and it
     # would pass, silently, forever. `information_schema.role_table_grants` is
     # filtered to grants involving the current user, so a least-privilege reader
-    # sees nothing there; read pg_class.relacl instead (see migration-drift.yml).
+    # sees nothing there; read pg_class.relacl instead (the query is in README.md).
     if not live and expected:
         print(
             "The grant query came back empty while grants are expected — check the\n"

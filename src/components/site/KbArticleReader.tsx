@@ -11,7 +11,8 @@
 // wrong instead of two.
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Lock, MessageSquare, Check, Trash2, Pencil, CornerDownRight } from "lucide-react";
+import { toast } from "sonner";
+import { Lock, MessageSquare, Check, Trash2, Pencil, CornerDownRight, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +20,8 @@ import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/dates";
 import { groupThreads, resolveAnchors, splitBlocks } from "@/lib/kb";
 import type { AnnotationVisibility } from "@/lib/kb";
-import { extractHeadings } from "@/lib/kb-nav";
+import { extractHeadings, type KbHeading } from "@/lib/kb-nav";
+import { useConfirm } from "@/hooks/use-confirm";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 
 /** One annotation, exactly as `listAnnotations` returns it. */
@@ -101,9 +103,9 @@ export function KbArticleReader({
   // mean reaching into the rendered nodes. Hanging it on the block's wrapper
   // instead lands the reader in the same place and keeps both sides deriving the
   // id from `extractHeadings`, so the anchor and the link cannot disagree.
-  const headingIdByBlock = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const heading of extractHeadings(article.body_md)) map.set(heading.blockId, heading.id);
+  const headingByBlock = useMemo(() => {
+    const map = new Map<string, KbHeading>();
+    for (const heading of extractHeadings(article.body_md)) map.set(heading.blockId, heading);
     return map;
   }, [article.body_md]);
 
@@ -125,10 +127,11 @@ export function KbArticleReader({
           const shared = onBlock.filter((a) => a.visibility === "shared" && !a.parent_id).length;
           const notes = onBlock.filter((a) => a.visibility === "private").length;
           const isSelected = block.id === selected;
+          const heading = headingByBlock.get(block.id) ?? null;
           return (
             <div
               key={block.id}
-              id={headingIdByBlock.get(block.id)}
+              id={heading?.id}
               className={cn(
                 "group relative scroll-mt-24 rounded-md border border-transparent px-3 py-1 transition-colors",
                 isSelected ? "border-primary/40 bg-muted/60" : "hover:bg-muted/40",
@@ -152,44 +155,49 @@ export function KbArticleReader({
                 {block.markdown}
               </ReactMarkdown>
 
-              {/* Always rendered when there is anything to show OR the reader
-                  could add something. Gating this on `shared + notes > 0` (as it
-                  used to be) left phone users with no way to start a comment on
-                  a passage at all, since the gutter marker above is hidden
-                  there: the feature's headline capability, unreachable on a
-                  phone. */}
-              {(shared > 0 || notes > 0 || viewer.can_annotate) && (
-                <button
-                  type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => setSelected(isSelected ? null : block.id)}
-                  className={cn(
-                    "mt-1 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground",
-                    // With no comments yet the control is only worth the space
-                    // where it is the ONLY way in, i.e. below `xl`.
-                    shared === 0 && notes === 0 && "xl:hidden",
-                  )}
-                >
-                  {shared > 0 && (
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="h-3 w-3" />
-                      {shared}
-                    </span>
-                  )}
-                  {notes > 0 && (
-                    <span className="flex items-center gap-1">
-                      <Lock className="h-3 w-3" />
-                      {notes}
-                    </span>
-                  )}
-                  {shared === 0 && notes === 0 && (
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="h-3 w-3" />
-                      Comment
-                    </span>
-                  )}
-                </button>
-              )}
+              {/* The controls under a passage: how many comments are on it, and,
+                  when it opens a section, the link to that section. */}
+              <div className="flex flex-wrap items-center gap-4">
+                {/* Always rendered when there is anything to show OR the reader
+                    could add something. Gating this on `shared + notes > 0` (as
+                    it used to be) left phone users with no way to start a
+                    comment on a passage at all, since the gutter marker above is
+                    hidden there: the feature's headline capability, unreachable
+                    on a phone. */}
+                {(shared > 0 || notes > 0 || viewer.can_annotate) && (
+                  <button
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => setSelected(isSelected ? null : block.id)}
+                    className={cn(
+                      "mt-1 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground",
+                      // With no comments yet the control is only worth the space
+                      // where it is the ONLY way in, i.e. below `xl`.
+                      shared === 0 && notes === 0 && "xl:hidden",
+                    )}
+                  >
+                    {shared > 0 && (
+                      <span className="flex items-center gap-1">
+                        <MessageSquare className="h-3 w-3" />
+                        {shared}
+                      </span>
+                    )}
+                    {notes > 0 && (
+                      <span className="flex items-center gap-1">
+                        <Lock className="h-3 w-3" />
+                        {notes}
+                      </span>
+                    )}
+                    {shared === 0 && notes === 0 && (
+                      <span className="flex items-center gap-1">
+                        <MessageSquare className="h-3 w-3" />
+                        Comment
+                      </span>
+                    )}
+                  </button>
+                )}
+                {heading && <SectionLink heading={heading} />}
+              </div>
             </div>
           );
         })}
@@ -319,6 +327,52 @@ export function KbArticleReader({
         )}
       </aside>
     </div>
+  );
+}
+
+/**
+ * "Link to this section": the way somebody gets the address of one heading.
+ *
+ * It is a real `<a href="#id">`, so it behaves like a link everywhere a link is
+ * expected — the address bar ends up on the section, "copy link address" works,
+ * and a keyboard reaches it. The click ALSO puts the full URL on the clipboard,
+ * because the thing people actually want here is to paste it into another
+ * article or a message, and asking them to select it out of the address bar on
+ * a phone is asking them not to bother.
+ *
+ * Kept quiet until it is wanted: visible on hover or keyboard focus within the
+ * passage on a pointer screen, and always visible on a touch one, where there
+ * is no hover to reveal it with.
+ */
+function SectionLink({ heading }: { heading: KbHeading }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <a
+      href={`#${heading.id}`}
+      aria-label={`Link to this section, ${heading.text}`}
+      onClick={async () => {
+        // The href still does its job if this fails, so a refused clipboard
+        // (no secure context, a dismissed permission prompt) costs the copy and
+        // nothing else. The URL is in the error so it can be taken by hand.
+        const url = `${window.location.href.split("#")[0]}#${heading.id}`;
+        try {
+          await navigator.clipboard.writeText(url);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          toast.error("Couldn't copy that link automatically.", {
+            description: `Select this and copy it by hand: ${url}`,
+            duration: Infinity,
+            closeButton: true,
+          });
+        }
+      }}
+      className="mt-1 flex items-center gap-1 text-xs text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 xl:opacity-0"
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Link2 className="h-3 w-3" />}
+      {copied ? "Link copied" : "Link to this section"}
+    </a>
   );
 }
 
@@ -478,6 +532,7 @@ function AnnotationCard({
   // the card, so reopening the editor later showed stale text.
   const [draft, setDraft] = useState(annotation.body);
   const [draftFor, setDraftFor] = useState(annotation.body);
+  const { confirm, confirmDialog } = useConfirm();
   if (draftFor !== annotation.body && !editing) {
     setDraftFor(annotation.body);
     setDraft(annotation.body);
@@ -560,13 +615,26 @@ function AnnotationCard({
             <button
               type="button"
               disabled={busy}
-              onClick={() => {
+              onClick={async () => {
                 // Replies cascade with their root, so a thread's author deleting
-                // it takes the conversation. Ask first.
-                const warning = annotation.parent_id
-                  ? "Delete this reply?"
-                  : "Delete this comment and any replies to it?";
-                if (window.confirm(warning)) void onDelete(annotation.id);
+                // it takes the conversation with it. Nothing brings either back.
+                const ok = await confirm(
+                  annotation.parent_id
+                    ? {
+                        title: "Delete this reply?",
+                        description: "It comes off the thread for everyone who can see it.",
+                        confirmLabel: "Delete reply",
+                        destructive: true,
+                      }
+                    : {
+                        title: "Delete this comment?",
+                        description:
+                          "Any replies to it go too, for everyone who can see them. There is no way to get the thread back.",
+                        confirmLabel: "Delete comment",
+                        destructive: true,
+                      },
+                );
+                if (ok) void onDelete(annotation.id);
               }}
               className="flex items-center gap-1 hover:text-foreground"
             >
@@ -587,6 +655,7 @@ function AnnotationCard({
           )}
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

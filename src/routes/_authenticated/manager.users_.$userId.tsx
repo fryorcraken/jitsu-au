@@ -4,6 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { ChevronDown, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -49,8 +52,9 @@ import {
 } from "@/lib/club-user.functions";
 import { attachCheckInCoverage, transferCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
-import { runApproval } from "@/lib/waiver-approval";
+import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useConfirm } from "@/hooks/use-confirm";
 
 export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
   head: () => ({
@@ -447,6 +451,7 @@ function ManagerUserPage() {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [pdfs, setPdfs] = useState<Record<string, SignedUrlEntry>>({});
   const [approvingIds, setApprovingIds] = useState<Set<string>>(new Set());
+  const { confirm, confirmDialog } = useConfirm();
   // Only the newest load's result may land: back-to-back approvals each trigger
   // their own refetch. (A different person is a different component instance —
   // see remountDeps above.)
@@ -485,22 +490,31 @@ function ManagerUserPage() {
     [fetchDetail, userId],
   );
 
+  // Returns its own cancel flag so the mount effect can drop a late response,
+  // while "Try again" calls it with nothing to cancel.
+  const retry = useCallback(
+    (isCancelled: () => boolean = () => false) => {
+      setLoading(true);
+      setError(null);
+      return load(true)
+        .catch((e) => {
+          if (!isCancelled()) setError(describeLoadError(e, "Could not load this member"));
+        })
+        .finally(() => {
+          if (!isCancelled()) setLoading(false);
+        });
+    },
+    [load],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    let active = true;
-    setLoading(true);
-    setError(null);
-    load(true)
-      .catch((e) => {
-        if (active) setError(e instanceof Error ? e.message : "Failed to load user");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    let cancelled = false;
+    void retry(() => cancelled);
     return () => {
-      active = false;
+      cancelled = true;
     };
-  }, [isManager, load]);
+  }, [isManager, retry]);
 
   // Sign a PDF URL only for panels actually open, and re-sign a stale one:
   // Radix unmounts collapsed content, so re-expanding an old panel remounts the
@@ -614,7 +628,15 @@ function ManagerUserPage() {
     });
   }
 
-  async function setApproval(id: string, status: WaiverApprovalStatus) {
+  async function setApproval(
+    waiver: { id: string; full_name: string },
+    status: WaiverApprovalStatus,
+  ) {
+    // Approving emails the person and opens their login, and nothing on this
+    // page can take either back. Revoking only flips the row's status, so it
+    // goes through on the click.
+    if (status === "approved" && !(await confirm(approvalConfirmation(waiver.full_name)))) return;
+    const id = waiver.id;
     markApproving(id, true);
     // Statuses are derived per person (active vs superseded), so refresh by
     // refetching the whole person rather than patching one waiver. `load`
@@ -648,15 +670,34 @@ function ManagerUserPage() {
   if (loading) {
     return (
       <section className="mx-auto max-w-5xl px-4 py-10">
-        <p>Loading...</p>
+        <Loading />
       </section>
     );
   }
 
-  if (error || !detail) {
+  // Two different answers that used to share one line. "User not found" is a
+  // fact about the club; a failed read is a fact about the network, and only
+  // one of them is worth pressing a button about.
+  if (error) {
     return (
       <section className="mx-auto max-w-5xl space-y-4 px-4 py-10">
-        <p className="text-sm text-muted-foreground">{error ?? "User not found."}</p>
+        <LoadFailure
+          what="This member's record"
+          message={error}
+          hint="This is not the same as them having no waiver, membership or history."
+          onRetry={() => void retry()}
+        />
+        <Button asChild variant="outline">
+          <Link to="/manager/users">Back to users</Link>
+        </Button>
+      </section>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <section className="mx-auto max-w-5xl space-y-4 px-4 py-10">
+        <p className="text-sm text-muted-foreground">User not found.</p>
         <Button asChild variant="outline">
           <Link to="/manager/users">Back to users</Link>
         </Button>
@@ -1007,21 +1048,17 @@ function ManagerUserPage() {
                   </CollapsibleTrigger>
                   <div className="flex flex-wrap items-center gap-2">
                     {w.status === "pending" ? (
-                      <Button
-                        size="sm"
-                        onClick={() => setApproval(w.id, "approved")}
-                        disabled={busy}
-                      >
+                      <Button size="sm" onClick={() => setApproval(w, "approved")} disabled={busy}>
                         {busy ? "Approving..." : "Approve"}
                       </Button>
                     ) : (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setApproval(w.id, "pending")}
+                        onClick={() => setApproval(w, "pending")}
                         disabled={busy}
                       >
-                        {busy ? "Updating..." : "Unapprove"}
+                        {busy ? "Updating..." : "Revoke approval"}
                       </Button>
                     )}
                     {w.has_pdf ? (
@@ -1114,6 +1151,7 @@ function ManagerUserPage() {
           })
         )}
       </div>
+      {confirmDialog}
     </section>
   );
 }

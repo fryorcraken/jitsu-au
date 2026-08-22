@@ -106,6 +106,24 @@ someone in on a leftover trial session after the semester ends. The two are
 allowed to differ: the site promises the smaller thing, and the club can
 honour more than it promised.
 
+The pricing page's call to action (`MembershipCta`) reads who is looking before it decides
+where to send them, because `/membership` is behind the auth gate and there is
+no self-serve sign-up: a login exists only once a manager has approved your
+waiver. A signed-in member gets "Manage your membership" straight to
+`/membership`. Everyone else gets "Join the club" into `/register-interest`,
+plus a sign-in link carrying `redirect=/membership` for a member who happens to
+be signed out. That redirect is honoured when they already have a live session
+and when they sign in with a password; the emailed magic link still finishes on
+`/account`, because `MagicLinkSignIn` hard-codes its `emailRedirectTo` and never
+sees the parameter (true of every `?redirect=` link on the site, not just this
+one). Until the browser has resolved the session it shows the signed-out
+branch, which is what the server renders anyway and is right for almost
+everyone reading a public pricing page.
+
+**Any other public page linking into `_authenticated` needs the same
+treatment**, for the same reason: the gate behind it has nothing a person
+without a login can do.
+
 ## What an ended membership is called
 
 `memberships.status = 'expired'` is one stored word for two different endings,

@@ -7,7 +7,7 @@
 // feature actually has: several articles rather than one, a visibility setting,
 // and a feedback panel.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -40,11 +40,15 @@ import {
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MarkdownEditor } from "@/components/site/MarkdownEditor";
+import { CopyButton } from "@/components/site/CopyButton";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -66,8 +70,9 @@ import {
 } from "@/lib/kb.functions";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
+import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 import type { ArticleVisibility } from "@/lib/kb";
-import { buildKbNav, UNSECTIONED_TITLE } from "@/lib/kb-nav";
+import { buildKbNav, extractHeadings, UNSECTIONED_TITLE } from "@/lib/kb-nav";
 import type { KbNavEntry } from "@/lib/kb-nav";
 import {
   isArticleDirty,
@@ -243,6 +248,9 @@ function KnowledgeBaseManager() {
    * confident wrong answer on the panel a manager uses to decide whether members'
    * feedback has been dealt with.
    */
+  // The article and section lists themselves, as opposed to `failed` below,
+  // which is about one opened article's version and comment panels.
+  const [listError, setListError] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ article: boolean; versions: boolean; feedback: boolean }>({
     article: false,
     versions: false,
@@ -253,6 +261,7 @@ function KnowledgeBaseManager() {
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   /**
    * The arrangement a drag is producing, held while it is in flight and until
@@ -328,6 +337,15 @@ function KnowledgeBaseManager() {
   const liveVersion = versions.find((v) => v.is_current)?.version ?? null;
 
   /**
+   * The sections this article offers other articles a link to.
+   *
+   * Read off the text in the editor rather than the saved version, so a heading
+   * just typed can be linked to straight away and a manager can see what
+   * renaming one did to its link before publishing it.
+   */
+  const sectionAnchors = useMemo(() => extractHeadings(body), [body]);
+
+  /**
    * The knowledge base as a member will read it, built from the manager's own
    * lists.
    *
@@ -388,8 +406,9 @@ function KnowledgeBaseManager() {
   }, [rolesLoading, isManager, user, navigate]);
 
   /** Load the lists, and open the first article so the screen is never empty. */
-  useEffect(() => {
-    Promise.all([fetchArticles(), fetchSections()])
+  const loadLists = useCallback(() => {
+    setLoading(true);
+    return Promise.all([fetchArticles(), fetchSections()])
       .then(([rows, sectionRows]) => {
         setArticles(rows);
         setSections(sectionRows);
@@ -404,16 +423,24 @@ function KnowledgeBaseManager() {
         // this article was next saved.
         if (firstArticle) void openDocument(firstArticle.slug, { articles: rows });
       })
+      .then(() => setListError(null))
       .catch((e) => {
-        // A non-manager is redirected by the effect above; anything else is
-        // worth saying out loud rather than leaving a blank screen.
+        // A non-manager is redirected by the effect above; anything else stays
+        // on screen. "Nothing here yet. Create the first article." over a
+        // failed read invites a manager to write one that already exists.
         if (!(e instanceof Error) || !e.message.includes("Forbidden")) {
-          toast.error(e instanceof Error ? e.message : "Could not load articles");
+          const message = describeLoadError(e, "Could not load articles");
+          setListError(message);
+          toast.error(message);
         }
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchArticles, fetchSections]);
+
+  useEffect(() => {
+    void loadLists();
+  }, [loadLists]);
 
   /** Put the placement fields on screen from a list row. */
   function applyPlacement(summary: ArticleSummary | undefined) {
@@ -436,7 +463,7 @@ function KnowledgeBaseManager() {
     // even when `slug` already names this article, so the early return above
     // would leave the click doing nothing.
     if (!opts.force && !retrying && next === slug && !creating && !sectionEdit) return;
-    if (unsaved && !window.confirm("Discard your unsaved changes and open this?")) {
+    if (unsaved && !(await confirm(discardUnsavedChanges("Opening this")))) {
       return;
     }
     setSectionEdit(null);
@@ -564,9 +591,9 @@ function KnowledgeBaseManager() {
     }
   }
 
-  function startNew(nextKind: EntryKind) {
-    const what = nextKind === "link" ? "add a link" : "start a new article";
-    if (unsaved && !window.confirm(`Discard your unsaved changes and ${what}?`)) return;
+  async function startNew(nextKind: EntryKind) {
+    const what = nextKind === "link" ? "Adding a link" : "Starting a new article";
+    if (unsaved && !(await confirm(discardUnsavedChanges(what)))) return;
     claim();
     setSectionEdit(null);
     setCreating(true);
@@ -594,9 +621,9 @@ function KnowledgeBaseManager() {
   }
 
   /** Open a section in the main window, where it is renamed and deleted. */
-  function openSection(row: SectionRow) {
+  async function openSection(row: SectionRow) {
     if (sectionEdit?.slug === row.slug) return;
-    if (unsaved && !window.confirm("Discard your unsaved changes and open this section?")) {
+    if (unsaved && !(await confirm(discardUnsavedChanges("Opening this section")))) {
       return;
     }
     claim();
@@ -696,9 +723,11 @@ function KnowledgeBaseManager() {
     const widening = wideningVisibility(baseVisibility, visibility);
     if (
       widening &&
-      !window.confirm(
-        `This will change who can read "${title}" from ${widening.from} to ${widening.to}. Everyone in the wider group will be able to read every word of it, including any earlier wording still in the current version. Continue?`,
-      )
+      !(await confirm({
+        title: `Let ${visibilityAudience[widening.to].toLowerCase()} read "${title}"?`,
+        description: `Only ${visibilityAudience[widening.from].toLowerCase()} can read it right now. Saving opens it to everyone in the wider group, including any earlier wording still in the current version.`,
+        confirmLabel: "Save and open it up",
+      }))
     ) {
       return;
     }
@@ -798,21 +827,15 @@ function KnowledgeBaseManager() {
     // matters most to the manager who has just rewritten a passage: without it
     // they read "now live", see their own edit still in the box, and believe it
     // is what members are reading.
-    if (
-      dirty &&
-      !window.confirm(
-        `Your unsaved changes will be discarded, and they are not part of version ${version.version} so they will not go live. Save them as a new version first, or continue to publish the stored version ${version.version} and lose them?`,
-      )
-    ) {
-      return;
-    }
-    if (
-      !window.confirm(
-        `Publish version ${version.version}? ${visibilityAudience[baseVisibility ?? visibility]} will read it from now on. Comments stay attached to the version they were written against.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Publish version ${version.version}?`,
+      description: `${visibilityAudience[baseVisibility ?? visibility]} read it from now on. Comments stay attached to the version they were written against.`,
+      footnote: dirty
+        ? `Your unsaved edits are discarded by this, and they are not part of version ${version.version} so they will not go live either. Save them as a new version first if you want to keep them.`
+        : undefined,
+      confirmLabel: "Publish it",
+    });
+    if (!ok) return;
     const token = claim();
     const target = slug;
     setPromoting(true);
@@ -1159,15 +1182,16 @@ function KnowledgeBaseManager() {
 
   async function onDeleteSection(target: SectionRow) {
     const inside = articles.filter((a) => a.section === target.slug).length;
-    if (
-      !window.confirm(
-        inside
-          ? `Delete the section "${target.title}"? The ${inside} entr${inside === 1 ? "y" : "ies"} in it are kept, and drop to the "Everything else" group at the bottom of the sidebar until you file them somewhere.`
-          : `Delete the section "${target.title}"?`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete the section "${target.title}"?`,
+      description: inside
+        ? `The ${inside} entr${inside === 1 ? "y" : "ies"} in it are kept, and drop to the "Everything else" group at the bottom of the sidebar until you file them somewhere.`
+        : "It is empty, so nothing members read changes.",
+      footnote: "The section itself goes for good.",
+      confirmLabel: "Delete section",
+      destructive: true,
+    });
+    if (!ok) return;
     const token = claim();
     setBusy(true);
     try {
@@ -1199,6 +1223,22 @@ function KnowledgeBaseManager() {
     [kind, navTitle, title],
   );
 
+  /** The address this article will have, which is what a link to it must use. */
+  const articleSlug = slug || proposedSlug;
+
+  /**
+   * The worked example above the anchor list, built from THIS article's first
+   * heading.
+   *
+   * A fixed label ("how grading works") pointed at whatever the real first
+   * heading happened to be, so on most articles the words and the target
+   * disagreed ("[how grading works](/kb/about-us#our-mission)") — an example of
+   * the syntax that contradicts itself.
+   */
+  const anchorExample = sectionAnchors[0]
+    ? `[${sectionAnchors[0].text}](${anchorPath(articleSlug, sectionAnchors[0].id)})`
+    : "[how grading works](/kb/belts#grading)";
+
   /**
    * How the reading order can be dragged.
    *
@@ -1214,7 +1254,7 @@ function KnowledgeBaseManager() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <Loading className="p-8" />;
 
   // The same `isSectionDirty` the discard prompt consults, so "there is nothing
   // to save" and "there is nothing to lose" can never disagree.
@@ -1242,7 +1282,7 @@ function KnowledgeBaseManager() {
             type="button"
             variant="outline"
             disabled={saving || promoting || busy || ordering}
-            onClick={() => startNew("article")}
+            onClick={() => void startNew("article")}
           >
             <Plus className="mr-1.5 h-4 w-4" />
             New article
@@ -1255,7 +1295,7 @@ function KnowledgeBaseManager() {
             type="button"
             variant="outline"
             disabled={saving || promoting || busy || ordering}
-            onClick={() => startNew("link")}
+            onClick={() => void startNew("link")}
           >
             <Link2 className="mr-1.5 h-4 w-4" />
             New link
@@ -1283,10 +1323,20 @@ function KnowledgeBaseManager() {
                 tells members it was updated.
               </p>
 
-              {articles.length === 0 && sections.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Nothing here yet. Create the first article.
-                </p>
+              {listError ? (
+                <LoadFailure
+                  what="The knowledge base"
+                  message={listError}
+                  hint="This is not the same as it being empty, so do not write an article from here: it may already exist."
+                  onRetry={() => void loadLists()}
+                />
+              ) : (
+                articles.length === 0 &&
+                sections.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Nothing here yet. Create the first article.
+                  </p>
+                )
               )}
 
               <DndContext
@@ -1318,7 +1368,7 @@ function KnowledgeBaseManager() {
                         sectionCount={groups.filter((g) => g.slug !== "").length}
                         onOpen={() => {
                           const row = sections.find((s) => s.slug === group.slug);
-                          if (row) openSection(row);
+                          if (row) void openSection(row);
                         }}
                       >
                         {group.entries.map((entry, entryIndex) => (
@@ -1512,20 +1562,22 @@ function KnowledgeBaseManager() {
                       variant="outline"
                       size="sm"
                       disabled={saving || busy}
+                      // No confirm: this only swaps what the editor is
+                      // showing. Nothing members read changes until a save, and
+                      // leaving without saving puts the link back.
                       onClick={() => {
-                        if (
-                          !window.confirm(
-                            "Turn this link into an article? It keeps its place in the reading order, and you write its text here. The link is only replaced when you save.",
-                          )
-                        ) {
-                          return;
-                        }
                         setKind("article");
                         setLinkPath("");
                       }}
                     >
                       Turn this into an article
                     </Button>
+                  )}
+                  {stored?.link_path && (
+                    <p className="text-xs text-muted-foreground">
+                      It keeps its place in the reading order, and you write its text here. The link
+                      is only replaced when you save.
+                    </p>
                   )}
                 </div>
               ) : (
@@ -1667,7 +1719,7 @@ function KnowledgeBaseManager() {
                         ? "Create and publish"
                         : "Save as new version"}
                 </Button>
-                {busy && <span className="text-xs text-muted-foreground">Loading...</span>}
+                {busy && <Loading className="text-xs" />}
                 {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
               </div>
             </>
@@ -1803,6 +1855,61 @@ function KnowledgeBaseManager() {
             </Card>
           )}
 
+          {/* How one article points at a section of another. Managers asked for
+              cross-references, and the fragment is the part they cannot guess:
+              it comes from the wording of the heading, so this is where they
+              find out what it currently is and copy it. */}
+          {!sectionEdit && kind === "article" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Link to a section</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Paste one of these into another article as an ordinary Markdown link, for example{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">{anchorExample}</code>.
+                  Add{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">{"{#your-anchor}"}</code>{" "}
+                  to the end of a heading to pin its link, and it will keep working even if you
+                  reword the heading later.
+                </p>
+                {sectionAnchors.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    This article has no headings yet, so there is nothing to link to inside it.
+                    Start a line with ## to make one.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {sectionAnchors.map((heading) => (
+                      <li
+                        key={heading.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+                        style={{ marginLeft: `${(heading.depth - 1) * 0.75}rem` }}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">{heading.text}</span>
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
+                            {anchorPath(articleSlug, heading.id)}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          {/* Says which links survive a rewrite and which do not,
+                              which is the whole reason to pin one. */}
+                          {heading.pinned && <Badge variant="outline">Pinned</Badge>}
+                          <CopyButton
+                            text={anchorPath(articleSlug, heading.id)}
+                            label="Copy"
+                            ariaLabel={`Copy the link to ${heading.text}`}
+                          />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {!sectionEdit && (
             <Card>
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
@@ -1844,8 +1951,21 @@ function KnowledgeBaseManager() {
           )}
         </div>
       </div>
+      {confirmDialog}
     </section>
   );
+}
+
+/**
+ * The link that points at one section of an article.
+ *
+ * Falls back to the bare fragment while an article is being composed and has no
+ * slug yet, which is honest: a `/kb/#grading` with the slug missing is a link
+ * that goes to the wrong place, and half a link a manager can see is unfinished
+ * is better than a whole one that is wrong.
+ */
+function anchorPath(slug: string, id: string): string {
+  return slug ? `/kb/${slug}#${id}` : `#${id}`;
 }
 
 /**
