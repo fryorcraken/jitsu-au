@@ -69,6 +69,20 @@ describe("findEmDashesInSource", () => {
     expect(findEmDashesInSource("x.ts", source)).toEqual([]);
   });
 
+  it("flags an em dash written as an HTML entity, which renders the same", () => {
+    expect(
+      findEmDashesInSource("x.tsx", `const el = <p>Draft &mdash; not signed</p>;`),
+    ).toHaveLength(1);
+    expect(
+      findEmDashesInSource("x.tsx", `const el = <p>Draft &#8212; not signed</p>;`),
+    ).toHaveLength(1);
+  });
+
+  it("reports each dash once, not again for the sentence around it", () => {
+    const source = "const t = `Upvote — ${n} times — again`;";
+    expect(findEmDashesInSource("x.ts", source)).toHaveLength(2);
+  });
+
   it("reports the line the dash is on", () => {
     const source = ["const a = 1;", "", `const t = "Two sentences — one dash";`].join("\n");
     expect(findEmDashesInSource("x.ts", source)[0].line).toBe(3);
@@ -98,11 +112,30 @@ describe("findBannedConstructions", () => {
     expect(findBannedConstructions("x.ts", source)).toHaveLength(1);
   });
 
+  it("reads through an interpolation, which splits the phrase in two", () => {
+    const template = "const t = `Come along, whether you're ${level} or not.`;";
+    expect(findBannedConstructions("x.ts", template)).toHaveLength(1);
+
+    const jsx = `const el = <p>It's not just {sport}, it's a skill you keep.</p>;`;
+    expect(findBannedConstructions("x.tsx", jsx)).toHaveLength(1);
+  });
+
+  it("reads through a nested element, and reports the phrase once", () => {
+    const source = `const el = <p>Come along, <strong>whether you're</strong> new or not.</p>;`;
+    expect(findBannedConstructions("x.tsx", source)).toHaveLength(1);
+  });
+
+  it("counts a curly apostrophe, which reads identically", () => {
+    const source = `const t = "Come along, whether you’re new or not.";`;
+    expect(findBannedConstructions("x.ts", source)).toHaveLength(1);
+  });
+
   it("leaves ordinary sentences alone", () => {
     const source = [
       `const a = "Everyone trains together, whatever they have done before.";`,
       `const b = "Bring a water bottle. You do not need a Gi for your first class.";`,
       `const c = "Filling this in is what unlocks the student rate for them.";`,
+      `const d = "We ask whether you have trained before, but not just for the record.";`,
     ].join("\n");
     expect(findBannedConstructions("x.ts", source)).toEqual([]);
   });

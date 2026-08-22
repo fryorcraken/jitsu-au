@@ -72,6 +72,12 @@ const GIS_SRC = "https://accounts.google.com/gsi/client";
 const GAPI_SRC = "https://apis.google.com/js/api.js";
 const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
+// Every way Google's own scripts can fail to arrive reads the same to the
+// manager: the button did nothing. The URL that failed is the useful part for
+// us and means nothing to them, so it goes to the console and the toast gets
+// the sentence with a way out.
+const LOAD_FAILED = "Could not load Google's folder picker. Check your connection and try again.";
+
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) {
@@ -82,23 +88,23 @@ function loadScript(src: string): Promise<void> {
     script.src = src;
     script.async = true;
     script.onload = () => resolve();
-    script.onerror = () =>
-      reject(
-        new Error("Could not load Google's folder picker. Check your connection and try again."),
-      );
+    script.onerror = () => {
+      console.warn(`[google-picker] script did not load: ${src}`);
+      reject(new Error(LOAD_FAILED));
+    };
     document.head.appendChild(script);
   });
 }
 
 async function loadPickerLibrary(): Promise<void> {
   await loadScript(GAPI_SRC);
-  if (!window.gapi) throw new Error("Google API script did not load");
+  if (!window.gapi) throw new Error(LOAD_FAILED);
   await new Promise<void>((resolve) => window.gapi!.load("picker", () => resolve()));
 }
 
 async function requestAccessToken(clientId: string): Promise<string> {
   await loadScript(GIS_SRC);
-  if (!window.google) throw new Error("Google Identity Services did not load");
+  if (!window.google) throw new Error(LOAD_FAILED);
   const google = window.google;
   return new Promise((resolve, reject) => {
     const client = google.accounts.oauth2.initTokenClient({
@@ -204,7 +210,7 @@ export function readPickerResponse(
 export async function pickDriveFolder(clientId: string): Promise<PickedDriveFolder | null> {
   const [, token] = await Promise.all([loadPickerLibrary(), requestAccessToken(clientId)]);
   const google = window.google;
-  if (!google) throw new Error("Google Identity Services did not load");
+  if (!google) throw new Error(LOAD_FAILED);
 
   return new Promise((resolve, reject) => {
     try {
