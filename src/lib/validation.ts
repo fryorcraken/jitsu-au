@@ -453,6 +453,40 @@ export const markContactMessagesSeenSchema = z.object({
 });
 export type MarkContactMessagesSeenInput = z.infer<typeof markContactMessagesSeenSchema>;
 
+// ---- Deleting an enquiry ----
+//
+// An enquiry is the one thing a person leaves behind that the club has no
+// reason to keep once it has been dealt with: nothing was signed, nothing is
+// owed, and no record hangs off it. Everything else a person creates is either
+// evidence (a signed waiver) or the club's own history (memberships,
+// attendance), and destroying those is a decision the club has not made yet.
+// See docs/erasing-personal-data.md.
+
+/** Manager: delete one message from the contact inbox. */
+export const deleteContactMessageSchema = z.object({ id: z.string().uuid() }).strict();
+export type DeleteContactMessageInput = z.infer<typeof deleteContactMessageSchema>;
+
+/**
+ * Manager: delete every interest-form registration filed under one address.
+ *
+ * Keyed by email rather than by row id because that is what a lead IS: the
+ * directory merges every registration sharing an address into one person, so
+ * deleting "this lead" has to mean all of them. Deleting one row of two would
+ * leave the same person on the list with the older enquiry showing.
+ */
+export const deleteLeadSchema = z.object({ email: z.string().trim().email().max(255) }).strict();
+export type DeleteLeadInput = z.infer<typeof deleteLeadSchema>;
+
+/**
+ * Why a lead the screen offered a Delete for turns out not to be one.
+ *
+ * Read by a manager, so it says what the refusal means rather than naming the
+ * check: an address with a person behind it is somebody who signed something,
+ * and their enquiry is part of that record now.
+ */
+export const LEAD_HAS_PERSON_MESSAGE =
+  "That address belongs to someone the club has a record for, so this is more than an enquiry now. It can't be deleted here.";
+
 /**
  * Where the club-wide "messages seen up to here" marker should land.
  *

@@ -38,12 +38,16 @@ requests, the CI logs, and the screenshot artifacts.
 - CI is designed to hold exactly one production credential (`SUPABASE_DB_URL`,
   used only by `migration-drift.yml`), as a GitHub secret, and that workflow
   deliberately never runs on `pull_request`; keep it that way. Forks get no
-  secrets. **But the secret is not actually configured today** — every drift run
-  since the repo began has logged `SUPABASE_DB_URL:` empty and
-  `##[warning]SUPABASE_DB_URL is not set — the ... check did NOT run`, while
-  still reporting green. So nothing is currently at risk of leaking there, and
-  equally **the workflow has never checked anything**. Until that secret is set,
-  a green tick on Migration drift means only that the job ran.
+  secrets. **But the secret is not actually configured today**, so nothing is
+  currently at risk of leaking there — and equally, **the workflow checked
+  nothing from the repo's first day until 2026-08-21**: every run logged
+  `SUPABASE_DB_URL:` empty and passed anyway. Since then both steps **fail**
+  when the secret is missing, so Migration drift is expected to be **red** until
+  somebody adds it (Settings → Secrets and variables → Actions; the
+  least-privilege role to create is in `supabase/lint/README.md`). A red tick
+  there means "not armed", a green one now means the live database was really
+  asked. Do not soften those guards back to a pass to get the tick green — the
+  quiet green is the bug that hid this for months.
   - Both checks were run **by hand on 2026-08-20**, against the live database
     through Lovable's SQL access rather than the workflow, and both came back
     clean: **18 client grants live, 18 expected, 0 unexpected**, and every
@@ -308,7 +312,10 @@ RLS, relationships, storage); it is the source of truth for the data model and
 Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
-  column-length/format CHECK constraints in the RLS `WITH CHECK`.
+  column-length/format CHECK constraints in the RLS `WITH CHECK`. A manager can
+  **delete** an enquiry from either (service role, behind the manager gate);
+  that is the product's only erasure path, and what it deliberately does not
+  touch is `docs/erasing-personal-data.md`.
 - `profiles` — the person fields for an auth user, keyed by `user_id` (PK →
   `auth.users`). **The only email lives on `auth.users`** — no email column in
   `public`; the server resolves emails via the service-role-only
@@ -521,8 +528,13 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     so it neither publishes nor comments: its gallery is the artifact on the
     run's own page.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
-  migration file against the **live** ledger. Not on PRs — it holds a
-  production credential (see "Schema drift" in `docs/database-changes.md`).
+  migration file against the **live** ledger, and the grants `anon` /
+  `authenticated` actually hold against `supabase/lint/client-grants-expected.txt`.
+  Not on PRs — it holds a production credential (see "Schema drift" in
+  `docs/database-changes.md`). Both steps fail if `SUPABASE_DB_URL` is unset, so
+  the job is red until the secret exists; `scripts/migration-drift-workflow.test.ts`
+  pins that, and pins the credential out of every `pull_request`-triggered
+  workflow. Only the checkers' `--selftest` runs on PRs, from `ci.yml`.
 - **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
   `supabase/**`) starts a local Postgres, applies every migration to it (which
   is not the live database, see `docs/database-changes.md`), and runs the
@@ -621,6 +633,26 @@ invisible to `bun run build`.
   carry it only because they are generated that way). That rule has to stay in
   the base layer — layer order, not specificity, is what lets a `cursor-*`
   utility still win over it.
+- **Changing a colour token? The pairs are contrast-checked.**
+  `src/lib/color-contrast.test.ts` reads `styles.css`, converts every
+  `oklch()` token to sRGB and asserts each foreground/background pair clears
+  WCAG AA (4.5:1) in **both** themes, so a palette tweak that makes a label
+  unreadable fails the unit suite rather than shipping. Two things are worth
+  knowing before you move one:
+  - `--destructive` does two jobs. It is the fill behind
+    `text-destructive-foreground` on every delete/revoke button, and it is
+    `text-destructive`, the colour of every form error and failed-submit panel
+    on the page. In dark mode there is no lightness that serves both against a
+    near-white ink, which is why the dark `--destructive-foreground` is a near
+    black (`oklch(0.16 0.05 22)`) while every other dark `-foreground` on a
+    tinted surface is `oklch(0.15 0.03 220)`. Darkening the red instead would
+    fix the buttons and break the error text.
+  - Keep a token inside the sRGB gamut if you care about the number. Out of
+    gamut, the test clips per channel and a browser reduces chroma instead, so
+    the two stop agreeing; `isSrgbGamut` says which side a value is on.
+  - A pair that is knowingly below AA goes on `KNOWN_BELOW_AA` in that file
+    with its reason and its exact current ratio, so it cannot get worse
+    unnoticed and cannot be forgotten. It is an acknowledgement, not a pardon.
 - **SEO:** every public page sets its own `head()` meta (title/description/og)
   **and its own `rel="canonical"`**; manager and other private pages set
   `robots: noindex`. Match the existing pattern when adding pages, and see the
@@ -786,9 +818,11 @@ Practical rules:
   for most things: form rules in `src/lib/validation.ts`, server work in
   `src/lib/*.functions.ts` (`createServerFn` + Zod), writes from the browser
   through `useResilientSubmit`, RPC shapes in `src/lib/supabase-rpc.ts`, page
-  chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`. If
-  your change seems to need a _second_ way to do one of these, that is a design
-  decision to raise with the user, not a shortcut to take quietly.
+  chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`, and
+  the club facts every page repeats in `src/lib/venue.ts` (name, address,
+  phone), `src/lib/schedule.ts` (the weekly class times) and `src/lib/faq.ts`.
+  If your change seems to need a _second_ way to do one of these, that is a
+  design decision to raise with the user, not a shortcut to take quietly.
 - **Extracting logic into a pure module is usually the whole "make it easy"
   step.** `validation.ts` and `submit-resilience.ts` exist because behaviour was
   pulled out of handlers and components until it could be tested directly. Do
