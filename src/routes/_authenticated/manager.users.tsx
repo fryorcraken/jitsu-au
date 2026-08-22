@@ -471,8 +471,8 @@ function ManagerUsersPage() {
             <AlertDialogDescription>
               This deletes every interest form filed under {pendingDelete?.email}, with the name,
               phone number and message on it, and takes them off this list. The club keeps no copy,
-              and it can't be undone. Anything they sent through the contact form is separate, and
-              is deleted from Contact messages.
+              and it can't be undone. Anything they sent through the contact form is separate. This
+              does not touch it, and it stays in Contact messages until you delete it there.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

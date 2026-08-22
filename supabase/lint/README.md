@@ -2,25 +2,68 @@
 
 `.github/workflows/supabase-lint.yml` starts a throwaway local Postgres with
 `supabase db start` (which applies every migration in `../migrations`) and runs
-**both** Supabase linters against it. It is path-filtered to `supabase/**`, so
-frontend-only PRs don't pay for a Docker database.
+both Supabase linters against it, plus the **client grants** check below. It is
+path-filtered to `supabase/**`, so frontend-only PRs don't pay for a Docker
+database.
 
 This directory also holds two checks that talk to the **live** database rather
 than a local one: **migration drift** and **client grants**. Neither runs in CI,
 because on this project CI cannot reach the live database at all — see "Why
 these two are run by hand".
 
+`check-client-grants.py` therefore has two jobs. Against the **live** ACL it is
+one of those by-hand checks. Against the **local replay** the workflow already
+builds, it needs no credential at all, so that half of it does run in CI — see
+"One checker, two databases".
+
 ## What runs
 
-| Check               | Tool                                                 | Catches                                                                                                                                                                         |
-| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Advisors**        | `splinter.sql` via `psql` → `check-advisors.py`      | The Security/Performance lints from the dashboard's **Database > Advisors**, e.g. `function_search_path_mutable` (a `SECURITY DEFINER` function without a fixed `search_path`). |
-| **plpgsql_check**   | `supabase db lint --schema public --fail-on warning` | Errors in `public` PL/pgSQL function bodies (unused variables, bad SQL, etc.).                                                                                                  |
-| **Migration drift** | `check-migration-drift.py` against the live ledger   | A migration file that has never been applied to the live database. Committing a migration does not apply it — see `docs/database-changes.md`. **Run by hand**, not in CI.       |
-| **Client grants**   | `check-client-grants.py` against the live ACLs       | A privilege `anon` or `authenticated` holds that `client-grants-expected.txt` does not list, or one it lists that is missing. **Run by hand**, not in CI.                       |
+| Check                      | Tool                                                            | Catches                                                                                                                                                                                                          |
+| -------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Advisors**               | `splinter.sql` via `psql` → `check-advisors.py`                 | The Security/Performance lints from the dashboard's **Database > Advisors**, e.g. `function_search_path_mutable` (a `SECURITY DEFINER` function without a fixed `search_path`).                                  |
+| **plpgsql_check**          | `supabase db lint --schema public --fail-on warning`            | Errors in `public` PL/pgSQL function bodies (unused variables, bad SQL, etc.).                                                                                                                                   |
+| **Client grants (replay)** | `check-client-grants.py` against the replayed `pg_class.relacl` | A table the migrations leave open to `anon`/`authenticated`. Supabase grants ALL on every new table and `GRANT` cannot narrow that, so a missing `REVOKE` replays fully open. Runs in CI — no credential needed. |
+| **Migration drift**        | `check-migration-drift.py` against the live ledger              | A migration file that has never been applied to the live database. Committing a migration does not apply it — see `docs/database-changes.md`. **Run by hand**, not in CI.                                        |
+| **Client grants (live)**   | `check-client-grants.py` against the live ACLs                  | A privilege `anon` or `authenticated` holds that `client-grants-expected.txt` does not list, or one it lists that is missing. **Run by hand**, not in CI.                                                        |
 
 `supabase db lint` is scoped to `public` on purpose: Supabase-managed schemas
 (`storage`, `auth`, …) ship functions that emit warnings we don't control.
+
+## One checker, two databases
+
+`check-client-grants.py` is pointed at two different databases, over the same
+query and the same `client-grants-expected.txt`, and the two runs answer
+different questions:
+
+- Against the **local replay** in `supabase-lint.yml`: do the migration files,
+  applied from nothing, produce the expected set? The replay is a throwaway
+  container the workflow already starts, so this needs no credential and none of
+  the reachability problems below apply. It runs on every `supabase/**` pull
+  request, which is where a table that forgot its `REVOKE` is cheapest to fix.
+- Against the **live database**, by hand: does production hold the expected set
+  today? Only somebody with Lovable's SQL access can answer that, so it is a
+  snapshot taken deliberately rather than a check that runs.
+
+Neither subsumes the other. The migrations can be right while production has
+drifted by hand, or production can be right while the migrations would replay
+open — and the second is the one nobody notices, because every database built
+from this directory alone (the CI stacks, a restore, a re-provision, a clone
+once the repo is public) gets it. The replay half is also the only one of the
+two that anything runs automatically, so treat a by-hand live run as the thing
+that catches drift the replay cannot see, not as a duplicate of it.
+
+Two things to know before reading a failure:
+
+- **Grants follow the object, not the name.** A `REVOKE` survives a later
+  `ALTER TABLE … RENAME TO`, so the migration that closes a table may name it
+  something else entirely: `kb_articles`, `kb_article_versions` and
+  `kb_annotations` are closed by `20260731140000_documents.sql`, under the names
+  they had before the knowledge base rename. Grepping the migrations for a
+  table's current name therefore reports a missing `REVOKE` that is not missing.
+  Replaying and reading the ACL is the only reliable check, which is why this
+  runs as a replay rather than as a lint over the files.
+- **The replay is Postgres's answer, not a re-reading of the SQL.** If it says a
+  table is open, it is open in every database built from these files.
 
 ## Migration drift
 

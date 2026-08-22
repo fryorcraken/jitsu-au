@@ -74,3 +74,18 @@ scan the diff for em dashes before committing.
 
 This rule is about **copy**. Code comments, commit messages, PR bodies and the
 files under `docs/` are internal writing and are not held to it.
+
+## Two of these rules are checked, not trusted
+
+`bun run test` fails on an em dash in copy, and on the "whether you're X or Y"
+and "it's not just X, it's Y" constructions, anywhere under `src/`. The scan is
+`scripts/copy-voice.test.ts`; it parses each file and looks only at string
+literals, template literals and JSX text, so comments are never flagged, and it
+knows both exceptions above. Two files are exempt because their text is
+addressed to a coding agent rather than to a person, and they are listed with
+their reasons in `scripts/copy-voice.ts`.
+
+Everything else on this page is still a judgement call. Hollow hype, mechanical
+rule-of-three lists, and error text that describes the system rather than the
+next step are things a reviewer catches and a regex does not, so a green test
+run is not evidence that the copy is any good.

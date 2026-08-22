@@ -179,6 +179,7 @@ public/                   Served at the site root
   sw.js                   Service worker (pages network-only, assets cached)
   offline.html            Shown when a page is opened with no connection
   icons/                  Generated PWA icons (scripts/generate-pwa-icons.mjs)
+  fonts/                  Self-hosted Nunito Sans (woff2) + its OFL licence (docs/fonts.md)
 supabase/
   config.toml             Supabase project ref + the local stack CI boots
   migrations/*.sql        Schema + RLS (timestamped, applied in order)
@@ -442,6 +443,11 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     `decodeDataUrlPng`). This is the highest-value suite: it pins the honeypot,
     signature-required, and minor/guardian rules.
   - `src/lib/utils.test.ts` — the `cn()` class-merge helper.
+  - `scripts/copy-voice.test.ts` — the two mechanical copy rules from
+    `AGENTS.md` (no em dash in prose, and the two banned constructions),
+    checked against every file under `src/`. It parses rather than greps, so
+    comments and the placeholder-glyph exception are not flagged; the exempt
+    files and the reasoning are in `scripts/copy-voice.ts`.
   - `src/components/ui/button.test.tsx` — a Testing Library smoke test proving
     the jsdom/component setup works (render, variants, click, `asChild`).
 - **Where to add tests:** pure logic belongs in `src/lib/` modules (import and
@@ -535,13 +541,19 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     A fork's pull request gets a read-only token whatever the workflow asks for,
     so it neither publishes nor comments: its gallery is the artifact on the
     run's own page.
-- **Migration drift and client grants: no CI job.** Both compare the **live**
-  database against the repo (every migration applied; the grants `anon` /
-  `authenticated` hold matching `supabase/lint/client-grants-expected.txt`), and
-  neither can run in CI on this project — see the bullet under "This repository
-  is going public" above, and `supabase/lint/README.md` for the queries to run
-  them by hand. `ci.yml` runs both checkers' `--selftest`, which is the only
-  automated thing standing behind them.
+- **Migration drift and live client grants: no CI job.** Both compare the
+  **live** database against the repo (every migration applied; the grants `anon`
+  / `authenticated` hold matching `supabase/lint/client-grants-expected.txt`),
+  and neither can run in CI on this project — see the bullet under "This
+  repository is going public" above, and `supabase/lint/README.md` for the
+  queries to run them by hand. `ci.yml` runs both checkers' `--selftest`.
+  - **The grants checker has a second, automated half**, which is not about the
+    live database at all: pointed at the local replay in `supabase-lint.yml` it
+    asks whether the migration FILES produce the expected set. That needs no
+    credential, so it does run on every `supabase/**` pull request. It cannot
+    see a hand-made change to production, so it does not replace the by-hand
+    live run — but it is the half that catches a new table left open before it
+    ever reaches production.
 - **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
   `supabase/**`) starts a local Postgres, applies every migration to it (which
   is not the live database, see `docs/database-changes.md`), and runs the
@@ -550,6 +562,13 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   `public`). Security findings at WARN+ fail the build; performance findings are
   reported only. The vendored query and gating policy live in `supabase/lint/`
   (see its README before changing the threshold or refreshing `splinter.sql`).
+  - It also runs `check-client-grants.py` against that replayed database, so a
+    table whose migration forgot its `REVOKE ALL ... FROM anon, authenticated`
+    fails the pull request that adds it. Nothing else would catch it: the live
+    grants check is by hand, and the Splinter lints only ever test `SELECT`.
+    Grants attach to the object, not the name, so a `REVOKE` survives a later
+    `RENAME TO` — grepping the migrations for a table's current name is not a
+    substitute for the replay.
   - The allowlist (`supabase/lint/advisors-allowlist.txt`) only stops CI from
     **failing** on a reviewed finding; it does not remove it. Supabase's live
     **dashboard** advisors have no allowlist concept, so an acknowledged finding

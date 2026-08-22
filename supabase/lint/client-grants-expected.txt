@@ -1,7 +1,12 @@
 # Table privileges `anon` and `authenticated` are allowed to hold in `public`.
 #
-# One `table:grantee:privilege` per line. Checked against the live database by
-# check-client-grants.py, which FAILS on anything held live and not listed here.
+# One `table:grantee:privilege` per line. check-client-grants.py FAILS on
+# anything held and not listed here. It is pointed at two different databases:
+# a from-scratch REPLAY of supabase/migrations, from supabase-lint.yml on every
+# `supabase/**` pull request (no credential needed), and the LIVE ACL, by hand
+# through Lovable's SQL access because CI cannot reach that database at all
+# (supabase/lint/README.md). Both must agree with this file — the migrations
+# being right does not make production right, or the reverse.
 # `service_role` is out of scope — it bypasses RLS by design and every server
 # function needs it.
 #
@@ -26,6 +31,14 @@
 # `REVOKE ALL ON public.<table> FROM anon, authenticated;` in its migration
 # before any intended GRANT, or it will show up here as seven unexpected
 # privileges per role.
+#
+# That REVOKE follows the OBJECT, not the name, so it survives a later
+# `ALTER TABLE ... RENAME TO` — the migration that closes a table may name it
+# something else entirely. The knowledge base tables are the standing example:
+# kb_articles, kb_article_versions and kb_annotations hold nothing, closed by
+# 20260731140000_documents.sql under the names they had before the rename.
+# Grepping the migrations for a table's current name will say otherwise; the
+# replay in supabase-lint.yml is what actually answers the question.
 
 # The public funnel. These run in *server* functions that build their own
 # client from SUPABASE_PUBLISHABLE_KEY with no user session, so PostgREST
