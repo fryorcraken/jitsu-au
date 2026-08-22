@@ -175,6 +175,7 @@ src/
   start.ts                createStart(): global function + request middleware
   styles.css              Tailwind v4 entry + design tokens
 public/                   Served at the site root
+  _headers                Static-asset response headers (see Security headers)
   manifest.webmanifest    PWA manifest (start_url /app, icons, shortcuts)
   sw.js                   Service worker (pages network-only, assets cached)
   offline.html            Shown when a page is opened with no connection
@@ -701,6 +702,36 @@ Two non-obvious rules:
 
 Non-production hosts (Lovable previews, branch deploys) are served a blanket
 `Disallow: /`, so a preview never competes with `jitsu.au` in search results.
+
+## Security headers
+
+`src/lib/security-headers.ts` holds every response header the app sets for
+safety reasons, and `start.ts` applies it as the outermost request middleware,
+so it covers SSR pages, API route handlers, server-function RPCs and the error
+page alike. `public/_headers` states the same rules again for the static assets
+the platform serves without going through the server; Nitro merges that file
+into `.output/public/_headers` at build time, alongside its own `/assets/*`
+rule.
+
+Today that is `Referrer-Policy`, and the reason is three routes that carry a
+token in the URL **path**: `/api/calendar/<token>`, `/api/verify-email/<token>`
+and `/email-settings/<token>`. A calendar app and a mail client cannot send an
+Authorization header or a POST body, so on those three the token has to be in
+the URL, which makes it the browser's job not to pass that URL on. The site
+sends `strict-origin-when-cross-origin` everywhere and `no-referrer` on those
+three prefixes (the only value that also keeps the path out of a **same-origin**
+`Referer`), plus `Cache-Control: no-store` on them unless the route set its own.
+
+- **Adding a route that takes a token in its path?** Add its prefix to
+  `TOKEN_PATH_PREFIXES` and to `public/_headers`. `security-headers.test.ts`
+  fails if the two disagree.
+- **A route's own headers win.** The middleware only fills in `cache-control`
+  when the route did not set one, so the calendar feed keeps the
+  `private, max-age=300` its subscribers poll against.
+- CSP, HSTS and `X-Frame-Options` are **not** set here. Lovable owns the
+  Cloudflare deploy and the platform already sends `strict-transport-security`
+  and `x-content-type-options`; check what is already on the response with
+  `curl -I https://jitsu.au/` before adding anything that could overlap.
 
 ## Environment variables
 
