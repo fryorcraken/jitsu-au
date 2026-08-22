@@ -4,6 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -237,6 +240,7 @@ function MembershipPage() {
     unreadable: boolean;
   }>({ details: null, unreadable: false });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
   // The insurance checkbox is not raw state: it starts from the rules in
@@ -299,11 +303,26 @@ function MembershipPage() {
     [fetchPlans, fetchMine, fetchInstructions],
   );
 
+  // `reload()` on its own runs after choosing a plan, where that handler
+  // reports its own failure; this is the one the page loads through.
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return reload()
+        .then(() => setLoadError(null))
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load your membership");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [reload],
+  );
+
   useEffect(() => {
-    reload()
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load memberships"))
-      .finally(() => setLoading(false));
-  }, [reload]);
+    void load();
+  }, [load]);
 
   // Runs after the panel has rendered, so the ref is attached by the time we
   // reach for it. A member who ends up with nothing to pay just clears the flag.
@@ -351,13 +370,27 @@ function MembershipPage() {
     }
   }
 
-  if (loading) {
+  if (loading) return <Loading className="p-8" />;
+
+  // In place of the page, not beside it. With nothing loaded the status card
+  // falls back to "lead" and greets a paid-up member as somebody new, and the
+  // plan list would be empty, which reads as a club with nothing to sell.
+  if (loadError)
     return (
-      <>
-        <div className="p-8">Loading...</div>
-      </>
+      <section className="mx-auto max-w-2xl px-4 py-12">
+        <h1 className="text-3xl font-black">Membership</h1>
+        <LoadFailure
+          className="mt-6"
+          what="Your membership"
+          message={loadError}
+          hint="Nothing has changed, and anything you have already paid for is still yours."
+          onRetry={() => void load()}
+        />
+        <Button asChild variant="outline" className="mt-4">
+          <Link to="/account">Back to account</Link>
+        </Button>
+      </section>
     );
-  }
 
   const lifecycle = mine?.lifecycle ?? "lead";
   const status = lifecycleCopy(lifecycle, mine?.memberships ?? []);

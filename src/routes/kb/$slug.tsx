@@ -16,11 +16,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRight, Check, ChevronRight, ExternalLink, List } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronRight,
+  ExternalLink,
+  List,
+  RefreshCw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { KbArticleReader } from "@/components/site/KbArticleReader";
+import { Loading } from "@/components/site/Loading";
 import type { NewAnnotation } from "@/components/site/KbArticleReader";
 import { useKbNav } from "@/hooks/useKbNav";
 import {
@@ -224,7 +233,7 @@ function ArticlePage() {
   }
 
   if (authLoading || articleQ.isPending || redirectTo) {
-    return <p className="text-muted-foreground">Loading...</p>;
+    return <Loading />;
   }
 
   if (articleQ.isError || !article || !viewer) {
@@ -237,6 +246,14 @@ function ArticlePage() {
             : "That article does not exist, or is not available to you."}
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
+          {/* A rejected fetch and an article that is not yours look the same
+              from here, so offer the retry that only helps the first: a reader
+              whose connection dropped otherwise has nothing to press. */}
+          {articleQ.isError && (
+            <Button variant="outline" onClick={() => void articleQ.refetch()}>
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Try again
+            </Button>
+          )}
           <Button asChild variant="outline">
             <Link to="/kb">Back to the knowledge base</Link>
           </Button>

@@ -12,11 +12,18 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/hooks/useAuth";
+import { describeLoadError } from "@/lib/load-error";
 import { buildKbNav } from "@/lib/kb-nav";
 import type { KbNavSection } from "@/lib/kb-nav";
 import { listKnowledgeBase } from "@/lib/kb.functions";
 
-export function useKbNav(): { nav: KbNavSection[]; loading: boolean } {
+export function useKbNav(): {
+  nav: KbNavSection[];
+  loading: boolean;
+  /** Set when the fetch rejected. Null while it is in flight and once it lands. */
+  error: string | null;
+  refetch: () => void;
+} {
   const { user, loading: authLoading } = useAuth();
   const fetchNav = useServerFn(listKnowledgeBase);
   const query = useQuery({
@@ -41,5 +48,15 @@ export function useKbNav(): { nav: KbNavSection[]; loading: boolean } {
     () => (query.data ? buildKbNav(query.data.sections, query.data.entries) : []),
     [query.data],
   );
-  return { nav, loading: authLoading || query.isLoading };
+  // `isLoading` is false once a query has failed, and it was the only thing
+  // reported here: /kb sat on "Loading..." for good, with no error and no way
+  // out, because nothing downstream could see that the fetch had rejected.
+  return {
+    nav,
+    loading: authLoading || query.isLoading,
+    error: query.isError
+      ? describeLoadError(query.error, "Could not load the knowledge base")
+      : null,
+    refetch: () => void query.refetch(),
+  };
 }
