@@ -89,9 +89,9 @@ manager presses the button, which is why it sits at the top of the queue (see
 
 The waiver item's body says what approving leads to before the manager gets
 anywhere near the button: it activates the person's account, emails them to say
-so, and assigns the free trial. That is outward-facing and cannot be taken back
-quietly, and "anything irreversible gets a confirm that says what will happen"
-is the club's own UX rule.
+so, and assigns the free trial (`docs/waivers.md`, rule 6). That is
+outward-facing and cannot be taken back quietly, and "anything irreversible gets
+a confirm that says what will happen" is the club's own UX rule.
 
 Counted from `waivers.approval_status = 'pending'`, which is the stored fact.
 The waivers screen's third state, `superseded`, is derived from a person's other
