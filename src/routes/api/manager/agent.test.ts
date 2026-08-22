@@ -5,6 +5,7 @@
 // reachable directly — see membership.functions.test.ts for why that isn't
 // true of createServerFn handlers.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hashToken } from "@/lib/manager-api-tokens";
 
 type Result<T> = { data: T | null; error: { message: string } | null };
 const ok = <T>(data: T): Result<T> => ({ data, error: null });
@@ -124,7 +125,7 @@ function fakeAdminForEditInvoice(
 let currentAdmin: unknown;
 vi.mock("@/integrations/supabase/client.server", () => ({
   get supabaseAdmin() {
-    return currentAdmin;
+    return withMintedToken(currentAdmin);
   },
 }));
 
@@ -151,7 +152,69 @@ vi.mock("@/lib/waiver.functions", () => ({
   promoteWaiverTemplate: (...args: unknown[]) => promoteWaiverTemplateMock(...args),
 }));
 
-const BREAK_GLASS_KEY = "test-break-glass-key";
+const MINTED_TOKEN = "utsj_0123456789abcdef0123456789abcdef0123456789abcdef";
+const TOKEN_OWNER = "44444444-4444-4444-4444-444444444444";
+/**
+ * Shaped like something somebody would have put in MANAGER_AGENT_API_KEY. It is
+ * never minted, so the endpoint must refuse it — that env fallback is gone.
+ */
+const ENV_STYLE_KEY = "test-break-glass-key";
+
+/**
+ * The manager_api_tokens chains `authenticate` walks: look the token up by
+ * hash, then stamp last_used_at.
+ *
+ * It really compares the hash rather than waving any bearer token through. A
+ * fake that returned the row unconditionally would pass just as happily with
+ * the whole minted-token lookup deleted, which is exactly the assertion the
+ * env-key tests below depend on.
+ */
+function fakeTokensTable() {
+  let hash: string | null = null;
+  const select = {
+    eq: (col: string, val: string) => {
+      if (col === "token_hash") hash = val;
+      return select;
+    },
+    is: () => select,
+    maybeSingle: async () =>
+      ok(
+        hash === (await hashToken(MINTED_TOKEN)) ? { id: "tok-1", created_by: TOKEN_OWNER } : null,
+      ),
+  };
+  const stamp = {
+    eq: () => stamp,
+    then: (resolve: (r: Result<unknown>) => void) => resolve(ok(null)),
+  };
+  return { select: () => select, update: () => stamp };
+}
+
+/**
+ * Wrap a fake service-role client so it can also answer the two calls
+ * `authenticate` makes before any action runs: the hashed-token lookup and the
+ * has_role re-check of the token's owner. Every fake below models only the
+ * tables its own action walks, so without this each of them would throw
+ * "unexpected table manager_api_tokens" at the door instead of running.
+ */
+function withMintedToken(db: unknown) {
+  const base = (db ?? {}) as {
+    from?: (table: string) => unknown;
+    rpc?: (name: string, args?: unknown) => unknown;
+  };
+  return {
+    ...base,
+    from: (table: string) => {
+      if (table === "manager_api_tokens") return fakeTokensTable();
+      if (!base.from) throw new Error(`unexpected table ${table}`);
+      return base.from(table);
+    },
+    rpc: (name: string, args?: unknown) => {
+      if (name === "has_role") return Promise.resolve(ok(true));
+      if (!base.rpc) throw new Error(`unexpected rpc ${name}`);
+      return base.rpc(name, args);
+    },
+  };
+}
 
 type RouteHandler = (ctx: { request: Request }) => Promise<Response>;
 type RouteHandlers = Record<"GET" | "POST" | "PUT" | "PATCH" | "DELETE", RouteHandler>;
@@ -162,11 +225,11 @@ async function handlers(): Promise<RouteHandlers> {
     .handlers;
 }
 
-async function post(body: unknown) {
+async function post(body: unknown, token: string = MINTED_TOKEN) {
   return (await handlers()).POST({
     request: new Request("http://localhost/api/manager/agent", {
       method: "POST",
-      headers: { authorization: `Bearer ${BREAK_GLASS_KEY}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
   });
@@ -181,11 +244,50 @@ async function method(verb: "PUT" | "PATCH" | "DELETE") {
 describe("manager agent route", () => {
   beforeEach(() => {
     vi.resetModules();
-    process.env.MANAGER_AGENT_API_KEY = BREAK_GLASS_KEY;
   });
   afterEach(() => {
     delete process.env.MANAGER_AGENT_API_KEY;
     vi.restoreAllMocks();
+  });
+
+  // A minted, hashed manager_api_tokens row is now the ONLY credential this
+  // endpoint accepts. It used to take a MANAGER_AGENT_API_KEY env var as well,
+  // which was checked FIRST, stored in plaintext, revocable only by redeploy,
+  // and attributed to nobody — so a waiver filed through it named no auth user.
+  // Setting that variable must do nothing at all now, or the removal is
+  // reversible by anyone who can edit an environment.
+  describe("authentication", () => {
+    it("refuses an env-style key even when MANAGER_AGENT_API_KEY is set to it", async () => {
+      process.env.MANAGER_AGENT_API_KEY = ENV_STYLE_KEY;
+      // A fake with no tables but the token lookup: reaching any action at all
+      // would throw "unexpected table", so a 401 proves it stopped at the door.
+      currentAdmin = {};
+      const res = await post({ action: "list_invoices", params: {} }, ENV_STYLE_KEY);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: false, error: { code: "unauthorized" } });
+    });
+
+    it("refuses any token that hashes to no unrevoked row", async () => {
+      currentAdmin = {};
+      const res = await post({ action: "list_invoices", params: {} }, "utsj_not-a-minted-token");
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.code).toBe("unauthorized");
+    });
+
+    it("still refuses a request with no bearer token at all", async () => {
+      currentAdmin = {};
+      const res = await (
+        await handlers()
+      ).POST({
+        request: new Request("http://localhost/api/manager/agent", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "list_invoices", params: {} }),
+        }),
+      });
+      expect(res.status).toBe(401);
+    });
   });
 
   it.each(["PUT", "PATCH", "DELETE"] as const)(
@@ -478,15 +580,11 @@ describe("manager agent route: the waiver template", () => {
 
   beforeEach(() => {
     vi.resetModules();
-    process.env.MANAGER_AGENT_API_KEY = BREAK_GLASS_KEY;
     currentAdmin = {};
     listWaiverTemplateRowsMock.mockReset();
     loadWaiverTemplateVersionMock.mockReset();
     saveWaiverTemplateVersionMock.mockReset();
     promoteWaiverTemplateMock.mockReset();
-  });
-  afterEach(() => {
-    delete process.env.MANAGER_AGENT_API_KEY;
   });
 
   /**

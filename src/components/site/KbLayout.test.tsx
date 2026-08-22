@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KbNavSection } from "@/lib/kb-nav";
 
@@ -78,6 +79,23 @@ describe("KbLayout sidebar", () => {
       );
       unmount();
     }
+  });
+
+  // The sidebar had two answers for three situations, and "there is nothing in
+  // the knowledge base yet" is the wrong one to give a reader whose fetch
+  // failed: it reads as a club that has written nothing.
+  it("says the contents could not be loaded rather than showing the empty state", async () => {
+    const refetch = vi.fn();
+    mockUseKbNav.mockReturnValue({ nav: [], loading: false, error: "Failed to fetch", refetch });
+    render(<KbLayout>article</KbLayout>);
+
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts[0]).toHaveTextContent("The contents could not be loaded.");
+    expect(alerts[0]).toHaveTextContent("Failed to fetch");
+    expect(screen.queryByText(/nothing in the knowledge base yet/i)).not.toBeInTheDocument();
+
+    await userEvent.click(within(alerts[0]).getByRole("button", { name: /try again/i }));
+    expect(refetch).toHaveBeenCalled();
   });
 
   it("ticks off an article this member has read, and flags one rewritten since", () => {

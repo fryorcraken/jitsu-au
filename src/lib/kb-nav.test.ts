@@ -5,6 +5,8 @@ import {
   entryBreadcrumbs,
   entryHref,
   extractHeadings,
+  findHeadingForHash,
+  missingSectionFragment,
   flattenKbNav,
   headingSlug,
   kbProgress,
@@ -157,18 +159,45 @@ describe("headingSlug", () => {
 
 describe("parseHeading", () => {
   it("reads the level and the text", () => {
-    expect(parseHeading("## The blue belt")).toEqual({ depth: 2, text: "The blue belt" });
+    expect(parseHeading("## The blue belt")).toEqual({
+      depth: 2,
+      text: "The blue belt",
+      anchor: null,
+    });
   });
 
   it("strips inline markdown so a table of contents reads as words", () => {
     expect(parseHeading("### The **blue** `belt` and [more](/x)")).toEqual({
       depth: 3,
       text: "The blue belt and more",
+      anchor: null,
     });
   });
 
   it("ignores a closing run of hashes", () => {
-    expect(parseHeading("## Grading ##")).toEqual({ depth: 2, text: "Grading" });
+    expect(parseHeading("## Grading ##")).toEqual({ depth: 2, text: "Grading", anchor: null });
+  });
+
+  it("reads a pinned anchor and keeps it out of the heading text", () => {
+    expect(parseHeading("## How grading works {#grading}")).toEqual({
+      depth: 2,
+      text: "How grading works",
+      anchor: "grading",
+    });
+  });
+
+  it("puts a pinned anchor through the same slug rules as a derived one", () => {
+    expect(parseHeading("## Fees {#Fees & Costs}")?.anchor).toBeNull();
+    expect(parseHeading("## Fees {#Fees_2026}")?.anchor).toBe("fees-2026");
+  });
+
+  it("leaves a heading that is nothing but an anchor alone", () => {
+    // Stripping it would leave a heading with no words in it at all.
+    expect(parseHeading("## {#orphan}")).toEqual({
+      depth: 2,
+      text: "{#orphan}",
+      anchor: null,
+    });
   });
 
   it("is not fooled by a hash that is not a heading", () => {
@@ -211,6 +240,112 @@ describe("extractHeadings", () => {
 
   it("finds nothing in an article that is all prose", () => {
     expect(extractHeadings("Just a paragraph.\n\nAnd another.")).toEqual([]);
+  });
+
+  // The whole point of pinning: another article links to `#grading`, and the
+  // link survives the club rewriting the heading above it.
+  it("uses a pinned anchor instead of the wording, and says it was pinned", () => {
+    const headings = extractHeadings("## What happens at a grading {#grading}\n\nDetails.");
+    expect(headings[0].id).toBe("grading");
+    expect(headings[0].pinned).toBe(true);
+    expect(headings[0].text).toBe("What happens at a grading");
+
+    const reworded = extractHeadings("## Your first grading day {#grading}\n\nDetails.");
+    expect(reworded[0].id).toBe("grading");
+  });
+
+  it("marks an id taken from the wording as not pinned", () => {
+    expect(extractHeadings("## Grading\n\nx.")[0].pinned).toBe(false);
+  });
+
+  // The reason pinning exists at all is that other articles point at the
+  // anchor. A heading added later whose words happen to slugify to the same
+  // thing must not take it: every cross-reference in the club would quietly
+  // land on the wrong passage.
+  it("gives a pinned anchor to the heading that pinned it, wherever it sits", () => {
+    const headings = extractHeadings(
+      "## What happens on the day {#grading}\n\nx.\n\n## Grading\n\ny.",
+    );
+    expect(headings.map((h) => [h.text, h.id])).toEqual([
+      ["What happens on the day", "grading"],
+      ["Grading", "grading-2"],
+    ]);
+  });
+
+  it("keeps two headings pinned to the same anchor apart", () => {
+    const ids = extractHeadings("## A {#same}\n\nx.\n\n## B {#same}\n\ny.").map((h) => h.id);
+    expect(ids).toEqual(["same", "same-2"]);
+  });
+});
+
+describe("findHeadingForHash", () => {
+  const headings = extractHeadings("## Grading {#grading}\n\nx.\n\n## Belts\n\ny.");
+
+  it("finds the heading a fragment names, with or without the hash", () => {
+    expect(findHeadingForHash("#grading", headings)?.text).toBe("Grading");
+    expect(findHeadingForHash("belts", headings)?.text).toBe("Belts");
+  });
+
+  it("decodes a percent-encoded fragment", () => {
+    expect(findHeadingForHash("%23belts".replace("%23", "#"), headings)?.text).toBe("Belts");
+    expect(findHeadingForHash("#bel%74s", headings)?.text).toBe("Belts");
+  });
+
+  // A cross-reference written months ago against wording that has since been
+  // rewritten. Null is what makes the reader SAY so instead of landing silently
+  // at the top of a long article.
+  it("reports nothing for a section the article no longer has", () => {
+    expect(findHeadingForHash("#throws", headings)).toBeNull();
+    expect(findHeadingForHash("", headings)).toBeNull();
+  });
+
+  // A cross-reference typed by eye off the heading's own capitals. The section
+  // is right there, so finding it beats telling somebody it was renamed away.
+  it("matches a fragment whatever case it was typed in", () => {
+    expect(findHeadingForHash("#Belts", headings)?.text).toBe("Belts");
+    expect(findHeadingForHash("#GRADING", headings)?.text).toBe("Grading");
+  });
+
+  it("does not throw on a malformed escape", () => {
+    expect(findHeadingForHash("#100%", headings)).toBeNull();
+  });
+});
+
+describe("missingSectionFragment", () => {
+  const headings = extractHeadings("## Grading {#grading}\n\nx.\n\n## Belts\n\ny.");
+
+  it("names the section a stale cross-reference asked for", () => {
+    expect(missingSectionFragment("#throws", headings)).toBe("throws");
+  });
+
+  it("says nothing when the section is there, or no fragment was given", () => {
+    expect(missingSectionFragment("#grading", headings)).toBeNull();
+    expect(missingSectionFragment("", headings)).toBeNull();
+  });
+
+  // A notification about a comment links to /kb/<slug>#comment-<id>
+  // (`kbAnnotationHref`). That link is working as designed, and telling the
+  // member their section was renamed away would be wrong and alarming.
+  it("says nothing about the app's own comment links", () => {
+    expect(
+      missingSectionFragment("#comment-2a0f6e4c-0000-4000-8000-000000000000", headings),
+    ).toBeNull();
+  });
+
+  it("says nothing about a section that is there under different capitals", () => {
+    expect(missingSectionFragment("#Grading", headings)).toBeNull();
+  });
+
+  it("says nothing about a fragment that is not shaped like an anchor", () => {
+    expect(
+      missingSectionFragment("#error=access_denied&error_code=otp_expired", headings),
+    ).toBeNull();
+  });
+
+  it("truncates a very long fragment rather than printing it whole", () => {
+    const long = missingSectionFragment(`#${"a".repeat(200)}`, headings);
+    expect(long).toHaveLength(60);
+    expect(long?.endsWith("…")).toBe(true);
   });
 });
 

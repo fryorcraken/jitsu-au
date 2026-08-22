@@ -16,7 +16,7 @@ import type {
   KbSectionRow,
 } from "@/lib/kb-types";
 import type { SaveKbArticleInput, SaveKbSectionInput } from "@/lib/validation";
-import { actorUserId } from "@/lib/manager-agent";
+import { extractHeadings } from "@/lib/kb-nav";
 
 /** An article together with the version being read. */
 export type LoadedArticle = {
@@ -234,7 +234,6 @@ export async function saveKbArticle(
   input: SaveKbArticleInput,
   actingAs: string | null,
 ): Promise<{ slug: string; version: number | null; article_id: string; created: boolean }> {
-  const createdBy = actorUserId(actingAs);
   const sectionId = await resolveSectionId(db, input.section);
 
   const { data: existing, error: findErr } = await db
@@ -323,7 +322,7 @@ export async function saveKbArticle(
         position: input.position ?? 0,
         nav_title: input.nav_title || null,
         link_path: input.link_path || null,
-        created_by: createdBy,
+        created_by: actingAs,
       })
       .select("*")
       .single();
@@ -420,7 +419,7 @@ export async function saveKbArticle(
         body_md: text.body_md,
         change_note: input.change_note || null,
         is_current: false,
-        created_by: createdBy,
+        created_by: actingAs,
       })
       .select("id, version")
       .single();
@@ -500,6 +499,17 @@ export function projectArticle({ article, version }: LoadedArticle) {
     annotations_enabled: article.annotations_enabled,
     nav_title: article.nav_title,
     updated_at: version.created_at,
+    // The anchors this article offers, so an agent writing a cross-reference
+    // into another article does not have to re-derive a fragment from the
+    // heading wording and get it subtly wrong. `pinned` marks the ones written
+    // as `## Heading {#anchor}`, which are the ones that survive a rewording.
+    sections: extractHeadings(version.body_md).map((heading) => ({
+      id: heading.id,
+      text: heading.text,
+      depth: heading.depth,
+      pinned: heading.pinned,
+      url: `/kb/${article.slug}#${heading.id}`,
+    })),
   };
 }
 

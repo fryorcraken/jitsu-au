@@ -1,8 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { BlogPostEditor, type BlogPostEditorValue } from "@/components/site/BlogPostEditor";
 import { getBlogPostForEdit, updateBlogPost } from "@/lib/blog.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -28,18 +31,31 @@ function EditBlogPostPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useCallback(() => {
+    setLoading(true);
+    return fetchPost({ data: { id } })
+      .then((row) => {
+        setPost(row);
+        setLoadError(null);
+      })
+      .catch((e) => {
+        const message = describeLoadError(e, "Could not load that post");
+        setLoadError(message);
+        toast.error(message);
+      })
+      .finally(() => setLoading(false));
+  }, [id, fetchPost]);
+
   useEffect(() => {
     if (!isManager) return;
-    fetchPost({ data: { id } })
-      .then(setPost)
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load that post"))
-      .finally(() => setLoading(false));
-  }, [isManager, id, fetchPost]);
+    void load();
+  }, [isManager, load]);
 
   function goBack() {
     if (dirty && !window.confirm("Discard your unsaved changes?")) return;
@@ -107,7 +123,26 @@ function EditBlogPostPage() {
     [post],
   );
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <Loading className="p-8" />;
+
+  // Previously a blank page: the toast faded and `post` was null, so the route
+  // rendered nothing at all with no way back and nothing to press.
+  if (loadError)
+    return (
+      <section className="mx-auto max-w-2xl space-y-4 px-4 py-10">
+        <h1 className="text-3xl font-black">Edit post</h1>
+        <LoadFailure
+          what="That post"
+          message={loadError}
+          hint="It has not been changed or deleted, so there is nothing to rewrite."
+          onRetry={() => void load()}
+        />
+        <Button variant="outline" onClick={goBack}>
+          Back to posts
+        </Button>
+      </section>
+    );
+
   if (!post || !initial) return null;
 
   return (

@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "12",
+  version: "13",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,19 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "13",
+      // Additive: a new response field and a new piece of markdown syntax.
+      // Nothing that worked before fails or means anything different, and an
+      // article with no `{#anchor}` in it behaves exactly as it did.
+      breaking: false,
+      notes: [
+        "Articles can link to a SECTION of another article. Every heading has an anchor, and an ordinary markdown link carries it: [how grading works](/kb/belts#how-grading-works). The anchor is the heading's own words, lowercased with hyphens for anything else.",
+        "get_kb_article gained `sections`: every heading in the version you read, with its `id`, `text`, `depth`, `pinned` flag and ready-made `url`. Read the target article and use the `url` it reports rather than deriving a fragment from the heading yourself.",
+        "A heading can PIN its anchor with the attribute syntax `## How grading works {#grading}`, which fixes the link so rewording the heading later does not break it. The suffix is stripped when the article is rendered, and `sections[].pinned` says which anchors were set this way. Prefer pinning any heading you have just linked to from somewhere else.",
+        "A link to a section that no longer exists is not silently ignored: the reader is told the section is gone and shown what the article has now.",
+      ],
+    },
     {
       version: "12",
       // Five new optional fields on one action. Nothing that worked before
@@ -742,7 +755,7 @@ export const AGENT_MANIFEST: {
       name: "get_kb_article",
       method: "POST",
       summary:
-        "Read one article's full markdown. Returns the live version unless you name one. Read this before saving an edit: save_kb_article replaces the whole body, so an edit built without reading first silently drops everything it did not include.",
+        "Read one article's full markdown. Returns the live version unless you name one. Read this before saving an edit: save_kb_article replaces the whole body, so an edit built without reading first silently drops everything it did not include. The result also carries `sections`, every heading in it with the `url` that links straight to that heading — read the article you are about to point at and copy the url, rather than guessing the anchor.",
       params: [
         { name: "slug", required: true, description: "The article's URL key, e.g. our-history." },
         {
@@ -774,7 +787,7 @@ export const AGENT_MANIFEST: {
           name: "body_md",
           required: false,
           description:
-            "The whole article as markdown, up to 200000 characters. This REPLACES the previous body.",
+            "The whole article as markdown, up to 200000 characters. This REPLACES the previous body. Link to another article with an ordinary markdown link (/kb/<slug>), and to a SECTION of one by adding its anchor (/kb/belts#how-grading-works) — read that article with get_kb_article and take the anchor from its `sections`, rather than deriving it. Pin a heading's own anchor by ending it with the attribute syntax `## How grading works {#grading}`, so the link keeps working if the heading is reworded; the suffix is not shown to readers.",
         },
         {
           name: "section",
@@ -852,35 +865,6 @@ export const AGENT_MANIFEST: {
     },
   ],
 };
-
-/**
- * The `uploaded_by` recorded on a waiver filed through the break-glass
- * `MANAGER_AGENT_API_KEY` fallback, which authenticates without resolving to
- * any real auth user. Not a UUID on purpose: `filePaperWaiver` only attempts
- * to look up an owner's email for values that look like one.
- */
-export const AGENT_ENV_KEY_UPLOADER = "manager-agent-env-key";
-
-/**
- * The actor to record as the author of a row, or null when there isn't one.
- *
- * Every write this API makes on somebody's behalf lands in a column that
- * `references auth.users`, and the break-glass env key authenticates as
- * `AGENT_ENV_KEY_UPLOADER` — deliberately not a UUID, with no auth user behind
- * it. Writing that sentinel into such a column fails the insert outright, so
- * each writer asks this instead: record the manager when the token resolved to
- * one, null when it did not.
- *
- * Lives here, with the sentinel it exists because of, rather than as a private
- * copy in each writer — this is the third caller, which is the point the repo's
- * own rule says to stop duplicating.
- */
-export function actorUserId(actingAs: string | null): string | null {
-  if (!actingAs) return null;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actingAs)
-    ? actingAs
-    : null;
-}
 
 /**
  * Classify a raw request body's `action` field before dispatch, distinguishing

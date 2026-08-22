@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Loading } from "@/components/site/Loading";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -148,13 +149,7 @@ function SettingsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <>
-        <div className="p-8">Loading...</div>
-      </>
-    );
-  }
+  if (loading) return <Loading className="p-8" />;
 
   /**
    * The read failed, so we do not know what the club's account currently says.

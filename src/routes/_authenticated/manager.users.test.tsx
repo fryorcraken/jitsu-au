@@ -1,0 +1,141 @@
+// The directory is one row per person across the whole funnel, and only one of
+// those phases can be deleted from here: a lead, who signed nothing and owes
+// nothing. Everybody else has a waiver, a membership or attendance behind them,
+// and what the club may destroy of that is still an open product question.
+// So the test that matters is the negative one: the button is not drawn on a
+// person's row, whatever else changes about this screen.
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+
+const listClubUsers = vi.fn();
+const markInterestRegistrationsSeen = vi.fn();
+const deleteLead = vi.fn();
+
+const lead = {
+  user_id: null,
+  name: "Sam Lee",
+  greeting_name: null,
+  email: "sam@example.com",
+  email_confirmed_at: null,
+  phone: "0400 000 111",
+  roles: [] as string[],
+  lifecycle_status: "lead" as const,
+  has_waiver: false,
+  waiver_signed_at: null,
+  is_uts_student: false,
+  uts_student_number: null,
+  gi_size: null,
+  belt_size: null,
+  latest_plan_name: null,
+  latest_plan_kind: null,
+  latest_membership_status: null,
+  latest_sessions_remaining: null,
+  membership_count: 0,
+  sessions_attended: 0,
+  first_seen_at: "2026-08-05T10:00:00.000Z",
+};
+const member = {
+  ...lead,
+  user_id: "user-1",
+  name: "Kim Tran",
+  email: "kim@example.com",
+  lifecycle_status: "member" as const,
+  has_waiver: true,
+  waiver_signed_at: "2026-07-01T00:00:00.000Z",
+};
+
+vi.mock("@tanstack/react-router", () => ({
+  createFileRoute: () => (opts: Record<string, unknown>) => opts,
+  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  useNavigate: () => vi.fn(),
+}));
+
+vi.mock("@tanstack/react-start", () => ({
+  useServerFn: (fn: unknown) => fn,
+}));
+
+vi.mock("@/lib/membership.functions", () => ({
+  listClubUsers: (...args: unknown[]) => listClubUsers(...args),
+}));
+
+vi.mock("@/lib/leads.functions", () => ({
+  markInterestRegistrationsSeen: (...args: unknown[]) => markInterestRegistrationsSeen(...args),
+  deleteLead: (...args: unknown[]) => deleteLead(...args),
+}));
+
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ user: { id: "manager-1" }, session: null, loading: false }),
+  useRoles: () => ({ roles: ["manager"], loading: false, isManager: true }),
+}));
+
+vi.mock("@/hooks/useNotifications", () => ({
+  useNotifications: () => ({ refresh: vi.fn() }),
+}));
+
+const { Route } = await import("./manager.users");
+const ManagerUsersPage = (Route as unknown as { component: () => ReactNode }).component;
+
+async function renderLoaded() {
+  render(<ManagerUsersPage />);
+  await screen.findByRole("table");
+}
+
+beforeEach(() => {
+  listClubUsers.mockReset().mockResolvedValue([lead, member]);
+  markInterestRegistrationsSeen.mockReset().mockResolvedValue({ ok: true, newEmails: [] });
+  deleteLead.mockReset().mockResolvedValue({ ok: true, deleted: 1 });
+});
+
+describe("/manager/users", () => {
+  it("offers no delete for someone the club has a record for", async () => {
+    await renderLoaded();
+    expect(screen.queryByRole("button", { name: /Delete the enquiry from Kim Tran/ })).toBeNull();
+  });
+
+  it("deletes nothing until the manager confirms", async () => {
+    await renderLoaded();
+    await userEvent.click(screen.getByRole("button", { name: "Delete the enquiry from Sam Lee" }));
+
+    expect(deleteLead).not.toHaveBeenCalled();
+    expect(screen.getByText("Sam Lee")).toBeInTheDocument();
+  });
+
+  it("names the address, and says the contact inbox is separate", async () => {
+    await renderLoaded();
+    await userEvent.click(screen.getByRole("button", { name: "Delete the enquiry from Sam Lee" }));
+
+    const dialog = within(await screen.findByRole("alertdialog"));
+    expect(dialog.getByText(/Delete the enquiry from Sam Lee\?/)).toBeInTheDocument();
+    // A manager pressing this is entitled to think it removes everything about
+    // the person. It does not: their contact-form messages live in another
+    // inbox, and the confirm has to say so before the click, not after.
+    expect(dialog.getByText(/deleted from Contact messages/)).toBeVisible();
+  });
+
+  it("takes the lead off the list once the server confirms", async () => {
+    await renderLoaded();
+    await userEvent.click(screen.getByRole("button", { name: "Delete the enquiry from Sam Lee" }));
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete" }),
+    );
+
+    expect(deleteLead).toHaveBeenCalledWith({ data: { email: "sam@example.com" } });
+    expect(screen.queryByText("Sam Lee")).toBeNull();
+    expect(screen.getByText("Kim Tran")).toBeInTheDocument();
+  });
+
+  it("keeps the lead listed when the server refuses", async () => {
+    deleteLead.mockRejectedValue(new Error("That address belongs to someone the club has..."));
+    await renderLoaded();
+    await userEvent.click(screen.getByRole("button", { name: "Delete the enquiry from Sam Lee" }));
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete" }),
+    );
+
+    // The likeliest refusal is that they signed a waiver since the page loaded.
+    // Their enquiry is still on file, so the row stays.
+    expect(await screen.findByText("Sam Lee")).toBeInTheDocument();
+  });
+});

@@ -423,12 +423,16 @@ describe("buildPaymentReference", () => {
 
 describe("startMembershipSchema", () => {
   it("accepts a non-student selection without a student number", () => {
-    const r = startMembershipSchema.safeParse({ plan_code: "semester", is_student: false });
+    const r = startMembershipSchema.safeParse({
+      plan_code: "semester",
+      is_student: false,
+      hp: "",
+    });
     expect(r.success).toBe(true);
   });
 
   it("requires a UTS student number when taking the student rate", () => {
-    const r = startMembershipSchema.safeParse({ plan_code: "semester", is_student: true });
+    const r = startMembershipSchema.safeParse({ plan_code: "semester", is_student: true, hp: "" });
     expect(r.success).toBe(false);
   });
 
@@ -437,6 +441,7 @@ describe("startMembershipSchema", () => {
       plan_code: "semester",
       is_student: true,
       uts_student_number: "12345678",
+      hp: "",
     });
     expect(r.success).toBe(true);
   });
@@ -447,6 +452,13 @@ describe("startMembershipSchema", () => {
       is_student: false,
       hp: "bot",
     });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a selection that omits the honeypot", () => {
+    // `hp` is required, so a request that never had a form behind it fails
+    // here rather than starting a membership.
+    const r = startMembershipSchema.safeParse({ plan_code: "semester", is_student: false });
     expect(r.success).toBe(false);
   });
 });

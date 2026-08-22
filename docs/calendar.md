@@ -46,8 +46,10 @@ entry takes a title and a start time and nothing else:
   it is the manager's answer and is left alone; the only thing that overrides it
   is a start that moves past it, which would make the entry backwards.
 - **Location** is pre-filled with the club's gym (ActivateFit Gym, UTS Building 4,
-  745 Harris St, Ultimo). Somewhere else, or nowhere booked yet: overwrite or
-  clear it.
+  745 Harris Street, Ultimo NSW 2007), built from the shared venue constants in
+  `src/lib/venue.ts` so it is the same address the public pages, the map links
+  and the structured data give. Somewhere else, or nowhere booked yet: overwrite
+  or clear it.
 
 Both are only defaults on the add form. Editing an existing date shows what that
 date actually has, so an entry with no location keeps having none.
@@ -156,7 +158,11 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
 4. **No public calendar feed.** Only per-person links, so a subscriber can never
    silently miss a members-only entry. A link is a secret, but a durable one:
    like any calendar app's private ICS address it is stored and shown to its
-   owner whenever they ask, not shown once and then unrecoverable.
+   owner whenever they ask, not shown once and then unrecoverable. Because the
+   secret is in the URL, the feed is served with `Referrer-Policy: no-referrer`
+   (see "Security headers" in `CLAUDE.md`). It keeps its own
+   `Cache-Control: private, max-age=300`, which is what a polling calendar client
+   wants.
 5. **"Member" means paid.** Members-only visibility keys off an active, non-trial
    membership with a price above zero (mirroring `deriveLifecycleStatus`), via the
    `has_active_paid_membership` helper used in RLS.

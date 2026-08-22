@@ -56,25 +56,31 @@ jobs:
       # A single read-only SELECT against the migration ledger. psql ships on
       # the ubuntu-latest image, so there is nothing to install.
       #
-      # A missing secret warns and passes rather than failing, so that setting
-      # the workflow up does not wedge main. That means a green check here does
-      # NOT prove there is no drift unless the secret is set — read the summary,
-      # which says which of the two happened.
+      # A missing secret FAILS the job. It used to warn and pass, which meant
+      # every run since the repo began reported success while asking the
+      # database nothing — a green tick that said "no drift" when it meant "the
+      # job started". That is worse than having no check at all: a missing check
+      # is a known gap, a false green stops anyone from looking. So an unarmed
+      # check is red, and a green tick here means the live database was asked.
       - name: Compare supabase/migrations against the live ledger
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           if [ -z "$SUPABASE_DB_URL" ]; then
-            echo "::warning::SUPABASE_DB_URL is not set — the migration drift check did NOT run."
+            echo "::error::SUPABASE_DB_URL is not set, so the migration drift check could not run."
             {
-              echo "### ⚠️ Migration drift check not armed"
+              echo "### ❌ Migration drift check not armed"
               echo
-              echo "\`SUPABASE_DB_URL\` is not set, so this run checked nothing."
-              echo "A green tick here does **not** mean the migrations are applied."
+              echo "\`SUPABASE_DB_URL\` is not set, so this run checked nothing — and it"
+              echo "fails rather than passing, because a green tick on this job has to mean"
+              echo "the live database was actually asked."
               echo
-              echo "See \`supabase/lint/README.md\` for the least-privilege role to create."
+              echo "Fix it by adding the secret under **Settings → Secrets and variables →"
+              echo "Actions → Repository secrets**. See \`supabase/lint/README.md\` for the"
+              echo "least-privilege role to create: do not paste the dashboard's default"
+              echo "superuser URI."
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            exit 1
           fi
           psql "$SUPABASE_DB_URL" \
             -v ON_ERROR_STOP=1 --csv --tuples-only --quiet --pset pager=off \
@@ -103,14 +109,14 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           if [ -z "$SUPABASE_DB_URL" ]; then
-            echo "::warning::SUPABASE_DB_URL is not set — the client grants check did NOT run."
+            echo "::error::SUPABASE_DB_URL is not set, so the client grants check could not run."
             {
-              echo "### ⚠️ Client grants check not armed"
+              echo "### ❌ Client grants check not armed"
               echo
-              echo "\`SUPABASE_DB_URL\` is not set, so this run checked nothing."
-              echo "A green tick here does **not** mean the client grants are correct."
+              echo "\`SUPABASE_DB_URL\` is not set, so this run checked nothing — and it"
+              echo "fails rather than passing, for the same reason as the step above."
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            exit 1
           fi
           psql "$SUPABASE_DB_URL" \
             -v ON_ERROR_STOP=1 --csv --tuples-only --quiet --pset pager=off \

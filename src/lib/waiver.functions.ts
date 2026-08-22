@@ -48,7 +48,6 @@ import { hasMediaAcknowledgement, WaiverTemplateError } from "@/lib/waiver-templ
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 import { resolveWaiverContacts } from "@/lib/waiver-contacts";
-import { actorUserId } from "@/lib/manager-agent";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -1166,8 +1165,9 @@ export const setCurrentWaiverTemplate = createServerFn({ method: "POST" })
  * so the manager agent API saves through exactly this path instead of a second
  * one that could drift from it.
  *
- * `createdBy` is null for a caller that resolves to no auth user (the agent
- * API's break-glass env key), because the column is a real FK to `auth.users`.
+ * `createdBy` is the manager saving it, and the column is a real FK to
+ * `auth.users`, so only a real user id or null may go in — never a placeholder
+ * standing in for one.
  *
  * The media-consent check runs BEFORE the insert. `promoteWaiverTemplate` would
  * refuse the publish anyway, but only after the row existed, leaving a draft
@@ -1560,16 +1560,15 @@ export async function filePaperWaiver(
     uploaded_by: uploadedByUserId,
     scan_files: data.scan.map((f) => f.name),
   };
-  // Not every caller resolves to a real auth user: the manager agent API's
-  // break-glass env-key fallback (docs/manager-agent-api.md) has no owner to look up, so
-  // skip the lookup rather than log a spurious not-found error every call.
-  if (actorUserId(uploadedByUserId)) {
-    try {
-      const { data: manager } = await admin.auth.admin.getUserById(uploadedByUserId);
-      if (manager.user?.email) signer_meta.uploaded_by_email = manager.user.email;
-    } catch (e) {
-      console.error("[filePaperWaiver] could not resolve the uploading manager:", e);
-    }
+  // Every caller resolves to a real auth user — the manager's own upload form
+  // passes the signed-in manager, and the agent API passes the token's owner —
+  // so the uploader is always worth looking up. Failing to resolve one is
+  // logged, never fatal: the provenance the row already carries is enough.
+  try {
+    const { data: manager } = await admin.auth.admin.getUserById(uploadedByUserId);
+    if (manager.user?.email) signer_meta.uploaded_by_email = manager.user.email;
+  } catch (e) {
+    console.error("[filePaperWaiver] could not resolve the uploading manager:", e);
   }
 
   // Every field just submitted, written onto the row whether this is a fresh

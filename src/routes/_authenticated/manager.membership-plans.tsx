@@ -1,8 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -404,6 +407,7 @@ function PlansPage() {
    * it still matches the database and grey its Save button out when it does. */
   const [baseline, setBaseline] = useState<Record<string, MembershipPlanRow>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [newPlan, setNewPlan] = useState<NewPlanForm>(emptyNewPlan);
   const [copiedFrom, setCopiedFrom] = useState<string | null>(null);
@@ -413,16 +417,29 @@ function PlansPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return fetchAll()
+        .then((data) => {
+          setPlans(data as MembershipPlanRow[]);
+          setBaseline(baselineOf(data as MembershipPlanRow[]));
+          setLoadError(null);
+        })
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load the plans");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [fetchAll],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    fetchAll()
-      .then((data) => {
-        setPlans(data as MembershipPlanRow[]);
-        setBaseline(baselineOf(data as MembershipPlanRow[]));
-      })
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load plans"))
-      .finally(() => setLoading(false));
-  }, [isManager, fetchAll]);
+    void load();
+  }, [isManager, load]);
 
   function patch(id: string, p: Partial<MembershipPlanRow>) {
     setPlans((prev) => prev.map((pl) => (pl.id === id ? { ...pl, ...p } : pl)));
@@ -544,13 +561,24 @@ function PlansPage() {
     }
   }
 
-  if (loading) {
+  if (loading) return <Loading className="p-8" />;
+
+  // In place of the plan list AND the add form. A failed load leaves both plan
+  // sections empty, which reads as a club that sells nothing, and the obvious
+  // response to that is to add a plan that already exists.
+  if (loadError)
     return (
-      <>
-        <div className="p-8">Loading...</div>
-      </>
+      <section className="mx-auto max-w-2xl px-4 py-10">
+        <h1 className="text-3xl font-black">Membership plans</h1>
+        <LoadFailure
+          className="mt-6"
+          what="The plans"
+          message={loadError}
+          hint="This is not the same as the club selling nothing, so do not add a plan from here: you would be adding one that already exists."
+          onRetry={() => void load()}
+        />
+      </section>
     );
-  }
 
   // Club-local, not UTC: the member purchase screen's `sellablePlans` decides
   // a dated plan has ended by the same club-local calendar day, so the two
