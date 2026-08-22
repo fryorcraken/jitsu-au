@@ -35,6 +35,7 @@ import { Route as AuthenticatedMembershipRouteImport } from './routes/_authentic
 import { Route as AuthenticatedNotificationsRouteImport } from './routes/_authenticated/notifications'
 import { Route as BlogIndexRouteImport } from './routes/blog/index'
 import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
+import { Route as EmailSettingsIndexRouteImport } from './routes/email-settings/index'
 import { Route as EmailSettingsTokenRouteImport } from './routes/email-settings/$token'
 import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as KbSlugRouteImport } from './routes/kb/$slug'
@@ -192,6 +193,11 @@ const BlogIndexRoute = BlogIndexRouteImport.update({
 const BlogSlugRoute = BlogSlugRouteImport.update({
   id: '/blog/$slug',
   path: '/blog/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EmailSettingsIndexRoute = EmailSettingsIndexRouteImport.update({
+  id: '/email-settings/',
+  path: '/email-settings/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmailSettingsTokenRoute = EmailSettingsTokenRouteImport.update({
@@ -381,6 +387,7 @@ export interface FileRoutesByFullPath {
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
   '/blog/': typeof BlogIndexRoute
+  '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -435,6 +442,7 @@ export interface FileRoutesByTo {
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
   '/blog': typeof BlogIndexRoute
+  '/email-settings': typeof EmailSettingsIndexRoute
   '/kb': typeof KbIndexRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -492,6 +500,7 @@ export interface FileRoutesById {
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
   '/blog/': typeof BlogIndexRoute
+  '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -549,6 +558,7 @@ export interface FileRouteTypes {
     | '/email-settings/$token'
     | '/kb/$slug'
     | '/blog/'
+    | '/email-settings/'
     | '/kb/'
     | '/manager/api-tokens'
     | '/manager/blog'
@@ -603,6 +613,7 @@ export interface FileRouteTypes {
     | '/email-settings/$token'
     | '/kb/$slug'
     | '/blog'
+    | '/email-settings'
     | '/kb'
     | '/manager/api-tokens'
     | '/manager/blog'
@@ -659,6 +670,7 @@ export interface FileRouteTypes {
     | '/email-settings/$token'
     | '/kb/$slug'
     | '/blog/'
+    | '/email-settings/'
     | '/kb/'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/blog'
@@ -712,6 +724,7 @@ export interface RootRouteChildren {
   BlogSlugRoute: typeof BlogSlugRoute
   EmailSettingsTokenRoute: typeof EmailSettingsTokenRoute
   BlogIndexRoute: typeof BlogIndexRoute
+  EmailSettingsIndexRoute: typeof EmailSettingsIndexRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
   ApiNotificationsDigestRoute: typeof ApiNotificationsDigestRoute
@@ -902,6 +915,13 @@ declare module '@tanstack/react-router' {
       path: '/blog/$slug'
       fullPath: '/blog/$slug'
       preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/email-settings/': {
+      id: '/email-settings/'
+      path: '/email-settings'
+      fullPath: '/email-settings/'
+      preLoaderRoute: typeof EmailSettingsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/email-settings/$token': {
@@ -1199,6 +1219,7 @@ const rootRouteChildren: RootRouteChildren = {
   BlogSlugRoute: BlogSlugRoute,
   EmailSettingsTokenRoute: EmailSettingsTokenRoute,
   BlogIndexRoute: BlogIndexRoute,
+  EmailSettingsIndexRoute: EmailSettingsIndexRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,
   ApiNotificationsDigestRoute: ApiNotificationsDigestRoute,

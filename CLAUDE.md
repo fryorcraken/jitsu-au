@@ -687,6 +687,13 @@ sends `strict-origin-when-cross-origin` everywhere and `no-referrer` on those
 three prefixes (the only value that also keeps the path out of a **same-origin**
 `Referer`), plus `Cache-Control: no-store` on them unless the route set its own.
 
+Only the first two of those are pages. `/email-settings/<token>` is an
+**exchange**: it puts the token in a short-lived cookie and redirects to a plain
+`/email-settings`, so nobody ever reads a screen with the token in the address
+bar. Its `no-store` is load-bearing rather than precautionary, because a cached
+redirect would hand one person's `Set-Cookie` to the next. The cookie's own
+attributes and lifetime are in `src/lib/email-settings-session.ts`.
+
 - **Adding a route that takes a token in its path?** Add its prefix to
   `TOKEN_PATH_PREFIXES` and to `public/_headers`. `security-headers.test.ts`
   fails if the two disagree.

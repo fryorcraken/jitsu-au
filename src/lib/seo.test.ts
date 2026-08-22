@@ -430,6 +430,17 @@ describe("club details match the site", () => {
 // The sitemap is only useful if it keeps matching the site. These read the
 // route files directly so adding a public page without listing it (or leaving a
 // noindex page listed) fails here rather than silently costing search traffic.
+/**
+ * True when a route file tells crawlers to stay out.
+ *
+ * Matched on the `noindex` token rather than on the whole content string,
+ * because `content: "noindex, nofollow"` is the same instruction plus one more
+ * and pinning the exact literal read it as an indexable page.
+ */
+function declaresNoindex(source: string): boolean {
+  return /name: "robots", content: "noindex/.test(source);
+}
+
 /** URL a route file serves, from its directory prefix and basename-without-extension. */
 function routePath(prefix: string, base: string): string {
   // "index" resolves to whatever its directory is, and a dot inside a route
@@ -492,7 +503,7 @@ describe("sitemap coverage of the route files", () => {
     .filter(({ source }) => source.includes('rel: "canonical"'))
     .map(({ path, source }) => ({
       path,
-      noindex: /name: "robots", content: "noindex"/.test(source),
+      noindex: declaresNoindex(source),
     }));
 
   it("finds the route files (guards against the scan itself breaking)", () => {
@@ -549,7 +560,7 @@ describe("sitemap coverage of the route files", () => {
       const file = routeFiles.find((r) => r.path === path);
       expect(file, `no route file serves ${path}`).toBeDefined();
       expect(
-        /name: "robots", content: "noindex"/.test(file!.source),
+        declaresNoindex(file!.source),
         `${path} is listed as a noindex page but does not set robots: noindex`,
       ).toBe(true);
     }

@@ -19,11 +19,10 @@ import {
   type NotificationPreferenceRow,
 } from "@/lib/notifications";
 import { managerAttentionItems } from "@/lib/manager-notifications.functions";
+import { readEmailSettingsToken } from "@/lib/email-settings-session";
 import {
   markNotificationsReadSchema,
-  notificationPreferencesByTokenSchema,
   notificationPreferencesSchema,
-  notificationTokenSchema,
   type ManagerNotification,
 } from "@/lib/validation";
 
@@ -210,27 +209,71 @@ export type TokenSettings =
   | { ok: true; preferences: Record<EmailPreferenceKey, boolean> }
   | { ok: false };
 
-/** Read the switches behind a footer link, with no session. */
-export const getNotificationPreferencesByToken = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => notificationTokenSchema.parse(d))
-  .handler(async ({ data }): Promise<TokenSettings> => {
-    const db = await adminClient();
-    const userId = await userIdForToken(db, data.token);
-    if (!userId) return { ok: false };
-    return {
-      ok: true,
-      preferences: resolveNotificationPreferences(await readPreferences(db, userId)),
-    };
-  });
+/**
+ * The settings-link token this request is carrying.
+ *
+ * It arrives in a cookie, not in the POST body, and never in the URL: the
+ * emailed link hits `/email-settings/<token>`, which exchanges it for the
+ * cookie and redirects to the plain page. Why the cookie is shaped the way it
+ * is: `src/lib/email-settings-session.ts`.
+ *
+ * Never throws. A runtime with no request headers to offer means no token,
+ * which the callers already handle as "nothing to show".
+ */
+async function settingsCookieToken(): Promise<string | null> {
+  try {
+    const { getRequestHeader } = await import("@tanstack/react-start/server");
+    return readEmailSettingsToken(getRequestHeader("cookie"));
+  } catch {
+    return null;
+  }
+}
 
-/** Save the switches behind a footer link, with no session. */
-export const saveNotificationPreferencesByToken = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => notificationPreferencesByTokenSchema.parse(d))
+/**
+ * The switches behind a settings-link token, read or written.
+ *
+ * Split out of the two server functions below so the runner can reach it at
+ * all: a `createServerFn` dies on "No Start context found in AsyncLocalStorage"
+ * (see `leads.functions.test.ts`). What is worth pinning here is the refusal
+ * path. A `null` token must cost NOTHING, and an unknown one must not write:
+ * both were a single missing `if` away from upserting a preferences row for
+ * whoever the database happened to hand back.
+ *
+ * `patch` absent means read. An empty patch is not the same thing and still
+ * writes, which is what makes "turn this back to the club default" expressible.
+ */
+export async function emailSettingsFor(
+  db: AdminClient,
+  rawToken: string | null,
+  patch?: Partial<Record<EmailPreferenceKey, boolean | null>>,
+): Promise<TokenSettings> {
+  if (!rawToken) return { ok: false };
+  const userId = await userIdForToken(db, rawToken);
+  if (!userId) return { ok: false };
+  const row = patch ? await writePreferences(db, userId, patch) : await readPreferences(db, userId);
+  return { ok: true, preferences: resolveNotificationPreferences(row) };
+}
+
+/** Read the switches behind a footer link, with no session. */
+export const getEmailSettingsPreferences = createServerFn({ method: "POST" }).handler(
+  async (): Promise<TokenSettings> => {
+    // Read before the admin client is even built: somebody who opened
+    // /email-settings with no cookie should cost a request and nothing more.
+    const raw = await settingsCookieToken();
+    if (!raw) return { ok: false };
+    return emailSettingsFor(await adminClient(), raw);
+  },
+);
+
+/** Save the switches behind a footer link, with no session.
+ *
+ * Safe to authenticate with a cookie because that cookie is `SameSite=Lax`,
+ * which a cross-site POST does not carry: a page on another origin cannot flip
+ * somebody's switches on their behalf. */
+export const saveEmailSettingsPreferences = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => notificationPreferencesSchema.parse(d))
   .handler(async ({ data }): Promise<TokenSettings> => {
-    const db = await adminClient();
-    const userId = await userIdForToken(db, data.token);
-    if (!userId) return { ok: false };
-    const { token: _token, ...patch } = data;
-    const row = await writePreferences(db, userId, patch);
-    return { ok: true, preferences: resolveNotificationPreferences(row) };
+    const raw = await settingsCookieToken();
+    if (!raw) return { ok: false };
+    return emailSettingsFor(await adminClient(), raw, data);
   });

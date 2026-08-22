@@ -1,6 +1,7 @@
 // The email switches, rendered by both places they appear: /notifications for
-// somebody signed in, and /email-settings/<token> for somebody who clicked the
-// link at the bottom of an email. One component so the two can never drift into
+// somebody signed in, and /email-settings for somebody who clicked the link at
+// the bottom of an email (that link is /email-settings/<token>, which sets a
+// cookie and redirects here). One component so the two can never drift into
 // offering different choices.
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";

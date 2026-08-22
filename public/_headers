@@ -14,7 +14,9 @@
 # middleware sets it, and it matters MORE here: this file is what covers the
 # case where a response never reached the middleware, so the middleware's own
 # no-store never ran. A URL with a credential in its path landing in a shared
-# or on-disk cache is the thing being prevented.
+# or on-disk cache is the thing being prevented. /email-settings/* is now a
+# redirect that carries a Set-Cookie, so a cached copy would hand one person's
+# settings link to the next.
 #
 # /api/calendar/* is the deliberate exception. A calendar client polls that feed
 # every few minutes, so the route sets `private, max-age=300` itself and the

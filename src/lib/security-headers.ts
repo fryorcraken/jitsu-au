@@ -7,7 +7,7 @@
  *
  *   /api/calendar/<token>      an ICS feed a calendar app polls for months
  *   /api/verify-email/<token>  an email link, single use and time bound
- *   /email-settings/<token>    the settings panel at the foot of every email
+ *   /email-settings/<token>    the settings link at the foot of every email
  *
  * A calendar client and a mail client cannot send an Authorization header or a
  * POST body, so for those three the token stays in the path. What is avoidable
@@ -15,8 +15,14 @@
  * `Referrer-Policy` the browser falls back to its own default, which still
  * sends the full URL - token and all - on every same-origin request the page
  * makes, and older or differently configured browsers send it cross-origin
- * too. `/email-settings/<token>` is a full page with a footer full of outbound
- * links, so this is not theoretical.
+ * too.
+ *
+ * The third of those is no longer a page: it exchanges the token for a
+ * short-lived cookie and redirects to a plain /email-settings, so nobody sits
+ * on a screen with a credential in the address bar (see
+ * src/lib/email-settings-session.ts). It stays on this list because that one
+ * hop still has the token in its path, and its `no-store` is now the thing
+ * stopping a cached redirect handing one person's Set-Cookie to the next.
  *
  * So the site sends `strict-origin-when-cross-origin` everywhere, and the three
  * token paths send `no-referrer`, which is the only value that keeps the path

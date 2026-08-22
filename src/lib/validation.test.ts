@@ -49,9 +49,7 @@ import {
   isUtsStudent,
   managerEmailChangeSchema,
   markNotificationsReadSchema,
-  notificationPreferencesByTokenSchema,
   notificationPreferencesSchema,
-  notificationTokenSchema,
   MAX_SCAN_BYTES,
   base64ByteLength,
   normalizeEmail,
@@ -265,40 +263,6 @@ describe("notificationPreferencesSchema", () => {
   it("rejects a non-boolean switch", () => {
     expect(() => notificationPreferencesSchema.parse({ reply_to_me: "yes" })).toThrow();
     expect(() => notificationPreferencesSchema.parse({ new_blog_post: 1 })).toThrow();
-  });
-});
-
-describe("notificationPreferencesByTokenSchema", () => {
-  // The token IS the authentication on this path, so it can never be optional.
-  it("requires a token", () => {
-    expect(() => notificationPreferencesByTokenSchema.parse({ reply_to_me: false })).toThrow();
-  });
-
-  it("carries the same switches as the signed-in patch", () => {
-    const parsed = notificationPreferencesByTokenSchema.parse({
-      token: "utsj_abc123",
-      new_blog_post: true,
-    });
-    expect(parsed).toEqual({ token: "utsj_abc123", new_blog_post: true });
-  });
-
-  it("rejects a blank token", () => {
-    expect(() => notificationPreferencesByTokenSchema.parse({ token: "   " })).toThrow();
-  });
-});
-
-describe("notificationTokenSchema", () => {
-  it("trims the token, so a copied link with stray whitespace still works", () => {
-    expect(notificationTokenSchema.parse({ token: " utsj_abc " }).token).toBe("utsj_abc");
-  });
-
-  it("rejects an empty token", () => {
-    expect(() => notificationTokenSchema.parse({ token: "" })).toThrow();
-  });
-
-  // Bounded so a hostile caller cannot make the server hash a megabyte.
-  it("rejects an absurdly long token", () => {
-    expect(() => notificationTokenSchema.parse({ token: "x".repeat(201) })).toThrow();
   });
 });
 

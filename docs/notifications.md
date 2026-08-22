@@ -452,26 +452,76 @@ so it could not have carried "has this been announced".
 ### Turning email off
 
 The switches are on `/notifications` for somebody signed in, and at
-`/email-settings/<token>` for somebody who clicked the link at the bottom of an
-email. Both render `NotificationSwitches`, so the two can never offer different
+`/email-settings` for somebody who clicked the link at the bottom of an email.
+Both render `NotificationSwitches`, so the two can never offer different
 choices.
 
-The token rides in the URL path because an email client cannot send an
-`Authorization` header, the same as `/api/calendar/<token>` and
-`/api/verify-email/<token>`. The response is **uniform**: a token that never
-existed, one that has been rotated, and a malformed one all render the same
-page. Anything else would make the endpoint a way to probe which links the club
-has issued.
+**The emailed link is not the page.** It points at
+`/email-settings/<token>`, which is a server handler with no screen of its own:
+it puts the token in a short-lived cookie, redirects to a plain
+`/email-settings`, and that is where the switches are. So the credential is
+never in the address bar, never in the back button, and never in anything
+anybody pastes. The token rides in the URL for that one hop because an email
+client cannot send an `Authorization` header, the same constraint as
+`/api/calendar/<token>` and `/api/verify-email/<token>`. Those two keep it on
+screen: a calendar app subscribes to a URL and has nowhere else to put it, and
+the verification link is single use and dead within the hour.
 
-Because the token is in the URL, the page is served with
-`Referrer-Policy: no-referrer` and `Cache-Control: no-store`, so the link never
-travels in a `Referer` header (the footer has outbound links) and never lands in
-a shared or on-disk cache. That is set for every token path at once; see
-"Security headers" in `CLAUDE.md`.
+The cookie is `HttpOnly`, `SameSite=Lax`, `Secure` on https, scoped to `/` and
+good for **six hours**. Every one of those choices, including why `Lax`
+rather than `Strict` and why `/` rather than a narrower path, is written down in
+`src/lib/email-settings-session.ts`. Four consequences worth knowing:
+
+- **Nothing expires the emailed link itself.** It stays exchangeable for as long
+  as the row lives in `notification_tokens`, so an old email still works. What
+  runs out is the six-hour session it hands you.
+- **Those six hours are the browser's, not ours.** The cookie carries the same
+  token the link does and nothing checks its age server-side, so a wholesale
+  copy of a cookie jar keeps working until the token is rotated. Enforcing an
+  age would mean signing an issued-at, which means a server secret to configure
+  and rotate. The on-screen wording promises a page that stops saving, not a
+  credential that expires, and that is why.
+- **The exchange can be pointed at somebody.** A cross-site link to
+  `/email-settings/<somebody else's token>` replaces the settings session this
+  browser held, so the next person to open the page edits the linker's
+  preferences rather than their own. Nothing leaks the other way. Closing it
+  costs a "yes, this is my link" click on every legitimate visit, which is the
+  same trade `/api/verify-email/<token>` declined.
+- **`SameSite=Lax` is what makes the save safe.** The two server functions are
+  POSTs authenticated by that cookie, and a cross-site POST does not carry a Lax
+  cookie, so a page on another origin cannot flip somebody's switches for them.
+
+The response is **uniform** at both hops. A token that never existed, one that
+has been rotated, a malformed one and no cookie at all all end up on the same
+screen. Anything else would make this a way to probe which links the club has
+issued. The exchange endpoint touches no database at all, so a stream of guesses
+costs a redirect and nothing more.
+
+`/email-settings/` still carries `Referrer-Policy: no-referrer` and
+`Cache-Control: no-store`, because the exchange hop still has a token in its
+path. The `no-store` matters more than it used to: a cached redirect would hand
+one person's `Set-Cookie` to the next. That is set for every token path at once;
+see "Security headers" in `CLAUDE.md`.
 
 The signed-out page deliberately omits the manager switch. With no session it
 cannot tell whether the person holds the role, and offering a manager-only
 choice to a member would be a lie about what they can turn on.
+
+It renders five states, not one: loading, the switches, "this link is no longer
+live" (arrived with nothing usable), "this page has been open too long" (the
+session ran out while they sat on it), and a `LoadFailure` panel with a retry
+for a read that never landed. That last one is the distinction worth keeping:
+the **uniform** answer above is about the token and only the token, and dressing
+a dropped connection up as a dead link sends somebody on bad reception hunting
+for a newer email that will fail the same way.
+
+Saving goes through `useResilientSubmit` and `SubmitStatus`, like every other
+writing form on the site, so a bad connection gets the timeout, the retries and
+a failure panel that stays on screen. It needs no `client_submission_id`: a save
+sets one named switch to one named value, so sending it twice lands on the same
+row with the same value and there is nothing a duplicate could create. What the
+panel does **not** claim is that nothing was saved, because a reply lost on the
+way back means we genuinely do not know.
 
 ## What is deliberately not built
 
@@ -532,7 +582,9 @@ Two consequences worth knowing:
 | Page and settings server fns | `src/lib/notifications.functions.ts`                                          |
 | The shared query             | `src/hooks/useNotifications.ts`                                               |
 | The page                     | `src/routes/_authenticated/notifications.tsx`                                 |
-| The signed-out settings      | `src/routes/email-settings/$token.tsx`                                        |
+| The signed-out settings      | `src/routes/email-settings/index.tsx`                                         |
+| The link exchange            | `src/routes/email-settings/$token.ts`                                         |
+| The settings cookie          | `src/lib/email-settings-session.ts`                                           |
 | The switches                 | `src/components/site/NotificationSwitches.tsx`                                |
 | The sidebar badge            | `src/components/site/MemberLayout.tsx`                                        |
 | The digest endpoint          | `src/routes/api/notifications/digest.ts`                                      |

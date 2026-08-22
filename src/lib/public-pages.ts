@@ -51,6 +51,18 @@ export const PUBLIC_PAGES: SitemapPage[] = [
  * noindex page has to be listed here or nothing ever looks at it.
  *
  * Not listed, because each needs a token or a session that only its own email
- * gives it: `/update-password`, `/email-settings/$token`, `/blog/$slug`.
+ * gives it: `/update-password`, `/blog/$slug`.
+ *
+ * `/email-settings` IS listed, even though the settings behind it need a
+ * credential. Its URL no longer carries one (`/email-settings/<token>` sets a
+ * cookie and redirects here), so it is a fixed address anybody can open, and
+ * what it shows them without that cookie is a real screen worth photographing.
  */
-export const PUBLIC_NOINDEX_PATHS = ["/waiver", "/auth", "/reset-password", "/thank-you", "/app"];
+export const PUBLIC_NOINDEX_PATHS = [
+  "/waiver",
+  "/auth",
+  "/reset-password",
+  "/thank-you",
+  "/app",
+  "/email-settings",
+];
