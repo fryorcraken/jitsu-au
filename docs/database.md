@@ -48,8 +48,9 @@ roles.
 The list below is the complete set of table privileges the client roles hold.
 Most of the app needs none of it: it reaches the database through a server
 function on the service-role client, which bypasses both grants and RLS.
-`supabase/lint/client-grants-expected.txt` pins this list and
-`.github/workflows/migration-drift.yml` checks it against the live database.
+`supabase/lint/client-grants-expected.txt` pins this list, and
+`supabase/lint/check-client-grants.py` checks it against the live database when
+somebody runs it (see `supabase/lint/README.md` — it cannot run in CI).
 
 | Table                    | Role            | Privilege | Why                                                                                                                                                                                               |
 | ------------------------ | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

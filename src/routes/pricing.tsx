@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check } from "lucide-react";
+import { MembershipCta } from "@/components/site/MembershipCta";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
@@ -163,9 +164,7 @@ function Pricing() {
           classes during the UTS summer break.
         </p>
         <div className="mt-6">
-          <Button asChild variant="outline">
-            <Link to="/membership">Join or manage your membership</Link>
-          </Button>
+          <MembershipCta />
         </div>
       </section>
 

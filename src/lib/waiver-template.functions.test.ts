@@ -351,8 +351,8 @@ describe("saveWaiverTemplateVersion", () => {
   });
 
   it("records no author when the caller resolves to no auth user", async () => {
-    // `created_by` is a real FK to auth.users, and the agent API's break-glass
-    // key has no user behind it.
+    // `created_by` is a real FK to auth.users, so a caller with nobody behind it
+    // records no author rather than a stand-in for one.
     const store = fakeStore([row({ version: 1, is_current: true })]);
     await saveWaiverTemplateVersion(store.admin, draft, null);
     expect(store.inserts[0]).toMatchObject({ created_by: null });

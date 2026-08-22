@@ -9,7 +9,7 @@
 set -euo pipefail
 
 : "${UTS_MANAGER_API_URL:?set UTS_MANAGER_API_URL, e.g. https://jitsu.au}"
-: "${UTS_MANAGER_API_KEY:?set UTS_MANAGER_API_KEY (server MANAGER_AGENT_API_KEY)}"
+: "${UTS_MANAGER_API_KEY:?set UTS_MANAGER_API_KEY (mint one at /manager/api-tokens)}"
 
 endpoint="${UTS_MANAGER_API_URL%/}/api/manager/agent"
 action="${1:-manifest}"

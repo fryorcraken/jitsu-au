@@ -3,6 +3,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/site/StatusPill";
 import { coverageClass, UNREAD_CLASS } from "@/lib/status-colours";
@@ -110,6 +112,11 @@ function CheckInPage() {
   const [board, setBoard] = useState<Board | null>(null);
   const [uncovered, setUncovered] = useState<UncoveredRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Two loads, two failures, and they mean different things: no classes on the
+  // calendar is a reason to add one, and no roster means nobody is in the room.
+  // Both used to fade with a toast and leave the ordinary empty state saying so.
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [boardError, setBoardError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [openAttach, setOpenAttach] = useState<string | null>(null);
@@ -120,26 +127,40 @@ function CheckInPage() {
   }, [rolesLoading, isManager, user, navigate]);
 
   // The class list, and the one the screen opens on: today's, or the nearest.
-  useEffect(() => {
-    if (!isManager) return;
-    fetchEvents()
+  const loadEvents = useCallback(() => {
+    setLoading(true);
+    return fetchEvents()
       .then((rows) => {
         const list = rows as EventRow[];
         setEvents(list);
         setEventId((current) => current ?? pickDefaultEvent(list, new Date())?.id ?? null);
-        setLoading(false);
+        setEventsError(null);
       })
       .catch((e) => {
-        toast.error(e instanceof Error ? e.message : "Could not load the classes");
-        setLoading(false);
-      });
-  }, [isManager, fetchEvents]);
+        const message = describeLoadError(e, "Could not load the classes");
+        setEventsError(message);
+        toast.error(message);
+      })
+      .finally(() => setLoading(false));
+  }, [fetchEvents]);
+
+  useEffect(() => {
+    if (!isManager) return;
+    void loadEvents();
+  }, [isManager, loadEvents]);
 
   const reloadBoard = useCallback(() => {
     if (!eventId) return Promise.resolve();
     return fetchBoard({ data: { event_id: eventId } })
-      .then((b) => setBoard(b as Board))
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load the roster"));
+      .then((b) => {
+        setBoard(b as Board);
+        setBoardError(null);
+      })
+      .catch((e) => {
+        const message = describeLoadError(e, "Could not load the roster");
+        setBoardError(message);
+        toast.error(message);
+      });
   }, [eventId, fetchBoard]);
 
   const reloadUncovered = useCallback(() => {
@@ -304,7 +325,17 @@ function CheckInPage() {
             This class was cancelled, so nobody can be checked in to it.
           </p>
         )}
-        {events.length === 0 && !loading && (
+        {eventsError && !loading && (
+          <LoadFailure
+            className="mt-3"
+            what="The class list"
+            message={eventsError}
+            hint="This is not the same as there being no classes on the calendar, so do not add one from here."
+            onRetry={() => void loadEvents()}
+          />
+        )}
+
+        {events.length === 0 && !eventsError && !loading && (
           <p className="mt-3 text-sm text-muted-foreground">
             A check-in has to belong to a class on the calendar.{" "}
             <Link className="underline" to="/manager/calendar">
@@ -318,6 +349,14 @@ function CheckInPage() {
       {/* ---- Here now ---- */}
       <div className="space-y-2">
         <h2 className="text-xl font-bold">Here now{board ? ` (${board.checkins.length})` : ""}</h2>
+        {boardError && (
+          <LoadFailure
+            what="The roster"
+            message={boardError}
+            hint="Nobody is listed because it could not be read, not because the mat is empty."
+            onRetry={() => void reloadBoard()}
+          />
+        )}
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-left">

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { Loading } from "@/components/site/Loading";
 import { CodeOfConductDocument } from "@/components/site/CodeOfConductDocument";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -132,7 +133,7 @@ function CodeOfConduct() {
 
         <div className="mt-8">
           {signerQ.isPending ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <Loading />
           ) : justSigned ? (
             <SignedPanel
               name={signer?.name ?? ""}
