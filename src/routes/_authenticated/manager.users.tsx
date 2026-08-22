@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadError } from "@/components/site/LoadError";
 import { LoadingPanel } from "@/components/site/LoadingPanel";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,10 @@ function ManagerUsersPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kept on screen, unlike a toast: an empty directory and a directory that
+  // could not be read look identical once a toast has faded, and only one of
+  // them means there is nobody to look at.
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Who registered interest since a manager last opened this screen, captured
   // before the watermark moved. Normalized addresses: a lead is keyed by the
   // address they typed, a person by their auth email.
@@ -79,18 +84,24 @@ function ManagerUsersPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  useEffect(() => {
-    if (!isManager) return;
-    fetchList()
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    return fetchList()
       .then((data) => {
         setRows(data as Row[]);
         setLoading(false);
       })
       .catch((e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to load users");
+        setLoadError(e instanceof Error ? e.message : "Failed to load users.");
         setLoading(false);
       });
-  }, [isManager, fetchList]);
+  }, [fetchList]);
+
+  useEffect(() => {
+    if (!isManager) return;
+    void load();
+  }, [isManager, load]);
 
   // This screen is where new interest registrations are read, so opening it is
   // what clears them off the "needs attention" list. Club-wide, like the contact
@@ -280,6 +291,13 @@ function ManagerUsersPage() {
 
         {loading ? (
           <LoadingPanel className="p-0" />
+        ) : loadError ? (
+          <LoadError
+            what="The directory"
+            detail={loadError}
+            notEmpty="This is not the same as having no members."
+            onRetry={() => void load()}
+          />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No users yet.</p>
         ) : (
