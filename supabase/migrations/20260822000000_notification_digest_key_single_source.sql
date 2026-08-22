@@ -70,51 +70,103 @@ GRANT EXECUTE ON FUNCTION public.notification_digest_key() TO service_role;
 -- it, and the endpoint reads it back through the RPC above. There is nothing
 -- left to keep in sync.
 --
--- Two guards, both load-bearing:
---
---   * `to_regprocedure`, not a bare existence assumption — same reasoning
---     20260807000000 already applies to `net.http_post`: guessing wrong would
---     not fail here, it would fail silently at 3-args-vs-something-else call
---     time. `vault.create_secret(text,text,text)` is the 3-arg
---     (secret, name, description) form this project's Vault (0.3.1, per
---     docs/notifications.md) exposes.
---   * The `IF` branches below are why a Postgres that has no Vault at all
---     (this repo's own CI, which runs `supabase db start` against a local
---     stack — see .github/workflows/supabase-lint.yml) does not fail this
---     migration: PL/pgSQL only parses and plans the SQL inside a DO block's
---     branch the first time that branch actually executes, so the
---     `vault.create_secret` call is never resolved at all when the guard
---     steers around it. That is the same lazy-compilation property the
---     `net.http_post` assertion block relies on, used here to skip instead of
---     to raise.
---   * `EXISTS (SELECT 1 FROM vault.secrets ...)`, not `vault.secrets` being
---     unreadable some other way, is what makes a replay of this migration (or
---     a rotation someone has since done by hand) leave an existing secret
---     alone rather than overwrite it with a fresh random value that would
---     immediately stop matching what pg_cron and the endpoint had agreed on.
---
--- pgcrypto supplies `gen_random_bytes`. Supabase ships it enabled by default on
--- every project (unlike pg_cron/pg_net above, which are opt-in), but asserting
--- it the same defensive way costs nothing and this is the one statement in this
--- file that would otherwise depend on that assumption being true.
+-- pgcrypto supplies `gen_random_bytes`, the CSPRNG behind the secret's value
+-- (not pg_catalog's gen_random_uuid, which is structured and carries far
+-- fewer bits of real entropy). `CREATE EXTENSION IF NOT EXISTS ... WITH
+-- SCHEMA extensions` only picks that schema on a FRESH install — Postgres
+-- checks extension existence by NAME alone, so if pgcrypto is already
+-- installed somewhere else (schema `public`, say, on an older project) this
+-- line is a silent no-op and its functions stay where they already are. The
+-- explicit check below is what makes this the same defensive stance
+-- 20260807000000 takes with `net.http_post`: a wrong assumption about the
+-- schema has to raise loudly here, naming what was actually found, rather
+-- than surfacing three lines later as a bare "function does not exist" from
+-- the `PERFORM vault.create_secret(...)` call.
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 DO $$
+DECLARE
+  found_in TEXT;
 BEGIN
-  IF to_regprocedure('vault.create_secret(text,text,text)') IS NULL THEN
+  IF to_regprocedure('extensions.gen_random_bytes(integer)') IS NULL THEN
+    SELECT string_agg(DISTINCT n.nspname || '.' || p.proname
+                      || '(' || pg_get_function_arguments(p.oid) || ')', '; ')
+      INTO found_in
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE p.proname = 'gen_random_bytes';
+    RAISE EXCEPTION
+      'extensions.gen_random_bytes(integer) not found (found: %). pgcrypto is installed in a different schema; update this migration to reference it there.',
+      COALESCE(found_in, 'nothing named gen_random_bytes');
+  END IF;
+END;
+$$;
+
+-- Two DIFFERENT reasons `vault.create_secret` might be uncallable, and only
+-- one of them is safe to shrug off:
+--
+--   * Vault is not installed at all — `vault.secrets` does not exist. That is
+--     this repo's own CI (`supabase db start` / `supabase start` against a
+--     throwaway local Postgres — see .github/workflows/supabase-lint.yml and
+--     e2e.yml), which has no Vault and is expected never to. Skip and say so.
+--   * Vault IS installed, but not with the `create_secret(text,text,text)`
+--     3-arg (secret, name, description) overload this call assumes — a
+--     version skew this project has not seen but a future Vault release
+--     could introduce. This is NOT safe to skip: reporting success while
+--     minting nothing is exactly the "a green migration means the code ran,
+--     not that the work happened" failure this whole PR exists to fix. Raise
+--     instead, naming every overload actually found, so applying this fails
+--     loudly while a human is watching rather than leaving the digest looking
+--     armed when `vault.secrets` never got a row.
+--
+-- `to_regclass`, not `to_regprocedure`, for the presence check: `vault.secrets`
+-- is a TABLE, and to_regclass is the catalog lookup for relations (tables,
+-- views, etc.), the counterpart to to_regprocedure for routines.
+--
+-- The `IF`/`ELSIF` branches are also why a Vault-less Postgres does not fail
+-- this migration at all: PL/pgSQL only parses and plans the SQL inside a DO
+-- block's branch the first time that branch actually executes, so
+-- `vault.secrets` and `vault.create_secret` are never resolved when the guard
+-- steers around them — the same lazy-compilation property the `net.http_post`
+-- assertion block in 20260807000000 relies on.
+DO $$
+DECLARE
+  found_in TEXT;
+BEGIN
+  IF to_regclass('vault.secrets') IS NULL THEN
     RAISE NOTICE
-      'vault.create_secret not available; skipping notification_digest_key creation (expected on a Postgres with no Vault, e.g. this repo''s own CI)';
+      'vault is not installed; skipping notification_digest_key creation (expected on a Postgres with no Vault, e.g. this repo''s own CI)';
   ELSIF EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'notification_digest_key') THEN
     RAISE NOTICE 'notification_digest_key already exists in Vault; leaving it as is';
+  ELSIF to_regprocedure('vault.create_secret(text,text,text)') IS NULL THEN
+    SELECT string_agg(DISTINCT n.nspname || '.' || p.proname
+                      || '(' || pg_get_function_arguments(p.oid) || ')', '; ')
+      INTO found_in
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE p.proname = 'create_secret';
+    RAISE EXCEPTION
+      'vault is installed but vault.create_secret(text,text,text) was not found (found: %). notification_digest_key was NOT created; update this migration before relying on it.',
+      COALESCE(found_in, 'nothing named create_secret');
   ELSE
-    -- extensions.gen_random_bytes: pgcrypto's CSPRNG, not pg_catalog's
-    -- gen_random_uuid (structured, far fewer bits of real entropy). pgcrypto
-    -- is asserted above, the same defensive stance 20260807000000 takes with
-    -- pg_cron/pg_net, rather than assuming a Supabase project always has it.
     PERFORM vault.create_secret(
       encode(extensions.gen_random_bytes(32), 'hex'),
       'notification_digest_key'
     );
+  END IF;
+END;
+$$;
+
+-- Belt and braces on top of the branching above: whichever path was taken,
+-- if Vault is installed the secret has to actually be there afterwards. This
+-- is what catches a bug in the branching itself (or a future edit to it) —
+-- the migration still applies "successfully" by Postgres's own measure
+-- without this, exactly the silent-green failure item 1 of the review this
+-- migration answers to was about.
+DO $$
+BEGIN
+  IF to_regclass('vault.secrets') IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'notification_digest_key') THEN
+    RAISE EXCEPTION
+      'notification_digest_key is still missing from vault.secrets after this migration ran. The digest cannot be armed until it exists.';
   END IF;
 END;
 $$;

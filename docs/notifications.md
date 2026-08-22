@@ -405,6 +405,23 @@ without a redeploy leaves the deployed site checking against the old value**
 until the next publish. Rotate, then publish, in that order — the reverse gives
 a window where every run 401s.
 
+**Publishing shrinks that window, it does not close it.** The cache is
+per-worker-isolate, and Cloudflare gives no guarantee that every edge isolate
+picks up a new deploy at the same instant: an already-warm isolate can keep
+answering with the OLD key until it happens to cycle, independent of when the
+publish finished. So an old key can still be accepted for a while after
+"rotate, then publish" — this is why rotating at all is worth doing (new
+requests move to the new key as isolates cycle), not a claim that the old one
+stops working the moment you publish.
+
+That matters most for the reason anyone rotates a shared secret outside routine
+hygiene: it leaked. Say what this credential actually buys somebody who still
+has the old value during that tail: one POST that triggers a mail send, gated
+by the same per-person-per-day idempotency key everyone else's runs use, and
+nothing else — no read access to member data, no write path. Small blast
+radius, but the docs should not imply the old key stops working the instant you
+publish, because it does not.
+
 ### A post goes live
 
 `createBlogPost` and `updateBlogPost` announce on the transition **into**

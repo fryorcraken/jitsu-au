@@ -1187,11 +1187,17 @@ than by a runbook step someone has to remember:
 - **The secret is minted by the migration itself**, with
   `vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'),
   'notification_digest_key')`, guarded so it only runs once (an existing secret
-  is left alone) and only where `vault.create_secret` actually exists (guarded
-  with `to_regprocedure`, the same defensive pattern `20260807000000` already
-  uses for `net.http_post`, so this repo's own CI — a local Postgres with no
-  Vault — replays the migration as a no-op rather than a failure). Nobody ever
-  sees, types, or copies the value.
+  is left alone). The guard distinguishes two different reasons the call might
+  not be possible, and treats them oppositely: Vault genuinely absent (`to_
+  regclass('vault.secrets') IS NULL`, this repo's own CI — a local Postgres
+  with no Vault) is a safe `RAISE NOTICE` and skip, the same defensive pattern
+  `20260807000000` already uses for `net.http_post`; Vault present but without
+  the `create_secret(text,text,text)` overload this call assumes is NOT safe to
+  skip, and `RAISE EXCEPTION`s instead, naming what it actually found — a
+  silent skip there would report success while minting nothing, exactly the
+  failure this whole migration exists to eliminate. A closing assertion checks,
+  whichever branch ran, that `vault.secrets` now actually holds the row when
+  Vault is present at all. Nobody ever sees, types, or copies the value.
 
 **`public.notification_digest_key() → text`** is the other new piece: a
 `SECURITY DEFINER` lookup into `vault.decrypted_secrets`, same shape as
