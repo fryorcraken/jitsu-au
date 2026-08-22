@@ -12,6 +12,7 @@
 // know who is reading, and the reader's bearer token reaches a server function
 // through `attachSupabaseAuth` on an RPC from the browser, not during SSR.
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -224,7 +225,7 @@ function ArticlePage() {
   }
 
   if (authLoading || articleQ.isPending || redirectTo) {
-    return <p className="text-muted-foreground">Loading...</p>;
+    return <LoadingPanel className="p-0" />;
   }
 
   if (articleQ.isError || !article || !viewer) {

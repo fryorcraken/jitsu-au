@@ -5,6 +5,7 @@
 // to a crawler that cannot read any of them. See docs/knowledge-base.md ("SEO")
 // for what making one article indexable would take.
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { ArrowRight, Check, ExternalLink, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useKbNav } from "@/hooks/useKbNav";
@@ -104,7 +105,7 @@ function KnowledgeBaseIndex() {
         </div>
       )}
 
-      {loading && <p className="mt-10 text-sm text-muted-foreground">Loading...</p>}
+      {loading && <LoadingPanel className="mt-10 p-0" />}
 
       {!loading && !nav.length && (
         <p className="mt-10 text-sm text-muted-foreground">

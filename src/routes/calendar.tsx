@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -211,7 +212,7 @@ function CalendarPage() {
 
       <section className="mx-auto max-w-4xl px-4 pb-20">
         {loading ? (
-          <p className="text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : groups.length === 0 ? (
           <p className="text-muted-foreground">Nothing scheduled right now. Check back soon.</p>
         ) : (

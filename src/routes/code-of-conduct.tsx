@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
@@ -132,7 +133,7 @@ function CodeOfConduct() {
 
         <div className="mt-8">
           {signerQ.isPending ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <LoadingPanel className="p-0" />
           ) : justSigned ? (
             <SignedPanel
               name={signer?.name ?? ""}

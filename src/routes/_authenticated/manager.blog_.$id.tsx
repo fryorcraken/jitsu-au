@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -107,7 +108,7 @@ function EditBlogPostPage() {
     [post],
   );
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <LoadingPanel />;
   if (!post || !initial) return null;
 
   return (

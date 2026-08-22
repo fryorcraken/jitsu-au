@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -80,7 +81,7 @@ function ManagerMembershipsPage() {
         </div>
 
         {loading ? (
-          <p>Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No memberships yet.</p>
         ) : (

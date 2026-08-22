@@ -19,6 +19,7 @@
 // wanted fewer announcements should not lose replies as well, which is what a
 // single "you are unsubscribed from everything" button would cost them.
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -104,7 +105,7 @@ function EmailSettingsPage() {
           </p>
         </div>
 
-        {state === "loading" && <p className="text-sm text-muted-foreground">Loading...</p>}
+        {state === "loading" && <LoadingPanel className="p-0" />}
 
         {state === "unavailable" && (
           <Card>

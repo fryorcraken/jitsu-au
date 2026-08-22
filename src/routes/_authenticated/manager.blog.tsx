@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -68,7 +69,7 @@ function BlogPostsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <LoadingPanel />;
 
   return (
     <section className="mx-auto max-w-5xl space-y-6 px-4 py-10">

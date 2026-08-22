@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -382,7 +383,7 @@ function AboutYouCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
@@ -473,7 +474,7 @@ function KitSizingCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
@@ -596,7 +597,7 @@ function ContactCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
@@ -738,7 +739,7 @@ function MediaConsentCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -824,7 +825,7 @@ function WaiversCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : waivers.length === 0 ? (
           <p className="text-sm text-muted-foreground">No waivers on file yet.</p>
         ) : (
@@ -902,7 +903,7 @@ function CodeOfConductCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : state === "signed" ? (
           <p className="text-sm text-muted-foreground">
             You agreed to version {acceptedVersion} on {formatDate(acceptedAt)}.
@@ -1050,7 +1051,7 @@ function GoogleDriveCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : connected ? (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">

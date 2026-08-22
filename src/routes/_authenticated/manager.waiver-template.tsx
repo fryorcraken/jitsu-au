@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -253,7 +254,7 @@ function EditorPage() {
   if (loading)
     return (
       <>
-        <div className="p-8">Loading...</div>
+        <LoadingPanel />
       </>
     );
 

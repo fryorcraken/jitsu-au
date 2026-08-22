@@ -7,6 +7,7 @@
 // feature actually has: several articles rather than one, a visibility setting,
 // and a feedback panel.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -1240,7 +1241,7 @@ function KnowledgeBaseManager() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <LoadingPanel />;
 
   // The same `isSectionDirty` the discard prompt consults, so "there is nothing
   // to save" and "there is nothing to lose" can never disagree.
@@ -1693,7 +1694,11 @@ function KnowledgeBaseManager() {
                         ? "Create and publish"
                         : "Save as new version"}
                 </Button>
-                {busy && <span className="text-xs text-muted-foreground">Loading...</span>}
+                {busy && (
+                  <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+                    Loading
+                  </span>
+                )}
                 {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
               </div>
             </>

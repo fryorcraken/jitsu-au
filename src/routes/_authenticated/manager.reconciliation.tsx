@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -147,7 +148,7 @@ function ReconciliationPage() {
         </Card>
 
         {loading ? (
-          <p>Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : (
           <Card>
             <CardHeader>

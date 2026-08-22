@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -648,7 +649,7 @@ function ManagerUserPage() {
   if (loading) {
     return (
       <section className="mx-auto max-w-5xl px-4 py-10">
-        <p>Loading...</p>
+        <LoadingPanel className="p-0" />
       </section>
     );
   }

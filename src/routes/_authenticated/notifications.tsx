@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -163,7 +164,7 @@ function NotificationsPage() {
           )}
         </CardHeader>
         <CardContent>
-          {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+          {loading && <LoadingPanel className="p-0" />}
           {data && data.items.length === 0 && (
             <p className="text-sm text-muted-foreground">
               Nothing yet. Replies to your comments will show up here.
@@ -212,7 +213,7 @@ function NotificationsPage() {
               isManager={data?.isManager}
             />
           ) : (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <LoadingPanel className="p-0" />
           )}
         </CardContent>
       </Card>

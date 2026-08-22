@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -546,7 +547,7 @@ function ManagerCalendarPage() {
       <div className="space-y-4">
         <h2 className="text-xl font-bold">What's coming up</h2>
         {loading ? (
-          <p className="text-muted-foreground">Loading...</p>
+          <LoadingPanel className="p-0" />
         ) : events.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing on the calendar yet.</p>
         ) : (
@@ -794,7 +795,13 @@ function ManagerCalendarPage() {
                         <tr className="border-t bg-muted/30">
                           <td colSpan={6} className="px-3 py-3">
                             {rsvpLoading ? (
-                              <p className="text-xs text-muted-foreground">Loading...</p>
+                              <p
+                                role="status"
+                                aria-live="polite"
+                                className="text-xs text-muted-foreground"
+                              >
+                                Loading
+                              </p>
                             ) : rsvpRows.length === 0 ? (
                               <p className="text-xs text-muted-foreground">
                                 Nobody has replied yet.

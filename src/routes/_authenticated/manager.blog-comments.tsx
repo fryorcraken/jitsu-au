@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -138,7 +139,7 @@ function BlogCommentsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <LoadingPanel />;
 
   const blockedUserIds = new Set(blocked.map((b) => b.user_id));
   const replyCountByParent = countRepliesByParent(comments);
