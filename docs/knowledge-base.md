@@ -238,10 +238,10 @@ From the member area: the sidebar's first item, and a card at the top of
 
 The waiver-confirmation email **mentions** the knowledge base and deliberately
 does not link to it. Whoever is reading that email cannot sign in yet: their
-account is created locked, and a manager approving the waiver is what opens it.
-A link there would land a brand-new person on a sign-in screen they have no
-account for. The **account-activated** email sent at approval does link it, by
-which point they can get in.
+account is created locked, and a manager approving the waiver is what opens it
+(`docs/waivers.md`, rule 6). A link there would land a brand-new person on a
+sign-in screen they have no account for. The **account-activated** email sent at
+approval does link it, by which point they can get in.
 
 ## Private notes and shared threads
 
