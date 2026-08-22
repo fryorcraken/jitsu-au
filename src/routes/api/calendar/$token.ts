@@ -1,15 +1,20 @@
 // Per-person ICS calendar feed: GET /api/calendar/<token>
 //
 // The token rides in the URL path (calendar apps can't send an auth header). We
-// hash it and look up a live calendar_feed_tokens row; the feed then carries that
+// hash it and look up the calendar_feed_tokens row; the feed then carries that
 // person's events — public always, plus members-only ones if they are a PAID
 // member (or a manager). There is deliberately no public/anon feed, so a
 // subscriber never silently misses a members-only event.
+//
+// A row whose owner has REPLACED their link is looked up too, rather than
+// filtered out, so the old address can say what happened instead of reading as
+// a typo. feedTokenVerdict owns that call.
 //
 // All DB access uses the service-role client, lazy-imported (route files ship to
 // the client bundle, so it must never be a top-level import).
 import { createFileRoute } from "@tanstack/react-router";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { feedTokenVerdict, UNKNOWN_LINK_MESSAGE } from "@/lib/calendar-feed-token";
 import { buildCalendar, type IcsEvent } from "@/lib/ics";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
 import type { CalendarClient, CalendarFeedSelection } from "@/lib/calendar-types";
@@ -57,19 +62,28 @@ export const Route = createFileRoute("/api/calendar/$token")({
     handlers: {
       GET: async ({ params }) => {
         const raw = params.token;
-        if (!raw) return textResponse("Calendar not found.", 404);
+        if (!raw) return textResponse(UNKNOWN_LINK_MESSAGE, 404);
 
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const admin = supabaseAdmin as unknown as CalendarClient;
 
         const token_hash = await hashToken(raw);
-        const { data: tokenRow } = await admin
+        // No `.is("revoked_at", null)` filter: token_hash is unique across the
+        // whole table, so this still matches at most one row, and a replaced
+        // one has to come back so the verdict can tell the two cases apart.
+        const { data: lookup, error: lookupError } = await admin
           .from("calendar_feed_tokens")
-          .select("id, user_id")
+          .select("id, user_id, revoked_at")
           .eq("token_hash", token_hash)
-          .is("revoked_at", null)
           .maybeSingle();
-        if (!tokenRow) return textResponse("Calendar not found.", 404);
+        // Surfaced rather than folded into `lookup === null`. This route's whole
+        // job is telling a live link, a replaced one and a made-up one apart, and
+        // a database blip answering "no such calendar" to a subscriber holding a
+        // perfectly good token is the one wrong answer of the three.
+        if (lookupError) return textResponse("Could not build calendar.", 500);
+        const verdict = feedTokenVerdict(lookup);
+        if (!verdict.serve) return textResponse(verdict.message, verdict.status);
+        const tokenRow = verdict.row;
 
         // Best-effort usage stamp — never blocks the feed. A PostgrestBuilder is
         // a lazy thenable: `void builder` would never issue the request, so the

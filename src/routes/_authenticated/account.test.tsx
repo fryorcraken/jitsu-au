@@ -54,6 +54,13 @@ vi.mock("@/lib/waiver.functions", () => ({
   getWaiverPdfUrl: vi.fn(),
 }));
 
+vi.mock("@/lib/calendar.functions", () => ({
+  getMyCalendarFeedUrl: vi.fn().mockResolvedValue({
+    url: "https://jitsu.au/api/calendar/utsj_000000000000",
+  }),
+  replaceMyCalendarFeedUrl: vi.fn(),
+}));
+
 vi.mock("@/lib/code-of-conduct.functions", () => ({
   getCodeOfConductSigner: vi.fn().mockResolvedValue({ status: null }),
 }));
