@@ -297,6 +297,24 @@ describe("/account", () => {
     expect(screen.queryByText("We couldn't load your details")).toBeNull();
   });
 
+  // "No waivers on file yet." is the one sentence on that card a member acts
+  // on, by going and signing a waiver they have already signed. It has to be
+  // true when it is said.
+  it("does not claim a member has no waivers when the list failed to load", async () => {
+    const user = userEvent.setup();
+    const { listMyWaivers } = await import("@/lib/waiver.functions");
+    vi.mocked(listMyWaivers).mockRejectedValueOnce(new Error("network"));
+
+    render(<AccountPage />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Your waivers could not be loaded.");
+    expect(screen.queryByText("No waivers on file yet.")).toBeNull();
+
+    await user.click(within(alert).getByRole("button", { name: /try again/i }));
+    expect(await screen.findByText("No waivers on file yet.")).toBeInTheDocument();
+  });
+
   it("offers nothing that would edit the legal name, date of birth or email", async () => {
     await renderLoaded();
     // These are evidence a signed waiver froze, or the person's identity. The

@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { CalendarPlus, Clock, MapPin, User } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { Loading } from "@/components/site/Loading";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getCalendar, getMyCalendarFeedUrl, getMyRsvps, setRsvp } from "@/lib/calendar.functions";
@@ -211,7 +212,7 @@ function CalendarPage() {
 
       <section className="mx-auto max-w-4xl px-4 pb-20">
         {loading ? (
-          <p className="text-muted-foreground">Loading...</p>
+          <Loading />
         ) : groups.length === 0 ? (
           <p className="text-muted-foreground">Nothing scheduled right now. Check back soon.</p>
         ) : (

@@ -37,6 +37,13 @@ This is the club's reading for the people who train here, not marketing. So:
   and the top bar carries the same link. On a phone the drawer is the only
   navigation on screen, so the way out cannot live only in the top bar. Neither
   of them waits on the article list loading.
+- The contents has **three** states, not two. "Loading", "there is nothing in
+  the knowledge base yet", and "the contents could not be loaded". The third
+  one used to be folded into the second: `useKbNav` reported only
+  `query.isLoading`, which is false once a query has rejected, so `/kb` sat on
+  "Loading..." for good and the sidebar told a member the club had written
+  nothing. It now returns `error` and `refetch`, and both `/kb` and the sidebar
+  render a failure panel with a retry in place of the empty state.
 
 The gate is enforced twice on purpose, and the two are not the same thing. The
 route redirect is a courtesy for a person; `canReadArticle` (`src/lib/kb.ts`)

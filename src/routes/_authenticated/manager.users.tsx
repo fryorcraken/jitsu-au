@@ -5,6 +5,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/site/StatusPill";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { formatDate } from "@/lib/dates";
 import {
   ROLE_CLASS,
@@ -45,6 +48,7 @@ function ManagerUsersPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Who registered interest since a manager last opened this screen, captured
   // before the watermark moved. Normalized addresses: a lead is keyed by the
   // address they typed, a person by their auth email.
@@ -61,18 +65,28 @@ function ManagerUsersPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return fetchList()
+        .then((data) => {
+          setRows(data as Row[]);
+          setLoadError(null);
+        })
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load the members");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [fetchList],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    fetchList()
-      .then((data) => {
-        setRows(data as Row[]);
-        setLoading(false);
-      })
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : "Failed to load users");
-        setLoading(false);
-      });
-  }, [isManager, fetchList]);
+    void load();
+  }, [isManager, load]);
 
   // This screen is where new interest registrations are read, so opening it is
   // what clears them off the "needs attention" list. Club-wide, like the contact
@@ -239,7 +253,14 @@ function ManagerUsersPage() {
         </div>
 
         {loading ? (
-          <p>Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="The member list"
+            message={loadError}
+            hint="This is not the same as the club having no members."
+            onRetry={() => void load()}
+          />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No users yet.</p>
         ) : (

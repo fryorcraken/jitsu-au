@@ -1,11 +1,14 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Pill } from "@/components/site/StatusPill";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +52,7 @@ function BlogCommentsPage() {
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [blocked, setBlocked] = useState<BlockedRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Two separate id-spaces — a comment id and its author's user id are never
   // the same value, but keying both actions off one shared `busyId` state
   // meant blocking an author never disabled anything in the Blocked
@@ -72,13 +76,29 @@ function BlogCommentsPage() {
     ]);
   }
 
+  // `refresh()` on its own is called after a hide or a block, where the action's
+  // own handler reports a failure; this wrapper is the one the screen loads
+  // through and the one "Try again" repeats.
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return refresh()
+        .then(() => setLoadError(null))
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load comments");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    refresh()
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load comments"))
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isManager]);
+    void load();
+  }, [isManager, load]);
 
   async function confirmHide() {
     if (!hideTarget) return;
@@ -138,7 +158,7 @@ function BlogCommentsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <Loading className="p-8" />;
 
   const blockedUserIds = new Set(blocked.map((b) => b.user_id));
   const replyCountByParent = countRepliesByParent(comments);
@@ -153,7 +173,14 @@ function BlogCommentsPage() {
         </p>
       </div>
 
-      {comments.length === 0 ? (
+      {loadError ? (
+        <LoadFailure
+          what="The comments"
+          message={loadError}
+          hint="This is not the same as there being nothing to moderate."
+          onRetry={() => void load()}
+        />
+      ) : comments.length === 0 ? (
         <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -278,7 +305,11 @@ function BlogCommentsPage() {
         <p className="text-sm text-muted-foreground">
           People blocked from commenting anywhere on the blog.
         </p>
-        {blocked.length === 0 ? (
+        {loadError ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            This list could not be loaded either, so it is not saying nobody is blocked.
+          </p>
+        ) : blocked.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">Nobody is blocked.</p>
         ) : (
           <div className="mt-3 overflow-x-auto rounded-lg border">
