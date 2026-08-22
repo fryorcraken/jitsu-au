@@ -6,29 +6,36 @@
 // the address bar, the history, or anything anybody pastes. What the cookie is
 // and why it is set the way it is: src/lib/email-settings-session.ts.
 //
-// The response is deliberately UNIFORM. No cookie, an expired one, a rotated
-// token and a token that never existed all produce the same screen. Anything
-// else would make this page a way to probe which links the club has issued, and
-// the visitor has nothing useful to do with the difference anyway.
+// The UNIFORM response is about the token and only the token: no cookie, an
+// expired one, a rotated one and one that never existed all produce the same
+// screen, because anything else would make this page a way to probe which links
+// the club has issued. A dropped connection is NOT that, and must not be dressed
+// up as it: telling somebody on bad reception that their link is dead sends them
+// hunting for a newer email that will fail in exactly the same way. So a request
+// that never landed gets `LoadFailure` and a retry, like every other screen here.
 //
 // This is a settings PANEL, not a one-click unsubscribe. Somebody who only
 // wanted fewer announcements should not lose replies as well, which is what a
 // single "you are unsubscribed from everything" button would cost them.
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertTriangle, RefreshCw } from "lucide-react";
 
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Loading } from "@/components/site/Loading";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NotificationSwitches } from "@/components/site/NotificationSwitches";
+import { useResilientSubmit } from "@/hooks/use-resilient-submit";
+import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { buildPageMeta } from "@/lib/seo";
 import type { EmailPreferenceKey } from "@/lib/notifications";
 import {
   getEmailSettingsPreferences,
   saveEmailSettingsPreferences,
+  type TokenSettings,
 } from "@/lib/notifications.functions";
 
 export const Route = createFileRoute("/email-settings/")({
@@ -47,7 +54,8 @@ export const Route = createFileRoute("/email-settings/")({
     links: [{ rel: "canonical", href: "https://jitsu.au/email-settings" }],
   }),
   // No SSR. Nothing about one person's settings should travel through a server
-  // render into HTML that might be held anywhere along the way.
+  // render into HTML that might be held anywhere along the way. The `head()`
+  // above still renders server-side, so the `noindex` reaches a crawler.
   ssr: false,
   component: EmailSettingsPage,
 });
@@ -59,8 +67,10 @@ export const Route = createFileRoute("/email-settings/")({
  * they get different words for it. Somebody who lands on `gone` never got in;
  * somebody who hits `lapsed` was reading their own switches a minute ago and
  * needs to be told the session ran out rather than that their link is broken.
+ * `failed` is neither: the request itself did not land, and the answer to that
+ * is a retry, not an explanation.
  */
-type PageState = "loading" | "ready" | "gone" | "lapsed";
+type PageState = "loading" | "ready" | "gone" | "lapsed" | "failed";
 
 function SignInCard({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -81,69 +91,93 @@ function SignInCard({ title, children }: { title: string; children: ReactNode })
 function EmailSettingsPage() {
   const load = useServerFn(getEmailSettingsPreferences);
   const save = useServerFn(saveEmailSettingsPreferences);
+  // The same retry driver every writing form on this site uses. It brings the
+  // timeout, the automatic retries, the offline state and a failure panel that
+  // stays on screen with a button in it.
+  //
+  // No `client_submission_id` and no `confirm`, which the intake forms need and
+  // this does not: a save here sets a named switch to a named value, so sending
+  // it twice lands on the same row with the same value. There is nothing a
+  // duplicate could create.
+  const send = useResilientSubmit<TokenSettings>(INTAKE_SUBMIT);
 
   const [prefs, setPrefs] = useState<Record<EmailPreferenceKey, boolean> | null>(null);
   const [state, setState] = useState<PageState>("loading");
-  const [saving, setSaving] = useState(false);
-  // A save that could not reach us, kept on screen with the switch it was for.
-  // Not a toast: a toast fades, and somebody who thinks they turned emails off
-  // and did not will find out from their inbox a week later.
-  const [failed, setFailed] = useState<{ key: EmailPreferenceKey; next: boolean } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // The switch a failed save was for, so "Try again" resends that same change
+  // rather than needing the person to find it and flip it a second time.
+  const pending = useRef<{ key: EmailPreferenceKey; next: boolean } | null>(null);
+
+  const runLoad = useCallback(
+    (isCancelled: () => boolean = () => false) => {
+      setState("loading");
+      setLoadError(null);
+      return load({})
+        .then((result) => {
+          if (isCancelled()) return;
+          if (result.ok) {
+            setPrefs(result.preferences);
+            setState("ready");
+          } else {
+            setState("gone");
+          }
+        })
+        .catch((e: unknown) => {
+          if (isCancelled()) return;
+          // Not "your link is dead". See the note at the top of this file.
+          setLoadError(e instanceof Error ? e.message : null);
+          setState("failed");
+        });
+    },
+    [load],
+  );
 
   useEffect(() => {
-    let live = true;
-    load({})
-      .then((result) => {
-        if (!live) return;
-        if (result.ok) {
-          setPrefs(result.preferences);
-          setState("ready");
-        } else {
-          setState("gone");
-        }
-      })
-      // A failed request and an unknown token land in the same place on
-      // purpose. See the uniform-response note at the top of this file.
-      .catch(() => {
-        if (live) setState("gone");
-      });
+    let cancelled = false;
+    void runLoad(() => cancelled);
     return () => {
-      live = false;
+      cancelled = true;
     };
-  }, [load]);
+  }, [runLoad]);
 
   const applySwitch = useCallback(
-    (key: EmailPreferenceKey, next: boolean) => {
+    async (key: EmailPreferenceKey, next: boolean) => {
+      pending.current = { key, next };
       // Optimistic. A switch that waits for a round trip before it moves feels
       // broken, so it moves now and goes back if the save does not land.
       const previous = prefs;
       setPrefs((p) => (p ? { ...p, [key]: next } : p));
-      setSaving(true);
-      setFailed(null);
-      save({ data: { [key]: next } })
-        .then((result) => {
-          if (result.ok) {
-            setPrefs(result.preferences);
-            return;
-          }
-          // The cookie ran out (or was replaced) while this page sat open.
-          // Nothing further on this page will work, so say so rather than
-          // letting them flip switches into the void.
-          setPrefs(previous);
-          setState("lapsed");
-        })
-        .catch(() => {
-          setPrefs(previous);
-          setFailed({ key, next });
-        })
-        .finally(() => setSaving(false));
+
+      const outcome = await send.submit({
+        run: (signal) => save({ signal, data: { [key]: next } }),
+      });
+
+      if (!outcome.ok) {
+        // Every attempt is spent and we never heard back, so we do not know
+        // whether the last one landed. Show the last value we were actually
+        // told about and let `SubmitStatus` say the rest.
+        setPrefs(previous);
+        return;
+      }
+      if (outcome.value.ok) {
+        pending.current = null;
+        setPrefs(outcome.value.preferences);
+        return;
+      }
+      // The cookie ran out, or was replaced, while this page sat open. Nothing
+      // further on this page will work, so say so rather than letting them flip
+      // switches into the void.
+      pending.current = null;
+      setPrefs(previous);
+      setState("lapsed");
     },
-    [prefs, save],
+    [prefs, save, send],
   );
 
-  const retry = useCallback(() => {
-    if (failed) applySwitch(failed.key, failed.next);
-  }, [applySwitch, failed]);
+  const retrySave = useCallback(() => {
+    const again = pending.current;
+    if (again) void applySwitch(again.key, again.next);
+  }, [applySwitch]);
 
   return (
     <SiteLayout>
@@ -157,19 +191,28 @@ function EmailSettingsPage() {
 
         {state === "loading" && <Loading label="Loading your email settings..." />}
 
+        {state === "failed" && (
+          <LoadFailure
+            what="Your email choices"
+            message={loadError}
+            hint="This is not the same as your link having expired. Nothing has changed."
+            onRetry={() => void runLoad()}
+          />
+        )}
+
         {state === "gone" && (
           <SignInCard title="This link is no longer live">
-            A settings link stops working after a while, and each new email brings a fresh one. Open
-            the most recent email we sent you, or sign in and change everything from your
-            notifications page.
+            A settings link stops working once it has been replaced, and each new email brings a
+            fresh one. Open the most recent email we sent you, or sign in and change everything from
+            your notifications page.
           </SignInCard>
         )}
 
         {state === "lapsed" && (
           <SignInCard title="This page has been open too long">
-            We keep these links usable for half an hour, so nobody else can pick up where you left
-            off. Nothing you changed before now is lost. Open the link at the bottom of any email
-            from us to carry on, or sign in and use your notifications page.
+            This page stops saving after a while, so it does not sit open on a borrowed screen.
+            Nothing you changed before now is lost. Open the link at the bottom of any email from us
+            to carry on, or sign in and use your notifications page.
           </SignInCard>
         )}
 
@@ -185,28 +228,26 @@ function EmailSettingsPage() {
                   manager-only choice to a member would be a lie about what
                   they can turn on. Managers have the full set on
                   /notifications. */}
-              <NotificationSwitches values={prefs} onChange={applySwitch} disabled={saving} />
+              <NotificationSwitches
+                values={prefs}
+                onChange={(key, next) => void applySwitch(key, next)}
+                disabled={send.busy}
+              />
 
-              {failed && (
-                <div
-                  className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4"
-                  role="alert"
-                >
-                  <p className="flex items-start gap-2 text-sm font-medium">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-                    We couldn't save that change.
-                  </p>
+              <SubmitStatus
+                status={send.status}
+                attempt={send.attempt}
+                attempts={send.attempts}
+                error={send.error}
+                failureKind={send.failureKind}
+                onRetry={retrySave}
+                fallback={
                   <p className="text-sm text-muted-foreground">
-                    The switch is back where it was, so nothing has changed. Check your signal and
-                    try again.
+                    We could not confirm that one, so it may or may not have saved. The switch shows
+                    the last setting we know about. Try again and we will set it either way.
                   </p>
-                  <Button type="button" variant="outline" size="sm" onClick={retry}>
-                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Try again
-                  </Button>
-                </div>
-              )}
-
-              {saving && <Loading label="Saving..." />}
+                }
+              />
             </CardContent>
           </Card>
         )}

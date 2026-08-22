@@ -37,6 +37,23 @@
  * needs to read four switches. It expiring while the page is open is a state
  * the page renders, not an error it swallows.
  *
+ * Two limits worth knowing, both deliberate:
+ *
+ * - **The half hour is the browser's, not ours.** The cookie carries the same
+ *   token the emailed link does, and `notification_tokens` rows do not expire,
+ *   so anything that copies a cookie jar wholesale (a restored backup, a
+ *   profile copy, an extension) keeps working until the token is rotated.
+ *   Enforcing an age server-side means signing an issued-at, which means a new
+ *   server secret to configure and rotate, and it would only stop somebody who
+ *   already has a credential that reads the same person's email. So the page's
+ *   copy claims a page that stops saving, not a credential that expires.
+ * - **The exchange can be pointed at somebody.** A cross-site link to
+ *   `/email-settings/<their token>` replaces whatever settings session this
+ *   browser held, so the next person to open `/email-settings` edits the
+ *   linker's preferences rather than their own. It leaks nothing in the other
+ *   direction, and closing it means a "yes, this is my link" click on every
+ *   legitimate visit, which is the same trade `/api/verify-email/` declined.
+ *
  * Everything here is pure and server-import-free, so it is unit-tested directly
  * and can be imported from a route file, a server function, or a test.
  */

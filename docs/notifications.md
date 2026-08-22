@@ -287,11 +287,23 @@ the verification link is single use and dead within the hour.
 The cookie is `HttpOnly`, `SameSite=Lax`, `Secure` on https, scoped to `/` and
 good for **thirty minutes**. Every one of those choices, including why `Lax`
 rather than `Strict` and why `/` rather than a narrower path, is written down in
-`src/lib/email-settings-session.ts`. Two consequences worth knowing:
+`src/lib/email-settings-session.ts`. Four consequences worth knowing:
 
 - **Nothing expires the emailed link itself.** It stays exchangeable for as long
   as the row lives in `notification_tokens`, so an old email still works. What
   runs out is the half-hour session it hands you.
+- **That half hour is the browser's, not ours.** The cookie carries the same
+  token the link does and nothing checks its age server-side, so a wholesale
+  copy of a cookie jar keeps working until the token is rotated. Enforcing an
+  age would mean signing an issued-at, which means a server secret to configure
+  and rotate. The on-screen wording promises a page that stops saving, not a
+  credential that expires, and that is why.
+- **The exchange can be pointed at somebody.** A cross-site link to
+  `/email-settings/<somebody else's token>` replaces the settings session this
+  browser held, so the next person to open the page edits the linker's
+  preferences rather than their own. Nothing leaks the other way. Closing it
+  costs a "yes, this is my link" click on every legitimate visit, which is the
+  same trade `/api/verify-email/<token>` declined.
 - **`SameSite=Lax` is what makes the save safe.** The two server functions are
   POSTs authenticated by that cookie, and a cross-site POST does not carry a Lax
   cookie, so a page on another origin cannot flip somebody's switches for them.
@@ -312,11 +324,21 @@ The signed-out page deliberately omits the manager switch. With no session it
 cannot tell whether the person holds the role, and offering a manager-only
 choice to a member would be a lie about what they can turn on.
 
-It renders four states, not one: loading, the switches, "this link is no longer
-live" (arrived with nothing usable), and "this page has been open too long" (the
-session ran out while they sat on it). A save that cannot reach us leaves the
-switch where it was and keeps a retry on screen, because somebody who thinks
-they turned emails off and did not finds out from their inbox a week later.
+It renders five states, not one: loading, the switches, "this link is no longer
+live" (arrived with nothing usable), "this page has been open too long" (the
+session ran out while they sat on it), and a `LoadFailure` panel with a retry
+for a read that never landed. That last one is the distinction worth keeping:
+the **uniform** answer above is about the token and only the token, and dressing
+a dropped connection up as a dead link sends somebody on bad reception hunting
+for a newer email that will fail the same way.
+
+Saving goes through `useResilientSubmit` and `SubmitStatus`, like every other
+writing form on the site, so a bad connection gets the timeout, the retries and
+a failure panel that stays on screen. It needs no `client_submission_id`: a save
+sets one named switch to one named value, so sending it twice lands on the same
+row with the same value and there is nothing a duplicate could create. What the
+panel does **not** claim is that nothing was saved, because a reply lost on the
+way back means we genuinely do not know.
 
 ## What is deliberately not built
 
