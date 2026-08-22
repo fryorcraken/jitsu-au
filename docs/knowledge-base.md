@@ -114,7 +114,9 @@ Three consequences worth knowing:
 
 `/kb/<slug>` for a link entry bounces to the destination. The sidebar already
 points straight at it, so that path only fires for a URL somebody saved before
-the entry became a link.
+the entry became a link. The bounce, and the sidebar entry itself, are handled
+by the router: `link_path` is site-relative by validation, so leaving for
+`/first-class` swaps the shell rather than reloading the application.
 
 ## Reading an article
 
@@ -144,6 +146,15 @@ reader to the fees part of the grading article without them having to find it.
 - **Link to one with an ordinary Markdown link.** `[the fees](/kb/belts#fees)`
   from another article, `[the fees](#fees)` inside the same one. There is no
   special syntax, because there does not need to be.
+- **Following one does not reload the page.** A link to a path on this site is
+  rendered as a router link, so a cross-reference costs a fetch of the next
+  article and nothing else. It used to be a plain anchor, which made every
+  cross-reference a full page load: blank screen, the whole bundle again, the
+  session resolved again, the sidebar fetched again, to move one page. A `#`
+  fragment stays a plain anchor, because it names a heading in the article
+  already on screen. Anything that is not a same-site path (including
+  `//another-host`, which is not one however much it looks like a path) opens in
+  a new tab with `rel="noopener noreferrer"`.
 - **Pin an anchor by ending the heading with `{#your-anchor}`**, the attribute
   syntax Pandoc and Docusaurus use: `## How grading works {#grading}` answers to
   `#grading` for as long as that suffix is there, whatever the heading is
@@ -521,6 +532,42 @@ agent API; nothing in the code depends on those slugs existing. The articles
 themselves (your first belt, how to train off the mat, our belt system, the full
 syllabus, our history, how to contribute) are content, written through the skill.
 
+## How fast it feels, and why
+
+Every page under `/kb` renders client-side, so there is a real cost to opening
+one: the session has to resolve in the browser before anything can be asked for,
+and each answer is a round trip through the site's own server to Supabase. Four
+things keep that off the reader's path.
+
+- **The contents is fetched once and held.** The sidebar is on every page here
+  and its structure changes when a manager publishes, which is a few times a
+  year, so it is cached for five minutes rather than refetched on every mount
+  and every window focus. Finishing an article still ticks it off immediately:
+  recording a read invalidates the contents on purpose.
+- **Articles are prefetched on intent.** The sidebar, the index list, the search
+  results and the previous/next links all know the slug a reader is about to
+  open, so the fetch starts on hover, on keyboard focus, or on the touch that
+  precedes a tap. On a warm cache the click lands on an article that is already
+  there. An article is held for five minutes too, so moving back and forth
+  through a section costs nothing.
+- **Nothing waits for anything it does not need.** The article, its comments and
+  the reader's identity are three independent lookups, and they now run at the
+  same time. The comments used to wait for the article to arrive even though all
+  they need is the slug the router already has; on the server, working out who
+  is asking (two round trips of its own) used to sit in front of the first query
+  rather than beside it. The article page also read the same database row twice
+  on every load: once to tell a link entry from a real page, once again inside
+  the loader it then called.
+- **The page keeps its frame while the text is fetched.** The contents already
+  knows this article's section and title, so moving between two articles shows
+  the breadcrumb and the heading straight away rather than replacing the whole
+  page with a spinner.
+
+Everything a reader is cached for is keyed by **who they are**. That is a
+security property rather than a nicety: managers-only drafts are readable data
+under these keys, and a five-minute cache under a reader-agnostic key would keep
+one on screen after a sign-out in another tab.
+
 ## SEO
 
 `/kb` is in `robots.txt`'s disallow list, and every page under it is `noindex`
@@ -551,6 +598,8 @@ it as a marketing page or a blog post instead.
 | Shell (top bar, sidebar, search, progress)  | `src/components/site/KbLayout.tsx`                  |
 | Reader UI                                   | `src/components/site/KbArticleReader.tsx`           |
 | Sign-in gate + reader routes                | `src/routes/kb/route.tsx`, `index.tsx`, `$slug.tsx` |
+| Contents fetch and its cache                | `src/hooks/useKbNav.ts`                             |
+| Article fetch, its cache, prefetching       | `src/hooks/useKbArticle.ts`                         |
 | Manager screen                              | `src/routes/_authenticated/manager.kb.tsx`          |
 | Manager API actions                         | `src/routes/api/manager/agent.ts`                   |
 

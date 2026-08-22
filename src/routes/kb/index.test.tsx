@@ -13,6 +13,10 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
 }));
 vi.mock("@/hooks/useKbNav", () => ({ useKbNav: () => mockUseKbNav() }));
+// The list starts fetching an article on hover. That is behaviour of its own,
+// covered in `useKbArticle`'s own tests; here it only has to not be a query
+// client this suite does not have.
+vi.mock("@/hooks/useKbArticle", () => ({ useKbArticlePrefetch: () => vi.fn() }));
 
 const { Route } = await import("./index");
 const KnowledgeBaseIndex = (Route as unknown as { component: () => ReactNode }).component;

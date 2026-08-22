@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
 import { useAuth } from "@/hooks/useAuth";
 import { useKbNav } from "@/hooks/useKbNav";
+import { useKbArticlePrefetch } from "@/hooks/useKbArticle";
 import { readState } from "@/lib/kb-nav";
 import type { KbNavEntry, KbNavSection } from "@/lib/kb-nav";
 import { searchKnowledgeBase } from "@/lib/kb.functions";
@@ -134,6 +135,10 @@ function KbNavList({
   onRetry: () => void;
 }) {
   const location = useLocation();
+  // The sidebar knows what a reader is about to open before they click it, so
+  // the fetch starts on hover, on keyboard focus, or on the touch that precedes
+  // the tap. On a warm cache the article is simply there when the click lands.
+  const prefetchArticle = useKbArticlePrefetch();
 
   // Above everything, including the loading and empty states: the way out is
   // the one control that must never depend on a fetch landing. The top bar has
@@ -200,9 +205,10 @@ function KbNavList({
             {section.entries.map((entry) => {
               const active = location.pathname === `/kb/${entry.slug}`;
               // A link entry leaves the knowledge base for the marketing site,
-              // which is a different shell entirely — a plain anchor is the
-              // honest thing to render, and it saves a client-side route that
-              // would only bounce.
+              // which is a different shell entirely — but it is still this
+              // application, and `link_path` is validated site-relative
+              // (`kbLinkPathSchema`), so the router swaps the shell without the
+              // browser reloading everything to do it.
               const className = cn(
                 "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
                 active
@@ -212,16 +218,19 @@ function KbNavList({
               return (
                 <li key={entry.slug}>
                   {entry.link_path ? (
-                    <a href={entry.link_path} className={className}>
+                    <Link to={entry.link_path} className={className}>
                       {entry.title}
                       <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-                    </a>
+                    </Link>
                   ) : (
                     <Link
                       to="/kb/$slug"
                       params={{ slug: entry.slug }}
                       className={className}
                       aria-current={active ? "page" : undefined}
+                      onMouseEnter={() => prefetchArticle(entry.slug)}
+                      onFocus={() => prefetchArticle(entry.slug)}
+                      onTouchStart={() => prefetchArticle(entry.slug)}
                     >
                       {entry.title}
                       {/* Only a manager ever sees a managers-only entry, so
@@ -283,6 +292,7 @@ function KbSearch() {
   const [debounced, setDebounced] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const runSearch = useServerFn(searchKnowledgeBase);
+  const prefetchResult = useKbArticlePrefetch();
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(term.trim()), 200);
@@ -369,14 +379,20 @@ function KbSearch() {
                 return (
                   <li key={result.slug}>
                     {result.link_path ? (
-                      <a href={result.link_path} className="block px-3 py-2 hover:bg-muted">
+                      <Link
+                        to={result.link_path}
+                        onClick={() => setOpen(false)}
+                        className="block px-3 py-2 hover:bg-muted"
+                      >
                         {body}
-                      </a>
+                      </Link>
                     ) : (
                       <Link
                         to="/kb/$slug"
                         params={{ slug: result.slug }}
                         onClick={() => setOpen(false)}
+                        onMouseEnter={() => prefetchResult(result.slug)}
+                        onFocus={() => prefetchResult(result.slug)}
                         className="block px-3 py-2 hover:bg-muted"
                       >
                         {body}

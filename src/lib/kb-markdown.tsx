@@ -15,9 +15,37 @@
 // Heading levels are shifted down by one — a body `#` renders as an `<h2>` — so
 // a manager's markdown never produces a second `<h1>` competing with the page's
 // own title, keeping the heading outline correct for assistive tech.
+import { Link } from "@tanstack/react-router";
 import type { Components } from "react-markdown";
 import { remarkKbAnchors } from "@/lib/remark-kb-anchors";
 import { remarkKbTables } from "@/lib/remark-kb-tables";
+
+/**
+ * Where a link in an article body points, when it points somewhere on this site.
+ *
+ * Split out and exported because getting it wrong is expensive in both
+ * directions. Too narrow and a cross-reference between two articles reloads the
+ * whole application to move one page (the sidebar, the shell, the router and
+ * every bundle again, on a phone, mid-class) — which is exactly what club
+ * articles do most. Too wide and `//evil.example` reads as "a path", which is a
+ * protocol-relative URL to another host: the old test for an internal link was
+ * `/^[/#]/`, so that one was rendered as a same-tab link with no
+ * `rel="noopener"` on it.
+ *
+ * Returns null for anything that is not a plain same-site path, including a
+ * fragment (which belongs to the page already on screen) and a path carrying a
+ * query string (a typed `search` object is what the router wants there, and no
+ * article has ever needed one).
+ */
+export function internalLinkTarget(href: string | undefined): { to: string; hash?: string } | null {
+  if (typeof href !== "string") return null;
+  // One leading slash, and no `?`: `//host` and `/a?b=c` both fall through to
+  // the plain-anchor branch below.
+  const match = /^\/(?!\/)([^?#]*)(#(.*))?$/.exec(href);
+  if (!match) return null;
+  const hash = match[3];
+  return { to: `/${match[1]}`, ...(hash ? { hash } : {}) };
+}
 
 /**
  * The remark plugins every knowledge base rendering surface uses: the reader,
@@ -63,16 +91,32 @@ export const kbMarkdownComponents: Components = {
   ol: ({ children }) => <ol className="mb-4 ml-6 list-decimal space-y-1.5">{children}</ol>,
   li: ({ children }) => <li className="leading-relaxed text-foreground">{children}</li>,
   a: ({ children, href }) => {
-    // A path or a fragment stays in the tab; anything else is leaving the site
-    // and gets the new-tab treatment. Club articles cross-reference each other
-    // constantly, and opening a new tab for every one of those is how a reader
-    // ends up with fifteen.
-    const internal = typeof href === "string" && /^[/#]/.test(href);
+    const className = "break-words text-primary underline underline-offset-2 hover:no-underline";
+
+    // A same-site path goes through the ROUTER, not the browser. A club article
+    // links to another club article constantly, and rendering those as bare
+    // anchors made every one of them a full page load: blank screen, the whole
+    // bundle again, auth resolved again, the sidebar fetched again, and the
+    // reader's place in the knowledge base thrown away to move one page.
+    const target = internalLinkTarget(href);
+    if (target) {
+      return (
+        <Link {...target} className={className}>
+          {children}
+        </Link>
+      );
+    }
+
+    // A fragment stays in the tab and stays a plain anchor: it names a heading
+    // in the article already on screen, and the reader page listens for
+    // `hashchange` to jump to it. Anything else is leaving the site and gets
+    // the new-tab treatment.
+    const fragment = typeof href === "string" && href.startsWith("#");
     return (
       <a
         href={href}
-        {...(internal ? {} : { target: "_blank", rel: "noopener noreferrer" })}
-        className="break-words text-primary underline underline-offset-2 hover:no-underline"
+        {...(fragment ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+        className={className}
       >
         {children}
       </a>

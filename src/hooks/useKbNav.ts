@@ -17,6 +17,11 @@ import { buildKbNav } from "@/lib/kb-nav";
 import type { KbNavSection } from "@/lib/kb-nav";
 import { listKnowledgeBase } from "@/lib/kb.functions";
 
+/**
+ * How long the fetched contents count as fresh. See the `staleTime` below.
+ */
+export const KB_NAV_STALE_TIME = 5 * 60_000;
+
 export function useKbNav(): {
   nav: KbNavSection[];
   loading: boolean;
@@ -42,6 +47,13 @@ export function useKbNav(): {
     // before auth has settled returns the signed-out view of the knowledge base
     // to a member who is signed in.
     enabled: !authLoading,
+    // The sidebar is on every page under /kb and its contents change when a
+    // manager publishes, which is a few times a year. Without this, React Query
+    // refetches the whole structure on every remount and every window focus, so
+    // a reader alt-tabbing back to an article they are part-way through paid for
+    // the nav again. `markKbArticleRead` invalidates this key when a tick needs
+    // to appear, so progress is still immediate.
+    staleTime: KB_NAV_STALE_TIME,
   });
 
   const nav = useMemo(

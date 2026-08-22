@@ -28,6 +28,7 @@ import {
   listSharedAnnotations,
   loadKbArticle,
   loadKbArticleRow,
+  loadKbArticleVersion,
   projectArticle,
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow, KbClient, KbSectionRow } from "@/lib/kb-types";
@@ -183,22 +184,28 @@ export const getKbArticle = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => readKbArticleSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
-    const viewer = await resolveViewer(db);
+
+    // Both at once. Working out who is asking costs two round trips of its own
+    // (the token, then `has_role`) and the answer is not needed until the row
+    // is in hand, so waiting for it first put the whole identity lookup in
+    // front of every article read for nothing.
+    const [viewer, row] = await Promise.all([resolveViewer(db), loadKbArticleRow(db, data.slug)]);
+    if (!row) throw new Error(NOT_FOUND);
+    if (!canReadArticle(row.visibility, viewer)) throw new Error(NOT_FOUND);
 
     // A link entry has no text of its own, so `/kb/<slug>` for one is a
     // signpost rather than a page. The sidebar already points straight at the
     // destination; this path exists for a link somebody saved or shared before
     // the entry became a redirect, and it bounces them rather than showing a
     // "not available" page for something that plainly is.
-    const row = await loadKbArticleRow(db, data.slug);
-    if (row?.link_path) {
-      if (!canReadArticle(row.visibility, viewer)) throw new Error(NOT_FOUND);
+    if (row.link_path) {
       return { redirect_to: row.link_path, article: null, viewer: null };
     }
 
-    const loaded = await loadKbArticle(db, data.slug);
+    // `loadKbArticleVersion`, not `loadKbArticle`: the row is already here, and
+    // asking by slug again would re-read it.
+    const loaded = await loadKbArticleVersion(db, row);
     if (!loaded) throw new Error(NOT_FOUND);
-    if (!canReadArticle(loaded.article.visibility, viewer)) throw new Error(NOT_FOUND);
 
     return {
       redirect_to: null,
@@ -223,9 +230,13 @@ export const getKbArticle = createServerFn({ method: "POST" })
  */
 export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async () => {
   const db = await adminClient();
-  const viewer = await resolveViewer(db);
 
-  const [sectionsResult, articlesResult] = await Promise.all([
+  // Who is asking runs ALONGSIDE the two list queries rather than in front of
+  // them. It is two round trips of its own (the token, then `has_role`) and
+  // nothing below needs the answer until both lists are back, so making the
+  // sidebar wait for it added that latency to every page of the knowledge base.
+  const [viewer, sectionsResult, articlesResult] = await Promise.all([
+    resolveViewer(db),
     db.from("kb_sections").select("id, slug, title, position"),
     db
       .from("kb_articles")
@@ -255,39 +266,45 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
   // version at all, so they are excluded from the lookup and take their label
   // from `nav_title`, which the schema requires them to have.
   const needVersions = readable.filter((a) => !a.link_path);
+  const versionIds = needVersions.map((a) => a.id);
+
+  // The titles and this reader's progress are two independent lookups over the
+  // same set of ids, so they go out together rather than one after the other.
+  // With the identity lookup moved alongside the lists above, building the
+  // sidebar is now two waits deep instead of five.
+  const [versionsResult, readsResult] = await Promise.all([
+    versionIds.length
+      ? db
+          .from("kb_article_versions")
+          .select("article_id, title, version, created_at")
+          .in("article_id", versionIds)
+          .eq("is_current", true)
+      : null,
+    // Nobody else's reads are ever fetched: the filter is `user_id`, so there
+    // is no shape of downstream bug that could show one member another member's
+    // progress.
+    viewer.userId && versionIds.length
+      ? db
+          .from("kb_article_reads")
+          .select("article_id, version")
+          .eq("user_id", viewer.userId)
+          .in("article_id", versionIds)
+      : null,
+  ]);
+
   let liveByArticle = new Map<string, { title: string; version: number; created_at: string }>();
-  if (needVersions.length) {
-    const { data: versions, error: vErr } = await db
-      .from("kb_article_versions")
-      .select("article_id, title, version, created_at")
-      .in(
-        "article_id",
-        needVersions.map((a) => a.id),
-      )
-      .eq("is_current", true);
-    if (vErr) throw new Error(vErr.message);
-    liveByArticle = new Map((versions ?? []).map((v) => [v.article_id, v]));
+  if (versionsResult) {
+    if (versionsResult.error) throw new Error(versionsResult.error.message);
+    liveByArticle = new Map((versionsResult.data ?? []).map((v) => [v.article_id, v]));
   }
 
-  // What this reader has already read. One query for the whole knowledge base,
-  // on the same call that builds the sidebar, so a tick costs no extra round
-  // trip. Nobody else's reads are ever fetched: the filter is `user_id`, so
-  // there is no shape of downstream bug that could show one member another
-  // member's progress.
   let readByArticle = new Map<string, number>();
-  if (viewer.userId && needVersions.length) {
-    const { data: reads, error: rErr } = await db
-      .from("kb_article_reads")
-      .select("article_id, version")
-      .eq("user_id", viewer.userId)
-      .in(
-        "article_id",
-        needVersions.map((a) => a.id),
-      );
+  if (readsResult) {
     // Progress is decoration on a page that works without it, so a failure here
     // shows everything as unread rather than taking the sidebar down with it.
-    if (rErr) console.warn("[kb] could not read this member's progress:", rErr.message);
-    else readByArticle = new Map((reads ?? []).map((r) => [r.article_id, r.version]));
+    if (readsResult.error)
+      console.warn("[kb] could not read this member's progress:", readsResult.error.message);
+    else readByArticle = new Map((readsResult.data ?? []).map((r) => [r.article_id, r.version]));
   }
 
   const entries = readable
@@ -534,6 +551,28 @@ async function requireReadableArticle(db: KbClient, slug: string, viewer: Viewer
 }
 
 /**
+ * The same check as `requireReadableArticle`, for a caller that needs the
+ * article ROW and nothing else.
+ *
+ * `requireReadableArticle` reads the live version too, which means the whole
+ * markdown body over the wire: fine when the body is what is being returned,
+ * pure waste when all that is wanted is `article.id` to filter comments by. A
+ * link entry is refused here explicitly, because it is only the missing version
+ * row that refuses it in the heavier check.
+ *
+ * The one case this is softer on: an article whose save half-failed, so it has
+ * no live version. `requireReadableArticle` calls that "not available"; this
+ * lists the comments on it, filtered by the same visibility rules as any other
+ * article's. Nothing reads them, because the page that would show them has
+ * already failed to load the text they hang off.
+ */
+function checkReadableArticleRow(article: KbArticleRow | null, viewer: Viewer) {
+  if (!article || article.link_path) throw new Error(NOT_FOUND);
+  if (!canReadArticle(article.visibility, viewer)) throw new Error(NOT_FOUND);
+  return article;
+}
+
+/**
  * Display names for a set of authors, so member-facing comments are not
  * signed with UUIDs.
  *
@@ -602,13 +641,17 @@ export const listAnnotations = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ slug: kbSlugSchema }).parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
-    const viewer = await resolveViewer(db);
-    const loaded = await requireReadableArticle(db, data.slug, viewer);
+    // The viewer lookup and the article row are independent, so they go out
+    // together: this call runs beside the article fetch on every page of the
+    // knowledge base, and it used to put its own identity round trips in front
+    // of the first query rather than beside it.
+    const [viewer, row] = await Promise.all([resolveViewer(db), loadKbArticleRow(db, data.slug)]);
+    const article = checkReadableArticleRow(row, viewer);
 
     let query = db
       .from("kb_annotations")
       .select("*")
-      .eq("article_id", loaded.article.id)
+      .eq("article_id", article.id)
       .order("created_at", { ascending: true })
       .limit(ANNOTATIONS_LIMIT);
     const filter = annotationReadFilter(viewer);

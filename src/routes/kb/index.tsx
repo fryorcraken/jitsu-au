@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { useKbNav } from "@/hooks/useKbNav";
+import { useKbArticlePrefetch } from "@/hooks/useKbArticle";
 import { flattenKbNav, kbProgress, readState } from "@/lib/kb-nav";
 
 export const Route = createFileRoute("/kb/")({
@@ -21,6 +22,9 @@ export const Route = createFileRoute("/kb/")({
 
 function KnowledgeBaseIndex() {
   const { nav, loading, error, refetch } = useKbNav();
+  // Every article here is one click away, so the fetch starts on the hover, the
+  // keyboard focus or the touch that precedes the click.
+  const prefetchArticle = useKbArticlePrefetch();
   const progress = kbProgress(nav);
   const started = progress.read > 0 || progress.updated > 0;
   // Where to send them: the next thing they have not read, or the very first
@@ -47,12 +51,18 @@ function KnowledgeBaseIndex() {
           </p>
           <Button asChild className="mt-4">
             {target.link_path ? (
-              <a href={target.link_path}>
+              <Link to={target.link_path}>
                 {started ? "Keep reading" : "Start reading"}
                 <ArrowRight className="ml-1 h-4 w-4" />
-              </a>
+              </Link>
             ) : (
-              <Link to="/kb/$slug" params={{ slug: target.slug }}>
+              <Link
+                to="/kb/$slug"
+                params={{ slug: target.slug }}
+                onMouseEnter={() => prefetchArticle(target.slug)}
+                onFocus={() => prefetchArticle(target.slug)}
+                onTouchStart={() => prefetchArticle(target.slug)}
+              >
                 {started ? "Keep reading" : "Start reading"}
                 <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
@@ -169,11 +179,20 @@ function KnowledgeBaseIndex() {
                 return (
                   <li key={entry.slug}>
                     {entry.link_path ? (
-                      <a href={entry.link_path} className={className}>
+                      // Site-relative by validation, so the router takes it and
+                      // the browser never reloads the application to follow it.
+                      <Link to={entry.link_path} className={className}>
                         {label}
-                      </a>
+                      </Link>
                     ) : (
-                      <Link to="/kb/$slug" params={{ slug: entry.slug }} className={className}>
+                      <Link
+                        to="/kb/$slug"
+                        params={{ slug: entry.slug }}
+                        className={className}
+                        onMouseEnter={() => prefetchArticle(entry.slug)}
+                        onFocus={() => prefetchArticle(entry.slug)}
+                        onTouchStart={() => prefetchArticle(entry.slug)}
+                      >
                         {label}
                       </Link>
                     )}

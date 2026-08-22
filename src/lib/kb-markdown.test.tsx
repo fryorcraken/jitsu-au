@@ -1,7 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import ReactMarkdown from "react-markdown";
-import { kbMarkdownComponents, kbRemarkPlugins } from "./kb-markdown";
+
+// Article bodies link to other articles constantly, and those links go through
+// the ROUTER now rather than the browser. Stood in for here, marked so a test
+// can tell a router link from a plain anchor.
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    to,
+    hash,
+    children,
+    ...props
+  }: {
+    to: string;
+    hash?: string;
+    children: React.ReactNode;
+  }) => (
+    <a href={hash ? `${to}#${hash}` : to} data-router-link="" {...props}>
+      {children}
+    </a>
+  ),
+}));
+
+import { internalLinkTarget, kbMarkdownComponents, kbRemarkPlugins } from "./kb-markdown";
 
 function renderMarkdown(markdown: string) {
   return render(<ReactMarkdown components={kbMarkdownComponents}>{markdown}</ReactMarkdown>);
@@ -30,6 +51,55 @@ describe("kbMarkdownComponents", () => {
     renderMarkdown("[Belt system](/kb/belt-system) and [Activate](https://example.com)");
     expect(screen.getByRole("link", { name: "Belt system" })).not.toHaveAttribute("target");
     expect(screen.getByRole("link", { name: "Activate" })).toHaveAttribute("target", "_blank");
+  });
+
+  // The bug this fixes: every cross-reference between two articles was a full
+  // page load. The reader lost their place, the bundle and the sidebar were
+  // fetched again, and moving one page cost what opening the site costs.
+  it("follows a link to another article through the router, not the browser", () => {
+    renderMarkdown("See the [belt system](/kb/belt-system#grading).");
+    const link = screen.getByRole("link", { name: "belt system" });
+    expect(link).toHaveAttribute("data-router-link");
+    expect(link).toHaveAttribute("href", "/kb/belt-system#grading");
+  });
+
+  // A fragment names a heading in the article already on screen. The reader
+  // page listens for `hashchange` to jump to it, so it stays a plain anchor.
+  it("leaves a fragment as a plain anchor", () => {
+    renderMarkdown("Jump to [fees](#fees).");
+    const link = screen.getByRole("link", { name: "fees" });
+    expect(link).not.toHaveAttribute("data-router-link");
+    expect(link).not.toHaveAttribute("target");
+  });
+
+  // `//host` is a protocol-relative URL to somebody else's site. The old test
+  // for "internal" was `/^[/#]/`, which read it as a path and rendered it
+  // same-tab with no `rel="noopener"` on it.
+  it("treats a protocol-relative URL as leaving the site", () => {
+    renderMarkdown("[Not us](//example.com/phish)");
+    const link = screen.getByRole("link", { name: "Not us" });
+    expect(link).not.toHaveAttribute("data-router-link");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+});
+
+describe("internalLinkTarget", () => {
+  it("splits a path from its fragment", () => {
+    expect(internalLinkTarget("/kb/belts")).toEqual({ to: "/kb/belts" });
+    expect(internalLinkTarget("/kb/belts#grading")).toEqual({ to: "/kb/belts", hash: "grading" });
+    expect(internalLinkTarget("/")).toEqual({ to: "/" });
+  });
+
+  it("refuses anything that is not a plain same-site path", () => {
+    expect(internalLinkTarget("//example.com")).toBeNull();
+    expect(internalLinkTarget("https://example.com")).toBeNull();
+    expect(internalLinkTarget("mailto:hello@example.com")).toBeNull();
+    expect(internalLinkTarget("#fees")).toBeNull();
+    // A typed `search` object is what the router wants for a query string, and
+    // no article has ever needed one.
+    expect(internalLinkTarget("/classes?day=tue")).toBeNull();
+    expect(internalLinkTarget(undefined)).toBeNull();
   });
 
   // The table styling in this map is only reachable through `kbRemarkPlugins`,

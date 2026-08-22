@@ -17,6 +17,13 @@ vi.mock("@tanstack/react-router", () => ({
     useParams: () => ({ slug: "belts" }),
   }),
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
+  useNavigate: () => vi.fn(),
+  // The page reads the fragment from the router as well as from the browser,
+  // because a cross-reference between two articles is a router navigation now
+  // and those fire no `hashchange`. These tests set `window.location.hash`
+  // directly, so the router's view of it is empty throughout.
+  useRouterState: ({ select }: { select: (s: unknown) => unknown }) =>
+    select({ location: { hash: "" } }),
 }));
 
 vi.mock("@tanstack/react-start", () => ({
@@ -29,6 +36,13 @@ vi.mock("@/hooks/useAuth", () => ({
 
 vi.mock("@/hooks/useKbNav", () => ({
   useKbNav: () => ({ nav: [], loading: false }),
+}));
+
+vi.mock("@/hooks/useKbArticle", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  // The real hook, so the fetch is exercised, but without the prefetching the
+  // sidebar drives: there is no sidebar in this render.
+  useKbArticlePrefetch: () => vi.fn(),
 }));
 
 const BODY = [
