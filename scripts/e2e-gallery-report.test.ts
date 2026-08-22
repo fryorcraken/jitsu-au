@@ -7,6 +7,7 @@ import {
   collectEntries,
   entrySlug,
   flowGroups,
+  pageAnchor,
   pageGroups,
   shotHref,
   tourProjects,
@@ -249,6 +250,10 @@ describe("buildGalleryHtml", () => {
     expect(html).toContain("/faq");
   });
 
+  it("gives each page a stable id, so a review can link at one screen", () => {
+    expect(html).toContain('id="page-faq"');
+  });
+
   it("says which page failed, in words rather than Playwright's own", () => {
     expect(html).toContain("failed");
     expect(html).not.toContain("unexpected");
@@ -261,6 +266,22 @@ describe("buildGalleryHtml", () => {
     });
     expect(nasty).not.toContain("<script>alert(1)</script>");
     expect(nasty).toContain("&lt;script&gt;");
+  });
+});
+
+describe("pageAnchor", () => {
+  // These ids get pasted into pull request descriptions, so they have to keep
+  // meaning the same screen from one run to the next.
+  it("names a path after itself", () => {
+    expect(pageAnchor("/faq")).toBe("page-faq");
+    expect(pageAnchor("/manager/waivers")).toBe("page-manager-waivers");
+  });
+
+  // "/" slugs to nothing, so without its own case it would land on slugify's
+  // fallback and collide with any other path that slugs away to nothing.
+  it("does not let the home page fall back to a shared name", () => {
+    expect(pageAnchor("/")).toBe("page-home");
+    expect(pageAnchor("/")).not.toBe(pageAnchor("/!"));
   });
 });
 

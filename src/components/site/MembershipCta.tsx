@@ -36,7 +36,7 @@ export function MembershipCta() {
         <Link to="/register-interest">Join the club</Link>
       </Button>
       <p className="mt-3 max-w-prose text-sm text-muted-foreground">
-        Joining starts with a free class, so there's nothing to pay yet. Already have a login?{" "}
+        Joining starts with two free sessions, so there's nothing to pay yet. Already have a login?{" "}
         <Link
           to="/auth"
           search={{ redirect: "/membership" }}

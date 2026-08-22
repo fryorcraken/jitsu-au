@@ -12,7 +12,7 @@ export const Route = createFileRoute("/pricing")({
       title: "Pricing | UTS Jitsu",
       description:
         "UTS student and general public fees for Japanese Jiu-Jitsu at UTS Ultimo. Casual, semester, and yearly options.",
-      ogDescription: "Casual, semester and yearly options. First two sessions are always free.",
+      ogDescription: "Casual, semester and yearly options. First two sessions free.",
       path: "/pricing",
     }),
     links: [{ rel: "canonical", href: "https://jitsu.au/pricing" }],
@@ -70,7 +70,7 @@ const extras = [
   {
     title: "First two sessions",
     price: "Free",
-    note: "All year long. No gear needed",
+    note: "Any time during the semester. No gear needed",
   },
   {
     title: "Sydney Jitsu yearly membership",
@@ -125,8 +125,8 @@ function Pricing() {
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Pricing</p>
         <h1 className="mt-3 text-4xl font-bold md:text-5xl">Simple, honest fees.</h1>
         <p className="mt-5 text-lg text-muted-foreground">
-          Your first two sessions are free, every day of the year. When you're ready to join, pick
-          the option that suits how you want to train.
+          Your first two sessions are free, any time during the semester. When you're ready to join,
+          pick the option that suits how you want to train.
         </p>
       </section>
 
