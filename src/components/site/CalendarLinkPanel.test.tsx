@@ -113,8 +113,27 @@ describe("CalendarLinkPanel", () => {
     expect(screen.getByRole("button", { name: /copy your calendar link/i })).toBeEnabled();
   });
 
-  // A failed replace may or may not have retired the old link, so it stays in
-  // the dialog with the message and the button, never a toast.
+  // The server retires the old link before it mints the new one, so a failure
+  // can still have left the address on screen dead. Handing that back with a
+  // Copy button beside it is the worst outcome available, so the panel asks
+  // what the live link is now instead of assuming nothing happened.
+  it("recovers a replace that failed after the old link was already retired", async () => {
+    replaceMyCalendarFeedUrl.mockRejectedValueOnce(new Error("lost the response"));
+    await renderPanel();
+    getMyCalendarFeedUrl.mockResolvedValue({ url: NEW_URL });
+
+    await userEvent.click(screen.getByRole("button", { name: /replace link/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /replace link/i }));
+
+    // It did land, so this is not an error to make them press through.
+    expect(await screen.findByText(NEW_URL)).toBeInTheDocument();
+    expect(screen.queryByText(OLD_URL)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  // A failed replace that really did nothing stays in the dialog with the
+  // message and the button, never a toast.
   it("keeps a failed replace in the dialog with something to press", async () => {
     replaceMyCalendarFeedUrl.mockRejectedValueOnce(new Error("nope"));
     await renderPanel();
@@ -123,7 +142,9 @@ describe("CalendarLinkPanel", () => {
     const dialog = await screen.findByRole("alertdialog");
     await userEvent.click(within(dialog).getByRole("button", { name: /replace link/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/didn't go through/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /didn't go through, and your link has not changed/i,
+    );
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /try again/i })).toBeEnabled();
   });

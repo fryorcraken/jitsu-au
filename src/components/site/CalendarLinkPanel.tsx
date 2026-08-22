@@ -51,18 +51,39 @@ export function CalendarLinkPanel() {
 
   useEffect(load, [load]);
 
+  /** Show `fresh` as the live link and close the confirm on a done replace. */
+  function settle(fresh: string) {
+    setUrl(fresh);
+    setJustReplaced(true);
+    setPending(null);
+  }
+
   async function replace() {
+    const previous = url;
     setPending({ busy: true, error: null });
     try {
-      const { url: fresh } = await replaceFeedUrl();
-      setUrl(fresh);
-      setJustReplaced(true);
-      setPending(null);
+      settle((await replaceFeedUrl()).url);
+      return;
     } catch {
-      // Stays in the dialog with the button still there. The message has to
-      // cover both halves of a half-finished replace: it may have retired the
-      // old link before it failed, and a reload is what settles which link they
-      // actually hold now.
+      // Not a clean "nothing happened". The server retires the old link before
+      // it mints the new one, so a failure here can still have left the address
+      // on screen dead, and leaving it there next to a Copy button would hand
+      // someone a URL that no longer works. So ask what the live link is now
+      // rather than guessing: that both repairs the screen and answers the
+      // question, since the server mints one for anyone left without one.
+    }
+    try {
+      const { url: current } = await loadFeedUrl();
+      // A different link means the replace effectively landed, whatever the
+      // first call reported. Nothing is gained by making them press again.
+      if (current !== previous) return settle(current);
+      setUrl(current);
+      setPending({
+        busy: false,
+        error: "That didn't go through, and your link has not changed. Try again.",
+      });
+    } catch {
+      // Could not even ask. Say exactly that, rather than claiming either way.
       setPending({
         busy: false,
         error:

@@ -173,9 +173,13 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
    links, so a subscriber can never silently miss a members-only entry. A link
    is a secret, but a durable one: like any calendar app's private ICS address
    it is stored and shown to its owner whenever they ask, not shown once and
-   then unrecoverable. It lasts until **its owner replaces it**, and nothing
-   else ever retires one. Replacing mints a new link and revokes the old row
-   rather than deleting it, so the old address can say what happened. Because the
+   then unrecoverable. It lasts until it is **replaced**, which happens for
+   exactly two reasons: its owner asked, or it is one of the pre-`20260728180000`
+   links the server only ever stored the hash of, which it cannot show and so
+   swaps for a fresh one the first time its owner opens the page. Nothing else
+   retires a link, and nothing expires one on age. Both paths revoke the old row
+   rather than deleting it, and mint a new one alongside, so the old address can
+   say what happened instead of reading as a typo. Because the
    secret is in the URL, the feed is served with `Referrer-Policy: no-referrer`
    (see "Security headers" in `CLAUDE.md`). It keeps its own
    `Cache-Control: private, max-age=300`, which is what a polling calendar client
@@ -208,4 +212,5 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
   "you changed your password so your calendar stopped". The only thing a member
   notices when a calendar link quietly stops working is that they stopped
   hearing about training, which is a worse outcome than the risk it would
-  reduce. A link ends because somebody asked it to.
+  reduce. A link ends because somebody asked it to, bar the one legacy case in
+  rule 4.

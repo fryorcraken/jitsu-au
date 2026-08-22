@@ -71,11 +71,16 @@ export const Route = createFileRoute("/api/calendar/$token")({
         // No `.is("revoked_at", null)` filter: token_hash is unique across the
         // whole table, so this still matches at most one row, and a replaced
         // one has to come back so the verdict can tell the two cases apart.
-        const { data: lookup } = await admin
+        const { data: lookup, error: lookupError } = await admin
           .from("calendar_feed_tokens")
           .select("id, user_id, revoked_at")
           .eq("token_hash", token_hash)
           .maybeSingle();
+        // Surfaced rather than folded into `lookup === null`. This route's whole
+        // job is telling a live link, a replaced one and a made-up one apart, and
+        // a database blip answering "no such calendar" to a subscriber holding a
+        // perfectly good token is the one wrong answer of the three.
+        if (lookupError) return textResponse("Could not build calendar.", 500);
         const verdict = feedTokenVerdict(lookup);
         if (!verdict.serve) return textResponse(verdict.message, verdict.status);
         const tokenRow = verdict.row;
