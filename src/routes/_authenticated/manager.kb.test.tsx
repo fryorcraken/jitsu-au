@@ -157,6 +157,9 @@ describe("/manager/kb section links", () => {
 
     await screen.findByLabelText(/sidebar label/i);
     expect(screen.getByText("/kb/our-history#our-history")).toBeInTheDocument();
+    // The worked example is built from this article's own first heading, so its
+    // link text and its target agree.
+    expect(screen.getByText("[our-history](/kb/our-history#our-history)")).toBeInTheDocument();
     expect(screen.getByText("/kb/our-history#grading")).toBeInTheDocument();
     // The pinned one is marked, because that is the link that survives the
     // heading being reworded.

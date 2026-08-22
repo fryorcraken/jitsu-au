@@ -299,6 +299,13 @@ describe("findHeadingForHash", () => {
     expect(findHeadingForHash("", headings)).toBeNull();
   });
 
+  // A cross-reference typed by eye off the heading's own capitals. The section
+  // is right there, so finding it beats telling somebody it was renamed away.
+  it("matches a fragment whatever case it was typed in", () => {
+    expect(findHeadingForHash("#Belts", headings)?.text).toBe("Belts");
+    expect(findHeadingForHash("#GRADING", headings)?.text).toBe("Grading");
+  });
+
   it("does not throw on a malformed escape", () => {
     expect(findHeadingForHash("#100%", headings)).toBeNull();
   });
@@ -323,6 +330,10 @@ describe("missingSectionFragment", () => {
     expect(
       missingSectionFragment("#comment-2a0f6e4c-0000-4000-8000-000000000000", headings),
     ).toBeNull();
+  });
+
+  it("says nothing about a section that is there under different capitals", () => {
+    expect(missingSectionFragment("#Grading", headings)).toBeNull();
   });
 
   it("says nothing about a fragment that is not shaped like an anchor", () => {

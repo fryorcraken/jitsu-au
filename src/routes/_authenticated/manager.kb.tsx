@@ -1213,6 +1213,19 @@ function KnowledgeBaseManager() {
   const articleSlug = slug || proposedSlug;
 
   /**
+   * The worked example above the anchor list, built from THIS article's first
+   * heading.
+   *
+   * A fixed label ("how grading works") pointed at whatever the real first
+   * heading happened to be, so on most articles the words and the target
+   * disagreed ("[how grading works](/kb/about-us#our-mission)") — an example of
+   * the syntax that contradicts itself.
+   */
+  const anchorExample = sectionAnchors[0]
+    ? `[${sectionAnchors[0].text}](${anchorPath(articleSlug, sectionAnchors[0].id)})`
+    : "[how grading works](/kb/belts#grading)";
+
+  /**
    * How the reading order can be dragged.
    *
    * The keyboard sensor is not a nicety: it is the ONLY way to reorder without a
@@ -1828,14 +1841,8 @@ function KnowledgeBaseManager() {
               <CardContent className="space-y-3">
                 <p className="text-xs text-muted-foreground">
                   Paste one of these into another article as an ordinary Markdown link, for example{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono">
-                    [how grading works](
-                    {sectionAnchors[0]
-                      ? anchorPath(articleSlug, sectionAnchors[0].id)
-                      : "/kb/belts#grading"}
-                    )
-                  </code>
-                  . Add{" "}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">{anchorExample}</code>.
+                  Add{" "}
                   <code className="rounded bg-muted px-1 py-0.5 font-mono">{"{#your-anchor}"}</code>{" "}
                   to the end of a heading to pin its link, and it will keep working even if you
                   reword the heading later.

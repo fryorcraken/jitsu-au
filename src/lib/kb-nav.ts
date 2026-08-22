@@ -393,7 +393,11 @@ export function extractHeadings(markdown: string): KbHeading[] {
  * than throwing on a page that was only trying to scroll.
  */
 export function findHeadingForHash(hash: string, headings: KbHeading[]): KbHeading | null {
-  const id = decodeFragment(hash);
+  // Matched case-insensitively. Every id `headingSlug` mints is lowercase, so
+  // this makes nothing ambiguous — but a cross-reference typed by eye, copying
+  // the heading's own capitals ("#Grading"), would otherwise miss a section
+  // that is right there and be reported as renamed away.
+  const id = decodeFragment(hash).toLowerCase();
   if (!id) return null;
   return headings.find((heading) => heading.id === id) ?? null;
 }
