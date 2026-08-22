@@ -143,10 +143,12 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
 3. **Get a calendar link** — a private URL (`/api/calendar/<token>`) to add to a
    phone or laptop calendar. New dates, changes and cancellations then sync on
    their own. It includes members-only entries only while that person is a paid
-   member. It is minted on the first visit to `/calendar` and shown in full on
-   both `/calendar` and `/account` every visit after that: one link per person,
-   with nothing to press to get it. Losing the link is not a failure state,
-   since it is always on the page.
+   member. It is minted the first time they open `/calendar` or `/account`,
+   whichever comes first, and shown in full on both every visit after that: one
+   link per person, with nothing to press to get it. Losing the link is not a
+   failure state, since it is always on the page. That does mean every signed-in
+   person ends up with one, managers and people who will never subscribe
+   included, which is the price of it always being there when they ask.
 4. **Replace the calendar link** — "Replace link", on the same panel in both
    places. It exists because the token can never leave the URL path (a calendar
    app subscribes to an address and has nowhere else to put a credential), so

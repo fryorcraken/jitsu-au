@@ -4,7 +4,8 @@
 // URLs do afterwards: the token lives in the path of a feed that a calendar app
 // fetches with no session at all, so only a real request against the real route
 // can show that the old address has stopped carrying events and the new one has
-// started.
+// started. The route reads no session, only the token in the path, which is why
+// fetching the URL is a complete test of it.
 //
 // It cleans up after itself by construction: the member ends the test holding
 // one live link, the same as they started with.
@@ -56,8 +57,10 @@ test("a member replaces their calendar link and the old one stops working", asyn
   );
 
   await step(page, "the old link has stopped, and the new one works", async () => {
-    // The whole point of the feature. `page.request` carries no session, which
-    // is how a calendar app asks.
+    // The whole point of the feature. `page.request` does send the context's
+    // cookies, so this is not proof that an anonymous caller is refused; it does
+    // not need to be, because the feed route reads no session at all and
+    // resolves everything from the token in the path.
     const retired = await page.request.get(oldUrl);
     expect(retired.status()).toBe(410);
     expect(await retired.text()).toContain("replaced");

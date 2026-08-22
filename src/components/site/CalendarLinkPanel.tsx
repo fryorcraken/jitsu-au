@@ -28,6 +28,29 @@ import {
 } from "@/components/ui/alert-dialog";
 import { getMyCalendarFeedUrl, replaceMyCalendarFeedUrl } from "@/lib/calendar.functions";
 
+/**
+ * How long to wait for either call before giving up on the answer.
+ *
+ * Not a retry, and not an abort of the work: as `submit-resilience.ts` puts it,
+ * giving up on a reply never tells you the work did not happen. It is here
+ * because the confirm below cannot be dismissed while a request is in flight,
+ * so without a ceiling a stalled connection (this club's traffic is phones, in
+ * transit) leaves someone in a modal with a spinner and no way out. The panel
+ * answers a timeout the same way it answers a failure: by asking what the live
+ * link is now, which is the only thing that actually settles it.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Timed out.")), REQUEST_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
 /** Open confirm, mid-flight, or failed with something to press again. */
 type Pending = { busy: boolean; error: string | null };
 
@@ -44,7 +67,7 @@ export function CalendarLinkPanel() {
 
   const load = useCallback(() => {
     setLoadFailed(false);
-    loadFeedUrl()
+    withTimeout(loadFeedUrl())
       .then(({ url: fresh }) => setUrl(fresh))
       .catch(() => setLoadFailed(true));
   }, [loadFeedUrl]);
@@ -62,7 +85,7 @@ export function CalendarLinkPanel() {
     const previous = url;
     setPending({ busy: true, error: null });
     try {
-      settle((await replaceFeedUrl()).url);
+      settle((await withTimeout(replaceFeedUrl())).url);
       return;
     } catch {
       // Not a clean "nothing happened". The server retires the old link before
@@ -73,7 +96,7 @@ export function CalendarLinkPanel() {
       // question, since the server mints one for anyone left without one.
     }
     try {
-      const { url: current } = await loadFeedUrl();
+      const { url: current } = await withTimeout(loadFeedUrl());
       // A different link means the replace effectively landed, whatever the
       // first call reported. Nothing is gained by making them press again.
       if (current !== previous) return settle(current);

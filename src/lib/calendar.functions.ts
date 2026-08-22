@@ -265,6 +265,15 @@ export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
         .is("revoked_at", null)
         .maybeSingle();
       if (raced?.token) return feedUrl(raced.token);
+      // Nothing to fall back on, and the retire above already happened, so this
+      // person would be left with NO live link and a dead address, from a page
+      // load that was only meant to show them something. There is no
+      // transaction around the two statements, so put the old row back by hand
+      // before reporting the failure: the next load then finds it and takes the
+      // same branch again, rather than the member's calendar silently stopping.
+      if (existing) {
+        await admin.from("calendar_feed_tokens").update({ revoked_at: null }).eq("id", existing.id);
+      }
       throw new Error(insertError.message);
     }
     return feedUrl(raw);
@@ -286,11 +295,12 @@ export const getMyCalendarFeedUrl = createServerFn({ method: "POST" })
  * a member their live link, and a row that is no longer anyone's live link has
  * no reason to keep the secret. The hash stays, and is what the feed matches on.
  *
- * Retired rows are never pruned, so a member pressing this repeatedly writes
- * rows nothing removes. Left alone rather than capped: every row costs a
- * deliberate press by a signed-in person, a club this size will not notice, and
- * a cap would have to decide how old a retired address may be before it goes
- * back to answering like a typo. Worth revisiting if the table ever grows.
+ * Retired rows are never pruned, so every call writes a row nothing removes, and
+ * nothing rate-limits the call: a signed-in account, or a stolen session, can
+ * loop it. Left uncapped for now because a club this size will not notice, and
+ * because a cap has to decide how long a retired address may keep explaining
+ * itself before it goes back to answering like a typo. That is a judgement, not
+ * a guarantee, so revisit it if the table ever grows.
  */
 export const replaceMyCalendarFeedUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

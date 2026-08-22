@@ -780,8 +780,12 @@ how long a retired address may keep explaining itself. See `docs/calendar.md`.
 **RLS:** a person reads their own token row; minting, replacing and feed lookup
 all run through the service role; `authenticated` gets SELECT only, so a client
 cannot clear its own `revoked_at` and resurrect a link it just replaced. The
-owner's live row carries the raw token, which is what the page shows them
-anyway.
+original migration also carried owner-scoped INSERT and UPDATE policies, kept as
+defence in depth when the write grants went; `20260822093000` drops them, because
+`revoked_at` is now what makes a leaked link stop working and a policy saying "a
+person may write their own row" would undo exactly that the moment a write grant
+came back. The owner's live row carries the raw token, which is what the page
+shows them anyway.
 
 ---
 
