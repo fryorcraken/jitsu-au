@@ -15,6 +15,8 @@ import {
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
 import { Button } from "@/components/ui/button";
+import { LoadError } from "@/components/site/LoadError";
+import { LoadingPanel } from "@/components/site/LoadingPanel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -140,7 +142,7 @@ function ContactMessagesPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <LoadingPanel label="Loading the messages" />;
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
@@ -167,15 +169,12 @@ function ContactMessagesPage() {
       )}
 
       {loadError ? (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
-          <p className="text-sm font-medium">The contact messages could not be loaded.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {loadError} This is not the same as having no messages.
-          </p>
-          <Button className="mt-3" size="sm" variant="outline" onClick={() => void load()}>
-            Try again
-          </Button>
-        </div>
+        <LoadError
+          what="The contact messages"
+          detail={loadError}
+          notEmpty="This is not the same as having no messages."
+          onRetry={() => void load()}
+        />
       ) : messages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages yet.</p>
       ) : (
