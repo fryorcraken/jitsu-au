@@ -7,6 +7,7 @@
 // of the fix — the jump once the text is there, and what a reader is told when
 // the section has been renamed away since the link was written.
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -18,12 +19,6 @@ vi.mock("@tanstack/react-router", () => ({
   }),
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
   useNavigate: () => vi.fn(),
-  // The page reads the fragment from the router as well as from the browser,
-  // because a cross-reference between two articles is a router navigation now
-  // and those fire no `hashchange`. These tests set `window.location.hash`
-  // directly, so the router's view of it is empty throughout.
-  useRouterState: ({ select }: { select: (s: unknown) => unknown }) =>
-    select({ location: { hash: "" } }),
 }));
 
 vi.mock("@tanstack/react-start", () => ({
@@ -133,6 +128,28 @@ describe("/kb/$slug section anchors", () => {
 
     expect(await screen.findByText(/does not have/i)).toBeInTheDocument();
     expect(screen.getByText("#throws")).toBeInTheDocument();
+  });
+
+  // A cross-reference between two articles is a ROUTER navigation, and the
+  // browser fires no `hashchange` for one. The page therefore re-reads the
+  // fragment after every render rather than waiting for an event, which is the
+  // only thing that catches a router navigation that changes only the hash.
+  it("follows the fragment when it changes without a hashchange event", async () => {
+    renderArticle("");
+
+    // The article is on screen, at the top, with no section asked for.
+    await waitFor(() => expect(document.getElementById("grading")).not.toBeNull());
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    // What a router navigation does: the URL changes, and no event is fired.
+    // Something unrelated then re-renders the page, the way any state change on
+    // it would.
+    window.location.hash = "#grading";
+    await userEvent.click(screen.getByRole("button", { name: /on this page/i }));
+
+    // Scrolling is the assertion; focus is covered by the first test and would
+    // race the click that caused this render.
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
   });
 
   // A notification about a comment sends the member to /kb/<slug>#comment-<id>.

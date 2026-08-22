@@ -18,7 +18,8 @@ vi.mock("@tanstack/react-start", () => ({ useServerFn: () => fetchArticle }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => auth }));
 vi.mock("@/lib/kb.functions", () => ({ getKbArticle: vi.fn() }));
 
-const { useKbArticle, useKbArticlePrefetch } = await import("./useKbArticle");
+const { useInvalidateKbReader, useKbArticle, useKbArticlePrefetch } =
+  await import("./useKbArticle");
 
 function harness() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -101,5 +102,30 @@ describe("useKbArticlePrefetch", () => {
 
     result.current("belts");
     await waitFor(() => expect(fetchArticle).not.toHaveBeenCalled());
+  });
+});
+
+describe("useInvalidateKbReader", () => {
+  // Nothing else connects the manager editor to the reader's cache: the editor
+  // keeps its own state and never goes through these queries. Without this, a
+  // manager who publishes a correction reads the version they just replaced
+  // for as long as the article stays fresh.
+  it("makes a cached article refetch", async () => {
+    const { client, wrapper } = harness();
+    const { result } = renderHook(
+      () => ({ article: useKbArticle("belts"), invalidate: useInvalidateKbReader() }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.article.data).toEqual(ARTICLE));
+    expect(fetchArticle).toHaveBeenCalledTimes(1);
+
+    const REWRITTEN = { ...ARTICLE, article: { slug: "belts", title: "Belts, rewritten" } };
+    fetchArticle.mockResolvedValue(REWRITTEN);
+    result.current.invalidate();
+
+    await waitFor(() => expect(result.current.article.data).toEqual(REWRITTEN));
+    // Invalidated, not removed: the reader refetches rather than blanking.
+    expect(client.getQueryData(["kb-article", "u1", "belts"])).toEqual(REWRITTEN);
   });
 });

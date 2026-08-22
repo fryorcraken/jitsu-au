@@ -568,6 +568,11 @@ security property rather than a nicety: managers-only drafts are readable data
 under these keys, and a five-minute cache under a reader-agnostic key would keep
 one on screen after a sign-out in another tab.
 
+**Publishing clears all of it.** The manager screen keeps its own state and
+never goes through these queries, so it drops them by hand after every write
+(`useInvalidateKbReader`). Without that, a manager who publishes a correction
+and opens `/kb/<slug>` to check it reads the version they have just replaced.
+
 ## SEO
 
 `/kb` is in `robots.txt`'s disallow list, and every page under it is `noindex`

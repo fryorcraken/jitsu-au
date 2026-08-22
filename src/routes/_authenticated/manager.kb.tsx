@@ -69,6 +69,7 @@ import {
   setCurrentArticleVersion,
 } from "@/lib/kb.functions";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
+import { useInvalidateKbReader } from "@/hooks/useKbArticle";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
 import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 import type { ArticleVisibility } from "@/lib/kb";
@@ -262,6 +263,10 @@ function KnowledgeBaseManager() {
   const [promoting, setPromoting] = useState(false);
   const [busy, setBusy] = useState(false);
   const { confirm, confirmDialog } = useConfirm();
+  // Called after every write here. The reader side caches articles and the
+  // sidebar for minutes at a time, and this screen is the only thing that
+  // changes what they hold.
+  const invalidateKbReader = useInvalidateKbReader();
 
   /**
    * The arrangement a drag is producing, held while it is in flight and until
@@ -775,6 +780,12 @@ function KnowledgeBaseManager() {
             ? `Created "${targetSlug}" and published version ${res.version}`
             : `Saved version ${res.version}, now live`,
       );
+      // What members are reading has just changed, so drop the reader side's
+      // cached copies. This screen keeps its own state and never goes through
+      // those queries, so nothing else would: the manager who opens
+      // `/kb/<slug>` to check their correction would otherwise read the version
+      // they have just replaced.
+      invalidateKbReader();
       // The save landed either way, so it is reported. But if the manager has
       // since opened a different article, writing this one's text back into the
       // editor would put the screen out of step with itself.
@@ -842,6 +853,8 @@ function KnowledgeBaseManager() {
     try {
       await promote({ data: { id: version.id } });
       toast.success(`Version ${version.version} is now live`);
+      // A different version is what members read now. See `onSave`.
+      invalidateKbReader();
       // The publish has already committed. Reporting a failed REFRESH as a
       // failed publish would tell the manager the club's live article is
       // something it is not, so the refresh gets its own try. (`onSave` learned
@@ -895,6 +908,8 @@ function KnowledgeBaseManager() {
    * manager the MOVE failed would have them do it again and move it twice.
    */
   async function refreshStructure(token: number) {
+    // The reading order a member sees is what just moved. See `onSave`.
+    invalidateKbReader();
     try {
       const [rows, sectionRows] = await Promise.all([fetchArticles(), fetchSections()]);
       if (stale(token)) return;

@@ -35,16 +35,42 @@ import { remarkKbTables } from "@/lib/remark-kb-tables";
  * Returns null for anything that is not a plain same-site path, including a
  * fragment (which belongs to the page already on screen) and a path carrying a
  * query string (a typed `search` object is what the router wants there, and no
- * article has ever needed one).
+ * article has ever needed one). Those two still stay in the tab: see
+ * `staysInThisTab`.
  */
 export function internalLinkTarget(href: string | undefined): { to: string; hash?: string } | null {
-  if (typeof href !== "string") return null;
-  // One leading slash, and no `?`: `//host` and `/a?b=c` both fall through to
-  // the plain-anchor branch below.
-  const match = /^\/(?!\/)([^?#]*)(#(.*))?$/.exec(href);
+  if (!isSameSitePath(href)) return null;
+  // No `?`: a path carrying a query string falls through to a plain anchor.
+  const match = /^(\/[^?#]*)(#(.*))?$/.exec(href);
   if (!match) return null;
   const hash = match[3];
-  return { to: `/${match[1]}`, ...(hash ? { hash } : {}) };
+  return { to: match[1], ...(hash ? { hash } : {}) };
+}
+
+/**
+ * A path on this site, as opposed to a URL that only looks like one.
+ *
+ * The second character is what decides it, and both spellings matter. `//host`
+ * is a protocol-relative URL to somebody else's site; so is `/\host`, because a
+ * browser normalises the backslash to a slash before resolving it. Either one
+ * rendered as a same-tab link with no `rel="noopener"` is the hole this
+ * function exists to close.
+ */
+function isSameSitePath(href: string | undefined): href is string {
+  return typeof href === "string" && /^\/(?![/\\])/.test(href);
+}
+
+/**
+ * Whether following this link keeps the reader where they are.
+ *
+ * Wider than `internalLinkTarget`: a fragment names a heading on this page, and
+ * a same-site path with a query string is still this site even though the
+ * router will not take it as a bare string. Both are same-tab links; only a
+ * genuinely outside destination earns a new tab.
+ */
+export function staysInThisTab(href: string | undefined): boolean {
+  if (typeof href !== "string") return false;
+  return href.startsWith("#") || isSameSitePath(href);
 }
 
 /**
@@ -107,15 +133,15 @@ export const kbMarkdownComponents: Components = {
       );
     }
 
-    // A fragment stays in the tab and stays a plain anchor: it names a heading
-    // in the article already on screen, and the reader page listens for
-    // `hashchange` to jump to it. Anything else is leaving the site and gets
-    // the new-tab treatment.
-    const fragment = typeof href === "string" && href.startsWith("#");
+    // Everything the router cannot take as a bare string. A fragment names a
+    // heading in the article already on screen, and the reader page listens for
+    // `hashchange` to jump to it; a same-site path with a query string is still
+    // this site. Both stay in the tab. Anything else is leaving, and gets the
+    // new-tab treatment.
     return (
       <a
         href={href}
-        {...(fragment ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+        {...(staysInThisTab(href) ? {} : { target: "_blank", rel: "noopener noreferrer" })}
         className={className}
       >
         {children}

@@ -41,6 +41,12 @@ function articleQueryOptions<T>(
     queryKey: ["kb-article", userId, slug],
     queryFn: () => fetchArticle({ data: { slug } }),
     staleTime: KB_ARTICLE_STALE_TIME,
+    // No retries, and here rather than on the observer so a PREFETCH obeys it
+    // too. The common failure is a refusal ("that article does not exist, or is
+    // not available to you"), which no amount of asking again will change, and
+    // a prefetch left retrying on the default backoff would hold a click in the
+    // loading state for seconds waiting for an answer that is already known.
+    retry: false,
   };
 }
 
@@ -63,7 +69,6 @@ export function useKbArticle(slug: string) {
   return useQuery({
     ...articleQueryOptions(fetchArticle, user?.id ?? null, slug),
     enabled: !authLoading,
-    retry: false,
   });
 }
 
@@ -89,4 +94,26 @@ export function useKbArticlePrefetch(): (slug: string) => void {
     },
     [authLoading, fetchArticle, queryClient, userId],
   );
+}
+
+/**
+ * Throw away everything the READER side has cached about the knowledge base.
+ *
+ * For the manager screen to call after it writes. Nothing else connects the
+ * two: the editor keeps its own state and never goes through these queries, so
+ * without this a manager who publishes a correction (or reorders the sidebar,
+ * or renames a section) would read the old version at `/kb/<slug>` until the
+ * five minutes above ran out. Cheap, and it is invalidation rather than
+ * removal, so a screen currently showing one of these refetches instead of
+ * blanking.
+ */
+export function useInvalidateKbReader(): () => void {
+  const queryClient = useQueryClient();
+  return useCallback(() => {
+    // Every reader's copy, not just this manager's: they are keyed by user id,
+    // and a manager holds at most one of them anyway.
+    for (const key of [["kb-article"], ["kb-nav"], ["kb-search"], ["kb-annotations"]]) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+  }, [queryClient]);
 }

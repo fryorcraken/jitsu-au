@@ -22,7 +22,12 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-import { internalLinkTarget, kbMarkdownComponents, kbRemarkPlugins } from "./kb-markdown";
+import {
+  internalLinkTarget,
+  kbMarkdownComponents,
+  kbRemarkPlugins,
+  staysInThisTab,
+} from "./kb-markdown";
 
 function renderMarkdown(markdown: string) {
   return render(<ReactMarkdown components={kbMarkdownComponents}>{markdown}</ReactMarkdown>);
@@ -82,6 +87,29 @@ describe("kbMarkdownComponents", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
+
+  // `/\host` is the same off-site URL wearing a different hat, because a browser
+  // normalises the backslash to a slash before resolving it. It cannot arrive
+  // that way through an article: react-markdown percent-encodes the backslash
+  // first, and `%5C` is an ordinary path character no browser re-reads as an
+  // authority. Pinned because that is the only thing standing between the two,
+  // and `internalLinkTarget` refuses the raw form regardless.
+  it("cannot be handed a backslash-authority URL by markdown at all", () => {
+    renderMarkdown("[Also not us](/\\example.com/phish)");
+    expect(screen.getByRole("link", { name: "Also not us" })).toHaveAttribute(
+      "href",
+      "/%5Cexample.com/phish",
+    );
+  });
+
+  // The router will not take a query string as a bare `to`, but this is still
+  // a page on this site: opening it in a new tab would be wrong.
+  it("keeps a same-site path with a query string in the tab", () => {
+    renderMarkdown("[Tuesday](/classes?day=tue)");
+    const link = screen.getByRole("link", { name: "Tuesday" });
+    expect(link).not.toHaveAttribute("data-router-link");
+    expect(link).not.toHaveAttribute("target");
+  });
 });
 
 describe("internalLinkTarget", () => {
@@ -93,6 +121,7 @@ describe("internalLinkTarget", () => {
 
   it("refuses anything that is not a plain same-site path", () => {
     expect(internalLinkTarget("//example.com")).toBeNull();
+    expect(internalLinkTarget("/\\example.com")).toBeNull();
     expect(internalLinkTarget("https://example.com")).toBeNull();
     expect(internalLinkTarget("mailto:hello@example.com")).toBeNull();
     expect(internalLinkTarget("#fees")).toBeNull();
@@ -100,6 +129,22 @@ describe("internalLinkTarget", () => {
     // no article has ever needed one.
     expect(internalLinkTarget("/classes?day=tue")).toBeNull();
     expect(internalLinkTarget(undefined)).toBeNull();
+  });
+});
+
+describe("staysInThisTab", () => {
+  it("is true for this site, whether or not the router can take it", () => {
+    expect(staysInThisTab("/kb/belts")).toBe(true);
+    expect(staysInThisTab("/classes?day=tue")).toBe(true);
+    expect(staysInThisTab("#fees")).toBe(true);
+  });
+
+  it("is false for a destination that is not this site", () => {
+    expect(staysInThisTab("https://example.com")).toBe(false);
+    expect(staysInThisTab("//example.com")).toBe(false);
+    expect(staysInThisTab("/\\example.com")).toBe(false);
+    expect(staysInThisTab("mailto:hello@example.com")).toBe(false);
+    expect(staysInThisTab(undefined)).toBe(false);
   });
 
   // The table styling in this map is only reachable through `kbRemarkPlugins`,

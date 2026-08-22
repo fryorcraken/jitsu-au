@@ -11,7 +11,7 @@
 // Rendered client-side rather than in the loader: the annotation layer needs to
 // know who is reading, and the reader's bearer token reaches a server function
 // through `attachSupabaseAuth` on an RPC from the browser, not during SSR.
-import { createFileRoute, Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -94,9 +94,6 @@ function ArticlePage() {
     queryKey: kbAnnotationsQueryKey(user?.id ?? null, slug),
     queryFn: () => fetchAnnotations({ data: { slug } }),
     enabled: !authLoading,
-    // A link entry has no comments and no article, so this call refuses it.
-    // Retrying that is a wasted round trip on a page that is about to redirect.
-    retry: false,
   });
 
   // A link entry has no page of its own. The sidebar sends readers straight to
@@ -124,17 +121,27 @@ function ArticlePage() {
   const [hash, setHash] = useState(() =>
     typeof window === "undefined" ? "" : window.location.hash,
   );
-  // The router's own view of the fragment. A cross-reference between articles is
-  // a router navigation now, not a browser one, and the browser fires no
-  // `hashchange` for those: without this, following `/kb/belts#fees` from
-  // somewhere else in the knowledge base would land at the top of the article.
-  const routerHash = useRouterState({ select: (state) => state.location.hash });
   useEffect(() => {
     const sync = () => setHash(window.location.hash);
-    sync();
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
-  }, [slug, routerHash]);
+  }, []);
+  // Deliberately on EVERY commit, with no dependency list.
+  //
+  // There are two ways the fragment changes here and neither covers the other.
+  // A plain `#section` anchor (the contents list) fires `hashchange` but leaves
+  // the router's own location untouched; a cross-reference to another article is
+  // a router navigation, which fires no `hashchange` at all. Keying this to the
+  // router's hash instead would miss the case where the two have drifted apart
+  // and a navigation asks for the fragment the router already believes it is on.
+  // Reading `window.location.hash` after each render catches both, and costs a
+  // string comparison: React bails out of `setHash` when the value is unchanged,
+  // so this settles on the first render that sees a new fragment and cannot
+  // chain. That bail-out is exactly what the lint rule below cannot see.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setHash(window.location.hash);
+  });
 
   const target = useMemo(() => findHeadingForHash(hash, headings), [hash, headings]);
   /** What the reader asked for, when it is worth saying the section is gone. */
