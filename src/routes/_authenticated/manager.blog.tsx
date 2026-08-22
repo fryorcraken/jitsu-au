@@ -1,8 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Pill } from "@/components/site/StatusPill";
 import {
   AlertDialog,
@@ -39,6 +42,7 @@ function BlogPostsPage() {
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Row | null>(null);
 
@@ -46,13 +50,28 @@ function BlogPostsPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
+  const load = useMemo(
+    () => () => {
+      setLoading(true);
+      return fetchList()
+        .then((data) => {
+          setRows(data);
+          setLoadError(null);
+        })
+        .catch((e) => {
+          const message = describeLoadError(e, "Could not load posts");
+          setLoadError(message);
+          toast.error(message);
+        })
+        .finally(() => setLoading(false));
+    },
+    [fetchList],
+  );
+
   useEffect(() => {
     if (!isManager) return;
-    fetchList()
-      .then(setRows)
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Could not load posts"))
-      .finally(() => setLoading(false));
-  }, [isManager, fetchList]);
+    void load();
+  }, [isManager, load]);
 
   async function onDelete(row: Row) {
     setDeletingId(row.id);
@@ -68,7 +87,7 @@ function BlogPostsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (loading) return <Loading className="p-8" />;
 
   return (
     <section className="mx-auto max-w-5xl space-y-6 px-4 py-10">
@@ -84,7 +103,14 @@ function BlogPostsPage() {
         </Button>
       </div>
 
-      {rows.length === 0 ? (
+      {loadError ? (
+        <LoadFailure
+          what="The posts"
+          message={loadError}
+          hint="This is not the same as having written none, so do not start a post over the top of one."
+          onRetry={() => void load()}
+        />
+      ) : rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">No posts yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">

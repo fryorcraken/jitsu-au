@@ -38,12 +38,16 @@ requests, the CI logs, and the screenshot artifacts.
 - CI is designed to hold exactly one production credential (`SUPABASE_DB_URL`,
   used only by `migration-drift.yml`), as a GitHub secret, and that workflow
   deliberately never runs on `pull_request`; keep it that way. Forks get no
-  secrets. **But the secret is not actually configured today** — every drift run
-  since the repo began has logged `SUPABASE_DB_URL:` empty and
-  `##[warning]SUPABASE_DB_URL is not set — the ... check did NOT run`, while
-  still reporting green. So nothing is currently at risk of leaking there, and
-  equally **the workflow has never checked anything**. Until that secret is set,
-  a green tick on Migration drift means only that the job ran.
+  secrets. **But the secret is not actually configured today**, so nothing is
+  currently at risk of leaking there — and equally, **the workflow checked
+  nothing from the repo's first day until 2026-08-21**: every run logged
+  `SUPABASE_DB_URL:` empty and passed anyway. Since then both steps **fail**
+  when the secret is missing, so Migration drift is expected to be **red** until
+  somebody adds it (Settings → Secrets and variables → Actions; the
+  least-privilege role to create is in `supabase/lint/README.md`). A red tick
+  there means "not armed", a green one now means the live database was really
+  asked. Do not soften those guards back to a pass to get the tick green — the
+  quiet green is the bug that hid this for months.
   - Both checks were run **by hand on 2026-08-20**, against the live database
     through Lovable's SQL access rather than the workflow, and both came back
     clean: **18 client grants live, 18 expected, 0 unexpected**, and every
@@ -171,6 +175,7 @@ src/
   start.ts                createStart(): global function + request middleware
   styles.css              Tailwind v4 entry + design tokens
 public/                   Served at the site root
+  _headers                Static-asset response headers (see Security headers)
   manifest.webmanifest    PWA manifest (start_url /app, icons, shortcuts)
   sw.js                   Service worker (pages network-only, assets cached)
   offline.html            Shown when a page is opened with no connection
@@ -204,8 +209,21 @@ Read `src/routes/README.md` before touching routes. Key points:
   top-level `import` `client.server.ts` (service-role key) from them. Instead
   lazy-load inside the handler:
   `const { supabaseAdmin } = await import("@/integrations/supabase/client.server")`.
-- Forms include a honeypot field `hp` (a hidden input that must stay empty);
-  handlers early-return on a filled `hp`.
+- Forms include a honeypot field `hp`, a decoy input a person never sees and
+  that must therefore arrive empty. Its schema is `honeypot` in
+  `src/lib/validation.ts` (`z.string().max(0)`), spelled once and used by all
+  seven write paths, and it is **required**: a browser always sends `""`
+  because the form carries the input, so a request that omits the field never
+  came from a form, and both that and a _filled_ `hp` fail validation. The
+  `if (data.hp)` early-returns in the handlers are therefore unreachable today
+  and stay only as a net if the schema is ever loosened. Two rules keep the
+  trap working, and both were broken in places before 2026-08-21:
+  - **Every form that writes must send `hp`**, or it cannot submit at all.
+  - **The input has to be one a form-filler would actually fill**: a
+    `type="text"` field hidden with `className="hidden"` and kept out of the
+    tab order with `tabIndex={-1}`, whose value is read into the payload. A
+    `type="hidden"` input, or a payload that hardcodes `hp: ""`, is a honeypot
+    that can never catch anything. `register-interest.tsx` is the pattern.
 
 ## Supabase clients — pick the right one
 
@@ -303,7 +321,10 @@ RLS, relationships, storage); it is the source of truth for the data model and
 Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
-  column-length/format CHECK constraints in the RLS `WITH CHECK`.
+  column-length/format CHECK constraints in the RLS `WITH CHECK`. A manager can
+  **delete** an enquiry from either (service role, behind the manager gate);
+  that is the product's only erasure path, and what it deliberately does not
+  touch is `docs/erasing-personal-data.md`.
 - `profiles` — the person fields for an auth user, keyed by `user_id` (PK →
   `auth.users`). **The only email lives on `auth.users`** — no email column in
   `public`; the server resolves emails via the service-role-only
@@ -521,8 +542,13 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
     so it neither publishes nor comments: its gallery is the artifact on the
     run's own page.
 - **Migration drift CI:** `.github/workflows/migration-drift.yml` checks every
-  migration file against the **live** ledger. Not on PRs — it holds a
-  production credential (see "Schema drift" in `docs/database-changes.md`).
+  migration file against the **live** ledger, and the grants `anon` /
+  `authenticated` actually hold against `supabase/lint/client-grants-expected.txt`.
+  Not on PRs — it holds a production credential (see "Schema drift" in
+  `docs/database-changes.md`). Both steps fail if `SUPABASE_DB_URL` is unset, so
+  the job is red until the secret exists; `scripts/migration-drift-workflow.test.ts`
+  pins that, and pins the credential out of every `pull_request`-triggered
+  workflow. Only the checkers' `--selftest` runs on PRs, from `ci.yml`.
 - **Supabase lint CI:** `.github/workflows/supabase-lint.yml` (path-filtered to
   `supabase/**`) starts a local Postgres, applies every migration to it (which
   is not the live database, see `docs/database-changes.md`), and runs the
@@ -621,6 +647,26 @@ invisible to `bun run build`.
   carry it only because they are generated that way). That rule has to stay in
   the base layer — layer order, not specificity, is what lets a `cursor-*`
   utility still win over it.
+- **Changing a colour token? The pairs are contrast-checked.**
+  `src/lib/color-contrast.test.ts` reads `styles.css`, converts every
+  `oklch()` token to sRGB and asserts each foreground/background pair clears
+  WCAG AA (4.5:1) in **both** themes, so a palette tweak that makes a label
+  unreadable fails the unit suite rather than shipping. Two things are worth
+  knowing before you move one:
+  - `--destructive` does two jobs. It is the fill behind
+    `text-destructive-foreground` on every delete/revoke button, and it is
+    `text-destructive`, the colour of every form error and failed-submit panel
+    on the page. In dark mode there is no lightness that serves both against a
+    near-white ink, which is why the dark `--destructive-foreground` is a near
+    black (`oklch(0.16 0.05 22)`) while every other dark `-foreground` on a
+    tinted surface is `oklch(0.15 0.03 220)`. Darkening the red instead would
+    fix the buttons and break the error text.
+  - Keep a token inside the sRGB gamut if you care about the number. Out of
+    gamut, the test clips per channel and a browser reduces chroma instead, so
+    the two stop agreeing; `isSrgbGamut` says which side a value is on.
+  - A pair that is knowingly below AA goes on `KNOWN_BELOW_AA` in that file
+    with its reason and its exact current ratio, so it cannot get worse
+    unnoticed and cannot be forgotten. It is an acknowledgement, not a pardon.
 - **SEO:** every public page sets its own `head()` meta (title/description/og)
   **and its own `rel="canonical"`**; manager and other private pages set
   `robots: noindex`. Match the existing pattern when adding pages, and see the
@@ -661,6 +707,36 @@ Two non-obvious rules:
 
 Non-production hosts (Lovable previews, branch deploys) are served a blanket
 `Disallow: /`, so a preview never competes with `jitsu.au` in search results.
+
+## Security headers
+
+`src/lib/security-headers.ts` holds every response header the app sets for
+safety reasons, and `start.ts` applies it as the outermost request middleware,
+so it covers SSR pages, API route handlers, server-function RPCs and the error
+page alike. `public/_headers` states the same rules again for the static assets
+the platform serves without going through the server; Nitro merges that file
+into `.output/public/_headers` at build time, alongside its own `/assets/*`
+rule.
+
+Today that is `Referrer-Policy`, and the reason is three routes that carry a
+token in the URL **path**: `/api/calendar/<token>`, `/api/verify-email/<token>`
+and `/email-settings/<token>`. A calendar app and a mail client cannot send an
+Authorization header or a POST body, so on those three the token has to be in
+the URL, which makes it the browser's job not to pass that URL on. The site
+sends `strict-origin-when-cross-origin` everywhere and `no-referrer` on those
+three prefixes (the only value that also keeps the path out of a **same-origin**
+`Referer`), plus `Cache-Control: no-store` on them unless the route set its own.
+
+- **Adding a route that takes a token in its path?** Add its prefix to
+  `TOKEN_PATH_PREFIXES` and to `public/_headers`. `security-headers.test.ts`
+  fails if the two disagree.
+- **A route's own headers win.** The middleware only fills in `cache-control`
+  when the route did not set one, so the calendar feed keeps the
+  `private, max-age=300` its subscribers poll against.
+- CSP, HSTS and `X-Frame-Options` are **not** set here. Lovable owns the
+  Cloudflare deploy and the platform already sends `strict-transport-security`
+  and `x-content-type-options`; check what is already on the response with
+  `curl -I https://jitsu.au/` before adding anything that could overlap.
 
 ## Environment variables
 
@@ -709,10 +785,6 @@ The app reads:
   `VITE_SUPABASE_PROJECT_ID`.
 - Server: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
   (admin client only), plus `LOVABLE_API_KEY` / `LOVABLE_SEND_URL` for auth email.
-- Server, optional: `MANAGER_AGENT_API_KEY` — break-glass bearer token for the
-  manager agent API (`/api/manager/agent`). Normally managers mint revocable
-  tokens at `/manager/api-tokens` (stored hashed in `manager_api_tokens`); this
-  env var is just an optional fallback (see `docs/manager-agent-api.md`).
 - Server, optional: `NOTIFICATION_DIGEST_KEY` — bearer token for the daily
   notification digest (`POST /api/notifications/digest`). **Unset means the
   endpoint refuses everything**, so no digest goes out until it is configured.
@@ -786,9 +858,11 @@ Practical rules:
   for most things: form rules in `src/lib/validation.ts`, server work in
   `src/lib/*.functions.ts` (`createServerFn` + Zod), writes from the browser
   through `useResilientSubmit`, RPC shapes in `src/lib/supabase-rpc.ts`, page
-  chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`. If
-  your change seems to need a _second_ way to do one of these, that is a design
-  decision to raise with the user, not a shortcut to take quietly.
+  chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`, and
+  the club facts every page repeats in `src/lib/venue.ts` (name, address,
+  phone), `src/lib/schedule.ts` (the weekly class times) and `src/lib/faq.ts`.
+  If your change seems to need a _second_ way to do one of these, that is a
+  design decision to raise with the user, not a shortcut to take quietly.
 - **Extracting logic into a pure module is usually the whole "make it easy"
   step.** `validation.ts` and `submit-resilience.ts` exist because behaviour was
   pulled out of handlers and components until it could be tested directly. Do
@@ -839,9 +913,28 @@ Then hold the change to this:
   that catches a fetch error with only `toast.error(...)` and then renders an
   empty table is indistinguishable from "there's nothing here" once the toast
   fades — the manager has no way to tell a genuinely empty list from a broken
-  one. Keep the error on screen (a `loadError`-style state) with a retry
-  action; `manager.contact-messages.tsx` is the pattern to copy, not the
-  `toast.error()` + empty-table pattern most manager list pages default to.
+  one. Hold a `loadError` state and render **`components/site/LoadFailure`** in
+  place of the content: it is the panel, the "this is not the same as having
+  none" line, the `role="alert"`, and the retry button, so no screen writes its
+  own. `manager.contact-messages.tsx` is the shortest example. Use
+  `describeLoadError(e, "…")` for the message rather than an inline
+  `instanceof Error` ternary, so an Error with an empty body still says
+  something.
+  - Where an empty screen is not merely ambiguous but **invites a destructive
+    action** — an editor that would save blanks over a live document, an "add"
+    form for a list that failed to load — put the panel in place of the whole
+    screen rather than beside it, and say in the copy why not to work around
+    it. `manager.waiver-template.tsx`, `manager.membership-plans.tsx` and
+    `manager.settings.tsx` all do this.
+  - A query-backed screen has the same trap in a different shape:
+    `useQuery`'s `isLoading` is **false** once a query has rejected, so a hook
+    that reports only `isLoading` leaves the page on "Loading..." for good.
+    Surface `isError` too (`useKbNav` is the worked example).
+- **A bare `Loading...` is not a loading state.** Use
+  **`components/site/Loading`**, which carries the `role="status"` /
+  `aria-live="polite"` wiring `AuthPending` and `SubmitStatus` already have.
+  Without it a screen-reader user gets no signal that a page started fetching
+  or finished.
 - **Never lose someone's input.** A failed submit keeps the form filled and
   offers the retry. Ask for as little as possible in the first place, and prefill
   what we already know (the waiver does this with `getMyLatestWaiver`). Every

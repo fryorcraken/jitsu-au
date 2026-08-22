@@ -4,6 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -382,7 +385,7 @@ function AboutYouCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <Loading />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
@@ -473,7 +476,7 @@ function KitSizingCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <Loading />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
@@ -596,7 +599,7 @@ function ContactCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <Loading />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
@@ -738,7 +741,7 @@ function MediaConsentCard({ profile, loading, onSaved }: DetailsCardProps) {
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <Loading />
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -797,13 +800,28 @@ function WaiversCard() {
   const getUrl = useServerFn(getWaiverPdfUrl);
   const [waivers, setWaivers] = useState<MyWaiver[]>([]);
   const [loading, setLoading] = useState(true);
+  // "No waivers on file yet." is the one sentence on this card that a member
+  // acts on, by going and signing one they have already signed. It has to be
+  // true when it is said.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchMine()
-      .then((rows) => setWaivers(rows as MyWaiver[]))
-      .catch(() => setWaivers([]))
+  const load = useCallback(() => {
+    setLoading(true);
+    return fetchMine()
+      .then((rows) => {
+        setWaivers(rows as MyWaiver[]);
+        setLoadError(null);
+      })
+      .catch((e) => {
+        setWaivers([]);
+        setLoadError(describeLoadError(e, "Could not load your waivers"));
+      })
       .finally(() => setLoading(false));
   }, [fetchMine]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function download(id: string) {
     try {
@@ -824,7 +842,14 @@ function WaiversCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="Your waivers"
+            message={loadError}
+            hint="This is not the same as having none on file, so there is nothing to sign again."
+            onRetry={() => void load()}
+          />
         ) : waivers.length === 0 ? (
           <p className="text-sm text-muted-foreground">No waivers on file yet.</p>
         ) : (
@@ -876,20 +901,29 @@ function CodeOfConductCard() {
   const [acceptedAt, setAcceptedAt] = useState<string | null>(null);
   const [acceptedVersion, setAcceptedVersion] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Swallowed, this card fell back to the "please read and agree" prompt, which
+  // asks somebody who agreed last month to do it again.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchSigner({ data: { token: "" } })
+  const load = useCallback(() => {
+    setLoading(true);
+    return fetchSigner({ data: { token: "" } })
       .then((res) => {
+        setLoadError(null);
         if (!res.status) return;
         setState(res.status.state);
         setAcceptedAt(res.status.accepted_at);
         setAcceptedVersion(res.status.accepted_version);
       })
-      .catch(() => {
-        /* nothing to show is the honest fallback here */
+      .catch((e) => {
+        setLoadError(describeLoadError(e, "Could not load your code of conduct"));
       })
       .finally(() => setLoading(false));
   }, [fetchSigner]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <Card>
@@ -902,7 +936,14 @@ function CodeOfConductCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="Whether you have agreed to this"
+            message={loadError}
+            hint="If you have already agreed, that still stands."
+            onRetry={() => void load()}
+          />
         ) : state === "signed" ? (
           <p className="text-sm text-muted-foreground">
             You agreed to version {acceptedVersion} on {formatDate(acceptedAt)}.
@@ -934,6 +975,7 @@ function GoogleDriveCard() {
   const saveFolderFromPicker = useServerFn(setGoogleDriveFolderFromPicker);
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -942,21 +984,28 @@ function GoogleDriveCard() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
 
-  const refresh = () =>
-    status()
+  const refresh = () => {
+    setLoading(true);
+    return status()
       .then((s) => {
+        setLoadError(null);
         setConnected(s.connected);
         setEmail(s.connected ? (s.email ?? null) : null);
         const name = s.connected ? (s.folderName ?? null) : null;
         setSavedFolderName(name);
         setFolderNameInput(name ?? DEFAULT_FOLDER_NAME);
       })
-      .catch(() => {
+      .catch((e) => {
+        // Not "not connected". That offers a manager the Google consent screen
+        // for an account that is already linked, and a folder box that would
+        // overwrite the folder they already chose.
+        setLoadError(describeLoadError(e, "Could not check your Drive connection"));
         setConnected(false);
         setEmail(null);
         setSavedFolderName(null);
       })
       .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     refresh();
@@ -1054,7 +1103,14 @@ function GoogleDriveCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <Loading />
+        ) : loadError ? (
+          <LoadFailure
+            what="Your Drive connection"
+            message={loadError}
+            hint="This is not the same as it being disconnected, so any folder you set is still set."
+            onRetry={() => void refresh()}
+          />
         ) : connected ? (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">

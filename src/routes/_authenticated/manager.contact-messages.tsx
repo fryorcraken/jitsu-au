@@ -3,10 +3,14 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Pill } from "@/components/site/StatusPill";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
+import { describeLoadError } from "@/lib/load-error";
 import { UNREAD_CLASS } from "@/lib/status-colours";
 import { formatDateTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import {
+  deleteContactMessage,
   listContactMessages,
   markContactMessagesSeen,
   type ContactMessage,
@@ -14,6 +18,16 @@ import {
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_authenticated/manager/contact-messages")({
   head: () => ({
@@ -28,6 +42,7 @@ function ContactMessagesPage() {
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchMessages = useServerFn(listContactMessages);
   const markSeen = useServerFn(markContactMessagesSeen);
+  const removeMessage = useServerFn(deleteContactMessage);
   const { refresh: refreshNotifications } = useNotifications();
 
   const [messages, setMessages] = useState<ContactMessage[]>([]);
@@ -45,6 +60,11 @@ function ContactMessagesPage() {
   // behind them" — the server declines to move it, and this says why rather than
   // leaving a badge that will not clear look broken.
   const [hiddenOlder, setHiddenOlder] = useState(0);
+  // The message a manager has asked to delete, held until they confirm. The row
+  // itself stays on screen the whole time: nothing disappears before the server
+  // says it is gone, so a failed delete leaves the message exactly where it was.
+  const [pendingDelete, setPendingDelete] = useState<ContactMessage | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -81,7 +101,7 @@ function ContactMessagesPage() {
         }
       })
       .catch((e) => {
-        const message = e instanceof Error ? e.message : "Could not load the contact messages";
+        const message = describeLoadError(e, "Could not load the contact messages");
         if (isCancelled()) return;
         setLoadError(message);
         toast.error(message);
@@ -101,7 +121,29 @@ function ContactMessagesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isManager]);
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  async function onDelete(message: ContactMessage) {
+    setDeletingId(message.id);
+    try {
+      await removeMessage({ data: { id: message.id } });
+      setMessages((prev) => prev.filter((m) => m.id !== message.id));
+      setUnreadIds((prev) => {
+        if (!prev.has(message.id)) return prev;
+        const next = new Set(prev);
+        next.delete(message.id);
+        return next;
+      });
+      toast.success("Message deleted");
+    } catch (e) {
+      // The row is still on screen and still in the list, so there is nothing
+      // for the manager to recover here: the delete simply did not happen.
+      toast.error(e instanceof Error ? e.message : "Could not delete that message");
+    } finally {
+      setDeletingId(null);
+      setPendingDelete(null);
+    }
+  }
+
+  if (loading) return <Loading className="p-8" />;
 
   return (
     <section className="mx-auto max-w-6xl space-y-6 px-4 py-10">
@@ -128,15 +170,12 @@ function ContactMessagesPage() {
       )}
 
       {loadError ? (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
-          <p className="text-sm font-medium">The contact messages could not be loaded.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {loadError} This is not the same as having no messages.
-          </p>
-          <Button className="mt-3" size="sm" variant="outline" onClick={() => void load()}>
-            Try again
-          </Button>
-        </div>
+        <LoadFailure
+          what="The contact messages"
+          message={loadError}
+          hint="This is not the same as having no messages."
+          onRetry={() => void load()}
+        />
       ) : messages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages yet.</p>
       ) : (
@@ -155,6 +194,9 @@ function ContactMessagesPage() {
                 </th>
                 <th scope="col" className="p-3">
                   Message
+                </th>
+                <th scope="col" className="p-3">
+                  <span className="sr-only">Actions</span>
                 </th>
               </tr>
             </thead>
@@ -177,12 +219,52 @@ function ContactMessagesPage() {
                   <td className="max-w-md p-3">
                     <p className="whitespace-pre-wrap break-words">{m.message}</p>
                   </td>
+                  <td className="p-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      // Named after the message it deletes. A table of buttons
+                      // all called "Delete" tells a screen-reader user nothing
+                      // about which one they are on, and this one is final.
+                      aria-label={`Delete the message from ${m.name}`}
+                      disabled={deletingId === m.id}
+                      onClick={() => setPendingDelete(m)}
+                    >
+                      {deletingId === m.id ? "Deleting..." : "Delete"}
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <AlertDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete the message from {pendingDelete?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes their name, their email address and everything they wrote. The club keeps
+              no copy anywhere else, and it can't be undone. If you still owe them a reply, send it
+              first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => pendingDelete && onDelete(pendingDelete)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

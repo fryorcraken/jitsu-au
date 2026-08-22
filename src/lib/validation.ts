@@ -382,6 +382,48 @@ export function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
  */
 export const clientSubmissionId = z.string().uuid().optional().or(z.literal(""));
 
+/**
+ * The hidden field every write-from-a-form path carries, spelled once here so
+ * all seven agree.
+ *
+ * **Required, not optional.** A browser always sends it, empty, because the
+ * form has the input in it. A script hand-rolling a POST against the endpoint
+ * has no reason to invent a field it cannot see, so it omits `hp` entirely —
+ * and while this was `.optional()`, omitting it was a clean pass through the
+ * trap. That is the exact shape of request the honeypot exists to catch, and
+ * it was the only one getting through.
+ *
+ * So both a filled `hp` and an absent one are refused here, at the validator.
+ * The `if (data.hp)` early-returns in the seven handlers are therefore
+ * unreachable: `.max(0)` has already thrown by the time a handler runs. They
+ * are left in place as the net if this ever loosens, not because they fire.
+ *
+ * Nothing about the browser's side changes: `""` still passes, and every call
+ * site already sends it. Keep it that way — a new form that forgets `hp` is a
+ * form that cannot be submitted at all. `honeypot.test.ts` reads the route
+ * files and holds the other half of the bargain: that the decoy each form
+ * renders is one something filling in a form would actually fill, and that its
+ * value reaches the payload instead of a hardcoded `""`.
+ *
+ * **Why all seven, including the ones behind a login.** Three of these
+ * (`startMembershipSchema`, `createAnnotationSchema`, `blogCommentSchema`) are
+ * only reachable with a session, where an anonymous bot cannot get to them at
+ * all, so the trap catches nothing there. They carry it anyway, because the
+ * alternative is a rule with an exception list: every future schema would need
+ * someone to decide which side of the line it falls on, and the way to get that
+ * wrong is to call a public form authenticated. A uniform rule fails safe; a
+ * remembered one does not.
+ *
+ * The cost that would argue the other way is a non-browser caller failing on a
+ * field it cannot see. That cannot happen through the manager agent API, which
+ * has its own schemas for the same operations and no honeypot on any of them
+ * (`createMembershipSchema`, `paperWaiverUploadSchema`, and the rest in
+ * `manager-agent.ts`). Anything machine-to-machine belongs on that seam, not on
+ * a form schema. If a genuine non-browser caller for one of these seven ever
+ * appears, that is the signal to give it its own schema, not to loosen this one.
+ */
+export const honeypot = z.string().max(0);
+
 // ---- Interest registration ----
 
 export const interestSchema = z.object({
@@ -392,7 +434,7 @@ export const interestSchema = z.object({
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
   message: z.string().trim().max(1000).optional().or(z.literal("")),
-  hp: z.string().max(0).optional(), // honeypot — must stay empty
+  hp: honeypot,
 });
 
 // ---- Contact message ----
@@ -411,7 +453,7 @@ export const contactSchema = z.object({
   email: z.string().trim().email().max(255),
   subject: z.string().trim().max(150).regex(singleLine).optional().or(z.literal("")),
   message: z.string().trim().min(1).max(2000),
-  hp: z.string().max(0).optional(), // honeypot
+  hp: honeypot,
 });
 
 /**
@@ -433,6 +475,40 @@ export const markContactMessagesSeenSchema = z.object({
   seen_at: z.string().datetime({ offset: true }),
 });
 export type MarkContactMessagesSeenInput = z.infer<typeof markContactMessagesSeenSchema>;
+
+// ---- Deleting an enquiry ----
+//
+// An enquiry is the one thing a person leaves behind that the club has no
+// reason to keep once it has been dealt with: nothing was signed, nothing is
+// owed, and no record hangs off it. Everything else a person creates is either
+// evidence (a signed waiver) or the club's own history (memberships,
+// attendance), and destroying those is a decision the club has not made yet.
+// See docs/erasing-personal-data.md.
+
+/** Manager: delete one message from the contact inbox. */
+export const deleteContactMessageSchema = z.object({ id: z.string().uuid() }).strict();
+export type DeleteContactMessageInput = z.infer<typeof deleteContactMessageSchema>;
+
+/**
+ * Manager: delete every interest-form registration filed under one address.
+ *
+ * Keyed by email rather than by row id because that is what a lead IS: the
+ * directory merges every registration sharing an address into one person, so
+ * deleting "this lead" has to mean all of them. Deleting one row of two would
+ * leave the same person on the list with the older enquiry showing.
+ */
+export const deleteLeadSchema = z.object({ email: z.string().trim().email().max(255) }).strict();
+export type DeleteLeadInput = z.infer<typeof deleteLeadSchema>;
+
+/**
+ * Why a lead the screen offered a Delete for turns out not to be one.
+ *
+ * Read by a manager, so it says what the refusal means rather than naming the
+ * check: an address with a person behind it is somebody who signed something,
+ * and their enquiry is part of that record now.
+ */
+export const LEAD_HAS_PERSON_MESSAGE =
+  "That address belongs to someone the club has a record for, so this is more than an enquiry now. It can't be deleted here.";
 
 /**
  * Where the club-wide "messages seen up to here" marker should land.
@@ -541,7 +617,7 @@ export const waiverSubmitSchema = z
     // person record is created already verified. Never required, and never
     // trusted for anything beyond that: it is re-checked server-side.
     vt: z.string().trim().max(120).optional().or(z.literal("")),
-    hp: z.string().max(0).optional(),
+    hp: honeypot,
   })
   .refine(
     (d) =>
@@ -778,7 +854,7 @@ export const codeOfConductAcceptSchema = z.object({
   // rule the waiver applies to its template version.
   version: z.number().int().positive(),
   client_meta: waiverClientMetaSchema.optional(),
-  hp: z.string().max(0).optional(), // honeypot
+  hp: honeypot,
 });
 export type CodeOfConductAcceptInput = z.infer<typeof codeOfConductAcceptSchema>;
 
@@ -1772,7 +1848,7 @@ export const startMembershipSchema = z
     // same payment reference). The server makes its own call from the
     // member's current cover — a member with none cannot turn this off.
     include_insurance: z.boolean().optional().default(false),
-    hp: z.string().max(0).optional(), // honeypot — must stay empty
+    hp: honeypot,
   })
   .refine((d) => !d.is_student || Boolean(d.uts_student_number && d.uts_student_number.trim()), {
     message: "A UTS student number is required to take the student rate.",
@@ -2917,7 +2993,7 @@ export const createAnnotationSchema = z.object({
   /** Set to reply to an existing shared annotation. */
   parent_id: z.string().uuid().optional(),
   body: z.string().trim().min(1).max(5000),
-  hp: z.string().max(0).optional().or(z.literal("")),
+  hp: honeypot,
 });
 export type CreateAnnotationInput = z.infer<typeof createAnnotationSchema>;
 
@@ -3043,7 +3119,7 @@ export const blogCommentSchema = z.object({
   post_id: z.string().uuid(),
   parent_comment_id: z.string().uuid().optional(),
   body: z.string().trim().min(1).max(2000),
-  hp: z.string().max(0).optional(), // honeypot — must stay empty
+  hp: honeypot,
 });
 export type BlogCommentInput = z.infer<typeof blogCommentSchema>;
 

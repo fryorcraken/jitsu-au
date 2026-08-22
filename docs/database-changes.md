@@ -141,8 +141,10 @@ way) means updating the PR and asking again.
     here) would receive that secret while running a script the PR itself can
     edit. So drift surfaces a merge later, not in the PR. Only the checker's
     `--selftest` runs on PRs, from `ci.yml`.
-  - Without the `SUPABASE_DB_URL` secret it warns and passes, so a green tick
-    only means "no drift" once the secret is set — the job summary says which.
+  - Without the `SUPABASE_DB_URL` secret it **fails**, so a green tick always
+    means the live database was actually asked. The secret is not configured
+    yet, so expect this job to be red until somebody adds it; the run summary
+    says whether the failure is a missing secret or real drift.
   - It proves a **ledger row exists**, not that the SQL ran. Since step 4 above
     writes that row by hand, a recorded-but-unapplied migration still passes.
     Step 5 (verify the object exists) is the part only a human/agent can do.
