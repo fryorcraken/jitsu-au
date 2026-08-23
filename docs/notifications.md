@@ -228,7 +228,9 @@ honest:
   `LOVABLE_API_KEY`, where nothing is stamped at all: those notifications are
   still owed.
 
-`0 20 * * *` is 7am in Sydney during daylight saving and 6am outside it. pg_cron
+`0 22 * * *` is 9am in Sydney during daylight saving and 8am outside it
+(`20260823000000_notification_digest_morning_schedule.sql`; it was `0 20 * * *`,
+so 7am and 6am, until the club owner saw the first real run land at 6am). pg_cron
 schedules are UTC and have no notion of DST, and an hour's drift on a club digest
 is not worth a scheduler of our own.
 
@@ -319,7 +321,8 @@ what state the club is in rather than guessing from a set of instructions.
 **The state before, checked read-only through Lovable on 2026-08-21.**
 `NOTIFICATION_DIGEST_KEY` was not set (the project had three secrets and this was
 not one of them), neither Vault secret existed, and no digest email had ever been
-sent. pg_cron was installed with job `notification-digest` active on `0 20 * * *`;
+sent. pg_cron was installed with job `notification-digest` active on `0 20 * * *`
+(since moved to `0 22 * * *`, see above);
 pg_net was installed with its extension home in `extensions` and its functions in
 `net`, which is what the migration asserts. The five runs from 17 to 21 August all
 recorded **succeeded** having done nothing. The backlog stood at **34 rows**, from
@@ -380,7 +383,7 @@ was applied, so the endpoint was still answering 503 from the old env-var path.
 Steps 3 and 4 below are the remaining verification, and they need a deploy of the
 merged code first.
 
-**3. Prove it works, without waiting for 20:00 UTC.** Run the job by hand and
+**3. Prove it works, without waiting for the scheduled run.** Run the job by hand and
 read the response back inside pg_net's 6-hour TTL:
 
 ```sql
