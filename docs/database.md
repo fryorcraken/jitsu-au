@@ -1192,7 +1192,9 @@ reached from a link rather than by looking the token up.
 
 Added by `20260807000000_notification_digest_cron.sql`, which enables **pg_cron**
 (schema `cron`) and **pg_net** (schema `net`) and registers one job,
-`notification-digest`, at `0 20 * * *` UTC. It replaced a GitHub Actions
+`notification-digest`, at `0 20 * * *` UTC, moved to `0 22 * * *` by
+`20260823000000_notification_digest_morning_schedule.sql` so it lands at 8am
+Sydney in AEST and 9am in AEDT rather than 6am and 7am. It replaced a GitHub Actions
 workflow: scheduling production work from CI put a credential that makes the site
 email its members into a repo that takes same-repo branches from Lovable and from
 coding agents.
