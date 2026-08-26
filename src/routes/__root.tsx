@@ -7,7 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
@@ -16,6 +16,7 @@ import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
 import { resolveAuthRefresh } from "../lib/auth-events";
 import { clearCacheFor } from "../lib/local-cache";
+import { writeLastVisit } from "../lib/last-visit";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
@@ -189,8 +190,41 @@ const initialHref = typeof window === "undefined" ? "" : window.location.href;
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
+  /**
+   * Who is signed in right now, as a ref rather than state.
+   *
+   * Read by the last-visit recorder on every navigation and written by the auth
+   * subscription below. A ref because nothing renders from it: as state it would
+   * re-render the whole tree on sign-in for no visible change.
+   */
+  const signedInUserId = useRef<string | null>(null);
 
   useEffect(() => setUpServiceWorker(), []);
+
+  // Remember where the app is, so a relaunch can come back to it.
+  //
+  // The installed app has no "resume": when a phone reclaims it in the
+  // background, the next tap on the icon is a COLD launch at `start_url`. Until
+  // now that always landed on the member home page, so somebody half-way
+  // through an article, or reading tonight's roster, came back to a different
+  // screen with no sign that anything had been lost. From the outside that is
+  // indistinguishable from the app reloading itself, and it was half of what
+  // made it feel so eager to. `/app` reads this back (`resolveLaunchTarget`).
+  useEffect(() => {
+    const record = () => {
+      const { pathname, searchStr } = router.state.location;
+      // `signedInUserId` is kept up to date by the auth subscription below
+      // rather than asking Supabase here, which would be a storage read and a
+      // promise on every navigation for something already known.
+      writeLastVisit(
+        signedInUserId.current,
+        `${pathname}${searchStr}`,
+        signedInUserId.current !== null,
+      );
+    };
+    record();
+    return router.subscribe("onResolved", record);
+  }, [router]);
 
   useEffect(() => {
     let mounted = true;
@@ -218,6 +252,7 @@ function RootComponent() {
           }
           previousUserId = nextUserId;
         }
+        signedInUserId.current = nextUserId;
         if (refresh.invalidateRouter) router.invalidate();
         if (refresh.invalidateQueries) queryClient.invalidateQueries();
       });
