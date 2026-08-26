@@ -14,6 +14,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
+import { resolveAuthRefresh } from "../lib/auth-events";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
@@ -197,10 +198,15 @@ function RootComponent() {
       if (mounted) applyRememberPreference(initialHref);
     });
     import("@/integrations/supabase/client").then(({ supabase }) => {
-      const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-        if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-        router.invalidate();
-        if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
+      // Three-valued on purpose: `undefined` means no event has arrived yet.
+      // See `resolveAuthRefresh` for why that is not the same as signed out.
+      let previousUserId: string | null | undefined = undefined;
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        const nextUserId = session?.user?.id ?? null;
+        const refresh = resolveAuthRefresh(event, previousUserId, nextUserId);
+        if (event === "SIGNED_IN" || event === "SIGNED_OUT") previousUserId = nextUserId;
+        if (refresh.invalidateRouter) router.invalidate();
+        if (refresh.invalidateQueries) queryClient.invalidateQueries();
       });
       // The import resolves asynchronously, so the effect may already have been
       // cleaned up by the time we get here.
