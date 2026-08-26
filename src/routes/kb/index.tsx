@@ -8,6 +8,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Check, ExternalLink, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
+import { StaleNotice } from "@/components/site/StaleNotice";
 import { Loading } from "@/components/site/Loading";
 import { useKbNav } from "@/hooks/useKbNav";
 import { useKbArticlePrefetch } from "@/hooks/useKbArticle";
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/kb/")({
 });
 
 function KnowledgeBaseIndex() {
-  const { nav, loading, error, refetch } = useKbNav();
+  const { nav, loading, error, restoredAt, refetch } = useKbNav();
   // Every article here is one click away, so the fetch starts on the hover, the
   // keyboard focus or the touch that precedes the click.
   const prefetchArticle = useKbArticlePrefetch();
@@ -121,6 +122,9 @@ function KnowledgeBaseIndex() {
       {/* Before the empty state, and instead of it. "There is nothing here for
           you to read yet" is a claim about the club, and a member who is told
           it because a fetch failed has no reason to ever come back. */}
+      {/* `error` is only set when there is NO list to show: with the contents
+          kept on the device, a failed background refresh still has a perfectly
+          good one, and that is the notice below rather than this panel. */}
       {!loading && error && (
         <LoadFailure
           className="mt-10"
@@ -130,6 +134,10 @@ function KnowledgeBaseIndex() {
           onRetry={refetch}
         />
       )}
+
+      {!loading && restoredAt ? (
+        <StaleNotice className="mt-10" what="contents" savedAt={restoredAt} onRetry={refetch} />
+      ) : null}
 
       {!loading && !error && !nav.length && (
         <p className="mt-10 text-sm text-muted-foreground">

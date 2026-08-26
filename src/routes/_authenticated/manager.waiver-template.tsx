@@ -28,9 +28,13 @@ import {
   hasMediaAcknowledgement,
   isDirty,
   meaningfulAcks,
+  parseAcksJson,
   versionLabel,
 } from "@/lib/waiver-template-editor";
 import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
+import { useEditorDraft } from "@/hooks/use-editor-draft";
+import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
+import { SaveFailure } from "@/components/site/SaveFailure";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
@@ -99,6 +103,14 @@ export const Route = createFileRoute("/_authenticated/manager/waiver-template")(
 
 type TemplateVersion = Awaited<ReturnType<typeof listWaiverTemplates>>[number];
 
+/**
+ * The template draft, flattened for storage. The acknowledgements are a list of
+ * objects, so they travel as JSON in one string field.
+ */
+type TemplateDraftFields = { title: string; body: string; acksJson: string };
+
+const TEMPLATE_DRAFT_SHAPE: TemplateDraftFields = { title: "", body: "", acksJson: "[]" };
+
 function EditorPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -119,6 +131,12 @@ function EditorPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  /**
+   * The last failed save, kept on screen rather than left to a toast. This is
+   * the document people sign, so "did that go through?" is not a question to
+   * leave somebody guessing at four seconds after the fact.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const { confirm, confirmDialog } = useConfirm();
 
   const selected = templates.find((t) => t.id === selectedId) ?? null;
@@ -171,6 +189,53 @@ function EditorPage() {
   );
 
   const liveVersion = templates.find((t) => t.is_current)?.version ?? null;
+
+  /**
+   * The on-device safety net, the same one the blog composer and the knowledge
+   * base editor use. This is the document people sign, and rewriting it is a
+   * long sitting: losing it to a backgrounded app is the worst version of the
+   * problem, not the least serious one.
+   *
+   * The acknowledgements are a list of objects, so they travel as JSON in a
+   * single string field — everything a draft stores has to be a plain string or
+   * boolean so a later build can read it back (`src/lib/editor-draft.ts`).
+   *
+   * Scoped to the version being edited, and held back until one is open: with no
+   * baseline, an offer would be measured against nothing.
+   */
+  const templateDraftFields = useMemo<TemplateDraftFields>(
+    () => ({ title, body, acksJson: JSON.stringify(acks) }),
+    [title, body, acks],
+  );
+  const templateDraftBaseline = useMemo<TemplateDraftFields>(
+    () =>
+      selected
+        ? {
+            title: selected.title,
+            body: selected.body_md,
+            acksJson: JSON.stringify(selected.acknowledgements ?? []),
+          }
+        : TEMPLATE_DRAFT_SHAPE,
+    [selected],
+  );
+  const templateDraft = useEditorDraft<TemplateDraftFields>({
+    kind: "waiver-template",
+    scope: selectedId ?? "new",
+    owner: user?.id ?? null,
+    value: templateDraftFields,
+    baseline: templateDraftBaseline,
+    shape: TEMPLATE_DRAFT_SHAPE,
+    enabled: Boolean(selected),
+  });
+
+  function restoreTemplateDraft() {
+    const d = templateDraft.offered;
+    if (!d) return;
+    setTitle(d.title);
+    setBody(d.body);
+    setAcks(parseAcksJson(d.acksJson, acks));
+    templateDraft.restore();
+  }
 
   // Checked against the raw acks so clearing the media row's label trips this
   // immediately, before `meaningfulAcks` would silently drop the row on save.
@@ -225,6 +290,13 @@ function EditorPage() {
 
   const preview = useMemo(() => applyPlaceholders(body, SAMPLE), [body]);
 
+  // Editing anything clears the last failure: the panel is about the save that
+  // was attempted, and leaving it up over changed text claims something about
+  // work it never saw.
+  useEffect(() => {
+    setSaveError(null);
+  }, [title, body, acks]);
+
   async function onSave() {
     // Belt and braces: the Save button is already disabled for this, but a
     // rejected server call after the fact is a worse experience than catching
@@ -236,6 +308,7 @@ function EditorPage() {
       );
       return;
     }
+    setSaveError(null);
     setSaving(true);
     try {
       const cleanAcks = meaningfulAcks(acks);
@@ -246,6 +319,9 @@ function EditorPage() {
       // as "Save failed" for a version that had been written and made live —
       // whereupon the obvious response, saving again, files a duplicate.
       toast.success(`Saved version ${res.version}, now live`);
+      // Published, so there is nothing left to recover. The reload below opens
+      // the new version, whose own baseline then matches what is on screen.
+      templateDraft.clear();
       try {
         const rows = await fetchTemplates();
         setTemplates(rows);
@@ -255,7 +331,7 @@ function EditorPage() {
         toast.warning("Saved. The version list could not be refreshed, so reload to see it.");
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Save failed");
+      setSaveError(e instanceof Error && e.message ? e.message : "Save failed.");
     } finally {
       setSaving(false);
     }
@@ -298,6 +374,24 @@ function EditorPage() {
             <Link to="/account">Back to account</Link>
           </Button>
         </div>
+
+        {templateDraft.offered && (
+          <DraftRestoreBanner
+            what="waiver template"
+            savedAt={templateDraft.offeredAt}
+            onRestore={restoreTemplateDraft}
+            onDiscard={templateDraft.discard}
+          />
+        )}
+
+        {saveError && (
+          <SaveFailure
+            what="waiver template"
+            message={saveError}
+            retrying={saving}
+            onRetry={() => void onSave()}
+          />
+        )}
 
         <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
           <div className="space-y-4">

@@ -64,7 +64,7 @@ function EditBlogPostPage() {
     navigate({ to: "/manager/blog" });
   }
 
-  async function onSave(value: BlogPostEditorValue) {
+  async function onSave(value: BlogPostEditorValue): Promise<boolean | string> {
     setSaving(true);
     try {
       const res = await update({
@@ -98,8 +98,11 @@ function EditBlogPostPage() {
             }
           : prev,
       );
+      return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save that post");
+      // Returned rather than toasted: the editor keeps it on screen in a panel
+      // that does not fade, beside the writing it failed to save.
+      return e instanceof Error && e.message ? e.message : "Could not save that post.";
     } finally {
       setSaving(false);
     }

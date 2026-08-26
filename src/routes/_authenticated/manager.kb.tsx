@@ -69,6 +69,9 @@ import {
   setCurrentArticleVersion,
 } from "@/lib/kb.functions";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
+import { useEditorDraft } from "@/hooks/use-editor-draft";
+import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import { useInvalidateKbReader } from "@/hooks/useKbArticle";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
 import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
@@ -156,6 +159,35 @@ function containerOf(groups: NavGroup[], id: string): string | null {
   const slug = id.slice("entry:".length);
   return groups.find((g) => g.entries.some((e) => e.slug === slug))?.slug ?? null;
 }
+
+/**
+ * One entry's draft, flattened. `position` is a number on screen and a string
+ * here for the same reason every other field is a string or a boolean: the
+ * stored shape has to be readable by a later build without a migration.
+ */
+type KbDraftFields = {
+  title: string;
+  body: string;
+  visibility: string;
+  annotationsEnabled: boolean;
+  section: string;
+  position: string;
+  navTitle: string;
+  linkPath: string;
+  changeNote: string;
+};
+
+const KB_DRAFT_SHAPE: KbDraftFields = {
+  title: "",
+  body: "",
+  visibility: "members",
+  annotationsEnabled: true,
+  section: "",
+  position: "0",
+  navTitle: "",
+  linkPath: "",
+  changeNote: "",
+};
 
 function KnowledgeBaseManager() {
   const navigate = useNavigate();
@@ -262,6 +294,25 @@ function KnowledgeBaseManager() {
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [busy, setBusy] = useState(false);
+  /**
+   * The last failed save, kept on screen rather than left to a toast.
+   *
+   * `SaveFailure`, for the reason written at the top of that component: a toast
+   * fades in four seconds and leaves an editor that looks exactly like one that
+   * saved. A manager who glanced away walks off believing a correction is live.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
+  /**
+   * The fields "New article" / "New link" just seeded, so a draft of an entry
+   * that does not exist yet has something to be measured against.
+   *
+   * `stored` is the baseline for an entry that HAS been saved, and it is null
+   * while creating one — which is exactly the case that loses the most work, so
+   * it cannot simply be left unprotected. Measuring against a bare empty shape
+   * instead would not do: `startNew` presets a section and a position, so a
+   * form nobody has typed into yet would read as unsaved work.
+   */
+  const [newBaseline, setNewBaseline] = useState<KbDraftFields | null>(null);
   const { confirm, confirmDialog } = useConfirm();
   // Called after every write here. The reader side caches articles and the
   // sidebar for minutes at a time, and this screen is the only thing that
@@ -330,6 +381,100 @@ function KnowledgeBaseManager() {
     link_path: linkPath,
   };
   const dirty = isArticleDirty(draft, stored);
+
+  /**
+   * The on-device safety net for whichever entry is open.
+   *
+   * An article is Markdown a manager can sit with for a long time, and until now
+   * it lived only in React state — so the installed app being reclaimed in the
+   * background took the lot, exactly as it did for a blog post. Flattened to
+   * strings and booleans because a draft has to survive being read back by a
+   * later build of the site (see `src/lib/editor-draft.ts`).
+   *
+   * Scoped by slug, so two entries never overwrite each other's draft, and held
+   * back until `stored` has loaded: comparing against a baseline that has not
+   * arrived would offer back a draft identical to the saved version.
+   */
+  const kbDraftFields = useMemo<KbDraftFields>(
+    () => ({
+      title,
+      body,
+      visibility,
+      annotationsEnabled,
+      section,
+      position: String(position),
+      navTitle,
+      linkPath,
+      changeNote,
+    }),
+    [
+      title,
+      body,
+      visibility,
+      annotationsEnabled,
+      section,
+      position,
+      navTitle,
+      linkPath,
+      changeNote,
+    ],
+  );
+  const kbDraftBaseline = useMemo<KbDraftFields>(
+    () =>
+      !stored
+        ? (newBaseline ?? KB_DRAFT_SHAPE)
+        : {
+            title: stored.title,
+            body: stored.body_md,
+            visibility: stored.visibility,
+            annotationsEnabled: stored.annotations_enabled,
+            section: stored.section,
+            position: String(stored.position),
+            navTitle: stored.nav_title,
+            linkPath: stored.link_path,
+            // Never part of the saved version — it describes the save that is
+            // about to happen — so its baseline is always empty and a note
+            // somebody typed counts as unsaved work on its own.
+            changeNote: "",
+          },
+    [stored, newBaseline],
+  );
+  const kbDraft = useEditorDraft<KbDraftFields>({
+    kind: "kb-entry",
+    // A new entry has no slug yet, so it gets its own slot. Once it is saved
+    // the screen moves onto the real slug and this one is cleared.
+    scope: creating ? "new" : slug,
+    owner: user?.id ?? null,
+    value: kbDraftFields,
+    baseline: kbDraftBaseline,
+    shape: KB_DRAFT_SHAPE,
+    // Held back until there is a baseline to measure against: an offer weighed
+    // against nothing is an offer to restore a draft identical to what is
+    // already on screen.
+    enabled: creating ? newBaseline !== null : Boolean(slug) && stored !== null,
+  });
+
+  // Editing anything clears the last failure: the panel is about the save that
+  // was attempted, and leaving it up over changed text claims something about
+  // work it never saw.
+  useEffect(() => {
+    setSaveError(null);
+  }, [title, body, visibility, annotationsEnabled, section, navTitle, linkPath]);
+
+  function restoreKbDraft() {
+    const d = kbDraft.offered;
+    if (!d) return;
+    setTitle(d.title);
+    setBody(d.body);
+    setVisibility(d.visibility === "managers" ? "managers" : "members");
+    setAnnotationsEnabled(d.annotationsEnabled);
+    setSection(d.section);
+    setPosition(Number.isFinite(Number(d.position)) ? Number(d.position) : 0);
+    setNavTitle(d.navTitle);
+    setLinkPath(d.linkPath);
+    setChangeNote(d.changeNote);
+    kbDraft.restore();
+  }
   /**
    * The work the VISIBLE editor would lose, which is what every "discard your
    * unsaved changes?" prompt is really asking about.
@@ -486,6 +631,7 @@ function KnowledgeBaseManager() {
     if (summary?.link_path) {
       claim();
       setCreating(false);
+      setNewBaseline(null);
       setSlug(next);
       setKind("link");
       setTitle("");
@@ -530,6 +676,7 @@ function KnowledgeBaseManager() {
       if (stale(token)) return;
 
       setCreating(false);
+      setNewBaseline(null);
       setSlug(next);
       setChangeNote("");
       setPreview(null);
@@ -622,6 +769,11 @@ function KnowledgeBaseManager() {
     const into = sections[0]?.slug ?? "";
     setSection(into);
     setPosition(nextPosition(siblingsOf(into)));
+    setNewBaseline({
+      ...KB_DRAFT_SHAPE,
+      section: into,
+      position: String(nextPosition(siblingsOf(into))),
+    });
     setFailed({ article: false, versions: false, feedback: false });
   }
 
@@ -662,6 +814,7 @@ function KnowledgeBaseManager() {
   }
 
   async function onSave() {
+    setSaveError(null);
     const isLink = kind === "link";
     const targetSlug = (creating ? slug || slugFromTitle(isLink ? navTitle : title) : slug).trim();
     if (!targetSlug) {
@@ -791,6 +944,7 @@ function KnowledgeBaseManager() {
       // editor would put the screen out of step with itself.
       if (stale(token)) return;
       setCreating(false);
+      setNewBaseline(null);
       setSlug(targetSlug);
       setChangeNote("");
       setBaseVisibility(visibility);
@@ -807,6 +961,10 @@ function KnowledgeBaseManager() {
         link_path: isLink ? linkPath.trim() : "",
       });
       if (isLink) setLinkPath(linkPath.trim());
+      // The version is published, so there is nothing left to recover. `stored`
+      // moving to match would clear it anyway; doing it here as well covers the
+      // save that also changed the slug, whose draft is filed under the old one.
+      kbDraft.clear();
       try {
         const [rows, sectionRows, vs] = await Promise.all([
           fetchArticles(),
@@ -823,7 +981,8 @@ function KnowledgeBaseManager() {
         toast.warning("Saved. The version list could not be refreshed, so reload to see it.");
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Save failed");
+      if (stale(token)) return;
+      setSaveError(e instanceof Error && e.message ? e.message : "Save failed.");
     } finally {
       setSaving(false);
       // Clears a `busy` a load abandoned when this save overtook it. That load
@@ -1457,6 +1616,25 @@ function KnowledgeBaseManager() {
         </aside>
 
         <div className="space-y-4">
+          {/* Above both editors rather than inside the article one: the offer is
+              about this slug, and it should be the first thing a manager sees on
+              a screen they have just come back to. */}
+          {kbDraft.offered && (
+            <DraftRestoreBanner
+              what={kbDraft.offered.linkPath ? "link" : "article"}
+              savedAt={kbDraft.offeredAt}
+              onRestore={restoreKbDraft}
+              onDiscard={kbDraft.discard}
+            />
+          )}
+          {saveError && (
+            <SaveFailure
+              what={kind === "link" ? "link" : "article"}
+              message={saveError}
+              retrying={saving}
+              onRetry={() => void onSave()}
+            />
+          )}
           {sectionEdit ? (
             /* A section, edited in the same window an article is, so titles,
                settings and deletion all live in one place and the list on the

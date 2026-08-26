@@ -35,6 +35,10 @@ import {
   type BlogPostStatus,
 } from "@/lib/validation";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { useEditorDraft } from "@/hooks/use-editor-draft";
+import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
+import { SaveFailure } from "@/components/site/SaveFailure";
 
 /** File -> base64, same chunked approach as the paper-waiver scan upload
  * (`manager.waivers_.upload.tsx`), which avoids a giant intermediate string
@@ -54,6 +58,34 @@ const IMAGE_ACCEPT = blogImageMimeTypes.join(",");
 function isBlogImageMimeType(type: string): type is BlogImageMimeType {
   return (blogImageMimeTypes as readonly string[]).includes(type);
 }
+
+/**
+ * The draft's own flat shape, and the empty value of each field.
+ *
+ * Separate from `BlogPostEditorValue` on purpose: a draft has to survive being
+ * written by an older build of the site, so every field is a plain string or
+ * boolean with an obvious empty value (`cover_image_url`'s `null` becomes `""`).
+ * See `reviveDraftFields`.
+ */
+type BlogDraftFields = {
+  title: string;
+  slug: string;
+  excerpt: string;
+  body: string;
+  status: string;
+  coverPath: string;
+  coverUrl: string;
+};
+
+const BLOG_DRAFT_SHAPE: BlogDraftFields = {
+  title: "",
+  slug: "",
+  excerpt: "",
+  body: "",
+  status: "draft",
+  coverPath: "",
+  coverUrl: "",
+};
 
 export type BlogPostEditorValue = {
   title: string;
@@ -83,7 +115,16 @@ export function BlogPostEditor({
   postId?: string;
   initial: BlogPostEditorValue;
   saving: boolean;
-  onSave: (value: BlogPostEditorValue) => void;
+  /**
+   * Save it.
+   *
+   * Resolve `true` only when it really landed: that is the signal to throw away
+   * the on-device draft, and doing it on a failed save would delete the copy
+   * that is about to be needed. Resolve `false`, or a message to show, when it
+   * did not — the editor keeps that on screen (`SaveFailure`) instead of
+   * leaving it to a toast that fades.
+   */
+  onSave: (value: BlogPostEditorValue) => Promise<boolean | string>;
   /** Called whenever the form's dirty-vs-`initial` state changes, so the
    * parent route can guard navigating away. */
   onDirtyChange?: (dirty: boolean) => void;
@@ -100,10 +141,19 @@ export function BlogPostEditor({
   const [mobileTab, setMobileTab] = useState<"write" | "preview">("write");
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [videoUrl, setVideoUrl] = useState("");
+  /**
+   * The last failed save, kept on screen rather than left to a toast.
+   *
+   * Cleared when a save is attempted and when anything is edited: a stale
+   * "not saved" panel over a form somebody has since fixed and saved is its own
+   * kind of wrong answer.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const upload = useServerFn(uploadBlogImage);
+  const { user } = useAuth();
 
   // Re-seed the form whenever the parent hands us a new baseline — e.g. the
   // edit page updates `initial` after a successful save, so the "unsaved
@@ -131,9 +181,19 @@ export function BlogPostEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty]);
 
-  // Covers a closed tab / refresh / typed-in address bar. In-app navigation
-  // (clicking another sidebar link) is guarded separately by the parent
-  // route's "Back to posts" action, which checks `dirty` before navigating.
+  // Editing anything clears the last failure: the panel is about the save that
+  // was attempted, and leaving it up over changed text claims something about
+  // work it never saw.
+  useEffect(() => {
+    setSaveError(null);
+  }, [title, slug, excerpt, body, status, coverPath]);
+
+  // Covers a closed tab / refresh / typed-in address bar on a DESKTOP browser.
+  // In-app navigation (clicking another sidebar link) is guarded separately by
+  // the parent route's "Back to posts" action, which checks `dirty` before
+  // navigating. On a phone this fires for essentially nothing — iOS ignores it,
+  // and an installed app the system reclaims in the background is never asked to
+  // unload — which is why the real safety net is the draft below, not this.
   useEffect(() => {
     if (!dirty) return;
     function handler(e: BeforeUnloadEvent) {
@@ -143,6 +203,49 @@ export function BlogPostEditor({
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
+
+  // The safety net. Everything typed here is kept on this device as it is
+  // written and flushed the moment the page is hidden, so leaving the app and
+  // coming back to a relaunched, empty editor no longer costs the post. See
+  // `src/lib/editor-draft.ts` for why this is localStorage where the waiver's
+  // equivalent is sessionStorage.
+  const draftFields = useMemo<BlogDraftFields>(
+    () => ({ title, slug, excerpt, body, status, coverPath, coverUrl: coverUrl ?? "" }),
+    [title, slug, excerpt, body, status, coverPath, coverUrl],
+  );
+  const draftBaseline = useMemo<BlogDraftFields>(
+    () => ({
+      title: initial.title,
+      slug: initial.slug,
+      excerpt: initial.excerpt,
+      body: initial.body_md,
+      status: initial.status,
+      coverPath: initial.cover_image_path,
+      coverUrl: initial.cover_image_url ?? "",
+    }),
+    [initial],
+  );
+  const draft = useEditorDraft<BlogDraftFields>({
+    kind: "blog-post",
+    scope: postId ?? "new",
+    owner: user?.id ?? null,
+    value: draftFields,
+    baseline: draftBaseline,
+    shape: BLOG_DRAFT_SHAPE,
+  });
+
+  function restoreDraft() {
+    const stored = draft.offered;
+    if (!stored) return;
+    setTitle(stored.title);
+    setSlug(stored.slug);
+    setExcerpt(stored.excerpt);
+    setBody(stored.body);
+    setStatus(stored.status === "published" ? "published" : "draft");
+    setCoverPath(stored.coverPath);
+    setCoverUrl(stored.coverUrl || null);
+    draft.restore();
+  }
 
   const willUnpublish = initial.status === "published" && status === "draft";
 
@@ -218,7 +321,19 @@ export function BlogPostEditor({
     // publishing it again from this same form, and the notice under the status
     // picker already says what saving will do, before the click rather than
     // after it. A modal on top of that is friction on a reversible action.
-    onSave(value);
+    //
+    // The draft is cleared only once the save has actually landed. The edit page
+    // also moves its baseline to match, which clears it a second time; the new
+    // post page navigates away instead, and without this its draft would be
+    // offered back the next time somebody opened "New post".
+    setSaveError(null);
+    void onSave(value).then((result) => {
+      if (result === true) {
+        draft.clear();
+        return;
+      }
+      setSaveError(typeof result === "string" ? result : "We could not reach the site to save it.");
+    });
   }
 
   const previewSlug = slug.trim() || defaultBlogSlug(title) || "your-post-title";
@@ -414,6 +529,16 @@ export function BlogPostEditor({
 
   return (
     <div>
+      {draft.offered && (
+        <DraftRestoreBanner
+          className="mb-4"
+          what="post"
+          savedAt={draft.offeredAt}
+          onRestore={restoreDraft}
+          onDiscard={draft.discard}
+        />
+      )}
+
       {/* Below `lg`, Write/Preview share the same space via a manual toggle
           rather than shadcn's Tabs: Tabs mounts both panels (or unmounts the
           inactive one) which would either duplicate every field's `id` or
@@ -439,6 +564,16 @@ export function BlogPostEditor({
         <div className={cn(mobileTab === "preview" && "hidden lg:block")}>{formFields}</div>
         <div className={cn(mobileTab === "write" && "hidden lg:block")}>{previewCard}</div>
       </div>
+
+      {saveError && (
+        <SaveFailure
+          className="mt-6"
+          what="post"
+          message={saveError}
+          retrying={saving}
+          onRetry={handleSave}
+        />
+      )}
 
       <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <Button disabled={saving || !title.trim() || !body.trim()} onClick={handleSave}>

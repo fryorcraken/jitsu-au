@@ -7,13 +7,17 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
+import { reportsIdentity, resolveAuthRefresh } from "../lib/auth-events";
+import { clearCacheFor } from "../lib/local-cache";
+import { writeLastVisit } from "../lib/last-visit";
+import { isResumablePath } from "../lib/pwa";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
@@ -187,8 +191,44 @@ const initialHref = typeof window === "undefined" ? "" : window.location.href;
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
+  /**
+   * Who is signed in right now, as a ref rather than state.
+   *
+   * Read by the last-visit recorder on every navigation and written by the auth
+   * subscription below. A ref because nothing renders from it: as state it would
+   * re-render the whole tree on sign-in for no visible change.
+   */
+  const signedInUserId = useRef<string | null>(null);
 
   useEffect(() => setUpServiceWorker(), []);
+
+  // Remember where the app is, so a relaunch can come back to it.
+  //
+  // The installed app has no "resume": when a phone reclaims it in the
+  // background, the next tap on the icon is a COLD launch at `start_url`. Until
+  // now that always landed on the member home page, so somebody half-way
+  // through an article, or reading tonight's roster, came back to a different
+  // screen with no sign that anything had been lost. From the outside that is
+  // indistinguishable from the app reloading itself, and it was half of what
+  // made it feel so eager to. `/app` reads this back (`resolveLaunchTarget`).
+  useEffect(() => {
+    const record = () => {
+      const { pathname, searchStr } = router.state.location;
+      // `signedInUserId` is kept up to date by the auth subscription below
+      // rather than asking Supabase here, which would be a storage read and a
+      // promise on every navigation for something already known.
+      const path = `${pathname}${searchStr}`;
+      // Filtered on the way IN, not just on the way out. `resolveLaunchTarget`
+      // refuses to reopen these, but recording one still writes it to the
+      // device -- and an auth link lands with its PKCE `code` or `token_hash`
+      // in the query string, which has no business sitting in storage for a day
+      // just to be refused later.
+      if (!isResumablePath(path)) return;
+      writeLastVisit(signedInUserId.current, path, signedInUserId.current !== null);
+    };
+    record();
+    return router.subscribe("onResolved", record);
+  }, [router]);
 
   useEffect(() => {
     let mounted = true;
@@ -197,10 +237,29 @@ function RootComponent() {
       if (mounted) applyRememberPreference(initialHref);
     });
     import("@/integrations/supabase/client").then(({ supabase }) => {
-      const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-        if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-        router.invalidate();
-        if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
+      // Three-valued on purpose: `undefined` means no event has arrived yet.
+      // See `resolveAuthRefresh` for why that is not the same as signed out.
+      let previousUserId: string | null | undefined = undefined;
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        const nextUserId = session?.user?.id ?? null;
+        const refresh = resolveAuthRefresh(event, previousUserId, nextUserId);
+        // Adopted from every event that reports who is signed in, NOT just
+        // SIGNED_IN/SIGNED_OUT. `reportsIdentity` has the reasoning: the first
+        // event any subscriber gets is INITIAL_SESSION, and ignoring it left a
+        // returning member's tab never knowing who they were, so signing out
+        // wiped nothing off the device.
+        if (reportsIdentity(event, nextUserId)) {
+          previousUserId = nextUserId;
+          signedInUserId.current = nextUserId;
+        }
+        // Whoever was signed in is no longer the person at the keyboard, so
+        // everything this app kept on the device for them goes: the knowledge
+        // base it cached to work offline, the check-in roster, unsaved drafts.
+        // The rule for WHEN is `resolveAuthRefresh`'s, so it is unit tested
+        // rather than living here as a condition nothing checks.
+        if (refresh.clearDeviceCache) clearCacheFor(refresh.clearDeviceCache.owner);
+        if (refresh.invalidateRouter) router.invalidate();
+        if (refresh.invalidateQueries) queryClient.invalidateQueries();
       });
       // The import resolves asynchronously, so the effect may already have been
       // cleaned up by the time we get here.

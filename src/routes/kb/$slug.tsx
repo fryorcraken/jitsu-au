@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { KbArticleReader } from "@/components/site/KbArticleReader";
 import { Loading } from "@/components/site/Loading";
+import { StaleNotice } from "@/components/site/StaleNotice";
 import type { NewAnnotation } from "@/components/site/KbArticleReader";
 import { useKbNav } from "@/hooks/useKbNav";
 import { kbAnnotationsQueryKey, useKbArticle, useKbArticlePrefetch } from "@/hooks/useKbArticle";
@@ -262,7 +263,11 @@ function ArticlePage() {
     );
   }
 
-  if (articleQ.isError || !article || !viewer) {
+  // `!article` rather than `isError`: with the article kept on the device, a
+  // refresh that fails still has the text to show, and rendering "Not available"
+  // over a perfectly good copy would be the cache making things worse. A failed
+  // refresh becomes the notice above the article instead, further down.
+  if (!article || !viewer) {
     return (
       <section className="max-w-3xl">
         <h1 className="text-3xl font-bold">Not available</h1>
@@ -294,6 +299,18 @@ function ArticlePage() {
         section={crumbs?.section?.slug ? crumbs.section.title : null}
         title={article.title}
       />
+
+      {/* Only when BOTH are true: this is the stored copy, and the refresh
+          behind it failed. A successful refresh replaces the text silently,
+          which is the ordinary case and needs no announcement. */}
+      {articleQ.isError && articleQ.restoredAt !== null && (
+        <StaleNotice
+          className="mb-6"
+          what="article"
+          savedAt={articleQ.restoredAt}
+          onRetry={() => void articleQ.refetch()}
+        />
+      )}
 
       <header className="mb-8">
         <div className="flex flex-wrap items-center gap-2">
