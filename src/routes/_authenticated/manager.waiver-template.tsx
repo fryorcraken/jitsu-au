@@ -31,6 +31,8 @@ import {
   versionLabel,
 } from "@/lib/waiver-template-editor";
 import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
+import { useEditorDraft } from "@/hooks/use-editor-draft";
+import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
@@ -98,6 +100,31 @@ export const Route = createFileRoute("/_authenticated/manager/waiver-template")(
 });
 
 type TemplateVersion = Awaited<ReturnType<typeof listWaiverTemplates>>[number];
+
+/**
+ * The template draft, flattened for storage. The acknowledgements are a list of
+ * objects, so they travel as JSON in one string field.
+ */
+type TemplateDraftFields = { title: string; body: string; acksJson: string };
+
+const TEMPLATE_DRAFT_SHAPE: TemplateDraftFields = { title: "", body: "", acksJson: "[]" };
+
+/**
+ * Read the acknowledgements back out of a restored draft.
+ *
+ * Falls back to what is already on screen rather than to an empty list: the
+ * media consent row is required, and restoring a draft into no acknowledgements
+ * at all would put the editor into a state it refuses to save from, with no
+ * obvious way out.
+ */
+function parseAcksJson(raw: string, fallback: AcknowledgementDef[]): AcknowledgementDef[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as AcknowledgementDef[]) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function EditorPage() {
   const navigate = useNavigate();
@@ -171,6 +198,53 @@ function EditorPage() {
   );
 
   const liveVersion = templates.find((t) => t.is_current)?.version ?? null;
+
+  /**
+   * The on-device safety net, the same one the blog composer and the knowledge
+   * base editor use. This is the document people sign, and rewriting it is a
+   * long sitting: losing it to a backgrounded app is the worst version of the
+   * problem, not the least serious one.
+   *
+   * The acknowledgements are a list of objects, so they travel as JSON in a
+   * single string field — everything a draft stores has to be a plain string or
+   * boolean so a later build can read it back (`src/lib/editor-draft.ts`).
+   *
+   * Scoped to the version being edited, and held back until one is open: with no
+   * baseline, an offer would be measured against nothing.
+   */
+  const templateDraftFields = useMemo<TemplateDraftFields>(
+    () => ({ title, body, acksJson: JSON.stringify(acks) }),
+    [title, body, acks],
+  );
+  const templateDraftBaseline = useMemo<TemplateDraftFields>(
+    () =>
+      selected
+        ? {
+            title: selected.title,
+            body: selected.body_md,
+            acksJson: JSON.stringify(selected.acknowledgements ?? []),
+          }
+        : TEMPLATE_DRAFT_SHAPE,
+    [selected],
+  );
+  const templateDraft = useEditorDraft<TemplateDraftFields>({
+    kind: "waiver-template",
+    scope: selectedId ?? "new",
+    owner: user?.id ?? null,
+    value: templateDraftFields,
+    baseline: templateDraftBaseline,
+    shape: TEMPLATE_DRAFT_SHAPE,
+    enabled: Boolean(selected),
+  });
+
+  function restoreTemplateDraft() {
+    const d = templateDraft.offered;
+    if (!d) return;
+    setTitle(d.title);
+    setBody(d.body);
+    setAcks(parseAcksJson(d.acksJson, acks));
+    templateDraft.restore();
+  }
 
   // Checked against the raw acks so clearing the media row's label trips this
   // immediately, before `meaningfulAcks` would silently drop the row on save.
@@ -246,6 +320,9 @@ function EditorPage() {
       // as "Save failed" for a version that had been written and made live —
       // whereupon the obvious response, saving again, files a duplicate.
       toast.success(`Saved version ${res.version}, now live`);
+      // Published, so there is nothing left to recover. The reload below opens
+      // the new version, whose own baseline then matches what is on screen.
+      templateDraft.clear();
       try {
         const rows = await fetchTemplates();
         setTemplates(rows);
@@ -298,6 +375,15 @@ function EditorPage() {
             <Link to="/account">Back to account</Link>
           </Button>
         </div>
+
+        {templateDraft.offered && (
+          <DraftRestoreBanner
+            what="waiver template"
+            savedAt={templateDraft.offeredAt}
+            onRestore={restoreTemplateDraft}
+            onDiscard={templateDraft.discard}
+          />
+        )}
 
         <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
           <div className="space-y-4">

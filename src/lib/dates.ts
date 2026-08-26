@@ -31,3 +31,22 @@ export function formatDateOnly(value: string | null | undefined): string {
   const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : value;
 }
+
+/**
+ * "14:32", "yesterday at 14:32", "12 Aug at 14:32".
+ *
+ * A bare timestamp is the wrong answer for the common case, which is a draft
+ * from ten minutes ago: the useful thing to know is whether this is the work
+ * they just lost or something much older they had forgotten about.
+ */
+export function describeWhen(savedAt: number, now = Date.now()): string {
+  const then = new Date(savedAt);
+  const time = then.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  if (savedAt >= startOfToday.getTime()) return time;
+  const startOfYesterday = startOfToday.getTime() - 24 * 60 * 60_000;
+  if (savedAt >= startOfYesterday) return `yesterday at ${time}`;
+  const date = then.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return `${date} at ${time}`;
+}

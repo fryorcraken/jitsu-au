@@ -50,7 +50,7 @@ function NewBlogPostPage() {
     [],
   );
 
-  async function onSave(value: BlogPostEditorValue) {
+  async function onSave(value: BlogPostEditorValue): Promise<boolean> {
     setSaving(true);
     try {
       await create({
@@ -65,8 +65,10 @@ function NewBlogPostPage() {
       });
       toast.success(value.status === "published" ? "Post published" : "Draft saved");
       navigate({ to: "/manager/blog" });
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save that post");
+      return false;
     } finally {
       setSaving(false);
     }

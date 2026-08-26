@@ -69,6 +69,8 @@ import {
   setCurrentArticleVersion,
 } from "@/lib/kb.functions";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
+import { useEditorDraft } from "@/hooks/use-editor-draft";
+import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
 import { useInvalidateKbReader } from "@/hooks/useKbArticle";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
 import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
@@ -156,6 +158,35 @@ function containerOf(groups: NavGroup[], id: string): string | null {
   const slug = id.slice("entry:".length);
   return groups.find((g) => g.entries.some((e) => e.slug === slug))?.slug ?? null;
 }
+
+/**
+ * One entry's draft, flattened. `position` is a number on screen and a string
+ * here for the same reason every other field is a string or a boolean: the
+ * stored shape has to be readable by a later build without a migration.
+ */
+type KbDraftFields = {
+  title: string;
+  body: string;
+  visibility: string;
+  annotationsEnabled: boolean;
+  section: string;
+  position: string;
+  navTitle: string;
+  linkPath: string;
+  changeNote: string;
+};
+
+const KB_DRAFT_SHAPE: KbDraftFields = {
+  title: "",
+  body: "",
+  visibility: "members",
+  annotationsEnabled: true,
+  section: "",
+  position: "0",
+  navTitle: "",
+  linkPath: "",
+  changeNote: "",
+};
 
 function KnowledgeBaseManager() {
   const navigate = useNavigate();
@@ -330,6 +361,88 @@ function KnowledgeBaseManager() {
     link_path: linkPath,
   };
   const dirty = isArticleDirty(draft, stored);
+
+  /**
+   * The on-device safety net for whichever entry is open.
+   *
+   * An article is Markdown a manager can sit with for a long time, and until now
+   * it lived only in React state — so the installed app being reclaimed in the
+   * background took the lot, exactly as it did for a blog post. Flattened to
+   * strings and booleans because a draft has to survive being read back by a
+   * later build of the site (see `src/lib/editor-draft.ts`).
+   *
+   * Scoped by slug, so two entries never overwrite each other's draft, and held
+   * back until `stored` has loaded: comparing against a baseline that has not
+   * arrived would offer back a draft identical to the saved version.
+   */
+  const kbDraftFields = useMemo<KbDraftFields>(
+    () => ({
+      title,
+      body,
+      visibility,
+      annotationsEnabled,
+      section,
+      position: String(position),
+      navTitle,
+      linkPath,
+      changeNote,
+    }),
+    [
+      title,
+      body,
+      visibility,
+      annotationsEnabled,
+      section,
+      position,
+      navTitle,
+      linkPath,
+      changeNote,
+    ],
+  );
+  const kbDraftBaseline = useMemo<KbDraftFields>(
+    () =>
+      stored
+        ? {
+            title: stored.title,
+            body: stored.body_md,
+            visibility: stored.visibility,
+            annotationsEnabled: stored.annotations_enabled,
+            section: stored.section,
+            position: String(stored.position),
+            navTitle: stored.nav_title,
+            linkPath: stored.link_path,
+            // Never part of the saved version — it describes the save that is
+            // about to happen — so its baseline is always empty and a note
+            // somebody typed counts as unsaved work on its own.
+            changeNote: "",
+          }
+        : KB_DRAFT_SHAPE,
+    [stored],
+  );
+  const kbDraft = useEditorDraft<KbDraftFields>({
+    kind: "kb-entry",
+    scope: slug || "new",
+    owner: user?.id ?? null,
+    value: kbDraftFields,
+    baseline: kbDraftBaseline,
+    shape: KB_DRAFT_SHAPE,
+    enabled: Boolean(slug) && stored !== null,
+  });
+
+  function restoreKbDraft() {
+    const d = kbDraft.offered;
+    if (!d) return;
+    setTitle(d.title);
+    setBody(d.body);
+    setVisibility(d.visibility === "managers" ? "managers" : "members");
+    setAnnotationsEnabled(d.annotationsEnabled);
+    setSection(d.section);
+    setPosition(Number.isFinite(Number(d.position)) ? Number(d.position) : 0);
+    setNavTitle(d.navTitle);
+    setLinkPath(d.linkPath);
+    setChangeNote(d.changeNote);
+    kbDraft.restore();
+  }
   /**
    * The work the VISIBLE editor would lose, which is what every "discard your
    * unsaved changes?" prompt is really asking about.
@@ -807,6 +920,10 @@ function KnowledgeBaseManager() {
         link_path: isLink ? linkPath.trim() : "",
       });
       if (isLink) setLinkPath(linkPath.trim());
+      // The version is published, so there is nothing left to recover. `stored`
+      // moving to match would clear it anyway; doing it here as well covers the
+      // save that also changed the slug, whose draft is filed under the old one.
+      kbDraft.clear();
       try {
         const [rows, sectionRows, vs] = await Promise.all([
           fetchArticles(),
@@ -1457,6 +1574,17 @@ function KnowledgeBaseManager() {
         </aside>
 
         <div className="space-y-4">
+          {/* Above both editors rather than inside the article one: the offer is
+              about this slug, and it should be the first thing a manager sees on
+              a screen they have just come back to. */}
+          {kbDraft.offered && (
+            <DraftRestoreBanner
+              what={kbDraft.offered.linkPath ? "link" : "article"}
+              savedAt={kbDraft.offeredAt}
+              onRestore={restoreKbDraft}
+              onDiscard={kbDraft.discard}
+            />
+          )}
           {sectionEdit ? (
             /* A section, edited in the same window an article is, so titles,
                settings and deletion all live in one place and the list on the

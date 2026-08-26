@@ -64,7 +64,7 @@ function EditBlogPostPage() {
     navigate({ to: "/manager/blog" });
   }
 
-  async function onSave(value: BlogPostEditorValue) {
+  async function onSave(value: BlogPostEditorValue): Promise<boolean> {
     setSaving(true);
     try {
       const res = await update({
@@ -98,8 +98,10 @@ function EditBlogPostPage() {
             }
           : prev,
       );
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save that post");
+      return false;
     } finally {
       setSaving(false);
     }
