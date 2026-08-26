@@ -302,6 +302,17 @@ function KnowledgeBaseManager() {
    * saved. A manager who glanced away walks off believing a correction is live.
    */
   const [saveError, setSaveError] = useState<string | null>(null);
+  /**
+   * The fields "New article" / "New link" just seeded, so a draft of an entry
+   * that does not exist yet has something to be measured against.
+   *
+   * `stored` is the baseline for an entry that HAS been saved, and it is null
+   * while creating one — which is exactly the case that loses the most work, so
+   * it cannot simply be left unprotected. Measuring against a bare empty shape
+   * instead would not do: `startNew` presets a section and a position, so a
+   * form nobody has typed into yet would read as unsaved work.
+   */
+  const [newBaseline, setNewBaseline] = useState<KbDraftFields | null>(null);
   const { confirm, confirmDialog } = useConfirm();
   // Called after every write here. The reader side caches articles and the
   // sidebar for minutes at a time, and this screen is the only thing that
@@ -410,8 +421,9 @@ function KnowledgeBaseManager() {
   );
   const kbDraftBaseline = useMemo<KbDraftFields>(
     () =>
-      stored
-        ? {
+      !stored
+        ? (newBaseline ?? KB_DRAFT_SHAPE)
+        : {
             title: stored.title,
             body: stored.body_md,
             visibility: stored.visibility,
@@ -424,18 +436,22 @@ function KnowledgeBaseManager() {
             // about to happen — so its baseline is always empty and a note
             // somebody typed counts as unsaved work on its own.
             changeNote: "",
-          }
-        : KB_DRAFT_SHAPE,
-    [stored],
+          },
+    [stored, newBaseline],
   );
   const kbDraft = useEditorDraft<KbDraftFields>({
     kind: "kb-entry",
-    scope: slug || "new",
+    // A new entry has no slug yet, so it gets its own slot. Once it is saved
+    // the screen moves onto the real slug and this one is cleared.
+    scope: creating ? "new" : slug,
     owner: user?.id ?? null,
     value: kbDraftFields,
     baseline: kbDraftBaseline,
     shape: KB_DRAFT_SHAPE,
-    enabled: Boolean(slug) && stored !== null,
+    // Held back until there is a baseline to measure against: an offer weighed
+    // against nothing is an offer to restore a draft identical to what is
+    // already on screen.
+    enabled: creating ? newBaseline !== null : Boolean(slug) && stored !== null,
   });
 
   // Editing anything clears the last failure: the panel is about the save that
@@ -615,6 +631,7 @@ function KnowledgeBaseManager() {
     if (summary?.link_path) {
       claim();
       setCreating(false);
+      setNewBaseline(null);
       setSlug(next);
       setKind("link");
       setTitle("");
@@ -659,6 +676,7 @@ function KnowledgeBaseManager() {
       if (stale(token)) return;
 
       setCreating(false);
+      setNewBaseline(null);
       setSlug(next);
       setChangeNote("");
       setPreview(null);
@@ -751,6 +769,11 @@ function KnowledgeBaseManager() {
     const into = sections[0]?.slug ?? "";
     setSection(into);
     setPosition(nextPosition(siblingsOf(into)));
+    setNewBaseline({
+      ...KB_DRAFT_SHAPE,
+      section: into,
+      position: String(nextPosition(siblingsOf(into))),
+    });
     setFailed({ article: false, versions: false, feedback: false });
   }
 
@@ -921,6 +944,7 @@ function KnowledgeBaseManager() {
       // editor would put the screen out of step with itself.
       if (stale(token)) return;
       setCreating(false);
+      setNewBaseline(null);
       setSlug(targetSlug);
       setChangeNote("");
       setBaseVisibility(visibility);
