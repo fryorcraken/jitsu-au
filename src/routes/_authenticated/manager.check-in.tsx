@@ -12,6 +12,15 @@ import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
 import { coveragePreviewLabel, pickDefaultEvent } from "@/lib/checkin";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePersistentQuery } from "@/hooks/use-persistent-query";
+import { StaleNotice } from "@/components/site/StaleNotice";
+import {
+  CHECKIN_CACHE_MAX_AGE_MS,
+  checkInBoardCacheSchema,
+  checkInEventsCacheSchema,
+} from "@/lib/checkin-cache";
+import { cacheReviver } from "@/lib/kb-cache";
 import {
   attachCheckInCoverage,
   checkInPerson,
@@ -107,16 +116,7 @@ function CheckInPage() {
   const undo = useServerFn(undoCheckIn);
   const attach = useServerFn(attachCheckInCoverage);
 
-  const [events, setEvents] = useState<EventRow[]>([]);
   const [eventId, setEventId] = useState<string | null>(null);
-  const [board, setBoard] = useState<Board | null>(null);
-  const [uncovered, setUncovered] = useState<UncoveredRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  // Two loads, two failures, and they mean different things: no classes on the
-  // calendar is a reason to add one, and no roster means nobody is in the room.
-  // Both used to fade with a toast and leave the ordinary empty state saying so.
-  const [eventsError, setEventsError] = useState<string | null>(null);
-  const [boardError, setBoardError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [openAttach, setOpenAttach] = useState<string | null>(null);
@@ -126,60 +126,82 @@ function CheckInPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  // The class list, and the one the screen opens on: today's, or the nearest.
-  const loadEvents = useCallback(() => {
-    setLoading(true);
-    return fetchEvents()
-      .then((rows) => {
-        const list = rows as EventRow[];
-        setEvents(list);
-        setEventId((current) => current ?? pickDefaultEvent(list, new Date())?.id ?? null);
-        setEventsError(null);
-      })
-      .catch((e) => {
-        const message = describeLoadError(e, "Could not load the classes");
-        setEventsError(message);
-        toast.error(message);
-      })
-      .finally(() => setLoading(false));
-  }, [fetchEvents]);
+  /**
+   * The class list and the roster, both kept on this device.
+   *
+   * This screen is run at the door of a gym on a phone, so the two things it
+   * cannot afford are a spinner on launch and an error panel where the roster
+   * should be. `usePersistentQuery` paints what was here last time immediately
+   * and refreshes behind it; `checkin-cache.ts` sets the terms, including why
+   * this one expires in a day where the knowledge base's lasts a week.
+   */
+  const eventsQ = usePersistentQuery<EventRow[]>({
+    queryKey: ["checkin-events", user?.id ?? null],
+    queryFn: () => fetchEvents() as Promise<EventRow[]>,
+    enabled: isManager,
+    cacheKey: `checkin-events.${user?.id ?? "anon"}`,
+    owner: user?.id ?? null,
+    maxAgeMs: CHECKIN_CACHE_MAX_AGE_MS,
+    revive: cacheReviver<EventRow[]>(checkInEventsCacheSchema),
+  });
+  const events = useMemo(() => eventsQ.data ?? [], [eventsQ.data]);
 
+  const boardQ = usePersistentQuery<Board>({
+    queryKey: ["checkin-board", user?.id ?? null, eventId],
+    queryFn: () => fetchBoard({ data: { event_id: eventId! } }) as Promise<Board>,
+    enabled: isManager && Boolean(eventId),
+    cacheKey: `checkin-board.${user?.id ?? "anon"}.${eventId ?? "none"}`,
+    owner: user?.id ?? null,
+    maxAgeMs: CHECKIN_CACHE_MAX_AGE_MS,
+    revive: cacheReviver<Board>(checkInBoardCacheSchema),
+  });
+  const board = boardQ.data ?? null;
+
+  /**
+   * The needs-attention list, memory-only and deliberately so: see
+   * `checkin-cache.ts`. A stale worklist sends a manager chasing check-ins
+   * somebody has already sorted out.
+   */
+  const uncoveredQ = useQuery({
+    queryKey: ["checkin-uncovered", user?.id ?? null],
+    queryFn: () => fetchUncovered() as Promise<UncoveredRow[]>,
+    enabled: isManager,
+  });
+  const uncovered = useMemo(() => uncoveredQ.data ?? [], [uncoveredQ.data]);
+
+  // Two loads, two failures, and they mean different things: no classes on the
+  // calendar is a reason to add one, and no roster means nobody is in the room.
+  // Both are only a FAILURE when there is nothing to show — with a copy on the
+  // device, a failed refresh is a staleness notice instead (see `StaleNotice`).
+  const eventsError =
+    eventsQ.isError && !eventsQ.data
+      ? describeLoadError(eventsQ.error, "Could not load the classes")
+      : null;
+  const boardError =
+    boardQ.isError && !boardQ.data
+      ? describeLoadError(boardQ.error, "Could not load the roster")
+      : null;
+  const loading = eventsQ.isLoading;
+
+  // The class the screen opens on: today's, or the nearest. In an effect rather
+  // than inside the fetch, because the list can now arrive from the device
+  // before any fetch has happened at all.
   useEffect(() => {
-    if (!isManager) return;
-    void loadEvents();
-  }, [isManager, loadEvents]);
+    if (!events.length) return;
+    setEventId((current) => current ?? pickDefaultEvent(events, new Date())?.id ?? null);
+  }, [events]);
 
-  const reloadBoard = useCallback(() => {
-    if (!eventId) return Promise.resolve();
-    return fetchBoard({ data: { event_id: eventId } })
-      .then((b) => {
-        setBoard(b as Board);
-        setBoardError(null);
-      })
-      .catch((e) => {
-        const message = describeLoadError(e, "Could not load the roster");
-        setBoardError(message);
-        toast.error(message);
-      });
-  }, [eventId, fetchBoard]);
-
-  const reloadUncovered = useCallback(() => {
-    return fetchUncovered()
-      .then((rows) => setUncovered(rows as UncoveredRow[]))
-      .catch(() => {
-        /* the needs-attention list is secondary; never block the door on it */
-      });
-  }, [fetchUncovered]);
-
-  useEffect(() => {
-    if (!isManager) return;
-    reloadBoard();
-  }, [isManager, reloadBoard]);
-
-  useEffect(() => {
-    if (!isManager) return;
-    reloadUncovered();
-  }, [isManager, reloadUncovered]);
+  const queryClient = useQueryClient();
+  /** Re-read the roster and the needs-attention list after a write. */
+  const refreshAfterWrite = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["checkin-board"] }),
+      queryClient.invalidateQueries({ queryKey: ["checkin-uncovered"] }),
+      // The class list carries each class's attendance count, so checking
+      // somebody in changes it too.
+      queryClient.invalidateQueries({ queryKey: ["checkin-events"] }),
+    ]);
+  }, [queryClient]);
 
   const selectedEvent = events.find((e) => e.id === eventId) ?? null;
   const isCancelled = board?.event.status === "cancelled";
@@ -220,7 +242,7 @@ function CheckInPage() {
         );
       }
       setSearch("");
-      await Promise.all([reloadBoard(), reloadUncovered()]);
+      await refreshAfterWrite();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not check them in");
     } finally {
@@ -243,7 +265,7 @@ function CheckInPage() {
             : `Removed ${name ?? "the check-in"}.`,
         );
       }
-      await Promise.all([reloadBoard(), reloadUncovered()]);
+      await refreshAfterWrite();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not undo that check-in");
     } finally {
@@ -266,7 +288,7 @@ function CheckInPage() {
         toast.success(left == null ? `Attached to ${plan}.` : `Attached to ${plan}. ${left} left.`);
         setOpenAttach(null);
       }
-      await Promise.all([reloadBoard(), reloadUncovered()]);
+      await refreshAfterWrite();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not attach that check-in");
     } finally {
@@ -331,7 +353,7 @@ function CheckInPage() {
             what="The class list"
             message={eventsError}
             hint="This is not the same as there being no classes on the calendar, so do not add one from here."
-            onRetry={() => void loadEvents()}
+            onRetry={() => void eventsQ.refetch()}
           />
         )}
 
@@ -346,6 +368,18 @@ function CheckInPage() {
         )}
       </div>
 
+      {/* The one thing a manager at the door must not be left to guess: whether
+          what they are reading is live. Shown only when this really IS the
+          stored copy and the refresh behind it failed — a successful refresh
+          replaces it silently, which is the ordinary case. */}
+      {boardQ.isError && boardQ.restoredAt !== null && (
+        <StaleNotice
+          what="roster"
+          savedAt={boardQ.restoredAt}
+          onRetry={() => void boardQ.refetch()}
+        />
+      )}
+
       {/* ---- Here now ---- */}
       <div className="space-y-2">
         <h2 className="text-xl font-bold">Here now{board ? ` (${board.checkins.length})` : ""}</h2>
@@ -354,7 +388,7 @@ function CheckInPage() {
             what="The roster"
             message={boardError}
             hint="Nobody is listed because it could not be read, not because the mat is empty."
-            onRetry={() => void reloadBoard()}
+            onRetry={() => void boardQ.refetch()}
           />
         )}
         <div className="overflow-x-auto rounded-lg border">

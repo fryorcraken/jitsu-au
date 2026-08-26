@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
 import { resolveAuthRefresh } from "../lib/auth-events";
+import { clearCacheFor } from "../lib/local-cache";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
@@ -204,7 +205,19 @@ function RootComponent() {
       const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
         const nextUserId = session?.user?.id ?? null;
         const refresh = resolveAuthRefresh(event, previousUserId, nextUserId);
-        if (event === "SIGNED_IN" || event === "SIGNED_OUT") previousUserId = nextUserId;
+        if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+          // Whoever was signed in is no longer the person at the keyboard, so
+          // everything this app kept on the device for them goes: the knowledge
+          // base it cached to work offline, the check-in roster, unsaved drafts.
+          // This is what makes storing any of it defensible on a club laptop
+          // that several people use, and it is why every entry records its
+          // owner (`src/lib/local-cache.ts`). Signing the SAME person back in is
+          // not a handover, so their cache survives it.
+          if (previousUserId !== undefined && previousUserId !== nextUserId) {
+            clearCacheFor(previousUserId);
+          }
+          previousUserId = nextUserId;
+        }
         if (refresh.invalidateRouter) router.invalidate();
         if (refresh.invalidateQueries) queryClient.invalidateQueries();
       });

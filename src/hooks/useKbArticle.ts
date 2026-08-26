@@ -16,10 +16,14 @@
 //    the article is simply there, which is the difference between the knowledge
 //    base feeling like a set of pages and feeling like an app.
 import { useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/hooks/useAuth";
+import { usePersistentQuery } from "@/hooks/use-persistent-query";
+import { KB_CACHE_MAX_AGE_MS, cacheReviver, kbArticleCacheSchema } from "@/lib/kb-cache";
 import { getKbArticle } from "@/lib/kb.functions";
+
+type KbArticlePayload = Awaited<ReturnType<typeof getKbArticle>>;
 
 /**
  * How long a fetched article counts as fresh.
@@ -66,9 +70,19 @@ export function kbAnnotationsQueryKey(userId: string | null, slug: string) {
 export function useKbArticle(slug: string) {
   const { user, loading: authLoading } = useAuth();
   const fetchArticle = useServerFn(getKbArticle);
-  return useQuery({
-    ...articleQueryOptions(fetchArticle, user?.id ?? null, slug),
+  const userId = user?.id ?? null;
+  return usePersistentQuery<KbArticlePayload>({
+    ...articleQueryOptions(fetchArticle, userId, slug),
     enabled: !authLoading,
+    // Kept on the device so an article read once is readable again with no
+    // signal, and so relaunching the installed app onto an article shows the
+    // text rather than a spinner. Scoped to the reader and dropped on sign-out
+    // (`clearCacheFor` in `__root.tsx`) for the same reason the query key is:
+    // a managers-only draft must not outlive the session that could read it.
+    cacheKey: `kb-article.${userId ?? "anon"}.${slug}`,
+    owner: userId,
+    maxAgeMs: KB_CACHE_MAX_AGE_MS,
+    revive: cacheReviver<KbArticlePayload>(kbArticleCacheSchema),
   });
 }
 
