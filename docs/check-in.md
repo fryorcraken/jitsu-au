@@ -207,6 +207,30 @@ people in to a class that did not run.
   they attended reads as an accusation.
 - **The manager agent API** — `list_users` returns `sessions_attended`.
 
+## At the door, on a bad connection
+
+This screen is run in a university gym, on a phone, by a manager with a queue in
+front of them, so the two things it cannot afford are a spinner on launch and an
+error panel where the roster should be. The class list and the roster are kept
+**on that manager's device** and painted immediately while a fresh copy is
+fetched behind them.
+
+- **A day, and no longer.** This data carries members' names and email
+  addresses, and memberships are raised and waivers signed between classes, so a
+  roster older than that is a wrong answer rather than a convenience.
+- **Scoped to the manager who fetched it**, and wiped when anybody signs out, so
+  a club laptop passed to the next person carries nothing.
+- **When it is the stored copy on screen, the screen says so** — a notice with
+  the time it was fetched and a retry, rather than passing it off as live.
+- **The needs-attention list is deliberately not kept.** It is a worklist, and a
+  stale one sends a manager chasing check-ins somebody has already sorted out.
+
+Writing still needs the network: checking somebody in spends a session and
+resolves coverage server-side, so it is not something a phone can do on its own
+and then reconcile. Offline check-in is on the "not built, on purpose" list
+below. The terms above are in `src/lib/checkin-cache.ts`; `docs/pwa.md` has the
+storage rules they rest on.
+
 ## Not built, on purpose
 
 - **Self check-in, QR codes, kiosk mode.** A manager checks people in.

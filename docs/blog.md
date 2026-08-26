@@ -163,6 +163,31 @@ commenting anywhere, not just on this post. The same page has a "Blocked
 commenters" panel listing everyone currently blocked, each with an **Unblock**
 button.
 
+## Nothing typed here is lost to a closed app
+
+The composer keeps everything on the device as it is written, and flushes it the
+moment the page is hidden. That last part is the whole point: `beforeunload`,
+which was the only guard before, does not fire on a phone — iOS ignores it, and
+an installed app the system reclaims in the background is never asked to unload,
+it is simply killed and relaunched cold. A manager lost a finished draft to
+exactly that.
+
+Coming back to the composer with something stored offers it back, with the time
+it was kept from. It is an **offer**, never a silent restore: somebody who
+abandoned a draft on purpose, or who has since edited the same post from a
+laptop, must not have this device's copy pushed over what they meant to keep.
+The stored copy is thrown away once the post has really been saved, and kept
+when a save fails.
+
+A save that fails leaves a panel on screen saying so, with the writing still in
+the form and a button that tries again — not a toast, which fades in four
+seconds and leaves an editor that looks exactly like one that saved.
+
+The rules live in `src/lib/editor-draft.ts` and the wiring in
+`src/hooks/use-editor-draft.ts`; the knowledge base editor and the waiver
+template editor use the same two. `docs/pwa.md` has how long a draft is kept and
+why this uses `localStorage` where the waiver's own draft uses `sessionStorage`.
+
 ## SEO
 
 `/blog` is a normal entry in `PUBLIC_PAGES` (`src/lib/seo.ts`), like any other

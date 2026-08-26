@@ -158,4 +158,44 @@ describe("BlogPostEditor draft recovery", () => {
     await user.click(await screen.findByRole("button", { name: /bring it back/i }));
     expect(screen.getByLabelText("Title")).toHaveValue("Grading day");
   });
+
+  it("keeps a failed save on screen instead of leaving it to a toast", async () => {
+    const user = userEvent.setup();
+    render(
+      <BlogPostEditor
+        initial={EMPTY}
+        saving={false}
+        onSave={async () => "We could not reach the site."}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText(/Body/), "Everyone did well.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    // A toast fades in four seconds and leaves a form that looks exactly like
+    // one that saved. This has to still be here.
+    const panel = await screen.findByRole("alert");
+    expect(panel).toHaveTextContent(/was not saved/i);
+    expect(panel).toHaveTextContent(/We could not reach the site/);
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    // And the writing is still on screen.
+    expect(screen.getByLabelText("Title")).toHaveValue("Grading day");
+  });
+
+  it("clears the failure once the writing changes", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => false} />);
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText(/Body/), "Everyone did well.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("alert");
+
+    await user.type(screen.getByLabelText(/Body/), " Really.");
+
+    // The panel is about the save that was attempted. Left up over changed
+    // text it claims something about work it never saw.
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
 });

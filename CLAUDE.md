@@ -165,10 +165,13 @@ src/
     ui/                   shadcn/ui primitives (generated; avoid hand-editing)
     site/                 App chrome + shared UX: SiteLayout/MemberLayout/KbLayout,
                           SiteHeader, SiteFooter, SignaturePad, AuthPending,
-                          SubmitStatus, StatusPill
+                          SubmitStatus, StatusPill, Loading, LoadFailure,
+                          SaveFailure, StaleNotice, DraftRestoreBanner
   integrations/supabase/  Supabase clients + auth middleware + generated types
   lib/                    Business logic, server functions, PDF, email templates, utils
-  hooks/                  useAuth / useRoles, use-resilient-submit, use-mobile
+  hooks/                  useAuth / useRoles, use-resilient-submit, use-mobile,
+                          use-editor-draft (unsaved work kept on the device),
+                          use-persistent-query (answers that survive a relaunch)
   router.tsx              createRouter() factory (QueryClient in context)
   server.ts               SSR entry — wraps errors into a rendered error page
   start.ts                createStart(): global function + request middleware
@@ -827,7 +830,8 @@ Practical rules:
 - **Extend a seam, do not add a parallel one.** This repo already has the seam
   for most things: form rules in `src/lib/validation.ts`, server work in
   `src/lib/*.functions.ts` (`createServerFn` + Zod), writes from the browser
-  through `useResilientSubmit`, RPC shapes in `src/lib/supabase-rpc.ts`, page
+  through `useResilientSubmit`, anything kept on a device in
+  `src/lib/local-cache.ts`, RPC shapes in `src/lib/supabase-rpc.ts`, page
   chrome in `components/site/*Layout`, indexable pages in `src/lib/seo.ts`, and
   the club facts every page repeats in `src/lib/venue.ts` (name, address,
   phone), `src/lib/schedule.ts` (the weekly class times) and `src/lib/faq.ts`.
@@ -900,6 +904,32 @@ Then hold the change to this:
     `useQuery`'s `isLoading` is **false** once a query has rejected, so a hook
     that reports only `isLoading` leaves the page on "Loading..." for good.
     Surface `isError` too (`useKbNav` is the worked example).
+- **A failed SAVE is not a toast either, for the same reason.** A toast fades in
+  four seconds and what it leaves behind is a form that looks exactly like one
+  that saved, so somebody who glanced away walks off believing their work is
+  filed. Hold a `saveError` state and render **`components/site/SaveFailure`**
+  beside the form: it says the writing is still here, and carries the retry.
+  Clear it when the form is edited, or the panel starts claiming something about
+  work it never saw. The three long-form editors (blog, knowledge base, waiver
+  template) are the worked examples. A _success_ toast is still right.
+- **Anywhere somebody types at length, keep it on the device.** `beforeunload`
+  is not a safety net on a phone: iOS ignores it, and an installed app the
+  system reclaims in the background is killed without being asked to unload.
+  Use **`useEditorDraft`** + **`DraftRestoreBanner`**, which save a moment after
+  typing stops AND on `visibilitychange`/`pagehide`, and offer the result back
+  rather than restoring it silently. The waiver keeps its own module
+  (`waiver-draft.ts`) because its draft holds health answers and a signature and
+  therefore uses `sessionStorage`; everything else uses these. `docs/blog.md`
+  and `docs/pwa.md` have the reasoning.
+- **A screen that can be read on a bad connection should be.** Where an answer
+  is worth having offline and being a few minutes old is honest rather than
+  misleading, fetch it with **`usePersistentQuery`** so a relaunch paints
+  instead of spinning, and show **`components/site/StaleNotice`** when what is
+  on screen is the stored copy and the refresh failed. Such a screen must key
+  its "not available" branch on having no data, **never on `isError`** — a
+  failed refresh would otherwise hide a perfectly good cached copy. What is
+  cached and for how long is a judgement recorded in `docs/pwa.md`, not a
+  default; anything a person would act on irreversibly does not belong there.
 - **A bare `Loading...` is not a loading state.** Use
   **`components/site/Loading`**, which carries the `role="status"` /
   `aria-live="polite"` wiring `AuthPending` and `SubmitStatus` already have.

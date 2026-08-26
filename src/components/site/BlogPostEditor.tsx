@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
+import { SaveFailure } from "@/components/site/SaveFailure";
 
 /** File -> base64, same chunked approach as the paper-waiver scan upload
  * (`manager.waivers_.upload.tsx`), which avoids a giant intermediate string
@@ -115,11 +116,15 @@ export function BlogPostEditor({
   initial: BlogPostEditorValue;
   saving: boolean;
   /**
-   * Save it. Resolve `true` only when it really landed: that is the signal to
-   * throw away the on-device draft, and doing it on a failed save would delete
-   * the copy that is about to be needed.
+   * Save it.
+   *
+   * Resolve `true` only when it really landed: that is the signal to throw away
+   * the on-device draft, and doing it on a failed save would delete the copy
+   * that is about to be needed. Resolve `false`, or a message to show, when it
+   * did not — the editor keeps that on screen (`SaveFailure`) instead of
+   * leaving it to a toast that fades.
    */
-  onSave: (value: BlogPostEditorValue) => Promise<boolean>;
+  onSave: (value: BlogPostEditorValue) => Promise<boolean | string>;
   /** Called whenever the form's dirty-vs-`initial` state changes, so the
    * parent route can guard navigating away. */
   onDirtyChange?: (dirty: boolean) => void;
@@ -136,6 +141,14 @@ export function BlogPostEditor({
   const [mobileTab, setMobileTab] = useState<"write" | "preview">("write");
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [videoUrl, setVideoUrl] = useState("");
+  /**
+   * The last failed save, kept on screen rather than left to a toast.
+   *
+   * Cleared when a save is attempted and when anything is edited: a stale
+   * "not saved" panel over a form somebody has since fixed and saved is its own
+   * kind of wrong answer.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -167,6 +180,13 @@ export function BlogPostEditor({
     onDirtyChange?.(dirty);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty]);
+
+  // Editing anything clears the last failure: the panel is about the save that
+  // was attempted, and leaving it up over changed text claims something about
+  // work it never saw.
+  useEffect(() => {
+    setSaveError(null);
+  }, [title, slug, excerpt, body, status, coverPath]);
 
   // Covers a closed tab / refresh / typed-in address bar on a DESKTOP browser.
   // In-app navigation (clicking another sidebar link) is guarded separately by
@@ -306,8 +326,13 @@ export function BlogPostEditor({
     // also moves its baseline to match, which clears it a second time; the new
     // post page navigates away instead, and without this its draft would be
     // offered back the next time somebody opened "New post".
-    void onSave(value).then((saved) => {
-      if (saved) draft.clear();
+    setSaveError(null);
+    void onSave(value).then((result) => {
+      if (result === true) {
+        draft.clear();
+        return;
+      }
+      setSaveError(typeof result === "string" ? result : "We could not reach the site to save it.");
     });
   }
 
@@ -539,6 +564,16 @@ export function BlogPostEditor({
         <div className={cn(mobileTab === "preview" && "hidden lg:block")}>{formFields}</div>
         <div className={cn(mobileTab === "write" && "hidden lg:block")}>{previewCard}</div>
       </div>
+
+      {saveError && (
+        <SaveFailure
+          className="mt-6"
+          what="post"
+          message={saveError}
+          retrying={saving}
+          onRetry={handleSave}
+        />
+      )}
 
       <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <Button disabled={saving || !title.trim() || !body.trim()} onClick={handleSave}>

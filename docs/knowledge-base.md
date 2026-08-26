@@ -558,6 +558,14 @@ things keep that off the reader's path.
   rather than beside it. The article page also read the same database row twice
   on every load: once to tell a link entry from a real page, once again inside
   the loader it then called.
+- **The contents and the article survive the app being closed.** Both are kept
+  on the reader's own device as well as in memory, so opening the installed app
+  paints what was there last time instead of a spinner, and a member on the mat
+  with no signal can still read an article they have opened before. When the
+  refresh behind it fails, the article stays up with a notice saying when it was
+  fetched, rather than the page reporting itself unavailable. A week, because
+  these are the club's own handbooks and they change a few times a year;
+  `docs/pwa.md` has the storage rules and the reasoning.
 - **The page keeps its frame while the text is fetched.** The contents already
   knows this article's section and title, so moving between two articles shows
   the breadcrumb and the heading straight away rather than replacing the whole
@@ -566,7 +574,18 @@ things keep that off the reader's path.
 Everything a reader is cached for is keyed by **who they are**. That is a
 security property rather than a nicety: managers-only drafts are readable data
 under these keys, and a five-minute cache under a reader-agnostic key would keep
-one on screen after a sign-out in another tab.
+one on screen after a sign-out in another tab. The copies kept on the device
+carry the same reader's id on every entry, and signing out wipes them, so a
+shared club laptop never hands one person's reading to the next.
+
+**Nothing typed into the editor is lost to a closed app.** An article is Markdown
+a manager can sit with for a long time, and it used to live only in React state,
+so the installed app being reclaimed in the background took the lot. It is now
+kept on the device as it is written and offered back when the editor reopens —
+an offer, never a silent restore. A save that fails leaves a panel on screen
+rather than a toast that fades. Same two modules as the blog composer
+(`src/lib/editor-draft.ts`, `src/hooks/use-editor-draft.ts`); `docs/blog.md` has
+the reasoning written out.
 
 **Publishing clears all of it.** The manager screen keeps its own state and
 never goes through these queries, so it drops them by hand after every write

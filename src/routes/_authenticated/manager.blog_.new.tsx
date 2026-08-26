@@ -50,7 +50,7 @@ function NewBlogPostPage() {
     [],
   );
 
-  async function onSave(value: BlogPostEditorValue): Promise<boolean> {
+  async function onSave(value: BlogPostEditorValue): Promise<boolean | string> {
     setSaving(true);
     try {
       await create({
@@ -67,8 +67,9 @@ function NewBlogPostPage() {
       navigate({ to: "/manager/blog" });
       return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save that post");
-      return false;
+      // Returned rather than toasted: the editor keeps it on screen in a panel
+      // that does not fade, beside the writing it failed to save.
+      return e instanceof Error && e.message ? e.message : "Could not save that post.";
     } finally {
       setSaving(false);
     }

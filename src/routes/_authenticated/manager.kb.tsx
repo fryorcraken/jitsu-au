@@ -71,6 +71,7 @@ import {
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import { useInvalidateKbReader } from "@/hooks/useKbArticle";
 import { articleVisibilities, visibilityAudience } from "@/lib/kb";
 import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
@@ -293,6 +294,14 @@ function KnowledgeBaseManager() {
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [busy, setBusy] = useState(false);
+  /**
+   * The last failed save, kept on screen rather than left to a toast.
+   *
+   * `SaveFailure`, for the reason written at the top of that component: a toast
+   * fades in four seconds and leaves an editor that looks exactly like one that
+   * saved. A manager who glanced away walks off believing a correction is live.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const { confirm, confirmDialog } = useConfirm();
   // Called after every write here. The reader side caches articles and the
   // sidebar for minutes at a time, and this screen is the only thing that
@@ -428,6 +437,13 @@ function KnowledgeBaseManager() {
     shape: KB_DRAFT_SHAPE,
     enabled: Boolean(slug) && stored !== null,
   });
+
+  // Editing anything clears the last failure: the panel is about the save that
+  // was attempted, and leaving it up over changed text claims something about
+  // work it never saw.
+  useEffect(() => {
+    setSaveError(null);
+  }, [title, body, visibility, annotationsEnabled, section, navTitle, linkPath]);
 
   function restoreKbDraft() {
     const d = kbDraft.offered;
@@ -775,6 +791,7 @@ function KnowledgeBaseManager() {
   }
 
   async function onSave() {
+    setSaveError(null);
     const isLink = kind === "link";
     const targetSlug = (creating ? slug || slugFromTitle(isLink ? navTitle : title) : slug).trim();
     if (!targetSlug) {
@@ -940,7 +957,8 @@ function KnowledgeBaseManager() {
         toast.warning("Saved. The version list could not be refreshed, so reload to see it.");
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Save failed");
+      if (stale(token)) return;
+      setSaveError(e instanceof Error && e.message ? e.message : "Save failed.");
     } finally {
       setSaving(false);
       // Clears a `busy` a load abandoned when this save overtook it. That load
@@ -1583,6 +1601,14 @@ function KnowledgeBaseManager() {
               savedAt={kbDraft.offeredAt}
               onRestore={restoreKbDraft}
               onDiscard={kbDraft.discard}
+            />
+          )}
+          {saveError && (
+            <SaveFailure
+              what={kind === "link" ? "link" : "article"}
+              message={saveError}
+              retrying={saving}
+              onRetry={() => void onSave()}
             />
           )}
           {sectionEdit ? (

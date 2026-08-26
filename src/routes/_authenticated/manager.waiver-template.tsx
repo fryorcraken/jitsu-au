@@ -33,6 +33,7 @@ import {
 import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
+import { SaveFailure } from "@/components/site/SaveFailure";
 
 function applyPlaceholders(body: string, values: Record<string, string>): string {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k) => values[k] ?? `{{${k}}}`);
@@ -146,6 +147,12 @@ function EditorPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  /**
+   * The last failed save, kept on screen rather than left to a toast. This is
+   * the document people sign, so "did that go through?" is not a question to
+   * leave somebody guessing at four seconds after the fact.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const { confirm, confirmDialog } = useConfirm();
 
   const selected = templates.find((t) => t.id === selectedId) ?? null;
@@ -299,6 +306,13 @@ function EditorPage() {
 
   const preview = useMemo(() => applyPlaceholders(body, SAMPLE), [body]);
 
+  // Editing anything clears the last failure: the panel is about the save that
+  // was attempted, and leaving it up over changed text claims something about
+  // work it never saw.
+  useEffect(() => {
+    setSaveError(null);
+  }, [title, body, acks]);
+
   async function onSave() {
     // Belt and braces: the Save button is already disabled for this, but a
     // rejected server call after the fact is a worse experience than catching
@@ -310,6 +324,7 @@ function EditorPage() {
       );
       return;
     }
+    setSaveError(null);
     setSaving(true);
     try {
       const cleanAcks = meaningfulAcks(acks);
@@ -332,7 +347,7 @@ function EditorPage() {
         toast.warning("Saved. The version list could not be refreshed, so reload to see it.");
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Save failed");
+      setSaveError(e instanceof Error && e.message ? e.message : "Save failed.");
     } finally {
       setSaving(false);
     }
@@ -375,6 +390,15 @@ function EditorPage() {
             <Link to="/account">Back to account</Link>
           </Button>
         </div>
+
+        {saveError && (
+          <SaveFailure
+            what="waiver template"
+            message={saveError}
+            retrying={saving}
+            onRetry={() => void onSave()}
+          />
+        )}
 
         {templateDraft.offered && (
           <DraftRestoreBanner
