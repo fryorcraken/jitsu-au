@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { z } from "zod";
 import { usePersistentQuery } from "@/hooks/use-persistent-query";
 import { cacheReviver } from "@/lib/kb-cache";
+import * as localCache from "@/lib/local-cache";
 import { readCache, writeCache } from "@/lib/local-cache";
 import { PERSISTENT_QUERY_VERSION } from "@/hooks/use-persistent-query";
 
@@ -134,5 +135,29 @@ describe("usePersistentQuery", () => {
       { wrapper },
     );
     await waitFor(() => expect(window.localStorage.length).toBe(0));
+  });
+
+  it("reads the device once per key, not on every render", async () => {
+    writeCache("thing", { items: ["from the device"] }, PERSISTENT_QUERY_VERSION, "user-1");
+    const spy = vi.spyOn(localCache, "readCache");
+
+    const { rerender } = renderHook(
+      () => usePersistentQuery<Payload>(options(() => new Promise(() => {}))),
+      { wrapper },
+    );
+    const afterFirst = spy.mock.calls.length;
+    // Guard against this test passing vacuously: if the spy never intercepted
+    // the read at all, the count below would be 0 === 0 and prove nothing.
+    expect(afterFirst).toBeGreaterThan(0);
+    rerender();
+    rerender();
+    rerender();
+
+    // Re-reading per render means a synchronous localStorage read and a
+    // JSON.parse of the whole payload on every keystroke into any field on the
+    // page. The check-in screen puts a search box directly above a roster of
+    // every member, which is exactly the worst case.
+    expect(spy.mock.calls.length).toBe(afterFirst);
+    spy.mockRestore();
   });
 });

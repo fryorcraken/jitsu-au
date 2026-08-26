@@ -26,9 +26,9 @@
 // offline read AND being a few minutes out of date is honest rather than
 // misleading. Anything a manager would act on irreversibly does not belong here.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, type QueryKey, type UseQueryResult } from "@tanstack/react-query";
-import { readCache, writeCache } from "@/lib/local-cache";
+import { readCache, writeCache, type CacheHit } from "@/lib/local-cache";
 
 /** Bumped when the envelope changes; the payload's own shape is `revive`'s job. */
 export const PERSISTENT_QUERY_VERSION = 1;
@@ -75,9 +75,24 @@ export function usePersistentQuery<T>({
   // Read during render, not in an effect. An effect runs after the first paint,
   // which would mean a flash of the loading state before the cached answer
   // appeared — exactly the spinner this exists to remove.
-  const seed = enabled
-    ? readCache<T>(cacheKey, { version: PERSISTENT_QUERY_VERSION, owner, maxAgeMs, revive })
-    : null;
+  //
+  // Once per key, though, and that is what the ref is for. Reading on every
+  // render would mean a synchronous `localStorage` read and a `JSON.parse` of
+  // the whole payload on every keystroke into any field on the page — the
+  // check-in screen has a search box directly above a roster of every member,
+  // which is precisely the worst case. It is also what keeps `seed` stable, so
+  // `restoredAt` below does not change identity under a re-render.
+  const seedKey = `${cacheKey}\u0000${owner ?? ""}\u0000${enabled}`;
+  const seedRef = useRef<{ key: string; hit: CacheHit<T> | null } | null>(null);
+  if (seedRef.current?.key !== seedKey) {
+    seedRef.current = {
+      key: seedKey,
+      hit: enabled
+        ? readCache<T>(cacheKey, { version: PERSISTENT_QUERY_VERSION, owner, maxAgeMs, revive })
+        : null,
+    };
+  }
+  const seed = seedRef.current.hit;
 
   const query = useQuery({
     queryKey,
