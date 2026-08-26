@@ -198,4 +198,89 @@ describe("BlogPostEditor draft recovery", () => {
     // text it claims something about work it never saw.
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
+
+  it("keeps an offered draft on the device until it is answered", async () => {
+    // The bug this pins: the "nothing to recover, clear it" effect fired on the
+    // very render that put the offer on screen, because an unanswered offer sits
+    // in exactly that state -- the form still matches the saved version. The
+    // draft was deleted in the same breath as being offered, so anyone whose app
+    // was killed again before they clicked lost it for good.
+    const user = userEvent.setup();
+    const first = render(
+      <BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    hidePage();
+    first.unmount();
+
+    const second = render(
+      <BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await screen.findByRole("button", { name: /bring it back/i });
+    // Killed again without answering.
+    second.unmount();
+
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+    await user.click(await screen.findByRole("button", { name: /bring it back/i }));
+    expect(screen.getByLabelText("Title")).toHaveValue("Grading day");
+  });
+
+  it("offers the right draft after switching to another post without remounting", async () => {
+    // The knowledge base and waiver template editors are single-page selectors:
+    // picking a different article changes `scope` in place, with no remount. A
+    // once-per-instance check latched onto the first document, so every one
+    // opened after it was never looked at -- and worse, the clear-when-clean
+    // effect wiped its stored draft on sight.
+    const user = userEvent.setup();
+    const a = render(
+      <BlogPostEditor postId="post-a" initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Title"), "Post A draft");
+    hidePage();
+    a.unmount();
+
+    const b = render(
+      <BlogPostEditor postId="post-b" initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Title"), "Post B draft");
+    hidePage();
+    b.unmount();
+
+    // Open A, then switch to B in place, exactly as the KB sidebar does.
+    const { rerender } = render(
+      <BlogPostEditor postId="post-a" initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.click(await screen.findByRole("button", { name: /bring it back/i }));
+    expect(screen.getByLabelText("Title")).toHaveValue("Post A draft");
+
+    rerender(
+      <BlogPostEditor postId="post-b" initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.click(await screen.findByRole("button", { name: /bring it back/i }));
+    expect(screen.getByLabelText("Title")).toHaveValue("Post B draft");
+  });
+
+  it("does not offer one post's draft against another post's form", async () => {
+    const user = userEvent.setup();
+    const a = render(
+      <BlogPostEditor postId="post-a" initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Title"), "Post A draft");
+    hidePage();
+    a.unmount();
+
+    const { rerender } = render(
+      <BlogPostEditor postId="post-a" initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await screen.findByRole("button", { name: /bring it back/i });
+
+    // Post B has nothing stored, so switching to it must take the offer away
+    // rather than leaving post A's draft on offer against post B's form.
+    rerender(
+      <BlogPostEditor postId="post-b" initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /bring it back/i })).not.toBeInTheDocument(),
+    );
+  });
 });

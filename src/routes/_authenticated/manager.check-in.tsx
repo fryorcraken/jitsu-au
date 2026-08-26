@@ -372,6 +372,13 @@ function CheckInPage() {
           what they are reading is live. Shown only when this really IS the
           stored copy and the refresh behind it failed — a successful refresh
           replaces it silently, which is the ordinary case. */}
+      {eventsQ.isError && eventsQ.restoredAt !== null && (
+        <StaleNotice
+          what="class list"
+          savedAt={eventsQ.restoredAt}
+          onRetry={() => void eventsQ.refetch()}
+        />
+      )}
       {boardQ.isError && boardQ.restoredAt !== null && (
         <StaleNotice
           what="roster"

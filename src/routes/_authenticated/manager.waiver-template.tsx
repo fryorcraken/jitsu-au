@@ -28,6 +28,7 @@ import {
   hasMediaAcknowledgement,
   isDirty,
   meaningfulAcks,
+  parseAcksJson,
   versionLabel,
 } from "@/lib/waiver-template-editor";
 import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
@@ -109,23 +110,6 @@ type TemplateVersion = Awaited<ReturnType<typeof listWaiverTemplates>>[number];
 type TemplateDraftFields = { title: string; body: string; acksJson: string };
 
 const TEMPLATE_DRAFT_SHAPE: TemplateDraftFields = { title: "", body: "", acksJson: "[]" };
-
-/**
- * Read the acknowledgements back out of a restored draft.
- *
- * Falls back to what is already on screen rather than to an empty list: the
- * media consent row is required, and restoring a draft into no acknowledgements
- * at all would put the editor into a state it refuses to save from, with no
- * obvious way out.
- */
-function parseAcksJson(raw: string, fallback: AcknowledgementDef[]): AcknowledgementDef[] {
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as AcknowledgementDef[]) : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 function EditorPage() {
   const navigate = useNavigate();
@@ -391,21 +375,21 @@ function EditorPage() {
           </Button>
         </div>
 
-        {saveError && (
-          <SaveFailure
-            what="waiver template"
-            message={saveError}
-            retrying={saving}
-            onRetry={() => void onSave()}
-          />
-        )}
-
         {templateDraft.offered && (
           <DraftRestoreBanner
             what="waiver template"
             savedAt={templateDraft.offeredAt}
             onRestore={restoreTemplateDraft}
             onDiscard={templateDraft.discard}
+          />
+        )}
+
+        {saveError && (
+          <SaveFailure
+            what="waiver template"
+            message={saveError}
+            retrying={saving}
+            onRetry={() => void onSave()}
           />
         )}
 

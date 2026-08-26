@@ -30,19 +30,18 @@ export function StaleNotice({
   className?: string;
 }) {
   return (
-    <div
-      role="status"
-      className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm",
-        className,
-      )}
-    >
-      <CloudOff className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="text-muted-foreground">
-        Showing the {what} saved on this device at {describeWhen(savedAt)}. We could not reach the
-        site to check for anything newer.
-      </span>
-      <Button size="sm" variant="outline" className="ml-auto" onClick={onRetry}>
+    <div role="status" className={cn("rounded-lg border bg-muted/50 px-3 py-2 text-sm", className)}>
+      <p className="flex items-start gap-2 text-muted-foreground">
+        <CloudOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          Showing the {what} saved on this device at {describeWhen(savedAt)}. We could not reach the
+          site to check for anything newer.
+        </span>
+      </p>
+      {/* Left-aligned under the text, like `LoadFailure` and `SaveFailure`. An
+          `ml-auto` here stranded it alone at the far right of its own line once
+          the message wrapped, which on a phone is every time. */}
+      <Button size="sm" variant="outline" className="mt-2" onClick={onRetry}>
         <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Try again
       </Button>
     </div>

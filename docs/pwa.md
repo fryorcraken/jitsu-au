@@ -48,9 +48,17 @@ So the root component records where the app is on every navigation
   auth screens, and nothing carrying a token in its path —
   `/email-settings/<token>` consumes its token and redirects, so returning to
   it lands on a URL that no longer works;
-- the path is **plain and site-relative**. A protocol-relative `//host` is
-  another origin as far as a browser is concerned, and this value is read back
-  off the device.
+- the path is **plain and site-relative**. This value is read back off the
+  device, which makes it the one input here that anything with a script foothold
+  on the origin could choose, so `isResumablePath` is strict rather than relying
+  on what the router happens to do with a bad value: a protocol-relative
+  `//host` (another origin to a browser), any backslash, any control character
+  or whitespace, and any traversal (raw or percent-encoded) are all refused, and
+  the blocklist matches case-insensitively.
+
+`isResumablePath` gates the **write** as well as the read. Recording a path the
+app would refuse to reopen still puts it on the device for a day, and an auth
+link lands with its PKCE `code` or `token_hash` in the query string.
 
 The record is owner-scoped like everything else in `local-cache`, so a shared
 club laptop never sends the next person to the last manager's screen.
@@ -137,8 +145,15 @@ enforces the three rules that make it safe to rely on:
   half-read.
 - **Owned.** Every entry records the user id it was written for. A different
   person reads nothing, and signing out wipes everything belonging to whoever
-  was signed in (`clearCacheFor`, called from `__root.tsx`). This is what keeps
-  one member's data off the next member's screen on a shared club laptop.
+  was signed in (`clearCacheFor`, called from `__root.tsx` on the
+  decision `resolveAuthRefresh` returns). This is what keeps one member's data
+  off the next member's screen on a shared club laptop. The rule lives in that
+  pure function rather than as a condition in the component, because a privacy
+  guarantee that exists only as untested wiring is not one -- and this one was
+  broken exactly that way before it moved: identity was adopted only from
+  `SIGNED_IN`, but the first event any subscriber gets is `INITIAL_SESSION`, so a
+  returning member's tab never learned who they were and signing out wiped
+  nothing at all.
 - **Dated.** Every entry carries a write time, so a caller can refuse one that
   is too old and a screen can say how old what it is showing is.
 
@@ -156,7 +171,11 @@ refreshes behind it. A refresh that **fails** leaves the stored copy on screen
 under a `StaleNotice` saying when it was fetched, rather than blanking the page.
 A screen using it must therefore key its "not available" branch on _having no
 data_, not on `isError` — otherwise a failed refresh hides a perfectly good
-cached copy.
+cached copy. That mistake has been made twice already in this
+codebase, once on `/kb/<slug>` and once in `useKbNav` (where it blanked the whole
+sidebar behind an error panel), so a hook wrapping one of these should do the
+gating itself and hand its callers a plain `error` that is only set when there is
+genuinely nothing to show.
 
 Opting a new query in is a judgement, not a default: the data has to be worth an
 offline read **and** being a few minutes out of date has to be honest rather

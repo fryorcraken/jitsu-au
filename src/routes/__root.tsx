@@ -14,9 +14,10 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
-import { resolveAuthRefresh } from "../lib/auth-events";
+import { reportsIdentity, resolveAuthRefresh } from "../lib/auth-events";
 import { clearCacheFor } from "../lib/local-cache";
 import { writeLastVisit } from "../lib/last-visit";
+import { isResumablePath } from "../lib/pwa";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
@@ -216,11 +217,14 @@ function RootComponent() {
       // `signedInUserId` is kept up to date by the auth subscription below
       // rather than asking Supabase here, which would be a storage read and a
       // promise on every navigation for something already known.
-      writeLastVisit(
-        signedInUserId.current,
-        `${pathname}${searchStr}`,
-        signedInUserId.current !== null,
-      );
+      const path = `${pathname}${searchStr}`;
+      // Filtered on the way IN, not just on the way out. `resolveLaunchTarget`
+      // refuses to reopen these, but recording one still writes it to the
+      // device -- and an auth link lands with its PKCE `code` or `token_hash`
+      // in the query string, which has no business sitting in storage for a day
+      // just to be refused later.
+      if (!isResumablePath(path)) return;
+      writeLastVisit(signedInUserId.current, path, signedInUserId.current !== null);
     };
     record();
     return router.subscribe("onResolved", record);
@@ -239,20 +243,21 @@ function RootComponent() {
       const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
         const nextUserId = session?.user?.id ?? null;
         const refresh = resolveAuthRefresh(event, previousUserId, nextUserId);
-        if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
-          // Whoever was signed in is no longer the person at the keyboard, so
-          // everything this app kept on the device for them goes: the knowledge
-          // base it cached to work offline, the check-in roster, unsaved drafts.
-          // This is what makes storing any of it defensible on a club laptop
-          // that several people use, and it is why every entry records its
-          // owner (`src/lib/local-cache.ts`). Signing the SAME person back in is
-          // not a handover, so their cache survives it.
-          if (previousUserId !== undefined && previousUserId !== nextUserId) {
-            clearCacheFor(previousUserId);
-          }
+        // Adopted from every event that reports who is signed in, NOT just
+        // SIGNED_IN/SIGNED_OUT. `reportsIdentity` has the reasoning: the first
+        // event any subscriber gets is INITIAL_SESSION, and ignoring it left a
+        // returning member's tab never knowing who they were, so signing out
+        // wiped nothing off the device.
+        if (reportsIdentity(event, nextUserId)) {
           previousUserId = nextUserId;
+          signedInUserId.current = nextUserId;
         }
-        signedInUserId.current = nextUserId;
+        // Whoever was signed in is no longer the person at the keyboard, so
+        // everything this app kept on the device for them goes: the knowledge
+        // base it cached to work offline, the check-in roster, unsaved drafts.
+        // The rule for WHEN is `resolveAuthRefresh`'s, so it is unit tested
+        // rather than living here as a condition nothing checks.
+        if (refresh.clearDeviceCache) clearCacheFor(refresh.clearDeviceCache.owner);
         if (refresh.invalidateRouter) router.invalidate();
         if (refresh.invalidateQueries) queryClient.invalidateQueries();
       });

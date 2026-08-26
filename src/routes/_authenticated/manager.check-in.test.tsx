@@ -130,9 +130,12 @@ describe("/manager/check-in offline", () => {
 
     renderPage();
 
-    const notice = await screen.findByText(/saved on this device/i);
-    expect(notice).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    // Both halves say so, not just the roster: a manager acting on a stale class
+    // list (a class added since, a wrong attendance count) has no other way to
+    // tell it is not live.
+    expect(await screen.findByText(/roster saved on this device/i)).toBeInTheDocument();
+    expect(screen.getByText(/class list saved on this device/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /try again/i }).length).toBeGreaterThan(0);
   });
 
   it("says nothing about staleness once the refresh lands", async () => {

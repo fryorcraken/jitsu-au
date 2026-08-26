@@ -99,6 +99,37 @@ describe("isResumablePath", () => {
     }
   });
 
+  it("refuses the tricks that make one parser disagree with another", () => {
+    // This value is read back off the device, so it is the one input here an
+    // attacker with any script foothold could choose. None of these can come
+    // from a real navigation: a browser normalises them long before
+    // `location.pathname` is readable.
+    const bs = String.fromCharCode(92);
+    expect(isResumablePath(`/${bs}evil.example`)).toBe(false);
+    expect(isResumablePath(`/${bs}${bs}evil.example`)).toBe(false);
+    expect(isResumablePath("/%5cevil.example")).toBe(false);
+    // Traversal back out of a blocked prefix, raw and encoded.
+    expect(isResumablePath("/x/../email-settings/token")).toBe(false);
+    expect(isResumablePath("/x/%2e%2e/email-settings/token")).toBe(false);
+    expect(isResumablePath("/x%2f%2e%2e/auth")).toBe(false);
+    // A blocked screen reached through a spelling the list does not recognise.
+    expect(isResumablePath("/Auth")).toBe(false);
+    expect(isResumablePath("/EMAIL-SETTINGS/token")).toBe(false);
+    expect(isResumablePath("/API/calendar/token")).toBe(false);
+    // Control characters and whitespace, the classic smuggling vector.
+    expect(isResumablePath("/account\n")).toBe(false);
+    expect(isResumablePath("/\taccount")).toBe(false);
+    expect(isResumablePath("/acc\u0000ount")).toBe(false);
+    expect(isResumablePath("/account ")).toBe(false);
+  });
+
+  it("still allows the ordinary paths after all that", () => {
+    // The hardening must not break the feature it guards.
+    for (const path of ["/account", "/kb/your-first-class", "/manager/users?q=jane%20doe"]) {
+      expect(isResumablePath(path)).toBe(true);
+    }
+  });
+
   it("refuses anything that is not a plain site-relative path", () => {
     // "//evil.example" is a protocol-relative URL, which a browser treats as
     // another origin. It must never reach a redirect.

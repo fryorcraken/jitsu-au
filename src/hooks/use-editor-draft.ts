@@ -69,15 +69,29 @@ export function useEditorDraft<T extends Record<string, string | boolean>>({
   shape: T;
   enabled?: boolean;
 }): EditorDraftState<T> {
-  const [offered, setOffered] = useState<T | null>(null);
-  const [offeredAt, setOfferedAt] = useState<number | null>(null);
-  const [checked, setChecked] = useState(false);
+  /**
+   * Which document this hook has looked on the device for.
+   *
+   * Keyed rather than a bare "have we checked yet" boolean, because two of the
+   * three editors using this (`manager.kb.tsx`, `manager.waiver-template.tsx`)
+   * are single-page selectors: picking a different article or version changes
+   * `scope` in place, with no remount. A boolean latched on the first document
+   * and never looked at any other one again, so every document opened after the
+   * first silently lost its draft instead of being offered it -- the exact
+   * opposite of what this is for.
+   */
+  const scopeKey = `${kind}\u0000${scope}\u0000${owner ?? ""}`;
+  const [checkedScope, setCheckedScope] = useState<string | null>(null);
+  /** The offer, tagged with the document it belongs to. */
+  const [offer, setOffer] = useState<{ scope: string; data: T; savedAt: number } | null>(null);
 
-  // Read once the caller says it is ready, and only once: re-reading after the
-  // person has already answered the offer would put it back on screen.
+  // Look once per document. Not on every render: re-reading after the person has
+  // answered would put the offer straight back on screen.
   useEffect(() => {
-    if (!enabled || checked) return;
-    setChecked(true);
+    if (!enabled || checkedScope === scopeKey) return;
+    setCheckedScope(scopeKey);
+    // Whatever was being offered belonged to the document we just left.
+    setOffer(null);
     const hit = readEditorDraft(kind, scope, owner, shape);
     const verdict = draftVerdict(hit?.data ?? null, baseline, sameDraftFields);
     if (verdict === "stale") {
@@ -85,13 +99,20 @@ export function useEditorDraft<T extends Record<string, string | boolean>>({
       return;
     }
     if (verdict === "offer" && hit) {
-      setOffered(hit.data);
-      setOfferedAt(hit.savedAt);
+      setOffer({ scope: scopeKey, data: hit.data, savedAt: hit.savedAt });
     }
-    // `baseline` and `shape` are read at the moment this first runs and are not
-    // re-checked; adding them would re-offer a draft the person just dismissed.
+    // `baseline` and `shape` are read at the moment this runs for a given
+    // document and are not re-checked; adding them would re-offer a draft the
+    // person just dismissed. Both editors set the new scope and the new
+    // baseline in the same commit, so the baseline read here is the right one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, checked, kind, scope, owner]);
+  }, [enabled, checkedScope, scopeKey, kind, scope, owner]);
+
+  // Only ever the offer for the document on screen. Tagging and comparing, so a
+  // scope change cannot leave the previous document's draft on offer for one
+  // render against the wrong form.
+  const offered = offer && offer.scope === scopeKey ? offer.data : null;
+  const offeredAt = offer && offer.scope === scopeKey ? offer.savedAt : null;
 
   // The live value, in a ref, so the hidden-page flush below can read it without
   // re-registering its listeners on every keystroke.
@@ -109,15 +130,26 @@ export function useEditorDraft<T extends Record<string, string | boolean>>({
   // The ordinary path: a moment after typing stops.
   useEffect(() => {
     if (!enabled) return;
+    // Never delete a draft we have not looked at yet. On the first render for a
+    // document the form has just been seeded from the saved version, so it
+    // matches the baseline and reads as "nothing to recover" -- which would
+    // delete that document's stored draft on sight, before anyone was ever
+    // shown it.
+    if (checkedScope !== scopeKey) return;
     if (!dirty) {
       // Back to matching what is saved (an undo, or a successful save that moved
       // the baseline). Nothing to recover, so nothing should be offered later.
-      clearEditorDraft(kind, scope);
+      //
+      // Unless an offer is still on screen: an unanswered offer sits in exactly
+      // this state (the form still matches the baseline, the draft is the thing
+      // being offered), so clearing here deleted the draft in the same breath as
+      // offering it back. Anyone who was killed again before answering lost it.
+      if (!offered) clearEditorDraft(kind, scope);
       return;
     }
     const timer = setTimeout(save, EDITOR_DRAFT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [enabled, dirty, value, kind, scope, save]);
+  }, [enabled, checkedScope, scopeKey, offered, dirty, value, kind, scope, save]);
 
   // The path that actually matters on a phone. Both events, because they cover
   // different exits: `visibilitychange` fires when the app goes to the
@@ -138,15 +170,11 @@ export function useEditorDraft<T extends Record<string, string | boolean>>({
     };
   }, [enabled, save]);
 
-  const restore = useCallback(() => {
-    setOffered(null);
-    setOfferedAt(null);
-  }, []);
+  const restore = useCallback(() => setOffer(null), []);
 
   const discard = useCallback(() => {
     clearEditorDraft(kind, scope);
-    setOffered(null);
-    setOfferedAt(null);
+    setOffer(null);
   }, [kind, scope]);
 
   const clear = useCallback(() => {

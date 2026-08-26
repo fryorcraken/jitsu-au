@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
+import { StaleNotice } from "@/components/site/StaleNotice";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import logoAsset from "@/assets/UTS_JITSU_CMYK.png.asset.json";
@@ -43,7 +44,7 @@ import type { KbNavEntry, KbNavSection } from "@/lib/kb-nav";
 import { searchKnowledgeBase } from "@/lib/kb.functions";
 
 export function KbLayout({ children }: { children: React.ReactNode }) {
-  const { nav, loading, error, refetch } = useKbNav();
+  const { nav, loading, error, restoredAt, refetch } = useKbNav();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
@@ -66,7 +67,13 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
             <SheetContent side="left" className="w-[85vw] max-w-xs overflow-y-auto p-0">
               <SheetTitle className="border-b px-4 py-4 text-base">Knowledge base</SheetTitle>
               <div className="p-4">
-                <KbNavList nav={nav} loading={loading} error={error} onRetry={refetch} />
+                <KbNavList
+                  nav={nav}
+                  loading={loading}
+                  error={error}
+                  restoredAt={restoredAt}
+                  onRetry={refetch}
+                />
               </div>
             </SheetContent>
           </Sheet>
@@ -100,7 +107,13 @@ export function KbLayout({ children }: { children: React.ReactNode }) {
       <div className="mx-auto flex w-full max-w-7xl flex-1 gap-8 px-4 py-8">
         <aside className="hidden w-60 shrink-0 lg:block">
           <div className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
-            <KbNavList nav={nav} loading={loading} error={error} onRetry={refetch} />
+            <KbNavList
+              nav={nav}
+              loading={loading}
+              error={error}
+              restoredAt={restoredAt}
+              onRetry={refetch}
+            />
           </div>
         </aside>
         <main className="min-w-0 flex-1">{children}</main>
@@ -127,11 +140,14 @@ function KbNavList({
   nav,
   loading,
   error,
+  restoredAt,
   onRetry,
 }: {
   nav: KbNavSection[];
   loading: boolean;
   error: string | null;
+  /** Set when this list is the copy kept on the device and the refresh failed. */
+  restoredAt: number | null;
   onRetry: () => void;
 }) {
   const location = useLocation();
@@ -168,8 +184,11 @@ function KbNavList({
   }
 
   // The third answer the sidebar used to fold into the second one: the list
-  // could not be fetched. Left as an empty knowledge base, a reader has no
-  // reason to try again and no way to.
+  // could not be fetched AT ALL. `useKbNav` only reports an error when there is
+  // no list to show, because the contents is kept on the device: a failed
+  // background refresh over a good cached list is a staleness notice below, not
+  // a panel in place of the sidebar. Blanking a working sidebar on a bad
+  // connection would be this cache making things worse.
   if (error) {
     return (
       <>
@@ -193,9 +212,14 @@ function KbNavList({
     );
   }
 
+  const staleNotice = restoredAt ? (
+    <StaleNotice className="mb-3" what="contents" savedAt={restoredAt} onRetry={onRetry} />
+  ) : null;
+
   return (
     <nav aria-label="Knowledge base" className="space-y-6">
       {backToMemberSpace}
+      {staleNotice}
       {nav.map((section) => (
         <div key={section.slug ?? "unsectioned"} className="space-y-1">
           <p className="px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

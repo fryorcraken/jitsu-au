@@ -81,17 +81,45 @@ const NON_RESUMABLE_PREFIXES = [
   "/update-password",
 ];
 
-/** Whether a recorded path is one the app may open on. */
+/**
+ * Whether a path is one the app may record and open on.
+ *
+ * Deliberately strict, and deliberately not relying on what the router happens
+ * to do with a bad value. This string is read back off the device, so it is the
+ * one input here that an attacker with any script foothold on the origin could
+ * choose; today's router normalises its way out of most of it, but that is its
+ * internals, not a guarantee this code owns.
+ */
 export function isResumablePath(path: string): boolean {
   // Site-relative only. A protocol-relative "//evil.example" is a URL a browser
-  // would happily treat as another origin, so it is refused explicitly rather
-  // than left to the router.
+  // treats as another origin. So is a backslash form in several parsers, which
+  // is why a backslash anywhere is refused outright rather than reasoned about.
   if (!path.startsWith("/") || path.startsWith("//")) return false;
+  if (path.includes("\\")) return false;
+  // Control characters and whitespace never appear in a path a real navigation
+  // produced, and are the classic way to smuggle one parser past another.
+  // Checked by code point rather than a regex literal, which would need a
+  // `no-control-regex` suppression to say the same thing less clearly.
+  for (const character of path) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 0x20 || code === 0x7f) return false;
+  }
+
   const pathname = path.split(/[?#]/)[0];
+  // Traversal, raw or encoded. A browser resolves ".." before `location.pathname`
+  // is ever readable, so this can only come from a value somebody planted -- and
+  // "/x/../email-settings/tok" must not slip past the prefix list below.
+  const lowered = pathname.toLowerCase();
+  if (lowered.includes("..") || lowered.includes("%2e") || lowered.includes("%2f")) return false;
+  if (lowered.includes("%5c")) return false;
+
+  // Case-insensitively: the blocklist is about which SCREEN this is, and a
+  // server that resolves "/Auth" to the auth screen would otherwise be reachable
+  // through a spelling the list does not recognise.
   return !NON_RESUMABLE_PREFIXES.some((prefix) =>
     prefix.endsWith("/")
-      ? pathname.startsWith(prefix)
-      : pathname === prefix || pathname.startsWith(`${prefix}/`),
+      ? lowered.startsWith(prefix)
+      : lowered === prefix || lowered.startsWith(`${prefix}/`),
   );
 }
 

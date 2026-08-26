@@ -3,6 +3,7 @@ import {
   hasMediaAcknowledgement,
   isDirty,
   meaningfulAcks,
+  parseAcksJson,
   versionLabel,
 } from "./waiver-template-editor";
 import type { AcknowledgementDef } from "./validation";
@@ -114,5 +115,30 @@ describe("versionLabel", () => {
 
   it("calls everything a draft when nothing is live", () => {
     expect(versionLabel({ version: 1, is_current: false }, null)).toBe("Draft");
+  });
+});
+
+describe("parseAcksJson", () => {
+  const current = [ack({ id: "a", label: "Media consent" })];
+
+  it("reads back a list that was stored as JSON", () => {
+    const stored = [ack({ id: "b", label: "Something else" })];
+    expect(parseAcksJson(JSON.stringify(stored), current)).toEqual(stored);
+  });
+
+  it("falls back to what is on screen rather than to nothing", () => {
+    // Restoring into an empty list would put the editor into a state it refuses
+    // to save from (the media consent row is required), with no obvious way out.
+    expect(parseAcksJson("{not json", current)).toEqual(current);
+    expect(parseAcksJson("", current)).toEqual(current);
+    expect(parseAcksJson('{"not":"an array"}', current)).toEqual(current);
+    expect(parseAcksJson("null", current)).toEqual(current);
+    expect(parseAcksJson("42", current)).toEqual(current);
+  });
+
+  it("accepts a genuinely empty list, which is a real answer", () => {
+    // Distinct from the fallback above: "[]" is somebody having removed every
+    // row, which the save then refuses on its own terms with a message.
+    expect(parseAcksJson("[]", current)).toEqual([]);
   });
 });

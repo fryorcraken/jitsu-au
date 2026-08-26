@@ -112,3 +112,20 @@ export function versionLabel(
   if (liveVersion !== null && version.version < liveVersion) return "Previous";
   return "Draft";
 }
+
+/**
+ * Read the acknowledgements back out of a restored draft.
+ *
+ * Falls back to what is already on screen rather than to an empty list: the
+ * media consent row is required, and restoring a draft into no acknowledgements
+ * at all would put the editor into a state it refuses to save from, with no
+ * obvious way out.
+ */
+export function parseAcksJson(raw: string, fallback: AcknowledgementDef[]): AcknowledgementDef[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as AcknowledgementDef[]) : fallback;
+  } catch {
+    return fallback;
+  }
+}

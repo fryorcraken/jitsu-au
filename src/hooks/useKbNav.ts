@@ -32,8 +32,9 @@ export function useKbNav(): {
   error: string | null;
   refetch: () => void;
   /**
-   * When the sidebar on screen was fetched, if it came off this device rather
-   * than the network. Null once a fresh copy has landed.
+   * When the sidebar on screen was fetched, set only while it is the copy kept
+   * on this device AND the refresh behind it failed. Null otherwise, including
+   * once a fresh copy has landed.
    */
   restoredAt: number | null;
 } {
@@ -81,13 +82,23 @@ export function useKbNav(): {
   // `isLoading` is false once a query has failed, and it was the only thing
   // reported here: /kb sat on "Loading..." for good, with no error and no way
   // out, because nothing downstream could see that the fetch had rejected.
+  //
+  // `error` is now gated on there being NO contents, not on `isError` alone.
+  // With the sidebar kept on the device, a failed background refresh leaves a
+  // perfectly good list in `query.data` -- and reporting that as an error blanked
+  // the whole sidebar behind a panel on exactly the bad connection this caching
+  // exists for. A stale list is reported through `restoredAt` instead, which is
+  // the rule `docs/pwa.md` states and `/kb/<slug>` already follows.
+  const failedOutright = query.isError && !query.data;
   return {
     nav,
     loading: authLoading || query.isLoading,
-    error: query.isError
+    error: failedOutright
       ? describeLoadError(query.error, "Could not load the knowledge base")
       : null,
     refetch: () => void query.refetch(),
-    restoredAt: query.restoredAt,
+    // Set only while what is on screen is the stored copy AND the refresh behind
+    // it failed, so a screen can say so without having to work it out.
+    restoredAt: query.isError ? query.restoredAt : null,
   };
 }
