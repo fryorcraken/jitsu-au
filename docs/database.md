@@ -647,8 +647,13 @@ members-only entries and get them in their personal calendar feed. See
 
 **`has_active_paid_membership(_user_id uuid) → boolean`** — SECURITY DEFINER SQL
 helper (`SET search_path = ''`) used by the events RLS policy: true when the
-person has an `active` membership whose plan `kind <> 'trial'` and whose
-`price_cents > 0`, mirroring `deriveLifecycleStatus`. EXECUTE is revoked from
+person **or any of their dependants** (`profiles.guardian_user_id`) has an
+`active` membership whose plan `kind <> 'trial'` and whose `price_cents > 0`.
+The dependant half is what gets a parent who does not train into the
+members-only calendar their child's membership pays for
+(`20260827000000_household_guardian_link.sql`), and it is why this **no longer
+mirrors `deriveLifecycleStatus`**, which still counts only a person's own
+memberships. EXECUTE is revoked from
 PUBLIC/anon and granted to `authenticated` (it is evaluated inside RLS as the
 querying role) + `service_role`. It is acknowledged in
 `supabase/lint/advisors-allowlist.txt` for the same reason as `has_role`.

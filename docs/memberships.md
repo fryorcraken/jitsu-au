@@ -299,9 +299,23 @@ hand.
 
 **Members-only access is not gated on the `member` role.** It is gated live by
 the `has_active_paid_membership` SQL helper — an active, non-`trial`,
-`price_cents > 0` membership — which the RLS policies on the calendar and blog
-comments call directly. So the moment a membership is cancelled, access closes,
-with no role change involved.
+`price_cents > 0` membership — which the `calendar_events` RLS policy calls
+directly. So the moment a membership is cancelled, access closes, with no role
+change involved.
+
+**It is the calendar, and only the calendar.** This paragraph used to say the
+blog comment policy called the helper too. It never has: `Signed-in non-blocked
+users can comment` checks identity and block status and nothing else, so any
+signed-in person may comment whether or not they have ever paid the club a
+cent. `docs/blog.md` has always said so; this file disagreed with it.
+
+**The helper also answers for a person's dependants.** A parent who does not
+train holds no membership of their own, so without that they would be shut out
+of the class calendar they are paying for. See `docs/waivers.md` on household
+accounts. It is the one place the "an active paid membership" rule reaches past
+the person being asked about, and it is deliberately NOT mirrored in
+`deriveLifecycleStatus` or `syncMemberRole` — a guardian is not themself a
+member, and the funnel phase should not say they are.
 
 That helper's **name is now a leftover**: it never read `paid_at`, and since
 `active` means authorised rather than paid, what it actually asks is "do they

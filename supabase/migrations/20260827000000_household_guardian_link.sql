@@ -33,8 +33,19 @@
 -- ---------- the guardian link ----------
 
 ALTER TABLE public.profiles
-  ADD COLUMN IF NOT EXISTS guardian_user_id UUID
-    REFERENCES public.profiles(user_id) ON DELETE RESTRICT;
+  ADD COLUMN IF NOT EXISTS guardian_user_id UUID;
+
+-- The foreign key is added separately and re-asserted, NOT inlined above.
+-- `ADD COLUMN IF NOT EXISTS ... REFERENCES ...` skips the whole clause when the
+-- column already exists, so a first attempt that half-applied through Lovable's
+-- SQL editor would leave a column with no referential integrity and report
+-- success. Same reasoning as the CHECK and the index below.
+ALTER TABLE public.profiles
+  DROP CONSTRAINT IF EXISTS profiles_guardian_user_id_fkey;
+ALTER TABLE public.profiles
+  ADD CONSTRAINT profiles_guardian_user_id_fkey
+    FOREIGN KEY (guardian_user_id) REFERENCES public.profiles(user_id)
+    ON DELETE RESTRICT;
 
 COMMENT ON COLUMN public.profiles.guardian_user_id IS
   'The account holder responsible for this person. NOT NULL means they are a '
@@ -49,7 +60,8 @@ COMMENT ON COLUMN public.profiles.guardian_user_id IS
 -- books must fail LOUDLY rather than take those children's waivers, memberships
 -- and attendance with it. The knock-on is intended: deleting a parent's auth
 -- user is now refused until a manager has dealt with the children first.
--- docs/erasing-personal-data.md picks this up (issue #107).
+-- Nothing documents that remedy yet: #107 adds it to
+-- docs/erasing-personal-data.md, which today says nothing about the case.
 
 -- Nobody is their own guardian. One level only — that a dependant may not
 -- itself BE a guardian is enforced in the server function that creates one, not
@@ -75,10 +87,16 @@ CREATE INDEX IF NOT EXISTS profiles_guardian_user_id_idx
 -- locked out of the members-only calendar and blog while paying for a child who
 -- was not. They need the class times more than the child does.
 --
--- This is the ONLY change needed for that, because four surfaces already call
--- this one function: the members-only calendar policy (20260802000000), the
--- blog comment gate, src/lib/calendar.functions.ts and the subscribable ICS feed
+-- This is the ONLY change needed for that, because all THREE callers of this
+-- function go through it: the members-only calendar_events SELECT policy
+-- (20260802000000), src/lib/calendar.functions.ts and the subscribable ICS feed
 -- at src/routes/api/calendar/$token.ts.
+--
+-- All three are the calendar, and that is the whole of what this buys. The blog
+-- does NOT gate on membership: `Signed-in non-blocked users can comment`
+-- (20260802000000) checks identity and block status only, so any signed-in
+-- person could already comment and a guardian gains nothing there.
+-- docs/memberships.md claimed otherwise and is corrected in this change.
 --
 -- The caller-scoping guard from 20260820000000_scope_role_helpers_to_caller.sql
 -- is UNCHANGED and still load-bearing. The question this answers is still "about
@@ -127,6 +145,15 @@ $$;
 -- already is. Same belt-and-braces as 20260820000000.
 REVOKE EXECUTE ON FUNCTION public.has_active_paid_membership(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.has_active_paid_membership(UUID) TO authenticated, service_role;
+
+-- ⚠️ This deliberately diverges from deriveLifecycleStatus (src/lib/validation.ts)
+-- and syncMemberRole (src/lib/membership.functions.ts), which still count only a
+-- person's OWN memberships. So once dependants exist, a guardian holds live
+-- members-only access while the manager directory and the agent API's list_users
+-- still label them `lead` or `lapsed` with no `member` role. That is a real
+-- inconsistency and it is not reachable yet: nobody has a guardian until #105
+-- creates the first one. #107 reconciles the two, and until then this comment is
+-- the record that the gap is known rather than missed.
 
 -- No grant changes anywhere else, so supabase/lint/client-grants-expected.txt
 -- needs no edit: profiles holds nothing for anon or authenticated (everything
