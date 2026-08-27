@@ -221,6 +221,17 @@ describe("MembershipRowActions", () => {
     expect(setMembershipStart).not.toHaveBeenCalled();
   });
 
+  // A Save button that silently does nothing is a dead end. Clearing the field
+  // to retype is the ordinary way to reach that state.
+  it("says why Save is unavailable when the date is cleared", async () => {
+    const user = userEvent.setup();
+    renderRow(COVER);
+    await user.click(screen.getByRole("button", { name: /start date/i }));
+    await user.clear(await screen.findByLabelText(/start date/i));
+    expect(screen.getByRole("button", { name: /save start date/i })).toBeDisabled();
+    expect(screen.getByText(/pick a day to save/i)).toBeInTheDocument();
+  });
+
   it("saves the day, and lets the server place it", async () => {
     const user = userEvent.setup();
     setMembershipStart.mockResolvedValueOnce({ ok: true });

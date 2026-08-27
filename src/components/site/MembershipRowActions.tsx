@@ -304,9 +304,12 @@ export function MembershipRowActions({
             <p className="text-sm text-muted-foreground">
               {preview
                 ? `Runs ${clubDayLabel(preview.starts_at)} to ${clubDayLabel(preview.ends_at)}.`
-                : `Currently ${clubDayLabel(membership.starts_at)} to ${clubDayLabel(
-                    membership.ends_at,
-                  )}.`}
+                : // Save is disabled while there is no day to save. Saying so
+                  // beats a button that silently does nothing when somebody
+                  // clears the field to retype it.
+                  `Pick a day to save. It currently runs ${clubDayLabel(
+                    membership.starts_at,
+                  )} to ${clubDayLabel(membership.ends_at)}.`}
             </p>
           </div>
           {dating?.error && (
@@ -321,6 +324,13 @@ export function MembershipRowActions({
             <Button variant="outline" disabled={dating?.busy} onClick={() => setDating(null)}>
               Go back
             </Button>
+            {/* The spinner is the only thing that changes while this saves, and
+                a spinner says nothing to a screen reader. */}
+            {dating?.busy && (
+              <span className="sr-only" role="status">
+                Saving the start date...
+              </span>
+            )}
             <Button disabled={dating?.busy || !preview} onClick={() => void saveStart()}>
               {dating?.busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {dating?.error ? "Try again" : "Save start date"}

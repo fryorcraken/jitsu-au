@@ -1549,8 +1549,19 @@ export const setMembershipStart = createServerFn({ method: "POST" })
     if (!membership) throw new Error("Membership not found.");
 
     const patch = await resolveMembershipStartPatch(admin, membership, data.starts_on);
-    const { error: uErr } = await admin.from("memberships").update(patch).eq("id", data.id);
+    // Read the row back rather than trusting the absence of an error. An UPDATE
+    // matching nothing is not a failure in Postgres, so a membership deleted
+    // between the read above and this write would leave the manager looking at a
+    // dialog that closed on "saved" over a correction that went nowhere.
+    const { data: moved, error: uErr } = await admin
+      .from("memberships")
+      .update(patch)
+      .eq("id", data.id)
+      .select("id")
+      .maybeSingle();
     if (uErr) throw new Error(uErr.message);
+    if (!moved)
+      throw new Error("That membership is no longer there. Refresh the page and check it again.");
     return { ok: true as const, id: data.id, ...patch };
   });
 

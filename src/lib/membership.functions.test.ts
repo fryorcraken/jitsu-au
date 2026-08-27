@@ -1047,8 +1047,10 @@ describe("enrolMember with a start date", () => {
         status: "active",
         paid_at: null,
         price_cents: 0,
-        starts_at: "2026-05-01T00:00:00+00:00",
-        ends_at: "2027-05-01T00:00:00+00:00",
+        // Club midnight to club midnight, spelled as PostgREST renders a
+        // TIMESTAMPTZ: 00:00 on 1 May in Sydney is 14:00 the day before in UTC.
+        starts_at: "2026-04-30T14:00:00+00:00",
+        ends_at: "2027-04-30T14:00:00+00:00",
       }),
     );
     await enrolFrom(fake, INSURANCE_PLAN, "2026-02-01");

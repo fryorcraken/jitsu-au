@@ -228,11 +228,24 @@ year of cover sits where it ran, and nobody is invoiced for it now.
   club time too, so the date typed and the date shown are the same date wherever
   the manager is.
 - **Correcting it moves the window, it does not resize it**
-  (`rescheduleMembershipStart`): the end date shifts by exactly as much as the
-  start, so the cover keeps the length it was sold at. Recomputing the end from
-  the plan's current `duration_days` would make this the one back door through
-  which a later plan edit re-dates a membership somebody already bought, which
-  is exactly what "Buying a dated plan" says never happens.
+  (`rescheduleMembershipStart`): the cover keeps the number of days it was sold,
+  ending at the time of day it already ended. Recomputing the end from the plan's
+  current `duration_days` would make this the one back door through which a later
+  plan edit re-dates a membership somebody already bought, which is exactly what
+  "Buying a dated plan" says never happens. The start snaps to the beginning of
+  the chosen day while the end keeps its time, so the rounding can only add
+  hours, never take them away: correcting a record must not quietly shorten
+  cover somebody is relying on.
+- **A rolling plan's length is counted in club days, not in milliseconds.**
+  Sydney's clocks move twice a year, so `start + days x 86,400,000` lands an
+  hour out either side of a change, and an hour before midnight prints as the
+  previous day. A year of cover starting 5 April 2026 read as ending 4 April
+  2027: a day short, on screen, in the club's own words. Both
+  `planMembershipWindow` and `rescheduleMembershipStart` add calendar days at
+  the same time of day instead. **Leap years are a different question and are
+  deliberately not adjusted**: a plan that sells 365 days sells 365 days, and
+  one of them may be 29 February. If the club ever means "the same date next
+  year", that is a change to what the plan sells, not to this arithmetic.
 - **A start date is refused, never ignored**, on a plan that has none. A date
   quietly dropped leaves an invoice that looks backdated and is not, and nothing
   downstream would ever show the difference.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CLUB_TIME_ZONE, zonedWallTimeToUtc } from "./calendar";
 import {
   buildPaymentReference,
   clubPaymentDetailsSchema,
@@ -600,6 +601,26 @@ describe("planMembershipWindow", () => {
     expect(w.ends_at).toBe("2027-05-01T00:00:00.000Z");
   });
 
+  // Counted as calendar days at the same time of day, not as a fixed number of
+  // milliseconds. 00:00 on 5 April 2026 is AEDT (+11) — the clocks go back that
+  // very morning — and 00:00 on 5 April 2027 is AEST (+10), so the two are 365
+  // days and one hour apart. Fixed-ms arithmetic lands at 23:00 on the 4th, and
+  // an hour before midnight prints as the PREVIOUS DAY on every screen that
+  // shows it: a year of cover reading as a day short.
+  it("keeps a rolling plan on the same clock time across a daylight-saving change", () => {
+    const start = zonedWallTimeToUtc("2026-04-05", "00:00", CLUB_TIME_ZONE).toISOString();
+    const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: 365 }, start);
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2027-04-05", "00:00", CLUB_TIME_ZONE).toISOString());
+  });
+
+  // A leap year is a different question and deliberately NOT adjusted: a plan
+  // that sells 365 days sells 365 days, and one of them may be 29 February.
+  it("counts 365 days through a leap year rather than landing on the same date", () => {
+    const start = zonedWallTimeToUtc("2027-03-01", "00:00", CLUB_TIME_ZONE).toISOString();
+    const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: 365 }, start);
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2028-02-29", "00:00", CLUB_TIME_ZONE).toISOString());
+  });
+
   // Undated plans (the free trial, casual classes) run from the START OF THE
   // CLUB DAY, so the row reads as "granted on this day" rather than at some
   // arbitrary instant. Nothing enforces it -- a credit balance is not date-gated
@@ -665,13 +686,65 @@ describe("rescheduleMembershipStart", () => {
   // The whole rule: a correction moves the window, it does not resize it. A
   // recompute from the plan's CURRENT duration would make this the one back door
   // through which a later plan edit re-dates a membership somebody already
-  // bought.
-  it("moves the end by exactly as much as the start, keeping the length sold", () => {
-    const before = { starts_at: "2026-05-01T00:00:00.000Z", ends_at: "2027-05-01T00:00:00.000Z" };
+  // bought. The length carried over is a count of club DAYS, so the pinned value
+  // here is the day count, not a millisecond span — those two differ by an hour
+  // whenever the move crosses one of Sydney's clock changes, which is the whole
+  // reason this counts days.
+  it("carries the day count over rather than recomputing it from the plan", () => {
+    const before = {
+      starts_at: zonedWallTimeToUtc("2026-05-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+      ends_at: zonedWallTimeToUtc("2027-05-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+    };
     const after = rescheduleMembershipStart(before, "2026-02-01");
+    expect(after.starts_at).toBe(
+      zonedWallTimeToUtc("2026-02-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+    );
+    expect(after.ends_at).toBe(
+      zonedWallTimeToUtc("2027-02-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+    );
+  });
+
+  // The start is snapped to the BEGINNING of the chosen day while the end keeps
+  // the time of day it already had, so the rounding can only ever add hours,
+  // never take them away. Correcting a record must not quietly shorten cover
+  // somebody is relying on.
+  it("never shortens the cover it is moving", () => {
+    const before = {
+      starts_at: zonedWallTimeToUtc("2026-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+      ends_at: zonedWallTimeToUtc("2027-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+    };
     const length = (w: { starts_at: string; ends_at: string | null }) =>
       new Date(w.ends_at!).getTime() - new Date(w.starts_at).getTime();
-    expect(length(after)).toBe(length(before));
+    for (const day of ["2026-02-01", "2026-04-05", "2026-10-04", "2027-01-01"]) {
+      expect(length(rescheduleMembershipStart(before, day))).toBeGreaterThanOrEqual(length(before));
+    }
+  });
+
+  // The same reason `planMembershipWindow` counts days: dragging a fixed
+  // millisecond length across a clock change lands an hour out, and an hour
+  // before midnight is the previous day everywhere it is printed.
+  it("keeps the day count when the correction crosses a daylight-saving change", () => {
+    const w = rescheduleMembershipStart(
+      {
+        starts_at: zonedWallTimeToUtc("2026-01-05", "00:00", CLUB_TIME_ZONE).toISOString(),
+        ends_at: zonedWallTimeToUtc("2027-01-05", "00:00", CLUB_TIME_ZONE).toISOString(),
+      },
+      "2026-04-05",
+    );
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2027-04-05", "00:00", CLUB_TIME_ZONE).toISOString());
+  });
+
+  // A membership someone bought at 14:32 keeps ending at 14:32: the correction
+  // moves the window, it does not quietly re-grain it to midnight.
+  it("keeps the end's time of day on a window that did not start at midnight", () => {
+    const w = rescheduleMembershipStart(
+      {
+        starts_at: zonedWallTimeToUtc("2026-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+        ends_at: zonedWallTimeToUtc("2027-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+      },
+      "2026-02-01",
+    );
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2027-02-01", "14:32", CLUB_TIME_ZONE).toISOString());
   });
 
   // A plan that ends with its classes has no end to move, and inventing one

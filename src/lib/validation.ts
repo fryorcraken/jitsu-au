@@ -18,7 +18,7 @@ import { beltSizes, giSizes } from "./kit-sizes";
 // must cover that evening's class, not cut off at UTC midnight), so this
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
 // the same kind of module as this one (pure, no server imports).
-import { CLUB_TIME_ZONE, clubLocalDate, zonedWallTimeToUtc } from "./calendar";
+import { CLUB_TIME_ZONE, clubLocalDate, tzOffsetMinutes, zonedWallTimeToUtc } from "./calendar";
 import { formatDate, formatDateOnly } from "./dates";
 
 // ---- Pure helpers ----
@@ -1417,6 +1417,13 @@ function addCalendarDays(dateStr: string, days: number): string {
   return `${String(dt.getUTCFullYear()).padStart(4, "0")}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
 
+/** The club's own calendar date and clock time at an instant. */
+function clubWallTime(instant: Date): { date: string; time: string } {
+  const shifted = new Date(instant.getTime() + tzOffsetMinutes(instant, CLUB_TIME_ZONE) * 60000);
+  const iso = shifted.toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+}
+
 /**
  * The absolute instants a plan's membership runs for, resolved from the plan
  * alone — no second table to look up, and no branch on the plan's `kind`:
@@ -1451,8 +1458,19 @@ export function planMembershipWindow(
     return { starts_at, ends_at };
   }
   if (plan.duration_days) {
-    const ends_at = new Date(
-      new Date(now).getTime() + plan.duration_days * 86_400_000,
+    // Counted as CALENDAR days in the club's timezone, at the same time of day,
+    // not as a fixed number of milliseconds. Sydney's clocks move twice a year,
+    // so `now + days * 86_400_000` lands an hour out either side of a change —
+    // and when the start is a club midnight, an hour before midnight is the
+    // PREVIOUS DAY. A year of cover bought on 5 April 2026 then read as ending
+    // on 4 April 2027: a day short, on screen, in the club's own words. Leap
+    // years are untouched by this and are not the same question: a plan that
+    // sells 365 days sells 365 days, and one of them may be 29 February.
+    const { date, time } = clubWallTime(new Date(now));
+    const ends_at = zonedWallTimeToUtc(
+      addCalendarDays(date, plan.duration_days),
+      time,
+      CLUB_TIME_ZONE,
     ).toISOString();
     return { starts_at: now, ends_at };
   }
@@ -1498,14 +1516,19 @@ export function clubToday(now: Date = new Date()): string {
 
 /**
  * Move an existing membership's window so it begins at 00:00 club time on
- * `startsOn`, **keeping the length it already has**.
+ * `startsOn`, **keeping the length it already has** — the same number of club
+ * days, ending at the same time of day.
  *
- * Correcting a start date is not re-buying the plan, so the end date is shifted
- * by exactly the same amount rather than recomputed from the plan's current
- * `duration_days`. A membership is given its dates once, at the moment it is
- * raised, and a later plan edit never re-syncs it (see docs/memberships.md) —
- * recomputing here would make a start-date correction the one back door that
- * does, silently handing somebody a longer or shorter year than they bought.
+ * Correcting a start date is not re-buying the plan, so the length is carried
+ * over rather than recomputed from the plan's current `duration_days`. A
+ * membership is given its dates once, at the moment it is raised, and a later
+ * plan edit never re-syncs it (see docs/memberships.md) — recomputing here would
+ * make a start-date correction the one back door that does, silently handing
+ * somebody a longer or shorter year than they bought.
+ *
+ * Days rather than milliseconds, for the reason in `planMembershipWindow`: a
+ * fixed millisecond length dragged across one of Sydney's clock changes lands an
+ * hour off, and an hour before midnight is the previous day on screen.
  *
  * A null `ends_at` stays null: nothing to move, and inventing an end for a plan
  * that runs on credits would date-gate a balance that is deliberately not.
@@ -1516,11 +1539,23 @@ export function rescheduleMembershipStart(
 ): { starts_at: string; ends_at: string | null } {
   const starts_at = clubDayStart(startsOn);
   if (!window.ends_at || !window.starts_at) return { starts_at, ends_at: window.ends_at };
-  const lengthMs = new Date(window.ends_at).getTime() - new Date(window.starts_at).getTime();
+  const from = clubWallTime(new Date(window.starts_at));
+  const to = clubWallTime(new Date(window.ends_at));
+  const days = Math.round((dayNumber(to.date) - dayNumber(from.date)) / 86_400_000);
   return {
     starts_at,
-    ends_at: new Date(new Date(starts_at).getTime() + lengthMs).toISOString(),
+    ends_at: zonedWallTimeToUtc(
+      addCalendarDays(startsOn, days),
+      to.time,
+      CLUB_TIME_ZONE,
+    ).toISOString(),
   };
+}
+
+/** A YYYY-MM-DD as a plain day index, for counting days between two dates. */
+function dayNumber(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
 }
 
 /**

@@ -60,6 +60,17 @@ export function AddMembershipCard({
   // the Start date button on its row, where the field opens on the date it holds.
   const [startsOn, setStartsOn] = useState(() => clubToday());
   const [startsOnSet, setStartsOnSet] = useState(false);
+
+  // Abandoning an edit has to put the date back to "no opinion" too, or the
+  // guard only holds in one direction: a manager who typed February, thought
+  // better of it and closed the panel would come back to a field still showing
+  // February and still marked as set, and the next unrelated raise would carry
+  // it. Same for switching plans — a date chosen for one plan is not an answer
+  // about another.
+  function forgetStartDate() {
+    setStartsOn(clubToday());
+    setStartsOnSet(false);
+  }
   const [includeInsurance, setIncludeInsurance] = useState(false);
   const [sendEmail, setSendEmail] = useState(true);
   const [open, setOpen] = useState(false);
@@ -112,8 +123,7 @@ export function AddMembershipCard({
       // (a training period and a casual class) is a normal afternoon.
       setPlanCode("");
       setSessionDate("");
-      setStartsOn(clubToday());
-      setStartsOnSet(false);
+      forgetStartDate();
       await onAdded();
     }
   }
@@ -136,7 +146,14 @@ export function AddMembershipCard({
             a price stays pending until you press Activate; a free plan starts straight away.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setOpen(false);
+            forgetStartDate();
+          }}
+        >
           Close
         </Button>
       </div>
@@ -171,7 +188,10 @@ export function AddMembershipCard({
               id="add-plan"
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
               value={planCode}
-              onChange={(e) => setPlanCode(e.target.value)}
+              onChange={(e) => {
+                setPlanCode(e.target.value);
+                forgetStartDate();
+              }}
             >
               <option value="">Choose a plan...</option>
               {onSale.length > 0 && (

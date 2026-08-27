@@ -103,6 +103,41 @@ describe("AddMembershipCard start date", () => {
     expect(createMembership.mock.calls[0][0].data.starts_on).toBe("2026-02-01");
   });
 
+  // Abandoning an edit is the other direction of the same guard. The panel is
+  // one long-lived instance on the person's page, so without a reset a manager
+  // who typed a date, thought better of it and closed would come back to a field
+  // still holding it — and the next raise, for an unrelated reason, would move
+  // an existing invoice's window to a date nobody meant this time.
+  it("forgets a date that was typed and then abandoned", async () => {
+    const user = await openWithPlan("insurance_yearly");
+    const field = await screen.findByLabelText(/start date/i);
+    await user.clear(field);
+    await user.type(field, "2020-01-01");
+    await user.click(screen.getByRole("button", { name: /^close$/i }));
+
+    await user.click(screen.getByRole("button", { name: /add a membership/i }));
+    await user.selectOptions(await screen.findByLabelText(/^plan$/i), "insurance_yearly");
+    expect(await screen.findByLabelText(/start date/i)).not.toHaveValue("2020-01-01");
+    await user.click(screen.getByRole("button", { name: /^add membership$/i }));
+    await waitFor(() => expect(createMembership).toHaveBeenCalled());
+    expect(createMembership.mock.calls[0][0].data.starts_on).toBeNull();
+  });
+
+  // A date chosen for one plan is not an answer about another.
+  it("forgets a date after switching plans and back", async () => {
+    const user = await openWithPlan("insurance_yearly");
+    const field = await screen.findByLabelText(/start date/i);
+    await user.clear(field);
+    await user.type(field, "2020-01-01");
+    const plan = screen.getByLabelText(/^plan$/i);
+    await user.selectOptions(plan, "2026-s2");
+    await user.selectOptions(plan, "insurance_yearly");
+    expect(await screen.findByLabelText(/start date/i)).not.toHaveValue("2020-01-01");
+    await user.click(screen.getByRole("button", { name: /^add membership$/i }));
+    await waitFor(() => expect(createMembership).toHaveBeenCalled());
+    expect(createMembership.mock.calls[0][0].data.starts_on).toBeNull();
+  });
+
   // Nothing to place on a casual class or a training period, and the server
   // refuses a date there — so a stale value must never ride along.
   it("sends no start date for a plan that has none, even after picking one", async () => {

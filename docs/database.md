@@ -564,7 +564,8 @@ means a fixed date range (e.g. "Semester 2 2026", 20 Jul – 16 Dec — everyone
 buys it gets exactly those dates, full price regardless of when in it they
 join; there is no pro rata); `duration_days` set means a rolling window from the
 day the membership starts (yearly insurance, 365 days — today unless a manager
-names another day, see `docs/memberships.md`); neither set means the plan ends
+names another day, and counted as calendar days in the club's timezone rather
+than as fixed milliseconds, see `docs/memberships.md`); neither set means the plan ends
 with its session credits instead of a date (trial, casual class). Three CHECK
 constraints enforce this is mutually exclusive
 (`membership_plans_dates_paired`, `membership_plans_dates_order`,

@@ -126,6 +126,31 @@ function fakeAdminForEditInvoice(
   };
 }
 
+/**
+ * The reads `create_membership` walks before it can refuse a start date: the
+ * plan named by `plan_code`, and the insurance catalogue `resolveInsuranceCover`
+ * checks on the way past. Nothing else is reached, because the refusal lands
+ * before a single write.
+ */
+function fakeAdminForCreateMembership(plan: Record<string, unknown>) {
+  return {
+    from: (table: string) => {
+      if (table === "membership_plans") {
+        return {
+          select: () => ({
+            eq: (col: string) =>
+              col === "code"
+                ? { maybeSingle: () => Promise.resolve(ok(plan)) }
+                : // resolveInsuranceCover awaits the kind filter directly.
+                  Promise.resolve(ok([])),
+          }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+  };
+}
+
 let currentAdmin: unknown;
 vi.mock("@/integrations/supabase/client.server", () => ({
   get supabaseAdmin() {
@@ -480,8 +505,11 @@ describe("manager agent route", () => {
       ...ROW,
       id: INVOICE_ID,
       paid_at: null,
-      starts_at: "2026-05-01T00:00:00+00:00",
-      ends_at: "2027-05-01T00:00:00+00:00",
+      // A real backdated year of cover: club midnight to club midnight, spelled
+      // the way PostgREST renders a TIMESTAMPTZ. 00:00 on 1 May in Sydney is
+      // 14:00 the day before in UTC (AEST, +10).
+      starts_at: "2026-04-30T14:00:00+00:00",
+      ends_at: "2027-04-30T14:00:00+00:00",
     };
 
     it("moves both ends of the window, and reports both as changed", async () => {
@@ -500,8 +528,8 @@ describe("manager agent route", () => {
       });
       expect(body.result.changed).toEqual(["starts_at", "ends_at"]);
       expect(body.result.previous).toEqual({
-        starts_at: "2026-05-01T00:00:00+00:00",
-        ends_at: "2027-05-01T00:00:00+00:00",
+        starts_at: "2026-04-30T14:00:00+00:00",
+        ends_at: "2027-04-30T14:00:00+00:00",
       });
     });
 
@@ -566,6 +594,39 @@ describe("manager agent route", () => {
       // current value does.
       expect((await res.json()).result.changed).toEqual([]);
     });
+  });
+
+  // The refusal has to reach a caller as a 422 it can act on, not the 500 an
+  // unrecognised throw becomes — and it has to say the same thing edit_invoice
+  // says, since it is the same rule about the same plan.
+  it("refuses create_membership's start date on a plan that has none, as a 422", async () => {
+    currentAdmin = fakeAdminForCreateMembership({
+      id: "plan-period",
+      code: "2026-s2",
+      name: "Semester 2 2026",
+      kind: "period",
+      starts_on: "2026-07-20",
+      ends_on: "2026-11-22",
+      duration_days: null,
+      session_credits: null,
+      public_price_cents: 24500,
+      student_price_cents: null,
+      is_active: true,
+      sort_order: 0,
+    });
+    const res = await post({
+      action: "create_membership",
+      params: {
+        user_id: "22222222-2222-4222-8222-222222222222",
+        plan_code: "2026-s2",
+        starts_on: "2026-02-01",
+      },
+    });
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.code).toBe("start_date_not_choosable");
+    expect(body.error.message).toContain("Semester 2 2026");
+    expect(body.error.details.plan_kind).toBe("period");
   });
 
   it("reports a missing invoice as not_found rather than a guard failure", async () => {
