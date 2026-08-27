@@ -26,9 +26,16 @@
 --      shouldCreateUser: false). That is application behaviour, not schema —
 --      nothing here depends on the address's shape.
 --
--- NOTHING READS THIS COLUMN YET. This migration is deliberately alone in its
--- pull request (docs/database-changes.md): additive schema goes live before the
--- code that needs it, so the currently-deployed app keeps working in the gap.
+-- NO APPLICATION CODE READS THIS COLUMN YET, and no row can carry a non-null
+-- value until #105 creates the first dependant, so applying this changes nothing
+-- anybody can observe. Be precise about that rather than claiming more: the
+-- helper rewritten at the bottom of THIS file does read guardian_user_id, on
+-- every authenticated calendar access, from the moment this is applied. It is a
+-- no-op because the column is empty, not because nothing consults it.
+--
+-- The migration is still deliberately alone in its pull request
+-- (docs/database-changes.md): additive schema goes live before the code that
+-- needs it, so the currently-deployed app keeps working in the gap.
 
 -- ---------- the guardian link ----------
 
@@ -157,7 +164,10 @@ GRANT EXECUTE ON FUNCTION public.has_active_paid_membership(UUID) TO authenticat
 
 -- No grant changes anywhere else, so supabase/lint/client-grants-expected.txt
 -- needs no edit: profiles holds nothing for anon or authenticated (everything
--- goes through service-role server functions), and the two RLS policies that
--- call the function above call it unchanged.
+-- goes through service-role server functions), and the ONE RLS policy that
+-- calls the function above -- `Paid members can read members-only events` on
+-- calendar_events -- calls it unchanged. (That policy has been dropped and
+-- re-created twice under the same name, by 20260730113925 and 20260802000000,
+-- which makes it look like several in a grep. It is one.)
 
 NOTIFY pgrst, 'reload schema';
