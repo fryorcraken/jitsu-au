@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
-import { formatCents, sellablePlans } from "@/lib/validation";
+import { clubToday, formatCents, planStartIsChoosable, sellablePlans } from "@/lib/validation";
 import { createMembership, listAllMembershipPlans } from "@/lib/membership.functions";
 
 type Plan = Awaited<ReturnType<typeof listAllMembershipPlans>>[number];
@@ -48,6 +48,29 @@ export function AddMembershipCard({
   const [planCode, setPlanCode] = useState("");
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState("");
+  // Prefilled with today rather than left blank, because today is the answer
+  // almost every time and an empty date field asks a question nobody had.
+  //
+  // `startsOnSet` is what makes the prefill safe. Re-raising the same plan
+  // resolves back to the existing unpaid invoice and MOVES its window to the
+  // date sent, so a card that always sent its default would silently drag a
+  // deliberately backdated invoice forward to today the next time a manager
+  // opened this panel to fix something else. Untouched means "no opinion", which
+  // for a new membership is today anyway. Correcting one that already exists is
+  // the Start date button on its row, where the field opens on the date it holds.
+  const [startsOn, setStartsOn] = useState(() => clubToday());
+  const [startsOnSet, setStartsOnSet] = useState(false);
+
+  // Abandoning an edit has to put the date back to "no opinion" too, or the
+  // guard only holds in one direction: a manager who typed February, thought
+  // better of it and closed the panel would come back to a field still showing
+  // February and still marked as set, and the next unrelated raise would carry
+  // it. Same for switching plans — a date chosen for one plan is not an answer
+  // about another.
+  function forgetStartDate() {
+    setStartsOn(clubToday());
+    setStartsOnSet(false);
+  }
   const [includeInsurance, setIncludeInsurance] = useState(false);
   const [sendEmail, setSendEmail] = useState(true);
   const [open, setOpen] = useState(false);
@@ -66,6 +89,11 @@ export function AddMembershipCard({
   const onSaleCodes = new Set(onSale.map((p) => p.code));
   const retired = (plans ?? []).filter((p) => !onSaleCodes.has(p.code));
   const chosen = (plans ?? []).find((p) => p.code === planCode) ?? null;
+  // The same question the server asks, asked of the plan's own window rather
+  // than of its kind, so the field appears exactly where a date would change
+  // something. A training period's dates belong to the plan, and a class-credit
+  // plan has no window to place.
+  const startIsChoosable = chosen ? planStartIsChoosable(chosen) : false;
 
   async function submit() {
     if (!planCode) return;
@@ -78,6 +106,10 @@ export function AddMembershipCard({
             plan_code: planCode,
             uts_student_number: studentNumber.trim() || null,
             session_date: sessionDate || null,
+            // Sent only where it means something: the server refuses a start
+            // date on a plan that has none, and sending today's date for every
+            // casual class would turn that guard into a wall.
+            starts_on: startIsChoosable && startsOnSet ? startsOn || null : null,
             include_insurance: includeInsurance,
             send_email: sendEmail,
           },
@@ -91,6 +123,7 @@ export function AddMembershipCard({
       // (a training period and a casual class) is a normal afternoon.
       setPlanCode("");
       setSessionDate("");
+      forgetStartDate();
       await onAdded();
     }
   }
@@ -113,7 +146,14 @@ export function AddMembershipCard({
             a price stays pending until you press Activate; a free plan starts straight away.
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setOpen(false);
+            forgetStartDate();
+          }}
+        >
           Close
         </Button>
       </div>
@@ -148,7 +188,10 @@ export function AddMembershipCard({
               id="add-plan"
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
               value={planCode}
-              onChange={(e) => setPlanCode(e.target.value)}
+              onChange={(e) => {
+                setPlanCode(e.target.value);
+                forgetStartDate();
+              }}
             >
               <option value="">Choose a plan...</option>
               {onSale.length > 0 && (
@@ -198,6 +241,28 @@ export function AddMembershipCard({
               />
               <p className="text-xs text-muted-foreground">
                 Defaults to today, so each drop-in payment reconciles to its own class.
+              </p>
+            </div>
+          )}
+
+          {/* Only a plan that runs for a fixed number of days has a start to
+              place: the yearly insurance. Everyone who buys a training period
+              gets its dates, and a class-credit plan ends with its classes. */}
+          {startIsChoosable && (
+            <div className="space-y-2">
+              <Label htmlFor="add-starts-on">Start date</Label>
+              <Input
+                id="add-starts-on"
+                type="date"
+                value={startsOn}
+                onChange={(e) => {
+                  setStartsOn(e.target.value);
+                  setStartsOnSet(true);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Defaults to today. Set it back when you are writing down cover that really began
+                earlier; it runs {chosen?.duration_days ?? 365} days from whatever you pick.
               </p>
             </div>
           )}

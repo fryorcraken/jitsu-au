@@ -18,7 +18,7 @@ import { beltSizes, giSizes } from "./kit-sizes";
 // must cover that evening's class, not cut off at UTC midnight), so this
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
 // the same kind of module as this one (pure, no server imports).
-import { CLUB_TIME_ZONE, clubLocalDate, zonedWallTimeToUtc } from "./calendar";
+import { CLUB_TIME_ZONE, clubLocalDate, tzOffsetMinutes, zonedWallTimeToUtc } from "./calendar";
 import { formatDate, formatDateOnly } from "./dates";
 
 // ---- Pure helpers ----
@@ -1417,6 +1417,13 @@ function addCalendarDays(dateStr: string, days: number): string {
   return `${String(dt.getUTCFullYear()).padStart(4, "0")}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
 
+/** The club's own calendar date and clock time at an instant. */
+function clubWallTime(instant: Date): { date: string; time: string } {
+  const shifted = new Date(instant.getTime() + tzOffsetMinutes(instant, CLUB_TIME_ZONE) * 60000);
+  const iso = shifted.toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+}
+
 /**
  * The absolute instants a plan's membership runs for, resolved from the plan
  * alone — no second table to look up, and no branch on the plan's `kind`:
@@ -1451,8 +1458,19 @@ export function planMembershipWindow(
     return { starts_at, ends_at };
   }
   if (plan.duration_days) {
-    const ends_at = new Date(
-      new Date(now).getTime() + plan.duration_days * 86_400_000,
+    // Counted as CALENDAR days in the club's timezone, at the same time of day,
+    // not as a fixed number of milliseconds. Sydney's clocks move twice a year,
+    // so `now + days * 86_400_000` lands an hour out either side of a change —
+    // and when the start is a club midnight, an hour before midnight is the
+    // PREVIOUS DAY. A year of cover bought on 5 April 2026 then read as ending
+    // on 4 April 2027: a day short, on screen, in the club's own words. Leap
+    // years are untouched by this and are not the same question: a plan that
+    // sells 365 days sells 365 days, and one of them may be 29 February.
+    const { date, time } = clubWallTime(new Date(now));
+    const ends_at = zonedWallTimeToUtc(
+      addCalendarDays(date, plan.duration_days),
+      time,
+      CLUB_TIME_ZONE,
     ).toISOString();
     return { starts_at: now, ends_at };
   }
@@ -1462,6 +1480,115 @@ export function planMembershipWindow(
     CLUB_TIME_ZONE,
   ).toISOString();
   return { starts_at: startOfDay, ends_at: null };
+}
+
+/**
+ * Whether the day a membership STARTS is a real choice on this plan, and so
+ * whether a manager may set it when raising one or correct it afterwards.
+ *
+ * Only a rolling plan (`duration_days`, which today is the yearly insurance)
+ * qualifies, and the reason is what the other two kinds mean. A dated plan's
+ * window belongs to the plan, not the member — everyone who buys this training
+ * period gets exactly its dates, and a per-member start would quietly reinvent
+ * the pro rata this club does not do. A credit plan has no window to move: it
+ * ends with its classes, its `starts_at` is a record of the day it was granted,
+ * and nothing reads it as a limit (`docs/check-in.md`).
+ *
+ * A rolling plan is the opposite of both: its length is fixed but its position
+ * is not, so "when does their year of cover run from" is a question with no
+ * answer until somebody gives one. Today defaults it; a manager writing down an
+ * enrolment that already happened says when it really started.
+ */
+export function planStartIsChoosable(plan: PlanWindow): boolean {
+  if (plan.starts_on && plan.ends_on) return false;
+  return Boolean(plan.duration_days && plan.duration_days > 0);
+}
+
+/** The instant 00:00 in the club's own timezone on `date` (YYYY-MM-DD). */
+export function clubDayStart(date: string): string {
+  return zonedWallTimeToUtc(date, "00:00", CLUB_TIME_ZONE).toISOString();
+}
+
+/** Today's date (YYYY-MM-DD) where the club is, whatever timezone the reader is in. */
+export function clubToday(now: Date = new Date()): string {
+  return clubLocalDate(now, CLUB_TIME_ZONE);
+}
+
+/**
+ * Move an existing membership's window so it begins at 00:00 club time on
+ * `startsOn`, **keeping the length it already has** — the same number of club
+ * days, ending at the same time of day.
+ *
+ * Correcting a start date is not re-buying the plan, so the length is carried
+ * over rather than recomputed from the plan's current `duration_days`. A
+ * membership is given its dates once, at the moment it is raised, and a later
+ * plan edit never re-syncs it (see docs/memberships.md) — recomputing here would
+ * make a start-date correction the one back door that does, silently handing
+ * somebody a longer or shorter year than they bought.
+ *
+ * Days rather than milliseconds, for the reason in `planMembershipWindow`: a
+ * fixed millisecond length dragged across one of Sydney's clock changes lands an
+ * hour off, and an hour before midnight is the previous day on screen.
+ *
+ * A null `ends_at` stays null: nothing to move, and inventing an end for a plan
+ * that runs on credits would date-gate a balance that is deliberately not.
+ */
+export function rescheduleMembershipStart(
+  window: { starts_at: string | null; ends_at: string | null },
+  startsOn: string,
+): { starts_at: string; ends_at: string | null } {
+  const starts_at = clubDayStart(startsOn);
+  if (!window.ends_at || !window.starts_at) return { starts_at, ends_at: window.ends_at };
+  const from = clubWallTime(new Date(window.starts_at));
+  const to = clubWallTime(new Date(window.ends_at));
+  const days = Math.round((dayNumber(to.date) - dayNumber(from.date)) / 86_400_000);
+  return {
+    starts_at,
+    ends_at: zonedWallTimeToUtc(
+      addCalendarDays(startsOn, days),
+      to.time,
+      CLUB_TIME_ZONE,
+    ).toISOString(),
+  };
+}
+
+/** A YYYY-MM-DD as a plain day index, for counting days between two dates. */
+function dayNumber(dateStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+/**
+ * Whether two timestamps name the same instant, however they are spelled.
+ *
+ * Postgres hands a TIMESTAMPTZ back as `2026-05-01T00:00:00+00:00` while this
+ * code writes `2026-05-01T00:00:00.000Z`, and comparing those as strings reports
+ * a change that never happened. That is not cosmetic here: it is a phantom line
+ * in the invoice audit log, which is the club's only record of who moved what,
+ * and a write on every re-raise that should have been a no-op. The same trap has
+ * already cost this repo the waiver idempotency path once
+ * (`docs/manager-agent-api.md`) and is why `diffOccurrences` in `calendar.ts`
+ * compares by `getTime()` too.
+ */
+export function sameInstant(a: string | null, b: string | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ta = new Date(a).getTime();
+  const tb = new Date(b).getTime();
+  return Number.isFinite(ta) && ta === tb;
+}
+
+/**
+ * Why a plan refuses a start date, in the words a manager or an agent reads.
+ * One message for both callers, so the manager screen and the API cannot
+ * explain the same refusal differently.
+ */
+export function startDateNotChoosableMessage(plan: { name: string } & PlanWindow): string {
+  const reason =
+    plan.starts_on && plan.ends_on
+      ? "runs between fixed dates that everyone who buys it shares"
+      : "ends with its classes rather than on a date";
+  return `${plan.name} ${reason}, so it has no start date to set. Only a plan that runs for a fixed number of days, like the yearly insurance, does.`;
 }
 
 /**
@@ -2241,6 +2368,19 @@ export const setMembershipStatusSchema = z.object({
 });
 export type SetMembershipStatusInput = z.infer<typeof setMembershipStatusSchema>;
 
+// ---- Manager: correct the day a membership starts ----
+//
+// Only meaningful where the start is a real choice (`planStartIsChoosable`), so
+// in practice the yearly insurance. The server refuses anything else rather than
+// ignoring the date, and moves `ends_at` with `starts_at` so the cover keeps the
+// length it was sold at (`rescheduleMembershipStart`).
+
+export const setMembershipStartSchema = z.object({
+  id: z.string().uuid(),
+  starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type SetMembershipStartInput = z.infer<typeof setMembershipStartSchema>;
+
 // ---- Manager: record a payment ----
 //
 // The counterpart to bank reconciliation, for money that never touches the club
@@ -2278,6 +2418,15 @@ export const createMembershipSchema = z.object({
   plan_code: z.string().trim().min(1).max(64),
   uts_student_number: z.string().trim().max(32).nullable().optional(),
   session_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  // The day the membership itself runs from, for a plan whose start is a real
+  // choice (`planStartIsChoosable` — the yearly insurance). Absent means today.
+  // Refused rather than ignored on any other plan: an agent told "ignored" would
+  // read a 200 as proof it had backdated somebody's training period.
+  starts_on: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .nullable()
@@ -2369,6 +2518,15 @@ export const editInvoiceSchema = z
     payment_reference: z.string().trim().min(1).max(64).optional(),
     payment_method: z.enum(invoicePaymentMethods).optional(),
     status: z.enum(["pending", "cancelled", "expired"]).optional(),
+    // The day this membership runs from, for a plan whose start is a real
+    // choice (`planStartIsChoosable`). Writes `starts_at` AND `ends_at`: the
+    // window keeps the length it has and moves as one, so a correction can
+    // never quietly lengthen somebody's cover. Not nullable — a membership
+    // always starts on some day, so there is nothing to clear it to.
+    starts_on: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
     // `.default(false)` to match confirm_duplicate on paperWaiverUploadSchema:
     // two structurally identical confirmation flags should not parse to
     // different types (`boolean | undefined` vs `boolean`) for no reason.
@@ -2381,7 +2539,8 @@ export const editInvoiceSchema = z
       d.notes !== undefined ||
       d.payment_reference !== undefined ||
       d.payment_method !== undefined ||
-      d.status !== undefined,
+      d.status !== undefined ||
+      d.starts_on !== undefined,
     { message: "Provide at least one invoice field to edit." },
   );
 export type EditInvoiceInput = z.infer<typeof editInvoiceSchema>;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CLUB_TIME_ZONE, zonedWallTimeToUtc } from "./calendar";
 import {
   buildPaymentReference,
   clubPaymentDetailsSchema,
@@ -25,10 +26,14 @@ import {
   planTypePatch,
   strandedPlanFields,
   planMembershipWindow,
+  planStartIsChoosable,
+  rescheduleMembershipStart,
   sanitizeSurname,
   savePlanSchema,
+  sameInstant,
   sellablePlans,
   sellableWindowNotifications,
+  startDateNotChoosableMessage,
   sessionDateTag,
   stableCode,
   startMembershipSchema,
@@ -596,6 +601,26 @@ describe("planMembershipWindow", () => {
     expect(w.ends_at).toBe("2027-05-01T00:00:00.000Z");
   });
 
+  // Counted as calendar days at the same time of day, not as a fixed number of
+  // milliseconds. 00:00 on 5 April 2026 is AEDT (+11) — the clocks go back that
+  // very morning — and 00:00 on 5 April 2027 is AEST (+10), so the two are 365
+  // days and one hour apart. Fixed-ms arithmetic lands at 23:00 on the 4th, and
+  // an hour before midnight prints as the PREVIOUS DAY on every screen that
+  // shows it: a year of cover reading as a day short.
+  it("keeps a rolling plan on the same clock time across a daylight-saving change", () => {
+    const start = zonedWallTimeToUtc("2026-04-05", "00:00", CLUB_TIME_ZONE).toISOString();
+    const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: 365 }, start);
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2027-04-05", "00:00", CLUB_TIME_ZONE).toISOString());
+  });
+
+  // A leap year is a different question and deliberately NOT adjusted: a plan
+  // that sells 365 days sells 365 days, and one of them may be 29 February.
+  it("counts 365 days through a leap year rather than landing on the same date", () => {
+    const start = zonedWallTimeToUtc("2027-03-01", "00:00", CLUB_TIME_ZONE).toISOString();
+    const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: 365 }, start);
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2028-02-29", "00:00", CLUB_TIME_ZONE).toISOString());
+  });
+
   // Undated plans (the free trial, casual classes) run from the START OF THE
   // CLUB DAY, so the row reads as "granted on this day" rather than at some
   // arbitrary instant. Nothing enforces it -- a credit balance is not date-gated
@@ -606,6 +631,181 @@ describe("planMembershipWindow", () => {
     const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: null }, NOW);
     expect(w.starts_at).toBe("2026-04-30T14:00:00.000Z");
     expect(w.ends_at).toBeNull();
+  });
+});
+
+// ---- Setting and correcting the day a membership starts ----
+//
+// A start date is only a real question on a plan whose LENGTH is fixed but whose
+// POSITION is not, which today is the yearly insurance. The two mistakes worth
+// pinning are letting it loose on the other kinds -- a training period's dates
+// belong to the plan and everyone who buys it shares them -- and letting a
+// correction change how long somebody is covered for.
+
+describe("planStartIsChoosable", () => {
+  it("says yes to a rolling plan: its length is fixed, where it sits is not", () => {
+    expect(planStartIsChoosable({ starts_on: null, ends_on: null, duration_days: 365 })).toBe(true);
+  });
+
+  it("says no to a dated plan, whose dates everyone who buys it shares", () => {
+    expect(
+      planStartIsChoosable({ starts_on: "2026-07-20", ends_on: "2026-11-22", duration_days: null }),
+    ).toBe(false);
+  });
+
+  it("says no to a plan that ends with its classes rather than on a date", () => {
+    expect(planStartIsChoosable({ starts_on: null, ends_on: null, duration_days: null })).toBe(
+      false,
+    );
+  });
+
+  // The database still permits a shape the plan editor refuses. Dates win in
+  // `planMembershipWindow`, so they have to win here too -- otherwise the screen
+  // offers a start date the window would then ignore.
+  it("says no when a plan carries dates AND a duration, matching planMembershipWindow", () => {
+    expect(
+      planStartIsChoosable({ starts_on: "2026-07-20", ends_on: "2026-11-22", duration_days: 365 }),
+    ).toBe(false);
+  });
+
+  it("says no to a duration of zero days, which is not a plan that runs", () => {
+    expect(planStartIsChoosable({ starts_on: null, ends_on: null, duration_days: 0 })).toBe(false);
+  });
+});
+
+describe("rescheduleMembershipStart", () => {
+  // AEST (+10) in July: 00:00 on the 20th is 14:00 UTC the day before.
+  it("starts at 00:00 in the club's own timezone on the chosen day", () => {
+    const w = rescheduleMembershipStart(
+      { starts_at: "2026-05-01T00:00:00.000Z", ends_at: "2027-05-01T00:00:00.000Z" },
+      "2026-07-20",
+    );
+    expect(w.starts_at).toBe("2026-07-19T14:00:00.000Z");
+  });
+
+  // The whole rule: a correction moves the window, it does not resize it. A
+  // recompute from the plan's CURRENT duration would make this the one back door
+  // through which a later plan edit re-dates a membership somebody already
+  // bought. The length carried over is a count of club DAYS, so the pinned value
+  // here is the day count, not a millisecond span — those two differ by an hour
+  // whenever the move crosses one of Sydney's clock changes, which is the whole
+  // reason this counts days.
+  it("carries the day count over rather than recomputing it from the plan", () => {
+    const before = {
+      starts_at: zonedWallTimeToUtc("2026-05-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+      ends_at: zonedWallTimeToUtc("2027-05-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+    };
+    const after = rescheduleMembershipStart(before, "2026-02-01");
+    expect(after.starts_at).toBe(
+      zonedWallTimeToUtc("2026-02-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+    );
+    expect(after.ends_at).toBe(
+      zonedWallTimeToUtc("2027-02-01", "00:00", CLUB_TIME_ZONE).toISOString(),
+    );
+  });
+
+  // The start is snapped to the BEGINNING of the chosen day while the end keeps
+  // the time of day it already had, so the rounding can only ever add hours,
+  // never take them away. Correcting a record must not quietly shorten cover
+  // somebody is relying on.
+  it("never shortens the cover it is moving", () => {
+    const before = {
+      starts_at: zonedWallTimeToUtc("2026-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+      ends_at: zonedWallTimeToUtc("2027-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+    };
+    const length = (w: { starts_at: string; ends_at: string | null }) =>
+      new Date(w.ends_at!).getTime() - new Date(w.starts_at).getTime();
+    for (const day of ["2026-02-01", "2026-04-05", "2026-10-04", "2027-01-01"]) {
+      expect(length(rescheduleMembershipStart(before, day))).toBeGreaterThanOrEqual(length(before));
+    }
+  });
+
+  // The same reason `planMembershipWindow` counts days: dragging a fixed
+  // millisecond length across a clock change lands an hour out, and an hour
+  // before midnight is the previous day everywhere it is printed.
+  it("keeps the day count when the correction crosses a daylight-saving change", () => {
+    const w = rescheduleMembershipStart(
+      {
+        starts_at: zonedWallTimeToUtc("2026-01-05", "00:00", CLUB_TIME_ZONE).toISOString(),
+        ends_at: zonedWallTimeToUtc("2027-01-05", "00:00", CLUB_TIME_ZONE).toISOString(),
+      },
+      "2026-04-05",
+    );
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2027-04-05", "00:00", CLUB_TIME_ZONE).toISOString());
+  });
+
+  // A membership someone bought at 14:32 keeps ending at 14:32: the correction
+  // moves the window, it does not quietly re-grain it to midnight.
+  it("keeps the end's time of day on a window that did not start at midnight", () => {
+    const w = rescheduleMembershipStart(
+      {
+        starts_at: zonedWallTimeToUtc("2026-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+        ends_at: zonedWallTimeToUtc("2027-05-01", "14:32", CLUB_TIME_ZONE).toISOString(),
+      },
+      "2026-02-01",
+    );
+    expect(w.ends_at).toBe(zonedWallTimeToUtc("2027-02-01", "14:32", CLUB_TIME_ZONE).toISOString());
+  });
+
+  // A plan that ends with its classes has no end to move, and inventing one
+  // would date-gate a credit balance that deliberately is not.
+  it("leaves a null end date null", () => {
+    const w = rescheduleMembershipStart(
+      { starts_at: "2026-05-01T00:00:00.000Z", ends_at: null },
+      "2026-02-01",
+    );
+    expect(w.ends_at).toBeNull();
+  });
+});
+
+describe("sameInstant", () => {
+  // The whole point: Postgres hands a TIMESTAMPTZ back as `+00:00` with no
+  // fractional part, this code writes `Z` with one, and a string compare between
+  // them reports a move that never happened -- into the invoice audit log, which
+  // is the club's only record of who changed what.
+  it("reads the two spellings of one instant as equal", () => {
+    expect(sameInstant("2026-05-01T00:00:00+00:00", "2026-05-01T00:00:00.000Z")).toBe(true);
+  });
+
+  it("still tells two different instants apart", () => {
+    expect(sameInstant("2026-05-01T00:00:00+00:00", "2026-05-02T00:00:00.000Z")).toBe(false);
+  });
+
+  it("treats two nulls as equal and one null as a change", () => {
+    expect(sameInstant(null, null)).toBe(true);
+    expect(sameInstant(null, "2026-05-01T00:00:00.000Z")).toBe(false);
+    expect(sameInstant("2026-05-01T00:00:00.000Z", null)).toBe(false);
+  });
+
+  // An unparseable value is not quietly "the same as everything": NaN compares
+  // equal to nothing, and saying two unreadable dates match would hide the
+  // corruption rather than surface it.
+  it("does not call an unreadable timestamp equal to anything", () => {
+    expect(sameInstant("not a date", "2026-05-01T00:00:00.000Z")).toBe(false);
+    expect(sameInstant("not a date", "not a date")).toBe(true);
+  });
+});
+
+describe("startDateNotChoosableMessage", () => {
+  it("names the plan and why a training period has no start date to set", () => {
+    const msg = startDateNotChoosableMessage({
+      name: "Semester 2 2026",
+      starts_on: "2026-07-20",
+      ends_on: "2026-11-22",
+      duration_days: null,
+    });
+    expect(msg).toContain("Semester 2 2026");
+    expect(msg).toContain("fixed dates");
+  });
+
+  it("says a class-credit plan ends with its classes instead", () => {
+    const msg = startDateNotChoosableMessage({
+      name: "Casual class",
+      starts_on: null,
+      ends_on: null,
+      duration_days: null,
+    });
+    expect(msg).toContain("ends with its classes");
   });
 });
 

@@ -219,6 +219,23 @@ describe("buildInvoicePatch", () => {
     expect("notes" in untouched).toBe(false);
   });
 
+  // A start date is named as a DAY and placed by the plan. The caller never
+  // hands over instants, so the two columns cannot be pulled apart into a
+  // window no plan sells.
+  it("writes the resolved window, and never takes starts_at/ends_at from input", () => {
+    const patch = buildInvoicePatch({ id, starts_on: "2026-02-01" });
+    expect(patch).toEqual({});
+    const withWindow = buildInvoicePatch(
+      { id, starts_on: "2026-02-01" },
+      { starts_at: "2026-01-31T13:00:00.000Z", ends_at: "2027-01-31T13:00:00.000Z" },
+    );
+    expect(withWindow).toEqual({
+      starts_at: "2026-01-31T13:00:00.000Z",
+      ends_at: "2027-01-31T13:00:00.000Z",
+    });
+    expect("starts_on" in withWindow).toBe(false);
+  });
+
   it("only ever writes whitelisted columns", () => {
     const patch = buildInvoicePatch({
       id,
@@ -278,6 +295,15 @@ describe("reconciledEditBlockers", () => {
     // and the one status with consequences ("active") is refused by the schema.
     expect(RECONCILED_GUARDED_FIELDS).not.toContain("status");
     expect(RECONCILED_GUARDED_FIELDS).not.toContain("notes");
+  });
+
+  // The correction is wanted most often BECAUSE the money already landed: a
+  // year of cover settled in March and recorded in April. Guarding the dates
+  // would refuse the edit they exist for.
+  it("leaves the cover dates alone on a paid invoice: they are not a money record", () => {
+    expect(reconciledEditBlockers(paid, ["starts_at", "ends_at"], undefined)).toEqual([]);
+    expect(RECONCILED_GUARDED_FIELDS).not.toContain("starts_at");
+    expect(RECONCILED_GUARDED_FIELDS).not.toContain("ends_at");
   });
 
   it("does not block anything on an unpaid invoice, or when the caller confirms", () => {
@@ -452,7 +478,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("13");
+    expect(AGENT_MANIFEST.version).toBe("14");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it

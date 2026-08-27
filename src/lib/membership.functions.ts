@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   buildPaymentReference,
+  clubDayStart,
   computeMembershipPrice,
   createMembershipSchema,
   deleteMembershipSchema,
@@ -17,11 +18,16 @@ import {
   greetingName,
   nameWithPreferred,
   planMembershipWindow,
+  planStartIsChoosable,
   profileFullName,
+  rescheduleMembershipStart,
+  sameInstant,
   saveClubSettingsSchema,
   savePlanSchema,
   sellablePlans,
+  setMembershipStartSchema,
   setMembershipStatusSchema,
+  startDateNotChoosableMessage,
   startMembershipSchema,
   whyMembershipCannotBeDeleted,
 } from "@/lib/validation";
@@ -233,6 +239,17 @@ function projectMembership(m: MembershipRow, plan?: MembershipPlanRow) {
     plan_code: plan?.code ?? null,
     plan_name: plan?.name ?? null,
     kind: plan?.kind ?? null,
+    // The plan's own window, handed over whole rather than as a derived flag, so
+    // a screen asks `planStartIsChoosable` the same question the server asks
+    // instead of re-deriving it from `kind` and drifting the day one plan is set
+    // up a shape `kind` does not describe (the database still allows that).
+    plan_window: plan
+      ? {
+          starts_on: plan.starts_on,
+          ends_on: plan.ends_on,
+          duration_days: plan.duration_days,
+        }
+      : null,
     status: m.status,
     is_student: m.is_student,
     price_cents: m.price_cents,
@@ -809,11 +826,25 @@ export async function enrolMember(
     /** The casual class this is for; ignored by every other plan kind. */
     sessionDate?: string | null;
     insurancePlan: MembershipPlanRow | null;
+    /**
+     * The day (YYYY-MM-DD, club time) this membership runs from, when that is
+     * not today. Only a plan whose start is a real choice takes one — see
+     * `planStartIsChoosable` — and anything else is refused rather than
+     * ignored, because a silently dropped date reads as a backdated enrolment
+     * that never happened.
+     */
+    startsOn?: string | null;
     /** False records the invoice without telling them about it. */
     sendEmail?: boolean;
   },
 ): Promise<{ ok: true; authorised: true; reference: string | null }> {
   const { userId, plan, insurancePlan } = input;
+
+  // Resolved before anything is written: a refusal has to land before the
+  // invoice exists, not halfway through raising one.
+  const startsOn = input.startsOn || null;
+  if (startsOn && !planStartIsChoosable(plan)) throw new MembershipStartNotChoosableError(plan);
+  const effectiveFrom = startsOn ? clubDayStart(startsOn) : undefined;
 
   // Student status is derived server-side from the number's presence, so the
   // number is the single source of truth: a non-empty UTS student number gets
@@ -893,6 +924,25 @@ export async function enrolMember(
   let inserted: MembershipRow;
   if (existingUnpaid) {
     inserted = existingUnpaid;
+    // Reuse must not swallow a start date. Nothing re-runs `authorisedFields` on
+    // a reused row, so a manager who raised the insurance and then re-raised it
+    // with the right start date would be told it worked while the window sat
+    // where it was. Moved by the same rule a later correction uses, so the two
+    // paths cannot give the same request two different answers.
+    // By instant, not by string: the row came back from Postgres spelled
+    // `+00:00` and `rescheduleMembershipStart` writes `Z`, so a string compare
+    // would never match and every re-raise would write the window it already had.
+    const wanted = effectiveFrom ? rescheduleMembershipStart(inserted, startsOn!) : null;
+    if (wanted && !sameInstant(wanted.starts_at, inserted.starts_at)) {
+      const { data: moved, error: mvErr } = await admin
+        .from("memberships")
+        .update(wanted)
+        .eq("id", inserted.id)
+        .select("*")
+        .single();
+      if (mvErr || !moved) throw new Error(mvErr?.message || "Could not set the start date.");
+      inserted = moved;
+    }
   } else {
     const insert = {
       user_id: userId,
@@ -900,7 +950,11 @@ export async function enrolMember(
       // Authorised on the spot. Raising a membership IS the authorisation: the
       // invoice goes out and they can be checked in from that moment, with the
       // money outstanding until somebody records it.
-      ...authorisedFields(plan),
+      //
+      // `effectiveFrom` moves only THIS row. A bundled insurance invoice is a
+      // second plan being sold now, and dating it from a backfilled training
+      // period would hand out cover for a year that has already half run out.
+      ...authorisedFields(plan, effectiveFrom),
       is_student: isStudent,
       uts_student_number: utsStudentNumber,
       price_cents: price,
@@ -1432,6 +1486,86 @@ export const setMembershipStatus = createServerFn({ method: "POST" })
   });
 
 /**
+ * Resolve the window a membership should hold once its start date is corrected,
+ * or say why this membership has no start date to correct.
+ *
+ * Shared by the manager screen's server function and the agent's `edit_invoice`
+ * so both refuse the same plans, in the same words, and land the same two
+ * columns. The rule itself is pure (`rescheduleMembershipStart`): the window
+ * keeps its length and moves as one, so no correction can lengthen cover.
+ */
+export async function resolveMembershipStartPatch(
+  admin: MembershipClient,
+  membership: MembershipRow,
+  startsOn: string,
+): Promise<{ starts_at: string; ends_at: string | null }> {
+  // Both outcomes stop the edit, and they are different problems: a failed read
+  // must not be reported as "this plan has no start date", which would send a
+  // manager off to argue with a rule that never applied.
+  const { data: plan, error } = await admin
+    .from("membership_plans")
+    .select("*")
+    .eq("id", membership.plan_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!plan) throw new Error("Plan not found.");
+  if (!planStartIsChoosable(plan)) throw new MembershipStartNotChoosableError(plan);
+  return rescheduleMembershipStart(membership, startsOn);
+}
+
+/**
+ * The refusal a plan with no movable start gives back. A distinct class rather
+ * than a bare Error so the agent API can answer it as a 422 the caller can act
+ * on, instead of the 500 an unrecognised throw becomes.
+ */
+export class MembershipStartNotChoosableError extends Error {
+  constructor(readonly plan: MembershipPlanRow) {
+    super(startDateNotChoosableMessage(plan));
+    this.name = "MembershipStartNotChoosableError";
+  }
+}
+
+// ---- Manager: correct the day a membership starts ----
+//
+// The counterpart to setting it when the membership is raised, for the ordinary
+// case of a manager writing down an enrolment after the fact: the cover really
+// began in February, and the row says today. It says nothing about money and
+// sends nothing — a date correction is a records fix, not news — and it is
+// reversible by setting the date back, which is why the screen asks for it
+// without a hard confirm.
+export const setMembershipStart = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => setMembershipStartSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const admin = await adminClient();
+
+    const { data: membership, error } = await admin
+      .from("memberships")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!membership) throw new Error("Membership not found.");
+
+    const patch = await resolveMembershipStartPatch(admin, membership, data.starts_on);
+    // Read the row back rather than trusting the absence of an error. An UPDATE
+    // matching nothing is not a failure in Postgres, so a membership deleted
+    // between the read above and this write would leave the manager looking at a
+    // dialog that closed on "saved" over a correction that went nowhere.
+    const { data: moved, error: uErr } = await admin
+      .from("memberships")
+      .update(patch)
+      .eq("id", data.id)
+      .select("id")
+      .maybeSingle();
+    if (uErr) throw new Error(uErr.message);
+    if (!moved)
+      throw new Error("That membership is no longer there. Refresh the page and check it again.");
+    return { ok: true as const, id: data.id, ...patch };
+  });
+
+/**
  * Delete a membership outright, or refuse and say what would have to change.
  *
  * Shared by the manager screens and the agent's `delete_invoice`, so both
@@ -1567,6 +1701,7 @@ export async function createMembershipForUser(
     plan,
     utsStudentNumber: input.uts_student_number ?? null,
     sessionDate: input.session_date,
+    startsOn: input.starts_on,
     insurancePlan: input.include_insurance ? insurancePlan : null,
     sendEmail: input.send_email,
   });

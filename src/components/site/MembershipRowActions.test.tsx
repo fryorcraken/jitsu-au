@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 const setMembershipStatus = vi.fn();
 const deleteMembership = vi.fn();
 const markMembershipPaid = vi.fn();
+const setMembershipStart = vi.fn();
 
 vi.mock("@tanstack/react-start", () => ({
   useServerFn: (fn: unknown) => fn,
@@ -22,6 +23,7 @@ vi.mock("@/lib/membership.functions", () => ({
   setMembershipStatus: (...args: unknown[]) => setMembershipStatus(...args),
   deleteMembership: (...args: unknown[]) => deleteMembership(...args),
   markMembershipPaid: (...args: unknown[]) => markMembershipPaid(...args),
+  setMembershipStart: (...args: unknown[]) => setMembershipStart(...args),
 }));
 
 const { MembershipRowActions } = await import("./MembershipRowActions");
@@ -35,6 +37,19 @@ const JUNK: Row = {
   price_cents: 44500,
   checkin_count: 0,
   plan_name: "Semester 2 2026",
+  starts_at: "2026-07-19T14:00:00.000Z",
+  ends_at: "2026-11-22T12:59:59.000Z",
+  // A training period: its dates belong to the plan, so there is no start date
+  // on this row to move.
+  plan_window: { starts_on: "2026-07-20", ends_on: "2026-11-22", duration_days: null },
+};
+
+/** The yearly insurance: fixed length, and where it sits is a real choice. */
+const COVER: Partial<Row> = {
+  plan_name: "Yearly insurance",
+  starts_at: "2026-05-01T00:00:00.000Z",
+  ends_at: "2027-05-01T00:00:00.000Z",
+  plan_window: { starts_on: null, ends_on: null, duration_days: 365 },
 };
 
 function renderRow(overrides: Partial<Row> = {}, onChanged = vi.fn().mockResolvedValue(1)) {
@@ -165,6 +180,89 @@ describe("MembershipRowActions", () => {
       }),
     );
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  // ---- The start date ----
+  //
+  // Offered only where it means something, and it shows the end date moving
+  // with it: the one thing a manager could reasonably fear here is silently
+  // buying somebody a longer or shorter year.
+  it("offers a start date on the yearly cover and not on a training period", () => {
+    renderRow(COVER);
+    expect(screen.getByRole("button", { name: /start date/i })).toBeEnabled();
+  });
+
+  it("does not offer one on a plan whose dates belong to the plan", () => {
+    renderRow();
+    expect(screen.queryByRole("button", { name: /start date/i })).not.toBeInTheDocument();
+  });
+
+  it("does not offer one when the plan could not be read", () => {
+    renderRow({ ...COVER, plan_window: null });
+    expect(screen.queryByRole("button", { name: /start date/i })).not.toBeInTheDocument();
+  });
+
+  it("opens on the day it already starts, not on today", async () => {
+    const user = userEvent.setup();
+    renderRow(COVER);
+    await user.click(screen.getByRole("button", { name: /start date/i }));
+    expect(await screen.findByLabelText(/start date/i)).toHaveValue("2026-05-01");
+  });
+
+  it("shows the end date moving with the start before anything is saved", async () => {
+    const user = userEvent.setup();
+    renderRow(COVER);
+    await user.click(screen.getByRole("button", { name: /start date/i }));
+    const field = await screen.findByLabelText(/start date/i);
+    await user.clear(field);
+    await user.type(field, "2026-02-01");
+    // Still 365 days, moved: 1 Feb 2026 to 1 Feb 2027, read in club time.
+    expect(await screen.findByText(/Runs 01\/02\/2026 to 01\/02\/2027/)).toBeInTheDocument();
+    expect(setMembershipStart).not.toHaveBeenCalled();
+  });
+
+  // A Save button that silently does nothing is a dead end. Clearing the field
+  // to retype is the ordinary way to reach that state.
+  it("says why Save is unavailable when the date is cleared", async () => {
+    const user = userEvent.setup();
+    renderRow(COVER);
+    await user.click(screen.getByRole("button", { name: /start date/i }));
+    await user.clear(await screen.findByLabelText(/start date/i));
+    expect(screen.getByRole("button", { name: /save start date/i })).toBeDisabled();
+    expect(screen.getByText(/pick a day to save/i)).toBeInTheDocument();
+  });
+
+  it("saves the day, and lets the server place it", async () => {
+    const user = userEvent.setup();
+    setMembershipStart.mockResolvedValueOnce({ ok: true });
+    const { onChanged } = renderRow(COVER);
+
+    await user.click(screen.getByRole("button", { name: /start date/i }));
+    const field = await screen.findByLabelText(/start date/i);
+    await user.clear(field);
+    await user.type(field, "2026-02-01");
+    await user.click(screen.getByRole("button", { name: /save start date/i }));
+
+    await waitFor(() =>
+      expect(setMembershipStart).toHaveBeenCalledWith({
+        data: { id: "mem-1", starts_on: "2026-02-01" },
+      }),
+    );
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  // Same rule as every other write on this row: a failure stays on screen with
+  // the button still in it, never a toast that fades.
+  it("keeps a failed start-date save on screen with a way forward", async () => {
+    const user = userEvent.setup();
+    setMembershipStart.mockRejectedValueOnce(new Error("Yearly insurance has no start date"));
+    renderRow(COVER);
+
+    await user.click(screen.getByRole("button", { name: /start date/i }));
+    await user.click(screen.getByRole("button", { name: /save start date/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no start date/i);
+    expect(screen.getByRole("button", { name: /try again/i })).toBeEnabled();
   });
 
   it("keeps the failure on screen with the button still there", async () => {

@@ -13,6 +13,13 @@
 // cancelled or expired membership back into service — and it says nothing about
 // money.
 //
+// Start date is the odd one out and is deliberately not a confirm: it corrects a
+// record rather than doing anything to anybody, nothing is sent, and setting the
+// date back undoes it. It only appears where the start is a real choice
+// (`planStartIsChoosable`, so the yearly insurance), and it shows the end date
+// moving with it, because the one thing a manager could reasonably fear here is
+// silently buying somebody a longer or shorter year.
+//
 // The confirms say what will happen in words before the click, because both
 // outward-facing actions here are ones somebody feels: marking paid emails a
 // receipt and makes the row permanent, deleting cannot be undone. A failure
@@ -20,8 +27,18 @@
 // that auto-dismisses on a phone.
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Check, Loader2, RotateCcw, Trash2, Undo2 } from "lucide-react";
+import { CalendarDays, Check, Loader2, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,14 +52,20 @@ import {
 import {
   deleteMembership,
   markMembershipPaid,
+  setMembershipStart,
   setMembershipStatus,
 } from "@/lib/membership.functions";
 import {
+  clubToday,
   formatCents,
   isUnpaid,
   membershipDeleteMessage,
+  planStartIsChoosable,
+  rescheduleMembershipStart,
   whyMembershipCannotBeDeleted,
 } from "@/lib/validation";
+import type { PlanWindow } from "@/lib/validation";
+import { formatDateOnly } from "@/lib/dates";
 
 /** The fields both screens' membership rows carry, and all the guard needs. */
 export type MembershipActionRow = {
@@ -54,6 +77,15 @@ export type MembershipActionRow = {
   price_cents: number;
   checkin_count: number;
   plan_name: string | null;
+  /** When this membership runs from, and to. Both move together, or neither. */
+  starts_at: string | null;
+  ends_at: string | null;
+  /**
+   * The plan's own window, not a derived flag: whether the start date can be
+   * moved is one rule (`planStartIsChoosable`), asked here of the same three
+   * values the server asks it of.
+   */
+  plan_window: PlanWindow | null;
 };
 
 type Pending = {
@@ -61,6 +93,14 @@ type Pending = {
   error: string | null;
   busy: boolean;
 };
+
+/** The start-date form while it is open: what has been typed, and how it went. */
+type Dating = { startsOn: string; error: string | null; busy: boolean };
+
+/** An instant as the day it falls on where the club is, or "no end date". */
+function clubDayLabel(iso: string | null): string {
+  return iso ? formatDateOnly(clubToday(new Date(iso))) : "no end date";
+}
 
 export function MembershipRowActions({
   membership,
@@ -73,7 +113,9 @@ export function MembershipRowActions({
   const setStatus = useServerFn(setMembershipStatus);
   const remove = useServerFn(deleteMembership);
   const markPaid = useServerFn(markMembershipPaid);
+  const setStart = useServerFn(setMembershipStart);
   const [pending, setPending] = useState<Pending | null>(null);
+  const [dating, setDating] = useState<Dating | null>(null);
 
   // Computed here from the same pure rule the server enforces, so the button and
   // the refusal can never disagree about why. The server still re-checks: this
@@ -84,6 +126,36 @@ export function MembershipRowActions({
   // `isUnpaid` already knows a free membership owes nothing.
   const owesMoney = isUnpaid(membership);
   const isClosed = membership.status === "cancelled" || membership.status === "expired";
+
+  // Only a plan whose length is fixed but whose position is not — the yearly
+  // insurance. A membership whose plan could not be read shows no button rather
+  // than a button that will be refused.
+  const canDate = membership.plan_window ? planStartIsChoosable(membership.plan_window) : false;
+  // What the row would end up holding, worked out with the rule the server uses,
+  // so the preview and the write cannot disagree about the new end date.
+  const preview =
+    dating?.startsOn && /^\d{4}-\d{2}-\d{2}$/.test(dating.startsOn)
+      ? rescheduleMembershipStart(membership, dating.startsOn)
+      : null;
+
+  async function saveStart() {
+    if (!dating) return;
+    setDating({ ...dating, error: null, busy: true });
+    try {
+      await setStart({ data: { id: membership.id, starts_on: dating.startsOn } });
+    } catch (e) {
+      setDating({
+        ...dating,
+        busy: false,
+        error: e instanceof Error ? e.message : "That did not go through. Try again.",
+      });
+      return;
+    }
+    // Same reasoning as `run` below: the write has landed, so a failed refresh is
+    // a stale table rather than a failed correction.
+    await onChanged().catch(() => {});
+    setDating(null);
+  }
 
   async function run(kind: Pending["kind"]) {
     setPending({ kind, error: null, busy: true });
@@ -157,6 +229,26 @@ export function MembershipRowActions({
             <RotateCcw className="mr-1 h-3 w-3" /> Reopen
           </Button>
         )}
+        {canDate && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setDating({
+                // Prefilled with the day it currently starts, so the field opens
+                // on the answer it already holds rather than on today, which
+                // would invite a manager to overwrite a date that was right.
+                startsOn: membership.starts_at
+                  ? clubToday(new Date(membership.starts_at))
+                  : clubToday(),
+                error: null,
+                busy: false,
+              })
+            }
+          >
+            <CalendarDays className="mr-1 h-3 w-3" /> Start date
+          </Button>
+        )}
         {membership.status !== "cancelled" && (
           <Button
             size="sm"
@@ -180,6 +272,72 @@ export function MembershipRowActions({
         </Button>
         {!canDelete && <span className="sr-only">{membershipDeleteMessage(blockers)}</span>}
       </div>
+
+      <Dialog
+        open={Boolean(dating)}
+        onOpenChange={(open) => {
+          if (!open && !dating?.busy) setDating(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>When does {membership.plan_name ?? "this membership"} start?</DialogTitle>
+            <DialogDescription>
+              Set this back to the day the cover really began. It runs for the same length either
+              way, so the end date moves with it, and nothing is emailed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor={`start-date-${membership.id}`}>Start date</Label>
+            <Input
+              id={`start-date-${membership.id}`}
+              type="date"
+              value={dating?.startsOn ?? ""}
+              onChange={(e) =>
+                setDating((d) => (d ? { ...d, startsOn: e.target.value, error: null } : d))
+              }
+            />
+            {/* Read in the CLUB's timezone, not the reader's. A window stored as
+                13:00 UTC is 1 February in Sydney and 31 January in London, and
+                the date somebody just typed changing under them as they read it
+                back is the one thing this line must never do. */}
+            <p className="text-sm text-muted-foreground">
+              {preview
+                ? `Runs ${clubDayLabel(preview.starts_at)} to ${clubDayLabel(preview.ends_at)}.`
+                : // Save is disabled while there is no day to save. Saying so
+                  // beats a button that silently does nothing when somebody
+                  // clears the field to retype it.
+                  `Pick a day to save. It currently runs ${clubDayLabel(
+                    membership.starts_at,
+                  )} to ${clubDayLabel(membership.ends_at)}.`}
+            </p>
+          </div>
+          {dating?.error && (
+            <p
+              role="alert"
+              className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              {dating.error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={dating?.busy} onClick={() => setDating(null)}>
+              Go back
+            </Button>
+            {/* The spinner is the only thing that changes while this saves, and
+                a spinner says nothing to a screen reader. */}
+            {dating?.busy && (
+              <span className="sr-only" role="status">
+                Saving the start date...
+              </span>
+            )}
+            <Button disabled={dating?.busy || !preview} onClick={() => void saveStart()}>
+              {dating?.busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {dating?.error ? "Try again" : "Save start date"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={Boolean(pending)}
