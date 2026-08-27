@@ -19,7 +19,8 @@ plan's **kind** decides how it ends, and the manager screen asks for it as a
 single plain-language question ("what kind of plan is this?"): a **training
 period** runs between fixed dates (everyone who buys it gets exactly those
 dates, regardless of when in it they joined), **yearly insurance** runs N days
-from the moment it is raised, and a **casual class** or the **free trial**
+from the day it starts (today unless a manager says otherwise, see "Setting the
+day yearly cover starts"), and a **casual class** or the **free trial**
 ends with its session credits instead of on a date. There is no self-serve
 sign-up: a membership only exists because someone bought one, because a manager
 raised it for them, or because a manager approved a waiver and the club's free
@@ -32,7 +33,7 @@ trial was assigned automatically.
 | `trial_2_session`  | `trial`     | Free trial                 | ends with its credits               | Two free classes, ever, no expiry.                              |
 | `casual_session`   | `session`   | Casual class or class pack | ends with its credits               | One class, tied to a session date.                              |
 | `2026-s2`, …       | `period`    | Training period            | fixed dates (`starts_on`/`ends_on`) | Unlimited classes for that training period.                     |
-| `insurance_yearly` | `insurance` | Yearly insurance           | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from when it is raised. |
+| `insurance_yearly` | `insurance` | Yearly insurance           | rolling (`duration_days`)           | Club affiliation & insurance, 12 months from the day it starts. |
 
 A plan that ends with its credits carries a `starts_at` for the record, but
 **nothing reads it as a limit**: at check-in a credit balance covers any class
@@ -205,6 +206,59 @@ there is no re-sync.
 late joiner who would rather pay for only what is left is pointed at the
 casual per-class rate instead — that is what it is for.
 
+## Setting the day yearly cover starts
+
+**The yearly insurance is the one plan whose start date is a question**, and a
+manager answers it twice: once when the membership is raised, and again
+afterwards if the answer turns out to be wrong. Everywhere else the date is
+settled by something else and is not offered at all — a training period runs the
+plan's own dates and everyone who buys it shares them, and a casual class or the
+free trial ends with its classes rather than on a date, so there is no window to
+place. `planStartIsChoosable` is that rule, read off the plan's own window rather
+than its `kind`, and both the screen and the API ask it.
+
+**It defaults to today**, which is right for a member paying at the counter. It
+matters for the other case: a manager writing down cover that really began in
+February. Together with `send_email: false` that is a complete backfill — the
+year of cover sits where it ran, and nobody is invoiced for it now.
+
+- **The date is a day, and the club's day.** 00:00 Australia/Sydney on whatever
+  is picked, so cover starts at the beginning of that day and can cover a class
+  somebody trained at that morning. The screens read the stored instants back in
+  club time too, so the date typed and the date shown are the same date wherever
+  the manager is.
+- **Correcting it moves the window, it does not resize it**
+  (`rescheduleMembershipStart`): the end date shifts by exactly as much as the
+  start, so the cover keeps the length it was sold at. Recomputing the end from
+  the plan's current `duration_days` would make this the one back door through
+  which a later plan edit re-dates a membership somebody already bought, which
+  is exactly what "Buying a dated plan" says never happens.
+- **A start date is refused, never ignored**, on a plan that has none. A date
+  quietly dropped leaves an invoice that looks backdated and is not, and nothing
+  downstream would ever show the difference.
+- **Correcting is not gated on payment.** The dates say when somebody is
+  covered, not what they paid, so they sit outside the paid-invoice guard that
+  protects price, reference and method. The correction is wanted most often
+  precisely because the money already landed: settled in March, recorded in
+  April, dated from the day the manager got to it.
+- **A bundled insurance invoice always runs from today**, whatever start date
+  the plan beside it was given. It is a second plan being sold now, and dating
+  it from a backfilled training period would hand out a year of cover that has
+  already half run out. Backdating cover means raising the insurance on its own.
+- **Re-raising the same plan with a different start date moves the invoice it
+  reuses.** Raising a membership twice resolves back to the same unpaid row
+  rather than making a second one, and nothing re-runs the dating on that path —
+  so without this a manager who re-raised the insurance with the right date
+  would be told it worked while the window stayed where it was.
+
+A manager sets it in **Add a membership** on a person's page, and corrects it
+with **Start date** on the membership row (both manager screens, since they
+share `MembershipRowActions`). The correction is deliberately not a hard
+confirm: it changes a record rather than doing anything to anybody, sends
+nothing, and setting the date back undoes it. What it does show, before the
+save, is the end date moving with the start. The agent equivalents are
+`create_membership`'s and `edit_invoice`'s `starts_on`.
+
 ## Staying a member through the break
 
 Nothing in the app closes a membership automatically when its `ends_at`
@@ -258,6 +312,10 @@ nothing and re-sends nothing. There is no **Activate** button any more, because
 there is nothing left for it to do: a membership is authorised from the moment it
 is raised. **Reopen** is the narrow leftover, putting a cancelled or expired
 membership back into service, and it says nothing about money either way.
+
+**Start date** appears only on a membership whose start is a real choice (the
+yearly insurance) and corrects the day its cover began, moving the end with it.
+See "Setting the day yearly cover starts".
 
 **Cancel** works from any state and is the ordinary tidy-up for somebody who said
 they would join and never paid. It keeps the row, its dates and its credits;
@@ -317,6 +375,9 @@ often writing down an enrolment that already happened rather than selling one:
 - **Insurance is their call.** A member with no current cover cannot decline it
   (see "Buying a dated plan"); a manager can, because an enrolment that really
   did happen without cover is history, not a sale.
+- **Yearly cover can be dated.** A member buying for themselves gets cover from
+  now, because that is when they are buying it; a manager can say when it
+  actually began. See "Setting the day yearly cover starts".
 
 `send_email: false` records the invoice without telling anyone about it, so
 backfilling last semester does not invoice the whole club for it. The free trial
@@ -453,6 +514,7 @@ things to somebody about to transfer money.
 | `/manager/memberships`            | `list_invoices` / `edit_invoice`                 | See and correct invoices.                      |
 | both membership screens           | `edit_invoice` (`status`) / `delete_invoice`     | Cancel from any state; delete a junk invoice.  |
 | `/manager/users/<id>`             | `create_membership`                              | Raise a membership for a person.               |
+| both membership screens           | `edit_invoice` (`starts_on`)                     | Correct the day yearly cover began.            |
 | `/manager/users/<id>` (check-ins) | none                                             | Move a check-in to another membership.         |
 
 Moving a check-in is the one row with no agent equivalent: the API has no

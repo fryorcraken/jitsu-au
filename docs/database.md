@@ -562,9 +562,10 @@ no pro rata, staying a member through the break).
 its own window with no second table to look up: `starts_on`/`ends_on` both set
 means a fixed date range (e.g. "Semester 2 2026", 20 Jul – 16 Dec — everyone who
 buys it gets exactly those dates, full price regardless of when in it they
-join; there is no pro rata); `duration_days` set means a rolling window from
-payment (yearly insurance, 365 days); neither set means the plan ends with its
-session credits instead of a date (trial, casual class). Three CHECK
+join; there is no pro rata); `duration_days` set means a rolling window from the
+day the membership starts (yearly insurance, 365 days — today unless a manager
+names another day, see `docs/memberships.md`); neither set means the plan ends
+with its session credits instead of a date (trial, casual class). Three CHECK
 constraints enforce this is mutually exclusive
 (`membership_plans_dates_paired`, `membership_plans_dates_order`,
 `membership_plans_dates_xor_duration`). Each training period the club sells is
@@ -606,7 +607,11 @@ cancellation and deletion — it is a label, not the access gate (see the
 name/email come from their profile (via `user_id`). For a dated plan,
 `starts_at`/`ends_at` are the plan's own dates (`starts_on` at 00:00 and
 `ends_on` at 23:59:59, both Australia/Sydney), computed once at activation and
-never touched again. `sessions_remaining` is set at activation and spent by a
+never touched again. For a rolling plan (yearly insurance) they are the only
+window a manager can move afterwards: `setMembershipStart` and the agent API's
+`edit_invoice` (`starts_on`) write the pair together, keeping the length the
+membership already has, so a correction re-places the cover without resizing it
+(`docs/memberships.md`). `sessions_remaining` is set at activation and spent by a
 **check-in** — see `session_checkins` below, the only writer that decrements it.
 **RLS:** users read own; managers read/update all; direct member INSERT is
 revoked (all inserts go through the service-role `startMembership` /

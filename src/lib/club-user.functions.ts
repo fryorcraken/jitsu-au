@@ -73,7 +73,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         .eq("user_id", data.userId)
         .order("created_at", { ascending: false })
         .limit(MEMBERSHIPS_LIMIT),
-      admin.from("membership_plans").select("id, name, kind"),
+      admin.from("membership_plans").select("id, name, kind, starts_on, ends_on, duration_days"),
       admin.from("user_roles").select("user_id, role").eq("user_id", data.userId),
       userEmails(admin, [data.userId]),
       admin
@@ -304,6 +304,19 @@ export const getClubUser = createServerFn({ method: "POST" })
         // What the status is called depends on it: a plan sold as a number of
         // classes is "used up" when it ends, not "expired".
         kind: planById.get(m.plan_id)?.kind ?? null,
+        // The plan's own window, so the row can ask whether this membership's
+        // start date is a real choice with the same rule the server enforces
+        // (`planStartIsChoosable`) rather than re-deriving it from `kind`.
+        plan_window: (() => {
+          const plan = planById.get(m.plan_id);
+          return plan
+            ? {
+                starts_on: plan.starts_on,
+                ends_on: plan.ends_on,
+                duration_days: plan.duration_days,
+              }
+            : null;
+        })(),
         status: m.status,
         price_cents: m.price_cents,
         payment_reference: m.payment_reference,

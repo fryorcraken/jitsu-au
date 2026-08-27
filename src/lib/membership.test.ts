@@ -25,10 +25,13 @@ import {
   planTypePatch,
   strandedPlanFields,
   planMembershipWindow,
+  planStartIsChoosable,
+  rescheduleMembershipStart,
   sanitizeSurname,
   savePlanSchema,
   sellablePlans,
   sellableWindowNotifications,
+  startDateNotChoosableMessage,
   sessionDateTag,
   stableCode,
   startMembershipSchema,
@@ -606,6 +609,101 @@ describe("planMembershipWindow", () => {
     const w = planMembershipWindow({ starts_on: null, ends_on: null, duration_days: null }, NOW);
     expect(w.starts_at).toBe("2026-04-30T14:00:00.000Z");
     expect(w.ends_at).toBeNull();
+  });
+});
+
+// ---- Setting and correcting the day a membership starts ----
+//
+// A start date is only a real question on a plan whose LENGTH is fixed but whose
+// POSITION is not, which today is the yearly insurance. The two mistakes worth
+// pinning are letting it loose on the other kinds -- a training period's dates
+// belong to the plan and everyone who buys it shares them -- and letting a
+// correction change how long somebody is covered for.
+
+describe("planStartIsChoosable", () => {
+  it("says yes to a rolling plan: its length is fixed, where it sits is not", () => {
+    expect(planStartIsChoosable({ starts_on: null, ends_on: null, duration_days: 365 })).toBe(true);
+  });
+
+  it("says no to a dated plan, whose dates everyone who buys it shares", () => {
+    expect(
+      planStartIsChoosable({ starts_on: "2026-07-20", ends_on: "2026-11-22", duration_days: null }),
+    ).toBe(false);
+  });
+
+  it("says no to a plan that ends with its classes rather than on a date", () => {
+    expect(planStartIsChoosable({ starts_on: null, ends_on: null, duration_days: null })).toBe(
+      false,
+    );
+  });
+
+  // The database still permits a shape the plan editor refuses. Dates win in
+  // `planMembershipWindow`, so they have to win here too -- otherwise the screen
+  // offers a start date the window would then ignore.
+  it("says no when a plan carries dates AND a duration, matching planMembershipWindow", () => {
+    expect(
+      planStartIsChoosable({ starts_on: "2026-07-20", ends_on: "2026-11-22", duration_days: 365 }),
+    ).toBe(false);
+  });
+
+  it("says no to a duration of zero days, which is not a plan that runs", () => {
+    expect(planStartIsChoosable({ starts_on: null, ends_on: null, duration_days: 0 })).toBe(false);
+  });
+});
+
+describe("rescheduleMembershipStart", () => {
+  // AEST (+10) in July: 00:00 on the 20th is 14:00 UTC the day before.
+  it("starts at 00:00 in the club's own timezone on the chosen day", () => {
+    const w = rescheduleMembershipStart(
+      { starts_at: "2026-05-01T00:00:00.000Z", ends_at: "2027-05-01T00:00:00.000Z" },
+      "2026-07-20",
+    );
+    expect(w.starts_at).toBe("2026-07-19T14:00:00.000Z");
+  });
+
+  // The whole rule: a correction moves the window, it does not resize it. A
+  // recompute from the plan's CURRENT duration would make this the one back door
+  // through which a later plan edit re-dates a membership somebody already
+  // bought.
+  it("moves the end by exactly as much as the start, keeping the length sold", () => {
+    const before = { starts_at: "2026-05-01T00:00:00.000Z", ends_at: "2027-05-01T00:00:00.000Z" };
+    const after = rescheduleMembershipStart(before, "2026-02-01");
+    const length = (w: { starts_at: string; ends_at: string | null }) =>
+      new Date(w.ends_at!).getTime() - new Date(w.starts_at).getTime();
+    expect(length(after)).toBe(length(before));
+  });
+
+  // A plan that ends with its classes has no end to move, and inventing one
+  // would date-gate a credit balance that deliberately is not.
+  it("leaves a null end date null", () => {
+    const w = rescheduleMembershipStart(
+      { starts_at: "2026-05-01T00:00:00.000Z", ends_at: null },
+      "2026-02-01",
+    );
+    expect(w.ends_at).toBeNull();
+  });
+});
+
+describe("startDateNotChoosableMessage", () => {
+  it("names the plan and why a training period has no start date to set", () => {
+    const msg = startDateNotChoosableMessage({
+      name: "Semester 2 2026",
+      starts_on: "2026-07-20",
+      ends_on: "2026-11-22",
+      duration_days: null,
+    });
+    expect(msg).toContain("Semester 2 2026");
+    expect(msg).toContain("fixed dates");
+  });
+
+  it("says a class-credit plan ends with its classes instead", () => {
+    const msg = startDateNotChoosableMessage({
+      name: "Casual class",
+      starts_on: null,
+      ends_on: null,
+      duration_days: null,
+    });
+    expect(msg).toContain("ends with its classes");
   });
 });
 

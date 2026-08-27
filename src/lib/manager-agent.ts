@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "13",
+  version: "14",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,19 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "14",
+      // Additive: one new optional param on each of two actions, and two fields
+      // that were always in the response are now editable. Nothing that worked
+      // before fails or means anything different.
+      breaking: false,
+      notes: [
+        "create_membership takes starts_on: the day the membership itself runs from, defaulting to today. Only a plan that runs for a fixed number of days takes one, which today means the yearly insurance, so it is what backdating somebody's cover to when it really began needs. Sending it for a training period (whose dates belong to the plan and are shared by everyone who buys it) or for a class-credit plan (which ends with its classes, not on a date) is refused with 422 start_date_not_choosable rather than ignored.",
+        "edit_invoice takes starts_on too, for correcting that day afterwards. It writes starts_at AND ends_at: the window keeps the length it was sold at and moves as one, so a correction can never lengthen or shorten somebody's cover. Both appear in `changed` and `previous`, and in the audit log, like any other edit. Same 422 start_date_not_choosable on a plan with no start date to set.",
+        "starts_at / ends_at are deliberately NOT guarded by confirm_paid_edit. They record when somebody is covered, not what they paid, and the correction is most often wanted precisely because the money has already landed.",
+        "Re-raising the same person and plan with create_membership still reuses their existing unpaid invoice, and now moves that invoice's window when the starts_on you send differs from the one it holds.",
+      ],
+    },
     {
       version: "13",
       // Additive: a new response field and a new piece of markdown syntax.
@@ -380,10 +393,16 @@ export const AGENT_MANIFEST: {
             "YYYY-MM-DD, for a casual class only, so the payment reconciles to that session. Defaults to today; ignored by every other plan kind.",
         },
         {
+          name: "starts_on",
+          required: false,
+          description:
+            "YYYY-MM-DD, the day the membership runs from. Defaults to today. Only a plan that runs for a fixed number of days takes one (the yearly insurance): its length is fixed but where it sits is a real choice, which is what backdating cover to when it actually began needs. The end date follows from the plan's duration. Refused with 422 start_date_not_choosable on a training period (its dates belong to the plan and everyone who buys it shares them) or a class-credit plan (it ends with its classes, not on a date).",
+        },
+        {
           name: "include_insurance",
           required: false,
           description:
-            "Bundle yearly insurance as a second invoice on the same payment reference (default false). A member buying for themselves cannot decline this without current cover; a manager can, because recording an enrolment that really happened without cover is history, not a sale.",
+            "Bundle yearly insurance as a second invoice on the same payment reference (default false). A member buying for themselves cannot decline this without current cover; a manager can, because recording an enrolment that really happened without cover is history, not a sale. A bundled insurance invoice always runs from today, never from starts_on: it is a second plan being sold now.",
         },
         {
           name: "send_email",
@@ -417,6 +436,12 @@ export const AGENT_MANIFEST: {
           description: "bank_transfer | stripe | manual.",
         },
         { name: "status", required: false, description: "pending | cancelled | expired." },
+        {
+          name: "starts_on",
+          required: false,
+          description:
+            "YYYY-MM-DD, the day this membership runs from. Writes starts_at AND ends_at: the window keeps the length it was sold at and moves as one, so a correction cannot lengthen or shorten the cover. Only on a plan whose start is a real choice (the yearly insurance) - anything else is refused with 422 start_date_not_choosable. Not guarded by confirm_paid_edit: dates say when somebody is covered, not what they paid.",
+        },
         {
           name: "confirm_paid_edit",
           required: false,
@@ -940,30 +965,50 @@ export function bearerToken(header: string | null): string | null {
   return m ? m[1].trim() : null;
 }
 
-/** The membership columns `edit_invoice` may write (documented in the manifest). */
+/**
+ * The membership columns `edit_invoice` may write (documented in the manifest).
+ *
+ * `starts_at` / `ends_at` are here for the diff and the audit trail, not as
+ * fields a caller names: the API takes a `starts_on` DAY and resolves the pair
+ * itself, so the two always move together and a window can never be hand-built
+ * into a shape no plan sells.
+ */
 export const INVOICE_EDITABLE_FIELDS = [
   "price_cents",
   "notes",
   "payment_reference",
   "payment_method",
   "status",
+  "starts_at",
+  "ends_at",
 ] as const;
 
 /**
  * Turn a validated edit_invoice input into a DB patch containing only the fields
  * the caller actually supplied (so unspecified columns are never overwritten).
  *
- * Takes a Partial rather than a whole `EditInvoiceInput`: this reads the five
+ * Takes a Partial rather than a whole `EditInvoiceInput`: this reads the named
  * editable fields and nothing else, so requiring `id` or the `confirm_paid_edit`
  * flag in the signature would only be asking callers for values it ignores.
+ *
+ * `window` is the resolved answer to the input's `starts_on` — the caller works
+ * it out from the plan (which decides whether that plan has a start date to set
+ * at all) and hands the pair in, so this stays a pure field-by-field copy.
  */
-export function buildInvoicePatch(input: Partial<EditInvoiceInput>): Partial<MembershipRow> {
+export function buildInvoicePatch(
+  input: Partial<EditInvoiceInput>,
+  window?: { starts_at: string; ends_at: string | null },
+): Partial<MembershipRow> {
   const patch: Partial<MembershipRow> = {};
   if (input.price_cents !== undefined) patch.price_cents = input.price_cents;
   if (input.notes !== undefined) patch.notes = input.notes;
   if (input.payment_reference !== undefined) patch.payment_reference = input.payment_reference;
   if (input.payment_method !== undefined) patch.payment_method = input.payment_method;
   if (input.status !== undefined) patch.status = input.status;
+  if (window) {
+    patch.starts_at = window.starts_at;
+    patch.ends_at = window.ends_at;
+  }
   return patch;
 }
 
@@ -980,6 +1025,12 @@ export type InvoiceEditableField = (typeof INVOICE_EDITABLE_FIELDS)[number];
  * ran its course is an ordinary lifecycle move, not a rewrite of the payment,
  * and the one status that has consequences ("active") is already refused by the
  * schema. `notes` is free text about the invoice, never a claim about money.
+ *
+ * Nor are `starts_at` / `ends_at`. They say when somebody is covered, not what
+ * they paid, and the case for correcting them is at its strongest AFTER the
+ * money landed: a year of insurance settled in March, recorded in April, and
+ * dated from the day the manager got to it. Guarding them would refuse the very
+ * edit they exist for.
  */
 export const RECONCILED_GUARDED_FIELDS: readonly InvoiceEditableField[] = [
   "price_cents",

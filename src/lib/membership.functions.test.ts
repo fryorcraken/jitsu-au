@@ -871,7 +871,29 @@ function fakeEnrolAdmin(existing: Result) {
       },
       update: (patch: unknown) => {
         updates.push(patch);
-        return { eq: () => Promise.resolve(ok(null)) };
+        // Two callers, two shapes: syncMemberRole awaits `.eq(...)` directly,
+        // while the reuse path that moves a start date reads the moved row back
+        // with `.eq(...).select("*").single()`. A thenable carrying `select`
+        // serves both without the fake having to guess which one is calling.
+        return {
+          eq: () => {
+            const p = Promise.resolve(ok(null)) as Promise<Result> & {
+              select?: () => { single: () => Promise<Result> };
+            };
+            p.select = () => ({
+              single: () =>
+                Promise.resolve(
+                  ok({
+                    id: "mem-1",
+                    user_id: "user-1",
+                    price_cents: 0,
+                    ...(patch as Record<string, unknown>),
+                  }),
+                ),
+            });
+            return p;
+          },
+        };
       },
       upsert: () => Promise.resolve(ok(null)),
       delete: () => ({ eq: () => ({ eq: () => Promise.resolve(ok(null)) }) }),
@@ -937,6 +959,120 @@ describe("enrolMember on a free plan", () => {
       ok({ id: "mem-1", user_id: "user-1", status: "active", paid_at: null, price_cents: 0 }),
     );
     await enrol(fake);
+    expect(fake.updates).toEqual([]);
+  });
+});
+
+// ---- Setting the day a membership starts ----
+//
+// The yearly insurance is the one plan whose start is a real choice: it runs a
+// fixed number of days from wherever it is placed. A manager writing down cover
+// that began in February needs to say so, and the two ways that can go wrong are
+// a date silently ignored (the invoice looks backdated and is not) and a date
+// accepted on a plan whose dates belong to everyone who buys it.
+
+const INSURANCE_PLAN = {
+  id: "plan-insurance",
+  code: "insurance_yearly",
+  name: "Yearly insurance",
+  kind: "insurance",
+  is_active: true,
+  session_credits: null,
+  public_price_cents: 0,
+  student_price_cents: null,
+  starts_on: null,
+  ends_on: null,
+  duration_days: 365,
+};
+
+async function enrolFrom(
+  fake: ReturnType<typeof fakeEnrolAdmin>,
+  plan: unknown,
+  startsOn?: string,
+) {
+  const { enrolMember } = await import("./membership.functions");
+  return enrolMember(fake.admin as never, {
+    userId: "user-1",
+    plan: plan as never,
+    utsStudentNumber: null,
+    insurancePlan: null,
+    startsOn,
+  });
+}
+
+describe("enrolMember with a start date", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // 00:00 Sydney on 1 February is 13:00 UTC on 31 January (AEDT, +11), and the
+  // year of cover is measured from there rather than from the moment a manager
+  // happened to type it in.
+  it("dates a rolling plan from the start of the chosen club day", async () => {
+    const fake = fakeEnrolAdmin(ok(null));
+    await enrolFrom(fake, INSURANCE_PLAN, "2026-02-01");
+    expect(fake.inserts[0]).toMatchObject({
+      starts_at: "2026-01-31T13:00:00.000Z",
+      ends_at: "2027-01-31T13:00:00.000Z",
+    });
+  });
+
+  it("still runs from today when no start date is given", async () => {
+    const fake = fakeEnrolAdmin(ok(null));
+    const before = Date.now();
+    await enrolFrom(fake, INSURANCE_PLAN);
+    const starts = new Date((fake.inserts[0] as { starts_at: string }).starts_at).getTime();
+    expect(starts).toBeGreaterThanOrEqual(before - 1000);
+  });
+
+  // Refused, not ignored. A dropped date reads as a backdated enrolment that
+  // never happened, and nothing later would show the difference.
+  it("refuses a start date on a plan whose dates belong to the plan", async () => {
+    const fake = fakeEnrolAdmin(ok(null));
+    await expect(enrolFrom(fake, FREE_PLAN, "2026-02-01")).rejects.toThrow(/no start date to set/);
+    expect(fake.inserts).toEqual([]);
+  });
+
+  // The reuse path has no second `authorisedFields` in it, so without this a
+  // manager who re-raised the insurance with the right date would be told it
+  // worked while the window sat where it was.
+  it("moves an existing unpaid invoice's window when the start date differs", async () => {
+    const fake = fakeEnrolAdmin(
+      ok({
+        id: "mem-1",
+        user_id: "user-1",
+        status: "active",
+        paid_at: null,
+        price_cents: 0,
+        starts_at: "2026-05-01T00:00:00.000Z",
+        ends_at: "2027-05-01T00:00:00.000Z",
+      }),
+    );
+    await enrolFrom(fake, INSURANCE_PLAN, "2026-02-01");
+    expect(fake.inserts).toEqual([]);
+    expect(fake.updates[0]).toMatchObject({
+      starts_at: "2026-01-31T13:00:00.000Z",
+      // Moved, not resized: still 365 days, as sold.
+      ends_at: "2027-01-31T13:00:00.000Z",
+    });
+  });
+
+  it("writes nothing when the reused invoice already starts on that day", async () => {
+    const fake = fakeEnrolAdmin(
+      ok({
+        id: "mem-1",
+        user_id: "user-1",
+        status: "active",
+        paid_at: null,
+        price_cents: 0,
+        starts_at: "2026-01-31T13:00:00.000Z",
+        ends_at: "2027-01-31T13:00:00.000Z",
+      }),
+    );
+    await enrolFrom(fake, INSURANCE_PLAN, "2026-02-01");
     expect(fake.updates).toEqual([]);
   });
 });

@@ -59,6 +59,13 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   person + plan reuses their existing unpaid invoice rather than creating a
   second one, so a retry is safe; the free trial is still once per person ever
   (`409 trial_already_used`), and an unknown plan code is `404 plan_not_found`.
+  `starts_on` (default today) says when the membership itself runs from, and is
+  the other half of a backfill — `send_email: false` keeps the invoice quiet,
+  `starts_on` puts the cover where it actually ran. Only a plan whose start is a
+  real choice takes one (`planStartIsChoosable`, so the yearly insurance);
+  anything else is `422 start_date_not_choosable` rather than a date silently
+  dropped. A bundled insurance invoice always runs from today: it is a second
+  plan being sold now, not part of the backfill.
 - `mark_invoice_paid` — record a payment against an invoice, for money that never
   touches the club account (cash at the door). Dispatches to
   `recordMembershipPayment`, the same writer bank reconciliation uses, so a
@@ -80,7 +87,13 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   a reconciled invoice's amount is a record of money that moved, and the
   status it belongs to is already protected. `notes` and `status` stay freely
   editable (a note claims nothing about money; expiring a membership that ran
-  its course is ordinary). There is **no audit table** — if the log is not
+  its course is ordinary), and so is `starts_on`: it corrects the day a
+  membership began, writing `starts_at` **and** `ends_at` through
+  `rescheduleMembershipStart` so the window keeps the length it was sold at and
+  moves as one. It is unguarded on purpose — dates say when somebody is covered,
+  not what they paid, and the correction is wanted most often precisely because
+  the money already landed. Same `422 start_date_not_choosable` on a plan with no
+  start date to set, refused before anything is written. There is **no audit table** — if the log is not
   enough for the club's bookkeeping, that is a schema change and a product
   decision, not something to add quietly. Setting `status` to `cancelled` or
   `expired` also reconciles the person's `member` role (`syncMemberRole`), so
@@ -253,7 +266,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"13"`.
+test so the bump is a deliberate edit, and the current value is `"14"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

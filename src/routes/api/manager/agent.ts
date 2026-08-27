@@ -87,8 +87,10 @@ import {
 import {
   createMembershipForUser,
   deleteMembershipRow,
+  MembershipStartNotChoosableError,
   recordMembershipPayment,
   listMembershipPlanRows,
+  resolveMembershipStartPatch,
   saveMembershipPlanRow,
   syncMemberRole,
 } from "@/lib/membership.functions";
@@ -458,7 +460,24 @@ async function handleEditInvoice(params: unknown, actingAs: string) {
   if (findErr) throw new AgentError(500, "db_error", findErr.message);
   if (!existing) throw new AgentError(404, "not_found", "Invoice not found.");
 
-  const patch = buildInvoicePatch(input);
+  // Resolved before the patch is built, so a plan with no start date to set
+  // refuses the WHOLE edit rather than writing its other fields first. The plan
+  // is what decides, and reading it is also what stops a caller hand-building a
+  // window: they name a day, the plan's own rule places it.
+  let window: { starts_at: string; ends_at: string | null } | undefined;
+  if (input.starts_on !== undefined) {
+    try {
+      window = await resolveMembershipStartPatch(db, existing as MembershipRow, input.starts_on);
+    } catch (e) {
+      if (e instanceof MembershipStartNotChoosableError)
+        throw new AgentError(422, "start_date_not_choosable", e.message, {
+          plan_kind: e.plan.kind,
+        });
+      throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const patch = buildInvoicePatch(input, window);
   // What this edit would actually move, measured against the row as it stands.
   // Submitting a field with the value it already has is not an edit: it neither
   // trips the guard below nor gets recorded as a change that happened.
@@ -647,6 +666,11 @@ async function handleCreateMembership(params: unknown) {
   try {
     return await createMembershipForUser(db, input);
   } catch (e) {
+    // A start date on a plan that has none is the caller's mistake and is worth
+    // naming: the alternative reading, that we backdated the enrolment and said
+    // nothing, is the one that would go unnoticed.
+    if (e instanceof MembershipStartNotChoosableError)
+      throw new AgentError(422, "start_date_not_choosable", e.message, { plan_kind: e.plan.kind });
     // The two refusals a caller can act on — an unknown plan code, and the free
     // trial already being used — are the caller's mistakes, not server faults,
     // and a 500 would tell them to retry something that can never succeed.

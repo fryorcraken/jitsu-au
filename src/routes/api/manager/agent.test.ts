@@ -72,6 +72,10 @@ function fakeAdminForListInvoices(rows: (typeof ROW)[], total: number) {
 function fakeAdminForEditInvoice(
   existing: Record<string, unknown> | null,
   atWriteTime?: Record<string, unknown> | null,
+  // The plan behind the invoice. It decides one thing on its own: whether this
+  // membership has a start date to set at all, which is a property of the plan's
+  // window and not of the row being edited.
+  plan: Record<string, unknown> = { id: "plan-1", code: "trial" },
 ) {
   const updates: Record<string, unknown>[] = [];
   const current = atWriteTime === undefined ? existing : atWriteTime;
@@ -111,7 +115,7 @@ function fakeAdminForEditInvoice(
           return {
             select: () => ({
               eq: () => ({
-                maybeSingle: () => Promise.resolve(ok({ id: "plan-1", code: "trial" })),
+                maybeSingle: () => Promise.resolve(ok(plan)),
               }),
             }),
           };
@@ -451,6 +455,107 @@ describe("manager agent route", () => {
     });
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("invoice_changed");
+  });
+
+  // ---- Correcting the day a membership starts ----
+  //
+  // The manager's counterpart is the Start date button on the membership row;
+  // both land the same two columns through the same rule, so cover cannot be
+  // lengthened by correcting when it began.
+  describe("edit_invoice starts_on", () => {
+    const YEARLY = {
+      id: "plan-1",
+      code: "insurance_yearly",
+      name: "Yearly insurance",
+      kind: "insurance",
+      starts_on: null,
+      ends_on: null,
+      duration_days: 365,
+    };
+    const COVER = {
+      ...ROW,
+      id: INVOICE_ID,
+      paid_at: null,
+      starts_at: "2026-05-01T00:00:00.000Z",
+      ends_at: "2027-05-01T00:00:00.000Z",
+    };
+
+    it("moves both ends of the window, and reports both as changed", async () => {
+      const fake = fakeAdminForEditInvoice(COVER, undefined, YEARLY);
+      currentAdmin = fake.db;
+      const res = await post({
+        action: "edit_invoice",
+        params: { id: INVOICE_ID, starts_on: "2026-02-01" },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // 00:00 Sydney on 1 February, and 365 days later: the length it was sold at.
+      expect(fake.updates[0]).toEqual({
+        starts_at: "2026-01-31T13:00:00.000Z",
+        ends_at: "2027-01-31T13:00:00.000Z",
+      });
+      expect(body.result.changed).toEqual(["starts_at", "ends_at"]);
+      expect(body.result.previous).toEqual({
+        starts_at: "2026-05-01T00:00:00.000Z",
+        ends_at: "2027-05-01T00:00:00.000Z",
+      });
+    });
+
+    // Not ignored: an agent told "ok" would report a training period as
+    // backdated when nothing moved.
+    it("refuses a plan whose dates belong to the plan, and writes nothing", async () => {
+      const fake = fakeAdminForEditInvoice(COVER, undefined, {
+        id: "plan-1",
+        name: "Semester 2 2026",
+        kind: "period",
+        starts_on: "2026-07-20",
+        ends_on: "2026-11-22",
+        duration_days: null,
+      });
+      currentAdmin = fake.db;
+      const res = await post({
+        action: "edit_invoice",
+        params: { id: INVOICE_ID, starts_on: "2026-02-01" },
+      });
+      expect(res.status).toBe(422);
+      const body = await res.json();
+      expect(body.error.code).toBe("start_date_not_choosable");
+      expect(body.error.message).toContain("Semester 2 2026");
+      expect(fake.updates).toHaveLength(0);
+    });
+
+    // The case this exists for: cover settled in March, recorded in April, dated
+    // from the day the manager got to it. Guarding the dates behind
+    // confirm_paid_edit would refuse exactly that.
+    it("corrects a PAID invoice's dates without confirm_paid_edit", async () => {
+      const fake = fakeAdminForEditInvoice(
+        { ...COVER, paid_at: "2026-05-02T00:00:00.000Z" },
+        undefined,
+        YEARLY,
+      );
+      currentAdmin = fake.db;
+      const res = await post({
+        action: "edit_invoice",
+        params: { id: INVOICE_ID, starts_on: "2026-02-01" },
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()).result.changed).toEqual(["starts_at", "ends_at"]);
+    });
+
+    it("treats the day it already starts on as no edit at all", async () => {
+      const fake = fakeAdminForEditInvoice(
+        { ...COVER, starts_at: "2026-01-31T13:00:00.000Z", ends_at: "2027-01-31T13:00:00.000Z" },
+        undefined,
+        YEARLY,
+      );
+      currentAdmin = fake.db;
+      const res = await post({
+        action: "edit_invoice",
+        params: { id: INVOICE_ID, starts_on: "2026-02-01" },
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()).result.changed).toEqual([]);
+    });
   });
 
   it("reports a missing invoice as not_found rather than a guard failure", async () => {

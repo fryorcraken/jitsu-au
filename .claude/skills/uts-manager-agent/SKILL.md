@@ -128,11 +128,14 @@ invoice reconciles off a bank statement like any other.
 
 `params`: `user_id` (**required** — from `list_users`), `plan_code`
 (**required** — from `list_membership_plans`), `uts_student_number` (optional),
-`session_date` (optional `YYYY-MM-DD`, casual class only), `include_insurance`
-(optional, default false), `send_email` (optional, default true).
+`session_date` (optional `YYYY-MM-DD`, casual class only), `starts_on` (optional
+`YYYY-MM-DD`, yearly insurance only — see below), `include_insurance` (optional,
+default false), `send_email` (optional, default true).
 
 ```bash
 scripts/agent.sh create_membership '{"user_id":"<uuid>","plan_code":"2026-s2"}'
+# Cover that really started in February, recorded now, with no invoice email:
+scripts/agent.sh create_membership '{"user_id":"<uuid>","plan_code":"insurance_yearly","starts_on":"2026-02-01","send_email":false}'
 ```
 
 > **It is authorised straight away, and that is not the same as paid.** Whatever
@@ -165,19 +168,41 @@ scripts/agent.sh create_membership '{"user_id":"<uuid>","plan_code":"2026-s2"}'
 > unpaid invoice rather than creating a second one (and does not re-send the
 > email), so a call whose reply you never saw can simply be repeated. The free
 > trial is still once per person ever: a second one is `409 trial_already_used`.
+>
+> **`starts_on` says when the cover itself begins**, defaulting to today. Only a
+> plan that runs for a fixed number of days takes one — today that is the yearly
+> insurance — because its length is fixed while where it sits is a real choice.
+> That makes it the other half of a backfill: `send_email: false` stops the
+> invoice going out, `starts_on` puts the year of cover where it actually ran.
+> The end date follows from the plan's duration.
+>
+> Anything else is refused with `422 start_date_not_choosable` rather than
+> ignored: a **training period**'s dates belong to the plan and everyone who buys
+> it gets exactly those, and a **casual class or free trial** ends with its
+> classes rather than on a date (use `session_date` there — it dates the payment
+> reference, not the membership). Re-raising with a different `starts_on` moves
+> the reused invoice's window.
+>
+> A bundled `include_insurance` invoice always runs from **today**, never from
+> `starts_on`: it is a second plan being sold now. To backdate cover as well,
+> raise the insurance as its own `create_membership` call with its own
+> `starts_on`.
 
 ### `edit_invoice` — correct an invoice's details
 
 `params`: `id` (**required** — the invoice UUID from a list call) plus at least
 one editable field: `price_cents` (integer cents), `notes` (pass `null` to clear
 a mistaken note), `payment_reference`, `payment_method`
-(`bank_transfer | stripe | manual`), `status` (`pending | cancelled | expired`).
+(`bank_transfer | stripe | manual`), `status` (`pending | cancelled | expired`),
+`starts_on` (`YYYY-MM-DD`, yearly insurance only — see below).
 Any other key is rejected, naming itself in the error — so a typo like `price`
 doesn't get silently ignored. This includes the read-only fields a `list_*`
 call decorates an invoice with (`plan_code`, `plan_name`, `price`, `is_student`,
 `paid_at`, `starts_at`, `ends_at`, `created_at`, `member_name`,
 `member_email`): send only `id` plus the field(s) you're actually changing,
-never a listed invoice echoed back wholesale. `plan_name` already names the
+never a listed invoice echoed back wholesale. `starts_at` / `ends_at` move only
+through `starts_on`, which names a day and lets the plan place it — you never
+write the two instants yourself. `plan_name` already names the
 dated period an invoice is for (e.g. "Semester 2 2026", since each period is
 its own plan — see `list_membership_plans` below); it is not editable here
 (moving one person's dates is a plan correction, not an invoice edit).
@@ -229,6 +254,26 @@ audit log with who made it and each field's old and new value.
 >
 > Ask the manager before overriding. "The price is wrong" and "the price was
 > recorded wrong" are different problems, and only the second one is fixed here.
+
+> **`starts_on` corrects the day the cover began**, for a membership whose plan
+> runs a fixed number of days (the yearly insurance). It writes `starts_at` and
+> `ends_at` together: the window keeps the length it was sold at and moves as
+> one, so a correction can never lengthen or shorten somebody's cover. Both show
+> up in `changed` and `previous`, and in the audit log. Any other plan is refused
+> with `422 start_date_not_choosable` — a training period's dates belong to the
+> plan (correct them with `save_membership_plan`, which changes what activates
+> from then on, not anyone already on it), and a class-credit plan has no window
+> to move.
+>
+> It is deliberately **not** guarded by `confirm_paid_edit`. The dates say when
+> somebody is covered, not what they paid, and the correction is wanted most
+> often precisely because the money already landed. Still say what you moved:
+> shortening live cover is felt by the member even though nothing about the
+> invoice changed.
+
+```bash
+scripts/agent.sh edit_invoice '{"id":"<uuid>","starts_on":"2026-02-01"}'
+```
 
 ### `mark_invoice_paid` — record money that arrived
 
@@ -747,7 +792,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"13"`), and its
+- The manifest's `version` tells generations apart (currently `"14"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is
