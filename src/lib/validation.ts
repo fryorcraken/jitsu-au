@@ -1524,6 +1524,26 @@ export function rescheduleMembershipStart(
 }
 
 /**
+ * Whether two timestamps name the same instant, however they are spelled.
+ *
+ * Postgres hands a TIMESTAMPTZ back as `2026-05-01T00:00:00+00:00` while this
+ * code writes `2026-05-01T00:00:00.000Z`, and comparing those as strings reports
+ * a change that never happened. That is not cosmetic here: it is a phantom line
+ * in the invoice audit log, which is the club's only record of who moved what,
+ * and a write on every re-raise that should have been a no-op. The same trap has
+ * already cost this repo the waiver idempotency path once
+ * (`docs/manager-agent-api.md`) and is why `diffOccurrences` in `calendar.ts`
+ * compares by `getTime()` too.
+ */
+export function sameInstant(a: string | null, b: string | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ta = new Date(a).getTime();
+  const tb = new Date(b).getTime();
+  return Number.isFinite(ta) && ta === tb;
+}
+
+/**
  * Why a plan refuses a start date, in the words a manager or an agent reads.
  * One message for both callers, so the manager screen and the API cannot
  * explain the same refusal differently.

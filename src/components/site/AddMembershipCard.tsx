@@ -50,7 +50,16 @@ export function AddMembershipCard({
   const [sessionDate, setSessionDate] = useState("");
   // Prefilled with today rather than left blank, because today is the answer
   // almost every time and an empty date field asks a question nobody had.
+  //
+  // `startsOnSet` is what makes the prefill safe. Re-raising the same plan
+  // resolves back to the existing unpaid invoice and MOVES its window to the
+  // date sent, so a card that always sent its default would silently drag a
+  // deliberately backdated invoice forward to today the next time a manager
+  // opened this panel to fix something else. Untouched means "no opinion", which
+  // for a new membership is today anyway. Correcting one that already exists is
+  // the Start date button on its row, where the field opens on the date it holds.
   const [startsOn, setStartsOn] = useState(() => clubToday());
+  const [startsOnSet, setStartsOnSet] = useState(false);
   const [includeInsurance, setIncludeInsurance] = useState(false);
   const [sendEmail, setSendEmail] = useState(true);
   const [open, setOpen] = useState(false);
@@ -89,7 +98,7 @@ export function AddMembershipCard({
             // Sent only where it means something: the server refuses a start
             // date on a plan that has none, and sending today's date for every
             // casual class would turn that guard into a wall.
-            starts_on: startIsChoosable ? startsOn || null : null,
+            starts_on: startIsChoosable && startsOnSet ? startsOn || null : null,
             include_insurance: includeInsurance,
             send_email: sendEmail,
           },
@@ -104,6 +113,7 @@ export function AddMembershipCard({
       setPlanCode("");
       setSessionDate("");
       setStartsOn(clubToday());
+      setStartsOnSet(false);
       await onAdded();
     }
   }
@@ -225,7 +235,10 @@ export function AddMembershipCard({
                 id="add-starts-on"
                 type="date"
                 value={startsOn}
-                onChange={(e) => setStartsOn(e.target.value)}
+                onChange={(e) => {
+                  setStartsOn(e.target.value);
+                  setStartsOnSet(true);
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 Defaults to today. Set it back when you are writing down cover that really began

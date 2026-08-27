@@ -21,6 +21,7 @@ import {
   planStartIsChoosable,
   profileFullName,
   rescheduleMembershipStart,
+  sameInstant,
   saveClubSettingsSchema,
   savePlanSchema,
   sellablePlans,
@@ -928,8 +929,11 @@ export async function enrolMember(
     // with the right start date would be told it worked while the window sat
     // where it was. Moved by the same rule a later correction uses, so the two
     // paths cannot give the same request two different answers.
+    // By instant, not by string: the row came back from Postgres spelled
+    // `+00:00` and `rescheduleMembershipStart` writes `Z`, so a string compare
+    // would never match and every re-raise would write the window it already had.
     const wanted = effectiveFrom ? rescheduleMembershipStart(inserted, startsOn!) : null;
-    if (wanted && wanted.starts_at !== inserted.starts_at) {
+    if (wanted && !sameInstant(wanted.starts_at, inserted.starts_at)) {
       const { data: moved, error: mvErr } = await admin
         .from("memberships")
         .update(wanted)

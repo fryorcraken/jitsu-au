@@ -1047,8 +1047,8 @@ describe("enrolMember with a start date", () => {
         status: "active",
         paid_at: null,
         price_cents: 0,
-        starts_at: "2026-05-01T00:00:00.000Z",
-        ends_at: "2027-05-01T00:00:00.000Z",
+        starts_at: "2026-05-01T00:00:00+00:00",
+        ends_at: "2027-05-01T00:00:00+00:00",
       }),
     );
     await enrolFrom(fake, INSURANCE_PLAN, "2026-02-01");
@@ -1060,6 +1060,9 @@ describe("enrolMember with a start date", () => {
     });
   });
 
+  // Spelled as PostgREST returns a TIMESTAMPTZ, not as JS writes one: the same
+  // instant in two spellings is exactly what a string compare gets wrong, and a
+  // fixture in the write format would pass with the guard deleted.
   it("writes nothing when the reused invoice already starts on that day", async () => {
     const fake = fakeEnrolAdmin(
       ok({
@@ -1068,8 +1071,8 @@ describe("enrolMember with a start date", () => {
         status: "active",
         paid_at: null,
         price_cents: 0,
-        starts_at: "2026-01-31T13:00:00.000Z",
-        ends_at: "2027-01-31T13:00:00.000Z",
+        starts_at: "2026-01-31T13:00:00+00:00",
+        ends_at: "2027-01-31T13:00:00+00:00",
       }),
     );
     await enrolFrom(fake, INSURANCE_PLAN, "2026-02-01");

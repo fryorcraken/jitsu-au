@@ -7,7 +7,7 @@
 //
 // Keep AGENT_MANIFEST, managerAgentActions (validation.ts), the route dispatch,
 // and the skill (.claude/skills/uts-manager-agent/) in lockstep. See docs/manager-agent-api.md.
-import { formatCents } from "@/lib/validation";
+import { formatCents, sameInstant } from "@/lib/validation";
 import type { EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import { versionLabel } from "@/lib/waiver-template-editor";
@@ -1038,6 +1038,17 @@ export const RECONCILED_GUARDED_FIELDS: readonly InvoiceEditableField[] = [
   "payment_method",
 ];
 
+/**
+ * The editable columns holding a timestamp, where one instant has more than one
+ * spelling. See `sameInstant`.
+ */
+const INSTANT_FIELDS = new Set<InvoiceEditableField>(["starts_at", "ends_at"]);
+
+/** A field value as a timestamp, or null when it is not a string to parse. */
+function asInstant(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
 /** What an edit would actually change, and what those fields hold right now. */
 export type InvoiceEditDiff = {
   /** Editable fields whose value would genuinely move (a no-op edit is empty). */
@@ -1062,6 +1073,12 @@ export function diffInvoicePatch(
     const before = existing[field] ?? null;
     const after = patch[field] ?? null;
     if (before === after) continue;
+    // The two date columns are the only ones where equal values can be spelled
+    // differently: the row was read back from Postgres as `+00:00` and the patch
+    // was written by JS as `Z`. A string compare would call every resubmitted
+    // start date a change, putting a move that never happened into the club's
+    // only record of who edited an invoice.
+    if (INSTANT_FIELDS.has(field) && sameInstant(asInstant(before), asInstant(after))) continue;
     changed.push(field);
     previous[field] = before;
   }

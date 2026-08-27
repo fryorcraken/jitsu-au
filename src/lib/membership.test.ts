@@ -29,6 +29,7 @@ import {
   rescheduleMembershipStart,
   sanitizeSurname,
   savePlanSchema,
+  sameInstant,
   sellablePlans,
   sellableWindowNotifications,
   startDateNotChoosableMessage,
@@ -681,6 +682,34 @@ describe("rescheduleMembershipStart", () => {
       "2026-02-01",
     );
     expect(w.ends_at).toBeNull();
+  });
+});
+
+describe("sameInstant", () => {
+  // The whole point: Postgres hands a TIMESTAMPTZ back as `+00:00` with no
+  // fractional part, this code writes `Z` with one, and a string compare between
+  // them reports a move that never happened -- into the invoice audit log, which
+  // is the club's only record of who changed what.
+  it("reads the two spellings of one instant as equal", () => {
+    expect(sameInstant("2026-05-01T00:00:00+00:00", "2026-05-01T00:00:00.000Z")).toBe(true);
+  });
+
+  it("still tells two different instants apart", () => {
+    expect(sameInstant("2026-05-01T00:00:00+00:00", "2026-05-02T00:00:00.000Z")).toBe(false);
+  });
+
+  it("treats two nulls as equal and one null as a change", () => {
+    expect(sameInstant(null, null)).toBe(true);
+    expect(sameInstant(null, "2026-05-01T00:00:00.000Z")).toBe(false);
+    expect(sameInstant("2026-05-01T00:00:00.000Z", null)).toBe(false);
+  });
+
+  // An unparseable value is not quietly "the same as everything": NaN compares
+  // equal to nothing, and saying two unreadable dates match would hide the
+  // corruption rather than surface it.
+  it("does not call an unreadable timestamp equal to anything", () => {
+    expect(sameInstant("not a date", "2026-05-01T00:00:00.000Z")).toBe(false);
+    expect(sameInstant("not a date", "not a date")).toBe(true);
   });
 });
 

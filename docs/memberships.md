@@ -250,6 +250,18 @@ year of cover sits where it ran, and nobody is invoiced for it now.
   rather than making a second one, and nothing re-runs the dating on that path —
   so without this a manager who re-raised the insurance with the right date
   would be told it worked while the window stayed where it was.
+- **That is also why the Add a membership panel sends the date only when a
+  manager actually sets one.** The field is prefilled with today because today
+  is nearly always right, but sending that prefill on every raise would drag a
+  deliberately backdated invoice forward the next time somebody opened the panel
+  to fix a student number. Untouched means "no opinion", which for a membership
+  that does not exist yet is today anyway. Correcting one that does exist is the
+  Start date button on its row, where the field opens on the date it holds.
+- **Two spellings of one instant are not a change.** Postgres returns a
+  timestamp as `+00:00` where this code writes `Z`, so both the reuse move and
+  the agent's edit diff compare by instant (`sameInstant`). Comparing the
+  strings would write a move that never happened into the invoice audit log,
+  which is the club's only record of who changed what.
 
 A manager sets it in **Add a membership** on a person's page, and corrects it
 with **Start date** on the membership row (both manager screens, since they

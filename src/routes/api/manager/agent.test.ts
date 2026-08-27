@@ -472,12 +472,16 @@ describe("manager agent route", () => {
       ends_on: null,
       duration_days: 365,
     };
+    // Spelled the way PostgREST renders a TIMESTAMPTZ (`+00:00`, no fractional
+    // part), NOT the way JS writes one. A fixture in the write format hides the
+    // one bug these tests exist to catch: the same instant compared as two
+    // different strings, reported as an edit that never happened.
     const COVER = {
       ...ROW,
       id: INVOICE_ID,
       paid_at: null,
-      starts_at: "2026-05-01T00:00:00.000Z",
-      ends_at: "2027-05-01T00:00:00.000Z",
+      starts_at: "2026-05-01T00:00:00+00:00",
+      ends_at: "2027-05-01T00:00:00+00:00",
     };
 
     it("moves both ends of the window, and reports both as changed", async () => {
@@ -496,8 +500,8 @@ describe("manager agent route", () => {
       });
       expect(body.result.changed).toEqual(["starts_at", "ends_at"]);
       expect(body.result.previous).toEqual({
-        starts_at: "2026-05-01T00:00:00.000Z",
-        ends_at: "2027-05-01T00:00:00.000Z",
+        starts_at: "2026-05-01T00:00:00+00:00",
+        ends_at: "2027-05-01T00:00:00+00:00",
       });
     });
 
@@ -542,9 +546,11 @@ describe("manager agent route", () => {
       expect((await res.json()).result.changed).toEqual(["starts_at", "ends_at"]);
     });
 
+    // The same instant, spelled as Postgres returns it. A string compare would
+    // call this an edit and write a move that never happened into the audit log.
     it("treats the day it already starts on as no edit at all", async () => {
       const fake = fakeAdminForEditInvoice(
-        { ...COVER, starts_at: "2026-01-31T13:00:00.000Z", ends_at: "2027-01-31T13:00:00.000Z" },
+        { ...COVER, starts_at: "2026-01-31T13:00:00+00:00", ends_at: "2027-01-31T13:00:00+00:00" },
         undefined,
         YEARLY,
       );
@@ -554,6 +560,10 @@ describe("manager agent route", () => {
         params: { id: INVOICE_ID, starts_on: "2026-02-01" },
       });
       expect(res.status).toBe(200);
+      // `changed` empty is the assertion that matters: it is what the audit log
+      // records, and a move that never happened must not appear in it. The patch
+      // itself still carries the field, exactly as a price resubmitted at its
+      // current value does.
       expect((await res.json()).result.changed).toEqual([]);
     });
   });
