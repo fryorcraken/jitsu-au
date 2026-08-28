@@ -186,9 +186,16 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
    (see "Security headers" in `CLAUDE.md`). It keeps its own
    `Cache-Control: private, max-age=300`, which is what a polling calendar client
    wants.
-5. **"Member" means paid.** Members-only visibility keys off an active, non-trial
-   membership with a price above zero (mirroring `deriveLifecycleStatus`), via the
-   `has_active_paid_membership` helper used in RLS.
+5. **"Member" means paid, and it counts a parent's children.** Members-only
+   visibility keys off an active, non-trial membership with a price above zero,
+   via the `has_active_paid_membership` helper used in RLS. That helper answers
+   yes for the person **or any of their dependants**
+   (`profiles.guardian_user_id`), so a parent who does not train still gets the
+   class times their child's membership pays for. It therefore **no longer
+   mirrors `deriveLifecycleStatus`**, which still counts only a person's own
+   memberships: a guardian sees the members-only calendar without the funnel
+   calling them a member. See `docs/memberships.md`, "Staying a member through
+   the break".
 6. **A generated date is a copy of the entry**, including who can see it and the
    invite-only badge. Nothing about a repeat is hardcoded.
 7. **Times.** A repeat's time of day is local to the club (Australia/Sydney); every
