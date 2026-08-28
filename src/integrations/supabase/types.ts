@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -1125,6 +1125,7 @@ export type Database = {
           guardian_name: string | null
           guardian_phone: string | null
           guardian_relationship: string | null
+          guardian_user_id: string | null
           is_minor: boolean
           last_name: string | null
           martial_arts_experience: string | null
@@ -1156,6 +1157,7 @@ export type Database = {
           guardian_name?: string | null
           guardian_phone?: string | null
           guardian_relationship?: string | null
+          guardian_user_id?: string | null
           is_minor?: boolean
           last_name?: string | null
           martial_arts_experience?: string | null
@@ -1187,6 +1189,7 @@ export type Database = {
           guardian_name?: string | null
           guardian_phone?: string | null
           guardian_relationship?: string | null
+          guardian_user_id?: string | null
           is_minor?: boolean
           last_name?: string | null
           martial_arts_experience?: string | null
@@ -1202,7 +1205,15 @@ export type Database = {
           user_id?: string
           uts_student_number?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_guardian_user_id_fkey"
+            columns: ["guardian_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
       session_checkins: {
         Row: {
