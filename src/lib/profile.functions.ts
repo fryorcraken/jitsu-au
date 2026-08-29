@@ -59,9 +59,13 @@ export const updateMyProfile = createServerFn({ method: "POST" })
     // they set it themselves.
     //
     // It stamps whoever actually clicked, so a guardian answering for a
-    // dependant records the GUARDIAN's id, not the dependant's. That is the
-    // honest record, and it means the "they set it themselves" test above reads
-    // a guardian's answer as somebody else's, which is exactly what it is.
+    // dependant records the GUARDIAN's id, not the dependant's. The id is the
+    // honest record, but ⚠️ the WORDS built from it are not yet: the person page
+    // (`manager.users_.$userId.tsx`) reads any `setBy` that is not the person
+    // themselves as a manager, and would tell a manager "Set by a manager on
+    // <date>, not read off a waiver" about a parent's decision. Nothing can
+    // reach that today -- no row has a guardian, and no screen sends a target --
+    // so fixing it belongs with #106, which builds the screen that would.
     const provenance =
       patch.media_consent === undefined
         ? {}

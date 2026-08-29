@@ -77,38 +77,46 @@ export function contactUserIdFor(profile: HouseholdLink): string {
  * Throw unless `callerId` may act for `targetId`.
  *
  * Passes for the caller themselves, and for any of the caller's own
- * dependants. Everything else throws, including:
+ * dependants. It throws for somebody else's dependant, for another account
+ * holder, for a target that does not exist, and for a caller who is themselves
+ * a dependant reaching for anybody but themselves. That last one is the
+ * one-level rule: `20260827000000_household_guardian_link.sql` enforces only
+ * "nobody is their own guardian" and leaves the depth to the application,
+ * because a depth check in SQL needs a trigger. So a grandchild chain is
+ * refused here or nowhere, even if a bad row builds one.
  *
- *   * somebody else's dependant, which is the whole point of the gate;
- *   * a target that does not exist, which is refused with the same words;
- *   * a caller who is themselves a dependant, acting for ANYBODY -- including
- *     for themselves. This is the one-level rule
- *     (`20260827000000_household_guardian_link.sql` leaves it to the
- *     application deliberately, because a depth check in SQL needs a trigger).
- *     A dependant has no login at all, so a session claiming to be one is
- *     already something that should not exist; refusing it here means a
- *     grandchild chain can never be walked even if a bad row is written.
+ * **Acting for yourself is never refused, and never even asks the database.**
+ * That is deliberate, and it is the difference between a gate and an outage.
+ * This function guards reaching PAST yourself; a person looking at their own
+ * record is not doing that, and every screen that shows somebody their own
+ * details would otherwise depend on a query that can fail. Refusing a
+ * dependant their own account page would buy nothing (they cannot sign in at
+ * all, their auth user is permanently banned) and would cost a total,
+ * unactionable lockout of anyone who ever ends up with a guardian and a login.
+ * The person with no `profiles` row at all keeps working the same way for the
+ * same reason: this is not the place that decides a missing row's meaning.
  */
 export async function assertActingFor(
   admin: AdminClient,
   callerId: string,
   targetId: string,
 ): Promise<void> {
+  if (callerId === targetId) return;
+
   // One round trip for both people. `.in()` is parameterised by the client, so
   // no filter string is assembled by hand here (see `kb.functions.ts`).
-  const ids = callerId === targetId ? [callerId] : [callerId, targetId];
   const { data, error } = await admin
     .from("profiles")
     .select("user_id, guardian_user_id")
-    .in("user_id", ids);
+    .in("user_id", [callerId, targetId]);
   if (error) throw new Error(error.message);
 
   const rows = data ?? [];
   const caller = rows.find((r) => r.user_id === callerId);
-  // No profile row is not the same as "not allowed", but it has the same
-  // answer, and saying so any more precisely would leak the difference.
+  // No profile row is not the same as "not allowed", but reaching for somebody
+  // else has the same answer either way, and saying which would leak the
+  // difference.
   if (!caller || isDependant(caller)) throw new Error(NOT_YOURS);
-  if (callerId === targetId) return;
 
   const target = rows.find((r) => r.user_id === targetId);
   if (!target || target.guardian_user_id !== callerId) throw new Error(NOT_YOURS);

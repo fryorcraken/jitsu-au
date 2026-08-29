@@ -390,8 +390,11 @@ which is what "who are this person's dependants" reads.
   it is about: absent means the caller, and any other value goes through
   `assertActingFor`, so a guardian can maintain a dependant's details and nobody
   can reach anybody else's. Because the stamp names the clicker, a guardian's
-  answer records the GUARDIAN's id, so it reads as somebody else's change rather
-  than the dependant's own — which is what it is. ⚠️ Its contact fields OVERLAP with
+  answer for a dependant records the GUARDIAN's id. ⚠️ The person page reads any
+  id that is not the person's own as a manager's, so it would describe a
+  parent's decision as "Set by a manager"; nothing can reach that yet (no row
+  has a guardian, no screen sends a target) and #106 owns the fix.
+  ⚠️ Its contact fields OVERLAP with
   `waiverToProfileFields`, so a manager approving an older waiver can overwrite
   a correction made here; `/account` says so on the card.
 - A manager, from a person's detail page (`setClubUserKitSizes`): `gi_size` and

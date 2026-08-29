@@ -91,6 +91,15 @@ describe("assertActingFor", () => {
     await expect(assertActingFor(db, "parent", "parent")).resolves.toBeUndefined();
   });
 
+  // A gate that can refuse somebody their own account page is an outage, not a
+  // gate. Nobody is reaching past themselves, so nothing needs checking, and
+  // that must not depend on a query that can fail or on a row that may be
+  // missing.
+  it("never asks the database about somebody acting for themselves", async () => {
+    await expect(assertActingFor(erroringAdmin, "parent", "parent")).resolves.toBeUndefined();
+    await expect(assertActingFor(db, "ghost", "ghost")).resolves.toBeUndefined();
+  });
+
   it("lets a guardian act for their own dependant", async () => {
     await expect(assertActingFor(db, "parent", "child")).resolves.toBeUndefined();
     await expect(assertActingFor(db, "parent", "sibling")).resolves.toBeUndefined();
@@ -108,18 +117,18 @@ describe("assertActingFor", () => {
     );
   });
 
-  // A dependant has no login at all, so a session claiming to be one should not
-  // exist. It is refused for everybody, itself included, rather than trusted.
-  it("refuses a dependant acting for anyone, including themselves", async () => {
-    await expect(assertActingFor(db, "child", "child")).rejects.toThrow(
-      /only see your own account/i,
-    );
+  // A dependant cannot sign in at all, so this is defence in depth. It refuses
+  // them everybody else, including their own guardian and their sibling, while
+  // still letting them see themselves: locking a person out of their own
+  // account page buys nothing and costs everything.
+  it("refuses a dependant everyone except themselves", async () => {
     await expect(assertActingFor(db, "child", "sibling")).rejects.toThrow(
       /only see your own account/i,
     );
     await expect(assertActingFor(db, "child", "parent")).rejects.toThrow(
       /only see your own account/i,
     );
+    await expect(assertActingFor(db, "child", "child")).resolves.toBeUndefined();
   });
 
   // The one-level rule. The database enforces only "nobody is their own
@@ -146,8 +155,8 @@ describe("assertActingFor", () => {
     expect(unknown).toBe(forbidden);
   });
 
-  it("refuses a caller with no profile row", async () => {
-    await expect(assertActingFor(db, "ghost", "ghost")).rejects.toThrow(
+  it("refuses a caller with no profile row reaching for anybody else", async () => {
+    await expect(assertActingFor(db, "ghost", "child")).rejects.toThrow(
       /only see your own account/i,
     );
   });
