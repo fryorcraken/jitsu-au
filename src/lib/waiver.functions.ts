@@ -48,6 +48,7 @@ import { hasMediaAcknowledgement, WaiverTemplateError } from "@/lib/waiver-templ
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 import { resolveWaiverContacts } from "@/lib/waiver-contacts";
+import { assertActingFor, householdTargetSchema } from "@/lib/household";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -377,34 +378,39 @@ export const getCurrentWaiverTemplate = createServerFn({ method: "GET" }).handle
   };
 });
 
-// ---- The signed-in person's profile (autofill) ----
+// ---- A person on the caller's account, default themselves (autofill) ----
 export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .handler(async ({ data: input, context }) => {
     // Identity now lives on the person's profile (one row per email), not on each
     // waiver. Prefill the waiver form from it. Read via the service role scoped to
-    // the caller's own user id.
+    // the caller's own user id, or to a dependant of theirs once the gate below
+    // has agreed that is who they are asking about.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
+    if (input.userId) await assertActingFor(admin, context.userId, input.userId);
     const { data, error } = await admin
       .from("profiles")
       .select("*")
-      .eq("user_id", context.userId)
+      .eq("user_id", input.userId ?? context.userId)
       .maybeSingle();
     if (error) throw new Error(error.message);
     return data ?? null;
   });
 
-// ---- The signed-in person's waiver history (active one marked) ----
+// ---- That person's waiver history (active one marked) ----
 export const listMyWaivers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .handler(async ({ data: input, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
+    if (input.userId) await assertActingFor(admin, context.userId, input.userId);
     const { data, error } = await admin
       .from("waivers")
       .select("id, user_id, signed_at, template_version, pdf_path, approval_status, approved_at")
-      .eq("user_id", context.userId)
+      .eq("user_id", input.userId ?? context.userId)
       .order("signed_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);

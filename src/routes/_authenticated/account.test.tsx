@@ -3,6 +3,12 @@
 // card must send its own fields and nothing else, a blank display name must go
 // out as `null` (clearing the override) rather than `""` (which the schema
 // rejects), and an unset size must go out as `null` rather than "".
+//
+// Since the cards were extracted (`src/components/site/account/`) every write
+// also carries the `userId` it is about, and on this page that is always the
+// signed-in person. The card holds no opinion about who that is, which is what
+// lets the same six render a dependant elsewhere; the server decides who may
+// (`assertActingFor`).
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -126,6 +132,21 @@ describe("/account", () => {
     expect(getMyProfile).toHaveBeenCalledTimes(1);
   });
 
+  // Every read names the person it is about rather than leaning on the session,
+  // which is the whole seam the per-child page is built from. On this page that
+  // person is always the caller.
+  it("asks for the signed-in person by id, on every card that fetches", async () => {
+    const { getMyProfile, listMyWaivers } = await import("@/lib/waiver.functions");
+    const { getCodeOfConductSigner } = await import("@/lib/code-of-conduct.functions");
+    await renderLoaded();
+
+    expect(getMyProfile).toHaveBeenCalledWith({ data: { userId: "u1" } });
+    await waitFor(() => expect(listMyWaivers).toHaveBeenCalledWith({ data: { userId: "u1" } }));
+    await waitFor(() =>
+      expect(getCodeOfConductSigner).toHaveBeenCalledWith({ data: { token: "", userId: "u1" } }),
+    );
+  });
+
   it("shows the sizes already on file, by code and measurement", async () => {
     await renderLoaded();
     expect(screen.getByLabelText("Gi size")).toHaveValue("4");
@@ -159,7 +180,9 @@ describe("/account", () => {
     await user.click(within(card("Kit sizing")).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
-    expect(updateMyProfile).toHaveBeenCalledWith({ data: { gi_size: "5", belt_size: "3" } });
+    expect(updateMyProfile).toHaveBeenCalledWith({
+      data: { gi_size: "5", belt_size: "3", userId: "u1" },
+    });
   });
 
   it("clears a size with null rather than an empty string", async () => {
@@ -170,7 +193,9 @@ describe("/account", () => {
     await user.click(within(card("Kit sizing")).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
-    expect(updateMyProfile).toHaveBeenCalledWith({ data: { gi_size: "4", belt_size: null } });
+    expect(updateMyProfile).toHaveBeenCalledWith({
+      data: { gi_size: "4", belt_size: null, userId: "u1" },
+    });
   });
 
   it("clears a blank display name with null, which is what reverts to the derived name", async () => {
@@ -184,7 +209,7 @@ describe("/account", () => {
 
     await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
     expect(updateMyProfile).toHaveBeenCalledWith({
-      data: { preferred_name: "Addy", display_name: null },
+      data: { preferred_name: "Addy", display_name: null, userId: "u1" },
     });
   });
 
@@ -205,6 +230,7 @@ describe("/account", () => {
         emergency_contact_name: "Charles Babbage",
         emergency_contact_relationship: "Colleague",
         emergency_contact_phone: "0400000001",
+        userId: "u1",
       },
     });
   });
@@ -353,7 +379,7 @@ describe("/account", () => {
     await user.click(consentCard.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
-    expect(updateMyProfile).toHaveBeenCalledWith({ data: { media_consent: true } });
+    expect(updateMyProfile).toHaveBeenCalledWith({ data: { media_consent: true, userId: "u1" } });
   });
 
   it("lets a member record an explicit no for media consent, distinct from never having answered", async () => {
@@ -365,7 +391,9 @@ describe("/account", () => {
     await user.click(consentCard.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
-    expect(updateMyProfile).toHaveBeenCalledWith({ data: { media_consent: false } });
+    expect(updateMyProfile).toHaveBeenCalledWith({
+      data: { media_consent: false, userId: "u1" },
+    });
   });
 
   it("reverts an unsaved media consent choice back to what is on file, and saves nothing", async () => {

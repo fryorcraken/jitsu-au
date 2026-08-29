@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,24 +9,18 @@ import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Pill } from "@/components/site/StatusPill";
 import { NewPasswordField } from "@/components/site/NewPasswordField";
 import { CalendarLinkPanel } from "@/components/site/CalendarLinkPanel";
 import { describePasswordError, passwordProblem, type BreachStatus } from "@/lib/password-policy";
-import {
-  BELT_SIZE_HINT,
-  BeltSizeSelect,
-  GI_SIZE_HINT,
-  GiSizeSelect,
-} from "@/components/site/KitSizeSelect";
-import type { BeltSize, GiSize } from "@/lib/kit-sizes";
-import { isBeltSize, isGiSize } from "@/lib/kit-sizes";
-import { formatDate } from "@/lib/dates";
-import { mediaConsentClass, waiverClass } from "@/lib/status-colours";
-import { mediaConsentLabel } from "@/lib/waiver-acknowledgements";
+import { AboutYouCard } from "@/components/site/account/AboutYouCard";
+import { CodeOfConductCard } from "@/components/site/account/CodeOfConductCard";
+import { ContactCard } from "@/components/site/account/ContactCard";
+import type { Profile } from "@/components/site/account/DetailsCard";
+import { KitSizingCard } from "@/components/site/account/KitSizingCard";
+import { MediaConsentCard } from "@/components/site/account/MediaConsentCard";
+import { WaiversCard } from "@/components/site/account/WaiversCard";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { connectAppUser } from "@/integrations/lovable/appUserConnectorClient";
 import {
@@ -38,14 +32,9 @@ import {
   setGoogleDriveFolderFromPicker,
   startGoogleDriveConnect,
 } from "@/lib/google-drive.functions";
-import { getMyProfile, getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
-import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
-import type { CodeOfConductState } from "@/lib/code-of-conduct";
+import { getMyProfile } from "@/lib/waiver.functions";
 import { requestMyEmailVerification } from "@/lib/email-verification.functions";
 import { isEmailVerified } from "@/lib/email-verification";
-import { updateMyProfile } from "@/lib/profile.functions";
-import { commentDisplayName } from "@/lib/validation";
-import type { UpdateMyProfileInput } from "@/lib/validation";
 
 export const Route = createFileRoute("/_authenticated/account")({
   head: () => ({
@@ -121,12 +110,15 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-type Profile = Awaited<ReturnType<typeof getMyProfile>>;
-
 function AccountPage() {
   const { user } = useAuth();
   const { roles, isManager } = useRoles(user?.id);
   const fetchProfile = useServerFn(getMyProfile);
+  // Every card below is about a PERSON rather than about the session, and this
+  // page is the case where that person is the caller. The cards themselves
+  // hold no opinion, which is what lets the same six render somebody else on
+  // their account (see `src/components/site/account/`).
+  const userId = user?.id;
 
   // Fetched once here rather than per card: the three editable cards below all
   // read the same row, and three identical round trips would only give them
@@ -140,22 +132,23 @@ function AccountPage() {
   const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(() => {
+    if (!userId) return;
     setLoading(true);
     setLoadFailed(false);
-    fetchProfile()
+    fetchProfile({ data: { userId } })
       .then((p) => setProfile(p))
       .catch(() => {
         setProfile(null);
         setLoadFailed(true);
       })
       .finally(() => setLoading(false));
-  }, [fetchProfile]);
+  }, [fetchProfile, userId]);
 
   useEffect(load, [load]);
 
-  if (!user) return null;
+  if (!user || !userId) return null;
 
-  const details = { profile, loading, onSaved: setProfile };
+  const details = { userId, profile, loading, onSaved: setProfile };
 
   return (
     <section className="mx-auto max-w-2xl space-y-6 px-4 py-12">
@@ -233,9 +226,9 @@ function AccountPage() {
 
       <SectionHeading>Your records</SectionHeading>
 
-      <WaiversCard />
+      <WaiversCard userId={userId} />
 
-      <CodeOfConductCard />
+      <CodeOfConductCard userId={userId} />
 
       <SectionHeading>Calendar</SectionHeading>
 
@@ -272,714 +265,6 @@ function AccountPage() {
         </>
       )}
     </section>
-  );
-}
-
-/** What every editable card on this page is handed. */
-type DetailsCardProps = {
-  profile: Profile;
-  loading: boolean;
-  /** Called with the saved row so the page's copy of the profile stays true. */
-  onSaved: (profile: Profile) => void;
-};
-
-/**
- * The shared save path for the three editable cards: send only this card's
- * keys, fold them back into the page's profile, and say so.
- *
- * Returns the `busy` flag and a `save` the card calls with its own patch, so
- * each card owns its fields and nothing else.
- */
-function useDetailsSave({ profile, onSaved }: Pick<DetailsCardProps, "profile" | "onSaved">) {
-  const update = useServerFn(updateMyProfile);
-  const [busy, setBusy] = useState(false);
-
-  async function save(patch: UpdateMyProfileInput, message: string, failure: string) {
-    setBusy(true);
-    try {
-      await update({ data: patch });
-      if (profile) onSaved({ ...profile, ...patch } as Profile);
-      toast.success(message);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : failure);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return { busy, save };
-}
-
-/**
- * The buttons under every editable card.
- *
- * Save stays disabled until something actually differs from what is stored, so
- * the button tells the member whether they have unsaved work rather than
- * inviting a no-op write. Revert only appears once there is something to
- * revert: before this, the only way out of a half-typed change was reloading
- * the page, which is not an affordance anybody should have to guess.
- */
-function CardActions({
-  dirty,
-  busy,
-  onRevert,
-}: {
-  dirty: boolean;
-  busy: boolean;
-  onRevert: () => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button type="submit" disabled={busy || !dirty}>
-        {busy ? "Saving..." : "Save"}
-      </Button>
-      {dirty && !busy ? (
-        <Button type="button" variant="outline" onClick={onRevert}>
-          Revert
-        </Button>
-      ) : null}
-      {dirty ? <span className="text-xs text-muted-foreground">Unsaved changes</span> : null}
-    </div>
-  );
-}
-
-/**
- * What the club calls this person, and what other members see next to their
- * comments. `commentDisplayName` doubles as the placeholder, so the field shows
- * exactly what will be used if they clear it.
- */
-function AboutYouCard({ profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ profile, onSaved });
-  const [preferredName, setPreferredName] = useState("");
-  const [displayName, setDisplayName] = useState("");
-
-  // What is on file for the fields THIS card owns. Memoised on those values
-  // alone, not on the whole `profile` object: saving any card replaces that
-  // object, and resetting on its identity would silently wipe whatever the
-  // member had typed into the other two cards but not yet saved.
-  const stored = useMemo(
-    () => ({
-      preferredName: profile?.preferred_name ?? "",
-      displayName: profile?.display_name ?? "",
-    }),
-    [profile?.preferred_name, profile?.display_name],
-  );
-
-  const revert = useMemo(
-    () => () => {
-      setPreferredName(stored.preferredName);
-      setDisplayName(stored.displayName);
-    },
-    [stored],
-  );
-
-  useEffect(revert, [revert]);
-
-  const dirty = preferredName !== stored.preferredName || displayName !== stored.displayName;
-
-  const placeholder = profile ? commentDisplayName(profile) : "";
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const name = displayName.trim();
-    await save(
-      {
-        preferred_name: preferredName.trim() || null,
-        display_name: name || null,
-      },
-      "Saved",
-      "Could not save those names",
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>About you</CardTitle>
-        <CardDescription>
-          What we call you in person, and the name other members see on your comments.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <Loading />
-        ) : (
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="preferred-name">Preferred name</Label>
-              <Input
-                id="preferred-name"
-                value={preferredName}
-                onChange={(e) => setPreferredName(e.target.value)}
-                maxLength={60}
-                className="mt-1.5"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                What you go by, if it is not your first name. We use it to greet you.
-              </p>
-            </div>
-            <div>
-              <Label htmlFor="display-name">Display name</Label>
-              <Input
-                id="display-name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                maxLength={60}
-                placeholder={placeholder}
-                className="mt-1.5"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Shown on your blog and document comments. Leave blank to use{" "}
-                {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
-              </p>
-            </div>
-            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
-          </form>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * Gi and belt sizes. Kept apart from the contact card because it is the one
- * group here a manager reads in bulk (ordering kit), and because it is the only
- * one a waiver never overwrites.
- */
-function KitSizingCard({ profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ profile, onSaved });
-  const [giSize, setGiSize] = useState<GiSize | "">("");
-  const [beltSize, setBeltSize] = useState<BeltSize | "">("");
-
-  // See AboutYouCard: keyed on this card's own fields, never on `profile`.
-  const stored = useMemo(() => {
-    const gi = profile?.gi_size ?? "";
-    const belt = profile?.belt_size ?? "";
-    return {
-      giSize: (isGiSize(gi) ? gi : "") as GiSize | "",
-      beltSize: (isBeltSize(belt) ? belt : "") as BeltSize | "",
-    };
-  }, [profile?.gi_size, profile?.belt_size]);
-
-  const revert = useMemo(
-    () => () => {
-      setGiSize(stored.giSize);
-      setBeltSize(stored.beltSize);
-    },
-    [stored],
-  );
-
-  useEffect(revert, [revert]);
-
-  const dirty = giSize !== stored.giSize || beltSize !== stored.beltSize;
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    await save(
-      { gi_size: giSize || null, belt_size: beltSize || null },
-      "Sizes saved",
-      "Could not save your sizes",
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Kit sizing</CardTitle>
-        <CardDescription>
-          So we can order the right gi and belt for you, and hand you the right loan gear. Both are
-          optional.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <Loading />
-        ) : (
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="gi-size">Gi size</Label>
-              <GiSizeSelect
-                id="gi-size"
-                value={giSize}
-                onChange={setGiSize}
-                disabled={busy}
-                className="mt-1.5"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                The number in brackets is the wearer's height that gi size is cut for.{" "}
-                {GI_SIZE_HINT}
-              </p>
-            </div>
-            <div>
-              <Label htmlFor="belt-size">Belt size</Label>
-              <BeltSizeSelect
-                id="belt-size"
-                value={beltSize}
-                onChange={setBeltSize}
-                disabled={busy}
-                className="mt-1.5"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">{BELT_SIZE_HINT}</p>
-            </div>
-            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
-          </form>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * How the club reaches this person, and who it calls if something happens.
- *
- * The warning in the description is not boilerplate: approving a waiver still
- * promotes that submission's contact fields onto the profile
- * (`waiverToProfileFields`), so a correction made here can be overwritten later
- * by a manager working through a backlog of older waivers.
- */
-function ContactCard({ profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ profile, onSaved });
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [smsConsent, setSmsConsent] = useState(false);
-  const [ecName, setEcName] = useState("");
-  const [ecRelationship, setEcRelationship] = useState("");
-  const [ecPhone, setEcPhone] = useState("");
-
-  // See AboutYouCard: keyed on this card's own fields, never on `profile`.
-  const stored = useMemo(
-    () => ({
-      phone: profile?.phone ?? "",
-      address: profile?.address ?? "",
-      smsConsent: profile?.sms_whatsapp_consent ?? false,
-      ecName: profile?.emergency_contact_name ?? "",
-      ecRelationship: profile?.emergency_contact_relationship ?? "",
-      ecPhone: profile?.emergency_contact_phone ?? "",
-    }),
-    [
-      profile?.phone,
-      profile?.address,
-      profile?.sms_whatsapp_consent,
-      profile?.emergency_contact_name,
-      profile?.emergency_contact_relationship,
-      profile?.emergency_contact_phone,
-    ],
-  );
-
-  const revert = useMemo(
-    () => () => {
-      setPhone(stored.phone);
-      setAddress(stored.address);
-      setSmsConsent(stored.smsConsent);
-      setEcName(stored.ecName);
-      setEcRelationship(stored.ecRelationship);
-      setEcPhone(stored.ecPhone);
-    },
-    [stored],
-  );
-
-  useEffect(revert, [revert]);
-
-  const dirty =
-    phone !== stored.phone ||
-    address !== stored.address ||
-    smsConsent !== stored.smsConsent ||
-    ecName !== stored.ecName ||
-    ecRelationship !== stored.ecRelationship ||
-    ecPhone !== stored.ecPhone;
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    await save(
-      {
-        phone: phone.trim(),
-        address: address.trim(),
-        sms_whatsapp_consent: smsConsent,
-        emergency_contact_name: ecName.trim(),
-        emergency_contact_relationship: ecRelationship.trim(),
-        emergency_contact_phone: ecPhone.trim(),
-      },
-      "Contact details saved",
-      "Could not save your contact details",
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Contact</CardTitle>
-        <CardDescription>
-          How we reach you, and who we call if something happens in class. Saving here updates our
-          current record straight away. It does not change a waiver you have already signed, which
-          keeps what you typed at the time.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <Loading />
-        ) : (
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="account-phone">Mobile</Label>
-              <Input
-                id="account-phone"
-                type="tel"
-                required
-                maxLength={30}
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="mt-1.5"
-              />
-              <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
-                <Checkbox
-                  checked={smsConsent}
-                  onCheckedChange={(v) => setSmsConsent(v === true)}
-                  className="mt-0.5"
-                  aria-label="Consent to SMS or WhatsApp contact"
-                />
-                <span>
-                  I agree to be contacted by SMS or WhatsApp, and added to club WhatsApp groups.
-                </span>
-              </label>
-            </div>
-            <div>
-              <Label htmlFor="account-address">Address</Label>
-              <Input
-                id="account-address"
-                required
-                maxLength={300}
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="mt-1.5"
-              />
-            </div>
-
-            <fieldset className="space-y-4 rounded-md border p-4">
-              <legend className="px-1 text-sm font-medium">Emergency contact</legend>
-              <div>
-                <Label htmlFor="account-ec-name">Name</Label>
-                <Input
-                  id="account-ec-name"
-                  required
-                  maxLength={120}
-                  value={ecName}
-                  onChange={(e) => setEcName(e.target.value)}
-                  className="mt-1.5"
-                />
-              </div>
-              <div>
-                <Label htmlFor="account-ec-relationship">Relationship</Label>
-                <Input
-                  id="account-ec-relationship"
-                  required
-                  maxLength={80}
-                  value={ecRelationship}
-                  onChange={(e) => setEcRelationship(e.target.value)}
-                  className="mt-1.5"
-                />
-              </div>
-              <div>
-                <Label htmlFor="account-ec-phone">Mobile</Label>
-                <Input
-                  id="account-ec-phone"
-                  type="tel"
-                  required
-                  maxLength={30}
-                  value={ecPhone}
-                  onChange={(e) => setEcPhone(e.target.value)}
-                  className="mt-1.5"
-                />
-              </div>
-            </fieldset>
-
-            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
-          </form>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * Whether the club may use photos and video of this member.
- *
- * Its own card rather than a line in Contact: that card is about how to reach
- * somebody, and burying a consent decision under a phone number is how people
- * end up never having made one. It also needs room to say that changing it here
- * takes effect now, without contradicting the waiver they signed.
- *
- * The member owns this one. A photo consent only a manager could withdraw would
- * be the wrong way round -- they are the person in the photograph.
- *
- * Two explicit buttons rather than a checkbox: a checkbox collapses "I was
- * asked and said no" and "nobody has asked me" into the same unticked box, and
- * the whole point of this card is letting someone actively refuse, not just
- * abstain. There is no "clear back to not asked" button here -- only a manager
- * can put a record back to that state (see the mirrored card on their user
- * page), because "not asked" stops being true the moment a member looks at
- * this control.
- */
-function MediaConsentCard({ profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ profile, onSaved });
-
-  // `null` on file means nobody has ever asked, or a manager cleared it back to
-  // that. The status badge and explainer below always reflect THIS (the
-  // record on file), not the button the member has clicked but not yet saved,
-  // so a selection they have not saved never reads as already recorded.
-  const stored: boolean | null = useMemo(
-    () =>
-      profile?.media_consent === true || profile?.media_consent === false
-        ? profile.media_consent
-        : null,
-    [profile?.media_consent],
-  );
-  const [consent, setConsent] = useState<boolean | null>(null);
-
-  const revert = useMemo(() => () => setConsent(stored), [stored]);
-  useEffect(revert, [revert]);
-
-  const dirty = consent !== null && consent !== stored;
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (consent === null) return;
-    await save({ media_consent: consent }, "Saved", "Could not save that");
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Photos and video</CardTitle>
-        <CardDescription>
-          We sometimes photograph or film classes to promote the club. Tell us whether we can use
-          photos or video of you, and change your mind here any time. It does not rewrite a waiver
-          you have already signed, which keeps what you ticked at the time.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <Loading />
-        ) : (
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              {/* preserveCase: "Not asked" is a sentence, not an enum value. */}
-              <Pill
-                label={mediaConsentLabel(stored)}
-                className={mediaConsentClass(stored)}
-                preserveCase
-              />
-              <span className="text-sm text-muted-foreground">
-                {stored === true
-                  ? "We can use photos and video of you to promote the club. Your name is never published alongside them."
-                  : stored === false
-                    ? "We will not use any photo or video of you."
-                    : "You have not told us either way yet. Until you do, we will ask before using anything you are in."}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={consent === true ? "default" : "outline"}
-                aria-pressed={consent === true}
-                onClick={() => setConsent(true)}
-              >
-                Yes, I consent
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={consent === false ? "default" : "outline"}
-                aria-pressed={consent === false}
-                onClick={() => setConsent(false)}
-              >
-                No, I don't consent
-              </Button>
-            </div>
-            <CardActions dirty={dirty} busy={busy} onRevert={revert} />
-          </form>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-type MyWaiver = {
-  id: string;
-  signed_at: string;
-  template_version: number | null;
-  has_pdf: boolean;
-  status: "pending" | "active" | "superseded";
-};
-
-function WaiversCard() {
-  const fetchMine = useServerFn(listMyWaivers);
-  const getUrl = useServerFn(getWaiverPdfUrl);
-  const [waivers, setWaivers] = useState<MyWaiver[]>([]);
-  const [loading, setLoading] = useState(true);
-  // "No waivers on file yet." is the one sentence on this card that a member
-  // acts on, by going and signing one they have already signed. It has to be
-  // true when it is said.
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    return fetchMine()
-      .then((rows) => {
-        setWaivers(rows as MyWaiver[]);
-        setLoadError(null);
-      })
-      .catch((e) => {
-        setWaivers([]);
-        setLoadError(describeLoadError(e, "Could not load your waivers"));
-      })
-      .finally(() => setLoading(false));
-  }, [fetchMine]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function download(id: string) {
-    try {
-      const { url } = await getUrl({ data: { id } });
-      window.open(url, "_blank", "noopener");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not open the PDF. Try again.");
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Waivers</CardTitle>
-        <CardDescription>
-          Your waiver history. The active waiver is the latest one the club approved.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {loading ? (
-          <Loading />
-        ) : loadError ? (
-          <LoadFailure
-            what="Your waivers"
-            message={loadError}
-            hint="This is not the same as having none on file, so there is nothing to sign again."
-            onRetry={() => void load()}
-          />
-        ) : waivers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No waivers on file yet.</p>
-        ) : (
-          <ul className="space-y-2">
-            {waivers.map((w) => (
-              <li
-                key={w.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
-              >
-                <span>
-                  Signed {formatDate(w.signed_at)}
-                  {w.template_version != null && (
-                    <span className="text-muted-foreground"> (v{w.template_version})</span>
-                  )}{" "}
-                  {/* The same three statuses, and the same colours, a manager
-                      sees. The two-way ternary this replaced painted a
-                      superseded waiver exactly like a pending one, so a member
-                      who had re-signed could not tell which one counted. */}
-                  <Pill label={w.status} className={waiverClass(w.status)} />
-                </span>
-                {w.has_pdf && (
-                  <Button size="sm" variant="outline" onClick={() => download(w.id)}>
-                    Download PDF
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <Button asChild variant="outline" size="sm">
-          <Link to="/waiver">Sign an updated waiver</Link>
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * Where this member stands on the club's house rules.
- *
- * Reads through the same server function the public page uses: a signed-in
- * caller is identified by their session, so no token is involved here. Signing
- * itself happens on `/code-of-conduct`, because agreeing to a document you
- * cannot see on the same screen is not agreement.
- */
-function CodeOfConductCard() {
-  const fetchSigner = useServerFn(getCodeOfConductSigner);
-  const [state, setState] = useState<CodeOfConductState | null>(null);
-  const [acceptedAt, setAcceptedAt] = useState<string | null>(null);
-  const [acceptedVersion, setAcceptedVersion] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  // Swallowed, this card fell back to the "please read and agree" prompt, which
-  // asks somebody who agreed last month to do it again.
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    return fetchSigner({ data: { token: "" } })
-      .then((res) => {
-        setLoadError(null);
-        if (!res.status) return;
-        setState(res.status.state);
-        setAcceptedAt(res.status.accepted_at);
-        setAcceptedVersion(res.status.accepted_version);
-      })
-      .catch((e) => {
-        setLoadError(describeLoadError(e, "Could not load your code of conduct"));
-      })
-      .finally(() => setLoading(false));
-  }, [fetchSigner]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Code of conduct</CardTitle>
-        <CardDescription>
-          The rules we train by. Signing it is not required before you train, and we ask for it
-          around the time you join as a paying member.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {loading ? (
-          <Loading />
-        ) : loadError ? (
-          <LoadFailure
-            what="Whether you have agreed to this"
-            message={loadError}
-            hint="If you have already agreed, that still stands."
-            onRetry={() => void load()}
-          />
-        ) : state === "signed" ? (
-          <p className="text-sm text-muted-foreground">
-            You agreed to version {acceptedVersion} on {formatDate(acceptedAt)}.
-          </p>
-        ) : state === "outdated" ? (
-          <p className="text-sm text-muted-foreground">
-            You agreed to version {acceptedVersion} on {formatDate(acceptedAt)}. We have updated it
-            since, so please have another read.
-          </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">You have not agreed to it yet.</p>
-        )}
-        <Button asChild variant={state === "signed" ? "outline" : "default"} size="sm">
-          <Link to="/code-of-conduct" search={{ t: undefined }}>
-            {state === "signed" ? "Read the code of conduct" : "Read and sign it"}
-          </Link>
-        </Button>
-      </CardContent>
-    </Card>
   );
 }
 

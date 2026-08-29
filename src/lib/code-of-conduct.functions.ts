@@ -25,6 +25,7 @@ import {
   profileFullName,
 } from "@/lib/validation";
 import type { SignerMeta } from "@/lib/validation";
+import { assertActingFor } from "@/lib/household";
 import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-conduct";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
@@ -223,10 +224,19 @@ export async function codeOfConductStatusFor(
  * Public: it is called by anyone opening `/code-of-conduct`, with or without a
  * link. It never reveals anything about an address that was not supplied as a
  * live token, so it cannot be used to probe who the club holds.
+ *
+ * `userId` asks for somebody else's standing instead: a dependant of the
+ * caller's, checked by `assertActingFor`. `signer` still describes the CALLER,
+ * because they are the person who would sign, and only `status` moves.
  */
 export const getCodeOfConductSigner = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
-    z.object({ token: z.string().trim().max(120).optional().or(z.literal("")) }).parse(d ?? {}),
+    z
+      .object({
+        token: z.string().trim().max(120).optional().or(z.literal("")),
+        userId: z.string().uuid().optional(),
+      })
+      .parse(d ?? {}),
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -234,7 +244,19 @@ export const getCodeOfConductSigner = createServerFn({ method: "POST" })
     if (!signer) {
       return { signer: null, version: CODE_OF_CONDUCT_VERSION, status: null };
     }
-    const status = await codeOfConductStatusFor(supabaseAdmin, signer.userId);
+    let subjectId = signer.userId;
+    if (data.userId) {
+      // A live session only, never an emailed link. Signing a waiver is public
+      // and hands back a code-of-conduct token, so anyone can mint one for any
+      // address (see the note at the foot of `acceptCodeOfConduct`). A token
+      // proves an address; it must never prove the right to read a household.
+      if (!signer.signedIn) {
+        throw new Error("Sign in to your account to see this.");
+      }
+      await assertActingFor(supabaseAdmin, signer.userId, data.userId);
+      subjectId = data.userId;
+    }
+    const status = await codeOfConductStatusFor(supabaseAdmin, subjectId);
     return {
       signer: {
         name: signer.greetingName,

@@ -287,6 +287,7 @@ never stored.
 | Column                           | Type          | Null | Notes                                                                                                                                                                           |
 | -------------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `user_id`                        | `uuid` PK     | no   | `REFERENCES auth.users(id) ON DELETE CASCADE`. The person IS the auth user.                                                                                                     |
+| `guardian_user_id`               | `uuid`        | yes  | `REFERENCES profiles(user_id) ON DELETE RESTRICT`. NOT NULL means this person is a **dependant**: no login, contact goes to the guardian. See "Households" below.               |
 | `first_name`                     | `text`        | no   | Non-blank (`profiles_first_name_not_blank`). Every person has a name to show; `ensure_profile` seeds one when the auth user arrives.                                            |
 | `middle_name`                    | `text`        | yes  |                                                                                                                                                                                 |
 | `last_name`                      | `text`        | yes  |                                                                                                                                                                                 |
@@ -318,6 +319,26 @@ never stored.
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
+
+**Households.** `guardian_user_id` is the ONLY thing that marks a dependant, and
+it is a real person record in this table — unlike `guardian_name` /
+`guardian_email` below, which are contact details promoted from a waiver and
+name nobody in particular. A dependant is otherwise an ordinary person: an
+ordinary `auth.users` row (carrying a reserved, non-deliverable address and a
+permanent ban) and an ordinary `profiles` row, which is why every table that
+keys on a person needed no change at all
+(`20260827000000_household_guardian_link.sql`).
+
+Two rules sit either side of the schema. `profiles_guardian_not_self` forbids
+being your own guardian, in the database. The **one level only** rule — a
+dependant may not itself BE a guardian — is held in the application, by
+`assertActingFor` in `src/lib/household.ts`, because a depth check would need a
+trigger. That function is the single gate: `getMyProfile`, `updateMyProfile`,
+`listMyWaivers` and `getCodeOfConductSigner` each take an optional `userId` and
+call it, and nothing else re-derives who may act for whom.
+
+The partial index `profiles_guardian_user_id_idx` covers the non-null rows only,
+which is what "who are this person's dependants" reads.
 
 **Written by (service role only):**
 
@@ -363,9 +384,14 @@ inside the waiver PDF), and no `full_name`.
   which is a fact about the club's records rather than an answer a member can
   give, so nothing can restore it once it is set (there is no manager path back
   to NULL either — see below). Saving it also stamps the two
-  `media_consent_updated_*` columns with the MEMBER's own id, which is what
+  `media_consent_updated_*` columns with whoever CLICKED, which is what
   lets the person page tell their own change apart from one a manager recorded
-  before that write path existed. ⚠️ Its contact fields OVERLAP with
+  before that write path existed. The patch carries a `userId` naming the person
+  it is about: absent means the caller, and any other value goes through
+  `assertActingFor`, so a guardian can maintain a dependant's details and nobody
+  can reach anybody else's. Because the stamp names the clicker, a guardian's
+  answer records the GUARDIAN's id, so it reads as somebody else's change rather
+  than the dependant's own — which is what it is. ⚠️ Its contact fields OVERLAP with
   `waiverToProfileFields`, so a manager approving an older waiver can overwrite
   a correction made here; `/account` says so on the card.
 - A manager, from a person's detail page (`setClubUserKitSizes`): `gi_size` and
