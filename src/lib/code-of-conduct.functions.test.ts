@@ -17,19 +17,24 @@ const STRANGERS_CHILD = "aaaaaaaa-0000-4000-8000-000000000003";
 
 /** A `profiles` table holding one family and one unrelated child. */
 const admin = {
-  from: () => ({
-    select: () => ({
-      in: (_column: string, values: string[]) =>
-        Promise.resolve({
-          data: [
-            { user_id: PARENT, guardian_user_id: null },
-            { user_id: CHILD, guardian_user_id: PARENT },
-            { user_id: STRANGERS_CHILD, guardian_user_id: "someone-else" },
-          ].filter((r) => values.includes(r.user_id)),
-          error: null,
-        }),
-    }),
-  }),
+  from: (table: string) => {
+    // Throws rather than answering, so a gate pointed at the wrong table stops
+    // passing instead of quietly reading the right-shaped rows from anywhere.
+    if (table !== "profiles") throw new Error(`unexpected table: ${table}`);
+    return {
+      select: () => ({
+        in: (_column: string, values: string[]) =>
+          Promise.resolve({
+            data: [
+              { user_id: PARENT, guardian_user_id: null },
+              { user_id: CHILD, guardian_user_id: PARENT },
+              { user_id: STRANGERS_CHILD, guardian_user_id: "someone-else" },
+            ].filter((r) => values.includes(r.user_id)),
+            error: null,
+          }),
+      }),
+    };
+  },
 } as unknown as SupabaseClient<Database>;
 
 const signedIn = { userId: PARENT, signedIn: true };
@@ -47,7 +52,7 @@ describe("codeOfConductSubject", () => {
 
   it("refuses a signed-in caller somebody else's dependant", async () => {
     await expect(codeOfConductSubject(admin, signedIn, STRANGERS_CHILD)).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
   });
 

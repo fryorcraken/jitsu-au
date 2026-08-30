@@ -7,7 +7,16 @@
 // server decides who is allowed (`assertActingFor` in `src/lib/household.ts`);
 // nothing here does.
 //
-// ⚠️ That is true of the DATA and not yet of the VOICE. Every string in these
+// ⚠️ This carries a UX-bar debt it did not create but has now promoted into
+// shared code: `save` below reports a failed write with `toast.error`, and
+// CLAUDE.md's "A failed SAVE is not a toast either" asks for a held `saveError`
+// and `components/site/SaveFailure` instead. A member on bad reception saves
+// their emergency contact, the write fails, the toast fades in four seconds,
+// and the form still shows what they typed as though it saved. It is moved
+// verbatim here so this refactor changes no behaviour, which means the fix is
+// somebody's next change rather than nobody's.
+//
+// ⚠️ The person-agnostic claim above is true of the DATA and not yet of the VOICE. Every string in these
 // cards is second person ("About you", "your waiver history", "photos or video
 // of you"), which is correct on `/account` and wrong the first time a parent
 // reads one under a child's name. A per-child page therefore needs a name or

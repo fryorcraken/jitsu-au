@@ -29,7 +29,7 @@ const HOUSEHOLD = [
  * wrong `user_id` is the failure this whole module is defending against, and a
  * fake that ignored `.eq()` would stay green through it.
  */
-function fakeAdmin() {
+function fakeAdmin(matched = true) {
   const writes: Array<{ values: Record<string, unknown>; filters: Array<[string, unknown]> }> = [];
   const admin = {
     from(table: string) {
@@ -54,7 +54,11 @@ function fakeAdmin() {
               record.filters.push([column, value]);
               return write;
             },
-            select: () => Promise.resolve({ data: [{ user_id: value(record) }], error: null }),
+            select: () =>
+              Promise.resolve({
+                data: matched ? [{ user_id: value(record) }] : [],
+                error: null,
+              }),
           };
           return write;
         },
@@ -86,7 +90,7 @@ describe("updateProfileForCaller", () => {
     const { admin, writes } = fakeAdmin();
     await expect(
       updateProfileForCaller(admin, PARENT, { userId: STRANGERS_CHILD, phone: "0400 000 333" }),
-    ).rejects.toThrow(/only see your own account/i);
+    ).rejects.toThrow(/only see or change your own account/i);
     expect(writes).toHaveLength(0);
   });
 
@@ -94,7 +98,7 @@ describe("updateProfileForCaller", () => {
     const { admin, writes } = fakeAdmin();
     await expect(
       updateProfileForCaller(admin, PARENT, { userId: STRANGER, media_consent: false }),
-    ).rejects.toThrow(/only see your own account/i);
+    ).rejects.toThrow(/only see or change your own account/i);
     expect(writes).toHaveLength(0);
   });
 
@@ -104,7 +108,7 @@ describe("updateProfileForCaller", () => {
     const { admin, writes } = fakeAdmin();
     await expect(
       updateProfileForCaller(admin, PARENT, { userId: STRANGERS_CHILD, phone: undefined }),
-    ).rejects.toThrow(/only see your own account/i);
+    ).rejects.toThrow(/only see or change your own account/i);
     expect(writes).toHaveLength(0);
   });
 
@@ -112,6 +116,24 @@ describe("updateProfileForCaller", () => {
     const { admin, writes } = fakeAdmin();
     await updateProfileForCaller(admin, PARENT, { userId: CHILD, phone: "0400 000 444" });
     expect(writes[0].values).not.toHaveProperty("userId");
+  });
+
+  // PostgREST reports no error when the filter matched nothing, so without the
+  // handler's own check this would toast "Saved" over a write that never landed.
+  it("refuses to report a save that matched no row", async () => {
+    const { admin } = fakeAdmin(false);
+    await expect(updateProfileForCaller(admin, PARENT, { phone: "0400 000 555" })).rejects.toThrow(
+      /couldn't find your record/i,
+    );
+  });
+
+  // Allowed target, nothing actually set: no write, and no error either.
+  it("writes nothing when an allowed patch turns out to be empty", async () => {
+    const { admin, writes } = fakeAdmin();
+    await expect(
+      updateProfileForCaller(admin, PARENT, { userId: CHILD, phone: undefined }),
+    ).resolves.toEqual({ ok: true, fields: [] });
+    expect(writes).toHaveLength(0);
   });
 
   // The provenance names whoever clicked, not who the row is about.

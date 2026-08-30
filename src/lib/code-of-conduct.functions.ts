@@ -232,16 +232,19 @@ export async function codeOfConductSubject(
   signer: Pick<CodeOfConductSigner, "userId" | "signedIn">,
   target: string | undefined,
 ): Promise<string> {
-  // Naming yourself is the same as naming nobody, and it is checked first for
-  // the same reason `assertActingFor` returns early on it: somebody asking
-  // about their own standing is not reaching past themselves, and the ordinary
-  // /code-of-conduct case identifies people by an emailed link.
-  if (!target || target.toLowerCase() === signer.userId.toLowerCase()) return signer.userId;
-  // Reaching past yourself needs a live session, never an emailed link. Signing
-  // a waiver is public and hands back a code-of-conduct token, so anyone can
-  // mint one for any address (see the note at the foot of `acceptCodeOfConduct`).
-  // A token proves an address; it must never prove the right to read a household.
-  if (!signer.signedIn) {
+  if (!target) return signer.userId;
+  // The ONE extra rule this path has: reaching past yourself needs a live
+  // session, never an emailed link. Signing a waiver is public and hands back a
+  // code-of-conduct token, so anyone can mint one for any address (see the note
+  // at the foot of `acceptCodeOfConduct`). A token proves an address; it must
+  // never prove the right to read a household.
+  //
+  // The comparison is only here to decide whether THAT rule applies, not to
+  // decide whether the caller is allowed. Naming yourself has to stay allowed
+  // for a link-identified caller (it is the ordinary /code-of-conduct case),
+  // but `assertActingFor` is still the one place that says so: this function
+  // must not grow a second opinion about who may act for whom.
+  if (!signer.signedIn && target.toLowerCase() !== signer.userId.toLowerCase()) {
     throw new Error("Sign in to your account to see this.");
   }
   return resolveSubject(admin, signer.userId, target);

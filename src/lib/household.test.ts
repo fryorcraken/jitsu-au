@@ -132,13 +132,13 @@ describe("assertActingFor", () => {
 
   it("refuses somebody else's dependant", async () => {
     await expect(assertActingFor(db, "parent", "their-child")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
   });
 
   it("refuses another account holder", async () => {
     await expect(assertActingFor(db, "parent", "stranger")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
   });
 
@@ -148,10 +148,10 @@ describe("assertActingFor", () => {
   // account page buys nothing and costs everything.
   it("refuses a dependant everyone except themselves", async () => {
     await expect(assertActingFor(db, "child", "sibling")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
     await expect(assertActingFor(db, "child", "parent")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
     await expect(assertActingFor(db, "child", "child")).resolves.toBeUndefined();
   });
@@ -162,11 +162,11 @@ describe("assertActingFor", () => {
     const grandchild: Row = { user_id: "grandchild", guardian_user_id: "child", first_name: "Eve" };
     const chained = admin([...EVERYONE, grandchild]);
     await expect(assertActingFor(chained, "child", "grandchild")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
     // ...and it is not reachable by skipping a generation either.
     await expect(assertActingFor(chained, "parent", "grandchild")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
   });
 
@@ -182,7 +182,7 @@ describe("assertActingFor", () => {
 
   it("refuses a caller with no profile row reaching for anybody else", async () => {
     await expect(assertActingFor(db, "ghost", "child")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
   });
 
@@ -271,10 +271,10 @@ describe("resolveSubject", () => {
 
   it("refuses rather than quietly falling back to the caller", async () => {
     await expect(resolveSubject(db, "parent", "their-child")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
     await expect(resolveSubject(db, "parent", "nobody")).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
   });
 

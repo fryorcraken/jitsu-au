@@ -132,6 +132,12 @@ function AccountPage() {
   const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(() => {
+    // Waiting for the id is a real (small) behaviour change, and in the right
+    // direction. Before, a mount that beat the session resolving fired anyway,
+    // failed the auth middleware, set `loadFailed`, and never retried, because
+    // this callback did not depend on the user. That parked the member on "We
+    // couldn't load your details" until they reloaded. The route's own gate
+    // makes it rare, not impossible.
     if (!userId) return;
     setLoading(true);
     setLoadFailed(false);

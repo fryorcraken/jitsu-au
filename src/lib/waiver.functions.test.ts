@@ -1409,12 +1409,14 @@ describe("reading a person other than yourself", () => {
     const admin = {
       from: (table: string) => ({
         select: () => ({
-          // The gate's own two-person lookup.
-          in: (_c: string, values: string[]) =>
-            Promise.resolve({
+          // The gate's own two-person lookup, which only ever reads `profiles`.
+          in: (_c: string, values: string[]) => {
+            if (table !== "profiles") throw new Error(`gate read the wrong table: ${table}`);
+            return Promise.resolve({
               data: LINKS.filter((r) => values.includes(r.user_id)),
               error: null,
-            }),
+            });
+          },
           eq: (_c: string, userId: unknown) => {
             reads.push({ table, userId });
             return {
@@ -1455,13 +1457,13 @@ describe("reading a person other than yourself", () => {
 
     const profile = readAdmin();
     await expect(profileForCaller(profile.admin, PARENT, STRANGERS_CHILD)).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
     expect(profile.reads).toEqual([]);
 
     const waivers = readAdmin();
     await expect(waiversForCaller(waivers.admin, PARENT, STRANGERS_CHILD)).rejects.toThrow(
-      /only see your own account/i,
+      /only see or change your own account/i,
     );
     expect(waivers.reads).toEqual([]);
   });

@@ -67,8 +67,12 @@ export type HouseholdLink = {
  * A gate that said "no such person" for one id and "not yours" for another
  * would answer, to anybody who could type a uuid, the question "is this a real
  * person at the club?". So the caller learns only that the answer is no.
+ *
+ * It names both verbs because it is thrown by a save as well as a read
+ * (`updateMyProfile`), and a person refused a save should not be told they
+ * cannot see something.
  */
-const NOT_YOURS = "You can only see your own account and the people on it.";
+const NOT_YOURS = "You can only see or change your own account and the people on it.";
 
 /** True when this person is somebody's dependant rather than an account holder. */
 export function isDependant(person: Pick<HouseholdLink, "guardian_user_id">): boolean {
