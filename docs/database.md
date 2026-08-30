@@ -392,8 +392,9 @@ which is what "who are this person's dependants" reads.
   can reach anybody else's. Because the stamp names the clicker, a guardian's
   answer for a dependant records the GUARDIAN's id. ⚠️ The person page reads any
   id that is not the person's own as a manager's, so it would describe a
-  parent's decision as "Set by a manager"; nothing can reach that yet (no row
-  has a guardian, no screen sends a target) and #106 owns the fix.
+  parent's decision as "Set by a manager". Unreachable today because every
+  caller's target is themselves, not because nothing sends one; #106 owns the
+  fix, and needs it, since it is what first sends a different target.
   ⚠️ Its contact fields OVERLAP with
   `waiverToProfileFields`, so a manager approving an older waiver can overwrite
   a correction made here; `/account` says so on the card.

@@ -23,11 +23,20 @@ type MyWaiver = {
 /**
  * One person's waiver history.
  *
- * ⚠️ The download button reads the PDF through `getWaiverPdfUrl`, which is
- * scoped by RLS to waivers the CALLER may see rather than by the household
- * gate. So a guardian listing a dependant's waivers can see that they exist and
- * cannot yet open one. Widening that needs a policy change, which is a
- * migration and therefore not this change's to make.
+ * Two things here READ a subject and do not yet WRITE as one. Both are safe on
+ * `/account`, where the subject is the caller, and both need doing before this
+ * card is put in front of a parent looking at a child:
+ *
+ *   * ⚠️ The download button goes through `getWaiverPdfUrl`, which is scoped by
+ *     RLS to waivers the CALLER may see rather than by the household gate. On a
+ *     child's page every button would render and every press would fail, which
+ *     the UX bar rules out. Widening it is a policy change, so a migration, so
+ *     not this change's to make: either hide the button when the subject is not
+ *     the caller, or widen the policy.
+ *   * ⚠️ "Sign an updated waiver" links to `/waiver`, which signs for whoever is
+ *     signed in. Under a child's name that is the wrong person, silently, which
+ *     is the exact failure the household project exists to end. The waiver
+ *     submit path has no target parameter at all, so this cannot be fixed here.
  */
 export function WaiversCard({ userId }: { userId: string }) {
   const fetchMine = useServerFn(listMyWaivers);

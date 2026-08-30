@@ -1385,3 +1385,84 @@ describe("countWaiversAwaitingApproval", () => {
     });
   });
 });
+
+// ---- Who a read is allowed to be about ----
+//
+// `profileForCaller` and `waiversForCaller` were pulled out of their
+// `createServerFn` wrappers so the gate inside them is reachable from here.
+// That is the whole point: the wrappers die on "No Start context found", so a
+// gate left inside one could be deleted with every test still passing.
+describe("reading a person other than yourself", () => {
+  const PARENT = "bbbbbbbb-0000-4000-8000-000000000001";
+  const CHILD = "bbbbbbbb-0000-4000-8000-000000000002";
+  const STRANGERS_CHILD = "bbbbbbbb-0000-4000-8000-000000000003";
+
+  const LINKS = [
+    { user_id: PARENT, guardian_user_id: null },
+    { user_id: CHILD, guardian_user_id: PARENT },
+    { user_id: STRANGERS_CHILD, guardian_user_id: "somebody-else" },
+  ];
+
+  /** Records which table each read hit and which `user_id` it was filtered to. */
+  function readAdmin() {
+    const reads: Array<{ table: string; userId: unknown }> = [];
+    const admin = {
+      from: (table: string) => ({
+        select: () => ({
+          // The gate's own two-person lookup.
+          in: (_c: string, values: string[]) =>
+            Promise.resolve({
+              data: LINKS.filter((r) => values.includes(r.user_id)),
+              error: null,
+            }),
+          eq: (_c: string, userId: unknown) => {
+            reads.push({ table, userId });
+            return {
+              maybeSingle: () => Promise.resolve({ data: { user_id: userId }, error: null }),
+              order: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }),
+            };
+          },
+        }),
+      }),
+    };
+    return { admin: admin as unknown as SupabaseClient<Database>, reads };
+  }
+
+  it("reads the caller's own row when no target is named", async () => {
+    const { profileForCaller } = await import("./waiver.functions");
+    const { admin, reads } = readAdmin();
+    await profileForCaller(admin, PARENT, undefined);
+    expect(reads).toEqual([{ table: "profiles", userId: PARENT }]);
+  });
+
+  it("reads a dependant's rows for their own guardian", async () => {
+    const { profileForCaller, waiversForCaller } = await import("./waiver.functions");
+
+    const profile = readAdmin();
+    await profileForCaller(profile.admin, PARENT, CHILD);
+    expect(profile.reads).toEqual([{ table: "profiles", userId: CHILD }]);
+
+    const waivers = readAdmin();
+    await waiversForCaller(waivers.admin, PARENT, CHILD);
+    expect(waivers.reads).toEqual([{ table: "waivers", userId: CHILD }]);
+  });
+
+  // Without the gate these hand back somebody else's medical notes and waiver
+  // history. Asserting `reads` is empty is the part that matters: the refusal
+  // happens before anything is fetched at all.
+  it("refuses somebody else's dependant, and reads NOTHING", async () => {
+    const { profileForCaller, waiversForCaller } = await import("./waiver.functions");
+
+    const profile = readAdmin();
+    await expect(profileForCaller(profile.admin, PARENT, STRANGERS_CHILD)).rejects.toThrow(
+      /only see your own account/i,
+    );
+    expect(profile.reads).toEqual([]);
+
+    const waivers = readAdmin();
+    await expect(waiversForCaller(waivers.admin, PARENT, STRANGERS_CHILD)).rejects.toThrow(
+      /only see your own account/i,
+    );
+    expect(waivers.reads).toEqual([]);
+  });
+});

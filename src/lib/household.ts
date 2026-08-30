@@ -25,6 +25,22 @@ import type { Database } from "@/integrations/supabase/types";
 type AdminClient = SupabaseClient<Database>;
 
 /**
+ * A target user id, lowercased.
+ *
+ * The normalisation is load-bearing, not tidiness. `z.string().uuid()` accepts
+ * an uppercase uuid and Postgres does not care about case either, so
+ * `.eq("user_id", ID)` matches whichever form arrives -- but the rows it hands
+ * back are lowercase, and this module compares ids as JS strings. Without this
+ * an uppercase id (a route param somebody pasted or typed) would miss the
+ * "acting for yourself" check and then fail to match its own row, refusing a
+ * guardian their own child on a query that would have worked. It fails closed,
+ * so it was never a hole; it was an unactionable no on the happy path.
+ *
+ * Exported so every schema that takes a target uses this one and cannot drift.
+ */
+export const householdTargetUserId = z.string().uuid().toLowerCase();
+
+/**
  * The optional target a "...for this person" server function takes. Absent
  * means the caller themselves, which is what every caller sends today.
  *
@@ -32,7 +48,7 @@ type AdminClient = SupabaseClient<Database>;
  * every one of them agrees that a target is a uuid and that leaving it out is
  * allowed.
  */
-export const householdTargetSchema = z.object({ userId: z.string().uuid().optional() });
+export const householdTargetSchema = z.object({ userId: householdTargetUserId.optional() });
 
 /**
  * The two `profiles` fields every question below is answered from. Kept as its
@@ -98,9 +114,14 @@ export function contactUserIdFor(profile: HouseholdLink): string {
  */
 export async function assertActingFor(
   admin: AdminClient,
-  callerId: string,
-  targetId: string,
+  callerUserId: string,
+  targetUserId: string,
 ): Promise<void> {
+  // Again here, not only in the schema: this is the security boundary, and it
+  // takes two bare strings from wherever a caller got them. Postgres hands back
+  // lowercase, so every comparison below is against a lowercase id.
+  const callerId = callerUserId.toLowerCase();
+  const targetId = targetUserId.toLowerCase();
   if (callerId === targetId) return;
 
   // One round trip for both people. `.in()` is parameterised by the client, so
@@ -112,15 +133,46 @@ export async function assertActingFor(
   if (error) throw new Error(error.message);
 
   const rows = data ?? [];
-  const caller = rows.find((r) => r.user_id === callerId);
+  const caller = rows.find((r) => r.user_id.toLowerCase() === callerId);
   // No profile row is not the same as "not allowed", but reaching for somebody
   // else has the same answer either way, and saying which would leak the
   // difference.
   if (!caller || isDependant(caller)) throw new Error(NOT_YOURS);
 
-  const target = rows.find((r) => r.user_id === targetId);
-  if (!target || target.guardian_user_id !== callerId) throw new Error(NOT_YOURS);
+  const target = rows.find((r) => r.user_id.toLowerCase() === targetId);
+  if (!target || target.guardian_user_id?.toLowerCase() !== callerId) throw new Error(NOT_YOURS);
 }
+
+/**
+ * The person a "...for this person" server function is about: the named target
+ * once the gate has allowed it, or the caller when none was named.
+ *
+ * This exists so a handler cannot hold the rule wrongly. The four handlers that
+ * take a target each used to carry their own `if (input.userId) await
+ * assertActingFor(...)` followed by `input.userId ?? context.userId` -- two
+ * lines that have to agree, repeated per handler, and every one of them a fresh
+ * chance to gate one id and then read another. #105 and #106 add more of these,
+ * so it is one call now: you cannot get the subject without going through the
+ * gate, because getting the subject IS going through the gate.
+ */
+export async function resolveSubject(
+  admin: AdminClient,
+  callerUserId: string,
+  targetUserId: string | undefined,
+): Promise<string> {
+  if (!targetUserId) return callerUserId;
+  await assertActingFor(admin, callerUserId, targetUserId);
+  return targetUserId;
+}
+
+// `listHousehold` below and `contactUserIdFor` above have no production caller
+// yet: #106 lists a household, #107 addresses a digest to a contact. They are
+// here rather than with those PRs because #102 asks for the household rule to
+// exist in ONE place before three PRs start needing it, and an agent who
+// arrives to find only half the module writes the other half themselves, which
+// is the second seam CLAUDE.md forbids. It is a deliberate exception to "no
+// speculative generality" and worth re-reading as one: if #106 and #107 land
+// without calling these, delete them.
 
 /** One person on an account, as the household screens list them. */
 export type HouseholdMember = {

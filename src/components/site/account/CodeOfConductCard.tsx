@@ -17,6 +17,14 @@ import type { CodeOfConductState } from "@/lib/code-of-conduct";
  * caller is identified by their session, so no token is involved here. Signing
  * itself happens on `/code-of-conduct`, because agreeing to a document you
  * cannot see on the same screen is not agreement.
+ *
+ * ⚠️ The READ takes a subject; the button does not. `/code-of-conduct` records
+ * an acceptance for whoever is signed in, and `acceptCodeOfConduct` has no
+ * target, so a parent reading "You have not agreed to it yet" under a child's
+ * name and pressing the button would file the PARENT's agreement and leave the
+ * child's card unchanged. Nobody would be told. That is the same silent
+ * wrong-person write the household project exists to end, so a per-child page
+ * must not ship this button until signing itself takes a subject.
  */
 export function CodeOfConductCard({ userId }: { userId: string }) {
   const fetchSigner = useServerFn(getCodeOfConductSigner);

@@ -4,7 +4,14 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { assertActingFor, contactUserIdFor, isDependant, listHousehold } from "./household";
+import {
+  assertActingFor,
+  contactUserIdFor,
+  householdTargetSchema,
+  isDependant,
+  listHousehold,
+  resolveSubject,
+} from "./household";
 
 type Row = {
   user_id: string;
@@ -24,31 +31,49 @@ const THEIR_CHILD: Row = { user_id: "their-child", guardian_user_id: "stranger",
 
 const EVERYONE = [PARENT, CHILD, SIBLING, STRANGER, THEIR_CHILD];
 
-/** Fake admin serving `rows` through the two query shapes this module uses. */
+/**
+ * Fake admin serving `rows` through the two query shapes this module uses.
+ *
+ * It answers only for `profiles` and returns only the columns actually named in
+ * `.select()`, because a fake that ignored either would stay green if the code
+ * were pointed at the wrong table or stopped selecting `guardian_user_id` --
+ * and the second of those is the whole discriminator the gate reads.
+ */
 function admin(rows: Row[]) {
+  const pick = (columns: string, row: Row) => {
+    const names = columns.split(",").map((c) => c.trim());
+    return Object.fromEntries(
+      names.map((n) => [n, (row as Record<string, unknown>)[n]]),
+    ) as unknown as Row;
+  };
   return {
-    from: () => ({
-      select: () => ({
-        in: (column: keyof Row, values: string[]) =>
-          Promise.resolve({
-            data: rows.filter((r) => values.includes(r[column] as string)),
-            error: null,
-          }),
-        eq: (column: keyof Row, value: string) => {
-          const matched = rows.filter((r) => r[column] === value);
-          return {
-            maybeSingle: () => Promise.resolve({ data: matched[0] ?? null, error: null }),
-            order: (column2: keyof Row) =>
-              Promise.resolve({
-                data: [...matched].sort((a, b) =>
-                  String(a[column2]).localeCompare(String(b[column2])),
-                ),
-                error: null,
-              }),
-          };
-        },
-      }),
-    }),
+    from: (table: string) => {
+      if (table !== "profiles") throw new Error(`unexpected table: ${table}`);
+      return {
+        select: (columns: string) => ({
+          in: (column: keyof Row, values: string[]) =>
+            Promise.resolve({
+              data: rows
+                .filter((r) => values.includes(r[column] as string))
+                .map((r) => pick(columns, r)),
+              error: null,
+            }),
+          eq: (column: keyof Row, value: string) => {
+            const matched = rows.filter((r) => r[column] === value).map((r) => pick(columns, r));
+            return {
+              maybeSingle: () => Promise.resolve({ data: matched[0] ?? null, error: null }),
+              order: (column2: keyof Row) =>
+                Promise.resolve({
+                  data: [...matched].sort((a, b) =>
+                    String(a[column2]).localeCompare(String(b[column2])),
+                  ),
+                  error: null,
+                }),
+            };
+          },
+        }),
+      };
+    },
   } as unknown as SupabaseClient<Database>;
 }
 
@@ -198,5 +223,63 @@ describe("listHousehold", () => {
 
   it("surfaces a failed read", async () => {
     await expect(listHousehold(erroringAdmin, "parent")).rejects.toThrow("boom");
+  });
+});
+
+// The uuid a route param or a hand-typed link arrives as is not always the one
+// Postgres hands back: `z.string().uuid()` accepts uppercase, Postgres compares
+// uuids by value and returns them lowercase, and this module compares strings.
+describe("uuid case", () => {
+  const UPPER = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+  const lower = UPPER.toLowerCase();
+
+  it("normalises a target the schema accepts", () => {
+    expect(householdTargetSchema.parse({ userId: UPPER }).userId).toBe(lower);
+  });
+
+  it("still recognises a person acting for themselves", async () => {
+    const db = admin([{ user_id: lower, guardian_user_id: null }]);
+    await expect(assertActingFor(db, lower, UPPER)).resolves.toBeUndefined();
+  });
+
+  // Fails closed, so this was never a hole. It was a guardian being told they
+  // could not see their own child, on a query that would have matched fine.
+  it("still finds a guardian's own dependant", async () => {
+    const db = admin([
+      { user_id: lower, guardian_user_id: null },
+      { user_id: "kid", guardian_user_id: lower },
+    ]);
+    await expect(assertActingFor(db, UPPER, "kid")).resolves.toBeUndefined();
+    await expect(assertActingFor(db, lower, "KID".toLowerCase())).resolves.toBeUndefined();
+  });
+});
+
+// `resolveSubject` is the seam the handlers actually call. It exists so that
+// getting the subject IS going through the gate, rather than two lines that
+// have to agree.
+describe("resolveSubject", () => {
+  const db = admin(EVERYONE);
+
+  it("answers the caller when no target was named", async () => {
+    await expect(resolveSubject(db, "parent", undefined)).resolves.toBe("parent");
+  });
+
+  // The failure this shape rules out: gate one id, then read another.
+  it("answers the target it just checked, never the caller", async () => {
+    await expect(resolveSubject(db, "parent", "child")).resolves.toBe("child");
+  });
+
+  it("refuses rather than quietly falling back to the caller", async () => {
+    await expect(resolveSubject(db, "parent", "their-child")).rejects.toThrow(
+      /only see your own account/i,
+    );
+    await expect(resolveSubject(db, "parent", "nobody")).rejects.toThrow(
+      /only see your own account/i,
+    );
+  });
+
+  it("does not consult the database for a caller asking about themselves", async () => {
+    await expect(resolveSubject(erroringAdmin, "parent", undefined)).resolves.toBe("parent");
+    await expect(resolveSubject(erroringAdmin, "parent", "parent")).resolves.toBe("parent");
   });
 });

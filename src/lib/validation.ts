@@ -14,6 +14,7 @@ import { annotationVisibilities, articleVisibilities } from "./kb";
 // (and the CHECK constraints on `profiles` mirror them), so the wire schemas
 // below enumerate them from there rather than repeating the lists.
 import { beltSizes, giSizes } from "./kit-sizes";
+import { householdTargetUserId } from "./household";
 // A dated plan's window is computed in the club's own timezone (its last day
 // must cover that evening's class, not cut off at UTC midnight), so this
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
@@ -3481,8 +3482,9 @@ export const updateMyProfileSchema = z
     // Absent means the caller themselves, which is what `/account` sent before
     // a household could exist. Present, it is checked by `assertActingFor`
     // (`src/lib/household.ts`) and the handler strips it before the UPDATE, so
-    // it can never be mistaken for a field.
-    userId: z.string().uuid().optional(),
+    // it can never be mistaken for a field. Shares that module's schema rather
+    // than restating it, so a target means the same thing on every path.
+    userId: householdTargetUserId.optional(),
   })
   // Unknown keys are an attempt to write a field this path does not own (a
   // legal name, a date of birth), not a harmless extra. Rejecting beats

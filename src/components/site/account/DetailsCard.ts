@@ -2,10 +2,19 @@
 // handed, and how they save. Their buttons are `CardActions`.
 //
 // These cards are about a PERSON, not about the session. Each takes a `userId`
-// and sends it with every write, so the same card renders the signed-in
-// member's own details on `/account` and a dependant's on their own page,
-// without either screen knowing which case it is in. The server decides who is
-// allowed (`assertActingFor` in `src/lib/household.ts`); nothing here does.
+// and sends it with every write, so the same card can fetch and save the
+// signed-in member's own details on `/account` or a dependant's elsewhere. The
+// server decides who is allowed (`assertActingFor` in `src/lib/household.ts`);
+// nothing here does.
+//
+// ⚠️ That is true of the DATA and not yet of the VOICE. Every string in these
+// cards is second person ("About you", "your waiver history", "photos or video
+// of you"), which is correct on `/account` and wrong the first time a parent
+// reads one under a child's name. A per-child page therefore needs a name or
+// possessive threaded through alongside `userId`; it is not added here because
+// nothing would pass it yet, and a prop with no caller is the generality
+// CLAUDE.md rules out. #106 is where it belongs, and it is real work, not a
+// drop-in.
 //
 // The page above them fetches the profile ONCE and passes it down, rather than
 // each card fetching its own: they all read the same row, and three round trips
