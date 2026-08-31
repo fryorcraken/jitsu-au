@@ -52,33 +52,54 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { userEmails } from "@/lib/supabase-rpc";
+import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
 import { requireManager } from "@/lib/require-manager";
 
 /**
- * Resolve auth emails (the one email store) for a set of user ids via the
- * service-role `user_emails` RPC. Returns an empty map on lookup failure so
- * callers degrade to missing emails rather than erroring. Degraded mode in the
- * directory: persons render with a null email, and leads (matched to persons by
- * email) are not deduped against them, so a person mid-funnel could transiently
- * appear twice — acceptable, since the RPC failing is rare and non-destructive.
+ * Where a message ABOUT each of these people goes.
+ *
+ * The DELIVERY side of `household-email.ts`: a dependant has no mailbox of
+ * their own, so their invoices and receipts resolve to their guardian's. Keyed
+ * by the id you asked about, not by the id that answered, so a caller reads
+ * back the same id it passed in and cannot accidentally address a child by
+ * their guardian's key.
+ *
+ * Returns an empty map on lookup failure so callers degrade to missing emails
+ * rather than erroring, which for a send path means "do not send" rather than
+ * "send to the wrong person".
  */
-async function emailsByUserId(
+async function deliveryEmailsByUserId(
   admin: MembershipClient,
   userIds: string[],
 ): Promise<Map<string, string>> {
   if (!userIds.length) return new Map();
-  const { data, error } = await userEmails(admin, userIds);
-  if (error || !data) return new Map();
-  return new Map(data.map((e) => [e.user_id, e.email]));
+  const contacts = await loadHouseholdContacts(admin, userIds);
+  const map = new Map<string, string>();
+  for (const id of userIds) {
+    const email = contacts.deliveryEmail(id);
+    if (email) map.set(id, email);
+  }
+  return map;
 }
 
 /**
- * The same lookup, keeping the whole row rather than just the address.
+ * What a manager SCREEN prints as each of these people's contact address.
  *
- * The people directory needs `email_confirmed_at` alongside the email to badge
- * verified state, and it is the only caller that does — everywhere else wants a
- * plain user-id -> address map, so that stays the simpler helper above.
- * Degrades to an empty list on failure, matching `emailsByUserId`.
+ * The DISPLAY side, and a different question from the one above even though it
+ * usually has the same answer. A dependant's row shows their guardian's address
+ * together with whose it is, never the reserved string and never a bare address
+ * under a child's name, which would read as a mailbox somebody could write to.
+ *
+ * The people directory also needs `email_confirmed_at` to badge verified state.
+ * That fact belongs to the ADDRESS, so for a dependant it is the guardian's
+ * confirmation state, which is the truthful thing to badge: it is the guardian
+ * who proved they can read that mailbox.
+ *
+ * Degrades to an empty list on failure, matching the helper above. Degraded
+ * mode in the directory: persons render with a null email, and leads (matched
+ * to persons by email) are not deduped against them, so a person mid-funnel
+ * could transiently appear twice — acceptable, since the RPC failing is rare
+ * and non-destructive.
  */
 async function clubUserEmailRows(
   admin: MembershipClient,
@@ -382,7 +403,7 @@ export async function recordMembershipPayment(
           .select("first_name, middle_name, last_name, preferred_name")
           .eq("user_id", membership.user_id)
           .maybeSingle(),
-        emailsByUserId(admin, [membership.user_id]),
+        deliveryEmailsByUserId(admin, [membership.user_id]),
       ]);
       const email = emails.get(membership.user_id) ?? null;
       if (email) {
@@ -456,7 +477,7 @@ export async function ensureCasualInvoiceEmailed(
         .select("first_name, middle_name, last_name, preferred_name")
         .eq("user_id", membership.user_id)
         .maybeSingle(),
-      emailsByUserId(admin, [membership.user_id]),
+      deliveryEmailsByUserId(admin, [membership.user_id]),
     ]);
     const email = emails.get(membership.user_id) ?? null;
     if (!email) return;
@@ -1041,7 +1062,7 @@ export async function enrolMember(
   // member does not care that it lands as two invoices on our side.
   if (input.sendEmail !== false) {
     try {
-      const emails = await emailsByUserId(admin, [userId]);
+      const emails = await deliveryEmailsByUserId(admin, [userId]);
       const email = emails.get(userId) ?? null;
       if (email) {
         const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
@@ -1295,17 +1316,20 @@ export const listMemberships = createServerFn({ method: "GET" })
     // from the auth user (the one email store).
     const userIds = [...new Set((rows ?? []).map((r) => r.user_id).filter(Boolean))] as string[];
     const nameByUser = new Map<string, string>();
-    let emailByUser = new Map<string, string>();
+    // DISPLAY, not delivery: this is a manager reading a list, so a dependant's
+    // row shows their guardian's address AND says whose it is. A bare address
+    // under a child's name would read as the child's own mailbox.
+    let contactByUser = new Map<string, ContactEmail>();
     if (userIds.length) {
-      const [{ data: profiles, error: prErr }, emails] = await Promise.all([
+      const [{ data: profiles, error: prErr }, contacts] = await Promise.all([
         admin
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
-        emailsByUserId(admin, userIds),
+        loadHouseholdContacts(admin, userIds),
       ]);
       if (prErr) throw new Error(prErr.message);
-      emailByUser = emails;
+      contactByUser = new Map(userIds.map((id) => [id, contacts.displayEmail(id)]));
       for (const p of profiles ?? []) {
         nameByUser.set(p.user_id, nameWithPreferred(p));
       }
@@ -1324,7 +1348,13 @@ export const listMemberships = createServerFn({ method: "GET" })
       uts_student_number: r.uts_student_number,
       checkin_count: checkinCounts.get(r.id) ?? 0,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
-      member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
+      member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
+      // Null for the overwhelming majority: an account holder's address is
+      // their own and needs no caption. Set only when the address on this row
+      // belongs to somebody else, so the screen can say so instead of implying
+      // a child has a mailbox.
+      member_email_belongs_to:
+        (r.user_id ? contactByUser.get(r.user_id)?.onBehalfOf?.name : null) ?? null,
     }));
   });
 
@@ -1348,7 +1378,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
       admin
         .from("profiles")
         .select(
-          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at",
+          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at, guardian_user_id",
         )
         .limit(5000),
       admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),

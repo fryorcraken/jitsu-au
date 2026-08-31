@@ -12,12 +12,14 @@ import {
   emailPreferenceKeys,
   hasDigestContent,
   kbAnnotationHref,
+  mergeHouseholdItems,
   notificationKinds,
   preferenceForKind,
   resolveNotificationPreference,
   resolveNotificationPreferences,
   shouldEmail,
   threadActivityRecipients,
+  type DigestCandidate,
   type NotificationItem,
   type NotificationKind,
 } from "./notifications";
@@ -317,5 +319,74 @@ describe("commentPreview", () => {
 
   it("handles a single word longer than the limit", () => {
     expect(commentPreview("y".repeat(20), 5)).toBe("yyyyy...");
+  });
+});
+
+describe("mergeHouseholdItems", () => {
+  // A family shares one inbox, so their pending rows become one email. The trap
+  // is that `notifyNewBlogPost` writes a row per PERSON, children included, so
+  // one post announced to a parent and three children arrives as four rows
+  // carrying identical text. Concatenated, the parent opens an email that says
+  // "New post: Grading day" four times and cannot tell whether that is four
+  // posts or one.
+  const row = (over: Partial<DigestCandidate>): DigestCandidate => ({
+    id: "n1",
+    user_id: "parent",
+    subject_id: "post-1",
+    kind: "new_blog_post",
+    title: "New post: Grading day",
+    body: null,
+    href: "/blog/grading-day",
+    read_at: null,
+    created_at: "2026-08-30T01:00:00Z",
+    ...over,
+  });
+
+  it("folds one event announced to a whole family into one line", () => {
+    const merged = mergeHouseholdItems([
+      row({ id: "n1", user_id: "parent" }),
+      row({ id: "n2", user_id: "child-a" }),
+      row({ id: "n3", user_id: "child-b" }),
+      row({ id: "n4", user_id: "child-c" }),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe("n1");
+  });
+
+  it("keeps genuinely different events", () => {
+    const merged = mergeHouseholdItems([
+      row({ id: "n1", subject_id: "post-1" }),
+      row({ id: "n2", subject_id: "post-2", title: "New post: Timetable" }),
+    ]);
+    expect(merged.map((m) => m.title)).toEqual(["New post: Grading day", "New post: Timetable"]);
+  });
+
+  it("does not fold two kinds that happen to share a subject", () => {
+    // `(user_id, kind, subject_id)` is the table's own uniqueness, and lifting
+    // it to the household has to lift the whole key. Folding on subject alone
+    // would drop a reply because a thread-activity row named the same comment.
+    const merged = mergeHouseholdItems([
+      row({ id: "n1", kind: "reply", subject_id: "comment-1", title: "Ada replied" }),
+      row({
+        id: "n2",
+        kind: "thread_activity",
+        subject_id: "comment-1",
+        title: "New comment in a thread you are in",
+      }),
+    ]);
+    expect(merged).toHaveLength(2);
+  });
+
+  it("keeps the order the rows arrived in, earliest first", () => {
+    const merged = mergeHouseholdItems([
+      row({ id: "n1", subject_id: "post-1", created_at: "2026-08-30T01:00:00Z" }),
+      row({ id: "n2", subject_id: "post-2", created_at: "2026-08-30T02:00:00Z" }),
+      row({ id: "n3", subject_id: "post-1", created_at: "2026-08-30T03:00:00Z" }),
+    ]);
+    expect(merged.map((m) => m.id)).toEqual(["n1", "n2"]);
+  });
+
+  it("returns nothing for nothing", () => {
+    expect(mergeHouseholdItems([])).toEqual([]);
   });
 });

@@ -173,6 +173,57 @@ export function digestSections(
   };
 }
 
+/**
+ * A pending row as the digest picks it up: the item, plus who it is about and
+ * what event it is about.
+ *
+ * `user_id` and `subject_id` are not on `NotificationItem` because nothing that
+ * RENDERS an item needs them. They matter only while a household's rows are
+ * being merged, which is what the two fields below are for.
+ */
+export type DigestCandidate = NotificationItem & { user_id: string; subject_id: string };
+
+/**
+ * One household's pending rows, as the single email about them should read.
+ *
+ * A family shares an inbox, so a parent with three children gets ONE digest
+ * rather than four. That merge has a trap in it, and this is the function that
+ * closes it: `notifyNewBlogPost` writes a row for every person with a club
+ * record, children included, so a post announced to a family of four produces
+ * four rows carrying the same title and the same link. Concatenated, the parent
+ * opens one email that says "New post: X" four times and cannot tell whether
+ * that is four posts or one.
+ *
+ * So rows are folded on `(kind, subject_id)`, which is the club's own name for
+ * "the same event": it is the unique index the `notifications` table already
+ * carries per person, and lifting it to the household is exactly the same
+ * statement one level up. The earliest row wins, so the merged list keeps the
+ * created_at order it arrived in.
+ *
+ * ⚠️ This decides what is SHOWN, never what is stamped. Every row that went in
+ * is still owed an `emailed_at`, including the ones folded away here, or
+ * tomorrow's run reads them again and mails the family a second copy.
+ */
+export function mergeHouseholdItems(rows: DigestCandidate[]): NotificationItem[] {
+  const seen = new Set<string>();
+  const merged: NotificationItem[] = [];
+  for (const row of rows) {
+    const key = `${row.kind}:${row.subject_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      body: row.body,
+      href: row.href,
+      read_at: row.read_at,
+      created_at: row.created_at,
+    });
+  }
+  return merged;
+}
+
 /** Whether a digest has anything in it. An empty one is not sent. */
 export function hasDigestContent(sections: DigestSections): boolean {
   return (

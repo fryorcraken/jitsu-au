@@ -121,12 +121,39 @@ export async function assertActingFor(
   callerUserId: string,
   targetUserId: string,
 ): Promise<void> {
+  if (!(await mayActFor(admin, callerUserId, targetUserId))) throw new Error(NOT_YOURS);
+}
+
+/**
+ * The same question as `assertActingFor`, answered rather than thrown.
+ *
+ * `assertActingFor` is defined in terms of this, so there is still exactly ONE
+ * implementation of the rule and no way for the two to drift. This is not a
+ * second gate: it is the same gate with the refusal left to the caller.
+ *
+ * It exists for the one caller whose own refusal has to say something DIFFERENT
+ * from `NOT_YOURS`. `getWaiverPdfUrl` answers "Waiver PDF not found." to a
+ * caller who may not have it, which is the same sentence it answers for an id
+ * that does not exist -- so a stranger cannot use it to discover which waiver
+ * ids are real. Letting `NOT_YOURS` escape from there would undo that: two
+ * different messages for "exists but not yours" and "does not exist" is exactly
+ * the probe this module's single refusal sentence exists to prevent.
+ *
+ * ⚠️ A failed READ still throws. Only the answer "no" is returned as `false`; a
+ * database error is not an answer and must not be flattened into one, or an
+ * outage would read as a refusal at every call site.
+ */
+export async function mayActFor(
+  admin: AdminClient,
+  callerUserId: string,
+  targetUserId: string,
+): Promise<boolean> {
   // Again here, not only in the schema: this is the security boundary, and it
   // takes two bare strings from wherever a caller got them. Postgres hands back
   // lowercase, so every comparison below is against a lowercase id.
   const callerId = callerUserId.toLowerCase();
   const targetId = targetUserId.toLowerCase();
-  if (callerId === targetId) return;
+  if (callerId === targetId) return true;
 
   // One round trip for both people. `.in()` is parameterised by the client, so
   // no filter string is assembled by hand here (see `kb.functions.ts`).
@@ -141,10 +168,10 @@ export async function assertActingFor(
   // No profile row is not the same as "not allowed", but reaching for somebody
   // else has the same answer either way, and saying which would leak the
   // difference.
-  if (!caller || isDependant(caller)) throw new Error(NOT_YOURS);
+  if (!caller || isDependant(caller)) return false;
 
   const target = rows.find((r) => r.user_id.toLowerCase() === targetId);
-  if (!target || target.guardian_user_id?.toLowerCase() !== callerId) throw new Error(NOT_YOURS);
+  return target?.guardian_user_id?.toLowerCase() === callerId;
 }
 
 /**

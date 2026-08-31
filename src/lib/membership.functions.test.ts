@@ -1137,6 +1137,8 @@ function fakeInvoiceEmailAdmin(
     siblingPlans?: Result;
     profile?: Result;
     emails?: Result;
+    /** The `profiles` rows the household lookup reads, as guardian links. */
+    household?: Result;
   } = {},
 ) {
   const membership =
@@ -1157,6 +1159,12 @@ function fakeInvoiceEmailAdmin(
     over.profile ?? ok({ first_name: "Ada", middle_name: null, last_name: "Lovelace" });
   const emails =
     over.emails ?? ok([{ user_id: "user-1", email: "ada@example.com", email_confirmed_at: null }]);
+  // The guardian links `loadHouseholdContacts` reads before it resolves an
+  // address. Modelled rather than ignored: an invoice's recipient is now "the
+  // contact person for this member", and a fake that answered the name lookup
+  // for every profiles read would let a dependant's invoice silently resolve
+  // to nobody while the test stayed green.
+  const household = over.household ?? ok([{ user_id: "user-1", guardian_user_id: null }]);
 
   const byId = (filters: InvoiceOp["filters"]) =>
     filters.some(([col, verb]) => col === "id" && verb === "eq");
@@ -1185,6 +1193,11 @@ function fakeInvoiceEmailAdmin(
         return Promise.resolve(byId(op.filters) ? membership : filterSiblings(op.filters));
       if (op.table === "membership_plans")
         return Promise.resolve(byId(op.filters) ? plan : siblingPlans);
+      // Two different reads of `profiles`: the household link lookup filters
+      // `user_id` with `.in()` and wants rows, the name lookup uses `.eq()`
+      // and wants one.
+      if (op.table === "profiles" && op.filters.some(([c, v]) => c === "user_id" && v === "in"))
+        return Promise.resolve(household);
       return Promise.resolve(profile);
     };
     const builder: Record<string, unknown> = {

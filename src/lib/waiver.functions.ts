@@ -56,8 +56,10 @@ import {
   householdTargetSchema,
   isDependant,
   listHousehold,
+  mayActFor,
   resolveSubject,
 } from "@/lib/household";
+import { isManager } from "@/lib/require-manager";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -2506,22 +2508,82 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
     return { ok: true as const, id: data.id, status: data.status, approved_at: approvedAt };
   });
 
-// ---- Signed URL for a waiver PDF (manager or owner) ----
+// ---- Signed URL for a waiver PDF (manager, owner, or the owner's guardian) ----
+
+/** Every refusal this path can give, and deliberately only one sentence. */
+const PDF_NOT_FOUND = "Waiver PDF not found.";
+
+/**
+ * The stored object name of a waiver PDF the caller is entitled to open.
+ *
+ * Pulled out of its `createServerFn` wrapper for the reason `profileForCaller`
+ * and `waiversForCaller` above are: a handler cannot be called from the test
+ * runner, and a gate nothing can test is a gate that can be deleted without
+ * anything noticing.
+ *
+ * This used to read the row through the CALLER-scoped client and let
+ * `public.waivers` RLS ("Owners can view their own waivers", plus the manager
+ * policy) decide. That was right until dependants existed and is now the one
+ * read in this family that a guardian is refused: a child's waiver belongs to
+ * the child, `auth.uid()` is the parent, and the parent gets no row and a
+ * "not found" for a document that is theirs to see. #106 diagnosed this as the
+ * `storage.objects` policy; it is not (the signed URL is minted with the
+ * service role, which bypasses storage RLS entirely) -- see the header of
+ * `20260828000000_waiver_pdf_guardian_read.sql`.
+ *
+ * So it now reads on the service role and asks the three questions in the open,
+ * which is also what every other "...for this person" read here already does.
+ * The household half goes through `mayActFor` -- the same single gate, not a
+ * second one -- rather than a widened `public.waivers` policy, which would put
+ * the household rule in a place `src/lib/household.ts` is meant to be the only
+ * one for.
+ *
+ * ⚠️ All three refusals say the same thing, and the ordering below is not
+ * cosmetic. `mayActFor` is asked LAST and its own `NOT_YOURS` sentence is never
+ * allowed to escape, because "that waiver is not yours" and "no such waiver"
+ * must stay indistinguishable: this takes a bare uuid from anyone signed in,
+ * and two different answers would turn it into a way to enumerate which waiver
+ * ids are real.
+ */
+export async function waiverPdfPathForCaller(
+  admin: SupabaseClient<Database>,
+  caller: { userId: string; isManager: () => Promise<boolean> },
+  waiverId: string,
+): Promise<string> {
+  const { data: waiver, error } = await admin
+    .from("waivers")
+    .select("user_id, pdf_path")
+    .eq("id", waiverId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!waiver?.pdf_path) throw new Error(PDF_NOT_FOUND);
+
+  const callerId = caller.userId.toLowerCase();
+  const ownerId = waiver.user_id?.toLowerCase() ?? null;
+  // The owner, free. A manager, one RPC. Only then the household read, so the
+  // two common cases cost what they always did.
+  const allowed =
+    (ownerId != null && ownerId === callerId) ||
+    (await caller.isManager()) ||
+    (ownerId != null && (await mayActFor(admin, callerId, ownerId)));
+  if (!allowed) throw new Error(PDF_NOT_FOUND);
+
+  return waiver.pdf_path;
+}
+
 export const getWaiverPdfUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: waiver, error } = await context.supabase
-      .from("waivers")
-      .select("pdf_path")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!waiver?.pdf_path) throw new Error("Waiver PDF not found.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const path = await waiverPdfPathForCaller(
+      supabaseAdmin,
+      { userId: context.userId, isManager: () => isManager(context) },
+      data.id,
+    );
     const { data: signed, error: sErr } = await supabaseAdmin.storage
       .from(BUCKET)
-      .createSignedUrl(waiver.pdf_path, 60 * 60);
+      .createSignedUrl(path, 60 * 60);
     if (sErr) throw new Error(sErr.message);
     return { url: signed.signedUrl };
   });

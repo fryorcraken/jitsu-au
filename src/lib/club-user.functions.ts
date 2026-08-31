@@ -18,6 +18,7 @@ import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-condu
 import type { MembershipClient } from "@/lib/membership-types";
 import { personLabelsById, type ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
+import { isDependant } from "@/lib/household";
 
 /** Max waiver / membership rows one person's page pulls. */
 const WAIVERS_LIMIT = 100;
@@ -55,7 +56,6 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: memberships, error: mErr },
       { data: plans, error: plErr },
       { data: roles, error: rErr },
-      { data: emailRows, error: emailErr },
       { data: checkins, error: cErr },
       { count: checkinCount, error: ccErr },
       { data: codeOfConduct, error: cocErr },
@@ -75,7 +75,6 @@ export const getClubUser = createServerFn({ method: "POST" })
         .limit(MEMBERSHIPS_LIMIT),
       admin.from("membership_plans").select("id, name, kind, starts_on, ends_on, duration_days"),
       admin.from("user_roles").select("user_id, role").eq("user_id", data.userId),
-      userEmails(admin, [data.userId]),
       admin
         .from("session_checkins")
         .select("id, event_id, checked_in_at, coverage, membership_id, consumed_credit, warnings")
@@ -110,6 +109,33 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (cErr) throw new Error(cErr.message);
     if (ccErr) throw new Error(ccErr.message);
     if (!profile) throw new Error("User not found.");
+
+    // Whose address belongs on this page. For an account holder that is their
+    // own; for a dependant it is their guardian's, and the reserved,
+    // non-deliverable string on the child's own login is never asked for at
+    // all -- which is why this is a round of its own rather than part of the
+    // one above: the guardian's id is only known once the profile has come
+    // back. One extra round trip on a manager page, in exchange for never
+    // fetching an address that identifies nobody.
+    const contactId = profile.guardian_user_id ?? profile.user_id;
+    const [contactEmails, guardianProfile] = await Promise.all([
+      userEmails(admin, [contactId]),
+      profile.guardian_user_id
+        ? admin
+            .from("profiles")
+            .select("user_id, guardian_user_id, first_name, middle_name, last_name, preferred_name")
+            .eq("user_id", profile.guardian_user_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    // Same posture as the lookup this replaced: a failed address read degrades
+    // to a missing email rather than taking down the screen a manager approves
+    // from. A failed GUARDIAN read is logged for the same reason: the page
+    // still works, it just cannot name whose address it is showing.
+    const emailErr = contactEmails.error;
+    const emailRows = contactEmails.data;
+    if (guardianProfile.error)
+      console.error("[getClubUser] guardian profile lookup failed:", guardianProfile.error);
 
     const waiverRows = waivers ?? [];
     const membershipRows = memberships ?? [];
@@ -159,6 +185,8 @@ export const getClubUser = createServerFn({ method: "POST" })
     const [summary] = aggregateClubUsers({
       profiles: [profile],
       emails,
+      // Not a person on this page, only the owner of the address shown on it.
+      guardians: guardianProfile.data ? [guardianProfile.data] : [],
       waivers: waiverRows.map((w) => ({
         user_id: w.user_id,
         signed_at: w.signed_at,
@@ -211,6 +239,8 @@ export const getClubUser = createServerFn({ method: "POST" })
             .select("user_id, first_name, middle_name, last_name, preferred_name")
             .in("user_id", approverIds)
         : { data: [], error: null },
+      // Approvers are managers, so never dependants: a dependant has no login
+      // and cannot approve anything. Left as a direct lookup on purpose.
       approverIds.length ? userEmails(admin, approverIds) : { data: [], error: null },
     ]);
     const eventById = new Map((events ?? []).map((e) => [e.id, e]));
@@ -508,6 +538,38 @@ export const resendClubUserVerification = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
 
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
+
+    // A dependant is never sent a verification link, and this is the one path
+    // that could have sent one. #102 asks for that guarantee and #106 asks for
+    // it to be CONFIRMED rather than assumed, so here is the confirmation: of
+    // the four places that mint an `email_verification_tokens` row, the waiver
+    // confirmation and the code-of-conduct link both resolve to the contact
+    // person already, an interest registration is a lead with no person record
+    // at all, and this one takes a bare `userId` from a manager's screen and
+    // would happily mint against a child.
+    //
+    // What that produced was not dangerous so much as incoherent: a token bound
+    // to a reserved address in a subdomain the club routes no mail for, posted
+    // nowhere, redeemable by nobody, sitting in the table looking like somebody
+    // was asked to confirm something. Refused outright instead.
+    //
+    // ⚠️ The neighbouring hole is NOT closed here: `setClubUserEmail` can still
+    // be pointed at a dependant and move them onto a real address. That is
+    // #107's, listed in #102's sharp edges and recorded again in #111 as
+    // deliberately untouched, and fixing it here would mean writing half of
+    // #107's rule in the wrong PR.
+    const { data: person, error: personErr } = await admin
+      .from("profiles")
+      .select("user_id, guardian_user_id")
+      .eq("user_id", data.userId)
+      .maybeSingle();
+    if (personErr) throw new Error(personErr.message);
+    if (person && isDependant(person)) {
+      throw new Error(
+        "This person is on somebody else's account and has no email of their own. Send the link to the account holder instead.",
+      );
+    }
+
     const { data: got, error } = await admin.auth.admin.getUserById(data.userId);
     if (error) throw new Error(error.message);
     if (!got.user?.email) throw new Error("That person has no email on file.");

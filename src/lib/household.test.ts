@@ -11,6 +11,7 @@ import {
   householdTargetSchema,
   isDependant,
   listHousehold,
+  mayActFor,
   resolveSubject,
 } from "./household";
 
@@ -323,5 +324,39 @@ describe("resolveSubject", () => {
   it("does not consult the database for a caller asking about themselves", async () => {
     await expect(resolveSubject(erroringAdmin, "parent", undefined)).resolves.toBe("parent");
     await expect(resolveSubject(erroringAdmin, "parent", "parent")).resolves.toBe("parent");
+  });
+});
+
+describe("mayActFor", () => {
+  // The same gate as `assertActingFor`, answered instead of thrown. It exists
+  // for the one caller whose refusal has to say something else, so what matters
+  // is that the two never disagree: `assertActingFor` is defined in terms of
+  // this, and these cases hold both to the same answers.
+  it("agrees with assertActingFor on every case", async () => {
+    const db = admin(EVERYONE);
+    const cases: [string, string, boolean][] = [
+      ["parent", "parent", true],
+      ["parent", "child", true],
+      ["parent", "sibling", true],
+      ["parent", "their-child", false],
+      ["parent", "stranger", false],
+      ["child", "parent", false],
+      ["child", "sibling", false],
+      ["stranger", "child", false],
+      ["parent", "nobody", false],
+      ["nobody", "child", false],
+    ];
+    for (const [caller, target, allowed] of cases) {
+      expect(await mayActFor(db, caller, target)).toBe(allowed);
+      const assertion = assertActingFor(db, caller, target);
+      if (allowed) await expect(assertion).resolves.toBeUndefined();
+      else await expect(assertion).rejects.toThrow(/only see or change your own account/);
+    }
+  });
+
+  it("throws on a failed read rather than answering no", async () => {
+    // "We could not ask" is not "no". Flattening it would turn an outage into a
+    // refusal at every call site.
+    await expect(mayActFor(erroringAdmin, "parent", "child")).rejects.toThrow("boom");
   });
 });

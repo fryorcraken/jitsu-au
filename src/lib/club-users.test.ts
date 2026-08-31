@@ -28,6 +28,7 @@ function profile(over: Partial<ClubUserProfile> = {}): ClubUserProfile {
     uts_student_number: null,
     gi_size: null,
     belt_size: null,
+    guardian_user_id: null,
     created_at: "2026-01-01T00:00:00Z",
     ...over,
   };
@@ -438,5 +439,64 @@ describe("aggregateClubUsers", () => {
       leads: [lead({ name: "Amy Lead" })],
     });
     expect(users.map((u) => u.name)).toEqual(["Amy Lead", "Zoe"]);
+  });
+});
+
+describe("aggregateClubUsers, for a dependant", () => {
+  // What a manager reads on a child's row. A dependant's own login carries a
+  // reserved, non-deliverable address that identifies nobody, so the address
+  // shown has to be their guardian's -- and it has to SAY so, or the row reads
+  // as a nine-year-old with a mailbox somebody can write to.
+  const PARENT = profile({ user_id: "parent", first_name: "Ada", last_name: "Lovelace" });
+  const CHILD = profile({
+    user_id: "child",
+    first_name: "Bea",
+    last_name: "Lovelace",
+    guardian_user_id: "parent",
+  });
+  const emails = [
+    { user_id: "parent", email: "ada@example.com", email_confirmed_at: "2026-08-01T00:00:00Z" },
+  ];
+  const base = { waivers: [], memberships: [], plans, roles: [], leads: [] };
+
+  it("shows the guardian's address on a child's row, and whose it is", () => {
+    const [parent, child] = aggregateClubUsers({ profiles: [PARENT, CHILD], emails, ...base });
+
+    expect(child.email).toBe("ada@example.com");
+    expect(child.email_belongs_to).toBe("Ada Lovelace");
+
+    // The guardian's own row is unchanged: their address is their own, and
+    // captioning it would be noise on almost every row in the directory.
+    expect(parent.email).toBe("ada@example.com");
+    expect(parent.email_belongs_to).toBeNull();
+  });
+
+  it("badges the guardian's confirmation state on the child's row", () => {
+    // Confirmation is a fact about the ADDRESS. The guardian is who proved they
+    // can read that mailbox, so that is the honest thing to badge; reading the
+    // child's own would badge a reserved address nobody ever confirmed.
+    const [, child] = aggregateClubUsers({ profiles: [PARENT, CHILD], emails, ...base });
+    expect(child.email_confirmed_at).toBe("2026-08-01T00:00:00Z");
+  });
+
+  it("resolves the guardian even when they are not one of the people listed", () => {
+    // The single-person page (`getClubUser`) reads one person. If that person
+    // is a dependant their guardian is not in `profiles` at all, so it passes
+    // them separately rather than showing a child with no contact address.
+    const [child] = aggregateClubUsers({
+      profiles: [CHILD],
+      guardians: [PARENT],
+      emails,
+      ...base,
+    });
+    expect(child.email).toBe("ada@example.com");
+    expect(child.email_belongs_to).toBe("Ada Lovelace");
+  });
+
+  it("shows no address rather than the reserved one when the guardian cannot be resolved", () => {
+    // Never a fallback to the person's own address. That address is the
+    // reserved string, and printing it is the one thing this must not do.
+    const [child] = aggregateClubUsers({ profiles: [CHILD], emails: [], ...base });
+    expect(child.email).toBeNull();
   });
 });

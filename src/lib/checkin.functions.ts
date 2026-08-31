@@ -30,7 +30,7 @@ import type { CoverageCandidate, CoverageDecision } from "@/lib/checkin";
 import { topUpHorizon } from "@/lib/calendar.functions";
 import { ensureCasualInvoiceEmailed } from "@/lib/membership.functions";
 import type { ClubUserEmail } from "@/lib/club-users";
-import { userEmails } from "@/lib/supabase-rpc";
+import { loadHouseholdContacts } from "@/lib/household-email";
 
 type CheckinClient = SupabaseClient<Database>;
 
@@ -147,15 +147,36 @@ async function coverageCandidatesByUser(
   return byUser;
 }
 
-/** Resolve auth emails (the one email store) via the service-role RPC. */
-async function emailsByUserId(
+/**
+ * The contact address for each person on a roster, resolved through their
+ * guardian where they have one.
+ *
+ * ⚠️ Read what this feeds before changing it. #106 classifies this call site as
+ * a DELIVERY one, "check-in receipts", and there is no such thing: nothing in
+ * this module sends an email, and the only consumer of the map is the roster's
+ * `email` field, which `manager.check-in.tsx` uses solely to filter the list as
+ * a manager types. It is never printed. So this is neither of #106's two sides
+ * -- it is a search key -- and resolving it through the guardian is what makes
+ * a parent's address find their children at the door, which is the useful
+ * behaviour for the person holding the tablet.
+ *
+ * If a roster ever starts PRINTING this, it has to move to
+ * `displayEmail`/`onBehalfOf` and say whose address it is, for the reason every
+ * other display does: a bare address under a nine-year-old's name reads as a
+ * mailbox somebody could write to.
+ */
+async function contactEmailsByUserId(
   admin: CheckinClient,
   userIds: string[],
 ): Promise<Map<string, string>> {
   if (!userIds.length) return new Map();
-  const { data, error } = await userEmails(admin, userIds);
-  if (error || !data) return new Map();
-  return new Map(data.map((e) => [e.user_id, e.email]));
+  const contacts = await loadHouseholdContacts(admin, userIds);
+  const map = new Map<string, string>();
+  for (const id of userIds) {
+    const email = contacts.deliveryEmail(id);
+    if (email) map.set(id, email);
+  }
+  return map;
 }
 
 /**
@@ -426,7 +447,7 @@ export const getCheckInBoard = createServerFn({ method: "POST" })
 
     const userIds = people.map((p) => p.user_id);
     const [emails, candidates] = await Promise.all([
-      emailsByUserId(admin, userIds),
+      contactEmailsByUserId(admin, userIds),
       coverageCandidatesByUser(admin, userIds),
     ]);
 
