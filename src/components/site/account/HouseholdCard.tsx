@@ -23,10 +23,6 @@ import { listMyHousehold, type HouseholdPerson } from "@/lib/household.functions
  * It is HIDDEN for an account with no dependants, which is almost every
  * account. "People on your account: you" is a card that tells a member nothing
  * and pushes the details they came for further down the page.
- *
- * The account holder appears only when they have a waiver of their own. A
- * parent who does not train has no records here, so listing them among the
- * people who do would invite a click through to an empty page.
  */
 export function HouseholdCard({ userId }: { userId: string }) {
   const fetchHousehold = useServerFn(listMyHousehold);
@@ -61,7 +57,10 @@ export function HouseholdCard({ userId }: { userId: string }) {
   if (loading) return null;
   if (!loadError && dependants.length === 0) return null;
 
-  const listed = [...(self?.has_any_waiver && self ? [self] : []), ...dependants];
+  // The holder only when they have records of their own. A parent who does not
+  // train has no waiver, no membership and no photo consent, so a row for them
+  // would invite a click through to an empty page.
+  const listed = [...(self && self.has_any_waiver ? [self] : []), ...dependants];
 
   return (
     <Card>
