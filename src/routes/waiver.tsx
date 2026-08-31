@@ -1065,27 +1065,50 @@ function Waiver() {
                 onValueChange={(v) => chooseSigningFor(v as WaiverSigningFor)}
                 className="gap-2"
               >
-                <label className="flex items-start gap-2 text-sm" htmlFor="signing_for_self">
-                  <RadioGroupItem value="self" id="signing_for_self" className="mt-0.5" />
-                  <span>
-                    Myself
+                {/* The explanation under each option is a DESCRIPTION, not part
+                    of the option's name. Both matter. A screen reader should
+                    announce "Myself", not a whole sentence, and an accessible
+                    name that swallows a paragraph also swallows whatever words
+                    happen to be in it: with the hint inside the label, "they
+                    never need an email address of their own" made this radio a
+                    second match for "Email" and for "Address" on the page, and
+                    the end-to-end suite could no longer find the fields by
+                    their own labels. */}
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem
+                    value="self"
+                    id="signing_for_self"
+                    className="mt-0.5"
+                    aria-describedby={user ? "signing_for_self_hint" : undefined}
+                  />
+                  <div className="text-sm">
+                    <Label htmlFor="signing_for_self" className="font-normal">
+                      Myself
+                    </Label>
                     {user && (
-                      <span className="block text-xs text-muted-foreground">
+                      <p id="signing_for_self_hint" className="text-xs text-muted-foreground">
                         The waiver uses {user.email}, the address on your account.
-                      </span>
+                      </p>
                     )}
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm" htmlFor="signing_for_dependant">
-                  <RadioGroupItem value="dependant" id="signing_for_dependant" className="mt-0.5" />
-                  <span>
-                    My child, or someone else I look after
-                    <span className="block text-xs text-muted-foreground">
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem
+                    value="dependant"
+                    id="signing_for_dependant"
+                    className="mt-0.5"
+                    aria-describedby="signing_for_dependant_hint"
+                  />
+                  <div className="text-sm">
+                    <Label htmlFor="signing_for_dependant" className="font-normal">
+                      My child, or someone else I look after
+                    </Label>
+                    <p id="signing_for_dependant_hint" className="text-xs text-muted-foreground">
                       They get their own record at the club. You stay the contact for everything
                       about them, and they never need an email address of their own.
-                    </span>
-                  </span>
-                </label>
+                    </p>
+                  </div>
+                </div>
               </RadioGroup>
 
               {/* The people already on the account, so a parent signing for the

@@ -300,6 +300,27 @@ describe("/waiver, who is this for", () => {
     );
   };
 
+  // The end-to-end suite finds the form's fields by their own labels, and
+  // Playwright's `getByLabel` matches on a substring. An option whose
+  // accessible name swallows its explanation swallows the explanation's words
+  // with it: "they never need an email address of their own" made this radio a
+  // second match for both "Email" and "Address" on a page that has an Email
+  // field and an Address field, and the journey spec stopped being able to fill
+  // either. The hint is a description, which is also what a screen reader
+  // should hear: the name is the option, not a paragraph about it.
+  it("keeps each option's name to the option, with the hint as a description", async () => {
+    renderWaiver();
+    await screen.findByLabelText("First name");
+
+    const dependant = screen.getByRole("radio", {
+      name: "My child, or someone else I look after",
+    });
+    expect(dependant).toHaveAccessibleDescription(/never need an email address/i);
+    // One Email field on the page, and it is the Email field.
+    expect(screen.getAllByLabelText(/email/i)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/address/i)).toHaveLength(1);
+  });
+
   it("starts on Myself, so the form is the one everybody already knows", async () => {
     renderWaiver();
     await screen.findByLabelText("First name");
