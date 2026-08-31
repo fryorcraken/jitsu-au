@@ -1060,9 +1060,15 @@ function Waiver() {
                 account (#102). */}
             <fieldset className="space-y-3">
               <legend className="text-sm font-semibold">Who is this waiver for?</legend>
+              {/* Named the same way the health questions' groups are
+                  (`aria-label`, line ~1555). A <legend> names the fieldset, not
+                  the radiogroup inside it, so without this a screen-reader user
+                  arriving at the group is told there are two options and
+                  nothing about what they are choosing. */}
               <RadioGroup
                 value={signingFor}
                 onValueChange={(v) => chooseSigningFor(v as WaiverSigningFor)}
+                aria-label="Who is this waiver for?"
                 className="gap-2"
               >
                 {/* The explanation under each option is a DESCRIPTION, not part
@@ -1120,6 +1126,7 @@ function Waiver() {
                   <RadioGroup
                     value={dependantId}
                     onValueChange={choosePickedDependant}
+                    aria-label="Which person on your account is this waiver for?"
                     className="mt-2 gap-2"
                   >
                     {dependants.map((person) => (
