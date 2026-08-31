@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Loading } from "@/components/site/Loading";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import { CodeOfConductDocument } from "@/components/site/CodeOfConductDocument";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +42,7 @@ export const Route = createFileRoute("/code-of-conduct")({
 });
 
 function CodeOfConduct() {
-  const { t: token } = Route.useSearch();
+  const { t: token, for: subjectId } = Route.useSearch();
   const { user, loading: authLoading } = useAuth();
   const fetchSigner = useServerFn(getCodeOfConductSigner);
   const accept = useServerFn(acceptCodeOfConduct);
@@ -49,6 +50,12 @@ function CodeOfConduct() {
   const [agreed, setAgreed] = useState(false);
   const [signatureName, setSignatureName] = useState("");
   const [saving, setSaving] = useState(false);
+  // Held, not toasted. A toast fades in four seconds and leaves a form that
+  // looks exactly like one that filed, so somebody who glanced away walks off
+  // believing the agreement is on record. That was already wrong for a member
+  // signing for themselves; it is worse now that a parent can sign for a child
+  // and never find out that nothing was filed.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // The honeypot's live value. A person never touches it (it is display:none
   // and out of the tab order), so anything in it came from something filling
   // the form in wholesale.
@@ -59,14 +66,19 @@ function CodeOfConduct() {
   // identifies a signed-in member to the server, and asking too early would
   // resolve them as "we don't know who you are" and offer them the wrong screen.
   const signerQ = useQuery({
-    queryKey: ["code-of-conduct-signer", token ?? "", user?.id ?? ""],
-    queryFn: () => fetchSigner({ data: { token: token ?? "" } }),
+    queryKey: ["code-of-conduct-signer", token ?? "", user?.id ?? "", subjectId ?? ""],
+    queryFn: () => fetchSigner({ data: { token: token ?? "", userId: subjectId } }),
     enabled: !authLoading,
     staleTime: 60_000,
   });
 
   const signer = signerQ.data?.signer ?? null;
   const status = signerQ.data?.status ?? null;
+  // Set only when the agreement is about somebody else on the caller's account.
+  // Everything on this page that says "you" has to say their name instead, or a
+  // parent cannot tell which child they are agreeing for.
+  const subject = signerQ.data?.subject ?? null;
+  const subjectName = subject?.greeting_name ?? subject?.name ?? null;
 
   // Sign with the name the club has on file, without stopping anyone correcting
   // it (a legal name and the name someone signs with are not always identical).
@@ -85,10 +97,13 @@ function CodeOfConduct() {
       return;
     }
     setSaving(true);
+    setSaveError(null);
     try {
       const res = await accept({
         data: {
           token: token ?? "",
+          // WHOSE agreement. Absent means the caller's own.
+          userId: subjectId,
           agree: true,
           signature_name: signatureName,
           version: CODE_OF_CONDUCT_VERSION,
@@ -103,9 +118,17 @@ function CodeOfConduct() {
         },
       });
       setJustSigned(res.accepted_at ?? new Date().toISOString());
-      toast.success("Thanks. Your agreement is on file.");
+      toast.success(
+        subjectName
+          ? `Thanks. That is on file for ${subjectName}.`
+          : "Thanks. Your agreement is on file.",
+      );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      setSaveError(
+        err instanceof Error && err.message
+          ? err.message
+          : "We could not file that just now. What you typed is still here, so try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -140,6 +163,7 @@ function CodeOfConduct() {
               acceptedAt={justSigned}
               version={CODE_OF_CONDUCT_VERSION}
               signedIn={Boolean(user)}
+              forName={subjectName}
             />
           ) : !signer ? (
             <NotIdentifiedPanel signedIn={Boolean(user)} />
@@ -149,6 +173,7 @@ function CodeOfConduct() {
               acceptedAt={status.accepted_at ?? ""}
               version={status.accepted_version ?? CODE_OF_CONDUCT_VERSION}
               signedIn={Boolean(user)}
+              forName={subjectName}
             />
           ) : (
             <form onSubmit={onSubmit} className="space-y-5 rounded-2xl border bg-card p-6 md:p-8">
@@ -164,16 +189,26 @@ function CodeOfConduct() {
               <div>
                 <h2 className="text-xl font-bold">Agree to the code</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Signing as <strong>{signer.full_name}</strong> ({signer.email}).
-                  {signer.signed_in
-                    ? " To sign for someone else, log out first."
-                    : " Not you? Use the link from your own email."}
+                  {subjectName ? (
+                    <>
+                      Agreeing on behalf of <strong>{subject?.name ?? subjectName}</strong>, signed
+                      by you as <strong>{signer.full_name}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Signing as <strong>{signer.full_name}</strong> ({signer.email}).
+                      {signer.signed_in
+                        ? " To sign for someone else, log out first."
+                        : " Not you? Use the link from your own email."}
+                    </>
+                  )}
                 </p>
                 {status?.state === "outdated" && (
                   <p className="mt-3 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
-                    You agreed to version {status.accepted_version} on{" "}
-                    {formatDate(status.accepted_at ?? "")}. We have updated it since, so please read
-                    it again and agree to version {CODE_OF_CONDUCT_VERSION}.
+                    {subjectName ? `Agreed for ${subjectName}` : "You agreed"} to version{" "}
+                    {status.accepted_version} on {formatDate(status.accepted_at ?? "")}. We have
+                    updated it since, so please read it again and agree to version{" "}
+                    {CODE_OF_CONDUCT_VERSION}.
                   </p>
                 )}
               </div>
@@ -181,7 +216,10 @@ function CodeOfConduct() {
               <label className="flex items-start gap-3 text-sm">
                 <Checkbox
                   checked={agreed}
-                  onCheckedChange={(v) => setAgreed(v === true)}
+                  onCheckedChange={(v) => {
+                    setAgreed(v === true);
+                    setSaveError(null);
+                  }}
                   className="mt-0.5"
                 />
                 <span>{CODE_OF_CONDUCT_ACKNOWLEDGEMENT}</span>
@@ -194,7 +232,12 @@ function CodeOfConduct() {
                   required
                   maxLength={120}
                   value={signatureName}
-                  onChange={(e) => setSignatureName(e.target.value)}
+                  onChange={(e) => {
+                    setSignatureName(e.target.value);
+                    // The panel described the last attempt; editing the form
+                    // under it would leave it claiming something it never saw.
+                    setSaveError(null);
+                  }}
                   placeholder="Your full name"
                   className="mt-1.5"
                 />
@@ -204,8 +247,23 @@ function CodeOfConduct() {
                 </p>
               </div>
 
+              {saveError && (
+                <SaveFailure
+                  what={subjectName ? `${subjectName}'s agreement` : "Your agreement"}
+                  message={saveError}
+                  onRetry={() =>
+                    void onSubmit({ preventDefault: () => {} } as React.FormEvent<HTMLFormElement>)
+                  }
+                  retrying={saving}
+                />
+              )}
+
               <Button type="submit" size="lg" disabled={saving} className="w-full sm:w-auto">
-                {saving ? "Saving..." : "Agree to the code of conduct"}
+                {saving
+                  ? "Saving..."
+                  : subjectName
+                    ? `Agree on behalf of ${subjectName}`
+                    : "Agree to the code of conduct"}
               </Button>
             </form>
           )}
@@ -220,20 +278,28 @@ function SignedPanel({
   acceptedAt,
   version,
   signedIn,
+  forName,
 }: {
   name: string;
   acceptedAt: string;
   version: number;
   signedIn: boolean;
+  /** Set when this records somebody else's agreement, not the reader's own. */
+  forName?: string | null;
 }) {
   return (
     <div className="rounded-2xl border bg-card p-6 md:p-8">
       <div className="flex items-start gap-3">
         <CheckCircle2 className="mt-0.5 h-6 w-6 flex-none text-primary" />
         <div>
-          <h2 className="text-xl font-bold">You&apos;re all set{name ? `, ${name}` : ""}</h2>
+          <h2 className="text-xl font-bold">
+            {forName
+              ? `That is on file for ${forName}`
+              : `You're all set${name ? `, ${name}` : ""}`}
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            You agreed to version {version} of the code of conduct
+            {forName ? `${forName} is agreed to` : "You agreed to"} version {version} of the code of
+            conduct
             {acceptedAt ? ` on ${formatDate(acceptedAt)}` : ""}. There is nothing else to do. If we
             change the rules, we will ask you to read them again.
           </p>

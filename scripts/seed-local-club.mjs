@@ -218,6 +218,38 @@ async function createUser(persona) {
   return data.user.id;
 }
 
+/**
+ * Create a DEPENDANT of `guardianId`: a person with no login, ever.
+ *
+ * The shape the app itself mints (`resolveDependantId` in
+ * `waiver.functions.ts`): a reserved, non-deliverable address in a subdomain
+ * the club routes no mail for, left unconfirmed, and a permanent ban so the
+ * row can never hold a session even if the address were guessed. The guardian
+ * link is what actually makes them a dependant, and it is set below rather
+ * than here because `ensure_profile` creates the profile row.
+ *
+ * Synthetic like every other fixture person, and deliberately NOT `@example.com`
+ * -- the whole point of a dependant's address is that it is in the club's own
+ * mx-less subdomain, and a seed that used a different shape would photograph a
+ * screen the app cannot produce.
+ */
+async function createDependant(guardianId, person) {
+  const { data, error } = await admin.auth.admin.createUser({
+    email: `${crypto.randomUUID()}@dependant.jitsu.au`,
+    email_confirm: false,
+    ban_duration: "876000h",
+  });
+  if (error) throw new Error(`creating a dependant failed: ${error.message}`);
+  const id = data.user.id;
+  await fillProfile(id, {
+    first_name: person.firstName,
+    last_name: person.lastName,
+    date_of_birth: person.dateOfBirth,
+    guardian_user_id: guardianId,
+  });
+  return id;
+}
+
 const users = {
   manager: await createUser(PERSONAS.manager),
   member: await createUser(PERSONAS.member),
@@ -263,6 +295,17 @@ await fillProfile(users.applicant, {
   emergency_contact_phone: "0400 000 013",
 });
 console.log("[seed] profiles: 3");
+
+// A child on the member's account, so the tour photographs the per-child page
+// with a real dependant on it rather than the member reaching for themselves.
+// One is enough: what the screen has to prove is that somebody with no login of
+// their own has a full record, and a second child would only lengthen a list.
+users.dependant = await createDependant(users.member, {
+  firstName: "Robin",
+  lastName: PERSONAS.member.lastName,
+  dateOfBirth: "2015-04-02",
+});
+console.log("[seed] dependants: 1");
 
 await insert("user_roles", [
   { user_id: users.manager, role: "manager" },
@@ -775,6 +818,14 @@ const fixture = {
     userId: users.member,
     id: BLOG.welcome,
     slug: "welcome",
+  },
+  // Per-path overrides, for a parameter name that means different people on
+  // different pages. `$userId` is a person a MANAGER is looking at on
+  // /manager/users, and one of the MEMBER's own dependants on /account. The
+  // flat map above cannot say both, which `scripts/site-pages.ts` predicted in
+  // as many words; this is that fix.
+  paramsByPath: {
+    "/account/$userId": { userId: users.dependant },
   },
 };
 

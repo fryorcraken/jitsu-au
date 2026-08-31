@@ -787,6 +787,14 @@ export const waiverPrefillSearchSchema = z.object({
   phone: z.coerce.string().max(30).optional().catch(undefined),
   // Email-verification token, present only on links that arrived by email.
   vt: z.coerce.string().max(120).optional().catch(undefined),
+  // WHO on the account this waiver is for, from a "Sign an updated waiver"
+  // button on that person's page. It only ever preselects the picker, which
+  // then reads the name and date of birth from the account, so it is a
+  // convenience and not an authority: the server still resolves the
+  // participant inside the caller's own household and would refuse an id that
+  // is not theirs. `.catch(undefined)` for the same reason every other field
+  // here has it, and a bad value simply leaves the form on "myself".
+  for: z.coerce.string().max(64).optional().catch(undefined),
 });
 export type WaiverPrefillSearch = z.infer<typeof waiverPrefillSearchSchema>;
 
@@ -929,6 +937,13 @@ export const codeOfConductAcceptSchema = z.object({
   // rule the waiver applies to its template version.
   version: z.number().int().positive(),
   client_meta: waiverClientMetaSchema.optional(),
+  // WHO is agreeing. Absent means the signer themselves, which is every
+  // signature the club has taken so far. Present, it is one of the caller's
+  // dependants, and `codeOfConductSubject` adds the rule this path needs on top
+  // of `assertActingFor`: reaching past yourself takes a live session, never an
+  // emailed link. Shares `household.ts`'s schema so a target means the same
+  // thing here as everywhere else.
+  userId: householdTargetUserId.optional(),
   hp: honeypot,
 });
 export type CodeOfConductAcceptInput = z.infer<typeof codeOfConductAcceptSchema>;
@@ -936,6 +951,11 @@ export type CodeOfConductAcceptInput = z.infer<typeof codeOfConductAcceptSchema>
 /** Optional `?t=` token on a code-of-conduct link that arrived by email. */
 export const codeOfConductSearchSchema = z.object({
   t: z.coerce.string().max(120).optional().catch(undefined),
+  // WHO on the caller's account is agreeing, from the button on that person's
+  // page. Only meaningful for a signed-in caller: `codeOfConductSubject`
+  // refuses a target to anybody identified by a token, because a token proves
+  // an address and must never prove the right to reach a household.
+  for: z.coerce.string().max(64).optional().catch(undefined),
 });
 export type CodeOfConductSearch = z.infer<typeof codeOfConductSearchSchema>;
 
@@ -2155,6 +2175,19 @@ export function composeManagerNotifications(sources: {
 
 // ---- Member: start a membership ----
 
+/**
+ * `?for=` on `/membership`: whose plan the page is about.
+ *
+ * A parent with three children needs to say which one they are buying for
+ * BEFORE they pick a plan, because a plan bought for the wrong child is an
+ * invoice, an email and a membership under the wrong name. Absent means the
+ * account holder themselves.
+ */
+export const membershipSearchSchema = z.object({
+  for: z.coerce.string().max(64).optional().catch(undefined),
+});
+export type MembershipSearch = z.infer<typeof membershipSearchSchema>;
+
 export const startMembershipSchema = z
   .object({
     plan_code: z.string().trim().min(1).max(64),
@@ -2170,6 +2203,11 @@ export const startMembershipSchema = z
     // same payment reference). The server makes its own call from the
     // member's current cover — a member with none cannot turn this off.
     include_insurance: z.boolean().optional().default(false),
+    // WHO the plan is for. Absent means the caller themselves, which is every
+    // purchase before a household could exist. Present, it is one of the
+    // caller's dependants, checked by `assertActingFor`. Shares
+    // `household.ts`'s schema so a target means the same thing on every path.
+    userId: householdTargetUserId.optional(),
     hp: honeypot,
   })
   .refine((d) => !d.is_student || Boolean(d.uts_student_number && d.uts_student_number.trim()), {

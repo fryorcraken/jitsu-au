@@ -67,7 +67,11 @@ function mine(memberships: unknown[]) {
 }
 
 vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => (opts: Record<string, unknown>) => opts,
+  // `useSearch` is part of what a route object gives its component, and the
+  // page now reads `?for=` off it to decide whose membership it is showing.
+  // Empty here, which is the account holder's own: every case below is a member
+  // with nobody else on their account.
+  createFileRoute: () => (opts: Record<string, unknown>) => ({ ...opts, useSearch: () => ({}) }),
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
   useNavigate: () => vi.fn(),
 }));
@@ -81,6 +85,15 @@ vi.mock("@/lib/membership.functions", () => ({
   getMyMemberships: (...args: unknown[]) => getMyMemberships(...args),
   getPaymentInstructions: (...args: unknown[]) => getPaymentInstructions(...args),
   startMembership: (...args: unknown[]) => startMembership(...args),
+}));
+
+// Household reads on this page: who is on the account, and what the account
+// owes. Mocked because `household.functions.ts` pulls in the real auth
+// middleware. Empty means an account with nobody else on it, which is what
+// every existing case here is about, so the selector never renders.
+vi.mock("@/lib/household.functions", () => ({
+  listMyHousehold: vi.fn().mockResolvedValue([]),
+  listHouseholdInvoices: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/lib/code-of-conduct.functions", () => ({

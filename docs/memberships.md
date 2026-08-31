@@ -206,6 +206,30 @@ there is no re-sync.
 late joiner who would rather pay for only what is left is pointed at the
 casual per-class rate instead — that is what it is for.
 
+### Buying for a child
+
+A parent has one login and the club may hold several people on it (#102,
+`src/lib/household.ts`). So `/membership` asks **who is this for** before it
+asks which plan, as a row of buttons above the status card, and the choice rides
+in the URL as `?for=<user id>` so it survives a reload and can be linked to from
+that child's page. The control renders only for an account that has somebody
+else on it: for everybody else it would be a choice with one option.
+
+Everything downstream is per person and needed no change to become so:
+
+- **One invoice per child.** `buildPaymentReference` already mixes in
+  `stableCode(userId)`, so two siblings with the same surname on the same plan
+  get different references. A parent with three children makes three transfers.
+- **One free trial per child.** `assignTrialMembership` was always per person,
+  and `startMembership`'s own "you have already had your trial" check now asks
+  about the SUBJECT. Asked about the caller it would refuse a second child their
+  trial because their sibling had taken one, which is #102's bug in a new place.
+- **`enrolMember` takes a user** and was already indifferent to whose it is.
+
+The gate is `assertActingFor`, through `resolveSubject`, in exactly one place:
+`startMembership` and `getMyMemberships` both resolve their subject before they
+read or write anything, so a hand-typed `?for=` buys a stranger's child nothing.
+
 ## Setting the day yearly cover starts
 
 **The yearly insurance is the one plan whose start date is a question**, and a
@@ -500,6 +524,14 @@ rows**: a plan bought with yearly insurance is two pending memberships behind on
 reference, so it shows as one payment with the split underneath, matching the
 single combined amount the email quotes. The memberships table above it stays the
 per-row record.
+
+It covers **the whole account, not just the person on screen**. A parent with
+three children owes three transfers with three different references, and each
+one is captioned with who it is for. Switching between children to find out what
+each owes would be a worse version of a list they can read at once. The caption
+is hidden for an account with nobody else on it, where "For you" is noise. If
+the household read fails the panel falls back to the subject's own invoices, so
+a broken extra can never hide an invoice somebody has to pay.
 
 **The invoice email is a second copy of the same details, not a replacement**, so
 a member who deleted the email is not stuck, and it links back to the page.

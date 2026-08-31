@@ -276,6 +276,35 @@ function Waiver() {
   });
   const dependants = useMemo(() => dependantsQ.data ?? [], [dependantsQ.data]);
 
+  /**
+   * Open on a named child, when the button that got here said which one.
+   *
+   * `/account/<id>` has a "Sign an updated waiver" button, and following it
+   * should not land a parent on a form set to sign for themselves. Runs once
+   * the household has loaded and only if the id is really on this account, so
+   * a hand-typed `?for=` cannot preselect a stranger; and never over a restored
+   * draft or a choice already made, or it would fight the person using it.
+   */
+  const requestedDependantId = search.for;
+  const [appliedRequestedFor, setAppliedRequestedFor] = useState(false);
+  useEffect(() => {
+    if (appliedRequestedFor || restored || !requestedDependantId) return;
+    if (dependantsQ.isPending) return;
+    setAppliedRequestedFor(true);
+    const picked = dependants.find((d) => d.user_id === requestedDependantId);
+    if (!picked) return;
+    setSigningFor("dependant");
+    setDependantId(picked.user_id);
+    setFirstName(picked.first_name);
+    setMiddleName(picked.middle_name ?? "");
+    setLastName(picked.last_name ?? "");
+    setPreferredName(picked.preferred_name ?? "");
+    setDob(picked.date_of_birth ?? "");
+    // A dependant's waiver never carries a participant address, exactly as
+    // `chooseSigningFor` says.
+    setEmail("");
+  }, [appliedRequestedFor, restored, requestedDependantId, dependants, dependantsQ.isPending]);
+
   useEffect(() => {
     if (authLoading || !user) return;
     // A restored draft is what this person actually typed, so it outranks the

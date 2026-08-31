@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loading } from "@/components/site/Loading";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import { Pill } from "@/components/site/StatusPill";
 import { mediaConsentClass } from "@/lib/status-colours";
 import { mediaConsentLabel } from "@/lib/waiver-acknowledgements";
@@ -27,8 +28,12 @@ import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
  * page), because "not asked" stops being true the moment a member looks at
  * this control.
  */
-export function MediaConsentCard({ userId, profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ userId, profile, onSaved });
+export function MediaConsentCard({ userId, voice, profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save, saveError, clearSaveError, retrySave } = useDetailsSave({
+    userId,
+    profile,
+    onSaved,
+  });
 
   // `null` on file means nobody has ever asked, or a manager cleared it back to
   // that. The status badge and explainer below always reflect THIS (the
@@ -42,6 +47,13 @@ export function MediaConsentCard({ userId, profile, loading, onSaved }: DetailsC
     [profile?.media_consent],
   );
   const [consent, setConsent] = useState<boolean | null>(null);
+
+  function choose(value: boolean) {
+    setConsent(value);
+    // The panel described the previous attempt. Changing the answer under it
+    // would leave it claiming something about a choice it never saw.
+    clearSaveError();
+  }
 
   const revert = useMemo(() => () => setConsent(stored), [stored]);
   useEffect(revert, [revert]);
@@ -60,8 +72,9 @@ export function MediaConsentCard({ userId, profile, loading, onSaved }: DetailsC
         <CardTitle>Photos and video</CardTitle>
         <CardDescription>
           We sometimes photograph or film classes to promote the club. Tell us whether we can use
-          photos or video of you, and change your mind here any time. It does not rewrite a waiver
-          you have already signed, which keeps what you ticked at the time.
+          photos or video of {voice.who}, and change {voice.isSelf ? "your" : "the"} answer here any
+          time. It does not rewrite a waiver already signed, which keeps what was ticked at the
+          time.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -78,10 +91,12 @@ export function MediaConsentCard({ userId, profile, loading, onSaved }: DetailsC
               />
               <span className="text-sm text-muted-foreground">
                 {stored === true
-                  ? "We can use photos and video of you to promote the club. Your name is never published alongside them."
+                  ? `We can use photos and video of ${voice.who} to promote the club. ${voice.Whose} name is never published alongside them.`
                   : stored === false
-                    ? "We will not use any photo or video of you."
-                    : "You have not told us either way yet. Until you do, we will ask before using anything you are in."}
+                    ? `We will not use any photo or video of ${voice.who}.`
+                    : voice.isSelf
+                      ? "You have not told us either way yet. Until you do, we will ask before using anything you are in."
+                      : `Nobody has told us either way yet. Until somebody does, we will ask before using anything ${voice.who} is in.`}
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -90,20 +105,28 @@ export function MediaConsentCard({ userId, profile, loading, onSaved }: DetailsC
                 size="sm"
                 variant={consent === true ? "default" : "outline"}
                 aria-pressed={consent === true}
-                onClick={() => setConsent(true)}
+                onClick={() => choose(true)}
               >
-                Yes, I consent
+                {voice.isSelf ? "Yes, I consent" : "Yes, we consent"}
               </Button>
               <Button
                 type="button"
                 size="sm"
                 variant={consent === false ? "default" : "outline"}
                 aria-pressed={consent === false}
-                onClick={() => setConsent(false)}
+                onClick={() => choose(false)}
               >
-                No, I don't consent
+                {voice.isSelf ? "No, I don't consent" : "No, we don't consent"}
               </Button>
             </div>
+            {saveError && (
+              <SaveFailure
+                what={`${voice.Whose} answer`}
+                message={saveError}
+                onRetry={() => void retrySave?.()}
+                retrying={busy}
+              />
+            )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />
           </form>
         )}

@@ -179,6 +179,17 @@ none fails the run rather than leaving a gap nobody notices.
 `/update-password`, `/email-settings/$token` and `/blog/$slug` are deliberately
 not walked: each needs a token only its own email carries.
 
+**One parameter name can mean two different people.** `$userId` is somebody a
+MANAGER is looking at on `/manager/users/$userId`, and one of the MEMBER's own
+dependants on `/account/$userId`, so the flat `params` map in the manifest
+cannot answer both. `paramsByPath` overrides it per path and wins where it is
+set; everything else still reads the flat map, because most parameters do mean
+one thing. `scripts/site-pages.ts` predicted this collision before it happened
+and this is the fix it named. The seed creates one dependant of the member for
+exactly this: without it the tour would photograph a parent reaching for
+themselves through the per-child page, which renders but is not the screen a
+reviewer needs to see.
+
 What the gallery shows is **seeded fixture content** — `/blog`, `/pricing` and
 the calendar are the local club, not what is on `jitsu.au` today. That is the
 trade for a run that is identical on every branch and every fork.

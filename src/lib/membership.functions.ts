@@ -53,6 +53,7 @@ import type {
 } from "@/lib/club-users";
 import { userEmails } from "@/lib/supabase-rpc";
 import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
+import { householdTargetSchema, resolveSubject } from "@/lib/household";
 import { requireManager } from "@/lib/require-manager";
 
 /**
@@ -667,9 +668,15 @@ export const listMembershipPlans = createServerFn({ method: "GET" })
 // ---- Member: my memberships + lifecycle ----
 export const getMyMemberships = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .handler(async ({ data: input, context }) => {
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
+
+    // WHOSE memberships. Absent means the caller's own, which is what
+    // `/membership` sent before a household could exist. `resolveSubject` IS
+    // the gate, so every read below is about somebody the caller may act for.
+    const subjectId = await resolveSubject(admin, context.userId, input.userId);
 
     const [
       { data: rows, error },
@@ -681,26 +688,22 @@ export const getMyMemberships = createServerFn({ method: "GET" })
       admin
         .from("memberships")
         .select("*")
-        .eq("user_id", context.userId)
+        .eq("user_id", subjectId)
         .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("*"),
       // The student number lives on the profile; used to prefill the student
       // rate on the membership page.
-      admin
-        .from("profiles")
-        .select("uts_student_number")
-        .eq("user_id", context.userId)
-        .maybeSingle(),
+      admin.from("profiles").select("uts_student_number").eq("user_id", subjectId).maybeSingle(),
       // Waiver states feed the lifecycle: approved => visitor+, pending-only
       // => applicant.
-      admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
+      admin.from("waivers").select("approval_status").eq("user_id", subjectId).limit(100),
       // How many classes they have trained. Deliberately just the count: a
       // member has no business reading the club's coverage bookkeeping, and
       // "no cover" against a class they attended reads as an accusation.
       admin
         .from("session_checkins")
         .select("id", { count: "exact", head: true })
-        .eq("user_id", context.userId),
+        .eq("user_id", subjectId),
     ]);
     // An errored waivers read would tell an approved member they are still a
     // lead on their own membership page; an errored plans read would price every
@@ -1102,6 +1105,14 @@ export const startMembership = createServerFn({ method: "POST" })
     if (data.hp) return { ok: true as const, activated: false, reference: null as string | null };
     const admin = await adminClient();
 
+    // WHO this is for: the caller, or one of their dependants. `resolveSubject`
+    // IS the gate -- you cannot get the subject without going through it -- so
+    // every question below asks about the right person by construction. Note
+    // `enrolMember` already takes a user and needs no change, and
+    // `assignTrialMembership` is already per-person, so each child correctly
+    // gets their own free trial rather than sharing the parent's.
+    const subjectId = await resolveSubject(admin, context.userId, data.userId);
+
     const { data: plan, error: planErr } = await admin
       .from("membership_plans")
       .select("*")
@@ -1117,8 +1128,15 @@ export const startMembership = createServerFn({ method: "POST" })
     // One free trial per member. This is the member-driven half of the pair with
     // `assignTrialMembership`, so it is the easier one to hit: the member can
     // keep pressing until a read fails.
-    if (plan.kind === "trial" && (await hasUsedTrial(admin, context.userId, plan.id)))
-      throw new Error("You've already started your free trial.");
+    // Asked about the SUBJECT. Keyed on the caller it would refuse a second
+    // child their trial because their sibling had already had one, which is
+    // #102's bug in a new place.
+    if (plan.kind === "trial" && (await hasUsedTrial(admin, subjectId, plan.id)))
+      throw new Error(
+        subjectId === context.userId
+          ? "You've already started your free trial."
+          : "That person has already had their free trial.",
+      );
 
     // ---- Yearly insurance: required cover bundled into the purchase ----
     //
@@ -1126,7 +1144,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // caller opting out: all three. A club with no insurance plan never blocks a
     // purchase here, and `include_insurance` from a covered member is their own
     // choice to renew early.
-    const { insurancePlan, coverEndsAt } = await resolveInsuranceCover(admin, context.userId, plan);
+    const { insurancePlan, coverEndsAt } = await resolveInsuranceCover(admin, subjectId, plan);
     if (insurancePlan && !coverEndsAt && !data.include_insurance) {
       throw new Error(
         "Yearly insurance is required to train with us. Keep it selected and choose the plan again.",
@@ -1134,7 +1152,7 @@ export const startMembership = createServerFn({ method: "POST" })
     }
 
     return enrolMember(admin, {
-      userId: context.userId,
+      userId: subjectId,
       plan,
       utsStudentNumber: data.uts_student_number ?? null,
       sessionDate: data.session_date,

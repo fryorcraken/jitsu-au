@@ -97,16 +97,21 @@ export function personaFor(path: string): Persona {
  * Returns null when the fixture has no value for one, which the caller turns
  * into a hard failure rather than a 404 in the gallery.
  *
- * One flat map is enough only because the pages walked here happen not to reuse
- * a parameter name. The repo as a whole DOES reuse them — `$slug` names both a
- * knowledge base article and a blog post, `$token` three different things — so
- * if a signed-in page ever takes a `$slug`, this map stops being able to tell
- * them apart and needs keying by path instead.
+ * The flat map was enough only while the pages walked here happened not to
+ * reuse a parameter name, and that stopped being true the moment `/account`
+ * grew a per-person page: `$userId` names somebody a MANAGER is looking at on
+ * `/manager/users/$userId`, and one of the MEMBER's own dependants on
+ * `/account/$userId`. Two different people, one parameter name. So `byPath`
+ * wins over the flat map for exactly the paths that need it, which is the fix
+ * this comment used to predict rather than a new mechanism. The flat map still
+ * answers everything else, because most parameters do mean one thing.
  */
 export function fillRouteParams(
   path: string,
   params: Record<string, string> | undefined,
+  byPath?: Record<string, Record<string, string>> | undefined,
 ): string | null {
+  const overrides = byPath?.[path];
   const filled: string[] = [];
   for (const segment of path.split("/")) {
     const parameter = segment.match(/\$(\w+)/);
@@ -114,7 +119,7 @@ export function fillRouteParams(
       filled.push(segment);
       continue;
     }
-    const value = params?.[parameter[1]];
+    const value = overrides?.[parameter[1]] ?? params?.[parameter[1]];
     if (!value) return null;
     filled.push(String(value));
   }
@@ -132,12 +137,13 @@ export function fillRouteParams(
 export function signedInPathsByPersona(
   routeFiles: string[],
   params: Record<string, string> | undefined,
+  paramsByPath?: Record<string, Record<string, string>> | undefined,
 ): Record<Persona, string[]> {
   const byPersona: Record<Persona, string[]> = { member: [], manager: [] };
   const unfilled: string[] = [];
 
   for (const template of signedInPaths(routeFiles)) {
-    const path = fillRouteParams(template, params);
+    const path = fillRouteParams(template, params, paramsByPath);
     if (!path) {
       unfilled.push(template);
       continue;

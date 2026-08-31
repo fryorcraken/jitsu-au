@@ -18,6 +18,8 @@ import { AboutYouCard } from "@/components/site/account/AboutYouCard";
 import { CodeOfConductCard } from "@/components/site/account/CodeOfConductCard";
 import { ContactCard } from "@/components/site/account/ContactCard";
 import type { Profile } from "@/components/site/account/DetailsCard";
+import { subjectVoice } from "@/lib/subject-voice";
+import { HouseholdCard } from "@/components/site/account/HouseholdCard";
 import { KitSizingCard } from "@/components/site/account/KitSizingCard";
 import { MediaConsentCard } from "@/components/site/account/MediaConsentCard";
 import { WaiversCard } from "@/components/site/account/WaiversCard";
@@ -154,7 +156,10 @@ function AccountPage() {
 
   if (!user || !userId) return null;
 
-  const details = { userId, profile, loading, onSaved: setProfile };
+  // Second person, because this page is about the person reading it. The same
+  // cards on `/account/<id>` are handed a name instead.
+  const voice = subjectVoice(null);
+  const details = { userId, voice, profile, loading, onSaved: setProfile };
 
   return (
     <section className="mx-auto max-w-2xl space-y-6 px-4 py-12">
@@ -197,6 +202,11 @@ function AccountPage() {
         </CardContent>
       </Card>
 
+      {/* Above "Your details", because who is on the account is the frame for
+          everything below it. Renders nothing at all for an account with no
+          dependants, which is almost every account. */}
+      <HouseholdCard userId={userId} />
+
       <SectionHeading>Your details</SectionHeading>
 
       {loadFailed ? (
@@ -232,9 +242,9 @@ function AccountPage() {
 
       <SectionHeading>Your records</SectionHeading>
 
-      <WaiversCard userId={userId} />
+      <WaiversCard userId={userId} voice={voice} />
 
-      <CodeOfConductCard userId={userId} />
+      <CodeOfConductCard userId={userId} voice={voice} />
 
       <SectionHeading>Calendar</SectionHeading>
 

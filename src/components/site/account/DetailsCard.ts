@@ -7,23 +7,24 @@
 // server decides who is allowed (`assertActingFor` in `src/lib/household.ts`);
 // nothing here does.
 //
-// ⚠️ This carries a UX-bar debt it did not create but has now promoted into
-// shared code: `save` below reports a failed write with `toast.error`, and
-// CLAUDE.md's "A failed SAVE is not a toast either" asks for a held `saveError`
-// and `components/site/SaveFailure` instead. A member on bad reception saves
-// their emergency contact, the write fails, the toast fades in four seconds,
-// and the form still shows what they typed as though it saved. It is moved
-// verbatim here so this refactor changes no behaviour, which means the fix is
-// somebody's next change rather than nobody's.
+// Both of the debts #110 recorded here are paid off, because #106 is the change
+// that made them reachable.
 //
-// ⚠️ The person-agnostic claim above is true of the DATA and not yet of the VOICE. Every string in these
-// cards is second person ("About you", "your waiver history", "photos or video
-// of you"), which is correct on `/account` and wrong the first time a parent
-// reads one under a child's name. A per-child page therefore needs a name or
-// possessive threaded through alongside `userId`; it is not added here because
-// nothing would pass it yet, and a prop with no caller is the generality
-// CLAUDE.md rules out. #106 is where it belongs, and it is real work, not a
-// drop-in.
+// The first was the VOICE. Every string in these cards used to be second person
+// ("About you", "your waiver history"), which is right on `/account` and wrong
+// the moment a parent reads one under a child's name. They now take a `voice`
+// alongside `userId` and address whoever they are about: `subjectVoice(null)`
+// says "you" and "your", `subjectVoice("Bea")` says "Bea" and "Bea's". It lives
+// in `@/lib/subject-voice`, because `/membership` needs it too and importing it
+// from here dragged `profile.functions.ts` into that page.
+//
+// The second was a UX-bar debt: `save` reported a failed write with
+// `toast.error`, and CLAUDE.md's "A failed SAVE is not a toast either" asks for
+// a held error and `components/site/SaveFailure`. A member on bad reception
+// saved their emergency contact, the write failed, the toast faded in four
+// seconds, and the form still showed what they typed as though it had saved.
+// `save` now holds a `saveError` for the card to render, and clears it when the
+// form is edited so the panel never claims something about work it never saw.
 //
 // The page above them fetches the profile ONCE and passes it down, rather than
 // each card fetching its own: they all read the same row, and three round trips
@@ -34,6 +35,7 @@ import { toast } from "sonner";
 import { updateMyProfile } from "@/lib/profile.functions";
 import type { getMyProfile } from "@/lib/waiver.functions";
 import type { UpdateMyProfileFields } from "@/lib/validation";
+import type { SubjectVoice } from "@/lib/subject-voice";
 
 export type Profile = Awaited<ReturnType<typeof getMyProfile>>;
 
@@ -41,6 +43,8 @@ export type Profile = Awaited<ReturnType<typeof getMyProfile>>;
 export type DetailsCardProps = {
   /** The person these details belong to, who is not always the caller. */
   userId: string;
+  /** How to refer to that person. Defaults to second person on `/account`. */
+  voice: SubjectVoice;
   profile: Profile;
   loading: boolean;
   /** Called with the saved row so the page's copy of the profile stays true. */
@@ -63,19 +67,41 @@ export function useDetailsSave({
 }: Pick<DetailsCardProps, "userId" | "profile" | "onSaved">) {
   const update = useServerFn(updateMyProfile);
   const [busy, setBusy] = useState(false);
+  // Held, not toasted. The panel stays on screen until the save succeeds or the
+  // form is edited, so nobody walks away from a form that looks saved and is
+  // not. A SUCCESS toast is still right: there is nothing left to act on.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // The last attempt, so the failure panel's button can try the same write
+  // again rather than asking the member to press Save a second time.
+  const [retry, setRetry] = useState<(() => Promise<void>) | null>(null);
 
   async function save(patch: UpdateMyProfileFields, message: string, failure: string) {
     setBusy(true);
+    setSaveError(null);
     try {
       await update({ data: { ...patch, userId } });
       if (profile) onSaved({ ...profile, ...patch } as Profile);
+      setRetry(null);
       toast.success(message);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : failure);
+      setSaveError(err instanceof Error && err.message ? err.message : failure);
+      setRetry(() => () => save(patch, message, failure));
     } finally {
       setBusy(false);
     }
   }
 
-  return { busy, save };
+  /**
+   * Drop the panel because the form changed under it.
+   *
+   * Without this the panel outlives the attempt it describes: somebody edits a
+   * field after a failure and is still being told that a save of something
+   * else did not go through.
+   */
+  function clearSaveError() {
+    setSaveError(null);
+    setRetry(null);
+  }
+
+  return { busy, save, saveError, clearSaveError, retrySave: retry };
 }

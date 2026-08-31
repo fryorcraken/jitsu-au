@@ -22,6 +22,14 @@ type ClubFixture = {
   personas: Record<Persona, { email: string; userId: string }>;
   password: string;
   params: Record<string, string>;
+  /**
+   * Per-path parameter values, for a name that means different people on
+   * different pages. `$userId` is somebody a manager is looking at on
+   * `/manager/users`, and one of the member's own dependants on `/account`.
+   * Optional: a fixture written before this existed still tours everything
+   * else, and `fillRouteParams` falls back to the flat map above.
+   */
+  paramsByPath?: Record<string, Record<string, string>>;
 };
 
 // Resolved against the repo root, not the working directory: the seed writes it

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loading } from "@/components/site/Loading";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import {
   BELT_SIZE_HINT,
   BeltSizeSelect,
@@ -18,8 +19,12 @@ import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
  * group here a manager reads in bulk (ordering kit), and because it is the only
  * one a waiver never overwrites.
  */
-export function KitSizingCard({ userId, profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ userId, profile, onSaved });
+export function KitSizingCard({ userId, voice, profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save, saveError, clearSaveError, retrySave } = useDetailsSave({
+    userId,
+    profile,
+    onSaved,
+  });
   const [giSize, setGiSize] = useState<GiSize | "">("");
   const [beltSize, setBeltSize] = useState<BeltSize | "">("");
 
@@ -50,7 +55,7 @@ export function KitSizingCard({ userId, profile, loading, onSaved }: DetailsCard
     await save(
       { gi_size: giSize || null, belt_size: beltSize || null },
       "Sizes saved",
-      "Could not save your sizes",
+      `Could not save ${voice.whose} sizes`,
     );
   }
 
@@ -59,8 +64,8 @@ export function KitSizingCard({ userId, profile, loading, onSaved }: DetailsCard
       <CardHeader>
         <CardTitle>Kit sizing</CardTitle>
         <CardDescription>
-          So we can order the right gi and belt for you, and hand you the right loan gear. Both are
-          optional.
+          So we can order the right gi and belt for {voice.who}, and hand{" "}
+          {voice.isSelf ? "you" : voice.who} the right loan gear. Both are optional.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -73,7 +78,10 @@ export function KitSizingCard({ userId, profile, loading, onSaved }: DetailsCard
               <GiSizeSelect
                 id="gi-size"
                 value={giSize}
-                onChange={setGiSize}
+                onChange={(v) => {
+                  setGiSize(v);
+                  clearSaveError();
+                }}
                 disabled={busy}
                 className="mt-1.5"
               />
@@ -87,12 +95,23 @@ export function KitSizingCard({ userId, profile, loading, onSaved }: DetailsCard
               <BeltSizeSelect
                 id="belt-size"
                 value={beltSize}
-                onChange={setBeltSize}
+                onChange={(v) => {
+                  setBeltSize(v);
+                  clearSaveError();
+                }}
                 disabled={busy}
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">{BELT_SIZE_HINT}</p>
             </div>
+            {saveError && (
+              <SaveFailure
+                what={`${voice.Whose} sizes`}
+                message={saveError}
+                onRetry={() => void retrySave?.()}
+                retrying={busy}
+              />
+            )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />
           </form>
         )}

@@ -10,9 +10,10 @@ import {
   deliveryEmailFor,
   householdContacts,
   loadHouseholdContacts,
+  type HouseholdContactProfile,
 } from "./household-email";
 
-const PARENT = {
+const PARENT: HouseholdContactProfile = {
   user_id: "parent",
   guardian_user_id: null,
   first_name: "Ada",
@@ -20,7 +21,7 @@ const PARENT = {
   last_name: "Lovelace",
   preferred_name: null,
 };
-const CHILD = {
+const CHILD: HouseholdContactProfile = {
   user_id: "child",
   guardian_user_id: "parent",
   first_name: "Bea",
@@ -28,7 +29,7 @@ const CHILD = {
   last_name: "Lovelace",
   preferred_name: null,
 };
-const SIBLING = {
+const SIBLING: HouseholdContactProfile = {
   user_id: "sibling",
   guardian_user_id: "parent",
   first_name: "Cy",
@@ -104,7 +105,7 @@ describe("householdContacts", () => {
  * but "it is never looked up at all", and only a fake that remembers what was
  * asked can tell those two apart.
  */
-function admin(rows: (typeof PARENT)[], emails: { user_id: string; email: string }[]) {
+function admin(rows: HouseholdContactProfile[], emails: { user_id: string; email: string }[]) {
   const rpcCalls: string[][] = [];
   const client = {
     rpc: (name: string, args: { _user_ids: string[] }) => {

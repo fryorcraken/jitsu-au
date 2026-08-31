@@ -22,11 +22,11 @@ import {
   insuranceSelection,
   isUnpaid,
   isUtsStudent,
+  membershipSearchSchema,
   sellablePlans,
   unpaidInvoices,
   type ClubPaymentDetails,
   type LifecycleStatus,
-  type UnpaidInvoice,
 } from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
 import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
@@ -36,10 +36,18 @@ import {
   listMembershipPlans,
   startMembership,
 } from "@/lib/membership.functions";
+import { firstWord, subjectVoice } from "@/lib/subject-voice";
+import {
+  listHouseholdInvoices,
+  listMyHousehold,
+  type HouseholdInvoices,
+  type HouseholdPerson,
+} from "@/lib/household.functions";
 import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
 export const Route = createFileRoute("/_authenticated/membership")({
+  validateSearch: membershipSearchSchema,
   head: () => ({
     meta: [{ title: "Membership | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
@@ -135,6 +143,50 @@ function CodeOfConductNudge() {
   );
 }
 
+/**
+ * Which person on the account this page is about.
+ *
+ * Only rendered when there IS somebody else on the account. For everybody
+ * else it would be a control with one option, which is not a choice.
+ *
+ * It is the FIRST thing under the heading on purpose. A plan bought for the
+ * wrong child is an invoice, an email and a membership under the wrong name,
+ * and the moment to prevent that is before the plan is picked, not in a confirm
+ * afterwards.
+ */
+function WhoIsThisFor({
+  people,
+  selectedId,
+  onSelect,
+}: {
+  people: HouseholdPerson[];
+  selectedId: string | undefined;
+  onSelect: (userId: string | undefined) => void;
+}) {
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <p className="text-sm font-medium">Who is this for?</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {people.map((person) => {
+          const active = person.is_self ? !selectedId : selectedId === person.user_id;
+          return (
+            <Button
+              key={person.user_id}
+              type="button"
+              size="sm"
+              variant={active ? "default" : "outline"}
+              aria-pressed={active}
+              onClick={() => onSelect(person.is_self ? undefined : person.user_id)}
+            >
+              {person.is_self ? "You" : (firstWord(person.name) ?? "Someone on your account")}
+            </Button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** How a line of an invoice is named when its plan could not be resolved. */
 function lineName(planName: string | null) {
   return planName ?? "Membership";
@@ -150,28 +202,48 @@ function lineName(planName: string | null) {
  * most often come back for while standing in their banking app.
  */
 function HowToPay({
-  invoices,
+  owed,
   details,
   detailsUnreadable,
+  showWho,
 }: {
-  invoices: UnpaidInvoice[];
+  /**
+   * Everybody on the account with something outstanding, in household order.
+   *
+   * A list per person rather than one flat list of invoices: a parent with
+   * three children makes three separate transfers with three different
+   * references, and the only question they are actually asking this panel is
+   * "which one is which".
+   */
+  owed: HouseholdInvoices[];
   /** Null when the club has not published a complete set of account details. */
   details: ClubPaymentDetails | null;
   /** True when the settings could not be read, which reads differently. */
   detailsUnreadable: boolean;
+  /** Name each transfer. False for an account with nobody else on it. */
+  showWho: boolean;
 }) {
+  const transfers = owed.flatMap((person) =>
+    person.invoices.map((invoice) => ({ person, invoice })),
+  );
   return (
     <Card>
       <CardHeader>
         <CardTitle>How to pay</CardTitle>
         <CardDescription>
-          Transfer the amount below and put the reference in the description. We activate your
-          membership as soon as it lands, and email you to confirm.
+          {transfers.length > 1
+            ? "Each of these is a separate transfer. Put its own reference in the description, or we cannot tell which one it pays."
+            : "Transfer the amount below and put the reference in the description. We activate the membership as soon as it lands, and email you to confirm."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {invoices.map((invoice) => (
+        {transfers.map(({ person, invoice }) => (
           <div key={invoice.reference} className="rounded-lg border bg-muted/30 p-4">
+            {showWho && (
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                For {person.is_self ? "you" : (person.name ?? "someone on your account")}
+              </p>
+            )}
             <p className="text-sm font-medium">
               {invoice.lines.map((l) => lineName(l.plan_name)).join(" + ")}
             </p>
@@ -228,10 +300,24 @@ function HowToPay({
 
 function MembershipPage() {
   const navigate = useNavigate();
+  const { for: subjectParam } = Route.useSearch();
   const fetchPlans = useServerFn(listMembershipPlans);
   const fetchMine = useServerFn(getMyMemberships);
   const fetchInstructions = useServerFn(getPaymentInstructions);
+  const fetchHousehold = useServerFn(listMyHousehold);
+  const fetchOwed = useServerFn(listHouseholdInvoices);
   const start = useServerFn(startMembership);
+
+  // WHO this page is about. Absent means the account holder, which is what
+  // every visit was before a family could share a login. It only ever names
+  // somebody the server will allow: `getMyMemberships` and `startMembership`
+  // both run the household gate on it, so a hand-typed id buys nothing.
+  const [household, setHousehold] = useState<HouseholdPerson[]>([]);
+  const [owed, setOwed] = useState<HouseholdInvoices[]>([]);
+  const subjectId = subjectParam;
+  const subject = household.find((p) => p.user_id === subjectId) ?? null;
+  const dependants = household.filter((p) => !p.is_self);
+  const voice = subjectVoice(subject && !subject.is_self ? firstWord(subject.name) : null);
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
@@ -279,7 +365,7 @@ function MembershipPage() {
     () => () => {
       return Promise.all([
         fetchPlans(),
-        fetchMine(),
+        fetchMine({ data: subjectId ? { userId: subjectId } : {} }),
         // The club's account details are the one thing here the member cannot
         // supply themselves, but they are also the one thing that is not their
         // own data: a failure degrades this panel into "we could not load
@@ -288,9 +374,16 @@ function MembershipPage() {
           console.error("[membership] club account details failed to load:", e);
           return { ok: false, details: null };
         }),
-      ]).then(([p, m, s]) => {
+        // Who is on this account, and what the whole account still owes. Both
+        // are about the caller rather than the subject, so switching person
+        // does not re-ask them for a different answer.
+        fetchHousehold(),
+        fetchOwed(),
+      ]).then(([p, m, s, people, outstanding]) => {
         setPlans(p);
         setMine(m);
+        setHousehold(people);
+        setOwed(outstanding);
         setAccount({ details: s.details, unreadable: !s.ok });
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
@@ -300,7 +393,7 @@ function MembershipPage() {
         return m;
       });
     },
-    [fetchPlans, fetchMine, fetchInstructions],
+    [fetchPlans, fetchMine, fetchInstructions, fetchHousehold, fetchOwed, subjectId],
   );
 
   // `reload()` on its own runs after choosing a plan, where that handler
@@ -346,6 +439,10 @@ function MembershipPage() {
           uts_student_number: studentNumber.trim(),
           session_date: plan.kind === "session" ? sessionDate : "",
           include_insurance: plan.kind !== "insurance" ? insuranceIncluded : false,
+          // WHO the plan is for. Absent buys for the account holder, exactly as
+          // before; named, it buys for one of their children and the invoice,
+          // the reference and the membership all land under that child.
+          userId: subjectId,
           hp: "",
         },
       });
@@ -358,10 +455,18 @@ function MembershipPage() {
       if (unpaidInvoices(refreshed.memberships).length > 0) {
         // The details are now on this page, above the plan they just picked, so
         // send them there rather than to their inbox. The email still goes out.
-        toast.success("Your invoice is ready. The payment details are at the top of this page.");
+        toast.success(
+          voice.isSelf
+            ? "Your invoice is ready. The payment details are at the top of this page."
+            : `${voice.Whose} invoice is ready. The payment details are at the top of this page.`,
+        );
         setScrollToPay(true);
       } else {
-        toast.success("You're all set. Your membership is active.");
+        toast.success(
+          voice.isSelf
+            ? "You're all set. Your membership is active."
+            : `All set. ${voice.Whose} membership is active.`,
+        );
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start membership");
@@ -417,7 +522,9 @@ function MembershipPage() {
           <div>
             <h1 className="text-3xl font-black">Membership</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Pick a plan, pay by bank transfer, and you're on the mat.
+              {voice.isSelf
+                ? "Pick a plan, pay by bank transfer, and you're on the mat."
+                : `Pick a plan for ${voice.who}, pay by bank transfer, and they're on the mat.`}
             </p>
           </div>
           <Button asChild variant="outline">
@@ -425,10 +532,23 @@ function MembershipPage() {
           </Button>
         </div>
 
+        {/* Only for an account that has somebody else on it. */}
+        {dependants.length > 0 && (
+          <WhoIsThisFor
+            people={household}
+            selectedId={subjectId}
+            onSelect={(next) =>
+              // Through the URL rather than component state, so the choice
+              // survives a reload and can be linked to from a child's page.
+              void navigate({ to: "/membership", search: next ? { for: next } : {} })
+            }
+          />
+        )}
+
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <CardTitle>Your status</CardTitle>
+              <CardTitle>{voice.isSelf ? "Your status" : `${voice.Whose} status`}</CardTitle>
               {/* Not the shared <Pill>: this badge is a heading companion, so it
                   sits slightly larger and bolder, and its label is a sentence
                   ("On trial") that must not be title-cased. */}
@@ -499,12 +619,22 @@ function MembershipPage() {
         {/* `scroll-mt-20` clears the member-space header (`sticky top-0 h-14`),
             which would otherwise sit over the card's title once the scroll after
             a purchase lands. */}
-        {unpaid.length > 0 && (
+        {/* The WHOLE account's outstanding transfers, not just the person on
+            screen: a parent switching between children to see what each owes
+            would be a worse version of a list they can read at once. Falls back
+            to the subject's own when the household read failed, so a broken
+            extra never hides an invoice the member has to pay. */}
+        {(owed.length > 0 || unpaid.length > 0) && (
           <div ref={payRef} className="scroll-mt-20">
             <HowToPay
-              invoices={unpaid}
+              owed={
+                owed.length > 0
+                  ? owed
+                  : [{ user_id: subjectId ?? "", name: null, is_self: true, invoices: unpaid }]
+              }
               details={account.details}
               detailsUnreadable={account.unreadable}
+              showWho={dependants.length > 0}
             />
           </div>
         )}

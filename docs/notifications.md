@@ -65,6 +65,13 @@ written whether or not the person wants it emailed.
    off", so changing a club default later moves the right people.
 10. **The link in an email footer opens the switches, not an unsubscribe.**
     Somebody who only wanted fewer announcements should not lose replies too.
+11. **A household is one inbox, so it gets one email.** A dependant has no
+    mailbox of their own (`docs/waivers.md`, and `src/lib/household.ts`), so
+    everything about them reaches their guardian. The daily summary therefore
+    groups by CONTACT PERSON rather than by `notifications.user_id`, folds the
+    repeats of a single event, and keys its idempotency on the recipient. The
+    same rule governs `notification_tokens`: one row per inbox, so a parent has
+    one settings link rather than one per child. See "One family, one email".
 
 ## Flows
 
@@ -178,8 +185,41 @@ Vault and calls out with pg_net to a literal `jitsu.au` URL; the schedule itself
 never holds the token, since anyone who can read `cron.job` can read a command
 string. The endpoint reads the SAME token back out of Vault, through a
 service-role RPC, and compares it against whatever the request sent. The
-endpoint then groups every row with no `emailed_at` by person, drops the kinds
-they have switched off, and sends one email to whoever has anything left.
+endpoint then groups every row with no `emailed_at` by CONTACT PERSON (see
+below), drops the kinds they have switched off, and sends one email to whoever
+has anything left.
+
+#### One family, one email
+
+`notifications.user_id` is the person a row is ABOUT. It stopped being the
+person who READS it the moment a family could share a login, and the digest now
+groups on the latter.
+
+The bug this fixes was live rather than theoretical. `notifyNewBlogPost` writes
+a row for every person with a club record, children included, so a parent with
+three children got FOUR emails announcing one post, into one inbox, on one
+morning. Every one of them was separately idempotent, which is exactly why
+nothing caught it: the key was `digest-<user id>-<day>`, so four different
+people minted four different keys by construction.
+
+Three things follow, and all three matter:
+
+- **The unit is the contact person.** `contactUserIdFor` decides it: a
+  dependant's guardian, everybody else themselves. Their own pending rows and
+  their dependants' become one list.
+- **One event is one line.** `mergeHouseholdItems` folds the merged list on
+  `(kind, subject_id)`, which is the same uniqueness the `notifications` table
+  already enforces per person, lifted one level up. Without it the parent above
+  opens an email that says "New post: Grading day" four times and cannot tell
+  whether that is four posts or one.
+- **Every row is still stamped, including the folded ones.** Stamping only what
+  was rendered would leave the duplicates pending and mail the family the same
+  post again tomorrow.
+
+The preferences, the manager check and the greeting are all read for the
+RECIPIENT, not for the person a row is about. A dependant has no meaningful
+preferences (no page they can reach), no role, and no need to be greeted in mail
+they never see.
 
 This ran as a GitHub Actions workflow first, and moving it was a correction, not
 a preference. Scheduling production work from CI put a credential that makes the
@@ -480,6 +520,10 @@ rather than `Strict` and why `/` rather than a narrower path, is written down in
 - **Nothing expires the emailed link itself.** It stays exchangeable for as long
   as the row lives in `notification_tokens`, so an old email still works. What
   runs out is the six-hour session it hands you.
+- **The row belongs to the INBOX, not to the person a notification is about.**
+  `settingsUrlFor` resolves to the contact person before it reads or mints one,
+  so a parent has one link governing all the mail they get, rather than a
+  different one in every email about a different child.
 - **Those six hours are the browser's, not ours.** The cookie carries the same
   token the link does and nothing checks its age server-side, so a wholesale
   copy of a cookie jar keeps working until the token is rotated. Enforcing an

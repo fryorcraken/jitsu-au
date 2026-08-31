@@ -71,6 +71,15 @@ vi.mock("@/lib/code-of-conduct.functions", () => ({
   getCodeOfConductSigner: vi.fn().mockResolvedValue({ status: null }),
 }));
 
+// The "People on your account" card. Mocked like every other server module
+// here: `household.functions.ts` pulls in the real auth middleware, which needs
+// a Start context this runner does not have. An empty household is the case
+// this page is in for almost every member, and the card renders nothing for it.
+vi.mock("@/lib/household.functions", () => ({
+  listMyHousehold: vi.fn().mockResolvedValue([]),
+  listHouseholdInvoices: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("@/lib/email-verification.functions", () => ({
   requestMyEmailVerification: vi.fn(),
 }));
@@ -361,7 +370,7 @@ describe("/account", () => {
   it("tells a member their contact edits do not rewrite a signed waiver", async () => {
     await renderLoaded();
     expect(
-      within(card("Contact")).getByText(/does not change a waiver you have already signed/i),
+      within(card("Contact")).getByText(/does not change a waiver already signed/i),
     ).toBeInTheDocument();
   });
 

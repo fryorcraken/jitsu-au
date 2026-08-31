@@ -10,7 +10,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 
-const sendLovableEmail = vi.hoisted(() => vi.fn(async () => ({})));
+/** The one payload field set this test reads back off the stubbed send. */
+type SentEmail = { to: string; subject: string; idempotency_key: string; text: string };
+
+const sendLovableEmail = vi.hoisted(() =>
+  vi.fn(
+    async (_payload: {
+      to: string;
+      subject: string;
+      idempotency_key: string;
+      text: string;
+    }) => ({}),
+  ),
+);
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
 
 const PARENT = "parent";
@@ -165,9 +177,7 @@ describe("sendDailyDigests, for a household", () => {
     expect(sendLovableEmail).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ considered: 4, recipients: 1, sent: 1 });
 
-    const [payload] = sendLovableEmail.mock.calls[0] as [
-      { to: string; subject: string; idempotency_key: string; text: string },
-    ];
+    const [payload] = sendLovableEmail.mock.calls[0] as [SentEmail];
     // To the parent's mailbox, keyed on the parent. Before this the key was
     // `digest-${userId}-${day}`, which made the four sends distinct by
     // construction and so passed every idempotency check there was.
@@ -191,7 +201,7 @@ describe("sendDailyDigests, for a household", () => {
     const result = await sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"));
 
     expect(result).toEqual({ considered: 3, recipients: 2, sent: 2 });
-    const to = (sendLovableEmail.mock.calls as [{ to: string }][]).map(([p]) => p.to).sort();
+    const to = (sendLovableEmail.mock.calls as [SentEmail][]).map(([p]) => p.to).sort();
     expect(to).toEqual(["ada@example.com", "eve@example.com"]);
   });
 
@@ -217,7 +227,7 @@ describe("sendDailyDigests, for a household", () => {
 
     await sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"));
 
-    const [payload] = sendLovableEmail.mock.calls[0] as [{ subject: string; text: string }];
+    const [payload] = sendLovableEmail.mock.calls[0] as [SentEmail];
     expect(payload.subject).toBe("2 new things at UTS Jitsu");
     expect(payload.text).toContain("Grading day");
     expect(payload.text).toContain("Timetable");
