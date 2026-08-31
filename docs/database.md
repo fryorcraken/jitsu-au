@@ -340,10 +340,22 @@ different jobs. **Writing** such a row is refused by the server function that
 creates a dependant (#105); nothing stops it today because nothing creates one
 yet. **Walking** a chain that exists anyway is refused by `assertActingFor` in
 `src/lib/household.ts`, which turns away a caller who is themselves a dependant.
-That gate is the single authority on who may act for whom: `getMyProfile`,
-`updateMyProfile`, `listMyWaivers` and `getCodeOfConductSigner` each take an
-optional `userId` and reach it through `resolveSubject`, and nothing else
-re-derives the rule.
+That gate is the single authority on who may act for whom. `getMyProfile`,
+`updateMyProfile`, `listMyWaivers`, `getCodeOfConductSigner`,
+`acceptCodeOfConduct`, `getMyMemberships` and `startMembership` each take an
+optional `userId` and reach it through `resolveSubject`; `getWaiverPdfUrl` asks
+the same gate through `mayActFor`, the non-throwing form, because its own
+refusal has to stay the same sentence it gives for a waiver that does not
+exist. Nothing else re-derives the rule, and `mayActFor` is not a second gate:
+`assertActingFor` is defined in terms of it.
+
+⚠️ **Anything that reads a person in order to SHOW their contact has to select
+`guardian_user_id` too.** A dependant has no mailbox, so the address on their
+row is their guardian's and the screen has to say whose it is
+(`src/lib/household-email.ts`). `ClubUserProfile` makes the column required
+rather than optional for exactly this reason: an optional field defaulting to
+null would render a child as an account holder with their own address, silently,
+on any screen whose `.select()` forgot it.
 
 The partial index `profiles_guardian_user_id_idx` covers the non-null rows only,
 which is what "who are this person's dependants" reads.
