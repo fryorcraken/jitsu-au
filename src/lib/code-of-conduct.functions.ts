@@ -25,6 +25,7 @@ import {
   profileFullName,
 } from "@/lib/validation";
 import type { SignerMeta } from "@/lib/validation";
+import { householdTargetUserId, resolveSubject } from "@/lib/household";
 import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-conduct";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
@@ -218,15 +219,58 @@ export async function codeOfConductStatusFor(
 }
 
 /**
+ * Whose standing `getCodeOfConductSigner` should report: the signer themselves,
+ * or a dependant of theirs.
+ *
+ * Its own function, and exported, because a `createServerFn` handler cannot be
+ * called from the runner (no Start context), and the rule below is the single
+ * line stopping an emailed link from reading a household. See
+ * `contact-messages.functions.ts` for the same reason spelled out.
+ */
+export async function codeOfConductSubject(
+  admin: AdminClient,
+  signer: Pick<CodeOfConductSigner, "userId" | "signedIn">,
+  target: string | undefined,
+): Promise<string> {
+  if (!target) return signer.userId;
+  // The ONE extra rule this path has: reaching past yourself needs a live
+  // session, never an emailed link. Signing a waiver is public and hands back a
+  // code-of-conduct token, so anyone can mint one for any address (see the note
+  // at the foot of `acceptCodeOfConduct`). A token proves an address; it must
+  // never prove the right to read a household.
+  //
+  // The comparison is only here to decide whether THAT rule applies, not to
+  // decide whether the caller is allowed. Naming yourself has to stay allowed
+  // for a link-identified caller (it is the ordinary /code-of-conduct case),
+  // but `assertActingFor` is still the one place that says so: this function
+  // must not grow a second opinion about who may act for whom.
+  if (!signer.signedIn && target.toLowerCase() !== signer.userId.toLowerCase()) {
+    throw new Error("Sign in to your account to see this.");
+  }
+  return resolveSubject(admin, signer.userId, target);
+}
+
+/**
  * Who the signing form should address, and whether they have already agreed.
  *
  * Public: it is called by anyone opening `/code-of-conduct`, with or without a
  * link. It never reveals anything about an address that was not supplied as a
  * live token, so it cannot be used to probe who the club holds.
+ *
+ * `userId` asks for somebody else's standing instead: a dependant of the
+ * caller's, checked by `assertActingFor`. `signer` still describes the CALLER,
+ * because they are the person who would sign, and only `status` moves. ⚠️ That
+ * makes one response object about two people, so anything added to `signer`
+ * later is about the caller and must not be rendered as the subject's.
  */
 export const getCodeOfConductSigner = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
-    z.object({ token: z.string().trim().max(120).optional().or(z.literal("")) }).parse(d ?? {}),
+    z
+      .object({
+        token: z.string().trim().max(120).optional().or(z.literal("")),
+        userId: householdTargetUserId.optional(),
+      })
+      .parse(d ?? {}),
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -234,7 +278,8 @@ export const getCodeOfConductSigner = createServerFn({ method: "POST" })
     if (!signer) {
       return { signer: null, version: CODE_OF_CONDUCT_VERSION, status: null };
     }
-    const status = await codeOfConductStatusFor(supabaseAdmin, signer.userId);
+    const subjectId = await codeOfConductSubject(supabaseAdmin, signer, data.userId);
+    const status = await codeOfConductStatusFor(supabaseAdmin, subjectId);
     return {
       signer: {
         name: signer.greetingName,

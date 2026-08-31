@@ -355,6 +355,22 @@ describe("updateMyProfileSchema", () => {
     expect(() => updateMyProfileSchema.parse({ emergency_contact_name: "" })).toThrow();
     expect(() => updateMyProfileSchema.parse({ emergency_contact_relationship: "" })).toThrow();
   });
+
+  // `userId` says WHO the patch is about. It is the one key here that is not a
+  // column, and the handler strips it before the UPDATE.
+  it("accepts the person the patch is about, and requires it to be a uuid", () => {
+    const target = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+    expect(updateMyProfileSchema.parse({ gi_size: "4", userId: target }).userId).toBe(target);
+    expect(() => updateMyProfileSchema.parse({ gi_size: "4", userId: "u1" })).toThrow();
+  });
+
+  it("still treats a patch that only names a person as nothing to update", () => {
+    // Naming somebody is not editing them, so this must not slip past the
+    // empty-patch guard and become a write of no fields.
+    expect(() =>
+      updateMyProfileSchema.parse({ userId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301" }),
+    ).toThrow();
+  });
 });
 
 describe("managerKitSizesSchema", () => {

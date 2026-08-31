@@ -14,6 +14,7 @@ import { annotationVisibilities, articleVisibilities } from "./kb";
 // (and the CHECK constraints on `profiles` mirror them), so the wire schemas
 // below enumerate them from there rather than repeating the lists.
 import { beltSizes, giSizes } from "./kit-sizes";
+import { householdTargetUserId } from "./household";
 // A dated plan's window is computed in the club's own timezone (its last day
 // must cover that evening's class, not cut off at UTC midnight), so this
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
@@ -3477,16 +3478,28 @@ export const updateMyProfileSchema = z
     emergency_contact_phone: z.string().trim().min(1).max(30).optional(),
     gi_size: z.enum(giSizes).nullable().optional(),
     belt_size: z.enum(beltSizes).nullable().optional(),
+    // WHO this patch is about, and the one key here that is not a column.
+    // Absent means the caller themselves, which is what `/account` sent before
+    // a household could exist. Present, it is checked by `assertActingFor`
+    // (`src/lib/household.ts`) and the handler strips it before the UPDATE, so
+    // it can never be mistaken for a field. Shares that module's schema rather
+    // than restating it, so a target means the same thing on every path.
+    userId: householdTargetUserId.optional(),
   })
   // Unknown keys are an attempt to write a field this path does not own (a
   // legal name, a date of birth), not a harmless extra. Rejecting beats
   // stripping: a caller that thought it was saving `first_name` should hear
   // that it was not.
   .strict()
-  .refine((patch) => Object.values(patch).some((v) => v !== undefined), {
-    message: "Nothing to update.",
-  });
+  // `userId` is excluded on purpose: naming a person is not editing them, so a
+  // patch carrying only a target is still nothing to update.
+  .refine(
+    (patch) => Object.entries(patch).some(([key, v]) => key !== "userId" && v !== undefined),
+    { message: "Nothing to update." },
+  );
 export type UpdateMyProfileInput = z.infer<typeof updateMyProfileSchema>;
+/** The same patch with the target removed: exactly the `profiles` columns. */
+export type UpdateMyProfileFields = Omit<UpdateMyProfileInput, "userId">;
 
 /** Manager: correct somebody's kit sizes from their detail page. */
 export const managerKitSizesSchema = z.object({
