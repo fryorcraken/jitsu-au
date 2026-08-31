@@ -399,6 +399,10 @@ function Waiver() {
       return;
     }
     setFirstName(picked.first_name);
+    // Restored even though the picker never showed it. Without this the field
+    // stays cleared from the switch above, and approving the waiver promotes
+    // that blank over the middle name already on their record.
+    setMiddleName(picked.middle_name ?? "");
     setLastName(picked.last_name ?? "");
     setPreferredName(picked.preferred_name ?? "");
     setDob(picked.date_of_birth ?? "");

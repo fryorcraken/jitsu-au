@@ -20,6 +20,13 @@ import { isDependant, listHousehold } from "@/lib/household";
 export type MyDependant = {
   user_id: string;
   first_name: string;
+  /**
+   * Carried even though no screen prints it. Picking a child prefills the
+   * waiver form from these fields, and a middle name that came back missing
+   * would be submitted blank and then promoted over the stored one at
+   * approval: a field quietly erased by choosing the person it belongs to.
+   */
+  middle_name: string | null;
   last_name: string | null;
   preferred_name: string | null;
   date_of_birth: string | null;
@@ -46,6 +53,7 @@ export const listMyDependants = createServerFn({ method: "GET" })
     return household.filter(isDependant).map((person) => ({
       user_id: person.user_id,
       first_name: person.first_name,
+      middle_name: person.middle_name,
       last_name: person.last_name,
       preferred_name: person.preferred_name,
       date_of_birth: person.date_of_birth,

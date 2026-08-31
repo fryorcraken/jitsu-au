@@ -392,14 +392,55 @@ function newDependantEmail(): string {
 }
 
 /**
- * True for an address this module minted. Nothing may ever send to one.
- *
- * Exported because it is the only honest way to ask the question: the column
- * that decides who is a dependant is `profiles.guardian_user_id`, and this is
- * for the places holding an address with no profile row to hand.
+ * What an anonymous signer is told when they try to add somebody to an account
+ * that already works. Exported so the handler and its test cannot drift.
  */
-export function isDependantEmail(email: string): boolean {
-  return normalizeEmail(email).endsWith(`@${DEPENDANT_EMAIL_DOMAIN}`);
+export const SIGN_IN_TO_ADD_TO_ACCOUNT =
+  "That email already has an account with us. Please sign in first, then add someone to your account.";
+
+/**
+ * Whether filing for a dependant needs the signer to prove who they are first.
+ *
+ * ⚠️ Adding somebody to an account that ALREADY WORKS needs proof. Everything
+ * else on this page is deliberately public, and this is the one thing that is
+ * not.
+ *
+ * Signing is public and unlimited (`docs/waivers.md` rule 4), and an anonymous
+ * submission naming an existing address has always been able to file a waiver
+ * against that person. A manager reading it is the gate, and that is accepted.
+ * A DEPENDANT is different in kind: it writes a new person into somebody else's
+ * household, before any approval and whether or not the waiver is ever
+ * approved, and no screen in the product removes one. Without this, anyone
+ * holding a member's address could put people on their account.
+ *
+ * The rule is narrow on purpose, because the flow it must not break is the
+ * whole point of the feature: a parent with no account signs for their first
+ * child, and approving that waiver is what gives them a login. So it asks only
+ * about a guardian who can ALREADY sign in, which means "please sign in first"
+ * is always something the person reading it can actually do. A guardian created
+ * moments ago by `resolvePersonId` is still banned and passes, as does one
+ * whose own waiver is still pending: that is exactly the parent adding a second
+ * child before anyone has approved the first.
+ *
+ * Known cost, recorded rather than discovered: the refusal is only ever seen
+ * for an address that has a working account, so it distinguishes one from an
+ * unknown address in a way `/auth` deliberately does not. It sits behind a
+ * complete, valid waiver submission rather than a cheap probe, and the
+ * alternative is letting strangers write into people's households.
+ *
+ * Pure, and takes the ban as a string, so it is testable without an auth stub.
+ */
+export function needsSignInToFileForDependant(opts: {
+  /** Signed in as the guardian, or arrived from a link proving their address. */
+  identityProven: boolean;
+  /** `banned_until` from the guardian's auth user, as GoTrue reports it. */
+  guardianBannedUntil: string | null | undefined;
+  now?: Date;
+}): boolean {
+  if (opts.identityProven) return false;
+  const until = opts.guardianBannedUntil;
+  const guardianIsLocked = Boolean(until && new Date(until) > (opts.now ?? new Date()));
+  return !guardianIsLocked;
 }
 
 /** One of the three fields a dependant is matched on, ready to compare. */
@@ -921,6 +962,25 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const contactId =
       callerId ?? (await resolvePersonId(admin, { email, emailProven, seed: contactSeed }));
 
+    // The one thing on this public page that is not public: see
+    // `needsSignInToFileForDependant` for what this is defending against and
+    // why it is this narrow.
+    if (signingForDependant && !callerId && !emailProven) {
+      const { data: guardianUser, error: guardianErr } =
+        await admin.auth.admin.getUserById(contactId);
+      if (guardianErr) throw new Error(guardianErr.message);
+      const bannedUntil = (guardianUser.user as { banned_until?: string | null } | null)
+        ?.banned_until;
+      if (
+        needsSignInToFileForDependant({
+          identityProven: false,
+          guardianBannedUntil: bannedUntil,
+        })
+      ) {
+        throw new Error(SIGN_IN_TO_ADD_TO_ACCOUNT);
+      }
+    }
+
     // ...and the PARTICIPANT, who for a child's waiver is somebody else
     // entirely: one of this guardian's dependants, matched or created, with a
     // full person record of their own and no login, ever.
@@ -1204,7 +1264,14 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         template_body: tpl.body_md,
         template_version: tpl.version,
         club_name: CLUB_NAME,
-        is_minor: isMinor,
+        // `needsGuardian`, NOT `isMinor`. This prop decides whether the PDF
+        // carries the "Parent / guardian consent" block and the guardian's
+        // signature, which is the "is somebody signing for this person"
+        // question rather than the "how old are they" one. Keyed on age, an
+        // adult dependant's document would come out with no consent block and
+        // no second signature, while the form had just required both: a signed
+        // legal record of a consent that is missing from it.
+        is_minor: needsGuardian,
         guardian_name: contacts.guardianName,
         guardian_relationship: contacts.guardianRelationship,
         guardian_address: contacts.guardianAddress,

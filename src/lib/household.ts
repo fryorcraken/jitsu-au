@@ -214,6 +214,7 @@ export async function resolveSubject(
 export type HouseholdMember = {
   user_id: string;
   first_name: string;
+  middle_name: string | null;
   last_name: string | null;
   preferred_name: string | null;
   date_of_birth: string | null;
@@ -232,7 +233,8 @@ export async function listHousehold(
   admin: AdminClient,
   userId: string,
 ): Promise<HouseholdMember[]> {
-  const columns = "user_id, first_name, last_name, preferred_name, date_of_birth, guardian_user_id";
+  const columns =
+    "user_id, first_name, middle_name, last_name, preferred_name, date_of_birth, guardian_user_id";
   // Two queries rather than one hand-written `.or()` filter, as `kb.functions.ts`
   // explains. They are independent, so they cost one round trip between them.
   const [self, dependants] = await Promise.all([

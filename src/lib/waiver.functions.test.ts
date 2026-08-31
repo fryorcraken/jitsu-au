@@ -1802,3 +1802,56 @@ describe("filePaperWaiver, for a dependant", () => {
     expect(row.user_id).toBe(CHILD_ONE);
   });
 });
+
+// The one thing on the public signing page that is not public. Filing for a
+// dependant writes a new person into somebody else's household, which an
+// anonymous submission naming a member's address must not be able to do.
+describe("needsSignInToFileForDependant", () => {
+  const HOUR = 60 * 60 * 1000;
+  const now = new Date("2026-08-31T00:00:00.000Z");
+  const banned = new Date(now.getTime() + HOUR).toISOString();
+  const expired = new Date(now.getTime() - HOUR).toISOString();
+
+  it("refuses an anonymous signer against a guardian who can already sign in", async () => {
+    const { needsSignInToFileForDependant } = await import("./waiver.functions");
+    expect(
+      needsSignInToFileForDependant({
+        identityProven: false,
+        guardianBannedUntil: null,
+        now,
+      }),
+    ).toBe(true);
+    // A ban that has run out is not a ban.
+    expect(
+      needsSignInToFileForDependant({
+        identityProven: false,
+        guardianBannedUntil: expired,
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  // The flow this must not break, and the whole point of the feature: a parent
+  // with no account signs for their first child, and approving that waiver is
+  // what gives them a login. They cannot sign in, so a refusal would be
+  // unactionable and the feature unreachable.
+  it("allows an anonymous signer against a guardian who is still locked", async () => {
+    const { needsSignInToFileForDependant } = await import("./waiver.functions");
+    expect(
+      needsSignInToFileForDependant({
+        identityProven: false,
+        guardianBannedUntil: banned,
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it("never asks anything of a signer who has proved who they are", async () => {
+    const { needsSignInToFileForDependant } = await import("./waiver.functions");
+    for (const guardianBannedUntil of [null, banned, expired]) {
+      expect(
+        needsSignInToFileForDependant({ identityProven: true, guardianBannedUntil, now }),
+      ).toBe(false);
+    }
+  });
+});
