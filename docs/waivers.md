@@ -368,11 +368,22 @@ Attach a PDF, or a photo of each page, or any mix of the two: several files are
 joined into one document in the order shown, so the waiver has the single PDF
 every screen already expects. Up to 10 MB in total.
 
-A paper form is filed for a child the same way, by answering the same "who is
-this for" question. The manager names the parent or guardian and gives their
-address, and the record that comes out is identical to one signed online: the
-child gets their own person record, the waiver is filed under the guardian's
-address, and approving it unlocks the guardian's login.
+A paper form **can** be filed for a child, by answering the same "who is this
+for" question the online form asks. The manager names the parent or guardian and
+gives their address, and the record that comes out is identical to one signed
+online: the child gets their own person record, the waiver is filed under the
+guardian's address, and approving it unlocks the guardian's login.
+
+⚠️ **Today that is reachable only through the manager agent API**
+(`docs/manager-agent-api.md`, `file_waiver`), not from "Upload a paper waiver"
+on the site. The filing function and its validation take the question; the
+screen does not ask it yet, so a form uploaded there is still filed as being
+for the person whose email was typed. **The consequence is the bug this whole
+change exists to fix, still live on that one screen**: two siblings uploaded
+under one parent's address land on the same person, and approving the second
+overwrites the first. #107 adds the question to the screen. Until then, a
+child's paper waiver goes through the agent API, or the parent signs it on the
+site.
 
 From there it is an ordinary submission. It attaches to the email's existing
 person, or creates a locked applicant if that email is new, and it lands
