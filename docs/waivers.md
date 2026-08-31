@@ -209,6 +209,17 @@ system. (The contact form stores a message, not a person.)
    is created permanently banned and stays that way, so the auth page answers
    for their reserved address exactly as it does for an unknown one.
 
+   That first case reaches the screen. `/account` shows kit sizing, photos and
+   video, waivers and the code of conduct only to somebody who has records of
+   their own, so a parent-only account sees the people on it, their contact
+   details, their calendar link and their password, and nothing that asks them
+   to size a gi they will never wear. It takes BOTH halves to shrink the page:
+   having somebody else on the account AND no waiver of one's own. Somebody
+   with no dependants is an ordinary member about to sign their first waiver
+   and needs every card, and a household that fails to load leaves the page
+   showing everything, because a dropped connection must not hide a member's
+   own records from them.
+
 ## Flows
 
 ### Lead registers for the free trial
