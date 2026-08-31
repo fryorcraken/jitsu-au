@@ -682,6 +682,21 @@ request at `/auth`, or a password they set). They see: the waiver form prefilled
 waiver history with the active one marked and PDFs downloadable, and
 memberships (buying a paid plan makes a visitor a member).
 
+**A guardian sees the same for each person on their account**, from
+`/account/<id>`: that child's waiver history, their PDFs, their details and
+their code of conduct. `getWaiverPdfUrl` allows three readers, and asks in this
+order: the waiver's owner, a manager, then the owner's guardian through
+`mayActFor`. All three refusals say "Waiver PDF not found.", the same sentence
+it gives for a waiver that does not exist, because it takes a bare uuid from
+anybody signed in and two different answers would let somebody enumerate real
+waiver ids.
+
+The `storage.objects` policies say the same thing (`docs/database.md`), but they
+are not what enforces it: the signed URL is minted with the service role, which
+bypasses storage RLS. They are the versioned statement of the access model for
+the direct-from-client path, kept in step so the next person to add one inherits
+the right answer.
+
 Every emailed auth link and code lasts as long as Supabase Auth's "Email OTP
 Expiration" setting, currently its 3600 second default. The emails say so, from
 the single `AUTH_LINK_VALIDITY_MINUTES` constant in
