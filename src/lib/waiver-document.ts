@@ -79,8 +79,8 @@ export type WaiverPlaceholderInput = {
   /** How the emergency contact is related. Not the guardian by definition. */
   emergencyContactRelationship: string;
   emergencyContactPhone: string;
-  /** The signing parent/guardian of a minor, already resolved
-   * (`resolveWaiverContacts`). All ignored when `isMinor` is false. */
+  /** The signing parent/guardian, already resolved
+   * (`resolveWaiverContacts`). All ignored when `hasGuardian` is false. */
   guardianName: string;
   guardianRelationship: string;
   guardianAddress: string;
@@ -91,8 +91,26 @@ export type WaiverPlaceholderInput = {
   healthAnswers: HealthAnswerDraft;
   signatureName: string;
   clubName: string;
-  /** Under 18: ticks the minor box and prints the guardian tokens. */
+  /**
+   * Under 18 on the day of signing. Ticks the minor box rather than the adult
+   * one, and NOTHING else.
+   *
+   * This is a fact about the participant's age, taken from the date of birth
+   * they gave, so it is the only thing the participant-type tick may be read
+   * from. It used to also decide whether the guardian tokens printed, because
+   * until dependants existed the two questions had the same answer.
+   */
   isMinor: boolean;
+  /**
+   * Whether a parent or guardian signed this, which is a DIFFERENT question.
+   *
+   * True for a minor, and true for anyone on somebody else's account whatever
+   * their age. Keeping it apart from `isMinor` is what stops a 20-year-old
+   * dependant's document ticking "minor" beside a stored record that says they
+   * are not one: the frozen row and the evidence must never disagree about a
+   * legal fact.
+   */
+  hasGuardian: boolean;
   /** Pre-formatted signing date for `{{signed_date}}` (empty string if unsigned). */
   signedDate: string;
 };
@@ -137,10 +155,10 @@ export function buildWaiverPlaceholders(v: WaiverPlaceholderInput): Record<strin
     // for a family where the parent who signs is not the one we would ring
     // during class, printing the emergency contact here would name the wrong
     // person on a legal document. "N/A" for an adult, who has no guardian.
-    guardian_name: v.isMinor ? v.guardianName : "N/A",
-    guardian_relationship: v.isMinor ? v.guardianRelationship : "N/A",
-    guardian_address: v.isMinor ? v.guardianAddress : "N/A",
-    guardian_phone: v.isMinor ? v.guardianPhone : "N/A",
+    guardian_name: v.hasGuardian ? v.guardianName : "N/A",
+    guardian_relationship: v.hasGuardian ? v.guardianRelationship : "N/A",
+    guardian_address: v.hasGuardian ? v.guardianAddress : "N/A",
+    guardian_phone: v.hasGuardian ? v.guardianPhone : "N/A",
     guardian_email: v.isMinor ? v.guardianEmail : "N/A",
     signature_name: v.signatureName || v.fullName,
     signed_date: v.signedDate,

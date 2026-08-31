@@ -115,6 +115,7 @@ const base: WaiverPdfData = {
   template_version: 3,
   club_name: "UTS Jitsu",
   is_minor: false,
+  has_guardian: false,
   guardian_name: "",
   guardian_relationship: "",
   guardian_address: "",
@@ -278,6 +279,7 @@ describe("renderWaiverPdf", () => {
       await renderWaiverPdf({
         ...base,
         is_minor: true,
+        has_guardian: true,
         guardian_name: "Pat Sample",
         guardian_relationship: "Parent",
         guardian_address: "9 Quay St, Haymarket NSW",
@@ -298,6 +300,7 @@ describe("renderWaiverPdf", () => {
       await renderWaiverPdf({
         ...base,
         is_minor: true,
+        has_guardian: true,
         guardian_name: "Pat Sample",
         guardian_relationship: "Parent",
         guardian_address: "9 Quay St, Haymarket NSW",
@@ -371,6 +374,7 @@ describe("renderWaiverPdf", () => {
       await renderWaiverPdf({
         ...base,
         is_minor: true,
+        has_guardian: true,
         guardian_name: "Pat Sample",
         guardian_relationship: "Parent",
         guardian_address: "9 Quay St, Haymarket NSW",

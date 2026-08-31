@@ -46,6 +46,15 @@ they are an ordinary person record: their own waiver, their own trial, their own
 membership. The only difference is that phase 3 unlocks their guardian's login
 rather than one of their own.
 
+⚠️ A **guardian** does not, yet. `has_active_paid_membership` counts a
+dependant's membership, so a parent whose child is paid up gets the members-only
+calendar, but the phase above and the `member` role still count only a person's
+own memberships. So that parent reads as `lead` or `lapsed` on `/manager/users`
+and lands in the renewal-chasing list while holding live access. The migration
+that created the split recorded this as unreachable "until #105 creates the
+first dependant"; #105 is this change, so it is reachable now, and #107
+reconciles the two.
+
 **Managers** are club staff with the manager role, orthogonal to the funnel.
 Someone browsing the site who has not provided an email is nothing in the
 system. (The contact form stores a message, not a person.)
@@ -65,8 +74,19 @@ system. (The contact form stores a message, not a person.)
    ever. `profiles.guardian_user_id` is the only thing that marks them, and it
    names the account holder everything about them reaches. Their login record
    still carries an address, because auth requires one, but it is a reserved,
-   non-deliverable string the server generates. It is never printed, never sent
-   to, and their login is permanently banned. Nothing identifies a person by it.
+   non-deliverable string the server generates, and their login is permanently
+   banned. Nothing identifies a person by it.
+
+   ⚠️ **"Never printed, never sent to" is the intent, and it is not true yet.**
+   Until #106 splits display from delivery, a dependant's reserved address
+   **is** shown on `/manager/users` and on their person page, with an amber
+   "unverified" pill, and the person page's **Change email** and **Resend
+   verification** buttons act on it. Membership invoices and receipts also
+   resolve the recipient from the participant's own address, so an invoice
+   raised for a child is sent nowhere and the guardian is never told they owe
+   money. Nothing about a dependant reaches the guardian today except the
+   waiver confirmation and the account-activated email. Treat the rule as what
+   the product is committed to, and #106/#107 as the work that makes it so.
 
    So two children in one family are two people under one address, which is
    what the club actually has. Before this, the second child's waiver resolved
@@ -482,6 +502,18 @@ the person detail page (with the date), and on the member's account page.
 
 ### Email edge cases
 
+- **An account that already works has to sign in before adding somebody to
+  it.** Signing stays public and unlimited for everyone else, including a
+  parent with no account signing for their first child, and one whose own
+  waiver is still pending. But filing for a dependant writes a new person into
+  a household, before any approval and with no screen that removes one, so an
+  address that can already sign in is asked to. The refusal names the address
+  and says to sign in first. Known cost: it is the one answer on the site that
+  distinguishes an address with an account from an unknown one, which the auth
+  page below deliberately does not, and it does so silently (nothing is filed
+  and no manager sees it). It sits behind a complete valid waiver rather than a
+  cheap probe, and the alternative is letting a stranger put people on a
+  member's account.
 - **Signed-in people sign on their own account.** The form locks the email
   field to their login email, and the server rejects a submission whose email
   does not match it (prevents a typo or someone else's address attaching the

@@ -287,8 +287,21 @@ function Waiver() {
     // medical notes is not a shortcut, it is the wrong person's health record
     // on a signed legal document.
     if (signingFor === "dependant") return;
+    // ⚠️ Checked AGAIN when the answer lands, not only before asking.
+    //
+    // The gate above runs when the effect does; the fetch is a round trip. "Who
+    // is this waiver for?" is the FIRST control on the page, so the realistic
+    // sequence on a phone is: effect fires, request in flight, parent
+    // immediately picks "my child", the participant fields are cleared for the
+    // child, and THEN the parent's profile arrives and writes their own name,
+    // date of birth and medical notes into a block now labelled "Their
+    // details". A parent who corrects the name and not the birthday signs their
+    // child's waiver carrying their own, and since a dependant is matched on
+    // name and date of birth, a wrong birthday quietly mints a second child.
+    let cancelled = false;
     fetchMine()
       .then((row) => {
+        if (cancelled) return;
         if (!row) return;
         const r = row as Prefill;
         if (r.first_name || r.last_name) {
@@ -325,6 +338,11 @@ function Waiver() {
       .catch(() => {
         /* no profile yet */
       });
+    // Runs on any change to the deps below, which includes the moment
+    // `signingFor` flips, so an in-flight answer for the old one is dropped.
+    return () => {
+      cancelled = true;
+    };
   }, [authLoading, user, fetchMine, restored, signingFor]);
 
   // A signed-in person is the account holder, and the account holder's address
@@ -393,6 +411,11 @@ function Waiver() {
     const picked = dependants.find((d) => d.user_id === id);
     if (!picked) {
       setFirstName("");
+      // Cleared here too, not only restored below. Picking "Ada Byron
+      // Lovelace" and then "Someone new" would otherwise leave Byron in a
+      // field nobody can see for a person it does not belong to, and it would
+      // reach the signed document's legal name and that person's profile.
+      setMiddleName("");
       setLastName("");
       setPreferredName("");
       setDob("");
@@ -643,7 +666,9 @@ function Waiver() {
     healthAnswers: health,
     signatureName: signatureMode === "type" ? signatureName : "",
     clubName: "UTS Jitsu",
-    isMinor: needsGuardian,
+    // The age tick and the guardian block are separate questions now.
+    isMinor,
+    hasGuardian: needsGuardian,
     signedDate: new Date(previewSignedAt).toLocaleDateString("en-AU"),
   });
 
@@ -1664,7 +1689,8 @@ function Waiver() {
                   acknowledgements={resolveAcknowledgements(ackDefs, acks)}
                   signatureName={signatureMode === "type" ? signatureName : ""}
                   signatureImage={previewSignatureImage}
-                  isMinor={needsGuardian}
+                  isMinor={isMinor}
+                  hasGuardian={needsGuardian}
                   guardianName={contacts.guardianName}
                   guardianRelationship={contacts.guardianRelationship}
                   guardianAddress={contacts.guardianAddress}

@@ -569,13 +569,18 @@ async function resolveDependantId(
   // The profile row exists already (the ensure_profile trigger made it); this
   // seeds it AND sets the one column that makes them a dependant.
   //
-  // Not best-effort, unlike the seed in `resolvePersonId`, and that difference
-  // is load-bearing. A person created without `guardian_user_id` is an ORPHANED
-  // account holder: they carry a reserved address nobody can sign in with and
-  // nobody is contactable at, they belong to no household, and no screen in the
-  // product can find them or fix them. Failing here instead leaves an unused
-  // auth user, which is inert and invisible, and the signer is asked to try
-  // again.
+  // Not best-effort, unlike the seed in `resolvePersonId`. A person created
+  // without `guardian_user_id` is an ORPHANED account holder: a reserved
+  // address nobody can sign in with, nobody is contactable at, belonging to no
+  // household, and no screen in the product can find them or fix them.
+  //
+  // ⚠️ Throwing does NOT prevent that, and an earlier version of this comment
+  // claimed it did. The trigger has already inserted the profile row by the
+  // time this runs, so the orphan exists the moment `createUser` succeeds. What
+  // the throw buys is that the SIGNER is told, rather than getting a waiver
+  // filed against a person their guardian link never reached. So the auth user
+  // is removed on the way out: that is what actually takes the orphan back off
+  // the books, and it cascades the profile row with it.
   const { error: profileErr } = await admin
     .from("profiles")
     .upsert(
@@ -587,6 +592,17 @@ async function resolveDependantId(
       "[resolveDependantId] could not link the dependant to their guardian:",
       profileErr,
     );
+    // Best-effort, and it must not mask the real failure: if the removal fails
+    // too, the signer still hears the same sentence and a nameless person is
+    // left on a reserved address for a manager to find. Better than reporting
+    // success over it.
+    const { error: cleanupErr } = await admin.auth.admin.deleteUser(created.user.id);
+    if (cleanupErr) {
+      console.error(
+        "[resolveDependantId] could not remove the half-created dependant:",
+        cleanupErr,
+      );
+    }
     throw new Error("We couldn't add that person to your account. Please try again.");
   }
   return created.user.id;
@@ -1264,14 +1280,19 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         template_body: tpl.body_md,
         template_version: tpl.version,
         club_name: CLUB_NAME,
-        // `needsGuardian`, NOT `isMinor`. This prop decides whether the PDF
-        // carries the "Parent / guardian consent" block and the guardian's
-        // signature, which is the "is somebody signing for this person"
-        // question rather than the "how old are they" one. Keyed on age, an
-        // adult dependant's document would come out with no consent block and
-        // no second signature, while the form had just required both: a signed
-        // legal record of a consent that is missing from it.
-        is_minor: needsGuardian,
+        // Two different questions, and they stopped having the same answer the
+        // moment a dependant could be an adult.
+        //
+        // `is_minor` is the participant-type tick at the top of the form, read
+        // off the date of birth, and it must agree with the frozen row, which
+        // stores this same value. `has_guardian` is what prints the consent
+        // block and the second signature. Keyed on age alone, an adult
+        // dependant's document would carry no consent block while the form had
+        // just required one; keyed on the guardian alone, it would tick "minor"
+        // for a 20-year-old whose own record says otherwise. Both are wrong on
+        // a signed legal document, so they are separate inputs.
+        is_minor: isMinor,
+        has_guardian: needsGuardian,
         guardian_name: contacts.guardianName,
         guardian_relationship: contacts.guardianRelationship,
         guardian_address: contacts.guardianAddress,

@@ -18,6 +18,13 @@ import { ackAnchorId } from "@/lib/waiver-required-fields";
 
 const submitWaiverWithPdf = vi.fn();
 const getCurrentWaiverTemplate = vi.fn();
+const getMyProfile = vi.fn();
+/**
+ * Who `useAuth` reports, settable per test. Signed out is the default and what
+ * every case below the first describe assumes; the prefill only runs for a
+ * signed-in person, so testing it needs this to move.
+ */
+let authUser: { id: string; email: string } | null = null;
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => ({
@@ -34,7 +41,7 @@ vi.mock("@tanstack/react-start", () => ({
 vi.mock("@/lib/waiver.functions", () => ({
   submitWaiverWithPdf: (...args: unknown[]) => submitWaiverWithPdf(...args),
   getCurrentWaiverTemplate: (...args: unknown[]) => getCurrentWaiverTemplate(...args),
-  getMyProfile: vi.fn(),
+  getMyProfile: (...args: unknown[]) => getMyProfile(...args),
   checkWaiverSubmission: vi.fn(),
 }));
 
@@ -54,7 +61,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: null, session: null, loading: false }),
+  useAuth: () => ({ user: authUser, session: null, loading: false }),
 }));
 
 vi.mock("@/components/site/SiteLayout", () => ({
@@ -87,6 +94,9 @@ function summary() {
 }
 
 beforeEach(() => {
+  authUser = null;
+  getMyProfile.mockReset();
+  getMyProfile.mockResolvedValue(null);
   submitWaiverWithPdf.mockReset();
   getCurrentWaiverTemplate.mockReset();
   getCurrentWaiverTemplate.mockResolvedValue({
@@ -386,5 +396,57 @@ describe("/waiver, who is this for", () => {
     await user.type(screen.getByLabelText("Date of birth"), "1990-12-10");
 
     expect(screen.getByLabelText("Parent or guardian name")).toBeInTheDocument();
+  });
+});
+
+// A signed-in parent's own profile prefills their own waiver, and must never
+// prefill a child's. The gate on that is a race, because the prefill is a round
+// trip and the "who is this for?" question is the first control on the page.
+describe("/waiver, prefilling a signed-in parent", () => {
+  it("does not paste the parent's details into a child's waiver", async () => {
+    const user = userEvent.setup();
+    authUser = { id: "parent-1", email: "parent@example.com" };
+    // The profile lands only after the parent has already answered. This is the
+    // realistic order on a phone: the answer is one tap, the round trip is not.
+    let release: (v: unknown) => void = () => {};
+    getMyProfile.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    renderWaiver();
+    await screen.findByLabelText("First name");
+    await user.click(
+      screen.getByRole("radio", { name: /My child, or someone else I look after/i }),
+    );
+
+    release({
+      first_name: "Ada",
+      last_name: "Lovelace",
+      date_of_birth: "1815-12-10",
+      phone: "0400 000 000",
+      address: "1 Broadway",
+      medical_notes: "Parent's own condition",
+    });
+    await waitFor(() => expect(getMyProfile).toHaveBeenCalled());
+
+    // The child's block stays as the parent left it. A parent's date of birth
+    // landing here is worse than cosmetic: a dependant is matched on name and
+    // birthday, so a wrong one silently creates a second child.
+    expect(screen.getByLabelText("First name")).toHaveValue("");
+    expect(screen.getByLabelText("Date of birth")).toHaveValue("");
+    // And the parent's health record certainly does not belong on it.
+    expect(screen.queryByDisplayValue("Parent's own condition")).not.toBeInTheDocument();
+  });
+
+  it("still prefills when they are signing for themselves", async () => {
+    // The guard must not cost the ordinary case its prefill.
+    authUser = { id: "parent-1", email: "parent@example.com" };
+    getMyProfile.mockResolvedValue({ first_name: "Ada", last_name: "Lovelace" });
+
+    renderWaiver();
+    await waitFor(() => expect(screen.getByLabelText("First name")).toHaveValue("Ada"));
+    expect(screen.getByLabelText("Last name")).toHaveValue("Lovelace");
   });
 });

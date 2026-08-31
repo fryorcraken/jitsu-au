@@ -202,6 +202,7 @@ function fakeAdmin(opts: {
     uploads: [] as { path: string; bytes: unknown }[],
     removes: [] as string[][],
     getUserById: [] as string[],
+    deleteUser: [] as string[],
   };
 
   const admin = {
@@ -233,6 +234,11 @@ function fakeAdmin(opts: {
             data: { user: { id: string } | null };
             error: unknown;
           }>;
+        },
+        deleteUser: (id: string) => {
+          calls.deleteUser.push(id);
+          profiles.delete(id);
+          return Promise.resolve(ok(null)) as unknown as Promise<{ error: unknown }>;
         },
         getUserById: (id: string) => {
           calls.getUserById.push(id);
@@ -1536,10 +1542,18 @@ describe("reading a person other than yourself", () => {
 
 // ---- Filing for somebody on an account (#105) ----
 //
-// The paper path is used to exercise this because it is the exported one and
-// it takes the same "who is this for" shape as the online form: the same
-// `resolvePersonId` for the guardian and the same `resolveDependantId` for the
-// participant, so what is proved here holds for both.
+// The paper path is used to exercise this because it is the one that takes an
+// admin client as a parameter; `submitWaiverWithPdf` is a `createServerFn`
+// handler and dies on "No Start context found" from the runner.
+//
+// ⚠️ So what is proved here is `resolveDependantId` and `findDependantId`, which
+// both paths share, and NOT the public form's own wiring around them. The order
+// there (resolve the guardian, then the sign-in gate, then create the child),
+// the `contactId`-vs-`userId` split across the verification stamp, the
+// confirmation email and the ban check, and the suppressed code-of-conduct
+// token are covered by nothing in this file. Deleting the gate in
+// `submitWaiverWithPdf` keeps this suite green. That gap belongs to the
+// end-to-end suite, which drives the real form.
 describe("filePaperWaiver, for a dependant", () => {
   const PARENT = EXISTING_USER;
 
@@ -1781,6 +1795,30 @@ describe("filePaperWaiver, for a dependant", () => {
 
     const result = await filePaperWaiver(admin, dependantInput(), MANAGER_ID);
     expect(result.user_id).toBe(CHILD_ONE);
+  });
+
+  // The orphan case. The ensure_profile trigger creates the profile row the
+  // moment the auth user exists, so a failed guardian link leaves a nameless
+  // person on a reserved address that no screen can find or fix. Throwing tells
+  // the signer; removing the auth user is what takes the record back off the
+  // books.
+  it("removes the half-created dependant when the guardian link fails", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { admin, calls, profiles } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [{ user_id: PARENT, guardian_user_id: null }],
+      mintedUserIds: [CHILD_ONE],
+      profileUpsert: fails("guardian_user_id violates foreign key"),
+    });
+
+    await expect(filePaperWaiver(admin, dependantInput(), MANAGER_ID)).rejects.toThrow(
+      /couldn't add that person/i,
+    );
+    expect(calls.deleteUser).toEqual([CHILD_ONE]);
+    expect(profiles.has(CHILD_ONE)).toBe(false);
+    // And no waiver was filed against the person that never finished existing.
+    expect(calls.insert).toHaveLength(0);
   });
 
   it("files the waiver under the guardian's address, as the frozen record", async () => {

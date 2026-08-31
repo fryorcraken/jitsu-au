@@ -42,7 +42,13 @@ export type WaiverDocumentProps = {
   clubName: string;
   /** ISO timestamp; omit/empty for an unsigned draft. */
   signedAt?: string | null;
+  /** Under 18 on the day of signing: the participant-type tick, and nothing else. */
   isMinor: boolean;
+  /**
+   * Whether a parent or guardian signed. True for a minor, and for anyone on
+   * somebody else's account whatever their age. See `waiver-document.ts`.
+   */
+  hasGuardian: boolean;
   guardianName: string;
   guardianRelationship: string;
   /** The guardian's own contact details, already resolved against the
@@ -155,6 +161,7 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     clubName,
     signedAt,
     isMinor,
+    hasGuardian,
     guardianName,
     guardianRelationship,
     guardianAddress,
@@ -188,6 +195,7 @@ export function WaiverDocument(props: WaiverDocumentProps) {
     signatureName,
     clubName,
     isMinor,
+    hasGuardian,
     signedDate: signedAt ? new Date(signedAt).toLocaleDateString("en-AU") : "",
   });
   const blocks = parseWaiverBlocks(applyWaiverPlaceholders(templateBody, placeholders));
@@ -309,8 +317,8 @@ export function WaiverDocument(props: WaiverDocumentProps) {
           />
         </section>
 
-        {/* Guardian consent (minors only) */}
-        {isMinor ? (
+        {/* Guardian consent: a minor, or anyone on somebody else's account */}
+        {hasGuardian ? (
           <section className="mt-7">
             <h3 className="text-base font-bold" style={{ color: PRIMARY }}>
               Parent / guardian consent
