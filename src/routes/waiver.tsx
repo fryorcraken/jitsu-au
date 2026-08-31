@@ -291,18 +291,33 @@ function Waiver() {
     if (appliedRequestedFor || restored || !requestedDependantId) return;
     if (dependantsQ.isPending) return;
     setAppliedRequestedFor(true);
-    const picked = dependants.find((d) => d.user_id === requestedDependantId);
+    // Case-insensitively, because the id came out of a URL. The server
+    // lowercases every target (`householdTargetUserId`), so an uppercase one is
+    // perfectly valid there; matching it exactly here would silently leave the
+    // form on "myself" for a link that the server would have honoured.
+    const picked = dependants.find(
+      (d) => d.user_id.toLowerCase() === requestedDependantId.toLowerCase(),
+    );
     if (!picked) return;
-    setSigningFor("dependant");
-    setDependantId(picked.user_id);
-    setFirstName(picked.first_name);
-    setMiddleName(picked.middle_name ?? "");
-    setLastName(picked.last_name ?? "");
-    setPreferredName(picked.preferred_name ?? "");
-    setDob(picked.date_of_birth ?? "");
-    // A dependant's waiver never carries a participant address, exactly as
-    // `chooseSigningFor` says.
-    setEmail("");
+    // ⚠️ Through the SAME two functions the person using the picker goes
+    // through, rather than setting the fields this effect happens to care
+    // about. `chooseSigningFor` clears the participant block wholesale --
+    // medical notes, the health answers, gi size, UTS number, martial arts
+    // experience -- and every one of those is a field the profile prefill may
+    // already have filled with the PARENT's answers by the time the household
+    // lands. Setting only the name and date of birth here would leave a child's
+    // signed waiver carrying their parent's health record, which is the exact
+    // failure #102 exists to end, arrived at from a new direction.
+    //
+    // Flipping `signingFor` also cancels a prefill still in flight: that effect
+    // re-runs and its `cancelled` flag drops the old answer. So the race closes
+    // in both directions.
+    chooseSigningFor("dependant");
+    choosePickedDependant(picked.user_id);
+    // The two handlers above are re-created every render, so depending on them
+    // would re-run this forever. `appliedRequestedFor` is what makes it run
+    // once, which is the guard the rule cannot see.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appliedRequestedFor, restored, requestedDependantId, dependants, dependantsQ.isPending]);
 
   useEffect(() => {

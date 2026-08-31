@@ -52,36 +52,13 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { userEmails } from "@/lib/supabase-rpc";
-import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
+import {
+  deliveryRecipientFor,
+  loadHouseholdContacts,
+  type ContactEmail,
+} from "@/lib/household-email";
 import { householdTargetSchema, resolveSubject } from "@/lib/household";
 import { requireManager } from "@/lib/require-manager";
-
-/**
- * Where a message ABOUT each of these people goes.
- *
- * The DELIVERY side of `household-email.ts`: a dependant has no mailbox of
- * their own, so their invoices and receipts resolve to their guardian's. Keyed
- * by the id you asked about, not by the id that answered, so a caller reads
- * back the same id it passed in and cannot accidentally address a child by
- * their guardian's key.
- *
- * Returns an empty map on lookup failure so callers degrade to missing emails
- * rather than erroring, which for a send path means "do not send" rather than
- * "send to the wrong person".
- */
-async function deliveryEmailsByUserId(
-  admin: MembershipClient,
-  userIds: string[],
-): Promise<Map<string, string>> {
-  if (!userIds.length) return new Map();
-  const contacts = await loadHouseholdContacts(admin, userIds);
-  const map = new Map<string, string>();
-  for (const id of userIds) {
-    const email = contacts.deliveryEmail(id);
-    if (email) map.set(id, email);
-  }
-  return map;
-}
 
 /**
  * What a manager SCREEN prints as each of these people's contact address.
@@ -398,21 +375,18 @@ export async function recordMembershipPayment(
   // report a recorded payment as a failure and invite a retry.
   if (membership.user_id) {
     try {
-      const [{ data: profile }, emails] = await Promise.all([
-        admin
-          .from("profiles")
-          .select("first_name, middle_name, last_name, preferred_name")
-          .eq("user_id", membership.user_id)
-          .maybeSingle(),
-        deliveryEmailsByUserId(admin, [membership.user_id]),
-      ]);
-      const email = emails.get(membership.user_id) ?? null;
-      if (email) {
+      // The greeting and the address have to come from the SAME person, and
+      // that person is whoever reads the mail. Reading the subject's profile
+      // for a greeting while sending to their guardian produced "Hi Bea, we
+      // have received $90" into Bea's mother's inbox.
+      const recipient = await deliveryRecipientFor(admin, membership.user_id);
+      if (recipient.email) {
         const { sendMembershipPaidEmail } = await import("./membership-email.server");
         await sendMembershipPaidEmail({
           membershipId: membership.id,
-          memberGreetingName: profile ? greetingName(profile) : "",
-          memberEmail: email,
+          memberGreetingName: recipient.greetingName,
+          memberEmail: recipient.email,
+          forName: recipient.forName,
           planName: input.plan?.name ?? "your membership",
           validity: input.plan ? validityLabel(input.plan) : "",
           amount: formatCents(membership.price_cents),
@@ -471,16 +445,17 @@ export async function ensureCasualInvoiceEmailed(
     if (error) throw new Error(error.message);
     if (!membership || !membership.user_id) return;
 
-    const [{ data: plan }, { data: profile }, emails] = await Promise.all([
+    const [{ data: plan }, { data: profile }, recipient] = await Promise.all([
       admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
       admin
         .from("profiles")
         .select("first_name, middle_name, last_name, preferred_name")
         .eq("user_id", membership.user_id)
         .maybeSingle(),
-      deliveryEmailsByUserId(admin, [membership.user_id]),
+      // Same rule as above: greet whoever reads it, name whoever it is about.
+      deliveryRecipientFor(admin, membership.user_id),
     ]);
-    const email = emails.get(membership.user_id) ?? null;
+    const email = recipient.email;
     if (!email) return;
 
     if (membership.paid_at) {
@@ -491,8 +466,9 @@ export async function ensureCasualInvoiceEmailed(
       const { sendMembershipPaidEmail } = await import("./membership-email.server");
       await sendMembershipPaidEmail({
         membershipId: membership.id,
-        memberGreetingName: profile ? greetingName(profile) : "",
+        memberGreetingName: recipient.greetingName,
         memberEmail: email,
+        forName: recipient.forName,
         planName: plan?.name ?? "your casual class",
         validity: plan ? validityLabel(plan) : "",
         amount: formatCents(membership.price_cents),
@@ -543,10 +519,14 @@ export async function ensureCasualInvoiceEmailed(
 
     const { sendMembershipPaymentEmail } = await import("./membership-email.server");
     await sendMembershipPaymentEmail({
-      membershipId: membership.id,
+      // `memberName` is the MANAGER copy's "who is this", so it stays the
+      // subject's legal name. Only the greeting and the address move to the
+      // person who actually reads the member copy.
       memberName: profile ? profileFullName(profile) : "",
-      memberGreetingName: profile ? greetingName(profile) : "",
+      membershipId: membership.id,
+      memberGreetingName: recipient.greetingName,
       memberEmail: email,
+      forName: recipient.forName,
       planName,
       amount: formatCents(totalCents),
       reference: membership.payment_reference,
@@ -1065,17 +1045,19 @@ export async function enrolMember(
   // member does not care that it lands as two invoices on our side.
   if (input.sendEmail !== false) {
     try {
-      const emails = await deliveryEmailsByUserId(admin, [userId]);
-      const email = emails.get(userId) ?? null;
-      if (email) {
+      const recipient = await deliveryRecipientFor(admin, userId);
+      if (recipient.email) {
         const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
         const planName = insuranceInvoice ? `${plan.name} + ${insurancePlan!.name}` : plan.name;
         const { sendMembershipPaymentEmail } = await import("./membership-email.server");
         await sendMembershipPaymentEmail({
           membershipId: inserted.id,
+          // The manager copy still identifies the SUBJECT by their legal name;
+          // only the member copy's greeting and address follow the household.
           memberName: who ? profileFullName(who) : "",
-          memberGreetingName: who ? greetingName(who) : "",
-          memberEmail: email,
+          memberGreetingName: recipient.greetingName,
+          memberEmail: recipient.email,
+          forName: recipient.forName,
           planName,
           amount: formatCents(totalCents),
           reference: inserted.payment_reference,

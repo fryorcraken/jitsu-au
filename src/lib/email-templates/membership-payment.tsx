@@ -25,6 +25,11 @@ interface MembershipPaymentEmailProps {
   siteName: string;
   siteUrl: string;
   memberName: string;
+  /**
+   * The person the membership is FOR, when that is not the person reading
+   * this. See `membership-paid.tsx`: one inbox, possibly several children.
+   */
+  forName?: string | null;
   planName: string;
   amount: string;
   reference: string;
@@ -62,6 +67,7 @@ export const MembershipPaymentEmail = ({
   siteName,
   siteUrl,
   memberName,
+  forName,
   planName,
   amount,
   reference,
@@ -77,7 +83,8 @@ export const MembershipPaymentEmail = ({
       <Container style={container}>
         <Heading style={h1}>Almost there. Pay to activate your membership</Heading>
         <Text style={text}>
-          Hi {memberName || "there"}, thanks for signing up for <strong>{planName}</strong> at{" "}
+          Hi {memberName || "there"}, thanks for signing {forName ? `${forName} ` : ""}up for{" "}
+          <strong>{planName}</strong> at{" "}
           <Link href={siteUrl} style={link}>
             <strong>{siteName}</strong>
           </Link>

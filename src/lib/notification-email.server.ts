@@ -312,6 +312,21 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
   // So the unit is the contact person. Their own rows and their dependants' are
   // one list, `mergeHouseholdItems` folds the repeats of a single event, and
   // the idempotency key below is keyed on the person who actually receives it.
+  //
+  // ⚠️ This read is deliberately NOT guarded, and it is the one read here that
+  // covers every pending row rather than one recipient's. A failure aborts the
+  // whole run, nothing is stamped, and tomorrow tries again. That is the right
+  // failure, and the tempting alternative is the wrong one:
+  //
+  // Falling back to grouping by `user_id` looks like graceful degradation and
+  // is data loss. Every group would then be read against ITS OWN preferences,
+  // and a dependant's are the club defaults with announcements OFF, so their
+  // rows would be judged unwanted, stamped, and never mentioned to the parent
+  // who was actually owed them. Silently, once, with no way to get them back.
+  // Failing the run costs a day and loses nothing.
+  //
+  // `loadHouseholdContacts` chunks its own reads, so the size of this list is
+  // not what would break it.
   const contacts = await loadHouseholdContacts(
     db,
     pending.map((r) => r.user_id),

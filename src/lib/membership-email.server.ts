@@ -58,6 +58,13 @@ export interface MembershipPaymentEmailParams {
   /** What to call the member to their face: preferred name, else first name. */
   memberGreetingName: string;
   memberEmail: string;
+  /**
+   * The person the membership is FOR, when that is not the person being
+   * written to. A dependant has no mailbox, so everything about them reaches
+   * their guardian; the greeting is the guardian's and this names the child.
+   * Null for the ordinary case, where the two are the same person.
+   */
+  forName?: string | null;
   planName: string;
   /** Human-readable amount, e.g. "$245". */
   amount: string;
@@ -76,6 +83,7 @@ export async function sendMembershipPaymentEmail({
   memberName,
   memberGreetingName,
   memberEmail,
+  forName,
   planName,
   amount,
   reference,
@@ -96,6 +104,7 @@ export async function sendMembershipPaymentEmail({
     siteUrl: SITE_URL,
     // The member-facing greeting: call them what they asked to be called.
     memberName: memberGreetingName,
+    forName,
     planName,
     amount,
     reference,
@@ -164,6 +173,13 @@ export interface MembershipPaidEmailParams {
    * This email has no manager copy, so the legal name is never needed. */
   memberGreetingName: string;
   memberEmail: string;
+  /**
+   * The person the membership is FOR, when that is not the person being
+   * written to. A dependant has no mailbox, so everything about them reaches
+   * their guardian; the greeting is the guardian's and this names the child.
+   * Null for the ordinary case, where the two are the same person.
+   */
+  forName?: string | null;
   planName: string;
   /** Human-readable validity/credit summary. */
   validity: string;
@@ -183,6 +199,7 @@ export async function sendMembershipPaidEmail({
   membershipId,
   memberGreetingName,
   memberEmail,
+  forName,
   planName,
   validity,
   amount,
@@ -198,6 +215,7 @@ export async function sendMembershipPaidEmail({
     siteName: SITE_NAME,
     siteUrl: SITE_URL,
     memberName: memberGreetingName,
+    forName,
     planName,
     validity,
     amount,

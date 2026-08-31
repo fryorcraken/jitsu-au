@@ -197,7 +197,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
 
             {saveError && (
               <SaveFailure
-                what={`${voice.Whose} contact details`}
+                what="change to the contact details"
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}

@@ -500,3 +500,29 @@ describe("aggregateClubUsers, for a dependant", () => {
     expect(child.email).toBeNull();
   });
 });
+
+describe("aggregateClubUsers, when the guardian's name is what a screen prints", () => {
+  // `email_belongs_to` is what the manager directory and person page render
+  // beside a dependant's address. Computed and never read, it would leave both
+  // screens showing a guardian's address uncaptioned, which is the exact
+  // reading #106 forbids.
+  it("carries the guardian's name for a screen to print", () => {
+    const parent = profile({ user_id: "parent", first_name: "Ada", last_name: "Lovelace" });
+    const child = profile({
+      user_id: "child",
+      first_name: "Bea",
+      last_name: "Lovelace",
+      guardian_user_id: "parent",
+    });
+    const [, dependant] = aggregateClubUsers({
+      profiles: [parent, child],
+      emails: [{ user_id: "parent", email: "ada@example.com", email_confirmed_at: null }],
+      waivers: [],
+      memberships: [],
+      plans,
+      roles: [],
+      leads: [],
+    });
+    expect(dependant.email_belongs_to).toBe("Ada Lovelace");
+  });
+});

@@ -121,7 +121,7 @@ export function MediaConsentCard({ userId, voice, profile, loading, onSaved }: D
             </div>
             {saveError && (
               <SaveFailure
-                what={`${voice.Whose} answer`}
+                what="answer"
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}

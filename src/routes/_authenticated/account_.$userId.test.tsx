@@ -156,3 +156,17 @@ describe("somebody reaching for a person who is not theirs", () => {
     expect(screen.queryByText(/can't show you this page/i)).not.toBeInTheDocument();
   });
 });
+
+describe("fields that do not belong to a child", () => {
+  it("does not offer a display name for somebody who can never comment", async () => {
+    // A dependant never signs in, so a name "other members see on your
+    // comments" is a field for an act they cannot perform. Not rendered rather
+    // than hidden: a hidden input still submits, and this card's save sends
+    // every key it owns.
+    render(<PersonPage />);
+    await screen.findByText("About Bea");
+    expect(screen.queryByLabelText(/display name/i)).not.toBeInTheDocument();
+    // The preferred name is still asked for: the club does call a child by it.
+    expect(screen.getByLabelText(/preferred name/i)).toBeInTheDocument();
+  });
+});

@@ -106,7 +106,7 @@ export function KitSizingCard({ userId, voice, profile, loading, onSaved }: Deta
             </div>
             {saveError && (
               <SaveFailure
-                what={`${voice.Whose} sizes`}
+                what="size change"
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}

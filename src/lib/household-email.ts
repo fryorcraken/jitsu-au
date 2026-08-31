@@ -32,7 +32,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { contactUserIdFor, type HouseholdLink } from "@/lib/household";
 import { userEmails } from "@/lib/supabase-rpc";
-import { nameWithPreferred } from "@/lib/validation";
+import { greetingName, nameWithPreferred } from "@/lib/validation";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -58,6 +58,35 @@ export type HouseholdContactProfile = HouseholdLink & {
 
 const PROFILE_COLUMNS =
   "user_id, guardian_user_id, first_name, middle_name, last_name, preferred_name";
+
+/**
+ * How many ids to put in one `.in()` filter.
+ *
+ * PostgREST renders `.in()` into the query STRING, so a few hundred uuids blow
+ * past the proxy's request-line limit. `checkin.functions.ts` chunks its roster
+ * reads at the same size for the same reason, and the calendar chunks its RSVP
+ * tally.
+ *
+ * It matters here specifically because of the digest: that caller passes every
+ * pending notification's `user_id` in one go, capped at 5000 rows. Unchunked,
+ * the nightly run would work fine at club size and then start failing outright
+ * on a busy night, which is the worst shape a bug can have.
+ */
+const ID_CHUNK = 100;
+
+/** Read `profiles` for a set of ids, a chunk at a time. */
+async function readProfiles(admin: AdminClient, ids: string[]): Promise<HouseholdContactProfile[]> {
+  const rows: HouseholdContactProfile[] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) {
+    const { data, error } = await admin
+      .from("profiles")
+      .select(PROFILE_COLUMNS)
+      .in("user_id", ids.slice(i, i + ID_CHUNK));
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as HouseholdContactProfile[]));
+  }
+  return rows;
+}
 
 /**
  * Both answers for a set of people, resolved in one pass.
@@ -147,13 +176,7 @@ export async function loadHouseholdContacts(
   const ids = [...new Set(userIds.map((id) => id.toLowerCase()))].filter(Boolean);
   if (ids.length === 0) return householdContacts({ people: [], emails: [] });
 
-  const { data: people, error } = await admin
-    .from("profiles")
-    .select(PROFILE_COLUMNS)
-    .in("user_id", ids);
-  if (error) throw new Error(error.message);
-
-  const rows = (people ?? []) as HouseholdContactProfile[];
+  const rows = await readProfiles(admin, ids);
   const byId = new Map(rows.map((p) => [p.user_id.toLowerCase(), p]));
   // Whose addresses are actually needed: the contact person for each id asked
   // about. A dependant's own id is deliberately NOT in this list.
@@ -169,25 +192,24 @@ export async function loadHouseholdContacts(
   // A guardian may not have been among the ids asked about, and a display has
   // to name them. One extra read rather than a name the screen has to guess.
   const missingGuardians = contactIds.filter((id) => !byId.has(id));
-  if (missingGuardians.length > 0) {
-    const { data: guardians, error: gErr } = await admin
-      .from("profiles")
-      .select(PROFILE_COLUMNS)
-      .in("user_id", missingGuardians);
-    if (gErr) throw new Error(gErr.message);
-    rows.push(...((guardians ?? []) as HouseholdContactProfile[]));
+  if (missingGuardians.length > 0) rows.push(...(await readProfiles(admin, missingGuardians)));
+
+  // Chunked for the same reason as the profile read: `user_emails` takes the
+  // ids as an argument PostgREST renders into the request.
+  const addresses: { user_id: string; email: string }[] = [];
+  for (let i = 0; i < contactIds.length; i += ID_CHUNK) {
+    const { data: emails, error: eErr } = await userEmails(
+      admin,
+      contactIds.slice(i, i + ID_CHUNK),
+    );
+    if (eErr || !emails) {
+      console.error("[household-email] could not resolve contact addresses:", eErr?.message);
+      return householdContacts({ people: rows, emails: [] });
+    }
+    addresses.push(...emails.map((e) => ({ user_id: e.user_id, email: e.email })));
   }
 
-  const { data: emails, error: eErr } = await userEmails(admin, contactIds);
-  if (eErr || !emails) {
-    console.error("[household-email] could not resolve contact addresses:", eErr?.message);
-    return householdContacts({ people: rows, emails: [] });
-  }
-
-  return householdContacts({
-    people: rows,
-    emails: emails.map((e) => ({ user_id: e.user_id, email: e.email })),
-  });
+  return householdContacts({ people: rows, emails: addresses });
 }
 
 /**
@@ -224,4 +246,60 @@ export async function contactUserIdOf(admin: AdminClient, userId: string): Promi
 export async function deliveryEmailFor(admin: AdminClient, userId: string): Promise<string | null> {
   const contacts = await loadHouseholdContacts(admin, [userId]);
   return contacts.deliveryEmail(userId);
+}
+
+/** Everything a transactional email needs in order to address a person. */
+export type DeliveryRecipient = {
+  /** Where it goes. Null means do not send. */
+  email: string | null;
+  /** What to call the person READING it. */
+  greetingName: string;
+  /**
+   * The person the message is ABOUT, when that is somebody else. Null when the
+   * reader is the subject, which is the ordinary case.
+   *
+   * Both halves matter and getting one without the other is worse than
+   * neither: an email that greets a nine-year-old and lands in their parent's
+   * inbox reads as a mistake, and one that greets the parent without naming the
+   * child leaves a parent with three children guessing which invoice this is.
+   */
+  forName: string | null;
+};
+
+/**
+ * Who to write to about `userId`, and what to call them.
+ *
+ * The delivery helper with the names attached, for the transactional emails.
+ * They used to read the SUBJECT's profile for a greeting and the contact
+ * person's mailbox for an address, which is right for everybody who is their
+ * own contact and produces "Hi Bea, transfer $90" into Bea's mother's inbox for
+ * everybody who is not.
+ */
+export async function deliveryRecipientFor(
+  admin: AdminClient,
+  userId: string,
+): Promise<DeliveryRecipient> {
+  const contacts = await loadHouseholdContacts(admin, [userId]);
+  const contactId = contacts.contactUserId(userId);
+  const email = contacts.deliveryEmail(userId);
+  const forDependant = contactId !== userId.toLowerCase();
+
+  const { data, error } = await admin
+    .from("profiles")
+    .select("user_id, first_name, middle_name, last_name, preferred_name")
+    .in("user_id", forDependant ? [contactId, userId.toLowerCase()] : [contactId]);
+  if (error) console.error("[household-email] could not read names to address:", error.message);
+
+  const rows = data ?? [];
+  const byId = new Map(rows.map((p) => [p.user_id.toLowerCase(), p]));
+  const reader = byId.get(contactId);
+  const subject = byId.get(userId.toLowerCase());
+
+  return {
+    email,
+    greetingName: reader ? greetingName(reader) : "",
+    // The subject's greeting name rather than their legal one: this appears in
+    // a sentence a parent reads, not on a document.
+    forName: forDependant && subject ? greetingName(subject) || null : null,
+  };
 }

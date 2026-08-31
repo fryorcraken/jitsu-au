@@ -352,6 +352,17 @@ function ManagerUsersPage() {
                         {r.email ? (
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span>{r.email}</span>
+                            {/* Whose address this actually is. A dependant has
+                                no mailbox of their own, so their row shows
+                                their guardian's, and printing it bare would
+                                read as a nine-year-old somebody can write to.
+                                Null for every account holder, which is almost
+                                every row here. */}
+                            {r.email_belongs_to ? (
+                              <span className="text-xs text-muted-foreground">
+                                ({r.email_belongs_to}&apos;s)
+                              </span>
+                            ) : null}
                             {/* Registered interest since a manager last looked.
                                 On the address, not the name, because that is
                                 what the registration and the person record have

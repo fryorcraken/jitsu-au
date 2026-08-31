@@ -233,3 +233,60 @@ describe("sendDailyDigests, for a household", () => {
     expect(payload.text).toContain("Timetable");
   });
 });
+
+describe("when households cannot be read at all", () => {
+  beforeEach(() => {
+    sendLovableEmail.mockClear();
+    process.env.LOVABLE_API_KEY = "test-key";
+  });
+
+  /** A db whose `profiles` reads all fail. */
+  function brokenProfiles(db: SupabaseClient<Database>) {
+    return new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === "from") {
+          return (table: string) => {
+            if (table === "profiles") {
+              return {
+                select: () => ({
+                  in: () => Promise.resolve({ data: null, error: { message: "boom" } }),
+                  eq: () => ({
+                    maybeSingle: () => Promise.resolve({ data: null, error: { message: "boom" } }),
+                  }),
+                }),
+              };
+            }
+            return (target as unknown as { from: (t: string) => unknown }).from(table);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+  }
+
+  it("fails the run rather than guessing who reads what", async () => {
+    // The tempting alternative is to fall back to grouping by `user_id`, which
+    // looks like graceful degradation and is data loss: a dependant's own
+    // preferences have announcements OFF by club default, so their rows would
+    // be judged unwanted, stamped, and never mentioned to the parent who was
+    // owed them. Failing costs a day and loses nothing.
+    const { sendDailyDigests } = await import("./notification-email.server");
+    const { db } = fakeDb([post("n1", PARENT), post("n2", CHILD_A)]);
+    await expect(
+      sendDailyDigests(brokenProfiles(db), new Date("2026-08-30T22:00:00Z")),
+    ).rejects.toThrow("boom");
+  });
+
+  it("stamps nothing, so tomorrow tries again", async () => {
+    // The half that matters more than the sending. A run that stamped rows it
+    // never sent would swallow a day of everybody's notifications, silently,
+    // with no way to get them back.
+    const { sendDailyDigests } = await import("./notification-email.server");
+    const { db, stamped } = fakeDb([post("n1", PARENT), post("n2", CHILD_A)]);
+    await expect(
+      sendDailyDigests(brokenProfiles(db), new Date("2026-08-30T22:00:00Z")),
+    ).rejects.toThrow();
+    expect(stamped.flat()).toEqual([]);
+    expect(sendLovableEmail).not.toHaveBeenCalled();
+  });
+});

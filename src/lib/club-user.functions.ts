@@ -278,6 +278,10 @@ export const getClubUser = createServerFn({ method: "POST" })
       user: {
         name: summary.name,
         email: summary.email,
+        // Whose address that is, when it is not this person's own. A dependant
+        // has no mailbox, so their page shows their guardian's and has to say
+        // so: printed bare it reads as a child a manager can write to.
+        email_belongs_to: summary.email_belongs_to,
         email_confirmed_at: summary.email_confirmed_at,
         phone: summary.phone,
         roles: summary.roles,

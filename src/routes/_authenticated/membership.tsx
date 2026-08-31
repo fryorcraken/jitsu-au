@@ -314,8 +314,12 @@ function MembershipPage() {
   // both run the household gate on it, so a hand-typed id buys nothing.
   const [household, setHousehold] = useState<HouseholdPerson[]>([]);
   const [owed, setOwed] = useState<HouseholdInvoices[]>([]);
-  const subjectId = subjectParam;
-  const subject = household.find((p) => p.user_id === subjectId) ?? null;
+  // Lowercased to match the server, which normalises every target through
+  // `householdTargetUserId`. An uppercase `?for=` is perfectly valid there, so
+  // comparing it raw here would leave the page speaking in the wrong voice and
+  // claiming no membership for a person the server was happily answering about.
+  const subjectId = subjectParam?.toLowerCase();
+  const subject = household.find((p) => p.user_id.toLowerCase() === subjectId) ?? null;
   const dependants = household.filter((p) => !p.is_self);
   const voice = subjectVoice(subject && !subject.is_self ? firstWord(subject.name) : null);
 
@@ -337,6 +341,27 @@ function MembershipPage() {
   // the plan the member just chose, which on a phone is well off screen.
   const [scrollToPay, setScrollToPay] = useState(false);
   const payRef = useRef<HTMLDivElement | null>(null);
+
+  // ⚠️ Everything the purchase form holds is about ONE person, so switching
+  // person has to drop it. Two of these were live bugs:
+  //
+  //   * `studentNumber` unlocks the discounted student rate and the server
+  //     prices from the number it is sent without asking whose it is, so a
+  //     student parent switching to their nine-year-old would have bought them
+  //     a UTS student membership.
+  //   * `insuranceTicked` is only editable while the person HAS cover, so a
+  //     parent who unticked it for themselves and switched to a child with no
+  //     cover got the box unticked AND disabled: every plan press refused with
+  //     "keep it selected", and no control on screen to select it with.
+  //
+  // Keyed on the subject rather than cleared in an onSelect handler, because
+  // the choice lives in the URL and can therefore arrive by navigation, by a
+  // link from a child's page, or by the back button.
+  useEffect(() => {
+    setStudentNumber("");
+    setInsuranceTicked(null);
+    setPendingCode(null);
+  }, [subjectId]);
 
   // A non-empty UTS student number is what makes someone a student; there is no
   // separate "I'm a student" flag. It unlocks the discounted student rate. Same

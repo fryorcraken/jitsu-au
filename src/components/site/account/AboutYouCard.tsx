@@ -94,27 +94,36 @@ export function AboutYouCard({ userId, voice, profile, loading, onSaved }: Detai
                   : `What ${voice.who} goes by, if it is not their first name. We use it to greet them.`}
               </p>
             </div>
-            <div>
-              <Label htmlFor="display-name">Display name</Label>
-              <Input
-                id="display-name"
-                value={displayName}
-                onChange={(e) => {
-                  setDisplayName(e.target.value);
-                  clearSaveError();
-                }}
-                maxLength={60}
-                placeholder={placeholder}
-                className="mt-1.5"
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Shown on your blog and document comments. Leave blank to use{" "}
-                {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
-              </p>
-            </div>
+            {/* Only for somebody who can comment. A dependant never signs in,
+                so a display name for their blog and knowledge base comments is
+                a field for an act they can never perform, and the hint below
+                would tell a parent what name "other members see" for a child no
+                member will ever see. Not rendered rather than hidden: a hidden
+                input still submits, and this card's save sends every key it
+                owns. */}
+            {voice.isSelf ? (
+              <div>
+                <Label htmlFor="display-name">Display name</Label>
+                <Input
+                  id="display-name"
+                  value={displayName}
+                  onChange={(e) => {
+                    setDisplayName(e.target.value);
+                    clearSaveError();
+                  }}
+                  maxLength={60}
+                  placeholder={placeholder}
+                  className="mt-1.5"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Shown on your blog and document comments. Leave blank to use{" "}
+                  {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
+                </p>
+              </div>
+            ) : null}
             {saveError && (
               <SaveFailure
-                what={voice.isSelf ? "Your names" : `${voice.Whose} names`}
+                what="name change"
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}

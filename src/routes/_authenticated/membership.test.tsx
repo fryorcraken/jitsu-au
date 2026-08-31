@@ -37,6 +37,14 @@ const pendingInsurance = {
 };
 const activePlan = { ...pendingPlan, id: "m3", status: "active", paid_at: "2026-08-02T00:00:00Z" };
 
+/**
+ * The page's `?for=` search, mutable so a test can put the page on a child.
+ *
+ * Reset to "the account holder" in `beforeEach`, which is what every case here
+ * that predates households is about.
+ */
+let search: { for?: string } = {};
+
 const getMyMemberships = vi.fn();
 const getPaymentInstructions = vi.fn();
 const listMembershipPlans = vi.fn();
@@ -71,7 +79,10 @@ vi.mock("@tanstack/react-router", () => ({
   // page now reads `?for=` off it to decide whose membership it is showing.
   // Empty here, which is the account holder's own: every case below is a member
   // with nobody else on their account.
-  createFileRoute: () => (opts: Record<string, unknown>) => ({ ...opts, useSearch: () => ({}) }),
+  createFileRoute: () => (opts: Record<string, unknown>) => ({
+    ...opts,
+    useSearch: () => search,
+  }),
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
   useNavigate: () => vi.fn(),
 }));
@@ -131,6 +142,9 @@ const ACCOUNT = {
 };
 
 beforeEach(() => {
+  // Back to "the account holder", which is what every case that predates
+  // households is about.
+  search = {};
   getMyMemberships.mockReset().mockResolvedValue(mine([pendingPlan]));
   getPaymentInstructions.mockReset().mockResolvedValue({ ok: true, details: ACCOUNT });
   listMembershipPlans.mockReset().mockResolvedValue([]);
@@ -378,5 +392,81 @@ describe("/membership: what a finished trial is called", () => {
     expect(screen.queryByText("Used up")).not.toBeInTheDocument();
     expect(screen.getByText("Lapsed")).toBeVisible();
     expect(screen.getByText(/membership has lapsed/i)).toBeVisible();
+  });
+});
+
+describe("/membership, when the page is about a child", () => {
+  // Everything the purchase form holds is about ONE person, so pointing the
+  // page at somebody else has to carry through to the server and drop what
+  // belonged to the last one.
+  const CHILD = "child-1";
+  const HOUSEHOLD = [
+    {
+      user_id: "parent-1",
+      name: "Ada Lovelace",
+      is_self: true,
+      lifecycle_status: "member",
+      has_any_waiver: true,
+      latest_plan_name: null,
+      latest_plan_kind: null,
+      latest_membership_status: null,
+      latest_sessions_remaining: null,
+    },
+    {
+      user_id: CHILD,
+      name: "Bea Lovelace",
+      is_self: false,
+      lifecycle_status: "visitor",
+      has_any_waiver: true,
+      latest_plan_name: null,
+      latest_plan_kind: null,
+      latest_membership_status: null,
+      latest_sessions_remaining: null,
+    },
+  ];
+
+  beforeEach(async () => {
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listMyHousehold).mockResolvedValue(HOUSEHOLD as never);
+  });
+
+  it("reads the CHILD's membership, not the caller's", async () => {
+    search = { for: CHILD };
+    await renderLoaded();
+    // Without the target this page shows a parent their own status and plans
+    // under a heading about their child, which is the silent wrong-person read
+    // the whole household project exists to end.
+    expect(getMyMemberships).toHaveBeenCalledWith({ data: { userId: CHILD } });
+  });
+
+  it("names the child in the status card, rather than saying 'your'", async () => {
+    search = { for: CHILD };
+    await renderLoaded();
+    expect(await screen.findByText("Bea's status")).toBeInTheDocument();
+  });
+
+  it("offers the choice of person, because there is somebody else on the account", async () => {
+    await renderLoaded();
+    expect(screen.getByText("Who is this for?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bea" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "You" })).toBeInTheDocument();
+  });
+
+  it("does not carry a parent's UTS student number onto a child's purchase", async () => {
+    // The server prices from the number it is sent without asking whose it is,
+    // so a student parent switching to their nine-year-old would have bought
+    // them a UTS student membership.
+    search = {};
+    getMyMemberships.mockResolvedValue({ ...mine([]), uts_student_number: "12345678" });
+    const { rerender } = render(<MembershipPage />);
+    await waitFor(() =>
+      expect(screen.getByLabelText(/UTS student number/i)).toHaveValue("12345678"),
+    );
+
+    // The same page, pointed at the child, whose own record has no number.
+    search = { for: CHILD };
+    getMyMemberships.mockResolvedValue(mine([]));
+    rerender(<MembershipPage />);
+    await waitFor(() => expect(screen.getByLabelText(/UTS student number/i)).toHaveValue(""));
   });
 });

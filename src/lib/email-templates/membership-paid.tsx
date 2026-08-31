@@ -16,6 +16,13 @@ interface MembershipPaidEmailProps {
   siteName: string;
   siteUrl: string;
   memberName: string;
+  /**
+   * The person the membership is FOR, when that is not the person reading
+   * this. A parent has one inbox and may hold several children on their
+   * account, so an invoice or receipt that named no one would leave them
+   * guessing which child it settles.
+   */
+  forName?: string | null;
   planName: string;
   /** Human-readable validity/credit summary, e.g. "Valid until 12 Dec 2026" or "2 sessions". */
   validity: string;
@@ -36,6 +43,7 @@ export const MembershipPaidEmail = ({
   siteName,
   siteUrl,
   memberName,
+  forName,
   planName,
   validity,
   amount,
@@ -48,8 +56,8 @@ export const MembershipPaidEmail = ({
       <Container style={container}>
         <Heading style={h1}>Payment received, thank you</Heading>
         <Text style={text}>
-          Hi {memberName || "there"}, we have received {amount} for your <strong>{planName}</strong>{" "}
-          at{" "}
+          Hi {memberName || "there"}, we have received {amount} for{" "}
+          {forName ? `${forName}'s` : "your"} <strong>{planName}</strong> at{" "}
           <Link href={siteUrl} style={link}>
             <strong>{siteName}</strong>
           </Link>

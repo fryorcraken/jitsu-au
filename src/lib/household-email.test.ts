@@ -8,6 +8,7 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   contactUserIdOf,
   deliveryEmailFor,
+  deliveryRecipientFor,
   householdContacts,
   loadHouseholdContacts,
   type HouseholdContactProfile,
@@ -183,6 +184,57 @@ describe("loadHouseholdContacts", () => {
   });
 });
 
+describe("loadHouseholdContacts, at size", () => {
+  it("chunks its reads, because PostgREST puts them in the query string", async () => {
+    // The digest passes every pending notification's user id in one go, capped
+    // at 5000. Unchunked, an `.in()` of that many uuids blows past the proxy's
+    // request-line limit, so the nightly run would work at club size and then
+    // fail outright on a busy night. `checkin.functions.ts` chunks at the same
+    // size for the same reason.
+    const people = Array.from({ length: 250 }, (_, i) => ({
+      user_id: `u${i}`,
+      guardian_user_id: null,
+      first_name: `P${i}`,
+      middle_name: null,
+      last_name: "Person",
+      preferred_name: null,
+    }));
+    const profileBatches: number[] = [];
+    const rpcBatches: number[] = [];
+    const client = {
+      rpc: (_name: string, args: { _user_ids: string[] }) => {
+        rpcBatches.push(args._user_ids.length);
+        return Promise.resolve({
+          data: args._user_ids.map((id) => ({ user_id: id, email: `${id}@example.com` })),
+          error: null,
+        });
+      },
+      from: () => ({
+        select: () => ({
+          in: (_c: string, ids: string[]) => {
+            profileBatches.push(ids.length);
+            return Promise.resolve({
+              data: people.filter((p) => ids.includes(p.user_id)),
+              error: null,
+            });
+          },
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+
+    const contacts = await loadHouseholdContacts(
+      client,
+      people.map((p) => p.user_id),
+    );
+
+    expect(profileBatches).toEqual([100, 100, 50]);
+    expect(rpcBatches).toEqual([100, 100, 50]);
+    // ...and the chunking is invisible to the answer.
+    expect(contacts.deliveryEmail("u0")).toBe("u0@example.com");
+    expect(contacts.deliveryEmail("u249")).toBe("u249@example.com");
+  });
+});
+
 describe("contactUserIdOf", () => {
   it("resolves a dependant to their guardian and an account holder to themselves", async () => {
     const { client } = admin([PARENT, CHILD], [PARENT_EMAIL]);
@@ -210,5 +262,35 @@ describe("deliveryEmailFor", () => {
   it("gives one person's delivery address through the guardian rule", async () => {
     const { client } = admin([PARENT, CHILD], [PARENT_EMAIL]);
     expect(await deliveryEmailFor(client, "child")).toBe("ada@example.com");
+  });
+});
+
+describe("deliveryRecipientFor", () => {
+  // The greeting and the address have to come from the same person. Read
+  // separately they produced "Hi Bea, we have received $90" into Bea's
+  // mother's inbox, which reads as mail sent to the wrong person.
+  it("greets the guardian and names the child", async () => {
+    const { client } = admin([PARENT, CHILD], [PARENT_EMAIL]);
+    expect(await deliveryRecipientFor(client, "child")).toEqual({
+      email: "ada@example.com",
+      greetingName: "Ada",
+      forName: "Bea",
+    });
+  });
+
+  it("names nobody when the reader IS the subject", async () => {
+    // Every account holder, which is almost everybody. "Hi Ada, we have
+    // received $90 for Ada's membership" would be worse than the original.
+    const { client } = admin([PARENT, CHILD], [PARENT_EMAIL]);
+    expect(await deliveryRecipientFor(client, "parent")).toEqual({
+      email: "ada@example.com",
+      greetingName: "Ada",
+      forName: null,
+    });
+  });
+
+  it("reports no address rather than sending to the child's reserved one", async () => {
+    const { client } = admin([PARENT, CHILD], []);
+    expect((await deliveryRecipientFor(client, "child")).email).toBeNull();
   });
 });

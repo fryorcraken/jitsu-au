@@ -249,7 +249,7 @@ function CodeOfConduct() {
 
               {saveError && (
                 <SaveFailure
-                  what={subjectName ? `${subjectName}'s agreement` : "Your agreement"}
+                  what="agreement"
                   message={saveError}
                   onRetry={() =>
                     void onSubmit({ preventDefault: () => {} } as React.FormEvent<HTMLFormElement>)
