@@ -1,16 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { LoadFailure } from "@/components/site/LoadFailure";
-import { Loading } from "@/components/site/Loading";
 import { Pill } from "@/components/site/StatusPill";
-import { describeLoadError } from "@/lib/load-error";
 import { lifecycleClass } from "@/lib/status-colours";
 import { lifecycleLabel, membershipStatusLabel } from "@/lib/status-labels";
-import { listMyHousehold, type HouseholdPerson } from "@/lib/household.functions";
+import { type HouseholdPerson } from "@/lib/household.functions";
 
 /**
  * Everybody on this account, and a way through to each of them.
@@ -23,38 +19,26 @@ import { listMyHousehold, type HouseholdPerson } from "@/lib/household.functions
  * It is HIDDEN for an account with no dependants, which is almost every
  * account. "People on your account: you" is a card that tells a member nothing
  * and pushes the details they came for further down the page.
+ *
+ * Presentational: `/account` owns the fetch, because it needs the same answer
+ * to decide whether the person reading has records of their own at all. Two
+ * fetches would give the page two chances to disagree with the card sitting on
+ * it, which is the reason the profile is fetched once up there too.
  */
-export function HouseholdCard({ userId }: { userId: string }) {
-  const fetchHousehold = useServerFn(listMyHousehold);
-  const [people, setPeople] = useState<HouseholdPerson[]>([]);
-  const [loading, setLoading] = useState(true);
-  // A failed read is not "nobody is on your account". Rendered as an empty
-  // card, it would tell a parent their children are gone.
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    return fetchHousehold()
-      .then((rows) => {
-        setPeople(rows);
-        setLoadError(null);
-      })
-      .catch((e) => {
-        setPeople([]);
-        setLoadError(describeLoadError(e, "Could not load the people on your account"));
-      })
-      .finally(() => setLoading(false));
-  }, [fetchHousehold]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
+export function HouseholdCard({
+  people,
+  loadError,
+  onRetry,
+}: {
+  people: HouseholdPerson[];
+  /** A failed read is not "nobody is on your account". */
+  loadError: string | null;
+  onRetry: () => void;
+}) {
   const dependants = people.filter((p) => !p.is_self);
   const self = people.find((p) => p.is_self) ?? null;
 
   // Nothing to say, and nothing went wrong. Say nothing.
-  if (loading) return null;
   if (!loadError && dependants.length === 0) return null;
 
   // The holder only when they have records of their own. A parent who does not
@@ -76,7 +60,7 @@ export function HouseholdCard({ userId }: { userId: string }) {
             what="The people on your account"
             message={loadError}
             hint="This is not the same as having nobody on it, so nothing has been removed."
-            onRetry={() => void load()}
+            onRetry={onRetry}
           />
         ) : (
           <ul className="space-y-2">

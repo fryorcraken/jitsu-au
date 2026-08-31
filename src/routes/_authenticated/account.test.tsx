@@ -75,8 +75,9 @@ vi.mock("@/lib/code-of-conduct.functions", () => ({
 // here: `household.functions.ts` pulls in the real auth middleware, which needs
 // a Start context this runner does not have. An empty household is the case
 // this page is in for almost every member, and the card renders nothing for it.
+const listMyHousehold = vi.fn().mockResolvedValue([]);
 vi.mock("@/lib/household.functions", () => ({
-  listMyHousehold: vi.fn().mockResolvedValue([]),
+  listMyHousehold: (...args: unknown[]) => listMyHousehold(...args),
   listHouseholdInvoices: vi.fn().mockResolvedValue([]),
 }));
 
@@ -486,5 +487,72 @@ describe("/account", () => {
       await user.type(passwordCard().getByLabelText("New password"), "er");
       expect(screen.queryByRole("alert")).toBeNull();
     });
+  });
+});
+
+describe("a parent who holds the login and does not train", () => {
+  // #102 calls this normal: "a parent-only account is normal, so a login must
+  // be able to exist with no waiver of its own". Every card below "Your
+  // details" would otherwise be a prompt to answer something that does not
+  // apply to them, on the page they came to for their children.
+  const PARENT_ONLY = [
+    {
+      user_id: "u1",
+      name: "Ada Lovelace",
+      is_self: true,
+      lifecycle_status: "lead",
+      has_any_waiver: false,
+      latest_plan_name: null,
+      latest_plan_kind: null,
+      latest_membership_status: null,
+      latest_sessions_remaining: null,
+    },
+    {
+      user_id: "child-1",
+      name: "Bea Lovelace",
+      is_self: false,
+      lifecycle_status: "visitor",
+      has_any_waiver: true,
+      latest_plan_name: "Free trial",
+      latest_plan_kind: "trial",
+      latest_membership_status: "active",
+      latest_sessions_remaining: 2,
+    },
+  ];
+
+  it("shrinks Your details to the contact details", async () => {
+    listMyHousehold.mockResolvedValue(PARENT_ONLY);
+    render(<AccountPage />);
+    // Not `renderLoaded`: that waits for "Gi size", which is one of the fields
+    // this case is about NOT rendering. The address is on the card that stays.
+    await screen.findByLabelText("Address");
+
+    // Contact stays: it is how the club reaches the family.
+    expect(card("Contact")).toBeInTheDocument();
+    // These do not. No kit to size, nobody in a photograph, nothing signed.
+    expect(screen.queryByText("Kit sizing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Photos and video")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waivers")).not.toBeInTheDocument();
+    expect(screen.queryByText("Code of conduct")).not.toBeInTheDocument();
+  });
+
+  it("still shows everything to a member who simply has not signed yet", async () => {
+    // The condition is BOTH halves. Somebody with no dependants is an ordinary
+    // member about to sign their first waiver, and hiding the waiver card from
+    // them would hide the thing they came to do.
+    listMyHousehold.mockResolvedValue([{ ...PARENT_ONLY[0], has_any_waiver: false }]);
+    await renderLoaded();
+
+    expect(card("Kit sizing")).toBeInTheDocument();
+    expect(screen.getByText("Waivers")).toBeInTheDocument();
+  });
+
+  it("shows everything when the household could not be read", async () => {
+    // A dropped connection must not hide a member's own records from them.
+    listMyHousehold.mockRejectedValue(new Error("Failed to fetch"));
+    await renderLoaded();
+
+    expect(card("Kit sizing")).toBeInTheDocument();
+    expect(screen.getByText("Waivers")).toBeInTheDocument();
   });
 });
