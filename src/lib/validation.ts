@@ -532,6 +532,35 @@ export function advanceSeenMarker(current: string | null, candidate: string, now
 
 const sigImage = z.string().max(500_000).optional().or(z.literal(""));
 
+/** Who a waiver is being signed for. */
+export type WaiverSigningFor = "self" | "dependant";
+
+/**
+ * Whether this submission needs a parent or guardian to be named and to sign.
+ *
+ * Two things make it true, and they are not the same thing:
+ *
+ *   * **the participant is under 18** -- the rule that has always been here;
+ *   * **the participant is a dependant** -- somebody with no login who cannot
+ *     sign anything, whatever their age.
+ *
+ * The second is why this is a function rather than `is_minor` spelled out four
+ * times. #105 describes the guardian refinements as unchanged, which is true of
+ * every case that exists today: a dependant is a child, so `is_minor` is set
+ * too. But #102 states plainly that a dependant who trains from ten to eighteen
+ * still has no login, and on their eighteenth birthday `is_minor` goes false
+ * while the person is no more able to sign than they were the day before.
+ * Keyed on `is_minor` alone, their next waiver would need no signature from
+ * anybody at all: a signed legal document with nobody's name on it. So the
+ * trigger is widened rather than the rules changed.
+ */
+export function waiverNeedsGuardian(v: {
+  is_minor?: boolean;
+  signing_for?: WaiverSigningFor;
+}): boolean {
+  return Boolean(v.is_minor) || v.signing_for === "dependant";
+}
+
 export const waiverSubmitSchema = z
   .object({
     client_submission_id: clientSubmissionId,
@@ -544,7 +573,25 @@ export const waiverSubmitSchema = z
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     address: z.string().trim().min(1).max(300),
     phone: z.string().trim().min(1).max(30),
-    email: z.string().trim().email().max(255),
+    // Who this waiver is for, asked explicitly rather than guessed from a date
+    // of birth. "dependant" means a parent is signing for a child on their
+    // account: the participant gets a full person record of their own and no
+    // login, ever, and everything about them reaches the guardian below.
+    //
+    // Defaulted rather than required so a client that predates this still
+    // submits -- the same treatment `template_version` and `vt` get. The
+    // default is the behaviour that already existed.
+    signing_for: z.enum(["self", "dependant"]).optional().default("self"),
+    // The participant's own address, and the ONE conditional field here.
+    //
+    // Required signing for yourself, because the address is what identifies the
+    // person (`docs/waivers.md` rule 1). Refused entirely for a dependant: a
+    // nine-year-old has no mailbox of their own, and asking for one is exactly
+    // what #102 set out to stop. Their auth user is keyed on a reserved,
+    // non-deliverable address the server generates, which a form may never
+    // choose. Refusing rather than ignoring it means a client that sends one
+    // hears about it instead of having it silently dropped.
+    email: z.string().trim().email().max(255).optional().or(z.literal("")),
     // Optional UTS student number. Non-empty means the person is a UTS student
     // (there is no separate "is a student" flag); it unlocks the student rate.
     uts_student_number: z.string().trim().max(20).optional().or(z.literal("")),
@@ -599,6 +646,10 @@ export const waiverSubmitSchema = z
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
     guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
     guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
+    // Optional signing for yourself (blank means "the same as the
+    // participant's"), REQUIRED for a dependant: it is the only address on the
+    // form then, it is what the club writes to about the child, and it is what
+    // `waivers.email` stores. See the refine below.
     guardian_email: z.string().trim().email().max(255).optional().or(z.literal("")),
     guardian_signature: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_signature_image: sigImage,
@@ -630,7 +681,7 @@ export const waiverSubmitSchema = z
   )
   .refine(
     (d) =>
-      !d.is_minor ||
+      !waiverNeedsGuardian(d) ||
       Boolean(
         (d.guardian_signature && d.guardian_signature.trim()) ||
         (d.guardian_signature_image && d.guardian_signature_image.trim()),
@@ -642,19 +693,42 @@ export const waiverSubmitSchema = z
   )
   // A minor's guardian is named on the document and signs it, so those two
   // fields are required whatever else is or is not the same as somebody else's.
-  .refine((d) => !d.is_minor || Boolean(d.guardian_name?.trim()), {
+  .refine((d) => !waiverNeedsGuardian(d) || Boolean(d.guardian_name?.trim()), {
     message: "Please give the parent or guardian's name.",
     path: ["guardian_name"],
   })
-  .refine((d) => !d.is_minor || Boolean(d.guardian_relationship?.trim()), {
+  .refine((d) => !waiverNeedsGuardian(d) || Boolean(d.guardian_relationship?.trim()), {
     message: "Please say how the parent or guardian is related to the participant.",
     path: ["guardian_relationship"],
+  })
+  // The participant's own address: required for yourself, refused for a child.
+  //
+  // Two rules rather than one so each says what it means. Signing for yourself,
+  // the address IS the identity and there is no waiver without it. Signing for
+  // a child there is no address to give, and one that arrived anyway would be
+  // somebody's guess at what a child's address should be -- most likely the
+  // parent's, which is precisely the mistake #102 exists to stop, since it
+  // would file the second child's waiver against the first child's person.
+  .refine((d) => d.signing_for === "dependant" || Boolean(d.email?.trim()), {
+    message: "Please give an email address.",
+    path: ["email"],
+  })
+  .refine((d) => d.signing_for !== "dependant" || !d.email?.trim(), {
+    message: "A child on your account has no email address of their own. Use yours below.",
+    path: ["email"],
+  })
+  // ...and the guardian's address stops being optional, because for a child's
+  // waiver it is the only address on the form. It is what the club writes to,
+  // it is the login an approval unlocks, and it is what `waivers.email` stores.
+  .refine((d) => d.signing_for !== "dependant" || Boolean(d.guardian_email?.trim()), {
+    message: "Please give the parent or guardian's email address.",
+    path: ["guardian_email"],
   })
   // The emergency contact is required of everyone, unless it is the guardian --
   // in which case the form asked once and copies the answer across, and asking
   // again would be asking the same person to write themselves down twice.
   .superRefine((d, ctx) => {
-    if (d.is_minor && d.emergency_contact_is_guardian) return;
+    if (waiverNeedsGuardian(d) && d.emergency_contact_is_guardian) return;
     const fields = [
       [
         "emergency_contact_name",
@@ -962,7 +1036,15 @@ export const paperWaiverUploadSchema = z
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     address: z.string().trim().min(1).max(300),
     phone: z.string().trim().min(1).max(30),
-    email: z.string().trim().email().max(255),
+    // The same "who is this for" question the online form asks, so a manager
+    // files a paper child waiver identically and it produces the identical
+    // record. Defaulted, so every existing importer and agent call keeps
+    // working with no change.
+    signing_for: z.enum(["self", "dependant"]).optional().default("self"),
+    // Conditional exactly as on the online form: the participant's own address
+    // signing for themselves, refused for a dependant who has none. See the
+    // refines below.
+    email: z.string().trim().email().max(255).optional().or(z.literal("")),
     uts_student_number: z.string().trim().max(20).optional().or(z.literal("")),
     sms_whatsapp_consent: z.boolean().optional().default(false),
     // Three-state, unlike the consent above. A paper form that predates the
@@ -1041,6 +1123,30 @@ export const paperWaiverUploadSchema = z
   .refine((d) => d.scan.reduce((sum, f) => sum + base64ByteLength(f.data), 0) <= MAX_SCAN_BYTES, {
     message: "The scan is too large. Keep the whole upload under 10 MB.",
     path: ["scan"],
+  })
+  // The three address rules, worded for the person reading them: a manager at a
+  // screen, or an agent reading a 400 out of the API.
+  .refine((d) => d.signing_for === "dependant" || Boolean(d.email?.trim()), {
+    message: "An email address is required.",
+    path: ["email"],
+  })
+  .refine((d) => d.signing_for !== "dependant" || !d.email?.trim(), {
+    message:
+      "A dependant has no email address of their own. File this under the parent or guardian's address instead.",
+    path: ["email"],
+  })
+  .refine((d) => d.signing_for !== "dependant" || Boolean(d.guardian_email?.trim()), {
+    message: "The parent or guardian's email address is required for a dependant's waiver.",
+    path: ["guardian_email"],
+  })
+  // A dependant's paper form was signed by somebody, and it has to say who.
+  // Unlike the minor rule above -- which accepts the emergency contact's name
+  // because an old single-block form has only one person on it -- this one asks
+  // for the guardian by name, because "who is the guardian" is the question the
+  // filing manager just answered by choosing "a dependant".
+  .refine((d) => d.signing_for !== "dependant" || Boolean(d.guardian_name?.trim()), {
+    message: "The parent or guardian's name is required for a dependant's waiver.",
+    path: ["guardian_name"],
   });
 
 export type PaperWaiverUploadInput = z.infer<typeof paperWaiverUploadSchema>;

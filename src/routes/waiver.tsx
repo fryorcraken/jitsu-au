@@ -36,6 +36,7 @@ import {
   WAIVER_ANCHORS,
 } from "@/lib/waiver-required-fields";
 import { useAuth } from "@/hooks/useAuth";
+import { listMyDependants } from "@/lib/household.functions";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { WAIVER_SUBMIT } from "@/lib/submit-resilience";
 import {
@@ -46,10 +47,13 @@ import {
   type WaiverDraft,
 } from "@/lib/waiver-draft";
 import {
+  greetingName,
   resolveNamePrefill,
+  waiverNeedsGuardian,
   waiverPrefillSearchSchema,
   type HealthAnswers,
   type HealthQuestionId,
+  type WaiverSigningFor,
 } from "@/lib/validation";
 import { buildPageMeta } from "@/lib/seo";
 import { cn } from "@/lib/utils";
@@ -107,6 +111,7 @@ function Waiver() {
   const submit = useServerFn(submitWaiverWithPdf);
   const fetchTemplate = useServerFn(getCurrentWaiverTemplate);
   const fetchMine = useServerFn(getMyProfile);
+  const fetchDependants = useServerFn(listMyDependants);
   const { user, loading: authLoading } = useAuth();
   const search = Route.useSearch();
   const { first_name, last_name, name } = search;
@@ -149,6 +154,27 @@ function Waiver() {
   const [dob, setDob] = useState("");
   const [phone, setPhone] = useState(search.phone ?? "");
   const [email, setEmail] = useState(search.email ?? "");
+  /**
+   * Who this waiver is for, asked before anything else.
+   *
+   * This replaces working it out from the date of birth. A form that derives
+   * "there must be a guardian" from an age can only ever describe ONE person,
+   * and the club needs a record for each child on a family's account: the
+   * participant's own waiver, membership, trial and attendance. So the question
+   * is asked instead of inferred, and the answer decides whose email the form
+   * asks for. See #102.
+   */
+  const [signingFor, setSigningFor] = useState<WaiverSigningFor>("self");
+  /**
+   * The child a signed-in parent picked, or "" for somebody new.
+   *
+   * Nothing but a prefill: the id is never sent, and the server matches on the
+   * name and date of birth inside the household it already knows. That is what
+   * makes the picker worth having, though: a parent who retypes a name with a
+   * typo would otherwise get a SECOND child record with a second free trial,
+   * which is the exact accident `resolveDependantId` exists to prevent.
+   */
+  const [dependantId, setDependantId] = useState("");
   const [address, setAddress] = useState("");
   const [utsStudentNumber, setUtsStudentNumber] = useState("");
   // Equipment sizing, not part of the waiver. Optional, and it goes straight
@@ -221,11 +247,34 @@ function Waiver() {
     return age < 18;
   }, [dob]);
 
+  // Whether the form has to ask for a parent or guardian. Under 18 as it always
+  // was, and for anyone on somebody else's account whatever their age: a
+  // dependant has no login and cannot sign, so somebody signs for them. Same
+  // rule the server applies (`waiverNeedsGuardian`), so the two cannot disagree
+  // about what the form was allowed to leave out.
+  const needsGuardian = waiverNeedsGuardian({
+    is_minor: isMinor,
+    signing_for: signingFor,
+  });
+
   const templateQ = useQuery({
     queryKey: ["waiver-template"],
     queryFn: () => fetchTemplate(),
     staleTime: 60_000,
   });
+
+  // The people already on a signed-in parent's account, so they can pick one
+  // instead of retyping a name. Only ever fetched for a signed-in caller, and
+  // a failure is not surfaced as an error: the picker is a shortcut, and the
+  // form still works by typing the child's name, which is exactly what somebody
+  // adding their first child does anyway.
+  const dependantsQ = useQuery({
+    queryKey: ["my-dependants", user?.id],
+    queryFn: () => fetchDependants(),
+    enabled: Boolean(user) && !authLoading,
+    staleTime: 60_000,
+  });
+  const dependants = useMemo(() => dependantsQ.data ?? [], [dependantsQ.data]);
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -233,6 +282,11 @@ function Waiver() {
     // stored profile. Without this gate the profile prefill lands after the
     // restore (it waits on the auth session) and quietly overwrites it.
     if (restored) return;
+    // The signed-in person's own record, so it only prefills their own waiver.
+    // Filling a child's form with their parent's name, date of birth and
+    // medical notes is not a shortcut, it is the wrong person's health record
+    // on a signed legal document.
+    if (signingFor === "dependant") return;
     fetchMine()
       .then((row) => {
         if (!row) return;
@@ -271,13 +325,21 @@ function Waiver() {
       .catch(() => {
         /* no profile yet */
       });
-  }, [authLoading, user, fetchMine, restored]);
+  }, [authLoading, user, fetchMine, restored, signingFor]);
 
-  // A signed-in person signs for their own account: the waiver's email is
-  // their login email, and the field is locked (the server enforces the match).
+  // A signed-in person is the account holder, and the account holder's address
+  // is the one on the waiver. Which FIELD that is depends on who they are
+  // signing for: their own email signing for themselves, and the parent or
+  // guardian's email signing for somebody on their account. Either way the
+  // field is locked and the server enforces the same match.
   useEffect(() => {
-    if (user?.email) setEmail(user.email);
-  }, [user]);
+    if (!user?.email) return;
+    if (signingFor === "dependant") {
+      setGuardianEmail(user.email);
+    } else {
+      setEmail(user.email);
+    }
+  }, [user, signingFor]);
 
   // Lets someone on a shared/previously-signed-in device sign under a
   // different address without leaving the page. Falls back to whatever
@@ -286,6 +348,60 @@ function Waiver() {
   async function signOutToSignAsSomeoneElse() {
     await supabase.auth.signOut();
     setEmail(search.email ?? "");
+  }
+
+  /**
+   * Switch the form between the account holder and somebody on their account.
+   *
+   * The participant fields are cleared on the way, because they describe a
+   * different human being: a form that keeps the parent's name, date of birth
+   * and medical notes and simply relabels them is how the wrong person's health
+   * declaration ends up on a signed document. The guardian block, the emergency
+   * contact and the signature are left alone, since those are about the people
+   * around the participant and are as likely to be right afterwards as before.
+   */
+  function chooseSigningFor(next: WaiverSigningFor) {
+    if (next === signingFor) return;
+    setSigningFor(next);
+    setDependantId("");
+    setFirstName("");
+    setMiddleName("");
+    setLastName("");
+    setPreferredName("");
+    setDob("");
+    setUtsStudentNumber("");
+    setGiSize("");
+    setMartialArtsExperience("");
+    setMedical("");
+    setHealth(emptyHealthDraft());
+    // The participant's own address only exists on their own waiver. Signing
+    // for a child it is not asked for at all, so leaving the parent's there
+    // would send an address the server refuses.
+    setEmail(next === "dependant" ? "" : (user?.email ?? search.email ?? ""));
+  }
+
+  /**
+   * Prefill from a child already on the account, or clear for somebody new.
+   *
+   * The name and date of birth are the whole point: the server matches a child
+   * on exactly those three fields, so putting the stored spelling back is what
+   * makes "sign again for the same child" land on the one person record instead
+   * of minting a second one with a second free trial.
+   */
+  function choosePickedDependant(id: string) {
+    setDependantId(id);
+    const picked = dependants.find((d) => d.user_id === id);
+    if (!picked) {
+      setFirstName("");
+      setLastName("");
+      setPreferredName("");
+      setDob("");
+      return;
+    }
+    setFirstName(picked.first_name);
+    setLastName(picked.last_name ?? "");
+    setPreferredName(picked.preferred_name ?? "");
+    setDob(picked.date_of_birth ?? "");
   }
 
   // Arriving from the link in an interest confirmation email is itself proof
@@ -326,6 +442,7 @@ function Waiver() {
     // submission that was in flight when the tab died can still be identified.
     adoptSubmissionId(draft.submissionId);
     if (draftHasContent(draft)) {
+      setSigningFor(draft.signingFor);
       setFirstName(draft.firstName);
       setMiddleName(draft.middleName);
       setLastName(draft.lastName);
@@ -391,6 +508,7 @@ function Waiver() {
       preferredName,
       dob,
       phone,
+      signingFor,
       email,
       address,
       utsStudentNumber,
@@ -424,6 +542,7 @@ function Waiver() {
       preferredName,
       dob,
       phone,
+      signingFor,
       email,
       address,
       utsStudentNumber,
@@ -471,7 +590,7 @@ function Waiver() {
   // and a ticked "the emergency contact is the guardian" means that one person
   // fills both roles. Computed here so the preview shows what will be signed.
   const contacts = resolveWaiverContacts({
-    isMinor,
+    isMinor: needsGuardian,
     address,
     phone,
     email,
@@ -520,7 +639,7 @@ function Waiver() {
     healthAnswers: health,
     signatureName: signatureMode === "type" ? signatureName : "",
     clubName: "UTS Jitsu",
-    isMinor,
+    isMinor: needsGuardian,
     signedDate: new Date(previewSignedAt).toLocaleDateString("en-AU"),
   });
 
@@ -539,6 +658,7 @@ function Waiver() {
     ecRelationship,
     ecPhone,
     ecIsGuardian,
+    signingFor,
     guardianName,
     guardianRelationship,
     guardianEmail,
@@ -644,7 +764,13 @@ function Waiver() {
             date_of_birth: dob,
             address,
             phone,
-            email,
+            // Who it is for, and therefore which address the club gets. Signing
+            // for somebody on the account the participant's field is not on
+            // screen and nothing is sent for it: a dependant has no address of
+            // their own, and one invented here would be the parent's, which is
+            // the "two people, one record" bug this whole change is about.
+            signing_for: signingFor,
+            email: signingFor === "dependant" ? "" : email,
             uts_student_number: utsStudentNumber,
             gi_size: giSize,
             martial_arts_experience: martialArtsExperience,
@@ -656,16 +782,17 @@ function Waiver() {
             emergency_contact_relationship: ecRelationship,
             emergency_contact_phone: ecPhone,
             emergency_contact_is_guardian: ecIsGuardian,
-            // Only ever sent for a minor. The guardian block is hidden for an
-            // adult but its state survives (a date of birth can be corrected
-            // both ways), and sending a stale value the server still validates
-            // is how a hidden field ends up rejecting a form nobody can see a
-            // problem with.
-            guardian_name: isMinor ? guardianName : "",
-            guardian_relationship: isMinor ? guardianRelationship : "",
-            guardian_address: isMinor ? guardianAddress : "",
-            guardian_phone: isMinor ? guardianPhone : "",
-            guardian_email: isMinor ? guardianEmail : "",
+            // Only ever sent when the guardian block is on screen. It is
+            // hidden for an adult signing for themselves but its state survives
+            // (a date of birth can be corrected both ways, and so can the
+            // "who is this for" answer), and sending a stale value the server
+            // still validates is how a hidden field ends up rejecting a form
+            // nobody can see a problem with.
+            guardian_name: needsGuardian ? guardianName : "",
+            guardian_relationship: needsGuardian ? guardianRelationship : "",
+            guardian_address: needsGuardian ? guardianAddress : "",
+            guardian_phone: needsGuardian ? guardianPhone : "",
+            guardian_email: needsGuardian ? guardianEmail : "",
             // Every question is answered by this point (guarded below), so the
             // draft narrows to the five booleans the server requires.
             health_answers: health as HealthAnswers,
@@ -674,9 +801,10 @@ function Waiver() {
             signature_name: sigName,
             signature_image: sigImg,
             is_minor: isMinor,
-            guardian_signature: guardianSignatureMode === "type" ? guardianSignature : "",
+            guardian_signature:
+              needsGuardian && guardianSignatureMode === "type" ? guardianSignature : "",
             guardian_signature_image:
-              guardianSignatureMode === "draw" ? guardianSignatureImage : "",
+              needsGuardian && guardianSignatureMode === "draw" ? guardianSignatureImage : "",
             // The version on screen, so the server refuses to file this against a
             // template that was promoted while the form was being filled in.
             template_version: templateQ.data?.version,
@@ -878,7 +1006,9 @@ function Waiver() {
 
             {user && (
               <p className="rounded-md bg-primary/10 px-3 py-2 text-xs text-primary">
-                Signed in as {user.email}. Your details have been pre-filled from your profile.
+                {signingFor === "dependant"
+                  ? `Signed in as ${user.email}. That is the address we'll use for everything about this person.`
+                  : `Signed in as ${user.email}. Your details have been pre-filled from your profile.`}
               </p>
             )}
 
@@ -917,8 +1047,88 @@ function Waiver() {
               </div>
             )}
 
+            {/* Who is this waiver for?
+
+                First, before any field, because the answer changes what the
+                rest of the form asks for. It used to be inferred from the date
+                of birth further down, which could only ever describe one
+                person; the club needs a record for each child on a family's
+                account (#102). */}
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-semibold">Who is this waiver for?</legend>
+              <RadioGroup
+                value={signingFor}
+                onValueChange={(v) => chooseSigningFor(v as WaiverSigningFor)}
+                className="gap-2"
+              >
+                <label className="flex items-start gap-2 text-sm" htmlFor="signing_for_self">
+                  <RadioGroupItem value="self" id="signing_for_self" className="mt-0.5" />
+                  <span>
+                    Myself
+                    {user && (
+                      <span className="block text-xs text-muted-foreground">
+                        The waiver uses {user.email}, the address on your account.
+                      </span>
+                    )}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm" htmlFor="signing_for_dependant">
+                  <RadioGroupItem value="dependant" id="signing_for_dependant" className="mt-0.5" />
+                  <span>
+                    My child, or someone else I look after
+                    <span className="block text-xs text-muted-foreground">
+                      They get their own record at the club. You stay the contact for everything
+                      about them, and they never need an email address of their own.
+                    </span>
+                  </span>
+                </label>
+              </RadioGroup>
+
+              {/* The people already on the account, so a parent signing for the
+                  same child again lands on the record that already exists
+                  rather than typing a near-miss and getting a second one. */}
+              {signingFor === "dependant" && user && dependants.length > 0 && (
+                <div className="rounded-md border p-3">
+                  <p className="text-sm font-medium">Which of them?</p>
+                  <RadioGroup
+                    value={dependantId}
+                    onValueChange={choosePickedDependant}
+                    className="mt-2 gap-2"
+                  >
+                    {dependants.map((person) => (
+                      <label
+                        key={person.user_id}
+                        className="flex items-center gap-2 text-sm"
+                        htmlFor={`dependant_${person.user_id}`}
+                      >
+                        <RadioGroupItem value={person.user_id} id={`dependant_${person.user_id}`} />
+                        <span>
+                          {greetingName({
+                            preferred_name: person.preferred_name,
+                            first_name: person.first_name,
+                            last_name: person.last_name,
+                          })}{" "}
+                          {person.last_name}
+                        </span>
+                      </label>
+                    ))}
+                    <label className="flex items-center gap-2 text-sm" htmlFor="dependant_new">
+                      <RadioGroupItem value="" id="dependant_new" />
+                      <span>Someone new</span>
+                    </label>
+                  </RadioGroup>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Picking someone fills in their name and date of birth, so this waiver goes on
+                    the record they already have.
+                  </p>
+                </div>
+              )}
+            </fieldset>
+
             <fieldset className="space-y-5">
-              <legend className="text-sm font-semibold">Your details</legend>
+              <legend className="text-sm font-semibold">
+                {signingFor === "dependant" ? "Their details" : "Your details"}
+              </legend>
               <div className="grid gap-5 sm:grid-cols-3">
                 <div>
                   <Label htmlFor="first_name">First name</Label>
@@ -990,11 +1200,13 @@ function Waiver() {
                       from the date of birth, so we show which one applies
                       rather than asking the same thing twice. */}
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    {!dob
-                      ? "This decides whether you sign as an adult or a guardian signs for you."
-                      : isMinor
-                        ? "Under 18, so a parent or guardian consents and signs at the end."
-                        : "18 or over, so you sign as the applicant."}
+                    {signingFor === "dependant"
+                      ? "You sign for them at the end, whatever their age."
+                      : !dob
+                        ? "This decides whether you sign as an adult or a guardian signs for you."
+                        : isMinor
+                          ? "Under 18, so a parent or guardian consents and signs at the end."
+                          : "18 or over, so you sign as the applicant."}
                   </p>
                 </div>
                 <div>
@@ -1022,39 +1234,50 @@ function Waiver() {
                   </label>
                 </div>
               </div>
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  maxLength={255}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={Boolean(user)}
-                  {...fieldProps("email")}
-                />
-                {fieldMessage("email")}
-                {user && (
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    You're signed in, so the waiver uses your account email.
-                    <br />
-                    Wrong email?{" "}
-                    <button
-                      type="button"
-                      onClick={signOutToSignAsSomeoneElse}
-                      className="underline hover:text-foreground"
-                    >
-                      Log out
-                    </button>{" "}
-                    to sign under a different address, or{" "}
-                    <Link to="/contact" className="underline hover:text-foreground">
-                      contact us
-                    </Link>{" "}
-                    to change the email on your account.
-                  </p>
-                )}
-              </div>
+              {/* Not asked at all for somebody on the account. That is the
+                  point of the whole change: a nine-year-old is never asked for
+                  an email address, and everything about them reaches the parent
+                  or guardian named below. */}
+              {signingFor === "dependant" ? (
+                <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  We don&apos;t need an email address for them. Everything about their training goes
+                  to the parent or guardian you name below.
+                </p>
+              ) : (
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    required
+                    maxLength={255}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={Boolean(user)}
+                    {...fieldProps("email")}
+                  />
+                  {fieldMessage("email")}
+                  {user && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      You're signed in, so the waiver uses your account email.
+                      <br />
+                      Wrong email?{" "}
+                      <button
+                        type="button"
+                        onClick={signOutToSignAsSomeoneElse}
+                        className="underline hover:text-foreground"
+                      >
+                        Log out
+                      </button>{" "}
+                      to sign under a different address, or{" "}
+                      <Link to="/contact" className="underline hover:text-foreground">
+                        contact us
+                      </Link>{" "}
+                      to change the email on your account.
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <Label htmlFor="address">Address</Label>
                 <Input
@@ -1115,13 +1338,13 @@ function Waiver() {
               </div>
             </fieldset>
 
-            {isMinor && (
+            {needsGuardian && (
               <fieldset className="space-y-5 border-t pt-6">
                 <legend className="text-sm font-semibold">Parent or legal guardian</legend>
                 <p className="text-xs text-muted-foreground">
-                  The participant is under 18, so a parent or legal guardian consents and signs at
-                  the end of the form. Their details go on the waiver, so we can reach the person
-                  who signed it.
+                  {signingFor === "dependant"
+                    ? "You consent and sign at the end of the form, and your details go on the waiver as the person who signed it."
+                    : "The participant is under 18, so a parent or legal guardian consents and signs at the end of the form. Their details go on the waiver, so we can reach the person who signed it."}
                 </p>
                 <div className="grid gap-5 sm:grid-cols-2">
                   <div>
@@ -1175,15 +1398,28 @@ function Waiver() {
                   </div>
                   <div>
                     <Label htmlFor="guardian_email">
-                      Guardian email <span className="text-muted-foreground">(optional)</span>
+                      Guardian email{" "}
+                      {signingFor !== "dependant" && (
+                        <span className="text-muted-foreground">(optional)</span>
+                      )}
                     </Label>
                     <Input
                       id="guardian_email"
                       type="email"
+                      // The only address on the form when the participant has
+                      // none of their own, so it stops being optional. Locked
+                      // to the account when signed in, for the same reason the
+                      // participant's is: the server requires it to match.
+                      required={signingFor === "dependant"}
+                      disabled={signingFor === "dependant" && Boolean(user)}
                       maxLength={255}
                       value={guardianEmail}
                       onChange={(e) => setGuardianEmail(e.target.value)}
-                      placeholder="Same as the participant's"
+                      placeholder={
+                        signingFor === "dependant"
+                          ? "name@example.com"
+                          : "Same as the participant's"
+                      }
                       {...fieldProps("guardian_email")}
                       // The hint applies whether or not the address is flagged,
                       // so it is appended rather than replaced by fieldProps.
@@ -1215,7 +1451,7 @@ function Waiver() {
 
             <fieldset className="space-y-5 border-t pt-6">
               <legend className="text-sm font-semibold">Emergency contact</legend>
-              {isMinor && (
+              {needsGuardian && (
                 <label className="flex items-start gap-2 text-sm">
                   <Checkbox
                     checked={ecIsGuardian}
@@ -1235,7 +1471,7 @@ function Waiver() {
                   reader's form controls list can land on, and these hold the
                   other person's details. The state survives the unmount, so
                   unticking brings back whatever was typed. */}
-              {isMinor && ecIsGuardian ? null : (
+              {needsGuardian && ecIsGuardian ? null : (
                 <div className="grid gap-5 sm:grid-cols-3">
                   <div>
                     <Label htmlFor="emergency_contact_name">Contact name</Label>
@@ -1394,7 +1630,7 @@ function Waiver() {
                   acknowledgements={resolveAcknowledgements(ackDefs, acks)}
                   signatureName={signatureMode === "type" ? signatureName : ""}
                   signatureImage={previewSignatureImage}
-                  isMinor={isMinor}
+                  isMinor={needsGuardian}
                   guardianName={contacts.guardianName}
                   guardianRelationship={contacts.guardianRelationship}
                   guardianAddress={contacts.guardianAddress}
@@ -1470,10 +1706,12 @@ function Waiver() {
                 signature dated {new Date().toLocaleDateString()}.
               </p>
 
-              {isMinor && (
+              {needsGuardian && (
                 <div className="mt-4 space-y-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
                   <p className="text-sm font-medium text-primary">
-                    Participant is under 18, so a parent or legal guardian signs as well.
+                    {signingFor === "dependant"
+                      ? "You sign for them as their parent or legal guardian."
+                      : "Participant is under 18, so a parent or legal guardian signs as well."}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {contacts.guardianName || "The parent or guardian"}

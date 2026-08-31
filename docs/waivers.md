@@ -9,11 +9,14 @@ keep both aligned with the code in the same change.
 Anyone can sign the training waiver at any time, no login needed, as long as
 they give an email. A person is stored once: a **locked login record** carrying
 their email (the only place any email lives) plus a **profile** carrying their
-person fields. A waiver is a **frozen submission**: exactly what was typed, the
-signed PDF, and the signer's IP and browser context. Nothing becomes official
-until a **manager approves** a submission: approval copies its details onto the
-profile, unlocks the login, emails them that their account is active, and
-assigns the free trial.
+person fields. A parent can sign for a child instead of for themselves, and the
+child gets a person record of their own with no login and no email address:
+everything about them reaches the parent (rule 1). A waiver is a **frozen
+submission**: exactly what was typed, the signed PDF, and the signer's IP and
+browser context. Nothing becomes official until a **manager approves** a
+submission: approval copies its details onto the profile, unlocks the login of
+whoever the club writes to about that person, emails them that their account is
+active, and assigns the free trial.
 The **active waiver** is the latest approved one; everything else is history.
 
 ## The funnel
@@ -38,15 +41,37 @@ Derivation precedence: active paid membership → member; something ended with
 nothing active → lapsed; approved waiver → visitor; submission(s) pending →
 applicant; otherwise lead.
 
+A **dependant** moves through the same five phases as anybody else, because
+they are an ordinary person record: their own waiver, their own trial, their own
+membership. The only difference is that phase 3 unlocks their guardian's login
+rather than one of their own.
+
 **Managers** are club staff with the manager role, orthogonal to the funnel.
 Someone browsing the site who has not provided an email is nothing in the
 system. (The contact form stores a message, not a person.)
 
 ## Rules
 
-1. **A person is identified by their email, stored exactly once** — on their
-   login record (Supabase auth), which enforces uniqueness. The profile holds
-   the person fields and no email.
+1. **A person is identified by their person record. An ACCOUNT HOLDER is
+   identified by their email.** Those used to be the same sentence, and the
+   difference is what lets a family share one address.
+
+   An account holder is a person the club writes to, and their email is stored
+   exactly once, on their login record (Supabase auth), which enforces
+   uniqueness. The profile holds the person fields and no email.
+
+   A **dependant** is a person on somebody else's account: a child, most
+   obviously. They have a full person record like anyone else, and no login,
+   ever. `profiles.guardian_user_id` is the only thing that marks them, and it
+   names the account holder everything about them reaches. Their login record
+   still carries an address, because auth requires one, but it is a reserved,
+   non-deliverable string the server generates. It is never printed, never sent
+   to, and their login is permanently banned. Nothing identifies a person by it.
+
+   So two children in one family are two people under one address, which is
+   what the club actually has. Before this, the second child's waiver resolved
+   to the first child's record and quietly overwrote it (#102).
+
 2. **The person record starts at the waiver.** A lead is only a lead row;
    signing the waiver is what creates the locked login + profile (seeded with
    name and phone).
@@ -89,9 +114,20 @@ system. (The contact form stores a message, not a person.)
    stored.
 6. **Approval promotes, unlocks, and assigns the trial.** Approving a waiver
    copies its details onto the profile; on the person's first approval it also
-   lifts the ban on their login, emails them to say their account is active,
-   and assigns the club's free trial (one per person, ever — no membership
-   activation email, the account one covers it). That email carries **no
+   lifts the ban on **their contact person's** login, emails them to say their
+   account is active, and assigns the club's free trial (one per person, ever —
+   no membership activation email, the account one covers it).
+
+   **"Their contact person" is the participant themselves, unless they are a
+   dependant, in which case it is their guardian.** So approving a child's
+   waiver opens the PARENT's login, not the child's: the child has none and
+   never will, and unlocking theirs would open an account nobody can reach,
+   keyed on an address nothing delivers to, while leaving the parent locked out
+   of the club they just joined. The activation email greets the parent and
+   names the child, so a parent who never trains can tell what the account is
+   for. Everything else stays on the participant: the profile promotion and the
+   free trial are theirs, which is what gives each child in a family their own
+   record and their own trial. That email carries **no
    sign-in link**: it names the address their login is keyed on and sends them
    to `/auth` to request a link themselves. An unrequested magic link expires
    in an hour, so it is usually dead by the time it is read, while this one
@@ -125,7 +161,13 @@ system. (The contact form stores a message, not a person.)
 8. **No duplicate live data.** The profile is the only record of the person
    fields, and the login record is the only place any email lives. The email
    captured on a waiver is part of that frozen submission (evidence), not a
-   live record. There is no self-serve email change; a future manager action
+   live record.
+
+   For a **child's waiver that address is the guardian's**, because it is
+   honestly what was typed on the form and it is the only address anybody gave.
+   A blank would be worse for whoever reads the record in a year, and the
+   child's reserved one would be worse still: it means nothing to a human and
+   nothing may be sent to it. There is no self-serve email change; a future manager action
    changes it in the one place it lives.
 
    A member can keep some of that record current themselves on `/account`: what
@@ -135,9 +177,17 @@ system. (The contact form stores a message, not a person.)
    approval wins whenever it runs, so a manager working through a backlog of
    older waivers can undo a correction a member made since.
 
-9. **No self-serve sign-up.** Logins are created locked by waiver submission
-   and unlocked by approval. The auth page only signs people in (password or
-   magic link, with `shouldCreateUser: false`; a locked login cannot sign in).
+9. **No self-serve sign-up, and not everyone gets a login at all.** Logins are
+   created locked by waiver submission and unlocked by approval. The auth page
+   only signs people in (password or magic link, with `shouldCreateUser: false`;
+   a locked login cannot sign in).
+
+   Two consequences of rule 1 sit here. A **parent** who signs for their child
+   and never trains themselves still gets a login, because approving the
+   child's waiver unlocks theirs (rule 6): an account can exist with no waiver
+   of its own. A **dependant** never gets one, at any age. Their login record
+   is created permanently banned and stays that way, so the auth page answers
+   for their reserved address exactly as it does for an unknown one.
 
 ## Flows
 
@@ -152,14 +202,41 @@ they sign the waiver.
 
 ### Applicant signs the waiver
 
-Public page (`/waiver`), optionally prefilled from the free-trial flow. Email
-is required. The form is the club's **application form**: participant type
-(taken from the date of birth, not asked twice), applicant details, one
-emergency contact with their **relationship**, the five health questions
-answered yes or no, and the signature.
+Public page (`/waiver`), optionally prefilled from the free-trial flow. The
+form is the club's **application form**: participant type (taken from the date
+of birth, not asked twice), applicant details, one emergency contact with their
+**relationship**, the five health questions answered yes or no, and the
+signature.
 Anything answered yes has to be explained in the medical details box.
 
-For a participant under 18 the form adds a **parent or legal guardian** block:
+**The first question is who the waiver is for**, before any field, because the
+answer changes what the rest of the form asks for. _Myself_, or _my child, or
+someone else I look after_. A signed-in parent who already has children on their
+account picks one of them by name, or _someone new_; picking a name fills in
+their name and date of birth, which is what makes a second waiver for the same
+child land on the record they already have instead of creating a second one with
+a second free trial. Nobody is asked to log in first: a parent with no account
+yet signs for their first child exactly as an adult signs for themselves, and
+approving that waiver is what gives them a login (rule 6).
+
+An **email is required either way, but from a different person**. Signing for
+yourself it is yours, as it always was. Signing for someone on your account the
+participant is not asked for one at all, because a nine-year-old does not have a
+mailbox, and the parent or guardian's address below is required instead. That
+address is what the club writes to, what `waivers.email` stores, and the login
+an approval unlocks. A signed-in person's own address fills whichever of the two
+fields applies and is locked, and the server refuses a submission that does not
+match it.
+
+The server decides which existing person a child's waiver belongs to by matching
+**first name, last name and date of birth within that one household**. Nothing
+the form sends identifies the child, which is deliberate: an id on the payload
+would be something to guess at. Two children with the same name and the same
+birthday on one account would be treated as one person, which is not a case
+worth building for and which a manager can untangle afterwards.
+
+For a participant under 18, **or anyone on somebody else's account whatever
+their age**, the form adds a **parent or legal guardian** block:
 the person who consents, signs and carries the liability. They are asked for by
 name and relationship, plus their own **address, mobile and email** — each of
 those three optional, meaning "the same as the participant's", so a family at
@@ -179,6 +256,20 @@ by email; managers are notified. Behind the scenes, for a new email: a locked
 login record is created (their email, no way to sign in) and their profile is
 seeded with name + phone. An existing person is left untouched. Either way the
 waiver row stores the full submission, and the person is now an applicant.
+
+**For a child's waiver that happens twice over.** The address resolves to the
+guardian, creating their locked person record if this is their first child, and
+seeding it from the guardian block rather than the child's name. The participant
+is then matched or created inside that household, with a reserved address and a
+permanent ban. The confirmation email goes to the guardian and greets them, and
+names the child to the managers as the person who signed up.
+
+One thing a child's waiver does **not** get is the code-of-conduct link on the
+success screen and in the confirmation email. That link carries a token, and a
+token identifies its holder by proving an address, so one minted for a child
+could never be opened by the parent it was posted to. A parent signs the code of
+conduct for their child from the member area instead, where there is a live
+session. Nothing is lost by waiting: the code of conduct gates nothing.
 
 ### When something is missing
 
@@ -277,6 +368,12 @@ Attach a PDF, or a photo of each page, or any mix of the two: several files are
 joined into one document in the order shown, so the waiver has the single PDF
 every screen already expects. Up to 10 MB in total.
 
+A paper form is filed for a child the same way, by answering the same "who is
+this for" question. The manager names the parent or guardian and gives their
+address, and the record that comes out is identical to one signed online: the
+child gets their own person record, the waiver is filed under the guardian's
+address, and approving it unlocks the guardian's login.
+
 From there it is an ordinary submission. It attaches to the email's existing
 person, or creates a locked applicant if that email is new, and it lands
 **pending** like any other. Approving it does the same three things as always
@@ -299,7 +396,9 @@ waiver even if they signed a newer one online. The upload form says so.
 
 **Filing the same paper twice stops for a look.** Signing is unlimited, but if
 the person already has a waiver signed on that date, filing another one pauses
-and shows what it collided with. That is the realistic accident here: an upload
+and shows what it collided with. "The person" means the **participant**, so two
+children in one family filed for the same day never collide with each other, and
+two scans of one child's form still do. That is the realistic accident here: an upload
 a manager could not tell had gone through, or an import batch that ran twice.
 Every extra copy is another pending waiver somebody could approve, and since the
 active one is the last **approved**, which copy got approved is what the club's
@@ -372,11 +471,15 @@ the person detail page (with the date), and on the member's account page.
 
 ### Email edge cases
 
-- **Signed-in people sign for themselves.** The form locks the email field to
-  their login email, and the server rejects a submission whose email does not
-  match it (prevents a typo or someone else's address attaching the waiver to
-  the wrong person, or creating a duplicate person). To sign for someone else,
-  log out first.
+- **Signed-in people sign on their own account.** The form locks the email
+  field to their login email, and the server rejects a submission whose email
+  does not match it (prevents a typo or someone else's address attaching the
+  waiver to the wrong person, or creating a duplicate person). Which field is
+  locked follows the first question: their own address signing for themselves,
+  and the **parent or guardian's** address signing for someone on their
+  account. Either way the address on the waiver has to be the account holder's,
+  and the participant is either them or one of their dependants. To sign for
+  somebody who is not on your account, log out first.
 - **An unregistrable email** (rejected by the auth system) fails with a clear
   "check it for typos" message, never a raw database error.
 - **Signing in with an applicant's email** does nothing special: the auth page
@@ -393,7 +496,9 @@ the person detail page (with the date), and on the member's account page.
 - **Signed waivers keep the address as submitted.** They are frozen evidence of
   what was signed, so after a correction the person's live email and their
   waiver's email legitimately differ. The detail page says so rather than
-  looking broken.
+  looking broken. A **dependant's** waiver differs the same way permanently and
+  for a different reason: it holds the guardian's address, which is what was
+  typed, while the person's own login carries the reserved one.
 
 ### Manager reviews and approves
 

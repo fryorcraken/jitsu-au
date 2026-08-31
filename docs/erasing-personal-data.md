@@ -76,7 +76,8 @@ it should not have, which is why the slice above stops where it does.
 
 The map, for whoever builds the rest. Deleting the `auth.users` row by hand
 today is worse than doing nothing, because it destroys the record and keeps the
-documents.
+documents. Since dependants exist it may also simply fail, which is the one
+case where doing it by hand tells you so (see the box below).
 
 **Cascades from the login** (`ON DELETE CASCADE`, directly or through
 `profiles.user_id`): `profiles`, `waivers` (the frozen submission, including the
@@ -86,6 +87,44 @@ email as submitted), `session_checkins`, `code_of_conduct_acceptances`,
 `calendar_feed_tokens`, `email_verification_tokens`, `blog_comments`,
 `blog_comment_upvotes`, `blog_blocked_commenters`, `user_roles`,
 `app_user_connections`, `waiver_drive_uploads` (via `waivers`).
+
+> [!IMPORTANT]
+> **A parent with children on their account does not cascade. It fails.**
+>
+> `profiles.guardian_user_id` is `ON DELETE RESTRICT`, not `CASCADE`, so
+> deleting the `auth.users` row of anybody who still has a dependant on the
+> books is refused by Postgres with a raw `23503` foreign-key violation. That
+> is the whole list above not happening: nothing is deleted, and the error is
+> a constraint name rather than a sentence anyone can act on.
+>
+> It is the right behaviour. The alternative was a cascade, and a cascade from
+> a parent would take every child on the account with them: their waivers,
+> their memberships, their attendance. A child is a person in their own right
+> here, not a field on their parent's record, and deleting a parent must never
+> be a way to delete a child by accident.
+>
+> **So deal with the children first.** Whoever is doing the deletion has to
+> decide, per child, whether that person is also leaving the club:
+>
+> - **The child is leaving too.** Delete each child first, as their own
+>   deletion, with the same questions in "Why the rest is not built" answered
+>   for each of them. A child who trained has signed a waiver, so this is the
+>   hard case, not the easy one, and minors are exactly where the retention
+>   question bites (see below).
+> - **The child is staying**, which is realistic: a parent who separates, or
+>   who hands the account to another adult. The child has to be moved to a
+>   different guardian before the parent can go. There is no screen for that
+>   today. It is one `UPDATE` on `profiles.guardian_user_id`, but doing it by
+>   hand means picking a guardian who is not themselves a dependant, because
+>   the one-level rule is enforced in the application rather than by a trigger
+>   (`src/lib/household.ts`).
+>
+> Only once no `profiles` row points at them may the parent be deleted, and
+> only then does the cascade above describe what happens.
+>
+> Whatever gets built should ask this question out loud rather than letting a
+> manager discover it as a `23503`, the same way it should refuse a manager
+> outright (see the audit columns below).
 
 **Survives, holding personal data:**
 
@@ -120,7 +159,12 @@ In the order I would build it, once the questions above are answered:
 
 1. Delete an enquiry. **Done.**
 2. Delete a person who never signed anything, as one operation. Refused when a
-   waiver, a membership or attendance is behind them.
+   waiver, a membership or attendance is behind them, and refused with a
+   sentence rather than a `23503` when they still have children on their
+   account (see the box above). A "move these children to another guardian"
+   step is what would unblock the second case, and it is worth building
+   whether or not deletion ever is: it is also the answer when a family
+   changes shape and nobody is leaving.
 3. Delete or de-identify a person who did sign: their record, login, comments,
    notifications, attendance and PDFs, with the waiver either going with them or
    retained for the agreed period and kept out of the day-to-day screens.

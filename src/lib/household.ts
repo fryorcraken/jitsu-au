@@ -148,6 +148,39 @@ export async function assertActingFor(
 }
 
 /**
+ * Throw unless `userId` is an account holder who may be given dependants.
+ *
+ * The other half of the one-level rule, for the moment BEFORE a dependant
+ * exists. `assertActingFor` can only answer "may A act for B", and creating a
+ * child has no B yet: the server is about to mint one. So the question it asks
+ * here is the narrower "is this person allowed to be a guardian at all", and
+ * the answer is no when they are themselves somebody's dependant.
+ *
+ * It lives here, beside the gate, rather than in `waiver.functions.ts` where
+ * its only caller is. #102 asks for a depth check the migration deliberately
+ * left to the application (a depth check in SQL needs a trigger), and a second
+ * copy of that rule written next to the code that creates a child is exactly
+ * how the two drift. It refuses in the SAME words as `assertActingFor` for the
+ * same reason: the caller learns that the answer is no, and nothing else.
+ *
+ * A person with no `profiles` row is refused too. Unlike `assertActingFor`,
+ * where a missing row is not the interesting case, here it means the server is
+ * about to hang a child off somebody it cannot find, and failing closed costs
+ * nothing: every guardian this is asked about was either just resolved through
+ * `resolvePersonId` (which creates the profile) or is a live signed-in session.
+ */
+export async function assertMayHaveDependants(admin: AdminClient, userId: string): Promise<void> {
+  const id = userId.toLowerCase();
+  const { data, error } = await admin
+    .from("profiles")
+    .select("user_id, guardian_user_id")
+    .eq("user_id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data || isDependant(data)) throw new Error(NOT_YOURS);
+}
+
+/**
  * The person a "...for this person" server function is about: the named target
  * once the gate has allowed it, or the caller when none was named.
  *
@@ -169,14 +202,13 @@ export async function resolveSubject(
   return targetUserId;
 }
 
-// `listHousehold` below and `contactUserIdFor` above have no production caller
-// yet: #106 lists a household, #107 addresses a digest to a contact. They are
-// here rather than with those PRs because #102 asks for the household rule to
-// exist in ONE place before three PRs start needing it, and an agent who
-// arrives to find only half the module writes the other half themselves, which
-// is the second seam CLAUDE.md forbids. It is a deliberate exception to "no
-// speculative generality" and worth re-reading as one: if #106 and #107 land
-// without calling these, delete them.
+// `listHousehold` below and `contactUserIdFor` above were written in #104 with
+// no caller, as a deliberate exception to "no speculative generality": #102
+// asked for the household rule to exist in ONE place before three PRs started
+// needing it. #105 is the first of those, and it calls both -- `listHousehold`
+// to find whether a guardian already has this child on the books, and
+// `contactUserIdFor` to decide whose login an approval unlocks. So the
+// exception has been paid off; they are ordinary code now.
 
 /** One person on an account, as the household screens list them. */
 export type HouseholdMember = {

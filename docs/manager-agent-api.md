@@ -124,11 +124,18 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   paper records). Same params as the manager's paper-upload form
   (`paperWaiverUploadSchema`); dispatches to `filePaperWaiver` in
   `src/lib/waiver.functions.ts`, the same function the web form calls, so an
-  agent-filed waiver and a manager's own upload are identical. Always lands
+  agent-filed waiver and a manager's own upload are identical. That includes
+  the "who is this for" question: `signing_for` defaults to `"self"` and every
+  existing caller keeps working unchanged, while `"dependant"` files for
+  somebody on another person's account (the participant's `email` is refused,
+  `guardian_email` and `guardian_name` are required, and the participant is
+  matched within that guardian's household on name and date of birth). See
+  `docs/waivers.md`, rule 1. Always lands
   **pending**: it never approves, emails anyone, or marks the email verified
   — approving is a separate, deliberate manager action because it promotes
-  the record, unlocks the login, emails them that their account is active and
-  assigns the free trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is always
+  the record, unlocks the login of whoever the club writes to about them (their
+  guardian's, for a dependant), emails that person to say the account is active
+  and assigns the free trial (docs/waivers.md rule 6). `uploaded_by` on the filed row is always
   the token's owner: a waiver is legal evidence, so every filing names the
   manager who vouched for the scan. Filing a waiver the person already
   has for the same `signed_on` is refused with `409 duplicate_waiver` (the

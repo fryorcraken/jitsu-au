@@ -14,12 +14,14 @@ import {
   isMinorOn,
   isPaperWaiver,
   nameWithPreferred,
+  splitFullName,
   nextUtcDay,
   normalizeEmail,
   paperWaiverUploadSchema,
   saveTemplateSchema,
   setCurrentTemplateSchema,
   waiverApprovalSchema,
+  waiverNeedsGuardian,
   waiverSubmitSchema,
   waiverToProfileFields,
 } from "@/lib/validation";
@@ -48,7 +50,14 @@ import { hasMediaAcknowledgement, WaiverTemplateError } from "@/lib/waiver-templ
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 import { resolveWaiverContacts } from "@/lib/waiver-contacts";
-import { householdTargetSchema, resolveSubject } from "@/lib/household";
+import {
+  assertMayHaveDependants,
+  contactUserIdFor,
+  householdTargetSchema,
+  isDependant,
+  listHousehold,
+  resolveSubject,
+} from "@/lib/household";
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";
@@ -329,6 +338,219 @@ async function resolvePersonId(
   return created.user.id;
 }
 
+// ---- Dependants: a person on somebody else's account ----
+
+/**
+ * The domain a dependant's reserved login address is minted in.
+ *
+ * This address is never printed, never sent to, and never typed by anyone. It
+ * exists because `auth.users.email` is unique and Supabase will not create a
+ * user without one, and a dependant has to be an ordinary auth user so that
+ * every table keying on a person keeps working (the model in #102). It carries
+ * no part of the child's identity on purpose: a uuid, and nothing else, so an
+ * address that leaks into a log or onto a manager's screen says nothing about
+ * a nine-year-old.
+ *
+ * **Why this domain rather than RFC 2606's reserved `.invalid`.** #102 marked
+ * "will GoTrue accept an address in a subdomain with no MX record" as the
+ * design's one unverified assumption, with `.invalid` as the fallback. It was
+ * tested against GoTrue v2.196.0 (the version the local stack pins) and BOTH
+ * are accepted: `admin.createUser` answers 200 for either, with
+ * `email_confirm: false` leaving `email_confirmed_at` null and the ban stamped.
+ *
+ * The reason is worth writing down, because it says which future change would
+ * break this. `admin.createUser` validates an address with
+ * `checkmail.ValidateFormat` and nothing else: syntax, and no DNS or MX lookup
+ * at all. GoTrue's MX check lives in `internal/mailer/validateclient` and runs
+ * only when it is about to SEND a message, which is why turning
+ * `GOTRUE_MAILER_EMAIL_VALIDATION_EXTENDED` on changes neither answer. A
+ * dependant is created with `email_confirm: false` and is never mailed, so that
+ * path is never reached.
+ *
+ * So the choice was ours rather than GoTrue's, and this is the better of the
+ * two: the club owns `jitsu.au`, so this is a name the club controls and could
+ * point at a null MX record (RFC 7505) to say in DNS that it accepts no mail. A
+ * `.invalid` address is equally undeliverable but is not ours, and it reads as
+ * a bug rather than as a deliberate reservation to whoever finds one.
+ *
+ * If GoTrue ever does start checking DNS on create, the fallback still stands
+ * and only this constant changes.
+ */
+const DEPENDANT_EMAIL_DOMAIN = "dependant.jitsu.au";
+
+/**
+ * A fresh reserved address for a dependant being created right now.
+ *
+ * Random rather than derived from the child's name or their guardian's address.
+ * A derived scheme would put a real person into a string that ends up in logs
+ * and admin screens, and #102 rejects plus-addressing the parent's address for
+ * exactly that reason: it leaks the child's identity into an address and may
+ * actually deliver.
+ */
+function newDependantEmail(): string {
+  return `${crypto.randomUUID()}@${DEPENDANT_EMAIL_DOMAIN}`;
+}
+
+/**
+ * True for an address this module minted. Nothing may ever send to one.
+ *
+ * Exported because it is the only honest way to ask the question: the column
+ * that decides who is a dependant is `profiles.guardian_user_id`, and this is
+ * for the places holding an address with no profile row to hand.
+ */
+export function isDependantEmail(email: string): boolean {
+  return normalizeEmail(email).endsWith(`@${DEPENDANT_EMAIL_DOMAIN}`);
+}
+
+/** One of the three fields a dependant is matched on, ready to compare. */
+const matchable = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
+
+/**
+ * Whether somebody already on the account is the child this waiver is for.
+ *
+ * Compared field by field rather than through a joined key, because a key has
+ * to pick a separator no name can contain and getting that wrong merges two
+ * different people in silence: `"Jo Anne" + "Smith"` and `"Jo" + "Anne Smith"`
+ * share a space-joined key and are not the same child.
+ */
+const isSameDependant = (
+  a: { first_name?: string | null; last_name?: string | null; date_of_birth?: string | null },
+  b: { first_name?: string | null; last_name?: string | null; date_of_birth?: string | null },
+) =>
+  matchable(a.first_name) === matchable(b.first_name) &&
+  matchable(a.last_name) === matchable(b.last_name) &&
+  (a.date_of_birth ?? "").trim() === (b.date_of_birth ?? "").trim();
+
+/**
+ * The guardian's dependant matching this name and date of birth, or null.
+ *
+ * Read-only, and split out from `resolveDependantId` because one caller must
+ * not create anything. `filePaperWaiver` probes for a duplicate filing BEFORE
+ * it resolves anybody, so that a filing it goes on to refuse leaves no stranded
+ * person behind, and it needs the participant's id to run that probe against.
+ */
+async function findDependantId(
+  admin: SupabaseClient<Database>,
+  opts: {
+    guardianId: string;
+    person: { first_name: string; last_name: string; date_of_birth: string };
+  },
+): Promise<string | null> {
+  const household = await listHousehold(admin, opts.guardianId);
+  const match = household.find((p) => isDependant(p) && isSameDependant(p, opts.person));
+  return match?.user_id ?? null;
+}
+
+/**
+ * The person a child's waiver belongs to: one of this guardian's existing
+ * dependants, or a new one.
+ *
+ * The sibling of `resolvePersonId`, and deliberately shaped like it. That one
+ * answers "who is this email", which is the question for anybody who has a
+ * mailbox. This one answers it for somebody who does not, so the answer has to
+ * come from somewhere else: the guardian, plus the name and date of birth on
+ * the form.
+ *
+ * **Matching rather than always creating is the whole point.** A parent who
+ * signs for the same child twice (a correction, a new season, a form they were
+ * not sure went through) must land on the one person record, or the second
+ * waiver mints a second child with a second free trial, a second membership
+ * ledger and a second attendance record for one human being. That is the bug in
+ * #102 in reverse: it is about a second child wrongly sharing the first one's
+ * record, and always-creating would be one child wrongly split across two.
+ *
+ * A first name, a last name and a date of birth agreeing WITHIN ONE HOUSEHOLD
+ * is at least as strong a claim as the email match it replaces, and where it is
+ * wrong it is wrong in the safe direction: two genuinely different children with
+ * the same name and the same birthday on one account is not a case worth
+ * building for, and a manager can still tell them apart afterwards.
+ *
+ * Names are compared trimmed and case-insensitively, in JS, against the
+ * household this guardian actually has. Deliberately not an `ilike` filter:
+ * `_` and `%` are LIKE wildcards and both are legal in a name, so a filter
+ * would over-match and could pick a sibling. `docs/erasing-personal-data.md`
+ * records the same trap on the lead delete, in the sentence "the search is not
+ * the decision".
+ */
+async function resolveDependantId(
+  admin: SupabaseClient<Database>,
+  opts: {
+    guardianId: string;
+    /**
+     * The child's person fields. `date_of_birth` is required and is NOT part
+     * of `PersonSeed`, because it is load-bearing here in a way it is not for
+     * an ordinary applicant: an applicant's profile gets no date of birth
+     * until a manager's approval promotes one, but a dependant is matched on
+     * theirs from the very next waiver, so it has to be on the record from the
+     * moment they are created or the match can never fire.
+     */
+    seed: PersonSeed & { date_of_birth: string };
+  },
+): Promise<string> {
+  // The one-level rule, asked before anything is read or created: a dependant
+  // may not be given dependants of their own. It lives in `household.ts` beside
+  // `assertActingFor`, which enforces the same rule for a target that already
+  // exists, so there is no second copy of it here. #102: "A dependant must not
+  // itself be a guardian. Enforce in the server function, not with a trigger."
+  await assertMayHaveDependants(admin, opts.guardianId);
+
+  // Everyone already on this account. Scoped to this guardian by the query
+  // itself, so the match below chooses only among people this guardian is by
+  // definition allowed to act for and `assertActingFor` has nothing left to
+  // ask. The account holder is in this list too and is filtered out: a parent
+  // whose own name and birthday happen to match what they typed for their child
+  // must not have the child's waiver filed against themselves.
+  const existing = await findDependantId(admin, {
+    guardianId: opts.guardianId,
+    person: opts.seed,
+  });
+  if (existing) return existing;
+
+  // A new child: the reserved address, `email_confirm: false`, and the same
+  // ~100-year ban an applicant gets. The difference is what lifts it. For an
+  // applicant the ban is pending a manager's approval; for a dependant it is
+  // permanent by design, because approving their waiver unlocks their
+  // GUARDIAN's login (see setWaiverApproval) and never this one.
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email: newDependantEmail(),
+    email_confirm: false,
+    ban_duration: "876000h",
+  });
+  if (createErr || !created.user) {
+    // No re-resolve on failure, unlike `resolvePersonId`. There is no address
+    // to race on: every call above mints a fresh uuid, so a collision is not
+    // the failure mode here, and re-reading the household would only find the
+    // same people it just looked at.
+    console.error("[resolveDependantId] could not create the dependant:", createErr);
+    throw new Error("We couldn't add that person to your account. Please try again.");
+  }
+
+  // The profile row exists already (the ensure_profile trigger made it); this
+  // seeds it AND sets the one column that makes them a dependant.
+  //
+  // Not best-effort, unlike the seed in `resolvePersonId`, and that difference
+  // is load-bearing. A person created without `guardian_user_id` is an ORPHANED
+  // account holder: they carry a reserved address nobody can sign in with and
+  // nobody is contactable at, they belong to no household, and no screen in the
+  // product can find them or fix them. Failing here instead leaves an unused
+  // auth user, which is inert and invisible, and the signer is asked to try
+  // again.
+  const { error: profileErr } = await admin
+    .from("profiles")
+    .upsert(
+      { user_id: created.user.id, guardian_user_id: opts.guardianId, ...opts.seed },
+      { onConflict: "user_id" },
+    );
+  if (profileErr) {
+    console.error(
+      "[resolveDependantId] could not link the dependant to their guardian:",
+      profileErr,
+    );
+    throw new Error("We couldn't add that person to your account. Please try again.");
+  }
+  return created.user.id;
+}
+
 /**
  * Best-effort real client IP from the proxy headers, kept on the waiver as a
  * forensic/legal record. Falls back through the common forwarding headers.
@@ -505,9 +727,23 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     }
 
     const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
-    // Email is the person's identity key (always provided); normalize it so
-    // case/whitespace variants map to the one profile.
-    const email = normalizeEmail(data.email);
+
+    // Who this waiver is for, and therefore whose address is on it.
+    //
+    // For a child's waiver the address IS the guardian's, everywhere below: the
+    // frozen `waivers.email`, the PDF, the confirmation email, the person the
+    // signed-in check compares against. That is not a stand-in for a missing
+    // value, it is what was typed on the form and it is honestly the only
+    // address the club has for anyone involved. A blank there would be worse
+    // for whoever reads the record in a year (#105).
+    //
+    // The child's own reserved address exists on their auth user and appears
+    // nowhere in this function.
+    const signingForDependant = data.signing_for === "dependant";
+    // Normalized so case and whitespace variants map to the one person.
+    const email = normalizeEmail(
+      signingForDependant ? data.guardian_email || "" : data.email || "",
+    );
 
     // Signing-context evidence for the forensic/legal record: the signer's real
     // IP plus request headers (user agent, language, client hints) merged with
@@ -527,10 +763,21 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       signer_meta = buildSignerMeta(() => undefined, data.client_meta);
     }
 
-    // A signed-in caller signs for their own account: require the submitted
-    // email to match their login email (the form locks the field; this is the
-    // server-side backstop). Without this, a typo or someone else's address
-    // would attach the waiver to the wrong person or mint a duplicate one.
+    // A signed-in caller signs on their OWN account, and this is the
+    // server-side backstop for it (the form locks the field). Without it a typo
+    // or somebody else's address would attach the waiver to the wrong person or
+    // mint a duplicate one.
+    //
+    // The rule inverted with this change, and `email` above is what inverts it.
+    // It used to mean "the participant's address must be yours", which read as
+    // "to sign for someone else, log out first" and was the right answer while
+    // every participant had an address. Now the address on the form belongs to
+    // the ACCOUNT HOLDER either way: signing for yourself that is you, and
+    // signing for your child it is you as their guardian. So the comparison is
+    // unchanged and the meaning is new: the guardian's address must be the
+    // caller's, and the participant is either the caller or one of their
+    // dependants. Which of those two it is gets settled by `resolveDependantId`
+    // below, inside the household, and never by anything the form sends.
     let callerId: string | null = null;
     if (bearer) {
       try {
@@ -539,7 +786,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           const callerEmail = callerData.user.email ?? "";
           if (!callerEmail || normalizeEmail(callerEmail) !== email) {
             throw new Error(
-              `You're signed in as ${callerEmail || "another account"}, so the waiver must use that email. To sign for someone else, log out first.`,
+              signingForDependant
+                ? `You're signed in as ${callerEmail || "another account"}, so a waiver for someone on your account has to use that email as the parent or guardian's.`
+                : `You're signed in as ${callerEmail || "another account"}, so the waiver must use that email. To sign for someone else, log out first.`,
             );
           }
           callerId = callerData.user.id;
@@ -587,6 +836,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 
     const signed_at = new Date().toISOString();
     const isMinor = data.is_minor ?? false;
+    // Whether a parent or guardian has to be named on the document and sign it.
+    // True for a minor, as it always was, and true for a dependant of any age,
+    // who cannot sign anything themselves. See `waiverNeedsGuardian`.
+    const needsGuardian = waiverNeedsGuardian(data);
 
     const sigPng = decodeDataUrlPng(data.signature_image || "");
     const gSigPng = decodeDataUrlPng(data.guardian_signature_image || "");
@@ -598,7 +851,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // below -- the frozen row and the PDF -- uses these resolved values, so the
     // document and the record can never disagree about who signed.
     const contacts = resolveWaiverContacts({
-      isMinor,
+      isMinor: needsGuardian,
       address: data.address,
       phone: data.phone,
       email,
@@ -621,20 +874,66 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // being asked to confirm an address they have demonstrably just read.
     const emailProven = await proveSubmittedEmail(admin, data.vt, email);
 
-    const userId = callerId
-      ? callerId
-      : await resolvePersonId(admin, {
-          email,
-          emailProven,
+    // The person fields for whoever this address belongs to, used only when the
+    // club has never seen it. Signing for yourself that is you. Signing for a
+    // child it is the PARENT, so it is built from the guardian block: seeding
+    // the parent's brand-new profile with the child's name is precisely the
+    // "two people, one record" mistake #102 exists to end, one level up.
+    //
+    // The form asks for the guardian's name as one string, so it is split the
+    // same way a legacy prefill link is (`splitFullName`). Lossy for an
+    // unusual name, and that is fine: this only ever seeds a record nobody has
+    // filled in yet, and approving the parent's own waiver later promotes the
+    // real fields over it.
+    const guardianNameParts = splitFullName(contacts.guardianName);
+    const contactSeed: PersonSeed = signingForDependant
+      ? {
+          first_name: guardianNameParts.first,
+          middle_name: guardianNameParts.middle || null,
+          last_name: guardianNameParts.last,
+          preferred_name: null,
+          phone: contacts.guardianPhone || null,
+          // No gi or belt size, and no martial arts experience: those describe
+          // the child who is training, not the parent who signed.
+        }
+      : {
+          first_name: data.first_name,
+          middle_name: data.middle_name || null,
+          last_name: data.last_name,
+          preferred_name: data.preferred_name || null,
+          phone: data.phone || null,
+          // Only reached when this email is NEW to the club, so there is no
+          // existing record for these to overwrite. An existing person's
+          // sizes are handled further down, and only with proof of identity.
+          ...(data.gi_size
+            ? { gi_size: data.gi_size, belt_size: beltSizeForGiSize(data.gi_size) }
+            : {}),
+          ...(data.martial_arts_experience?.trim()
+            ? { martial_arts_experience: data.martial_arts_experience.trim() }
+            : {}),
+        };
+
+    // The ACCOUNT HOLDER this submission belongs to: the person the address
+    // identifies, and the person the club writes to about it. Signing for
+    // yourself they are also the participant; signing for a child they are the
+    // guardian, and `resolvePersonId` creates their locked person record here
+    // if this is their first child.
+    const contactId =
+      callerId ?? (await resolvePersonId(admin, { email, emailProven, seed: contactSeed }));
+
+    // ...and the PARTICIPANT, who for a child's waiver is somebody else
+    // entirely: one of this guardian's dependants, matched or created, with a
+    // full person record of their own and no login, ever.
+    const userId = signingForDependant
+      ? await resolveDependantId(admin, {
+          guardianId: contactId,
           seed: {
             first_name: data.first_name,
             middle_name: data.middle_name || null,
             last_name: data.last_name,
             preferred_name: data.preferred_name || null,
+            date_of_birth: data.date_of_birth,
             phone: data.phone || null,
-            // Only reached when this email is NEW to the club, so there is no
-            // existing record for these to overwrite. An existing person's
-            // sizes are handled further down, and only with proof of identity.
             ...(data.gi_size
               ? { gi_size: data.gi_size, belt_size: beltSizeForGiSize(data.gi_size) }
               : {}),
@@ -642,14 +941,22 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
               ? { martial_arts_experience: data.martial_arts_experience.trim() }
               : {}),
           },
-        });
+        })
+      : contactId;
 
     // A person who ALREADY existed and clicked their emailed link: apply the
     // proof to them too. Idempotent, so it is a harmless no-op for someone just
     // created with `email_confirm` above, which keeps this to one code path.
     // Best-effort — a hiccup here must not fail a signed waiver.
+    //
+    // `contactId`, never `userId`. The proof is that somebody read the mailbox
+    // this waiver names, and for a child's waiver that mailbox is the parent's.
+    // Stamping it on the child would mark a reserved, non-deliverable address
+    // as a confirmed one, which is a lie about the one fact this column is for
+    // (#102: a dependant should never be sent a verification link, and there is
+    // nothing here for one to have proved).
     if (emailProven) {
-      const { error: confirmErr } = await admin.auth.admin.updateUserById(userId, {
+      const { error: confirmErr } = await admin.auth.admin.updateUserById(contactId, {
         email_confirm: true,
       });
       if (confirmErr) {
@@ -670,16 +977,40 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // Best-effort, and deliberately so. Signing the code of conduct is optional
     // and never blocks training, so a token that could not be minted costs the
     // signer a button, not their waiver.
+    //
+    // ⚠️ Not minted at all for a child's waiver, and this is a deliberate gap
+    // rather than an oversight. The token identifies its holder by proving an
+    // address: `resolveSigner` in `code-of-conduct.functions.ts` re-reads the
+    // token's person and refuses unless that person's auth email still matches
+    // the address the token was mailed to. A dependant's auth email is their
+    // reserved one, so a token minted for the child and posted to the parent
+    // can never match, and the link would land the parent on a page they
+    // cannot sign from.
+    //
+    // The alternatives are worse. Minting it against the PARENT would have
+    // them agree to the code of conduct themselves while the child, who is the
+    // one training, never does. Teaching the token to identify a dependant
+    // through their guardian is the change #110 warned against in as many
+    // words: a token proves an address, and it must never prove the right to
+    // read a household.
+    //
+    // So a parent signs it for their child from the member area instead, where
+    // there is a live session and `assertActingFor` can answer properly (#106).
+    // Nothing is lost meanwhile: the code of conduct gates nothing, and this
+    // path already treats a missing token as costing the signer a button
+    // rather than their waiver.
     let codeOfConductToken: string | null = null;
-    try {
-      const { mintVerificationToken } = await import("./email-verification.server");
-      codeOfConductToken = await mintVerificationToken(admin, {
-        email,
-        purpose: "code_of_conduct",
-        userId,
-      });
-    } catch (e) {
-      console.error("[submitWaiverWithPdf] could not mint a code-of-conduct link:", e);
+    if (!signingForDependant) {
+      try {
+        const { mintVerificationToken } = await import("./email-verification.server");
+        codeOfConductToken = await mintVerificationToken(admin, {
+          email,
+          purpose: "code_of_conduct",
+          userId,
+        });
+      } catch (e) {
+        console.error("[submitWaiverWithPdf] could not mint a code-of-conduct link:", e);
+      }
     }
     const { buildCodeOfConductUrl } = await import("./code-of-conduct");
     const codeOfConductUrl = codeOfConductToken
@@ -807,19 +1138,35 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         const { sendWaiverEmails } = await import("./waiver-email.server");
         await sendWaiverEmails({
           waiverId: inserted.id,
+          // The participant, for the managers' "new waiver signed by" line.
+          // Still the child on a child's waiver: they are who signed up, and a
+          // reviewer is about to look at their record.
           memberName: full_name,
-          memberGreetingName: greetingName({
-            preferred_name: data.preferred_name,
-            first_name: data.first_name,
-            middle_name: data.middle_name,
-            last_name: data.last_name,
-          }),
+          // ...but the person READING the confirmation is the account holder,
+          // so greet them. On a child's waiver that is the parent, taken from
+          // the guardian block, because addressing a parent by their
+          // nine-year-old's name in an email about their nine-year-old is the
+          // kind of small wrongness that makes a club look like it is guessing.
+          memberGreetingName: signingForDependant
+            ? splitFullName(contacts.guardianName).first || contacts.guardianName
+            : greetingName({
+                preferred_name: data.preferred_name,
+                first_name: data.first_name,
+                middle_name: data.middle_name,
+                last_name: data.last_name,
+              }),
           memberEmail: email,
           pdfUrl,
           admin: supabaseAdmin,
           // Lets the confirmation email add a "confirm your email address"
           // button, but only for someone whose address is still unproven.
-          userId,
+          //
+          // `contactId`, never `userId`: this asks whether the address the
+          // email is going to has been proved, and mints a link to prove it if
+          // not. Pointed at a dependant it would ask about a reserved address
+          // and offer to verify one, which is the single thing #102 says must
+          // never happen.
+          userId: contactId,
           // So the email can offer the code of conduct too: the signer may well
           // close this tab without doing it now, and this is the only way back
           // in until a manager approves them.
@@ -1393,7 +1740,12 @@ export async function filePaperWaiver(
     throw new Error("The signing date is in the future. Check the date on the form.");
   }
 
-  const email = normalizeEmail(data.email);
+  // The address this filing is recorded under, and the same rule as the online
+  // form: for a dependant's waiver it is the GUARDIAN's, because a dependant
+  // has none of their own. Every use of `email` below -- the idempotency check,
+  // the duplicate probe's person lookup, the frozen row -- follows from it.
+  const signingForDependant = data.signing_for === "dependant";
+  const email = normalizeEmail(signingForDependant ? data.guardian_email || "" : data.email || "");
   const signed_at = `${data.signed_on}T00:00:00.000Z`;
 
   // Has this exact filing attempt already landed? Checked before any of the
@@ -1480,6 +1832,10 @@ export async function filePaperWaiver(
   }
 
   const isMinor = isMinorOn(data.date_of_birth, data.signed_on);
+  // Same widening as the online form: a dependant of any age is signed for by
+  // their guardian, so the guardian block is resolved for them whether or not
+  // they were under 18 on the day the paper was signed.
+  const needsGuardian = isMinor || signingForDependant;
 
   // The signer and the emergency contact, resolved the same way the online
   // form resolves them (see resolveWaiverContacts). Paper filings never set
@@ -1487,7 +1843,7 @@ export async function filePaperWaiver(
   // manager read off the page, and an old form's single contact block falls
   // through to the guardian by name.
   const paperContacts = resolveWaiverContacts({
-    isMinor,
+    isMinor: needsGuardian,
     address: data.address,
     phone: data.phone,
     email,
@@ -1509,8 +1865,35 @@ export async function filePaperWaiver(
   // has no waiver — indistinguishable afterwards from a real lead, and holding
   // that email address permanently. A brand-new address has no waivers to
   // collide with anyway, so the probe has nothing to do for it.
-  const { data: existingPersonId, error: personLookupErr } = await userIdByEmail(admin, email);
+  const { data: existingContactId, error: personLookupErr } = await userIdByEmail(admin, email);
   if (personLookupErr) throw new Error(personLookupErr.message);
+
+  // Whose waivers the duplicate probe below should look at: the PARTICIPANT's.
+  //
+  // ⚠️ For a dependant that is not the person the address just resolved to.
+  // #105 says this probe "keeps working, because a child now has their own user
+  // id", and that is only half true: it does key on the participant, but the
+  // participant is resolved AFTER the probe on purpose (see the paragraph
+  // above), so without this it would ask about the guardian's own waivers and
+  // find nothing. Two scans of one child's form, filed a minute apart, would
+  // then both go through silently -- which is exactly the accident this whole
+  // probe exists to catch.
+  //
+  // Read-only, so it still creates nothing: a guardian the club has never seen
+  // has no dependants to find, and a child who is not on the books yet has no
+  // waivers to collide with either. Both cases are a null here, and a null
+  // skips the probe, which is the correct answer rather than a shortcut.
+  const existingPersonId =
+    signingForDependant && existingContactId
+      ? await findDependantId(admin, {
+          guardianId: existingContactId,
+          person: {
+            first_name: data.first_name,
+            last_name: data.last_name,
+            date_of_birth: data.date_of_birth,
+          },
+        })
+      : existingContactId;
 
   // Same person, same signing date: almost certainly the same piece of paper
   // arriving twice. Warn and let the caller confirm rather than blocking, since
@@ -1569,17 +1952,44 @@ export async function filePaperWaiver(
   // to that person untouched; a new one becomes a locked applicant. Never
   // verified by this route — a manager holding a piece of paper is not proof
   // that anyone can read the mailbox written on it.
-  const userId = await resolvePersonId(admin, {
+  //
+  // Two people on a dependant's filing, exactly as on the online form: the
+  // address resolves to the GUARDIAN (created locked if the club has never seen
+  // it), and the participant is one of that guardian's dependants, matched on
+  // name and date of birth or created.
+  const guardianNameParts = splitFullName(paperContacts.guardianName);
+  const contactId = await resolvePersonId(admin, {
     email,
     emailProven: false,
-    seed: {
-      first_name: data.first_name,
-      middle_name: data.middle_name || null,
-      last_name: data.last_name,
-      preferred_name: data.preferred_name || null,
-      phone: data.phone || null,
-    },
+    seed: signingForDependant
+      ? {
+          first_name: guardianNameParts.first,
+          middle_name: guardianNameParts.middle || null,
+          last_name: guardianNameParts.last,
+          preferred_name: null,
+          phone: paperContacts.guardianPhone || null,
+        }
+      : {
+          first_name: data.first_name,
+          middle_name: data.middle_name || null,
+          last_name: data.last_name,
+          preferred_name: data.preferred_name || null,
+          phone: data.phone || null,
+        },
   });
+  const userId = signingForDependant
+    ? await resolveDependantId(admin, {
+        guardianId: contactId,
+        seed: {
+          first_name: data.first_name,
+          middle_name: data.middle_name || null,
+          last_name: data.last_name,
+          preferred_name: data.preferred_name || null,
+          date_of_birth: data.date_of_birth,
+          phone: data.phone || null,
+        },
+      })
+    : contactId;
 
   // Who filed it, when, and from what. This is the paper equivalent of the IP
   // and browser context an online submission carries: the provenance of the
@@ -1918,24 +2328,56 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       // themselves. A magic link nobody requested expires in an hour, so it is
       // usually dead by the time it is read, and this email needs to stay good
       // for as long as it takes a new member to get round to it.
+      //
+      // ⚠️ **Whose login this is** is the one thing that changed with #105, and
+      // it is not always the person whose waiver was approved. Approving a
+      // child's waiver unlocks their PARENT: the child has no login and never
+      // will, so unlocking theirs would open an account nobody can reach,
+      // keyed on a reserved address nothing delivers to, and leave the parent
+      // still locked out of the club they just joined. `contactUserIdFor` is
+      // the one place that rule is written down.
       try {
-        const { data: got, error: getErr } = await admin.auth.admin.getUserById(waiver.user_id);
+        const { data: participant, error: participantErr } = await admin
+          .from("profiles")
+          .select("user_id, guardian_user_id")
+          .eq("user_id", waiver.user_id)
+          .maybeSingle();
+        if (participantErr) throw participantErr;
+        // A waiver whose person has no profile row should not exist -- every
+        // path that files one creates the profile first. If it happens, the
+        // person themselves is the only honest answer, which is what this did
+        // before there were dependants at all.
+        const contactUserId = participant ? contactUserIdFor(participant) : waiver.user_id;
+        const forDependant = contactUserId !== waiver.user_id;
+
+        const { data: got, error: getErr } = await admin.auth.admin.getUserById(contactUserId);
         if (getErr) throw getErr;
         const bannedUntil = (got.user as { banned_until?: string | null } | null)?.banned_until;
         const isLocked = Boolean(bannedUntil && new Date(bannedUntil) > new Date());
         if (isLocked) {
-          const { error: unbanErr } = await admin.auth.admin.updateUserById(waiver.user_id, {
+          const { error: unbanErr } = await admin.auth.admin.updateUserById(contactUserId, {
             ban_duration: "none",
           });
           if (unbanErr) throw unbanErr;
           // The canonical email lives on the auth user.
           const authEmail = got.user?.email;
           if (authEmail) {
+            // The parent's own name, from the guardian block on the waiver
+            // that was just approved -- not `greetingName(waiver)`, which is
+            // the child's. The email is going to the parent and is about
+            // their account.
+            const guardianFirstName = splitFullName(waiver.guardian_name || "").first;
             const { sendAccountActivatedEmail } = await import("./waiver-email.server");
             await sendAccountActivatedEmail({
               waiverId: waiver.id,
-              memberGreetingName: greetingName(waiver),
+              memberGreetingName: forDependant
+                ? guardianFirstName || waiver.guardian_name || ""
+                : greetingName(waiver),
               memberEmail: authEmail,
+              // Names the child, so a parent who never trains can tell what
+              // this account is for. Absent means "this is your own waiver",
+              // and the email reads exactly as it always has.
+              dependantName: forDependant ? greetingName(waiver) : null,
             });
           }
         }

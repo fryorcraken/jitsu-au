@@ -22,6 +22,7 @@
 //
 // Kept side-effect-free and server-import-free so it stays unit-testable.
 import { z } from "zod";
+import { waiverNeedsGuardian, type WaiverSigningFor } from "./validation";
 import { anyHealthConcern, missingHealthAnswers, type HealthAnswerDraft } from "./waiver-health";
 import {
   missingRequiredAcks,
@@ -56,9 +57,19 @@ export type WaiverFieldState = {
   /** Under 18, and the emergency contact is the guardian: the form asked for
    * that person once, so the three fields above are not on screen to fill in. */
   ecIsGuardian: boolean;
+  /**
+   * Who the form says this waiver is for. "dependant" means a parent is
+   * signing for somebody on their account, which moves the required address
+   * from the participant to the guardian and asks for a guardian at any age.
+   */
+  signingFor: WaiverSigningFor;
   guardianName: string;
   guardianRelationship: string;
-  /** Optional, so only its FORMAT is checked, and only when one was typed. */
+  /**
+   * Optional signing for yourself, so only its FORMAT is checked and only when
+   * one was typed. REQUIRED for a dependant, where it is the only address on
+   * the form.
+   */
   guardianEmail: string;
   health: HealthAnswerDraft;
   medical: string;
@@ -125,17 +136,23 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
   require("last_name", "Last name", state.lastName);
   require("date_of_birth", "Date of birth", state.dob);
   require("phone", "Phone", state.phone);
-  if (!state.email.trim()) {
-    missing.push({ anchorId: "email", label: "Email" });
-  } else if (!emailField.safeParse(state.email).success) {
-    // Listed with the missing fields on purpose: to the person filling the form
-    // these are the same problem, "this one is not right yet". Dropping the
-    // browser's native checking is what makes it ours to report.
-    missing.push({
-      anchorId: "email",
-      label: "Email",
-      hint: "Check the address, it should look like name@example.com",
-    });
+  // The participant's own address, and only when there IS one to ask for.
+  // Signing for somebody on your account the field is not on screen at all, so
+  // listing it would send a parent to a control they cannot see, and the
+  // address the form does need is asked for in the guardian block below.
+  if (state.signingFor !== "dependant") {
+    if (!state.email.trim()) {
+      missing.push({ anchorId: "email", label: "Email" });
+    } else if (!emailField.safeParse(state.email).success) {
+      // Listed with the missing fields on purpose: to the person filling the form
+      // these are the same problem, "this one is not right yet". Dropping the
+      // browser's native checking is what makes it ours to report.
+      missing.push({
+        anchorId: "email",
+        label: "Email",
+        hint: "Check the address, it should look like name@example.com",
+      });
+    }
   }
   require("address", "Address", state.address);
 
@@ -144,15 +161,26 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
   // The guardian's address, mobile and email are never REQUIRED here: each is
   // optional and blank means "the same as the participant's", so there is
   // nothing there for somebody to have missed.
-  if (state.isMinor) {
+  if (waiverNeedsGuardian({ is_minor: state.isMinor, signing_for: state.signingFor })) {
     require("guardian_name", "Parent or guardian name", state.guardianName);
     require("guardian_relationship", "Parent or guardian relationship to the participant", state.guardianRelationship);
-    // ...but an address somebody DID type still has to be one the server will
-    // accept. The submission schema rejects a malformed guardian email, and
-    // without this that rejection arrives as a Zod dump after a round trip
-    // instead of as a line under the field, which is the whole thing this
-    // module exists to prevent.
-    if (state.guardianEmail.trim() && !emailField.safeParse(state.guardianEmail).success) {
+    // The guardian's email is the one field whose treatment depends on who the
+    // waiver is for. Optional for a minor signing under their own address, so
+    // only its FORMAT is checked. REQUIRED for somebody on the caller's
+    // account, because there is no participant address for it to fall back to:
+    // it is what the club writes to, and it is the login an approval unlocks.
+    if (state.signingFor === "dependant" && !state.guardianEmail.trim()) {
+      missing.push({
+        anchorId: "guardian_email",
+        label: "Parent or guardian email",
+        hint: "We send everything about this person here",
+      });
+    } else if (state.guardianEmail.trim() && !emailField.safeParse(state.guardianEmail).success) {
+      // ...but an address somebody DID type still has to be one the server will
+      // accept. The submission schema rejects a malformed guardian email, and
+      // without this that rejection arrives as a Zod dump after a round trip
+      // instead of as a line under the field, which is the whole thing this
+      // module exists to prevent.
       missing.push({
         anchorId: "guardian_email",
         label: "Guardian email",
@@ -165,7 +193,12 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
   //
   // Skipped entirely when it is the guardian above: those fields are not on
   // screen, so listing them would send somebody to a control they cannot see.
-  if (!(state.isMinor && state.ecIsGuardian)) {
+  if (
+    !(
+      waiverNeedsGuardian({ is_minor: state.isMinor, signing_for: state.signingFor }) &&
+      state.ecIsGuardian
+    )
+  ) {
     require("emergency_contact_name", "Emergency contact name", state.ecName);
     require("emergency_contact_relationship", "Emergency contact relationship", state.ecRelationship);
     require("emergency_contact_phone", "Emergency contact mobile", state.ecPhone);
@@ -204,7 +237,7 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
       hint: "Draw it or type your full name",
     });
   }
-  if (state.isMinor) {
+  if (waiverNeedsGuardian({ is_minor: state.isMinor, signing_for: state.signingFor })) {
     const guardian =
       state.guardianSignatureMode === "draw"
         ? state.guardianSignatureImage

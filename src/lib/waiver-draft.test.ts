@@ -14,6 +14,7 @@ import {
 
 const blank: WaiverDraft = {
   submissionId: "3f7c1a2e-9b4d-4c8a-8e21-5d6f0a1b2c3d",
+  signingFor: "self",
   firstName: "",
   middleName: "",
   lastName: "",

@@ -38,6 +38,13 @@ vi.mock("@/lib/waiver.functions", () => ({
   checkWaiverSubmission: vi.fn(),
 }));
 
+// Mocked for the same reason as `waiver.functions` above: importing the real
+// module pulls in `requireSupabaseAuth`, and the `@tanstack/react-start` mock
+// carries no `createMiddleware`. The signed-out cases below never call it.
+vi.mock("@/lib/household.functions", () => ({
+  listMyDependants: vi.fn(async () => []),
+}));
+
 vi.mock("@/lib/email-verification.functions", () => ({
   redeemWaiverEmailVerification: vi.fn(),
 }));
@@ -280,5 +287,83 @@ describe("/waiver missing fields", () => {
     const banner = await screen.findByRole("alert");
     expect(within(banner).getByRole("button", { name: "Email" })).toBeInTheDocument();
     expect(banner).toHaveTextContent(/name@example.com/);
+  });
+});
+
+// The question that replaces "work out from the date of birth whether there is
+// a guardian". It comes first because it changes what the rest of the form
+// asks for. See #102.
+describe("/waiver, who is this for", () => {
+  const chooseDependant = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(
+      screen.getByRole("radio", { name: /My child, or someone else I look after/i }),
+    );
+  };
+
+  it("starts on Myself, so the form is the one everybody already knows", async () => {
+    renderWaiver();
+    await screen.findByLabelText("First name");
+
+    expect(screen.getByRole("radio", { name: /Myself/i })).toBeChecked();
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    // No guardian block for an adult signing for themselves.
+    expect(screen.queryByLabelText("Parent or guardian name")).not.toBeInTheDocument();
+  });
+
+  it("stops asking a child for an email address, and asks the guardian for theirs", async () => {
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+
+    await chooseDependant(user);
+
+    // The single sentence #102 is about: a nine-year-old is never asked for an
+    // email address.
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText(/Guardian email/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Parent or guardian name")).toBeInTheDocument();
+  });
+
+  it("asks for the guardian's email in the summary, and does not ask for the child's", async () => {
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+    await chooseDependant(user);
+
+    await user.click(screen.getByRole("button", { name: /Sign and download waiver/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(
+      within(banner).getByRole("button", { name: "Parent or guardian email" }),
+    ).toBeInTheDocument();
+    expect(within(banner).queryByRole("button", { name: "Email" })).not.toBeInTheDocument();
+    expect(submitWaiverWithPdf).not.toHaveBeenCalled();
+  });
+
+  it("clears the participant's details when the answer changes", async () => {
+    // A form that kept the previous person's name, date of birth and health
+    // answers and simply relabelled them is how the wrong person's health
+    // declaration ends up on a signed document.
+    const user = userEvent.setup();
+    renderWaiver();
+    const firstName = await screen.findByLabelText("First name");
+    await user.type(firstName, "Ada");
+    expect(firstName).toHaveValue("Ada");
+
+    await chooseDependant(user);
+
+    expect(screen.getByLabelText("First name")).toHaveValue("");
+  });
+
+  it("keeps the guardian block for a dependant born more than 18 years ago", async () => {
+    // `is_minor` goes false on their eighteenth birthday, and they are no more
+    // able to sign than they were the day before.
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+    await chooseDependant(user);
+    await user.type(screen.getByLabelText("Date of birth"), "1990-12-10");
+
+    expect(screen.getByLabelText("Parent or guardian name")).toBeInTheDocument();
   });
 });

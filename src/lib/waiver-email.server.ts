@@ -268,6 +268,16 @@ export interface AccountActivatedEmailParams {
   memberGreetingName: string;
   /** The address their login is keyed on, taken from the auth user. */
   memberEmail: string;
+  /**
+   * The dependant this approval was for, when the person being told is their
+   * guardian rather than the participant.
+   *
+   * Approving a child's waiver unlocks the PARENT's login, because the child
+   * has none and never will (#102). So the email goes to somebody who may not
+   * be training at all, and it has to say whose waiver it is about or it reads
+   * as a mistake. Null on every waiver signed for oneself.
+   */
+  dependantName?: string | null;
 }
 
 /**
@@ -296,6 +306,7 @@ export async function sendAccountActivatedEmail({
   waiverId,
   memberGreetingName,
   memberEmail,
+  dependantName,
 }: AccountActivatedEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -308,6 +319,7 @@ export async function sendAccountActivatedEmail({
     siteUrl: SITE_URL,
     memberName: memberGreetingName,
     loginEmail: memberEmail,
+    dependantName: dependantName ?? null,
     ...ACTIVATION_LINKS,
   });
 

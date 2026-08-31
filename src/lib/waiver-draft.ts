@@ -20,7 +20,7 @@
 // pure serialize/parse half is separated from the storage half for the same
 // reason.
 
-import type { HealthAnswers, HealthQuestionId } from "@/lib/validation";
+import type { HealthAnswers, HealthQuestionId, WaiverSigningFor } from "@/lib/validation";
 
 export const WAIVER_DRAFT_KEY = "uts-jitsu.waiver.draft";
 
@@ -44,6 +44,8 @@ export type HealthDraft = Record<HealthQuestionId, boolean | null>;
 
 export type WaiverDraft = {
   submissionId: string;
+  /** Who the form is being filled in for. */
+  signingFor: WaiverSigningFor;
   firstName: string;
   middleName: string;
   lastName: string;
@@ -141,6 +143,12 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
 
   return {
     submissionId: draft.submissionId,
+    // Same reasoning as `giSize` below: added without bumping the version. A
+    // draft written before the form asked who it was for restores as "self",
+    // which is exactly what that form meant, so nothing is misread. Bumping
+    // would bin every half-filled waiver, signature included, to add a field
+    // whose absence already has the right answer.
+    signingFor: draft.signingFor === "dependant" ? "dependant" : "self",
     firstName: text(draft.firstName),
     middleName: text(draft.middleName),
     lastName: text(draft.lastName),
