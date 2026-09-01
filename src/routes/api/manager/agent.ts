@@ -57,7 +57,13 @@ import {
   SubmissionIdConflictError,
   WaiverFilingIncompleteError,
 } from "@/lib/waiver-duplicates";
-import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
+import {
+  aggregateClubUsers,
+  contactUserIds,
+  profileUserIds,
+  CHECKINS_LIMIT,
+  LEADS_LIMIT,
+} from "@/lib/club-users";
 import type {
   ClubUserEmail,
   ClubUserLead,
@@ -333,7 +339,9 @@ async function handleListUsers(params: unknown) {
     // The email RPC is the one deliberate degradation (see emailsByUserId).
     const [{ data: roles, error: rErr }, resolved] = await Promise.all([
       db.from("user_roles").select("user_id, role").in("user_id", userIds),
-      emailsByUserId(pdb, userIds),
+      // The CONTACT ids, not `userIds`: a dependant's own would fetch the
+      // reserved string `household-email.ts` promises is never looked up.
+      emailsByUserId(pdb, contactUserIds(profileRows)),
     ]);
     if (rErr) throw new AgentError(500, "db_error", rErr.message);
     rolesRows = (roles ?? []) as { user_id: string; role: string }[];
@@ -454,8 +462,14 @@ async function handleListInvoices(params: unknown) {
     ...projectInvoice(r, planById.get(r.plan_id)),
     member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
     member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
-    member_email_belongs_to:
-      (r.user_id ? contactByUser.get(r.user_id)?.onBehalfOf?.name : null) ?? null,
+    // Present whenever the address is somebody else's, named or not: keyed on
+    // the NAME this fails open, and an uncaptioned address under a child's
+    // name is what the field exists to prevent.
+    member_email_belongs_to: r.user_id
+      ? contactByUser.get(r.user_id)?.onBehalfOf
+        ? (contactByUser.get(r.user_id)!.onBehalfOf!.name ?? "the account holder")
+        : null
+      : null,
   }));
   return { count: invoices.length, total: count ?? invoices.length, invoices };
 }

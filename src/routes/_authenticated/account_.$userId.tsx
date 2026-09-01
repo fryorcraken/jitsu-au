@@ -16,6 +16,7 @@ import { KitSizingCard } from "@/components/site/account/KitSizingCard";
 import { MediaConsentCard } from "@/components/site/account/MediaConsentCard";
 import { WaiversCard } from "@/components/site/account/WaiversCard";
 import { useAuth } from "@/hooks/useAuth";
+import { householdTargetUserId } from "@/lib/household";
 import { describeLoadError } from "@/lib/load-error";
 import { greetingName, nameWithPreferred } from "@/lib/validation";
 import { lifecycleClass } from "@/lib/status-colours";
@@ -53,7 +54,20 @@ export const Route = createFileRoute("/_authenticated/account_/$userId")({
  * and never says "no such person".
  */
 function PersonPage() {
-  const { userId } = Route.useParams();
+  // Normalised once, here, because two things downstream read it: the server
+  // (which lowercases every target itself) and the household lookup below
+  // (which would otherwise miss on an uppercase uuid out of the address bar and
+  // leave the page with no name for somebody it is showing).
+  //
+  // A param that is not a uuid at all is refused WITHOUT asking the server.
+  // Sent, it fails the input validator, which is a different error from the
+  // gate's, so the page rendered "could not load this person" with a Try again
+  // button that could only fail the same way forever. It also has to be the
+  // same refusal as somebody else's child: a malformed id that answered
+  // differently would be one more thing the address bar can find out.
+  const rawUserId = Route.useParams().userId;
+  const parsedUserId = householdTargetUserId.safeParse(rawUserId);
+  const userId = parsedUserId.success ? parsedUserId.data : rawUserId;
   const { user } = useAuth();
   const fetchProfile = useServerFn(getMyProfile);
   const fetchHousehold = useServerFn(listMyHousehold);
@@ -73,11 +87,16 @@ function PersonPage() {
     if (!user?.id) return;
     setLoading(true);
     setLoadError(null);
+    if (!parsedUserId.success) {
+      setRefused(true);
+      setLoading(false);
+      return;
+    }
     setRefused(false);
     Promise.all([fetchProfile({ data: { userId } }), fetchHousehold()])
       .then(([p, household]) => {
         setProfile(p);
-        setPerson(household.find((h) => h.user_id === userId) ?? null);
+        setPerson(household.find((h) => h.user_id.toLowerCase() === userId) ?? null);
       })
       .catch((e) => {
         setProfile(null);
@@ -91,7 +110,7 @@ function PersonPage() {
         else setLoadError(describeLoadError(e, "Could not load this person"));
       })
       .finally(() => setLoading(false));
-  }, [fetchProfile, fetchHousehold, userId, user?.id]);
+  }, [fetchProfile, fetchHousehold, userId, parsedUserId.success, user?.id]);
 
   useEffect(load, [load]);
 

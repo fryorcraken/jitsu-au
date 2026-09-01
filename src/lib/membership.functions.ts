@@ -60,15 +60,19 @@ import { householdTargetSchema, resolveSubject } from "@/lib/household";
 import { requireManager } from "@/lib/require-manager";
 
 /**
- * What a manager SCREEN prints as each of these people's contact address.
+ * Resolve a set of addresses for the directory, with their verified state.
  *
- * The DISPLAY side, and a different question from the one above even though it
- * usually has the same answer. A dependant's row shows their guardian's address
- * together with whose it is, never the reserved string and never a bare address
- * under a child's name, which would read as a mailbox somebody could write to.
+ * ⚠️ It answers about exactly the ids it is GIVEN and resolves no household
+ * rule itself. Callers must hand it `contactUserIds(...)` -- whoever the club
+ * writes to about each person -- not the people themselves: a dependant's own
+ * id would fetch the reserved, non-deliverable string, and `household-email.ts`
+ * promises that string is never looked up at all. `aggregateClubUsers` then
+ * keys these rows by contact id and puts the guardian's name beside the
+ * address, so a child's row never shows a bare address that reads as a mailbox
+ * somebody could write to.
  *
- * The people directory also needs `email_confirmed_at` to badge verified state.
- * That fact belongs to the ADDRESS, so for a dependant it is the guardian's
+ * The directory also needs `email_confirmed_at` to badge verified state. That
+ * fact belongs to the ADDRESS, so for a dependant it is the guardian's
  * confirmation state, which is the truthful thing to badge: it is the guardian
  * who proved they can read that mailbox.
  *
@@ -1363,7 +1367,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context);
     const admin = await adminClient();
-    const { aggregateClubUsers, profileUserIds, LEADS_LIMIT, CHECKINS_LIMIT } =
+    const { aggregateClubUsers, contactUserIds, profileUserIds, LEADS_LIMIT, CHECKINS_LIMIT } =
       await import("@/lib/club-users");
 
     const [
@@ -1434,7 +1438,8 @@ export const listClubUsers = createServerFn({ method: "GET" })
       // a failed roles read must not silently strip everyone's manager pill.
       const [{ data: roles, error: rErr }, resolved] = await Promise.all([
         admin.from("user_roles").select("user_id, role").in("user_id", userIds),
-        clubUserEmailRows(admin, userIds),
+        // The CONTACT ids, not `userIds`: see the helper's own warning.
+        clubUserEmailRows(admin, contactUserIds(profileRows)),
       ]);
       if (rErr) throw new Error(rErr.message);
       rolesRows = (roles ?? []) as { user_id: string; role: string }[];

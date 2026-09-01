@@ -55,13 +55,14 @@ type PendingRow = {
  * A service-role fake serving every read the digest makes, and recording the
  * `emailed_at` stamps so a test can prove nothing was left owed.
  */
-function fakeDb(pending: PendingRow[]) {
+function fakeDb(pending: PendingRow[], fails: { emails?: boolean; prefs?: boolean } = {}) {
   const stamped: string[][] = [];
   const tokenRows: { user_id: string; token: string }[] = [];
 
   const db = {
     rpc: (name: string, args: Record<string, unknown>) => {
       if (name === "user_emails") {
+        if (fails.emails) return Promise.resolve({ data: null, error: { message: "boom" } });
         const ids = args._user_ids as string[];
         return Promise.resolve({
           data: ids
@@ -105,21 +106,23 @@ function fakeDb(pending: PendingRow[]) {
         };
       }
       if (table === "notification_preferences") {
+        // New-post announcements are OFF by club default, so the parent has
+        // switched theirs on. The children's are left OFF, which is the
+        // assertion hiding in this fake: the mail lands in the parent's inbox,
+        // so it is the PARENT's switch that governs it. Reading a child's would
+        // suppress an email the parent asked for.
+        const prefFor = (id: string) => ({
+          user_id: id,
+          new_blog_post: id === PARENT || id === STRANGER,
+        });
         return {
           select: () => ({
+            in: (_c: string, ids: string[]) =>
+              fails.prefs
+                ? Promise.resolve({ data: null, error: { message: "boom" } })
+                : Promise.resolve({ data: ids.map(prefFor), error: null }),
             eq: (_c: string, id: string) => ({
-              // New-post announcements are OFF by club default, so the parent
-              // has switched theirs on. The children's are left OFF, which is
-              // the assertion hiding in this fake: the mail lands in the
-              // parent's inbox, so it is the PARENT's switch that governs it.
-              // Reading a child's would suppress an email the parent asked for.
-              maybeSingle: () =>
-                Promise.resolve({
-                  data:
-                    id === PARENT || id === STRANGER
-                      ? { new_blog_post: true }
-                      : { new_blog_post: false },
-                }),
+              maybeSingle: () => Promise.resolve({ data: prefFor(id) }),
             }),
           }),
         };
@@ -182,7 +185,7 @@ describe("sendDailyDigests, for a household", () => {
     // `digest-${userId}-${day}`, which made the four sends distinct by
     // construction and so passed every idempotency check there was.
     expect(payload.to).toBe("ada@example.com");
-    expect(payload.idempotency_key).toBe("digest-parent-2026-08-31");
+    expect(payload.idempotency_key).toMatch(/^digest-parent-2026-08-31-/);
     // One post, said once. Four identical lines would read as four posts.
     expect(payload.subject).toBe("1 new thing at UTS Jitsu");
 
@@ -288,5 +291,85 @@ describe("when households cannot be read at all", () => {
     ).rejects.toThrow();
     expect(stamped.flat()).toEqual([]);
     expect(sendLovableEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendDailyDigests, running twice in one day", () => {
+  beforeEach(() => {
+    sendLovableEmail.mockClear();
+    process.env.LOVABLE_API_KEY = "test-key";
+  });
+
+  it("does not send the second batch under the first batch's key", async () => {
+    // `emailed_at` means a second run picks up only the rows the first did not,
+    // so the email it composes is genuinely different. Under a key that varied
+    // only by recipient and day, the send provider would discard it as a
+    // duplicate while this code stamped its rows as sent, and those
+    // notifications would never be mentioned to anybody.
+    const { sendDailyDigests } = await import("./notification-email.server");
+
+    await sendDailyDigests(
+      fakeDb([post("n1", CHILD_A, "p1")]).db,
+      new Date("2026-08-30T22:00:00Z"),
+    );
+    await sendDailyDigests(
+      fakeDb([post("n2", CHILD_B, "p2")]).db,
+      new Date("2026-08-30T23:00:00Z"),
+    );
+
+    const [a] = sendLovableEmail.mock.calls[0] as [SentEmail];
+    const [b] = sendLovableEmail.mock.calls[1] as [SentEmail];
+    expect(a.idempotency_key).not.toBe(b.idempotency_key);
+  });
+
+  it("still gives the SAME key to a true re-run of the same rows", async () => {
+    // The half the content hash must not break: a run repeated over rows that
+    // were never stamped is the case the key exists for.
+    const { sendDailyDigests } = await import("./notification-email.server");
+
+    const rows = [post("n1", CHILD_A, "p1"), post("n2", CHILD_B, "p2")];
+    await sendDailyDigests(fakeDb(rows).db, new Date("2026-08-30T22:00:00Z"));
+    await sendDailyDigests(fakeDb(rows).db, new Date("2026-08-30T22:30:00Z"));
+
+    const [a] = sendLovableEmail.mock.calls[0] as [SentEmail];
+    const [b] = sendLovableEmail.mock.calls[1] as [SentEmail];
+    expect(a.idempotency_key).toBe(b.idempotency_key);
+  });
+});
+
+// Three ways a digest run can go wrong, and the one thing none of them may do:
+// stamp a row as emailed that nobody was ever told about. `emailed_at` is
+// permanent -- a row stamped in error is never mentioned again, on any day, to
+// anyone -- so every failure here has to cost a day and nothing more.
+describe("sendDailyDigests, when a read fails", () => {
+  beforeEach(() => {
+    sendLovableEmail.mockClear();
+    process.env.LOVABLE_API_KEY = "test-key";
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("leaves rows pending when no address could be resolved", async () => {
+    // Every person HAS an address; it lives on their login record. So a null
+    // here means the lookup failed, not that the club holds none, and stamping
+    // would swallow the family's mail permanently.
+    const { sendDailyDigests } = await import("./notification-email.server");
+    const { db, stamped } = fakeDb([post("n1", CHILD_A)], { emails: true });
+
+    const result = await sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"));
+
+    expect(sendLovableEmail).not.toHaveBeenCalled();
+    expect(result.sent).toBe(0);
+    expect(stamped.flat()).toEqual([]);
+  });
+
+  it("fails the run rather than reading a dropped connection as 'no preferences'", async () => {
+    // Missing preference rows read as the club defaults, which have
+    // announcements OFF. Answering "none" to a failed read would judge the
+    // day's mail unwanted and stamp it.
+    const { sendDailyDigests } = await import("./notification-email.server");
+    const { db, stamped } = fakeDb([post("n1", PARENT)], { prefs: true });
+
+    await expect(sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"))).rejects.toThrow("boom");
+    expect(stamped.flat()).toEqual([]);
   });
 });

@@ -121,6 +121,9 @@ export async function sendMembershipPaymentEmail({
     siteName: SITE_NAME,
     memberName,
     memberEmail,
+    // Same address, same caption as the screens: `memberEmail` is the contact
+    // person's, and for a dependant that is not the person named beside it.
+    emailBelongsTo: forName ? memberGreetingName : null,
     planName,
     amount,
     reference,
@@ -137,7 +140,12 @@ export async function sendMembershipPaymentEmail({
       apiKey,
       sendUrl,
       to: memberEmail,
-      subject: `Pay ${amount} to activate your ${planName}`,
+      // The plan named as the READER's or as the child's, because a parent
+      // with three children gets three of these and an inbox full of "your
+      // membership" tells them nothing about which one to pay.
+      subject: forName
+        ? `Pay ${amount} to activate ${forName}'s ${planName}`
+        : `Pay ${amount} to activate your ${planName}`,
       html: memberHtml,
       text: memberText,
       idempotencyKey: `membership-payment-${membershipId}`,
@@ -227,7 +235,9 @@ export async function sendMembershipPaidEmail({
       apiKey,
       sendUrl,
       to: memberEmail,
-      subject: `Payment received for ${planName}`,
+      subject: forName
+        ? `Payment received for ${forName}'s ${planName}`
+        : `Payment received for ${planName}`,
       html,
       text,
       idempotencyKey: `membership-paid-${membershipId}`,

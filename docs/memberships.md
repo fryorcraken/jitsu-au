@@ -225,6 +225,13 @@ Everything downstream is per person and needed no change to become so:
   about the SUBJECT. Asked about the caller it would refuse a second child their
   trial because their sibling had taken one, which is #102's bug in a new place.
 - **`enrolMember` takes a user** and was already indifferent to whose it is.
+- **The email says which child.** Every invoice and receipt for a dependant
+  lands in the same parent's inbox, so "Pay $245 to activate your One semester"
+  three times over is three identical lines in a mail client's list and no way
+  to tell which is still unpaid. The subject names the child
+  (`Pay $245 to activate Bea's One semester`), the body greets the parent, and
+  the manager's copy captions the address it carries as the parent's, for the
+  same reason the screens do.
 
 The gate is `assertActingFor`, through `resolveSubject`, in exactly one place:
 `startMembership` and `getMyMemberships` both resolve their subject before they

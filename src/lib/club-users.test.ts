@@ -503,20 +503,40 @@ describe("aggregateClubUsers, for a dependant", () => {
 
 describe("aggregateClubUsers, when the guardian's name is what a screen prints", () => {
   // `email_belongs_to` is what the manager directory and person page render
-  // beside a dependant's address. Computed and never read, it would leave both
-  // screens showing a guardian's address uncaptioned, which is the exact
-  // reading #106 forbids.
-  it("carries the guardian's name for a screen to print", () => {
-    const parent = profile({ user_id: "parent", first_name: "Ada", last_name: "Lovelace" });
-    const child = profile({
-      user_id: "child",
-      first_name: "Bea",
-      last_name: "Lovelace",
-      guardian_user_id: "parent",
+  // beside a dependant's address, and it decides only one thing: whether a
+  // caption is drawn at all. So the case that matters is the one where the
+  // name is missing.
+  const parent = profile({ user_id: "parent", first_name: "Ada", last_name: "Lovelace" });
+  const child = profile({
+    user_id: "child",
+    first_name: "Bea",
+    last_name: "Lovelace",
+    guardian_user_id: "parent",
+  });
+  const emails = [{ user_id: "parent", email: "ada@example.com", email_confirmed_at: null }];
+
+  it("still captions the address when the guardian's name did not come back", () => {
+    // Keyed on the name this would fail OPEN: the screen draws its caption
+    // only when this is non-null, so a guardian whose profile row is missing
+    // would leave a bare address printed under a nine-year-old's name --
+    // exactly the misreading the field exists to stop, arriving precisely when
+    // something else has already gone wrong.
+    const [dependant] = aggregateClubUsers({
+      profiles: [child],
+      emails,
+      waivers: [],
+      memberships: [],
+      plans,
+      roles: [],
+      leads: [],
     });
+    expect(dependant.email_belongs_to).toBe("the account holder");
+  });
+
+  it("names them when it can", () => {
     const [, dependant] = aggregateClubUsers({
       profiles: [parent, child],
-      emails: [{ user_id: "parent", email: "ada@example.com", email_confirmed_at: null }],
+      emails,
       waivers: [],
       memberships: [],
       plans,

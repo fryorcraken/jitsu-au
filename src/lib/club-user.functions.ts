@@ -18,7 +18,7 @@ import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-condu
 import type { MembershipClient } from "@/lib/membership-types";
 import { personLabelsById, type ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
-import { contactUserIdFor, isDependant } from "@/lib/household";
+import { contactUserIdFor, isDependantUser } from "@/lib/household";
 
 /** Max waiver / membership rows one person's page pulls. */
 const WAIVERS_LIMIT = 100;
@@ -572,13 +572,7 @@ export const resendClubUserVerification = createServerFn({ method: "POST" })
     // #107's, listed in #102's sharp edges and recorded again in #111 as
     // deliberately untouched, and fixing it here would mean writing half of
     // #107's rule in the wrong PR.
-    const { data: person, error: personErr } = await admin
-      .from("profiles")
-      .select("user_id, guardian_user_id")
-      .eq("user_id", data.userId)
-      .maybeSingle();
-    if (personErr) throw new Error(personErr.message);
-    if (person && isDependant(person)) {
+    if (await isDependantUser(admin, data.userId)) {
       throw new Error(
         "This person is on somebody else's account and has no email of their own. Send the link to the account holder instead.",
       );

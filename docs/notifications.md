@@ -221,6 +221,25 @@ RECIPIENT, not for the person a row is about. A dependant has no meaningful
 preferences (no page they can reach), no role, and no need to be greeted in mail
 they never see.
 
+The key is `digest-<contact person>-<day>-<count><hash of the row ids>`, and the
+content half is load-bearing rather than decorative. `emailed_at` is the real
+guard, so a second run later the same day picks up only the rows the first one
+did not and composes a genuinely different email. Under a key that varied only
+by recipient and day, the send provider would discard that as a duplicate while
+this code stamped its rows as sent, and those notifications would never be
+mentioned to anybody. The same set of rows still produces the same key, so a
+true re-run is still deduplicated.
+
+**Nothing that fails may stamp.** `emailed_at` is permanent: a row stamped in
+error is never mentioned again, on any day, to anyone, and there is no way to
+find out it happened. So every read the run depends on either throws (the
+household links, the preferences, the manager check) or leaves the rows pending
+(no resolvable address). Only two things stamp: a successful send, and a digest
+whose recipient genuinely wanted none of it. The tempting alternative in each
+case looks like graceful degradation and is silent data loss -- treating a
+failed preferences read as "no preferences" means the club defaults, which have
+announcements off, which means the day's mail is judged unwanted and destroyed.
+
 This ran as a GitHub Actions workflow first, and moving it was a correction, not
 a preference. Scheduling production work from CI put a credential that makes the
 site email its members into a repo that takes same-repo branches from Lovable and

@@ -10,6 +10,7 @@ import {
   contactUserIdFor,
   householdTargetSchema,
   isDependant,
+  isDependantUser,
   listHousehold,
   mayActFor,
   resolveSubject,
@@ -91,6 +92,33 @@ const erroringAdmin = {
     }),
   }),
 } as unknown as SupabaseClient<Database>;
+
+describe("isDependantUser", () => {
+  it("answers for a person the caller only has an id for", async () => {
+    await expect(isDependantUser(admin(EVERYONE), "child")).resolves.toBe(true);
+    await expect(isDependantUser(admin(EVERYONE), "parent")).resolves.toBe(false);
+  });
+
+  it("matches case-insensitively, like every other id here", async () => {
+    // A uuid out of a URL or a manager's paste can arrive in either case, and
+    // a miss here would read as "not a dependant" rather than as an error.
+    await expect(isDependantUser(admin(EVERYONE), "CHILD")).resolves.toBe(true);
+  });
+
+  it("treats somebody with no profile row as an account holder", async () => {
+    // Every auth user gets one from the `ensure_profile` trigger, so this is
+    // the "cannot happen" case; answering `false` matches what
+    // `contactUserIdFor` does with the same gap.
+    await expect(isDependantUser(admin(EVERYONE), "nobody")).resolves.toBe(false);
+  });
+
+  it("throws on a failed read rather than saying no", async () => {
+    // The answer gates a SEND. Reading a dropped connection as "not a
+    // dependant" would mint a verification token against a reserved address
+    // nobody can receive mail at, which is the exact outcome this prevents.
+    await expect(isDependantUser(erroringAdmin, "child")).rejects.toThrow("boom");
+  });
+});
 
 describe("isDependant", () => {
   it("is the guardian link and nothing else", () => {
@@ -329,10 +357,16 @@ describe("resolveSubject", () => {
 
 describe("mayActFor", () => {
   // The same gate as `assertActingFor`, answered instead of thrown. It exists
-  // for the one caller whose refusal has to say something else, so what matters
-  // is that the two never disagree: `assertActingFor` is defined in terms of
-  // this, and these cases hold both to the same answers.
-  it("agrees with assertActingFor on every case", async () => {
+  // for the one caller whose refusal has to say something else.
+  //
+  // The truth table is what this pins, and it is worth having: ten cases
+  // covering both directions of the guardian link, a stranger's child, a
+  // sibling reaching sideways, and both missing-row ends. `assertActingFor` is
+  // asserted alongside it not to prove the two agree -- it is literally
+  // defined as `if (!(await mayActFor(...))) throw`, so they cannot -- but so
+  // that a future edit which stops defining it that way is caught by this
+  // table rather than by nothing.
+  it("answers the whole truth table, and refuses in the gate's one sentence", async () => {
     const db = admin(EVERYONE);
     const cases: [string, string, boolean][] = [
       ["parent", "parent", true],

@@ -15,6 +15,14 @@ interface MembershipNotificationEmailProps {
   siteName: string;
   memberName: string;
   memberEmail: string;
+  /**
+   * Whose address `memberEmail` is, when it is not the member's own.
+   *
+   * A person on somebody else's account has no mailbox, so the address here is
+   * their guardian's. Printed bare after a nine-year-old's name it reads as a
+   * mailbox a manager can write to, which is the one thing it is not.
+   */
+  emailBelongsTo?: string | null;
   planName: string;
   amount: string;
   reference: string;
@@ -26,6 +34,7 @@ export const MembershipNotificationEmail = ({
   siteName,
   memberName,
   memberEmail,
+  emailBelongsTo,
   planName,
   amount,
   reference,
@@ -40,7 +49,8 @@ export const MembershipNotificationEmail = ({
       <Container style={container}>
         <Heading style={h1}>New membership pending payment</Heading>
         <Text style={text}>
-          <strong>{memberName || "A member"}</strong> ({memberEmail}) selected{" "}
+          <strong>{memberName || "A member"}</strong> (
+          {emailBelongsTo ? `${memberEmail}, ${emailBelongsTo}'s address` : memberEmail}) selected{" "}
           <strong>{planName}</strong> at {siteName} and owes <strong>{amount}</strong>.
         </Text>
         <Text style={text}>

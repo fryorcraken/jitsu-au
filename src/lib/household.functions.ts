@@ -232,7 +232,14 @@ export const listHouseholdInvoices = createServerFn({ method: "GET" })
       admin
         .from("memberships")
         .select("id, user_id, plan_id, status, paid_at, price_cents, payment_reference")
-        .in("user_id", ids),
+        .in("user_id", ids)
+        // Newest first, matching `getMyMemberships`, because `unpaidInvoices`
+        // groups by reference in the order it is handed the rows and an
+        // unordered read is free to hand them over differently each time. The
+        // two panels a member can see at once would then disagree about the
+        // order of the same transfers, and a person looking for the one they
+        // have not paid would be reading a list that moves.
+        .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("id, name"),
     ]);
     // Both fail the panel. An errored read reaching `unpaidInvoices` as an

@@ -17,6 +17,7 @@ import {
   nameWithPreferred,
   normalizeEmail,
 } from "./validation";
+import { contactUserIdFor } from "./household";
 import { householdContacts, type HouseholdContactProfile } from "./household-email";
 import type {
   LifecycleStatus,
@@ -204,6 +205,25 @@ export function profileUserIds(profiles: Pick<ClubUserProfile, "user_id">[]): st
   return [...new Set(profiles.map((p) => p.user_id))];
 }
 
+/**
+ * Whose addresses a directory actually needs: the CONTACT person for each of
+ * these people, which is their guardian for a dependant and themselves for
+ * everybody else.
+ *
+ * Its own function beside `profileUserIds` because the two questions look
+ * identical and are not: roles and check-ins are asked about the person,
+ * addresses are asked about whoever the club writes to. Asking `user_emails`
+ * for the first set fetches a dependant's reserved, non-deliverable string --
+ * which nothing renders, but `household-email.ts` promises it is never looked
+ * up at all, and a guarantee that only holds because the value happens not to
+ * be read downstream is one edit away from being false.
+ */
+export function contactUserIds(
+  profiles: Pick<ClubUserProfile, "user_id" | "guardian_user_id">[],
+): string[] {
+  return [...new Set(profiles.map((p) => contactUserIdFor(p)))];
+}
+
 /** The name parts a person is displayed by when all a screen has is their id. */
 export type PersonNameRow = PersonNameParts & { user_id: string };
 
@@ -349,7 +369,14 @@ export function aggregateClubUsers(input: {
       name: nameWithPreferred(p) || null,
       greeting_name: greetingName(p) || null,
       email: contact.email,
-      email_belongs_to: contact.onBehalfOf?.name ?? null,
+      // Set whenever the address belongs to somebody else, EVEN IF their name
+      // could not be resolved. Keyed on the name it would fail open: a guardian
+      // whose profile row did not come back would leave a child's row printing
+      // a bare address, which is the exact misreading the caption exists to
+      // stop, and it would happen precisely when something is already wrong.
+      email_belongs_to: contact.onBehalfOf
+        ? (contact.onBehalfOf.name ?? "the account holder")
+        : null,
       // Keyed on whose address it actually is, so a dependant badges their
       // guardian's confirmation rather than a reserved address nobody ever
       // confirmed.

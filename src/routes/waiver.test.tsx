@@ -25,11 +25,13 @@ const getMyProfile = vi.fn();
  * signed-in person, so testing it needs this to move.
  */
 let authUser: { id: string; email: string } | null = null;
+/** The page's `?for=`, settable per test. Empty for everything that predates it. */
+let search: { for?: string } = {};
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => ({
     ...opts,
-    useSearch: () => ({}),
+    useSearch: () => search,
   }),
   Link: ({ children, ...rest }: { children: ReactNode }) => <a {...rest}>{children}</a>,
 }));
@@ -48,8 +50,9 @@ vi.mock("@/lib/waiver.functions", () => ({
 // Mocked for the same reason as `waiver.functions` above: importing the real
 // module pulls in `requireSupabaseAuth`, and the `@tanstack/react-start` mock
 // carries no `createMiddleware`. The signed-out cases below never call it.
+const listMyDependants = vi.fn(async () => [] as unknown[]);
 vi.mock("@/lib/household.functions", () => ({
-  listMyDependants: vi.fn(async () => []),
+  listMyDependants: () => listMyDependants(),
 }));
 
 vi.mock("@/lib/email-verification.functions", () => ({
@@ -95,6 +98,8 @@ function summary() {
 
 beforeEach(() => {
   authUser = null;
+  search = {};
+  listMyDependants.mockReset().mockResolvedValue([]);
   getMyProfile.mockReset();
   getMyProfile.mockResolvedValue(null);
   submitWaiverWithPdf.mockReset();
@@ -448,5 +453,59 @@ describe("/waiver, prefilling a signed-in parent", () => {
     renderWaiver();
     await waitFor(() => expect(screen.getByLabelText("First name")).toHaveValue("Ada"));
     expect(screen.getByLabelText("Last name")).toHaveValue("Lovelace");
+  });
+});
+
+// A parent gets here by pressing "Sign an updated waiver" on a child's page,
+// which names that child in the URL. If the form cannot open on them it must
+// SAY so: left quietly on "Myself", the parent signs their own waiver believing
+// they signed their child's, and nothing about the page looks wrong.
+describe("/waiver opened on a named person", () => {
+  const PARENT = { id: "parent-1", email: "ada@example.com" };
+  const CHILD = {
+    user_id: "child-1",
+    first_name: "Bea",
+    last_name: "Lovelace",
+    preferred_name: null,
+    date_of_birth: "2015-04-02",
+  };
+
+  it("opens on the child the link named", async () => {
+    authUser = PARENT;
+    search = { for: "child-1" };
+    listMyDependants.mockResolvedValue([CHILD]);
+    renderWaiver();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("My child, or someone else I look after")).toBeChecked(),
+    );
+    expect(screen.queryByText(/could not open this on the person you picked/i)).toBeNull();
+  });
+
+  it("says so when the named person is not on the account", async () => {
+    authUser = PARENT;
+    search = { for: "00000000-0000-4000-8000-000000000000" };
+    listMyDependants.mockResolvedValue([CHILD]);
+    renderWaiver();
+
+    expect(
+      await screen.findByText(/could not open this on the person you picked/i),
+    ).toBeInTheDocument();
+    // ...and never names the id back, which would confirm to a hand-typed
+    // guess that somebody exists.
+    expect(screen.queryByText(/00000000-0000-4000-8000-000000000000/)).toBeNull();
+  });
+
+  it("says so when the household could not be read at all", async () => {
+    // Distinguished from "not on your account", because the two ask for
+    // different things: try again, versus pick somebody.
+    authUser = PARENT;
+    search = { for: "child-1" };
+    listMyDependants.mockRejectedValue(new Error("network"));
+    renderWaiver();
+
+    expect(
+      await screen.findByText(/could not load the people on your account/i),
+    ).toBeInTheDocument();
   });
 });

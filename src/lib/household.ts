@@ -208,6 +208,33 @@ export async function assertMayHaveDependants(admin: AdminClient, userId: string
 }
 
 /**
+ * Is this person on somebody else's account?
+ *
+ * The one-person, answered form of `isDependant`, for the callers that hold an
+ * id rather than a row. It exists as its own export because the answer gates a
+ * SEND: `resendClubUserVerification` is the only path that could mint an
+ * `email_verification_tokens` row against a dependant, and what that produced
+ * was a token bound to a reserved address in a subdomain the club routes no
+ * mail for, redeemable by nobody, sitting in the table looking like somebody
+ * had been asked to confirm something.
+ *
+ * Throws on a failed read rather than answering `false`, so a dropped
+ * connection cannot turn "we could not check" into "go ahead and send". A
+ * person with no `profiles` row is not a dependant, which is the same reading
+ * `contactUserIdFor` takes and for the same reason: it is not this module's
+ * job to decide what a missing row means, and every auth user has one.
+ */
+export async function isDependantUser(admin: AdminClient, userId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from("profiles")
+    .select("user_id, guardian_user_id")
+    .eq("user_id", userId.toLowerCase())
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? isDependant(data) : false;
+}
+
+/**
  * The person a "...for this person" server function is about: the named target
  * once the gate has allowed it, or the caller when none was named.
  *

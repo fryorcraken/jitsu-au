@@ -83,7 +83,6 @@ system. (The contact form stores a message, not a person.)
    at all: every lookup resolves the CONTACT person first and asks
    `user_emails` only about them, so a dependant's own address does not enter
    the process and cannot leak from a field somebody adds later.
-
    - **Delivery.** Invoices, receipts, the daily digest and the transactional
      emails all resolve the recipient through `deliveryRecipientFor` /
      `deliveryEmailFor`, so a message about a child goes to their guardian,

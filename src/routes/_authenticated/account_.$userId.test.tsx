@@ -16,8 +16,11 @@ import type { ReactNode } from "react";
 const getMyProfile = vi.fn();
 const listMyHousehold = vi.fn();
 
+const PARENT_ID = "11111111-1111-4111-8111-111111111111";
+const CHILD_ID = "22222222-2222-4222-8222-222222222222";
+
 const CHILD = {
-  user_id: "child-1",
+  user_id: CHILD_ID,
   first_name: "Bea",
   middle_name: null,
   last_name: "Lovelace",
@@ -44,7 +47,7 @@ const CHILD = {
 
 const HOUSEHOLD = [
   {
-    user_id: "parent-1",
+    user_id: PARENT_ID,
     name: "Ada Lovelace",
     is_self: true,
     lifecycle_status: "member",
@@ -55,7 +58,7 @@ const HOUSEHOLD = [
     latest_sessions_remaining: null,
   },
   {
-    user_id: "child-1",
+    user_id: CHILD_ID,
     name: "Bea Lovelace",
     is_self: false,
     lifecycle_status: "visitor",
@@ -67,10 +70,20 @@ const HOUSEHOLD = [
   },
 ];
 
+/**
+ * The id in the URL, settable per test.
+ *
+ * A real uuid, because the page refuses anything that is not one without
+ * asking the server -- a malformed id has to get the same answer as somebody
+ * else's child, and `getMyProfile` would have rejected it with a different
+ * error anyway.
+ */
+let param = CHILD_ID;
+
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => ({
     ...opts,
-    useParams: () => ({ userId: "child-1" }),
+    useParams: () => ({ userId: param }),
   }),
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
 }));
@@ -97,7 +110,7 @@ vi.mock("@/lib/code-of-conduct.functions", () => ({
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: { id: "parent-1" }, session: null, loading: false }),
+  useAuth: () => ({ user: { id: PARENT_ID }, session: null, loading: false }),
 }));
 
 const { Route } = await import("./account_.$userId");
@@ -105,6 +118,7 @@ const PersonPage = (Route as unknown as { component: () => ReactNode }).componen
 
 beforeEach(() => {
   vi.clearAllMocks();
+  param = CHILD_ID;
   getMyProfile.mockResolvedValue(CHILD);
   listMyHousehold.mockResolvedValue(HOUSEHOLD);
 });
@@ -116,7 +130,7 @@ describe("a parent looking at their child", () => {
     // The whole page is "somebody else's record". A call that forgot the target
     // would render the PARENT's details under the child's name, which is the
     // silent wrong-person read #102 exists to end.
-    expect(getMyProfile).toHaveBeenCalledWith({ data: { userId: "child-1" } });
+    expect(getMyProfile).toHaveBeenCalledWith({ data: { userId: CHILD_ID } });
   });
 
   it("speaks about the child by name, never as 'you'", async () => {
@@ -144,6 +158,19 @@ describe("somebody reaching for a person who is not theirs", () => {
     // The words that would turn this page into a way to enumerate people.
     expect(screen.queryByText(/no such person/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/not found/i)).not.toBeInTheDocument();
+  });
+
+  it("refuses an id that is not a uuid, without asking the server", async () => {
+    // Sent, it fails the server's input validator, which is a DIFFERENT error
+    // from the gate's -- so the page used to show "could not load this person"
+    // with a Try again button that could only fail the same way forever. It
+    // also has to be the same screen as somebody else's child, or a malformed
+    // id is one more thing the address bar can find out.
+    param = "not-a-uuid";
+    render(<PersonPage />);
+
+    expect(await screen.findByText(/can't show you this page/i)).toBeInTheDocument();
+    expect(getMyProfile).not.toHaveBeenCalled();
   });
 
   it("shows a dropped connection as a retry, not as a refusal", async () => {
