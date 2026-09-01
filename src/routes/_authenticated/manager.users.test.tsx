@@ -41,9 +41,19 @@ const member = {
   user_id: "user-1",
   name: "Kim Tran",
   email: "kim@example.com",
+  email_belongs_to: null as string | null,
   lifecycle_status: "member" as const,
   has_waiver: true,
   waiver_signed_at: "2026-07-01T00:00:00.000Z",
+};
+// A child on their parent's account. They have no mailbox of their own, so the
+// address on their row is the parent's.
+const dependant = {
+  ...member,
+  user_id: "user-2",
+  name: "Bea Tran",
+  email: "kim@example.com",
+  email_belongs_to: "Kim Tran",
 };
 
 vi.mock("@tanstack/react-router", () => ({
@@ -89,6 +99,28 @@ beforeEach(() => {
 });
 
 describe("/manager/users", () => {
+  it("says whose address a child's row is showing", async () => {
+    // The whole point of the split. Printed bare under "Bea Tran", this
+    // address reads as a nine-year-old's mailbox, and a manager writes to it.
+    // The caption is the half that makes it honest, and nothing else pins it.
+    listClubUsers.mockResolvedValue([member, dependant]);
+    await renderLoaded();
+
+    const row = screen.getByText("Bea Tran").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("(Kim Tran's)")).toBeInTheDocument();
+  });
+
+  it("leaves an account holder's own address uncaptioned", async () => {
+    // Almost every row. A caption on all of them would be noise, and would
+    // stop the ones that matter standing out.
+    listClubUsers.mockResolvedValue([member, dependant]);
+    await renderLoaded();
+
+    const row = screen.getByText("Kim Tran").closest("tr");
+    expect(within(row as HTMLElement).queryByText(/'s\)/)).toBeNull();
+  });
+
   it("offers no delete for someone the club has a record for", async () => {
     await renderLoaded();
     expect(screen.queryByRole("button", { name: /Delete the enquiry from Kim Tran/ })).toBeNull();

@@ -375,6 +375,13 @@ async function handleListUsers(params: unknown) {
     user_id: u.user_id,
     name: u.name,
     email: u.email,
+    // Whose address that is, when it is not this person's own. A dependant has
+    // no mailbox, so `email` is their guardian's, and a bare address under a
+    // nine-year-old's name reads to an agent exactly as it reads to a manager:
+    // as somebody it can write to. `list_invoices` says the same thing in
+    // `member_email_belongs_to`, and the two surfaces must not disagree about
+    // whether they say it at all.
+    email_belongs_to: u.email_belongs_to,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,

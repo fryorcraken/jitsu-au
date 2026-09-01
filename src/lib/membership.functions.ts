@@ -15,7 +15,6 @@ import {
   matchTransactionSchema,
   membershipDeleteMessage,
   normalizeRef,
-  greetingName,
   nameWithPreferred,
   planMembershipWindow,
   planStartIsChoosable,

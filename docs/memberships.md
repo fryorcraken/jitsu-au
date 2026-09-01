@@ -529,9 +529,18 @@ It covers **the whole account, not just the person on screen**. A parent with
 three children owes three transfers with three different references, and each
 one is captioned with who it is for. Switching between children to find out what
 each owes would be a worse version of a list they can read at once. The caption
-is hidden for an account with nobody else on it, where "For you" is noise. If
-the household read fails the panel falls back to the subject's own invoices, so
-a broken extra can never hide an invoice somebody has to pay.
+is hidden for an account with nobody else on it, where "For you" is noise. If the
+read of what the account owes fails, the page does not fail with it: the panel
+falls back to the subject's own invoices, says so above the amounts, and offers
+the retry, so a broken extra can never hide an invoice somebody has to pay and
+can never quietly present a part of the bill as the whole of it.
+
+The list of people has the same posture with one exception. It normally degrades
+to "just you", with the failure rendered where the picker would be, because an
+account with three children must never read as an account with none. But when
+the URL names somebody (`?for=`), that read is the only thing that says who they
+are, so a failure there fails the page: the alternative is a screen showing a
+child's memberships while addressing their parent as if they were the member.
 
 **The invoice email is a second copy of the same details, not a replacement**, so
 a member who deleted the email is not stuck, and it links back to the page.

@@ -3,6 +3,7 @@ import {
   MEDIA_ACK_ID,
   mediaConsentFromAnswers,
   mediaConsentLabel,
+  mediaConsentProvenance,
   missingRequiredAcks,
   parseTemplateAcks,
   resolveAcknowledgements,
@@ -92,5 +93,63 @@ describe("mediaConsentLabel", () => {
     expect(mediaConsentLabel(false)).toBe("No");
     expect(mediaConsentLabel(null)).toBe("Not asked");
     expect(mediaConsentLabel(undefined)).toBe("Not asked");
+  });
+});
+
+describe("mediaConsentProvenance", () => {
+  const base = {
+    userId: "child-1",
+    guardianUserId: "parent-1",
+    guardianName: "Ada Lovelace",
+    updatedAt: "2 Feb 2026, 9:00 am",
+    value: false,
+  };
+
+  it("names the guardian when the guardian answered, not the club", () => {
+    // The bug this exists to stop. A parent answering for their nine-year-old
+    // is not the subject either, so a bare `setBy !== userId` reads their
+    // decision as one a manager made, on the page a manager checks before
+    // publishing a photograph.
+    expect(mediaConsentProvenance({ ...base, setBy: "parent-1" })).toBe(
+      "Set on 2 Feb 2026, 9:00 am by Ada Lovelace who holds their account.",
+    );
+  });
+
+  it("still says a manager when it really was a manager", () => {
+    expect(mediaConsentProvenance({ ...base, setBy: "manager-9" })).toBe(
+      "Set by a manager on 2 Feb 2026, 9:00 am, not read off a waiver.",
+    );
+  });
+
+  it("says a person set their own, even when they are on somebody's account", () => {
+    // An adult can be on a household without being a dependant, and a member
+    // who signs up their own children is on nobody's.
+    expect(mediaConsentProvenance({ ...base, setBy: "child-1" })).toBe(
+      "They set this themselves on 2 Feb 2026, 9:00 am, from their account page.",
+    );
+    expect(mediaConsentProvenance({ ...base, guardianUserId: null, setBy: "child-1" })).toBe(
+      "They set this themselves on 2 Feb 2026, 9:00 am, from their account page.",
+    );
+  });
+
+  it("falls back to a manager when there is no guardian to be", () => {
+    expect(mediaConsentProvenance({ ...base, guardianUserId: null, setBy: "someone-else" })).toBe(
+      "Set by a manager on 2 Feb 2026, 9:00 am, not read off a waiver.",
+    );
+  });
+
+  it("still attributes it to the guardian when their name did not load", () => {
+    // A failed name lookup must not silently promote the sentence back to
+    // "a manager", which is the one thing it is not.
+    expect(mediaConsentProvenance({ ...base, guardianName: null, setBy: "parent-1" })).toBe(
+      "Set on 2 Feb 2026, 9:00 am by the person who holds their account.",
+    );
+  });
+
+  it("separates an answer off a waiver from never having been asked", () => {
+    expect(mediaConsentProvenance({ ...base, setBy: null })).toBe("From their approved waiver.");
+    expect(mediaConsentProvenance({ ...base, setBy: null, value: null })).toBe(
+      "Nothing recorded yet.",
+    );
   });
 });

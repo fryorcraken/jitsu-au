@@ -69,17 +69,12 @@ export async function updateProfileForCaller(
   // they set it themselves.
   //
   // It stamps whoever actually clicked, so a guardian answering for a
-  // dependant records the GUARDIAN's id, not the dependant's. The id is the
-  // honest record, but ⚠️ the WORDS built from it are not yet: the person page
-  // (`manager.users_.$userId.tsx`) reads any `setBy` that is not the person
-  // themselves as a manager, and would tell a manager "Set by a manager on
-  // <date>, not read off a waiver" about a parent's decision.
-  //
-  // Be precise about why that is unreachable today, because it is NOT that
-  // nothing sends a target: every card on /account now sends one. It is that
-  // the target is always the caller, so `setBy` always equals the subject.
-  // The moment #106 sends a different one, the wording above is wrong, and
-  // #106 is where it is fixed.
+  // dependant records the GUARDIAN's id, not the dependant's. That makes three
+  // possible values rather than two, and anything putting words to the column
+  // has to tell all three apart. `mediaConsentProvenance` owns that rule; the
+  // mistake it is written to prevent is reading "not the subject" as "a
+  // manager", which reports a parent's decision about their own child as one
+  // the club made.
   const provenance =
     patch.media_consent === undefined
       ? {}

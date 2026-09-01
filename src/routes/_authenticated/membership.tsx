@@ -355,6 +355,13 @@ function MembershipPage() {
   // both run the household gate on it, so a hand-typed id buys nothing.
   const [household, setHousehold] = useState<HouseholdPerson[]>([]);
   const [owed, setOwed] = useState<HouseholdInvoices[]>([]);
+  // Both of these are EXTRAS on a page whose job is one person's membership, so
+  // neither may take it down. They are tracked separately for the same reason
+  // the account page tracks its household read separately: an empty list is a
+  // claim ("nobody else is on your account", "nothing is outstanding") and a
+  // failed read must not be able to make it.
+  const [householdError, setHouseholdError] = useState<string | null>(null);
+  const [owedError, setOwedError] = useState<string | null>(null);
   // Lowercased to match the server, which normalises every target through
   // `householdTargetUserId`. An uppercase `?for=` is perfectly valid there, so
   // comparing it raw here would leave the page speaking in the wrong voice and
@@ -453,13 +460,34 @@ function MembershipPage() {
         // Who is on this account, and what the whole account still owes. Both
         // are about the caller rather than the subject, so switching person
         // does not re-ask them for a different answer.
-        fetchHousehold(),
-        fetchOwed(),
+        //
+        // Both degrade rather than failing the page: without them a member can
+        // still read their own status and buy their own plan, which is what
+        // they came for. `null` means "could not be read", which the page has
+        // to keep apart from the empty list.
+        fetchHousehold().catch((e: unknown) => {
+          // ...with one exception. When `?for=` names somebody, this read is
+          // the ONLY thing that says who they are, and without it the page
+          // would show a child's memberships while addressing the parent in
+          // the second person. Better to fail visibly than to be wrong about
+          // whose account is on screen.
+          if (subjectId) throw e;
+          console.error("[membership] the people on this account failed to load:", e);
+          return null;
+        }),
+        fetchOwed().catch((e: unknown) => {
+          console.error("[membership] the account's outstanding invoices failed to load:", e);
+          return null;
+        }),
       ]).then(([p, m, s, people, outstanding]) => {
         setPlans(p);
         setMine(m);
-        setHousehold(people);
-        setOwed(outstanding);
+        setHousehold(people ?? []);
+        setHouseholdError(
+          people ? null : "We could not load the other people on your account just now.",
+        );
+        setOwed(outstanding ?? []);
+        setOwedError(outstanding ? null : "We could not load what the rest of your account owes.");
         setAccount({ details: s.details, unreadable: !s.ok });
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
@@ -663,6 +691,19 @@ function MembershipPage() {
           </Button>
         </div>
 
+        {/* Rendered where the picker would be, because that is what is
+            missing. Without it an account with three children reads as an
+            account with none, and a parent concludes the club has lost them
+            rather than that a request failed. */}
+        {householdError && (
+          <LoadFailure
+            what="The people on your account"
+            message={householdError}
+            hint="This is not the same as having nobody else on it. Everything below is about you."
+            onRetry={load}
+          />
+        )}
+
         {/* Only for an account that has somebody else on it. */}
         {dependants.length > 0 && (
           <WhoIsThisFor
@@ -753,10 +794,19 @@ function MembershipPage() {
         {/* The WHOLE account's outstanding transfers, not just the person on
             screen: a parent switching between children to see what each owes
             would be a worse version of a list they can read at once. Falls back
-            to the subject's own when the household read failed, so a broken
-            extra never hides an invoice the member has to pay. */}
+            to the subject's own when that read failed, so a broken extra never
+            hides an invoice the member has to pay -- which is why the read
+            degrades to null above instead of taking the page down. */}
         {(owed.length > 0 || unpaid.length > 0) && (
           <div ref={payRef} className="scroll-mt-20">
+            {/* Said above the amounts, not after them. A parent who reads this
+                panel as the whole account's bill and pays it would still owe
+                money for a child, and would have no way to know. */}
+            {owedError && dependants.length > 0 && (
+              <p role="status" className="mb-2 text-sm text-muted-foreground">
+                {owedError} This is what {voice.who} owes, and may not be everything.
+              </p>
+            )}
             <HowToPay
               owed={
                 owed.length > 0

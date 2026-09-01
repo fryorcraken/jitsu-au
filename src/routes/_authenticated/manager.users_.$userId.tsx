@@ -33,7 +33,7 @@ import {
   waiverClass,
 } from "@/lib/status-colours";
 import { lifecycleLabel, membershipStatusLabel } from "@/lib/status-labels";
-import { mediaConsentLabel } from "@/lib/waiver-acknowledgements";
+import { mediaConsentLabel, mediaConsentProvenance } from "@/lib/waiver-acknowledgements";
 import { cn } from "@/lib/utils";
 import {
   deriveExpandedWaivers,
@@ -106,12 +106,21 @@ function MediaConsentCard({
   value,
   updatedAt,
   setBy,
+  guardianUserId,
+  guardianName,
 }: {
   userId: string;
   value: boolean | null;
   updatedAt: string | null;
-  /** Who last set it by hand: this person themselves, a manager (historically), or nobody. */
+  /**
+   * Who last set it by hand: this person themselves, the account holder who
+   * looks after them, a manager, or nobody.
+   */
   setBy: string | null;
+  /** Whose account this person is on, when they are on somebody else's. */
+  guardianUserId: string | null;
+  /** That person's name, for the sentence. Null when the lookup failed. */
+  guardianName: string | null;
 }) {
   return (
     <div className="rounded-lg border p-4">
@@ -129,31 +138,28 @@ function MediaConsentCard({
         </span>
       </div>
 
-      {/* Where the current answer came from. Three different facts wear the same
-          "No": one the member ticked when they signed, one they set themselves
-          on /account afterwards, and one a manager recorded by hand before this
-          page stopped allowing that. Only the first is in a signed PDF, so the
-          page never blurs them.
-
-          `setBy === userId` is what separates the member's own change from a
-          manager's -- both paths stamp the actor's id into the same column.
-
-          No branch claims a waiver exists: a profile can predate any submission
-          (the ensure_profile trigger gives every auth user one), so "their
-          signed waiver shows..." would be a statement the card cannot back up. */}
+      {/* Where the current answer came from. The rule is in
+          `mediaConsentProvenance`, with its reasoning and its tests: it is one
+          sentence, but it makes a statement about who decided something on
+          somebody else's behalf, and it got that wrong once already. */}
       <p className="mb-3 text-xs text-muted-foreground">
-        {setBy === userId
-          ? `They set this themselves on ${formatDateTime(updatedAt)}, from their account page.`
-          : setBy
-            ? `Set by a manager on ${formatDateTime(updatedAt)}, not read off a waiver.`
-            : value === null
-              ? "Nothing recorded yet."
-              : "From their approved waiver."}
+        {mediaConsentProvenance({
+          userId,
+          guardianUserId,
+          guardianName,
+          setBy,
+          updatedAt: formatDateTime(updatedAt),
+          value,
+        })}
       </p>
 
       <p className="text-xs text-muted-foreground">
-        This is read-only here. They can change it themselves on their account page, and approving a
-        newer waiver that asks about photos replaces it with what they ticked on it.
+        This is read-only here.{" "}
+        {guardianUserId
+          ? "Whoever holds their account can change it from their page there"
+          : "They can change it themselves on their account page"}
+        , and approving a newer waiver that asks about photos replaces it with what they ticked on
+        it.
       </p>
     </div>
   );
@@ -838,6 +844,8 @@ function ManagerUserPage() {
         value={profile.media_consent}
         updatedAt={profile.media_consent_updated_at}
         setBy={profile.media_consent_updated_by}
+        guardianUserId={profile.guardian_user_id}
+        guardianName={summary.email_belongs_to}
       />
 
       {/* House rules. Read-only on purpose: a manager cannot tick this on

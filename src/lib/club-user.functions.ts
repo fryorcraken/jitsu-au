@@ -18,7 +18,7 @@ import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-condu
 import type { MembershipClient } from "@/lib/membership-types";
 import { personLabelsById, type ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
-import { isDependant } from "@/lib/household";
+import { contactUserIdFor, isDependant } from "@/lib/household";
 
 /** Max waiver / membership rows one person's page pulls. */
 const WAIVERS_LIMIT = 100;
@@ -117,7 +117,11 @@ export const getClubUser = createServerFn({ method: "POST" })
     // one above: the guardian's id is only known once the profile has come
     // back. One extra round trip on a manager page, in exchange for never
     // fetching an address that identifies nobody.
-    const contactId = profile.guardian_user_id ?? profile.user_id;
+    // Through the helper rather than an inline `??`: `household.ts` says why
+    // that is a function at all. "Which id do I ask for an address?" has to
+    // have exactly one answer, because the wrong one here is a reserved,
+    // non-deliverable string that identifies nobody.
+    const contactId = contactUserIdFor(profile);
     const [contactEmails, guardianProfile] = await Promise.all([
       userEmails(admin, [contactId]),
       profile.guardian_user_id
@@ -306,6 +310,12 @@ export const getClubUser = createServerFn({ method: "POST" })
       // record as complete while the column driving student pricing is null.
       profile: {
         preferred_name: profile.preferred_name,
+        // Who holds this person's account, when somebody else does. The page
+        // needs the ID rather than just the guardian's name (which the summary
+        // already carries) because it has one question the name cannot answer:
+        // whether the person who last set a photo-consent answer was the
+        // guardian or a manager. Both are "not the subject".
+        guardian_user_id: profile.guardian_user_id,
         phone: profile.phone,
         date_of_birth: profile.date_of_birth,
         address: profile.address,

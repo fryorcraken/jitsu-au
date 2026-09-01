@@ -470,3 +470,54 @@ describe("/membership, when the page is about a child", () => {
     await waitFor(() => expect(screen.getByLabelText(/UTS student number/i)).toHaveValue(""));
   });
 });
+
+describe("/membership, when an extra will not load", () => {
+  const CHILD = "child-1";
+
+  it("still shows a member their own page when the household read fails", async () => {
+    // The list of people is an EXTRA on a page whose job is one person's
+    // membership. Failing the whole page over it leaves a member who only
+    // wanted to renew looking at "try again", with nothing to do but press it.
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listMyHousehold).mockRejectedValue(new Error("network"));
+    search = {};
+    await renderLoaded();
+
+    expect(screen.getByRole("heading", { name: "Membership" })).toBeVisible();
+    expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument();
+    // ...and it says so where the picker would have been, rather than letting
+    // an account with children read as an account with none.
+    expect(screen.getByText(/not the same as having nobody else on it/i)).toBeInTheDocument();
+  });
+
+  it("does fail the page when the URL names somebody it can no longer identify", async () => {
+    // The one case where degrading is worse than failing: this read is the only
+    // thing that says who `?for=` is, so without it the page would show a
+    // child's memberships while calling the reader the member.
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listMyHousehold).mockRejectedValue(new Error("network"));
+    search = { for: CHILD };
+    render(<MembershipPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/membership could not be loaded/i)).toBeInTheDocument(),
+    );
+    // Not the child's page with the parent's words on it, which is the state
+    // this refuses to render.
+    expect(screen.queryByText("Bea's status")).toBeNull();
+    expect(screen.queryByText("Who is this for?")).toBeNull();
+  });
+
+  it("still shows what the member owes when the household's invoices fail", async () => {
+    // The fallback the doc promises. A broken extra must never be able to hide
+    // an invoice somebody has to pay.
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listHouseholdInvoices).mockRejectedValue(new Error("network"));
+    search = {};
+    getMyMemberships.mockResolvedValue(mine([pendingPlan]));
+    await renderLoaded();
+
+    await waitFor(() => expect(payCard()).toBeInTheDocument());
+    expect(within(payCard()!).getByText(PLAN_REF)).toBeVisible();
+  });
+});
