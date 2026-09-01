@@ -17,6 +17,7 @@ const allAnswered = {
 
 /** A form with nothing filled in, i.e. what a first-time signer starts from. */
 const emptyForm: WaiverFieldState = {
+  signingFor: "self",
   firstName: "",
   lastName: "",
   dob: "",
@@ -299,6 +300,68 @@ describe("missingWaiverFields", () => {
 
     it("asks for nothing extra from an adult", () => {
       expect(missingWaiverFields(form({ isMinor: false }))).toEqual([]);
+    });
+  });
+
+  describe("signing for somebody on your account", () => {
+    /** A child's form: no address of their own, the guardian's required. */
+    const dependantForm = (over: Partial<WaiverFieldState> = {}): WaiverFieldState =>
+      form({
+        signingFor: "dependant",
+        email: "",
+        isMinor: true,
+        guardianName: "Kim Nguyen",
+        guardianRelationship: "Mother",
+        guardianEmail: "kim@example.com",
+        guardianSignatureImage: "data:image/png;base64,BBBB",
+        ...over,
+      });
+
+    it("never asks for the participant's own email", () => {
+      // The field is not on screen at all, so listing it would send a parent to
+      // a control they cannot see. This is the whole point of #102: a
+      // nine-year-old is never asked for an email address.
+      expect(missingWaiverFields(dependantForm())).toEqual([]);
+    });
+
+    it("asks for the guardian's email, which is optional on every other form", () => {
+      const missing = missingWaiverFields(dependantForm({ guardianEmail: "" }));
+      expect(missing.map((f) => f.anchorId)).toEqual(["guardian_email"]);
+      expect(
+        missingWaiverFields(dependantForm({ guardianEmail: "  " })).map((f) => f.anchorId),
+      ).toEqual(["guardian_email"]);
+    });
+
+    it("still checks the format of a guardian email that was typed", () => {
+      const missing = missingWaiverFields(dependantForm({ guardianEmail: "kim@" }));
+      expect(missing.map((f) => f.anchorId)).toEqual(["guardian_email"]);
+      expect(missing[0].hint).toMatch(/name@example\.com/);
+    });
+
+    // A dependant who turns 18 is no more able to sign than the day before, so
+    // the guardian block does not fall away with `isMinor`.
+    it("asks for a guardian even when the participant is over 18", () => {
+      const missing = missingWaiverFields(
+        dependantForm({
+          isMinor: false,
+          guardianName: "",
+          guardianRelationship: "",
+          guardianSignatureImage: "",
+        }),
+      );
+      expect(missing.map((f) => f.anchorId)).toEqual([
+        "guardian_name",
+        "guardian_relationship",
+        "guardian_signature_field",
+      ]);
+    });
+
+    it("lets the emergency contact be the guardian, as a minor's form does", () => {
+      expect(
+        missingWaiverFields(
+          dependantForm({ isMinor: false, ecIsGuardian: true, ecName: "", ecPhone: "" }),
+        ),
+      ).toEqual([]);
     });
   });
 });

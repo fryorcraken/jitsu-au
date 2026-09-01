@@ -31,7 +31,15 @@ export type WaiverPdfData = {
   template_body: string;
   template_version: number;
   club_name: string;
+  /** Under 18 on the day of signing: the participant-type tick, and nothing else. */
   is_minor: boolean;
+  /**
+   * Whether a parent or guardian signed. True for a minor, and for anyone on
+   * somebody else's account whatever their age. This is what prints the
+   * consent block and the guardian's signature, NOT `is_minor` -- see the note
+   * on `hasGuardian` in `waiver-document.ts`.
+   */
+  has_guardian: boolean;
   guardian_name: string;
   guardian_relationship: string;
   /** The guardian's own contact details, resolved by `resolveWaiverContacts`. */
@@ -306,6 +314,7 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
     signatureName: data.signature_name,
     clubName: data.club_name,
     isMinor: data.is_minor,
+    hasGuardian: data.has_guardian,
     signedDate: data.draft ? "" : new Date(data.signed_at).toLocaleDateString("en-AU"),
   });
   const paragraphs = applyWaiverPlaceholders(data.template_body, placeholders).split(/\n{2,}/);
@@ -427,7 +436,7 @@ export async function renderWaiverPdf(data: WaiverPdfData): Promise<Uint8Array> 
       : `Electronically signed on ${new Date(data.signed_at).toLocaleString("en-AU")}`,
   );
 
-  if (data.is_minor) {
+  if (data.has_guardian) {
     y -= 24;
     // Heading + five detail rows (28pt each) + the signature block: enough that
     // the guardian's consent never starts at the very foot of a page with its

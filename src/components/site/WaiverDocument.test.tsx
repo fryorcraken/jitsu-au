@@ -35,6 +35,7 @@ const base: WaiverDocumentProps = {
   clubName: "UTS Jitsu",
   signedAt: "2026-07-21T10:00:00.000Z",
   isMinor: false,
+  hasGuardian: false,
   guardianName: "",
   guardianRelationship: "",
   guardianAddress: "",
@@ -114,6 +115,7 @@ describe("waiver placeholders", () => {
       other: false,
     },
     isMinor: false,
+    hasGuardian: false,
     signedDate: "21/07/2026",
     signatureName: "",
     clubName: "UTS Jitsu",
@@ -160,7 +162,7 @@ describe("waiver placeholders", () => {
   it("ticks exactly one participant-type box, from the age", () => {
     expect(values.adult_checkbox).toBe("[X]");
     expect(values.minor_checkbox).toBe("[ ]");
-    const minor = buildWaiverPlaceholders({ ...input, isMinor: true });
+    const minor = buildWaiverPlaceholders({ ...input, isMinor: true, hasGuardian: true });
     expect(minor.adult_checkbox).toBe("[ ]");
     expect(minor.minor_checkbox).toBe("[X]");
   });
@@ -174,7 +176,7 @@ describe("waiver placeholders", () => {
     expect(values.guardian_phone).toBe("N/A");
     expect(values.guardian_email).toBe("N/A");
     expect(values.guardian_address).toBe("N/A");
-    const minor = buildWaiverPlaceholders({ ...input, isMinor: true });
+    const minor = buildWaiverPlaceholders({ ...input, isMinor: true, hasGuardian: true });
     expect(minor.guardian_name).toBe("Pat");
     expect(minor.guardian_relationship).toBe("Mother");
     expect(minor.guardian_phone).toBe("0422");
@@ -283,6 +285,7 @@ describe("WaiverDocument", () => {
       <WaiverDocument
         {...base}
         isMinor
+        hasGuardian
         guardianName="Pat Sample"
         guardianRelationship="Parent"
         guardianSignature="Pat Sample"
@@ -295,11 +298,40 @@ describe("WaiverDocument", () => {
 
   // The guardian carries the liability, so the document has to say how to reach
   // them -- they are not always the emergency contact printed above.
+  // The two questions came apart when a dependant could be an adult. The
+  // participant-type tick reads the date of birth; the consent block reads
+  // whether somebody signed for them. Keyed on age alone, a 20-year-old on
+  // their parent's account got a document with no consent block while the form
+  // had just required one. Keyed on the guardian alone, the same document
+  // ticked "minor" beside a stored record saying they were not one.
+  it("gives an adult on somebody's account the consent block AND the adult tick", () => {
+    render(
+      <WaiverDocument
+        {...base}
+        isMinor={false}
+        hasGuardian
+        templateBody={"{{adult_checkbox}} Adult (18+)\n{{minor_checkbox}} Minor (under 18)"}
+        guardianName="Pat Sample"
+        guardianRelationship="Parent"
+        guardianSignature="Pat Sample"
+      />,
+    );
+    expect(screen.getByText("Parent / guardian consent")).toBeInTheDocument();
+    // Named and signed: once in the consent block, once on the signature line.
+    expect(screen.getAllByText("Pat Sample").length).toBeGreaterThan(1);
+    // The tick follows the date of birth, so it stays on Adult.
+    const adult = screen.getByText("Adult (18+)").closest("li")!;
+    const minor = screen.getByText("Minor (under 18)").closest("li")!;
+    expect(within(adult).getByText("✓")).toBeInTheDocument();
+    expect(within(minor).queryByText("✓")).not.toBeInTheDocument();
+  });
+
   it("shows the guardian's own mobile, email and address", () => {
     render(
       <WaiverDocument
         {...base}
         isMinor
+        hasGuardian
         guardianName="Pat Sample"
         guardianRelationship="Parent"
         guardianPhone="0400 333 444"

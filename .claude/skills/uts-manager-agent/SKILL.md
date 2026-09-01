@@ -391,10 +391,23 @@ Files one waiver per call: attaches to the person with the given email (or
 creates a locked applicant if that email is new to the club), stores the scan
 as the waiver's PDF, and lands the row **pending**.
 
+**`signing_for`** (optional, `"self"` by default) says who the paper is for.
+Leave it out and nothing changes. Set it to `"dependant"` to file for somebody
+on another person's account, typically a child: then `email` is **refused**
+(they have none of their own) and `guardian_email` and `guardian_name` become
+**required**, because the guardian is who the club writes to and whose login an
+approval opens. The participant gets their own person record all the same, so
+two children filed under one parent address are two people with two free trials.
+The server decides which existing child a filing belongs to by matching
+`first_name`, `last_name` and `date_of_birth` within that guardian's household,
+so spell them the same way each time or a second record is created.
+
 `params` mirror the web form exactly — see the live manifest for the full list,
 but the shape is: `first_name`, `middle_name` (optional), `last_name`,
 `preferred_name` (optional), `date_of_birth` (`YYYY-MM-DD`), `address`, `phone`,
-`email`, `uts_student_number` (optional), `sms_whatsapp_consent` (optional,
+`signing_for` (optional, see above),
+`email` (required unless `signing_for` is `"dependant"`, where it is refused),
+`uts_student_number` (optional), `sms_whatsapp_consent` (optional,
 default false), `media_consent` (optional tri-state: `true`, `false`, or omit
 when the form has no photo/video consent box — omit rather than guessing, since
 `false` records a refusal the club never received),
@@ -429,8 +442,9 @@ scripts/agent.sh file_waiver '{
 >
 > - **It never approves, emails, or verifies.** Filing is not approving:
 >   approval is what promotes the record onto the person's profile, unlocks
->   their login, **emails them that their account is active**, and **assigns
->   the free trial** (`docs/waivers.md`, rule 6).
+>   **the login of whoever the club writes to about them** (their guardian's,
+>   for a dependant), **emails that person to say the account is active**, and
+>   **assigns the free trial** (`docs/waivers.md`, rule 6).
 >   `file_waiver` does none of that — every row lands pending, exactly like a
 >   manager's own upload. Approving hundreds of migrated people would email all
 >   of them and hand out that many trials; that decision belongs to the manager
@@ -439,7 +453,10 @@ scripts/agent.sh file_waiver '{
 >   filing.
 > - **A waiver's `email` is its identity key.** A typo creates a second person
 >   instead of attaching to the right one — check each address against source
->   data before sending it, especially in a scripted loop.
+>   data before sending it, especially in a scripted loop. For a
+>   `signing_for: "dependant"` filing the identity key is the guardian's
+>   address **plus** the participant's name and date of birth, so a typo in any
+>   of the three has the same effect.
 > - **A PDF is mandatory.** If a source record has no scan/document behind it,
 >   this action is not the right tool for it — that's a data-only record, not a
 >   waiver.

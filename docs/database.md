@@ -242,8 +242,10 @@ A person = an **auth user** (their email lives on `auth.users`, the ONLY email
 store) + a **`profiles` row keyed by that user id** (the person fields; no
 email column anywhere in `public`). An applicant is a **locked** auth user
 (banned, no credentials) created at first waiver submission; a manager's
-**approval** promotes the submission onto the profile and opens the account
-(`docs/waivers.md`, rule 6, is where what approval does is written down). A
+**approval** promotes the submission onto the profile and opens **the account
+the club writes to about that person**, which is their guardian's when they are
+a dependant (`docs/waivers.md`, rule 6, is where what approval does is written
+down). A
 waiver is a **frozen submission**: exactly what was typed, the signed PDF,
 template version, real signer IP and signing context, and its approval state.
 
@@ -1572,8 +1574,11 @@ behaviour it already had.
 The person's one identity record, managed by Supabase Auth (not in our
 migrations) — **the only place any email lives**. An applicant's auth user is
 created **locked** (banned, no credentials) by waiver submission; approval
-lifts the ban. There is no self-serve sign-up (`docs/waivers.md`, rules 6 and
-9). Two triggers fire:
+lifts the ban on whoever the club writes to about them. There is no self-serve
+sign-up (`docs/waivers.md`, rules 6 and 9). A **dependant's** auth user is
+created locked too, but with a reserved, non-deliverable address and a
+permanent ban that no approval ever lifts: they have no login, ever, and
+approving their waiver opens their guardian's instead. Two triggers fire:
 
 - `handle_new_user_role` — grants `manager` to a confirmed whitelisted address.
 - `ensure_profile` — inserts the `profiles` row for every new auth user, with a

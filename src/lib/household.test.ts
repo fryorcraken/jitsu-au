@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
   assertActingFor,
+  assertMayHaveDependants,
   contactUserIdFor,
   householdTargetSchema,
   isDependant,
@@ -94,6 +95,47 @@ describe("isDependant", () => {
   it("is the guardian link and nothing else", () => {
     expect(isDependant(CHILD)).toBe(true);
     expect(isDependant(PARENT)).toBe(false);
+  });
+});
+
+describe("assertMayHaveDependants", () => {
+  // The other half of the one-level rule, for the moment BEFORE a dependant
+  // exists: `assertActingFor` can only answer "may A act for B", and creating a
+  // child has no B yet.
+  it("allows an account holder", async () => {
+    await expect(assertMayHaveDependants(admin(EVERYONE), "parent")).resolves.toBeUndefined();
+  });
+
+  it("allows an account holder who has no dependants yet", async () => {
+    // The first child on an account has to be creatable, or the feature can
+    // never start.
+    await expect(assertMayHaveDependants(admin(EVERYONE), "stranger")).resolves.toBeUndefined();
+  });
+
+  it("refuses a dependant, so a household can never be more than one deep", async () => {
+    await expect(assertMayHaveDependants(admin(EVERYONE), "child")).rejects.toThrow(
+      /only see or change your own account/i,
+    );
+  });
+
+  it("refuses somebody with no profile row, in the same words", async () => {
+    // Fails closed, and says nothing about whether the id is a real person:
+    // the same sentence whatever the cause, exactly as `assertActingFor` does.
+    await expect(assertMayHaveDependants(admin(EVERYONE), "nobody")).rejects.toThrow(
+      /only see or change your own account/i,
+    );
+  });
+
+  it("is case-insensitive about the id it is given", async () => {
+    await expect(
+      assertMayHaveDependants(admin(EVERYONE), "PARENT".toLowerCase()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("surfaces a failed read rather than reading it as allowed or denied", async () => {
+    // A database that cannot answer must not be mistaken for a yes, and the
+    // refusal sentence would be a lie about why.
+    await expect(assertMayHaveDependants(erroringAdmin, "parent")).rejects.toThrow("boom");
   });
 });
 

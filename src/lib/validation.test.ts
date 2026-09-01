@@ -1706,6 +1706,140 @@ describe("waiverSubmitSchema", () => {
     const { hp: _hp, ...withoutHp } = validAdult;
     expect(waiverSubmitSchema.safeParse(withoutHp).success).toBe(false);
   });
+
+  // ---- Signing for somebody on your account (#105) ----
+  //
+  // The discriminator that lets a parent file a waiver for a child who has no
+  // email address of their own, and never will.
+
+  /** A child's payload: no address of their own, the guardian's required. */
+  const validDependant = {
+    ...validAdult,
+    signing_for: "dependant" as const,
+    email: undefined,
+    date_of_birth: "2016-03-02",
+    is_minor: true,
+    guardian_name: "Charles Babbage",
+    guardian_relationship: "Father",
+    guardian_email: "parent@example.com",
+    guardian_signature: "Charles Babbage",
+  };
+
+  it("defaults signing_for to self, so a client that predates it still submits", () => {
+    const result = waiverSubmitSchema.safeParse(validAdult);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.signing_for).toBe("self");
+  });
+
+  it("accepts a waiver for a dependant, with the guardian's email and no participant email", () => {
+    expect(waiverSubmitSchema.safeParse(validDependant).success).toBe(true);
+  });
+
+  it("requires the guardian's email for a dependant", () => {
+    // It is the only address on the form: what the club writes to, and the
+    // login an approval unlocks. There is no participant address to fall back
+    // to the way a minor signing under their own has.
+    const { guardian_email: _e, ...withoutGuardianEmail } = validDependant;
+    const result = waiverSubmitSchema.safeParse(withoutGuardianEmail);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("guardian_email"))).toBe(true);
+    }
+    expect(waiverSubmitSchema.safeParse({ ...validDependant, guardian_email: "  " }).success).toBe(
+      false,
+    );
+  });
+
+  it("refuses a participant email on a dependant's waiver", () => {
+    // Not merely ignored. An address arriving here would be somebody's guess at
+    // what a child's should be, most likely the parent's, which is exactly the
+    // "second child filed against the first" bug this change exists to end.
+    const result = waiverSubmitSchema.safeParse({
+      ...validDependant,
+      email: "parent@example.com",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("email"))).toBe(true);
+    }
+  });
+
+  it("still requires the participant's email when signing for yourself", () => {
+    const { email: _e, ...withoutEmail } = validAdult;
+    const result = waiverSubmitSchema.safeParse(withoutEmail);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("email"))).toBe(true);
+    }
+  });
+
+  // The case that would have failed before this change, and the one #102 is
+  // about. Two children on one parent's address used to resolve to ONE person:
+  // the second waiver was filed against the first child, overwriting their
+  // profile on approval and denying them a free trial, with no error anywhere.
+  it("accepts two children on one parent email as two separate waivers", () => {
+    const first = waiverSubmitSchema.safeParse({
+      ...validDependant,
+      first_name: "Ada",
+      date_of_birth: "2016-03-02",
+      guardian_email: "parent@example.com",
+    });
+    const second = waiverSubmitSchema.safeParse({
+      ...validDependant,
+      first_name: "Grace",
+      date_of_birth: "2018-07-11",
+      guardian_email: "parent@example.com",
+    });
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    // Nothing on either payload identifies the participant by address, so
+    // there is no longer anything for the two to collide on. Who they are is
+    // settled server-side, inside the household, by name and date of birth.
+    if (first.success && second.success) {
+      expect(first.data.email).toBeFalsy();
+      expect(second.data.email).toBeFalsy();
+      expect(first.data.guardian_email).toBe(second.data.guardian_email);
+      expect(first.data.first_name).not.toBe(second.data.first_name);
+    }
+  });
+
+  // The one place #105's "the guardian refinements stay as they are" is not
+  // quite right. A dependant who turns 18 is no more able to sign than they
+  // were the day before, and keyed on `is_minor` alone their next waiver would
+  // need no signature from anybody at all.
+  it("requires a guardian for an adult dependant, whom is_minor alone would let through", () => {
+    const adultDependant = {
+      ...validDependant,
+      date_of_birth: "2000-01-01",
+      is_minor: false,
+    };
+    expect(waiverSubmitSchema.safeParse(adultDependant).success).toBe(true);
+
+    const { guardian_signature: _s, ...unsigned } = adultDependant;
+    const result = waiverSubmitSchema.safeParse(unsigned);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("guardian_signature"))).toBe(true);
+    }
+
+    const { guardian_name: _n, ...unnamed } = adultDependant;
+    expect(waiverSubmitSchema.safeParse(unnamed).success).toBe(false);
+  });
+
+  it("lets a dependant's emergency contact be the guardian, as a minor's can", () => {
+    const {
+      emergency_contact_name: _n,
+      emergency_contact_relationship: _r,
+      emergency_contact_phone: _p,
+      ...withoutEmergencyContact
+    } = validDependant;
+    expect(
+      waiverSubmitSchema.safeParse({
+        ...withoutEmergencyContact,
+        emergency_contact_is_guardian: true,
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe("saveTemplateSchema", () => {

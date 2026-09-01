@@ -127,9 +127,28 @@ const MANAGER_ID = "44444444-4444-4444-4444-444444444444";
  * `existingId` picks the resolvePersonId branch: a truthy value is an existing
  * person (no createUser call), null/undefined is a brand-new applicant.
  */
+/** The two `profiles` columns every household question is answered from. */
+type ProfileRow = {
+  user_id: string;
+  guardian_user_id?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  preferred_name?: string | null;
+  date_of_birth?: string | null;
+};
+
+const CHILD_ONE = "55555555-5555-5555-5555-555555555555";
+const CHILD_TWO = "66666666-6666-6666-6666-666666666666";
+
 function fakeAdmin(opts: {
   existingId?: string | null;
   createUser?: Result;
+  /** Rows already on the books, keyed by user id. */
+  profiles?: ProfileRow[];
+  /** What the `profiles` upsert answers with. */
+  profileUpsert?: Result;
+  /** The ids `createUser` hands out, in order. */
+  mintedUserIds?: string[];
   /** Rows the same-person + same-signing-date duplicate probe finds. */
   duplicates?: Result;
   /**
@@ -161,6 +180,10 @@ function fakeAdmin(opts: {
   remove?: { error: { message: string } | null };
   getUserByIdEmail?: string | null;
 }) {
+  const profiles = new Map<string, ProfileRow>(
+    (opts.profiles ?? []).map((row) => [row.user_id, row]),
+  );
+  const mintedUserIds = opts.mintedUserIds ?? [];
   const inserted = opts.insert ?? ok({ id: "waiver-1" });
   const resumeUpdate = opts.resumeUpdate ?? ok({ id: "resumed" });
   const upload = opts.upload ?? { error: null };
@@ -179,6 +202,7 @@ function fakeAdmin(opts: {
     uploads: [] as { path: string; bytes: unknown }[],
     removes: [] as string[][],
     getUserById: [] as string[],
+    deleteUser: [] as string[],
   };
 
   const admin = {
@@ -191,9 +215,30 @@ function fakeAdmin(opts: {
       admin: {
         createUser: (args: unknown) => {
           calls.createUser.push(args);
-          return Promise.resolve(
-            opts.createUser ?? ok({ user: { id: NEW_USER } }),
-          ) as unknown as Promise<{ data: { user: { id: string } | null }; error: unknown }>;
+          if (opts.createUser) {
+            return Promise.resolve(opts.createUser) as unknown as Promise<{
+              data: { user: { id: string } | null };
+              error: unknown;
+            }>;
+          }
+          // A DISTINCT id per call, which the fake used to fake away by always
+          // answering NEW_USER. Two children on one account are two auth users
+          // and the whole point of #105, so a stub that hands both the same id
+          // would report the bug as fixed while reproducing it exactly.
+          const id = mintedUserIds[calls.createUser.length - 1] ?? NEW_USER;
+          const row = { user: { id } };
+          // The profile row every real createUser leaves behind, courtesy of
+          // the ensure_profile trigger. `resolveDependantId` upserts onto it.
+          profiles.set(id, { user_id: id, guardian_user_id: null });
+          return Promise.resolve(ok(row)) as unknown as Promise<{
+            data: { user: { id: string } | null };
+            error: unknown;
+          }>;
+        },
+        deleteUser: (id: string) => {
+          calls.deleteUser.push(id);
+          profiles.delete(id);
+          return Promise.resolve(ok(null)) as unknown as Promise<{ error: unknown }>;
         },
         getUserById: (id: string) => {
           calls.getUserById.push(id);
@@ -206,9 +251,30 @@ function fakeAdmin(opts: {
     from: (table: string) => {
       if (table === "profiles") {
         return {
-          upsert: (row: unknown) => {
+          upsert: (row: ProfileRow) => {
             calls.upsert.push(row);
-            return Promise.resolve(ok(null));
+            profiles.set(row.user_id, { ...profiles.get(row.user_id), ...row });
+            return Promise.resolve(opts.profileUpsert ?? ok(null));
+          },
+          // Two shapes of read reach this table, and they are told apart by
+          // which column they filter on, exactly as the real queries are:
+          // `assertMayHaveDependants` and `listHousehold`'s first half look up
+          // one person by `user_id`, and `listHousehold`'s second half lists
+          // everyone whose `guardian_user_id` is that person.
+          select: () => {
+            const query = {
+              eq: (column: string, value: string) => {
+                if (column === "guardian_user_id") {
+                  const rows = [...profiles.values()].filter((r) => r.guardian_user_id === value);
+                  return { order: () => Promise.resolve(ok(rows)) };
+                }
+                return {
+                  maybeSingle: () => Promise.resolve(ok(profiles.get(value) ?? null)),
+                  ...query,
+                };
+              },
+            };
+            return query;
           },
         };
       }
@@ -311,7 +377,11 @@ function fakeAdmin(opts: {
     },
   };
 
-  return { admin, calls };
+  // Cast once here rather than at every call site, the same way
+  // `fakeSignStoredPdfAdmin` above does. The existing `admin as any` casts
+  // below are left alone: they still compile, and rewriting twenty unrelated
+  // lines is not what this change is for.
+  return { admin: admin as unknown as SupabaseClient<Database>, calls, profiles };
 }
 
 const validInput: PaperWaiverUploadInput = {
@@ -322,6 +392,7 @@ const validInput: PaperWaiverUploadInput = {
   date_of_birth: "1990-12-10",
   address: "1 Broadway, Ultimo NSW",
   phone: "0400000000",
+  signing_for: "self",
   email: "Ada@Example.com",
   uts_student_number: "",
   sms_whatsapp_consent: false,
@@ -1466,5 +1537,359 @@ describe("reading a person other than yourself", () => {
       /only see or change your own account/i,
     );
     expect(waivers.reads).toEqual([]);
+  });
+});
+
+// ---- Filing for somebody on an account (#105) ----
+//
+// The paper path is used to exercise this because it is the one that takes an
+// admin client as a parameter; `submitWaiverWithPdf` is a `createServerFn`
+// handler and dies on "No Start context found" from the runner.
+//
+// ⚠️ So what is proved here is `resolveDependantId` and `findDependantId`, which
+// both paths share, and NOT the public form's own wiring around them. The order
+// there (resolve the guardian, then the sign-in gate, then create the child),
+// the `contactId`-vs-`userId` split across the verification stamp, the
+// confirmation email and the ban check, and the suppressed code-of-conduct
+// token are covered by nothing in this file. Deleting the gate in
+// `submitWaiverWithPdf` keeps this suite green. That gap belongs to the
+// end-to-end suite, which drives the real form.
+describe("filePaperWaiver, for a dependant", () => {
+  const PARENT = EXISTING_USER;
+
+  /** A child's filing: no address of their own, the guardian named. */
+  const dependantInput = (over: Partial<PaperWaiverUploadInput> = {}): PaperWaiverUploadInput => ({
+    ...validInput,
+    signing_for: "dependant",
+    email: "",
+    guardian_email: "parent@example.com",
+    guardian_name: "Charles Babbage",
+    guardian_relationship: "Father",
+    first_name: "Ada",
+    last_name: "Lovelace",
+    date_of_birth: "2016-03-02",
+    ...over,
+  });
+
+  it("files against a new dependant with a reserved address, banned and unconfirmed", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { admin, calls, profiles } = fakeAdmin({
+      // The parent is already on the books, so only the child is created.
+      existingId: PARENT,
+      profiles: [{ user_id: PARENT, guardian_user_id: null }],
+      mintedUserIds: [CHILD_ONE],
+    });
+
+    const result = await filePaperWaiver(admin, dependantInput(), MANAGER_ID);
+
+    expect(result.user_id).toBe(CHILD_ONE);
+    expect(result.user_id).not.toBe(PARENT);
+
+    // Exactly one auth user was made, and it is the child's.
+    expect(calls.createUser).toHaveLength(1);
+    const created = calls.createUser[0] as {
+      email: string;
+      email_confirm: boolean;
+      ban_duration: string;
+    };
+    // The address carries a uuid and nothing about the child. Proven against
+    // real GoTrue before any of this was written: see the note on
+    // DEPENDANT_EMAIL_DOMAIN.
+    expect(created.email).toMatch(/^[0-9a-f-]{36}@dependant\.jitsu\.au$/i);
+    // Never confirmed and never able to sign in. A dependant is not an
+    // applicant waiting on approval; the ban is the permanent state.
+    expect(created.email_confirm).toBe(false);
+    expect(created.ban_duration).toBe("876000h");
+
+    // ...and the one column that actually makes them a dependant.
+    expect(profiles.get(CHILD_ONE)?.guardian_user_id).toBe(PARENT);
+  });
+
+  it("creates the parent's own person record when this is their first child", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    // The club has never seen this address, so BOTH people are new.
+    const { admin, calls, profiles } = fakeAdmin({
+      existingId: null,
+      mintedUserIds: [NEW_USER, CHILD_ONE],
+    });
+
+    const result = await filePaperWaiver(admin, dependantInput(), MANAGER_ID);
+
+    expect(calls.createUser).toHaveLength(2);
+    // The parent first, under the address that was typed, and the child second
+    // under a reserved one.
+    expect((calls.createUser[0] as { email: string }).email).toBe("parent@example.com");
+    expect((calls.createUser[1] as { email: string }).email).toMatch(/@dependant\.jitsu\.au$/);
+    expect(result.user_id).toBe(CHILD_ONE);
+    expect(profiles.get(CHILD_ONE)?.guardian_user_id).toBe(NEW_USER);
+    // The parent's record is seeded from the GUARDIAN block, not the child's
+    // name. Seeding a parent's profile with their nine-year-old's details is
+    // the same "two people, one record" bug one level up.
+    expect(profiles.get(NEW_USER)?.first_name).toBe("Charles");
+    expect(profiles.get(NEW_USER)?.last_name).toBe("Babbage");
+  });
+
+  // The case #102 is about, and the one that would have failed before this
+  // change: two children on one parent's address used to resolve to ONE person.
+  it("gives two children on one parent email two distinct person records", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { admin, profiles } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [{ user_id: PARENT, guardian_user_id: null }],
+      mintedUserIds: [CHILD_ONE, CHILD_TWO],
+    });
+
+    const first = await filePaperWaiver(
+      admin,
+      dependantInput({
+        first_name: "Ada",
+        date_of_birth: "2016-03-02",
+        client_submission_id: "11111111-1111-4111-8111-111111111111",
+      }),
+      MANAGER_ID,
+    );
+    const second = await filePaperWaiver(
+      admin,
+      dependantInput({
+        first_name: "Grace",
+        date_of_birth: "2018-07-11",
+        client_submission_id: "22222222-2222-4222-8222-222222222222",
+        confirm_duplicate: true,
+      }),
+      MANAGER_ID,
+    );
+
+    expect(first.user_id).toBe(CHILD_ONE);
+    expect(second.user_id).toBe(CHILD_TWO);
+    expect(first.user_id).not.toBe(second.user_id);
+    // Neither is the parent, and both hang off them.
+    expect(first.user_id).not.toBe(PARENT);
+    expect(second.user_id).not.toBe(PARENT);
+    expect(profiles.get(CHILD_ONE)?.guardian_user_id).toBe(PARENT);
+    expect(profiles.get(CHILD_TWO)?.guardian_user_id).toBe(PARENT);
+  });
+
+  it("does not attach a second child to the first", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    // Ada is already on the account. Grace is not.
+    const { admin, calls } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [
+        { user_id: PARENT, guardian_user_id: null },
+        {
+          user_id: CHILD_ONE,
+          guardian_user_id: PARENT,
+          first_name: "Ada",
+          last_name: "Lovelace",
+          date_of_birth: "2016-03-02",
+        },
+      ],
+      mintedUserIds: [CHILD_TWO],
+    });
+
+    const result = await filePaperWaiver(
+      admin,
+      dependantInput({ first_name: "Grace", date_of_birth: "2018-07-11" }),
+      MANAGER_ID,
+    );
+
+    expect(result.user_id).toBe(CHILD_TWO);
+    expect(result.user_id).not.toBe(CHILD_ONE);
+    expect(calls.createUser).toHaveLength(1);
+  });
+
+  // The other half of that rule, and the reason matching beats always-creating:
+  // one child signed for twice is one person, not two with two free trials.
+  it("re-uses the same child on a second waiver, matching name and date of birth", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { admin, calls } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [
+        { user_id: PARENT, guardian_user_id: null },
+        {
+          user_id: CHILD_ONE,
+          guardian_user_id: PARENT,
+          first_name: "Ada",
+          last_name: "Lovelace",
+          date_of_birth: "2016-03-02",
+        },
+      ],
+    });
+
+    const result = await filePaperWaiver(
+      admin,
+      // Typed back with different capitalisation and stray spacing, the way a
+      // second filing realistically arrives.
+      dependantInput({ first_name: "  ada  ", last_name: "LOVELACE" }),
+      MANAGER_ID,
+    );
+
+    expect(result.user_id).toBe(CHILD_ONE);
+    // Nobody new was minted: not the parent, who already exists, and not the
+    // child, who was matched.
+    expect(calls.createUser).toHaveLength(0);
+  });
+
+  // The one-level rule, which the migration deliberately left to the
+  // application because a depth check in SQL needs a trigger.
+  it("refuses to hang a dependant off another dependant", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { admin, calls } = fakeAdmin({
+      existingId: CHILD_ONE,
+      profiles: [
+        { user_id: PARENT, guardian_user_id: null },
+        { user_id: CHILD_ONE, guardian_user_id: PARENT },
+      ],
+    });
+
+    await expect(filePaperWaiver(admin, dependantInput(), MANAGER_ID)).rejects.toThrow(
+      /only see or change your own account/i,
+    );
+    // Nothing was created on the way to refusing.
+    expect(calls.createUser).toHaveLength(0);
+    expect(calls.insert).toHaveLength(0);
+  });
+
+  // A dependant's filing has to probe the CHILD's waivers, not the parent's.
+  // #105 says this probe "keeps working, because a child now has their own user
+  // id"; it only does because the participant is resolved read-only first.
+  // Without that, two scans of one child's form would both file in silence.
+  it("checks the child's own waivers for a duplicate, not the parent's", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { admin } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [
+        { user_id: PARENT, guardian_user_id: null },
+        {
+          user_id: CHILD_ONE,
+          guardian_user_id: PARENT,
+          first_name: "Ada",
+          last_name: "Lovelace",
+          date_of_birth: "2016-03-02",
+        },
+      ],
+      duplicates: ok([
+        { id: "waiver-0", approval_status: "pending", signed_at: "2020-01-15T00:00:00+00:00" },
+      ]),
+    });
+
+    const { DuplicateWaiverError } = await import("./waiver-duplicates");
+    await expect(filePaperWaiver(admin, dependantInput(), MANAGER_ID)).rejects.toBeInstanceOf(
+      DuplicateWaiverError,
+    );
+  });
+
+  it("skips the duplicate probe for a child the club has never seen", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    // The parent exists and has waivers of their own on this date. The child
+    // does not exist yet, so there is nothing of THEIRS to collide with, and
+    // the parent's must not be mistaken for it.
+    const { admin } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [{ user_id: PARENT, guardian_user_id: null }],
+      mintedUserIds: [CHILD_ONE],
+      duplicates: ok([
+        { id: "waiver-0", approval_status: "pending", signed_at: "2020-01-15T00:00:00+00:00" },
+      ]),
+    });
+
+    const result = await filePaperWaiver(admin, dependantInput(), MANAGER_ID);
+    expect(result.user_id).toBe(CHILD_ONE);
+  });
+
+  // The orphan case. The ensure_profile trigger creates the profile row the
+  // moment the auth user exists, so a failed guardian link leaves a nameless
+  // person on a reserved address that no screen can find or fix. Throwing tells
+  // the signer; removing the auth user is what takes the record back off the
+  // books.
+  it("removes the half-created dependant when the guardian link fails", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { admin, calls, profiles } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [{ user_id: PARENT, guardian_user_id: null }],
+      mintedUserIds: [CHILD_ONE],
+      profileUpsert: fails("guardian_user_id violates foreign key"),
+    });
+
+    await expect(filePaperWaiver(admin, dependantInput(), MANAGER_ID)).rejects.toThrow(
+      /couldn't add that person/i,
+    );
+    expect(calls.deleteUser).toEqual([CHILD_ONE]);
+    expect(profiles.has(CHILD_ONE)).toBe(false);
+    // And no waiver was filed against the person that never finished existing.
+    expect(calls.insert).toHaveLength(0);
+  });
+
+  it("files the waiver under the guardian's address, as the frozen record", async () => {
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { admin, calls } = fakeAdmin({
+      existingId: PARENT,
+      profiles: [{ user_id: PARENT, guardian_user_id: null }],
+      mintedUserIds: [CHILD_ONE],
+    });
+
+    await filePaperWaiver(admin, dependantInput(), MANAGER_ID);
+
+    const row = calls.insert[0] as { email: string; user_id: string; guardian_email: string };
+    // What was typed on the form, which is honestly the only address anyone
+    // gave. A blank would be worse for whoever reads this in a year, and the
+    // child's reserved one appears nowhere.
+    expect(row.email).toBe("parent@example.com");
+    expect(row.guardian_email).toBe("parent@example.com");
+    expect(row.user_id).toBe(CHILD_ONE);
+  });
+});
+
+// The one thing on the public signing page that is not public. Filing for a
+// dependant writes a new person into somebody else's household, which an
+// anonymous submission naming a member's address must not be able to do.
+describe("needsSignInToFileForDependant", () => {
+  const HOUR = 60 * 60 * 1000;
+  const now = new Date("2026-08-31T00:00:00.000Z");
+  const banned = new Date(now.getTime() + HOUR).toISOString();
+  const expired = new Date(now.getTime() - HOUR).toISOString();
+
+  it("refuses an anonymous signer against a guardian who can already sign in", async () => {
+    const { needsSignInToFileForDependant } = await import("./waiver.functions");
+    expect(
+      needsSignInToFileForDependant({
+        identityProven: false,
+        guardianBannedUntil: null,
+        now,
+      }),
+    ).toBe(true);
+    // A ban that has run out is not a ban.
+    expect(
+      needsSignInToFileForDependant({
+        identityProven: false,
+        guardianBannedUntil: expired,
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  // The flow this must not break, and the whole point of the feature: a parent
+  // with no account signs for their first child, and approving that waiver is
+  // what gives them a login. They cannot sign in, so a refusal would be
+  // unactionable and the feature unreachable.
+  it("allows an anonymous signer against a guardian who is still locked", async () => {
+    const { needsSignInToFileForDependant } = await import("./waiver.functions");
+    expect(
+      needsSignInToFileForDependant({
+        identityProven: false,
+        guardianBannedUntil: banned,
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it("never asks anything of a signer who has proved who they are", async () => {
+    const { needsSignInToFileForDependant } = await import("./waiver.functions");
+    for (const guardianBannedUntil of [null, banned, expired]) {
+      expect(
+        needsSignInToFileForDependant({ identityProven: true, guardianBannedUntil, now }),
+      ).toBe(false);
+    }
   });
 });

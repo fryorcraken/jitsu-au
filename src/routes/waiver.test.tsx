@@ -18,6 +18,13 @@ import { ackAnchorId } from "@/lib/waiver-required-fields";
 
 const submitWaiverWithPdf = vi.fn();
 const getCurrentWaiverTemplate = vi.fn();
+const getMyProfile = vi.fn();
+/**
+ * Who `useAuth` reports, settable per test. Signed out is the default and what
+ * every case below the first describe assumes; the prefill only runs for a
+ * signed-in person, so testing it needs this to move.
+ */
+let authUser: { id: string; email: string } | null = null;
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => ({
@@ -34,8 +41,15 @@ vi.mock("@tanstack/react-start", () => ({
 vi.mock("@/lib/waiver.functions", () => ({
   submitWaiverWithPdf: (...args: unknown[]) => submitWaiverWithPdf(...args),
   getCurrentWaiverTemplate: (...args: unknown[]) => getCurrentWaiverTemplate(...args),
-  getMyProfile: vi.fn(),
+  getMyProfile: (...args: unknown[]) => getMyProfile(...args),
   checkWaiverSubmission: vi.fn(),
+}));
+
+// Mocked for the same reason as `waiver.functions` above: importing the real
+// module pulls in `requireSupabaseAuth`, and the `@tanstack/react-start` mock
+// carries no `createMiddleware`. The signed-out cases below never call it.
+vi.mock("@/lib/household.functions", () => ({
+  listMyDependants: vi.fn(async () => []),
 }));
 
 vi.mock("@/lib/email-verification.functions", () => ({
@@ -47,7 +61,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: null, session: null, loading: false }),
+  useAuth: () => ({ user: authUser, session: null, loading: false }),
 }));
 
 vi.mock("@/components/site/SiteLayout", () => ({
@@ -80,6 +94,9 @@ function summary() {
 }
 
 beforeEach(() => {
+  authUser = null;
+  getMyProfile.mockReset();
+  getMyProfile.mockResolvedValue(null);
   submitWaiverWithPdf.mockReset();
   getCurrentWaiverTemplate.mockReset();
   getCurrentWaiverTemplate.mockResolvedValue({
@@ -280,5 +297,156 @@ describe("/waiver missing fields", () => {
     const banner = await screen.findByRole("alert");
     expect(within(banner).getByRole("button", { name: "Email" })).toBeInTheDocument();
     expect(banner).toHaveTextContent(/name@example.com/);
+  });
+});
+
+// The question that replaces "work out from the date of birth whether there is
+// a guardian". It comes first because it changes what the rest of the form
+// asks for. See #102.
+describe("/waiver, who is this for", () => {
+  const chooseDependant = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(
+      screen.getByRole("radio", { name: /My child, or someone else I look after/i }),
+    );
+  };
+
+  // The end-to-end suite finds the form's fields by their own labels, and
+  // Playwright's `getByLabel` matches on a substring. An option whose
+  // accessible name swallows its explanation swallows the explanation's words
+  // with it: "they never need an email address of their own" made this radio a
+  // second match for both "Email" and "Address" on a page that has an Email
+  // field and an Address field, and the journey spec stopped being able to fill
+  // either. The hint is a description, which is also what a screen reader
+  // should hear: the name is the option, not a paragraph about it.
+  it("keeps each option's name to the option, with the hint as a description", async () => {
+    renderWaiver();
+    await screen.findByLabelText("First name");
+
+    const dependant = screen.getByRole("radio", {
+      name: "My child, or someone else I look after",
+    });
+    expect(dependant).toHaveAccessibleDescription(/never need an email address/i);
+    // One Email field on the page, and it is the Email field.
+    expect(screen.getAllByLabelText(/email/i)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/address/i)).toHaveLength(1);
+  });
+
+  it("starts on Myself, so the form is the one everybody already knows", async () => {
+    renderWaiver();
+    await screen.findByLabelText("First name");
+
+    expect(screen.getByRole("radio", { name: /Myself/i })).toBeChecked();
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    // No guardian block for an adult signing for themselves.
+    expect(screen.queryByLabelText("Parent or guardian name")).not.toBeInTheDocument();
+  });
+
+  it("stops asking a child for an email address, and asks the guardian for theirs", async () => {
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+
+    await chooseDependant(user);
+
+    // The single sentence #102 is about: a nine-year-old is never asked for an
+    // email address.
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText(/Guardian email/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Parent or guardian name")).toBeInTheDocument();
+  });
+
+  it("asks for the guardian's email in the summary, and does not ask for the child's", async () => {
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+    await chooseDependant(user);
+
+    await user.click(screen.getByRole("button", { name: /Sign and download waiver/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(
+      within(banner).getByRole("button", { name: "Parent or guardian email" }),
+    ).toBeInTheDocument();
+    expect(within(banner).queryByRole("button", { name: "Email" })).not.toBeInTheDocument();
+    expect(submitWaiverWithPdf).not.toHaveBeenCalled();
+  });
+
+  it("clears the participant's details when the answer changes", async () => {
+    // A form that kept the previous person's name, date of birth and health
+    // answers and simply relabelled them is how the wrong person's health
+    // declaration ends up on a signed document.
+    const user = userEvent.setup();
+    renderWaiver();
+    const firstName = await screen.findByLabelText("First name");
+    await user.type(firstName, "Ada");
+    expect(firstName).toHaveValue("Ada");
+
+    await chooseDependant(user);
+
+    expect(screen.getByLabelText("First name")).toHaveValue("");
+  });
+
+  it("keeps the guardian block for a dependant born more than 18 years ago", async () => {
+    // `is_minor` goes false on their eighteenth birthday, and they are no more
+    // able to sign than they were the day before.
+    const user = userEvent.setup();
+    renderWaiver();
+    await screen.findByLabelText("First name");
+    await chooseDependant(user);
+    await user.type(screen.getByLabelText("Date of birth"), "1990-12-10");
+
+    expect(screen.getByLabelText("Parent or guardian name")).toBeInTheDocument();
+  });
+});
+
+// A signed-in parent's own profile prefills their own waiver, and must never
+// prefill a child's. The gate on that is a race, because the prefill is a round
+// trip and the "who is this for?" question is the first control on the page.
+describe("/waiver, prefilling a signed-in parent", () => {
+  it("does not paste the parent's details into a child's waiver", async () => {
+    const user = userEvent.setup();
+    authUser = { id: "parent-1", email: "parent@example.com" };
+    // The profile lands only after the parent has already answered. This is the
+    // realistic order on a phone: the answer is one tap, the round trip is not.
+    let release: (v: unknown) => void = () => {};
+    getMyProfile.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    renderWaiver();
+    await screen.findByLabelText("First name");
+    await user.click(
+      screen.getByRole("radio", { name: /My child, or someone else I look after/i }),
+    );
+
+    release({
+      first_name: "Ada",
+      last_name: "Lovelace",
+      date_of_birth: "1815-12-10",
+      phone: "0400 000 000",
+      address: "1 Broadway",
+      medical_notes: "Parent's own condition",
+    });
+    await waitFor(() => expect(getMyProfile).toHaveBeenCalled());
+
+    // The child's block stays as the parent left it. A parent's date of birth
+    // landing here is worse than cosmetic: a dependant is matched on name and
+    // birthday, so a wrong one silently creates a second child.
+    expect(screen.getByLabelText("First name")).toHaveValue("");
+    expect(screen.getByLabelText("Date of birth")).toHaveValue("");
+    // And the parent's health record certainly does not belong on it.
+    expect(screen.queryByDisplayValue("Parent's own condition")).not.toBeInTheDocument();
+  });
+
+  it("still prefills when they are signing for themselves", async () => {
+    // The guard must not cost the ordinary case its prefill.
+    authUser = { id: "parent-1", email: "parent@example.com" };
+    getMyProfile.mockResolvedValue({ first_name: "Ada", last_name: "Lovelace" });
+
+    renderWaiver();
+    await waitFor(() => expect(screen.getByLabelText("First name")).toHaveValue("Ada"));
+    expect(screen.getByLabelText("Last name")).toHaveValue("Lovelace");
   });
 });

@@ -1086,7 +1086,14 @@ function ManagerUserPage() {
                       <Field label="Emergency phone" value={w.emergency_contact_phone} />
                       <Field label="Medical notes" value={w.medical_notes} />
                       <Field label="Minor" value={w.is_minor ? "Yes" : "No"} />
-                      {w.is_minor ? (
+                      {/* Shown whenever the waiver actually NAMES a guardian,
+                          not when the participant was under 18. Those came to
+                          the same thing until a person could be a dependant at
+                          any age: a guardian signs for one of those whatever
+                          their birthday, and keyed on `is_minor` their details
+                          would be on the signed document and missing from the
+                          only screen a manager reads it on. */}
+                      {w.guardian_name ? (
                         <>
                           <Field label="Guardian" value={w.guardian_name} />
                           <Field label="Guardian relationship" value={w.guardian_relationship} />

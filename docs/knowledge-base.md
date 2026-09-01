@@ -248,9 +248,11 @@ From the member area: the sidebar's first item, and a card at the top of
 ("Knowledge base editor"), which is a different entry from the reader above it.
 
 The waiver-confirmation email **mentions** the knowledge base and deliberately
-does not link to it. Whoever is reading that email cannot sign in yet: their
+does not link to it. Whoever is reading that email cannot sign in yet: the
 account is created locked, and a manager approving the waiver is what opens it
-(`docs/waivers.md`, rule 6). A link there would land a brand-new person on a
+(`docs/waivers.md`, rule 6). Still true for a parent who signed for their child:
+the account that opens is theirs, and it is still shut while they are reading
+this. A link there would land a brand-new person on a
 sign-in screen they have no account for. The **account-activated** email sent at
 approval does link it, by which point they can get in.
 

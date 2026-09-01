@@ -478,7 +478,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("14");
+    expect(AGENT_MANIFEST.version).toBe("15");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -520,6 +520,50 @@ describe("AGENT_MANIFEST", () => {
     const edit = AGENT_MANIFEST.actions.find((a) => a.name === "edit_invoice")!;
     const required = edit.params.filter((p) => p.required).map((p) => p.name);
     expect(required).toEqual(["id"]);
+  });
+
+  // `email` deliberately keeps `required: true` even though a dependant filing
+  // refuses it. It IS required for the default signing_for, which is what every
+  // caller sends, and the exception lives in its description, exactly as
+  // `emergency_contact_relationship` handles being required only for a minor.
+  // What must not happen is the manifest going quiet about the new shape.
+  it("documents the dependant filing an agent can now send", () => {
+    const fileWaiver = AGENT_MANIFEST.actions.find((a) => a.name === "file_waiver")!;
+    const params = new Map(fileWaiver.params.map((p) => [p.name, p]));
+
+    const signingFor = params.get("signing_for");
+    expect(signingFor).toBeDefined();
+    expect(signingFor!.required).toBe(false);
+    expect(signingFor!.description).toMatch(/dependant/i);
+    // The two params whose meaning changes have to say so, or an agent reading
+    // the manifest sends a call the endpoint refuses.
+    expect(params.get("email")!.description).toMatch(/dependant/i);
+    expect(params.get("guardian_email")!.description).toMatch(/required/i);
+    expect(params.get("guardian_name")!.description).toMatch(/required/i);
+
+    // ...and the shape it describes is the shape the schema takes.
+    const dependant = {
+      first_name: "Ada",
+      last_name: "Lovelace",
+      date_of_birth: "2016-03-02",
+      address: "1 Broadway",
+      phone: "0400000000",
+      signing_for: "dependant" as const,
+      guardian_email: "parent@example.com",
+      guardian_name: "Charles Babbage",
+      // Required because this child was under 18 on the signing date, which is
+      // an existing rule, unchanged.
+      guardian_relationship: "Father",
+      emergency_contact_name: "Charles",
+      emergency_contact_phone: "0400000001",
+      signed_on: "2026-01-15",
+      scan: [{ name: "w.pdf", type: "application/pdf" as const, data: "aGk=" }],
+    };
+    expect(paperWaiverUploadSchema.safeParse(dependant).success).toBe(true);
+    // And the address it refuses is refused.
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...dependant, email: "child@example.com" }).success,
+    ).toBe(false);
   });
 
   it("documents file_waiver's required params in step with the schema", () => {

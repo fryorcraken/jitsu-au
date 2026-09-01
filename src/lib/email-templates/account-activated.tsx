@@ -23,6 +23,18 @@ interface AccountActivatedEmailProps {
    * and, on first activation, no password either.
    */
   loginEmail: string;
+  /**
+   * The child this account was opened for, when it was opened by approving
+   * their waiver rather than the reader's own.
+   *
+   * Null for everyone signing for themselves, which is the common case and
+   * reads exactly as it always has. Set, it changes who the email is about: a
+   * parent who may never train themselves needs to know at a glance that this
+   * account is how they look after their child's training, or "your waiver has
+   * been approved" is a sentence about a form they did not fill in for
+   * themselves.
+   */
+  dependantName?: string | null;
   /** The sign-in page. Deliberately the only call to action in this email. */
   signInUrl: string;
   kbUrl: string;
@@ -56,6 +68,7 @@ export const AccountActivatedEmail = ({
   siteUrl,
   memberName,
   loginEmail,
+  dependantName,
   signInUrl,
   kbUrl,
   codeOfConductUrl,
@@ -69,13 +82,25 @@ export const AccountActivatedEmail = ({
     <Body style={main}>
       <Container style={container}>
         <Heading style={h1}>Your account is active</Heading>
-        <Text style={text}>
-          Hi {memberName || "there"}, your waiver has been approved and your account at{" "}
-          <Link href={siteUrl} style={link}>
-            <strong>{siteName}</strong>
-          </Link>{" "}
-          is now open. You&apos;re cleared to train.
-        </Text>
+        {dependantName ? (
+          <Text style={text}>
+            Hi {memberName || "there"}, {dependantName}&apos;s waiver has been approved and your
+            account at{" "}
+            <Link href={siteUrl} style={link}>
+              <strong>{siteName}</strong>
+            </Link>{" "}
+            is now open. {dependantName} is cleared to train, and you look after everything from
+            your account.
+          </Text>
+        ) : (
+          <Text style={text}>
+            Hi {memberName || "there"}, your waiver has been approved and your account at{" "}
+            <Link href={siteUrl} style={link}>
+              <strong>{siteName}</strong>
+            </Link>{" "}
+            is now open. You&apos;re cleared to train.
+          </Text>
+        )}
         <Text style={text}>
           Your login is <strong>{loginEmail}</strong>
         </Text>
@@ -91,14 +116,19 @@ export const AccountActivatedEmail = ({
           <Link href={codeOfConductUrl} style={itemLink}>
             The code of conduct
           </Link>
-          . How we train together: hygiene, mat etiquette, gear, and keeping each other safe. Please
-          read it and agree when you have a minute.
+          .{" "}
+          {dependantName
+            ? `How we train together: hygiene, mat etiquette, gear, and keeping each other safe. Please read it and agree on ${dependantName}'s behalf when you have a minute.`
+            : "How we train together: hygiene, mat etiquette, gear, and keeping each other safe. Please read it and agree when you have a minute."}
         </Text>
         <Text style={item}>
           <Link href={membershipUrl} style={itemLink}>
-            Your membership
+            {dependantName ? "Memberships" : "Your membership"}
           </Link>
-          . What you&apos;re on, what&apos;s been paid, and any invoices waiting on you.
+          .{" "}
+          {dependantName
+            ? "What each person on your account is on, what has been paid, and any invoices waiting on you."
+            : "What you're on, what's been paid, and any invoices waiting on you."}
         </Text>
         <Text style={item}>
           <Link href={blogUrl} style={itemLink}>

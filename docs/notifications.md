@@ -88,8 +88,10 @@ manager presses the button, which is why it sits at the top of the queue (see
 `composeManagerNotifications` for the full ordering and why).
 
 The waiver item's body says what approving leads to before the manager gets
-anywhere near the button: it activates the person's account, emails them to say
-so, and assigns the free trial (`docs/waivers.md`, rule 6). That is
+anywhere near the button: it activates an account, emails somebody to say so,
+and assigns the free trial (`docs/waivers.md`, rule 6). "Somebody" rather than
+"the person" since #105: for a child's waiver the account that opens and the
+inbox that hears about it are the **parent's**, not the participant's. That is
 outward-facing and cannot be taken back quietly, and "anything irreversible gets
 a confirm that says what will happen" is the club's own UX rule.
 

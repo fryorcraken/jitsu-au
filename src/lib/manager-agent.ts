@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "14",
+  version: "15",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,19 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "15",
+      // Additive: one new optional param on file_waiver, and one existing param
+      // that stops being required only when that param says so. Every call that
+      // worked before still works and still means the same thing.
+      breaking: false,
+      notes: [
+        'file_waiver takes signing_for: "self" (the default, and what every existing call means) or "dependant", for a person on somebody else\'s account, typically a child. A dependant gets their own person record with their own waiver, trial and attendance, and no login ever, which is what lets a family file one form per child under one address instead of the second overwriting the first.',
+        'With signing_for: "dependant", email is REFUSED rather than required: a dependant has none of their own. guardian_email and guardian_name become required instead, because the guardian is who the club writes to and whose login approving the waiver opens. email stays required for the default "self".',
+        "Which existing child a dependant filing belongs to is decided by matching first_name, last_name and date_of_birth within that guardian's household, so spell them the same way each time or a second person is created. The duplicate-waiver check for a dependant looks at that child's own waivers, not the guardian's.",
+        "A guardian who is themselves somebody's dependant is refused: a household is one level deep.",
+      ],
+    },
     {
       version: "14",
       // Additive: one new optional param on each of two actions, and two fields
@@ -490,10 +503,16 @@ export const AGENT_MANIFEST: {
         { name: "address", required: true, description: "As written on the form." },
         { name: "phone", required: true, description: "As written on the form." },
         {
+          name: "signing_for",
+          required: false,
+          description:
+            'Who the paper is for: "self" (the default, and every previous call) or "dependant" for somebody on another person\'s account, typically a child. A dependant gets their own person record and never a login; the guardian below is who the club writes to and whose login approval opens. Which existing child it attaches to is matched on first_name, last_name and date_of_birth within that guardian\'s household.',
+        },
+        {
           name: "email",
           required: true,
           description:
-            "Identifies the person: an address the club already knows attaches to that person, a new one creates one. A typo makes a second person.",
+            'Identifies the person: an address the club already knows attaches to that person, a new one creates one. A typo makes a second person. Required for signing_for "self"; REFUSED for "dependant", who has no address of their own, where guardian_email is given instead.',
         },
         {
           name: "uts_student_number",
@@ -527,7 +546,7 @@ export const AGENT_MANIFEST: {
           name: "guardian_name",
           required: false,
           description:
-            "The parent or legal guardian who signed a minor's form, when the paper names them separately from the emergency contact. Omit for an older form with only one contact block: that contact is then taken as the signer.",
+            'The parent or legal guardian who signed a minor\'s form, when the paper names them separately from the emergency contact. Omit for an older form with only one contact block: that contact is then taken as the signer. REQUIRED for signing_for "dependant", where the guardian is the whole point of the filing.',
         },
         {
           name: "guardian_relationship",
@@ -549,7 +568,7 @@ export const AGENT_MANIFEST: {
           name: "guardian_email",
           required: false,
           description:
-            "The guardian's email. Omit when it is the participant's. Never used to identify the person: the account is always keyed on the participant's email above.",
+            'The guardian\'s email. Omit when it is the participant\'s. For signing_for "self" it is evidence only, never used to identify anybody: the account stays keyed on the participant\'s email above. For "dependant" it is REQUIRED and it IS the identifying address, because the participant has none: it resolves the guardian (creating their locked person record if this is their first child), it is what the club writes to, and approving the waiver opens that login.',
         },
         {
           name: "medical_notes",
