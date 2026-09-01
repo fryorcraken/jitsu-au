@@ -98,8 +98,14 @@ function PersonPage() {
   if (!user?.id) return null;
 
   const name = profile ? nameWithPreferred(profile) : (person?.name ?? "");
-  const first = profile ? greetingName(profile) : "";
-  const voice = subjectVoice(first || name);
+  const first = profile ? greetingName(profile) : (person?.greeting_name ?? "");
+  // ⚠️ The fallback is "this person", never the second person. `subjectVoice("")`
+  // returns the SELF voice, which is the safe answer on a card that might be
+  // about the reader; it is the wrong answer on a page that is definitionally
+  // about somebody else. With no name on file it rendered "you has no
+  // membership yet", and flipped every heading on the page ("Your details",
+  // "Your records") to describe the reader while showing a child's record.
+  const voice = subjectVoice(first || name || "this person");
   const details = { userId, voice, profile, loading, onSaved: setProfile };
 
   const backToAccount = (

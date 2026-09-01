@@ -36,7 +36,8 @@ import {
   listMembershipPlans,
   startMembership,
 } from "@/lib/membership.functions";
-import { firstWord, subjectVoice } from "@/lib/subject-voice";
+import { firstWord, subjectVoice, type SubjectVoice } from "@/lib/subject-voice";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   listHouseholdInvoices,
   listMyHousehold,
@@ -60,26 +61,44 @@ type Mine = Awaited<ReturnType<typeof getMyMemberships>>;
 // The words are this page's own: a member reads "On trial", a manager reads
 // "visitor". The colours are not, and come from the shared map so the badge a
 // member sees matches the one a manager sees for the same phase.
-const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string }> = {
+const LIFECYCLE_COPY: Record<
+  LifecycleStatus,
+  { label: string; blurb: (v: SubjectVoice) => string }
+> = {
   lead: {
     label: "New here",
-    blurb: "Welcome! Sign the waiver and your two free trial sessions are waiting.",
+    blurb: (v) =>
+      v.isSelf
+        ? "Welcome! Sign the waiver and your two free trial sessions are waiting."
+        : `Sign ${v.whose} waiver and their two free trial sessions are waiting.`,
   },
   applicant: {
     label: "Waiver pending",
-    blurb: "Your waiver is with the club for review. Hold tight!",
+    blurb: (v) =>
+      v.isSelf
+        ? "Your waiver is with the club for review. Hold tight!"
+        : `${v.Whose} waiver is with the club for review. Hold tight!`,
   },
   visitor: {
     label: "On trial",
-    blurb: "You're on your free trial. Join a plan when you're ready to keep training.",
+    blurb: (v) =>
+      v.isSelf
+        ? "You're on your free trial. Join a plan when you're ready to keep training."
+        : `${v.who} is on the free trial. Join a plan when you're ready for more.`,
   },
   member: {
     label: "Member",
-    blurb: "You're an active member. See you on the mat!",
+    blurb: (v) =>
+      v.isSelf
+        ? "You're an active member. See you on the mat!"
+        : `${v.who} is an active member. See you on the mat!`,
   },
   lapsed: {
     label: "Lapsed",
-    blurb: "Your membership has lapsed. Renew below to keep training.",
+    blurb: (v) =>
+      v.isSelf
+        ? "Your membership has lapsed. Renew below to keep training."
+        : `${v.Whose} membership has lapsed. Renew below to keep them training.`,
   },
 };
 
@@ -97,13 +116,17 @@ const LIFECYCLE_COPY: Record<LifecycleStatus, { label: string; blurb: string }> 
 function lifecycleCopy(
   lifecycle: LifecycleStatus,
   memberships: { status: string; kind: string | null; sessions_remaining: number | null }[],
+  voice: SubjectVoice,
 ) {
   if (isTrialUsedUp(lifecycle, memberships[0]))
     return {
       label: TRIAL_USED_UP_LABEL,
-      blurb: "You've used your free trial classes. Pick a plan below to keep training.",
+      blurb: voice.isSelf
+        ? "You've used your free trial classes. Pick a plan below to keep training."
+        : `${voice.who} has used their free trial classes. Pick a plan below to keep them training.`,
     };
-  return LIFECYCLE_COPY[lifecycle];
+  const copy = LIFECYCLE_COPY[lifecycle];
+  return { label: copy.label, blurb: copy.blurb(voice) };
 }
 
 /**
@@ -115,15 +138,20 @@ function lifecycleCopy(
  * condition of anything, so it renders as a note and never blocks a plan, and it
  * disappears entirely once they have agreed.
  */
-function CodeOfConductNudge() {
+function CodeOfConductNudge({ subjectId, voice }: { subjectId?: string; voice: SubjectVoice }) {
   const fetchSigner = useServerFn(getCodeOfConductSigner);
   const [state, setState] = useState<CodeOfConductState | null>(null);
 
   useEffect(() => {
-    fetchSigner({ data: { token: "" } })
+    // ⚠️ Asked about the SUBJECT. Without the target this nudge reports the
+    // CALLER's standing while sitting directly under a heading that names their
+    // child, so a parent reads "please agree to it" as being about the child and
+    // signs the wrong one -- or, worse, sees nothing because they personally
+    // agreed last year while the child never has.
+    fetchSigner({ data: { token: "", userId: subjectId } })
       .then((res) => setState(res.status?.state ?? null))
       .catch(() => setState(null));
-  }, [fetchSigner]);
+  }, [fetchSigner, subjectId]);
 
   if (state === null || state === "signed") return null;
 
@@ -131,11 +159,16 @@ function CodeOfConductNudge() {
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
       <p className="text-sm text-muted-foreground">
         {state === "outdated"
-          ? "We have updated our code of conduct since you agreed to it. Please have another read."
-          : "While you're here, please read our code of conduct and agree to it. It takes a minute."}
+          ? `We have updated our code of conduct since ${voice.isSelf ? "you agreed" : `you agreed for ${voice.who}`} to it. Please have another read.`
+          : voice.isSelf
+            ? "While you're here, please read our code of conduct and agree to it. It takes a minute."
+            : `While you're here, please read our code of conduct and agree to it for ${voice.who}. It takes a minute.`}
       </p>
       <Button asChild size="sm" variant="outline">
-        <Link to="/code-of-conduct" search={{ t: undefined }}>
+        <Link
+          to="/code-of-conduct"
+          search={voice.isSelf ? { t: undefined } : { t: undefined, for: subjectId }}
+        >
           Read it
         </Link>
       </Button>
@@ -164,8 +197,13 @@ function WhoIsThisFor({
   onSelect: (userId: string | undefined) => void;
 }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-sm font-medium">Who is this for?</p>
+    // `role="group"` + `aria-labelledby`, or a screen reader hears "You, toggle
+    // button, pressed" with no question attached: the visible label is a
+    // paragraph and nothing tied it to the buttons.
+    <div className="rounded-lg border bg-card p-4" role="group" aria-labelledby="who-is-this-for">
+      <p id="who-is-this-for" className="text-sm font-medium">
+        Who is this for?
+      </p>
       <div className="mt-3 flex flex-wrap gap-2">
         {people.map((person) => {
           const active = person.is_self ? !selectedId : selectedId === person.user_id;
@@ -178,7 +216,9 @@ function WhoIsThisFor({
               aria-pressed={active}
               onClick={() => onSelect(person.is_self ? undefined : person.user_id)}
             >
-              {person.is_self ? "You" : (firstWord(person.name) ?? "Someone on your account")}
+              {person.is_self
+                ? "You"
+                : (person.greeting_name ?? firstWord(person.name) ?? "This person")}
             </Button>
           );
         })}
@@ -300,6 +340,7 @@ function HowToPay({
 
 function MembershipPage() {
   const navigate = useNavigate();
+  const { confirm, confirmDialog } = useConfirm();
   const { for: subjectParam } = Route.useSearch();
   const fetchPlans = useServerFn(listMembershipPlans);
   const fetchMine = useServerFn(getMyMemberships);
@@ -321,7 +362,13 @@ function MembershipPage() {
   const subjectId = subjectParam?.toLowerCase();
   const subject = household.find((p) => p.user_id.toLowerCase() === subjectId) ?? null;
   const dependants = household.filter((p) => !p.is_self);
-  const voice = subjectVoice(subject && !subject.is_self ? firstWord(subject.name) : null);
+  // `greeting_name`, not the first word of the legal name: `nameWithPreferred`
+  // renders `Ada "Addy" Lovelace`, so the first word is "Ada" while every other
+  // screen calls her "Addy". The two pages were naming the same child
+  // differently.
+  const voice = subjectVoice(
+    subject && !subject.is_self ? (subject.greeting_name ?? firstWord(subject.name)) : null,
+  );
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [mine, setMine] = useState<Mine | null>(null);
@@ -331,6 +378,10 @@ function MembershipPage() {
   }>({ details: null, unreadable: false });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // A `?for=` naming somebody who is not on this account is refused by the
+  // household gate. That is NOT a dropped connection, and rendering it as one
+  // offered a "Try again" button that could never succeed.
+  const [refused, setRefused] = useState(false);
   const [studentNumber, setStudentNumber] = useState("");
   const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
   // The insurance checkbox is not raw state: it starts from the rules in
@@ -427,9 +478,19 @@ function MembershipPage() {
     () => () => {
       setLoading(true);
       return reload()
-        .then(() => setLoadError(null))
+        .then(() => {
+          setLoadError(null);
+          setRefused(false);
+        })
         .catch((e) => {
-          const message = describeLoadError(e, "Could not load your membership");
+          // The gate's own sentence, matched rather than parsed for a code: it
+          // is the one message `assertActingFor` gives for every no.
+          if (e instanceof Error && e.message.includes("only see or change your own account")) {
+            setRefused(true);
+            setLoadError(null);
+            return;
+          }
+          const message = describeLoadError(e, "Could not load this membership");
           setLoadError(message);
           toast.error(message);
         })
@@ -455,6 +516,27 @@ function MembershipPage() {
   }, [scrollToPay]);
 
   async function choose(plan: Plan) {
+    // ⚠️ Only when buying for somebody else, and that narrowness is the point.
+    // Confirming every purchase would train people to click through, which is
+    // what stops the one confirm that matters from working (CLAUDE.md). But
+    // "who is this for?" sits two or three screens above these buttons on a
+    // phone, and a plan bought for the wrong child is an invoice, an email and
+    // a membership under the wrong name, none of which this screen can undo.
+    if (!voice.isSelf) {
+      const total = computeMembershipPrice(plan, isStudent);
+      const ok = await confirm({
+        title: `Start ${voice.whose} ${plan.name}?`,
+        description: `This is for ${voice.who}, not for you.`,
+        details: [
+          total === 0
+            ? "It starts straight away, at no cost."
+            : `We email you an invoice for ${formatCents(total)}, with a reference to pay by bank transfer.`,
+          `It goes on ${voice.whose} record, not yours.`,
+        ],
+        confirmLabel: `Yes, for ${voice.who}`,
+      });
+      if (!ok) return;
+    }
     setPendingCode(plan.code);
     try {
       await start({
@@ -502,6 +584,29 @@ function MembershipPage() {
 
   if (loading) return <Loading className="p-8" />;
 
+  // Same screen for somebody else's child and for a uuid that is nobody, so the
+  // address bar cannot be used to ask the club who exists.
+  if (refused)
+    return (
+      <section className="mx-auto max-w-2xl px-4 py-12">
+        <h1 className="text-3xl font-black">Membership</h1>
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>We can&apos;t show you this page</CardTitle>
+            <CardDescription>
+              You can only see or change your own account and the people on it. If this should be
+              one of them, ask us and we will sort it out.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link to="/membership">Back to your membership</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
+    );
+
   // In place of the page, not beside it. With nothing loaded the status card
   // falls back to "lead" and greets a paid-up member as somebody new, and the
   // plan list would be empty, which reads as a club with nothing to sell.
@@ -511,7 +616,7 @@ function MembershipPage() {
         <h1 className="text-3xl font-black">Membership</h1>
         <LoadFailure
           className="mt-6"
-          what="Your membership"
+          what={voice.isSelf ? "Your membership" : `${voice.Whose} membership`}
           message={loadError}
           hint="Nothing has changed, and anything you have already paid for is still yours."
           onRetry={() => void load()}
@@ -523,7 +628,7 @@ function MembershipPage() {
     );
 
   const lifecycle = mine?.lifecycle ?? "lead";
-  const status = lifecycleCopy(lifecycle, mine?.memberships ?? []);
+  const status = lifecycleCopy(lifecycle, mine?.memberships ?? [], voice);
   // What the member still owes, as transfers rather than as rows: a bundled
   // plan + insurance is two memberships behind one reference and one payment.
   const unpaid = unpaidInvoices(mine?.memberships ?? []);
@@ -542,6 +647,7 @@ function MembershipPage() {
 
   return (
     <>
+      {confirmDialog}
       <section className="mx-auto max-w-4xl space-y-8 px-4 py-12">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -633,8 +739,8 @@ function MembershipPage() {
               </div>
               {mine.sessions_attended > 0 && (
                 <p className="mt-3 text-sm text-muted-foreground">
-                  You have trained {mine.sessions_attended} time
-                  {mine.sessions_attended === 1 ? "" : "s"} with us.
+                  {voice.isSelf ? "You have" : `${voice.who} has`} trained {mine.sessions_attended}{" "}
+                  time{mine.sessions_attended === 1 ? "" : "s"} with us.
                 </p>
               )}
             </CardContent>
@@ -664,7 +770,7 @@ function MembershipPage() {
           </div>
         )}
 
-        <CodeOfConductNudge />
+        <CodeOfConductNudge subjectId={subjectId} voice={voice} />
 
         <div>
           <div className="flex flex-wrap items-end justify-between gap-4">
@@ -674,7 +780,14 @@ function MembershipPage() {
                 Pay per class, or get a membership for the whole training period.
               </p>
             </div>
-            <div className="rounded-lg border bg-card p-3">
+            {/* Hidden, not just cleared, when buying for a child. The student
+                rate is a fact about the person TRAINING, and a nine-year-old is
+                not a UTS student. Leaving the box on screen invited a parent to
+                type their own number onto their child's invoice, which is the
+                same bug the value-reset above already guards against. */}
+            <div
+              className={cn("rounded-lg border bg-card p-3", voice.isSelf ? undefined : "hidden")}
+            >
               <Label htmlFor="sid" className="text-xs">
                 UTS student number <span className="text-muted-foreground">(optional)</span>
               </Label>
@@ -708,8 +821,8 @@ function MembershipPage() {
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
                   {insuranceRules.canDeselect
-                    ? `Required to train. Your cover runs to ${insuranceEndsAt ? new Date(insuranceEndsAt).toLocaleDateString("en-AU") : ""}, so you can leave it off this time.`
-                    : "Required to train, so it comes with your plan. It covers you and your club affiliation for a year."}
+                    ? `Required to train. ${voice.Whose} cover runs to ${insuranceEndsAt ? new Date(insuranceEndsAt).toLocaleDateString("en-AU") : ""}, so you can leave it off this time.`
+                    : `Required to train, so it comes with the plan. It covers ${voice.who} and the club affiliation for a year.`}
                 </span>
               </span>
             </label>
@@ -822,7 +935,9 @@ function MembershipPage() {
                     {pendingCode === plan.code
                       ? "Starting..."
                       : hasStarted
-                        ? "Choose & pay by transfer"
+                        ? voice.isSelf
+                          ? "Choose & pay by transfer"
+                          : `Choose for ${voice.who} & pay by transfer`
                         : `Join from ${formatDateOnly(plan.starts_on)}`}
                   </Button>
                 </div>
@@ -869,8 +984,12 @@ function MembershipPage() {
                         {pendingCode === plan.code
                           ? "Starting..."
                           : price === 0
-                            ? "Start free"
-                            : "Choose & pay by transfer"}
+                            ? voice.isSelf
+                              ? "Start free"
+                              : `Start free for ${voice.who}`
+                            : voice.isSelf
+                              ? "Choose & pay by transfer"
+                              : `Choose for ${voice.who} & pay by transfer`}
                       </Button>
                     </div>
                   );
@@ -881,11 +1000,19 @@ function MembershipPage() {
         </div>
 
         <p className="text-sm text-muted-foreground">
-          Haven't signed your training waiver yet?{" "}
-          <Link to="/waiver" className="underline hover:text-foreground">
+          {voice.isSelf
+            ? "Haven't signed your training waiver yet?"
+            : `No waiver for ${voice.who} yet?`}{" "}
+          {/* Carries the subject, so the form opens on the right person rather
+              than on whoever is logged in. */}
+          <Link
+            to="/waiver"
+            search={voice.isSelf ? {} : { for: subjectId }}
+            className="underline hover:text-foreground"
+          >
             Sign it here
           </Link>{" "}
-          before your first class.
+          before {voice.isSelf ? "your" : "their"} first class.
         </p>
       </section>
     </>

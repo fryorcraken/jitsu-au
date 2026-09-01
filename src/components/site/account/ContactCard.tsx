@@ -92,9 +92,11 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
       <CardHeader>
         <CardTitle>Contact</CardTitle>
         <CardDescription>
-          How we reach {voice.who}, and who we call if something happens in class. Saving here
-          updates our current record straight away. It does not change a waiver already signed,
-          which keeps what was typed at the time.
+          {voice.isSelf
+            ? "How we reach you, and who we call if something happens in class."
+            : `How we reach you about ${voice.who}, and who we call if something happens in class.`}{" "}
+          Saving here updates our current record straight away. It does not change a waiver already
+          signed, which keeps what was typed at the time.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -103,7 +105,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
-              <Label htmlFor="account-phone">Mobile</Label>
+              <Label htmlFor="account-phone">Mobile{voice.isSelf ? "" : " to reach you on"}</Label>
               <Input
                 id="account-phone"
                 type="tel"
@@ -124,12 +126,14 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
                     clearSaveError();
                   }}
                   className="mt-0.5"
-                  aria-label="Consent to SMS or WhatsApp contact"
                 />
                 <span>
+                  {/* "I", not "we": everywhere else on this card "we" is the
+                      club, so "we agree" read as the club agreeing with itself.
+                      The person ticking is one parent. */}
                   {voice.isSelf
                     ? "I agree to be contacted by SMS or WhatsApp, and added to club WhatsApp groups."
-                    : `We agree to ${voice.who} being contacted by SMS or WhatsApp, and added to club WhatsApp groups.`}
+                    : `I agree to ${voice.who} being contacted by SMS or WhatsApp, and added to club WhatsApp groups.`}
                 </span>
               </label>
             </div>
@@ -201,6 +205,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}
+                keptOnDevice={false}
               />
             )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />

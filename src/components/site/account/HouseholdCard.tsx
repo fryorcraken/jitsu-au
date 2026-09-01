@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { LoadFailure } from "@/components/site/LoadFailure";
+import { Loading } from "@/components/site/Loading";
 import { Pill } from "@/components/site/StatusPill";
 import { lifecycleClass } from "@/lib/status-colours";
 import { lifecycleLabel, membershipStatusLabel } from "@/lib/status-labels";
@@ -27,16 +28,37 @@ import { type HouseholdPerson } from "@/lib/household.functions";
  */
 export function HouseholdCard({
   people,
+  loading,
   loadError,
   onRetry,
 }: {
   people: HouseholdPerson[];
+  /**
+   * Still fetching. Rendered rather than treated as "nobody here", because the
+   * page above uses the same answer to decide which detail cards to show: while
+   * this was silently empty a parent-only account painted four cards it does
+   * not have and then removed them a moment later.
+   */
+  loading: boolean;
   /** A failed read is not "nobody is on your account". */
   loadError: string | null;
   onRetry: () => void;
 }) {
   const dependants = people.filter((p) => !p.is_self);
   const self = people.find((p) => p.is_self) ?? null;
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>People on your account</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Loading />
+        </CardContent>
+      </Card>
+    );
+  }
 
   // Nothing to say, and nothing went wrong. Say nothing.
   if (!loadError && dependants.length === 0) return null;
@@ -72,11 +94,13 @@ export function HouseholdCard({
                   // A whole-row target rather than a small "view" link at the
                   // end: this is read on a phone, and a name is a much easier
                   // thing to hit with a thumb than a word.
-                  className="flex items-center gap-3 rounded-md border px-3 py-3 transition-colors hover:bg-muted/50"
+                  className="flex items-center gap-3 rounded-md border px-3 py-3 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{person.name || "Unnamed"}</span>
+                      <span className="font-medium">
+                        {person.name || "Someone on your account"}
+                      </span>
                       {person.is_self && (
                         <span className="text-xs text-muted-foreground">(you)</span>
                       )}

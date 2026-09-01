@@ -40,7 +40,14 @@ beforeEach(() => vi.clearAllMocks());
 
 /** Render the card the way `/account` does, with the fetch already done. */
 function show(people: unknown[], loadError: string | null = null) {
-  return render(<HouseholdCard people={people as never} loadError={loadError} onRetry={retry} />);
+  return render(
+    <HouseholdCard
+      people={people as never}
+      loading={false}
+      loadError={loadError}
+      onRetry={retry}
+    />,
+  );
 }
 
 describe("an account with nobody else on it", () => {
@@ -86,6 +93,19 @@ describe("a parent with a child", () => {
     ]);
 
     expect(screen.getByText("No membership yet")).toBeInTheDocument();
+  });
+});
+
+describe("while the household is still loading", () => {
+  it("says so rather than rendering nothing", () => {
+    // Nothing is the answer for almost every account, so an empty render is
+    // indistinguishable from "loaded, and there is nobody else here". A parent
+    // would watch the page decide they have no children and then change its
+    // mind, which is the one thing this card must never do.
+    render(<HouseholdCard people={[]} loading loadError={null} onRetry={retry} />);
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("People on your account")).toBeInTheDocument();
   });
 });
 

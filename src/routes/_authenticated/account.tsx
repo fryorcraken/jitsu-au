@@ -135,6 +135,11 @@ function AccountPage() {
   // with the card sitting on it.
   const [household, setHousehold] = useState<HouseholdPerson[]>([]);
   const [householdError, setHouseholdError] = useState<string | null>(null);
+  // Tracked separately from `loading` below, which is about the profile row.
+  // Until this answers, the page does not yet know whether the person reading
+  // is a parent who never trains, and the four cards that depend on that must
+  // not be painted only to be taken away a moment later.
+  const [householdLoading, setHouseholdLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   // A failed fetch is NOT "you have no details". Conflating the two renders the
   // cards editable and empty, and one Save then writes those blanks over a
@@ -143,6 +148,7 @@ function AccountPage() {
   const [loadFailed, setLoadFailed] = useState(false);
 
   const loadHousehold = useCallback(() => {
+    setHouseholdLoading(true);
     return fetchHousehold()
       .then((rows) => {
         setHousehold(rows);
@@ -151,7 +157,8 @@ function AccountPage() {
       .catch((e) => {
         setHousehold([]);
         setHouseholdError(describeLoadError(e, "Could not load the people on your account"));
-      });
+      })
+      .finally(() => setHouseholdLoading(false));
   }, [fetchHousehold]);
 
   const load = useCallback(() => {
@@ -194,6 +201,14 @@ function AccountPage() {
   // leaves `self` null, which must not hide a member's own records behind a
   // dropped connection.
   const parentOnly = dependants.length > 0 && self != null && !self.has_any_waiver;
+  // "Show this person their own records." False while the household is still
+  // in flight as well as for a parent-only account: `parentOnly` is false
+  // during that window because `household` is still `[]`, so keying the cards
+  // on it alone paints kit sizing, photos, waivers and the code of conduct,
+  // each with its own spinner, and then removes all four when the answer
+  // lands. Withholding them for that moment and adding them is the calmer of
+  // the two, and it is the direction that never takes something away.
+  const ownRecords = !householdLoading && !parentOnly;
 
   // Second person, because this page is about the person reading it. The same
   // cards on `/account/<id>` are handed a name instead.
@@ -244,7 +259,12 @@ function AccountPage() {
       {/* Above "Your details", because who is on the account is the frame for
           everything below it. Renders nothing at all for an account with no
           dependants, which is almost every account. */}
-      <HouseholdCard people={household} loadError={householdError} onRetry={loadHousehold} />
+      <HouseholdCard
+        people={household}
+        loading={householdLoading}
+        loadError={householdError}
+        onRetry={loadHousehold}
+      />
 
       <SectionHeading>Your details</SectionHeading>
 
@@ -269,24 +289,30 @@ function AccountPage() {
               has no kit to be sized and is in no photograph, so these two would
               be prompts to answer questions that do not apply to them. Contact
               details still do: they are how the club reaches the family. */}
-          {parentOnly ? null : <KitSizingCard {...details} />}
+          {ownRecords ? <KitSizingCard {...details} /> : null}
 
           <ContactCard {...details} />
 
-          {parentOnly ? null : <MediaConsentCard {...details} />}
+          {ownRecords ? <MediaConsentCard {...details} /> : null}
         </>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        {parentOnly
-          ? "Your email is your login, so a manager changes that one. Everything about the people on your account is on their own pages."
-          : "Your legal name and date of birth are not editable here, because a signed waiver records them as they were given. Ask us and we will correct them. Your email is your login, so a manager changes that one too."}
-      </p>
+      {/* Held back until the household lands for the same reason as the cards
+          above: the two sentences say different things, and the majority case
+          is the second one, so guessing would show most people the wrong note
+          and then swap it under them. */}
+      {householdLoading ? null : (
+        <p className="text-xs text-muted-foreground">
+          {parentOnly
+            ? "Your email is your login, so a manager changes that one. Everything about the people on your account is on their own pages."
+            : "Your legal name and date of birth are not editable here, because a signed waiver records them as they were given. Ask us and we will correct them. Your email is your login, so a manager changes that one too."}
+        </p>
+      )}
 
       {/* Nothing to show somebody who has signed nothing and agreed to nothing.
           The people they look after each have their own records, on their own
           pages, which the card above links to. */}
-      {parentOnly ? null : (
+      {ownRecords ? (
         <>
           <SectionHeading>Your records</SectionHeading>
 
@@ -294,7 +320,7 @@ function AccountPage() {
 
           <CodeOfConductCard userId={userId} voice={voice} />
         </>
-      )}
+      ) : null}
 
       <SectionHeading>Calendar</SectionHeading>
 

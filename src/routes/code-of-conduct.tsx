@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Loading } from "@/components/site/Loading";
+import { LoadFailure } from "@/components/site/LoadFailure";
+import { describeLoadError } from "@/lib/load-error";
 import { SaveFailure } from "@/components/site/SaveFailure";
 import { CodeOfConductDocument } from "@/components/site/CodeOfConductDocument";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,11 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDate } from "@/lib/dates";
-import { CODE_OF_CONDUCT_ACKNOWLEDGEMENT, CODE_OF_CONDUCT_VERSION } from "@/lib/code-of-conduct";
+import {
+  CODE_OF_CONDUCT_ACKNOWLEDGEMENT,
+  CODE_OF_CONDUCT_VERSION,
+  codeOfConductAcknowledgementFor,
+} from "@/lib/code-of-conduct";
 import { acceptCodeOfConduct, getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import { codeOfConductSearchSchema } from "@/lib/validation";
 
@@ -78,6 +84,12 @@ function CodeOfConduct() {
   // Everything on this page that says "you" has to say their name instead, or a
   // parent cannot tell which child they are agreeing for.
   const subject = signerQ.data?.subject ?? null;
+  // The gate's own sentence, matched rather than parsed for a code, so a
+  // refusal and a dropped connection stay two different screens.
+  const refusedSubject =
+    signerQ.error instanceof Error &&
+    (signerQ.error.message.includes("only see or change your own account") ||
+      signerQ.error.message.includes("Sign in to your account to see this"));
   const subjectName = subject?.greeting_name ?? subject?.name ?? null;
 
   // Sign with the name the club has on file, without stopping anyone correcting
@@ -124,10 +136,10 @@ function CodeOfConduct() {
           : "Thanks. Your agreement is on file.",
       );
     } catch (err) {
+      // Short: `SaveFailure` already says the work is still here and carries
+      // the retry, so repeating both made the panel say each thing twice.
       setSaveError(
-        err instanceof Error && err.message
-          ? err.message
-          : "We could not file that just now. What you typed is still here, so try again.",
+        err instanceof Error && err.message ? err.message : "We could not reach the club just now.",
       );
     } finally {
       setSaving(false);
@@ -157,6 +169,32 @@ function CodeOfConduct() {
         <div className="mt-8">
           {signerQ.isPending ? (
             <Loading />
+          ) : signerQ.isError ? (
+            // ⚠️ Without this branch a thrown read fell through to
+            // `NotIdentifiedPanel`, which tells the reader to go and sign a
+            // training waiver first. Two different people got that: somebody on
+            // a dropped connection who has signed everything, and a parent
+            // whose `?for=` the household gate refused. Neither is "we have
+            // never heard of you", and neither had a retry button anywhere.
+            refusedSubject ? (
+              <div className="rounded-2xl border bg-card p-6 md:p-8">
+                <h2 className="text-xl font-bold">We can&apos;t show you this page</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  You can only see or change your own account and the people on it. If this should
+                  be one of them, ask us and we will sort it out.
+                </p>
+                <Button asChild variant="outline" className="mt-6">
+                  <Link to="/account">Back to your account</Link>
+                </Button>
+              </div>
+            ) : (
+              <LoadFailure
+                what="Whether you have agreed to this"
+                message={describeLoadError(signerQ.error, "Could not check where you stand")}
+                hint="If you have already agreed, that still stands."
+                onRetry={() => void signerQ.refetch()}
+              />
+            )
           ) : justSigned ? (
             <SignedPanel
               name={signer?.name ?? ""}
@@ -191,8 +229,8 @@ function CodeOfConduct() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {subjectName ? (
                     <>
-                      Agreeing on behalf of <strong>{subject?.name ?? subjectName}</strong>, signed
-                      by you as <strong>{signer.full_name}</strong>.
+                      You are agreeing for <strong>{subject?.name ?? subjectName}</strong>, signing
+                      as <strong>{signer.full_name}</strong>.
                     </>
                   ) : (
                     <>
@@ -205,10 +243,10 @@ function CodeOfConduct() {
                 </p>
                 {status?.state === "outdated" && (
                   <p className="mt-3 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
-                    {subjectName ? `Agreed for ${subjectName}` : "You agreed"} to version{" "}
-                    {status.accepted_version} on {formatDate(status.accepted_at ?? "")}. We have
-                    updated it since, so please read it again and agree to version{" "}
-                    {CODE_OF_CONDUCT_VERSION}.
+                    You agreed to version {status.accepted_version}
+                    {subjectName ? ` for ${subjectName}` : ""} on{" "}
+                    {formatDate(status.accepted_at ?? "")}. We have updated it since, so please read
+                    it again and agree to version {CODE_OF_CONDUCT_VERSION}.
                   </p>
                 )}
               </div>
@@ -222,7 +260,15 @@ function CodeOfConduct() {
                   }}
                   className="mt-0.5"
                 />
-                <span>{CODE_OF_CONDUCT_ACKNOWLEDGEMENT}</span>
+                {/* ⚠️ The undertaking has to match who is bound by it. A parent
+                    signing for their nine-year-old was ticking a box saying
+                    THEY would follow the rules, on a form filed against the
+                    child. This is the most load-bearing string in the flow. */}
+                <span>
+                  {subjectName
+                    ? codeOfConductAcknowledgementFor(subjectName)
+                    : CODE_OF_CONDUCT_ACKNOWLEDGEMENT}
+                </span>
               </label>
 
               <div>
@@ -255,6 +301,7 @@ function CodeOfConduct() {
                     void onSubmit({ preventDefault: () => {} } as React.FormEvent<HTMLFormElement>)
                   }
                   retrying={saving}
+                  keptOnDevice={false}
                 />
               )}
 
@@ -298,8 +345,8 @@ function SignedPanel({
               : `You're all set${name ? `, ${name}` : ""}`}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {forName ? `${forName} is agreed to` : "You agreed to"} version {version} of the code of
-            conduct
+            You agreed to version {version} of the code of conduct
+            {forName ? ` for ${forName}` : ""}
             {acceptedAt ? ` on ${formatDate(acceptedAt)}` : ""}. There is nothing else to do. If we
             change the rules, we will ask you to read them again.
           </p>

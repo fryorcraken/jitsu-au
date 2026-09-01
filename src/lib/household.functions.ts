@@ -13,6 +13,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { isDependant, listHousehold } from "@/lib/household";
 import {
+  greetingName,
   nameWithPreferred,
   unpaidInvoices,
   type LifecycleStatus,
@@ -69,6 +70,16 @@ export type HouseholdPerson = {
   user_id: string;
   /** Legal full name with the preferred name quoted in. */
   name: string | null;
+  /**
+   * What to CALL them: preferred name, else first name.
+   *
+   * Carried separately because the two answer different questions and a screen
+   * that derives one from the other gets it wrong. `nameWithPreferred` renders
+   * `Ada "Addy" Lovelace`, so taking its first word gives "Ada" -- the legal
+   * name -- while every other screen greets her as "Addy". Two screens in this
+   * PR were calling the same child different things for exactly that reason.
+   */
+  greeting_name: string | null;
   /** The account holder themselves, rather than somebody on their account. */
   is_self: boolean;
   /** Where they are in the club's funnel, for the pill beside their name. */
@@ -170,6 +181,7 @@ export const listMyHousehold = createServerFn({ method: "GET" })
       return {
         user_id: person.user_id,
         name: summary?.name ?? nameWithPreferred(person) ?? null,
+        greeting_name: summary?.greeting_name ?? greetingName(person) ?? null,
         is_self: person.user_id === context.userId,
         lifecycle_status: summary?.lifecycle_status ?? "lead",
         has_any_waiver: anyWaiver.has(person.user_id),

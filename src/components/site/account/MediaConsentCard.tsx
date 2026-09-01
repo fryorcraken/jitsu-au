@@ -96,7 +96,7 @@ export function MediaConsentCard({ userId, voice, profile, loading, onSaved }: D
                     ? `We will not use any photo or video of ${voice.who}.`
                     : voice.isSelf
                       ? "You have not told us either way yet. Until you do, we will ask before using anything you are in."
-                      : `Nobody has told us either way yet. Until somebody does, we will ask before using anything ${voice.who} is in.`}
+                      : `You have not told us about ${voice.who} yet. Until you do, we will ask before using any photo they are in.`}
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -107,7 +107,7 @@ export function MediaConsentCard({ userId, voice, profile, loading, onSaved }: D
                 aria-pressed={consent === true}
                 onClick={() => choose(true)}
               >
-                {voice.isSelf ? "Yes, I consent" : "Yes, we consent"}
+                Yes, I consent
               </Button>
               <Button
                 type="button"
@@ -116,7 +116,7 @@ export function MediaConsentCard({ userId, voice, profile, loading, onSaved }: D
                 aria-pressed={consent === false}
                 onClick={() => choose(false)}
               >
-                {voice.isSelf ? "No, I don't consent" : "No, we don't consent"}
+                No, I don't consent
               </Button>
             </div>
             {saveError && (
@@ -125,6 +125,7 @@ export function MediaConsentCard({ userId, voice, profile, loading, onSaved }: D
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}
+                keptOnDevice={false}
               />
             )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />

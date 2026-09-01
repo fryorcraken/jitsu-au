@@ -127,6 +127,7 @@ export function AboutYouCard({ userId, voice, profile, loading, onSaved }: Detai
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}
+                keptOnDevice={false}
               />
             )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />

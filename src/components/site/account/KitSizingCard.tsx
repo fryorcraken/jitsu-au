@@ -65,7 +65,7 @@ export function KitSizingCard({ userId, voice, profile, loading, onSaved }: Deta
         <CardTitle>Kit sizing</CardTitle>
         <CardDescription>
           So we can order the right gi and belt for {voice.who}, and hand{" "}
-          {voice.isSelf ? "you" : voice.who} the right loan gear. Both are optional.
+          {voice.isSelf ? "you" : "them"} the right loan gear. Both are optional.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -110,6 +110,7 @@ export function KitSizingCard({ userId, voice, profile, loading, onSaved }: Deta
                 message={saveError}
                 onRetry={() => void retrySave?.()}
                 retrying={busy}
+                keptOnDevice={false}
               />
             )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />

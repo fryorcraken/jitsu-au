@@ -23,6 +23,7 @@ export function SaveFailure({
   message,
   onRetry,
   retrying,
+  keptOnDevice = true,
   className,
 }: {
   /** What was being saved, in the person's words: "post", "article". */
@@ -31,6 +32,15 @@ export function SaveFailure({
   message: string;
   onRetry: () => void;
   retrying?: boolean;
+  /**
+   * Whether a draft really is kept on the device (`useEditorDraft`).
+   *
+   * ⚠️ True by default because the three long-form editors this was written for
+   * do keep one. Pass FALSE from a form that does not, or the panel makes a
+   * promise the app cannot honour: a short form on a phone that the system
+   * reclaims loses everything, having just told the person it was safe.
+   */
+  keptOnDevice?: boolean;
   className?: string;
 }) {
   return (
@@ -43,8 +53,11 @@ export function SaveFailure({
         This {what} was not saved.
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
-        {message} Everything you have written is still on this screen and kept on this device, so
-        nothing is lost. Try again when you have a connection.
+        {message}{" "}
+        {keptOnDevice
+          ? "Everything you have written is still on this screen and kept on this device, so nothing is lost."
+          : "Everything you have typed is still on this screen, so nothing is lost."}{" "}
+        Try again when you have a connection.
       </p>
       <Button className="mt-3" size="sm" variant="outline" disabled={retrying} onClick={onRetry}>
         <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
