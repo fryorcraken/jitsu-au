@@ -278,10 +278,18 @@ await fillProfile(users.manager, {
   emergency_contact_relationship: "Partner",
   emergency_contact_phone: "0400 000 011",
 });
+/**
+ * What the member goes by. Hoisted because the fixture manifest has to report
+ * this person's name AS THE SCREENS PRINT IT, and a preferred name changes that
+ * form: `nameWithPreferred` renders `Tom "Tommy" Okafor`, not `Tom Okafor`.
+ * One constant, so the profile and the manifest cannot drift apart.
+ */
+const MEMBER_PREFERRED_NAME = "Tommy";
+
 await fillProfile(users.member, {
   first_name: PERSONAS.member.firstName,
   last_name: PERSONAS.member.lastName,
-  preferred_name: "Tommy",
+  preferred_name: MEMBER_PREFERRED_NAME,
   phone: "0400 000 002",
   address: "42 Harris Street, Pyrmont NSW 2009",
   date_of_birth: "1999-11-02",
@@ -487,7 +495,7 @@ await insert("waivers", [
     user_id: users.member,
     first_name: PERSONAS.member.firstName,
     last_name: PERSONAS.member.lastName,
-    preferred_name: "Tommy",
+    preferred_name: MEMBER_PREFERRED_NAME,
     email: PERSONAS.member.email,
     phone: "0400 000 002",
     address: "42 Harris Street, Pyrmont NSW 2009",
@@ -939,9 +947,20 @@ const fixture = {
   // way a person drives them, and the screen shows names.
   household: {
     guardianUserId: users.member,
-    // The name as the screens print it, so a spec can assert WHOSE account a
-    // child is on rather than merely that some caption rendered.
-    guardianName: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
+    /**
+     * The name as the screens PRINT it, so a spec can assert whose account a
+     * child is on rather than merely that some caption rendered.
+     *
+     * Not `first last`: every manager screen names a person through
+     * `nameWithPreferred`, which quotes a preferred name into the middle
+     * (`Tom "Tommy" Okafor`). This member has one, so the two forms differ and
+     * a spec written against the plain form fails on a page that is correct.
+     * Mirrored here rather than imported because this is a `.mjs` seed and that
+     * helper is TypeScript; if the display rule changes, this changes with it.
+     */
+    guardianName: MEMBER_PREFERRED_NAME
+      ? `${PERSONAS.member.firstName} "${MEMBER_PREFERRED_NAME}" ${PERSONAS.member.lastName}`
+      : `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
     children: [
       {
         userId: users.dependant,
