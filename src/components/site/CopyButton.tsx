@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,19 @@ interface CopyButtonProps {
  */
 export function CopyButton({ text, label, ariaLabel, className }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
+  // The tick's timer has to be cancellable. Left running it outlives the
+  // component: it fires against a React tree that is gone, and in the test
+  // environment it lands after jsdom has been torn down, where touching
+  // `window` throws `ReferenceError` OUTSIDE any test body. That failure is
+  // attributed to no test, so the suite reports every test passing and still
+  // exits non-zero, which reads as a random red CI run on an unrelated change.
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    },
+    [],
+  );
   return (
     <Button
       type="button"
@@ -41,7 +54,10 @@ export function CopyButton({ text, label, ariaLabel, className }: CopyButtonProp
         try {
           await navigator.clipboard.writeText(text);
           setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
+          // Cleared first, so a second click restarts the 1.5s rather than
+          // letting the first click's timer cut the new tick short.
+          if (resetTimer.current) clearTimeout(resetTimer.current);
+          resetTimer.current = setTimeout(() => setCopied(false), 1500);
         } catch {
           toast.error("Couldn't copy that automatically.", {
             description: `Select this and copy it by hand: ${text}`,

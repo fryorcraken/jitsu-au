@@ -4,7 +4,7 @@
 // used in places where the string it copies is nowhere else on screen (the
 // blog list copies a post URL it never prints), so a bare "copy it manually"
 // would leave nothing to select.
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,5 +56,31 @@ describe("CopyButton", () => {
   it("leaves the label as the accessible name when no ariaLabel is given", () => {
     render(<CopyButton text="x" label="Copy reference" />);
     expect(screen.getByRole("button", { name: "Copy reference" })).toBeInTheDocument();
+  });
+
+  // A timer left running outlives the component. In a browser it sets state on
+  // a tree that is gone; under the test runner it fires after jsdom has been
+  // torn down, throwing outside any test body — a failure attributed to no
+  // test, which exits the suite non-zero with every test reporting as passed.
+  // That is a red CI run nobody can trace to a change.
+  it("cancels the tick's timer when it is unmounted mid-countdown", async () => {
+    vi.useFakeTimers();
+    try {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+      const { unmount } = render(<CopyButton text="x" label="Copy link" />);
+
+      // fireEvent inside act, not userEvent: userEvent's own timers deadlock
+      // against the fake clock this test needs to count with.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+      });
+      expect(vi.getTimerCount()).toBe(1);
+
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
