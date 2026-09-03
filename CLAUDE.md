@@ -51,14 +51,34 @@ requests, the CI logs, and the screenshot artifacts.
   that a reachable credential exists — `supabase/lint/README.md` has the full
   finding and the security constraint that would still apply.
   - The two live checks survive as **scripts you run by hand** through Lovable's
-    SQL access (`supabase/lint/README.md` has the queries). Last run
-    **2026-08-22**: **68 migration files, 0 unapplied**, and **18 client grants
-    live, 18 expected, 0 unexpected**. So
+    SQL access (`supabase/lint/README.md` has the queries, and **owns these
+    figures** — this is a summary of that file, so change it there first). Last
+    run **2026-09-01**, straight after applying
+    `20260828000000_waiver_pdf_guardian_read.sql`: **76 migration files, 2
+    unapplied**, and **18 client grants live, 18 expected, 0 unexpected**. So
     `supabase/lint/client-grants-expected.txt` is verified against production as
-    of that date, not just against the migration files. It goes stale the moment
+    of that date, not just against the migration files, and `profiles` still
+    holds nothing for `anon` or `authenticated`. It goes stale the moment
     anyone changes a grant by hand in the Lovable UI, which produces no commit
     and no signal — so re-run them after applying a migration and before a
     release. Nothing does it for you.
+  - ⚠️ **The two unapplied migrations are real drift, not a naming artefact**,
+    and they are older than the run that found them. Both are notification-digest
+    migrations that were committed and merged without ever being applied, which
+    is the exact failure `docs/database-changes.md` exists to prevent, caught by
+    the check written to catch it. Do not confuse them with the ledger row below,
+    which is a different thing entirely.
+    - `20260821000000_notification_digest_fails_loudly.sql` — until it is
+      applied, `cron.job_run_details` keeps recording `succeeded` for a night on
+      which nothing was sent: the tick means "the function ran", not "the digest
+      went out".
+    - `20260823000000_notification_digest_morning_schedule.sql` — until it is
+      applied, the club's digest keeps going out at 6am rather than 8am.
+
+    Neither is allowlisted, and neither belongs to whatever PR you are reading
+    this from, so they wait for a decision of their own: "approval of the PR
+    covers the SQL described in it, and nothing else".
+
   - The live ledger also carries one row with no file here
     (`20260722131544_3de60949-…`, recorded as version `20260722131547`). Its SQL
     is byte-identical to `20260722000000_memberships.sql`, so it is the
@@ -337,10 +357,19 @@ Core tables:
   `public`; the server resolves emails via the service-role-only
   `user_id_by_email` / `user_emails` RPCs. A person = a (possibly **locked**,
   i.e. banned/no-credentials) auth user + their profile, created at waiver
-  submission (interest registrations are leads only — just rows). The funnel
-  phase (`lead | applicant | visitor | member | lapsed`) is always derived
-  (`deriveLifecycleStatus`). What a manager's approval does to a person, and why
-  there is no self-serve sign-up: `docs/waivers.md`, rules 6 and 9.
+  submission (interest registrations are leads only — just rows).
+  `guardian_user_id` (self-FK, `ON DELETE RESTRICT`) is the **only** thing that
+  makes somebody a dependant: not null means "this person is on that person's
+  account, has no login and never will, and everything about them goes to
+  them". Nothing sniffs an email string to decide. A household is one level
+  deep, and who may act for whom lives in exactly one place,
+  `src/lib/household.ts` — never re-derive it. The funnel phase
+  (`lead | applicant | visitor | member | lapsed`) is always derived
+  (`deriveLifecycleStatus`), and `member` is the one phase that reaches through
+  a household, so it agrees with the `has_active_paid_membership` gate; it is a
+  label only, and no policy reads the `member` role. What a manager's approval
+  does to a person, and why there is no self-serve sign-up: `docs/waivers.md`,
+  rules 6 and 9.
 - `waivers` — frozen submissions: the person fields **as submitted** (email
   included, as evidence), plus `user_id` (→ profiles), `pdf_path`,
   `template_version`, `signer_ip` + `signer_meta` (real IP + browser context,
@@ -408,8 +437,10 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
   `submitWaiverWithPdf`): validate → insert row (service role) → upload signature
   PNGs → render PDF with `lib/waiver-pdf.ts` (`pdf-lib`) → upload to `waivers`
   bucket → return a signed URL. Supports minors (guardian block) and draw/typed
-  signatures (`components/site/SignaturePad.tsx`). `getMyLatestWaiver` prefills
-  returning users.
+  signatures (`components/site/SignaturePad.tsx`). `getMyProfile` prefills a
+  returning signer from the club's current record. Also supports signing for a
+  **child** on your account, who gets their own person record and never a login
+  (`docs/waivers.md`, and `src/lib/household.ts` for the gate).
 - **Interest / contact** (`lib/submissions.functions.ts`): validate → insert to
   the respective public table.
 - **Installed app** (`routes/app.tsx` → `lib/pwa.ts`): the site is installable, and
@@ -948,7 +979,7 @@ Then hold the change to this:
   `/manager/users` to search for the person already in front of them.
 - **Never lose someone's input.** A failed submit keeps the form filled and
   offers the retry. Ask for as little as possible in the first place, and prefill
-  what we already know (the waiver does this with `getMyLatestWaiver`). Every
+  what we already know (the waiver does this with `getMyProfile`). Every
   field is friction somebody pays for.
 - **Errors say what to do next**, in the person's terms, not what failed
   internally. "We could not reach the server. Your details are still here, try
