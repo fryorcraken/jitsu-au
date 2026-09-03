@@ -11,6 +11,7 @@ import { describeLoadError } from "@/lib/load-error";
 import { formatDate } from "@/lib/dates";
 import { waiverClass } from "@/lib/status-colours";
 import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
+import type { SubjectVoice } from "@/lib/subject-voice";
 
 type MyWaiver = {
   id: string;
@@ -23,22 +24,21 @@ type MyWaiver = {
 /**
  * One person's waiver history.
  *
- * Two things here READ a subject and do not yet WRITE as one. Both are safe on
- * `/account`, where the subject is the caller, and both need doing before this
- * card is put in front of a parent looking at a child:
+ * #110 recorded two things here that read a subject and did not write as one.
+ * Both are closed now, which is what lets this card go in front of a parent
+ * looking at a child:
  *
- *   * ⚠️ The download button goes through `getWaiverPdfUrl`, which is scoped by
- *     RLS to waivers the CALLER may see rather than by the household gate. On a
- *     child's page every button would render and every press would fail, which
- *     the UX bar rules out. Widening it is a policy change, so a migration, so
- *     not this change's to make: either hide the button when the subject is not
- *     the caller, or widen the policy.
- *   * ⚠️ "Sign an updated waiver" links to `/waiver`, which signs for whoever is
- *     signed in. Under a child's name that is the wrong person, silently, which
- *     is the exact failure the household project exists to end. The waiver
- *     submit path has no target parameter at all, so this cannot be fixed here.
+ *   * The download button goes through `getWaiverPdfUrl`, which was scoped by
+ *     `public.waivers` RLS to the CALLER's own waivers. On a child's page every
+ *     button would have rendered and every press would have failed. It now
+ *     reads on the service role and asks the household gate, so a guardian gets
+ *     the document (`waiverPdfPathForCaller`).
+ *   * "Sign an updated waiver" linked to `/waiver`, which signs for whoever is
+ *     signed in. Under a child's name that was the wrong person, silently. The
+ *     link now carries the subject, and `/waiver` opens with that child already
+ *     chosen.
  */
-export function WaiversCard({ userId }: { userId: string }) {
+export function WaiversCard({ userId, voice }: { userId: string; voice: SubjectVoice }) {
   const fetchMine = useServerFn(listMyWaivers);
   const getUrl = useServerFn(getWaiverPdfUrl);
   const [waivers, setWaivers] = useState<MyWaiver[]>([]);
@@ -57,10 +57,10 @@ export function WaiversCard({ userId }: { userId: string }) {
       })
       .catch((e) => {
         setWaivers([]);
-        setLoadError(describeLoadError(e, "Could not load your waivers"));
+        setLoadError(describeLoadError(e, `Could not load ${voice.whose} waivers`));
       })
       .finally(() => setLoading(false));
-  }, [fetchMine, userId]);
+  }, [fetchMine, userId, voice.whose]);
 
   useEffect(() => {
     void load();
@@ -80,7 +80,7 @@ export function WaiversCard({ userId }: { userId: string }) {
       <CardHeader>
         <CardTitle>Waivers</CardTitle>
         <CardDescription>
-          Your waiver history. The active waiver is the latest one the club approved.
+          {voice.Whose} waiver history. The active waiver is the latest one the club approved.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -88,7 +88,7 @@ export function WaiversCard({ userId }: { userId: string }) {
           <Loading />
         ) : loadError ? (
           <LoadFailure
-            what="Your waivers"
+            what={`${voice.Whose} waivers`}
             message={loadError}
             hint="This is not the same as having none on file, so there is nothing to sign again."
             onRetry={() => void load()}
@@ -123,7 +123,11 @@ export function WaiversCard({ userId }: { userId: string }) {
           </ul>
         )}
         <Button asChild variant="outline" size="sm">
-          <Link to="/waiver">Sign an updated waiver</Link>
+          {/* The subject rides along, so `/waiver` opens with this person
+              already chosen rather than signing for whoever is logged in. */}
+          <Link to="/waiver" search={voice.isSelf ? {} : { for: userId }}>
+            Sign an updated waiver
+          </Link>
         </Button>
       </CardContent>
     </Card>

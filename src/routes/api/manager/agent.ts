@@ -57,7 +57,13 @@ import {
   SubmissionIdConflictError,
   WaiverFilingIncompleteError,
 } from "@/lib/waiver-duplicates";
-import { aggregateClubUsers, profileUserIds, CHECKINS_LIMIT, LEADS_LIMIT } from "@/lib/club-users";
+import {
+  aggregateClubUsers,
+  contactUserIds,
+  profileUserIds,
+  CHECKINS_LIMIT,
+  LEADS_LIMIT,
+} from "@/lib/club-users";
 import type {
   ClubUserEmail,
   ClubUserLead,
@@ -97,6 +103,7 @@ import {
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
+import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -278,7 +285,7 @@ async function handleListUsers(params: unknown) {
     pdb
       .from("profiles")
       .select(
-        "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at",
+        "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at, guardian_user_id",
       )
       .limit(5000),
     db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
@@ -332,7 +339,9 @@ async function handleListUsers(params: unknown) {
     // The email RPC is the one deliberate degradation (see emailsByUserId).
     const [{ data: roles, error: rErr }, resolved] = await Promise.all([
       db.from("user_roles").select("user_id, role").in("user_id", userIds),
-      emailsByUserId(pdb, userIds),
+      // The CONTACT ids, not `userIds`: a dependant's own would fetch the
+      // reserved string `household-email.ts` promises is never looked up.
+      emailsByUserId(pdb, contactUserIds(profileRows)),
     ]);
     if (rErr) throw new AgentError(500, "db_error", rErr.message);
     rolesRows = (roles ?? []) as { user_id: string; role: string }[];
@@ -374,6 +383,13 @@ async function handleListUsers(params: unknown) {
     user_id: u.user_id,
     name: u.name,
     email: u.email,
+    // Whose address that is, when it is not this person's own. A dependant has
+    // no mailbox, so `email` is their guardian's, and a bare address under a
+    // nine-year-old's name reads to an agent exactly as it reads to a manager:
+    // as somebody it can write to. `list_invoices` says the same thing in
+    // `member_email_belongs_to`, and the two surfaces must not disagree about
+    // whether they say it at all.
+    email_belongs_to: u.email_belongs_to,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,
@@ -421,19 +437,22 @@ async function handleListInvoices(params: unknown) {
     ...new Set(((rows ?? []) as MembershipRow[]).map((r) => r.user_id).filter(Boolean)),
   ] as string[];
   const nameByUser = new Map<string, string>();
-  let emailByUser = new Map<string, string>();
+  // DISPLAY: an agent reading this listing is being told who to contact about
+  // an invoice, and for a child's invoice that is the parent. Shown with whose
+  // address it is, so the agent cannot report it as the child's own.
+  let contactByUser = new Map<string, ContactEmail>();
   if (userIds.length) {
     const pdb = db;
-    const [{ data: profiles, error: prErr }, resolved] = await Promise.all([
+    const [{ data: profiles, error: prErr }, contacts] = await Promise.all([
       pdb
         .from("profiles")
         .select("user_id, first_name, middle_name, last_name, preferred_name")
         .in("user_id", userIds),
-      emailsByUserId(pdb, userIds),
+      loadHouseholdContacts(pdb, userIds),
     ]);
     if (prErr) throw new AgentError(500, "db_error", prErr.message);
     // The invoice listing only needs the address, not its verified state.
-    emailByUser = new Map(resolved.map((e) => [e.user_id, e.email]));
+    contactByUser = new Map(userIds.map((id) => [id, contacts.displayEmail(id)]));
     for (const p of profiles ?? []) {
       nameByUser.set(p.user_id, nameWithPreferred(p));
     }
@@ -442,7 +461,15 @@ async function handleListInvoices(params: unknown) {
   const invoices = ((rows ?? []) as MembershipRow[]).map((r) => ({
     ...projectInvoice(r, planById.get(r.plan_id)),
     member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
-    member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
+    member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
+    // Present whenever the address is somebody else's, named or not: keyed on
+    // the NAME this fails open, and an uncaptioned address under a child's
+    // name is what the field exists to prevent.
+    member_email_belongs_to: r.user_id
+      ? contactByUser.get(r.user_id)?.onBehalfOf
+        ? (contactByUser.get(r.user_id)!.onBehalfOf!.name ?? "the account holder")
+        : null
+      : null,
   }));
   return { count: invoices.length, total: count ?? invoices.length, invoices };
 }

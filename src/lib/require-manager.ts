@@ -24,12 +24,27 @@ export type ManagerContext = {
   userId: string;
 };
 
-/** Throw unless the caller holds the `manager` role. */
-export async function requireManager(context: ManagerContext): Promise<void> {
-  const { data: isManager, error } = await context.supabase.rpc("has_role", {
+/**
+ * Does the caller hold the `manager` role?
+ *
+ * The answered form of `requireManager`, which is defined in terms of it so the
+ * check stays in one place. For the handler that does not simply refuse a
+ * non-manager but has another route to try: `getWaiverPdfUrl` serves managers,
+ * owners AND guardians, so "no" is the start of the next question rather than
+ * the end of the request.
+ *
+ * A failed read still throws. "We could not ask" is not "no".
+ */
+export async function isManager(context: ManagerContext): Promise<boolean> {
+  const { data, error } = await context.supabase.rpc("has_role", {
     _user_id: context.userId,
     _role: "manager",
   });
   if (error) throw new Error(error.message);
-  if (!isManager) throw new Error("Forbidden");
+  return Boolean(data);
+}
+
+/** Throw unless the caller holds the `manager` role. */
+export async function requireManager(context: ManagerContext): Promise<void> {
+  if (!(await isManager(context))) throw new Error("Forbidden");
 }

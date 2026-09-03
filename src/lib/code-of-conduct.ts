@@ -34,9 +34,22 @@ export const CODE_OF_CONDUCT_VERSION = 1;
 
 export const CODE_OF_CONDUCT_TITLE = "UTS Jitsu Code of Conduct";
 
-/** The single tick box on the signing form. */
+/** The single tick box on the signing form, for somebody signing for themselves. */
 export const CODE_OF_CONDUCT_ACKNOWLEDGEMENT =
   "I have read the UTS Jitsu Code of Conduct and the ActivateUTS Clubs Code of Conduct, and I agree to follow both.";
+
+/**
+ * The same tick box, for a parent agreeing on behalf of a child.
+ *
+ * The undertaking has to name the person it binds. A parent signing for their
+ * nine-year-old was ticking "I agree to follow both" on a form filed against
+ * the CHILD: the wrong promise from the wrong person, on the one document in
+ * this flow whose whole purpose is to record a promise. `name` is a greeting
+ * name, so it reads the way the rest of the page addresses them.
+ */
+export function codeOfConductAcknowledgementFor(name: string): string {
+  return `I have read the UTS Jitsu Code of Conduct and the ActivateUTS Clubs Code of Conduct, and I agree that ${name} will follow both.`;
+}
 
 /** The ActivateUTS code this one sits on top of. Linked from the body as well. */
 export const ACTIVATE_UTS_CODE_URL =

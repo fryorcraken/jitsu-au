@@ -10,7 +10,9 @@ import {
   contactUserIdFor,
   householdTargetSchema,
   isDependant,
+  isDependantUser,
   listHousehold,
+  mayActFor,
   resolveSubject,
 } from "./household";
 
@@ -90,6 +92,33 @@ const erroringAdmin = {
     }),
   }),
 } as unknown as SupabaseClient<Database>;
+
+describe("isDependantUser", () => {
+  it("answers for a person the caller only has an id for", async () => {
+    await expect(isDependantUser(admin(EVERYONE), "child")).resolves.toBe(true);
+    await expect(isDependantUser(admin(EVERYONE), "parent")).resolves.toBe(false);
+  });
+
+  it("matches case-insensitively, like every other id here", async () => {
+    // A uuid out of a URL or a manager's paste can arrive in either case, and
+    // a miss here would read as "not a dependant" rather than as an error.
+    await expect(isDependantUser(admin(EVERYONE), "CHILD")).resolves.toBe(true);
+  });
+
+  it("treats somebody with no profile row as an account holder", async () => {
+    // Every auth user gets one from the `ensure_profile` trigger, so this is
+    // the "cannot happen" case; answering `false` matches what
+    // `contactUserIdFor` does with the same gap.
+    await expect(isDependantUser(admin(EVERYONE), "nobody")).resolves.toBe(false);
+  });
+
+  it("throws on a failed read rather than saying no", async () => {
+    // The answer gates a SEND. Reading a dropped connection as "not a
+    // dependant" would mint a verification token against a reserved address
+    // nobody can receive mail at, which is the exact outcome this prevents.
+    await expect(isDependantUser(erroringAdmin, "child")).rejects.toThrow("boom");
+  });
+});
 
 describe("isDependant", () => {
   it("is the guardian link and nothing else", () => {
@@ -323,5 +352,45 @@ describe("resolveSubject", () => {
   it("does not consult the database for a caller asking about themselves", async () => {
     await expect(resolveSubject(erroringAdmin, "parent", undefined)).resolves.toBe("parent");
     await expect(resolveSubject(erroringAdmin, "parent", "parent")).resolves.toBe("parent");
+  });
+});
+
+describe("mayActFor", () => {
+  // The same gate as `assertActingFor`, answered instead of thrown. It exists
+  // for the one caller whose refusal has to say something else.
+  //
+  // The truth table is what this pins, and it is worth having: ten cases
+  // covering both directions of the guardian link, a stranger's child, a
+  // sibling reaching sideways, and both missing-row ends. `assertActingFor` is
+  // asserted alongside it not to prove the two agree -- it is literally
+  // defined as `if (!(await mayActFor(...))) throw`, so they cannot -- but so
+  // that a future edit which stops defining it that way is caught by this
+  // table rather than by nothing.
+  it("answers the whole truth table, and refuses in the gate's one sentence", async () => {
+    const db = admin(EVERYONE);
+    const cases: [string, string, boolean][] = [
+      ["parent", "parent", true],
+      ["parent", "child", true],
+      ["parent", "sibling", true],
+      ["parent", "their-child", false],
+      ["parent", "stranger", false],
+      ["child", "parent", false],
+      ["child", "sibling", false],
+      ["stranger", "child", false],
+      ["parent", "nobody", false],
+      ["nobody", "child", false],
+    ];
+    for (const [caller, target, allowed] of cases) {
+      expect(await mayActFor(db, caller, target)).toBe(allowed);
+      const assertion = assertActingFor(db, caller, target);
+      if (allowed) await expect(assertion).resolves.toBeUndefined();
+      else await expect(assertion).rejects.toThrow(/only see or change your own account/);
+    }
+  });
+
+  it("throws on a failed read rather than answering no", async () => {
+    // "We could not ask" is not "no". Flattening it would turn an outage into a
+    // refusal at every call site.
+    await expect(mayActFor(erroringAdmin, "parent", "child")).rejects.toThrow("boom");
   });
 });

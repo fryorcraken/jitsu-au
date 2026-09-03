@@ -54,6 +54,48 @@ export function mediaConsentLabel(value: boolean | null | undefined): string {
 }
 
 /**
+ * Where the photo-consent answer on file came from, in one sentence.
+ *
+ * Four different facts wear the same "No", and the only thing that tells them
+ * apart is the id stamped into `media_consent_updated_by` -- every path stamps
+ * whoever clicked. Pure and here rather than inline in the manager page,
+ * because reading `setBy !== userId` as "a manager" is precisely the mistake
+ * this makes impossible to repeat unnoticed: a guardian answering for their
+ * child is also not the subject, and attributing that to the club is a wrong
+ * statement about who decided something about a nine-year-old.
+ *
+ * No branch claims a waiver exists. A profile can predate any submission (the
+ * `ensure_profile` trigger gives every auth user one), so "their signed waiver
+ * shows..." would be a statement the caller cannot back up.
+ */
+export function mediaConsentProvenance(input: {
+  /** The person the record is about. */
+  userId: string;
+  /** Whose account they are on, when somebody else holds it. */
+  guardianUserId: string | null;
+  /** That person's name, for the sentence. Null when the lookup failed. */
+  guardianName: string | null;
+  /** Who last set it by hand, or null if nobody ever did. */
+  setBy: string | null;
+  /** Already formatted for display: this helper does no date formatting. */
+  updatedAt: string;
+  /** The answer on file, which decides what "nobody set it" means. */
+  value: boolean | null;
+}): string {
+  const { userId, guardianUserId, guardianName, setBy, updatedAt, value } = input;
+  if (setBy && setBy === userId) {
+    return `They set this themselves on ${updatedAt}, from their account page.`;
+  }
+  if (setBy && guardianUserId && setBy === guardianUserId) {
+    return `Set on ${updatedAt} by ${guardianName ?? "the person"} who holds their account.`;
+  }
+  if (setBy) return `Set by a manager on ${updatedAt}, not read off a waiver.`;
+  // Nobody set it by hand. An answer that is nonetheless on file came off an
+  // approved waiver; no answer at all means nobody has ever been asked.
+  return value === null ? "Nothing recorded yet." : "From their approved waiver.";
+}
+
+/**
  * Parse the `acknowledgements` JSONB off a template row into a typed list.
  * Invalid entries are dropped rather than failing the whole read, and any
  * non-array value yields `[]` — the generated Supabase types don't yet know the

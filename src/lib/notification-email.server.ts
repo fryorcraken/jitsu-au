@@ -25,13 +25,15 @@ import {
   digestSections,
   digestSubject,
   hasDigestContent,
+  mergeHouseholdItems,
   shouldEmail,
-  type NotificationItem,
+  type DigestCandidate,
   type NotificationKind,
+  type NotificationPreferenceRow,
   type NotificationSubjectType,
 } from "@/lib/notifications";
-import { greetingName } from "@/lib/validation";
-import { userEmails } from "@/lib/supabase-rpc";
+import { greetingName, stableCode, type PersonNameParts } from "@/lib/validation";
+import { contactUserIdOf, deliveryEmailFor, loadHouseholdContacts } from "@/lib/household-email";
 
 // Sender configuration mirrors the auth-email webhook and every other email
 // this app sends.
@@ -85,16 +87,25 @@ export function absoluteUrl(href: string): string {
 export async function settingsUrlFor(db: AdminClient, userId: string): Promise<string> {
   const url = (token: string) => `${SITE_URL}/email-settings/${token}`;
 
+  // The token belongs to the person who READS the mail, not the person the mail
+  // is about. `notification_tokens` is one row per user, so minting one per
+  // child would hand a parent a different "email settings" link in every email
+  // about a different child, each opening a page of switches that governs only
+  // that child's mail. There is one inbox, so there is one set of switches, so
+  // there is one token. Resolved here rather than at each call site so no
+  // caller can mint the wrong one.
+  const contactId = await contactUserIdOf(db, userId);
+
   const { data: existing } = await db
     .from("notification_tokens")
     .select("token")
-    .eq("user_id", userId)
+    .eq("user_id", contactId)
     .maybeSingle();
   if (existing?.token) return url(existing.token);
 
   const raw = generateRawToken();
   const { error } = await db.from("notification_tokens").insert({
-    user_id: userId,
+    user_id: contactId,
     token: raw,
     token_hash: await hashToken(raw),
     token_prefix: tokenPreview(raw),
@@ -104,13 +115,13 @@ export async function settingsUrlFor(db: AdminClient, userId: string): Promise<s
   const { data: raced } = await db
     .from("notification_tokens")
     .select("token")
-    .eq("user_id", userId)
+    .eq("user_id", contactId)
     .maybeSingle();
   if (raced?.token) return url(raced.token);
 
   // No token, so no signed-out link. The signed-in page still works, and an
   // email with a settings link that needs a login beats no email at all.
-  console.error(`[notifications] could not mint a settings token for ${userId}`);
+  console.error(`[notifications] could not mint a settings token for ${contactId}`);
   return `${SITE_URL}/notifications`;
 }
 
@@ -166,11 +177,18 @@ export async function writeNotifications(
   }));
 }
 
-/** One person's email address, or null. */
+/**
+ * Where a message ABOUT this person goes.
+ *
+ * A dependant has no mailbox of their own -- their `auth.users` address is a
+ * reserved, non-deliverable string that nothing may ever send to -- so this
+ * resolves through their guardian. It is the delivery half of
+ * `household-email.ts`, and it replaced a direct `userEmails` lookup rather
+ * than sitting beside one, so there is no route left from here to an address
+ * that skips the rule.
+ */
 async function emailFor(db: AdminClient, userId: string): Promise<string | null> {
-  const { data, error } = await userEmails(db, [userId]);
-  if (error || !data?.length) return null;
-  return data[0].email ?? null;
+  return deliveryEmailFor(db, userId);
 }
 
 /**
@@ -272,7 +290,7 @@ export type DigestResult = { considered: number; recipients: number; sent: numbe
 export async function sendDailyDigests(db: AdminClient, now = new Date()): Promise<DigestResult> {
   const { data: rows, error } = await db
     .from("notifications")
-    .select("id, user_id, kind, title, body, href, read_at, created_at")
+    .select("id, user_id, kind, subject_id, title, body, href, read_at, created_at")
     .is("emailed_at", null)
     .order("created_at", { ascending: true })
     .limit(5000);
@@ -281,11 +299,47 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
   const pending = rows ?? [];
   if (pending.length === 0) return { considered: 0, recipients: 0, sent: 0 };
 
-  const byUser = new Map<string, NotificationItem[]>();
+  // ---- grouped by INBOX, not by person ----
+  //
+  // This used to group on `notifications.user_id`, which was the same thing
+  // until some people stopped having a mailbox of their own. A parent with
+  // three children shares one inbox with all three, and `notifyNewBlogPost`
+  // writes a row for every person with a club record, so one announcement
+  // produced four emails into that inbox on one morning. Every one of them was
+  // "correct" and separately idempotent, which is why nothing caught it: the
+  // key `digest-${userId}-${day}` made them four distinct sends by
+  // construction.
+  //
+  // So the unit is the contact person. Their own rows and their dependants' are
+  // one list, `mergeHouseholdItems` folds the repeats of a single event, and
+  // the idempotency key below is keyed on the person who actually receives it.
+  //
+  // ⚠️ This read is deliberately NOT guarded, and it is the one read here that
+  // covers every pending row rather than one recipient's. A failure aborts the
+  // whole run, nothing is stamped, and tomorrow tries again. That is the right
+  // failure, and the tempting alternative is the wrong one:
+  //
+  // Falling back to grouping by `user_id` looks like graceful degradation and
+  // is data loss. Every group would then be read against ITS OWN preferences,
+  // and a dependant's are the club defaults with announcements OFF, so their
+  // rows would be judged unwanted, stamped, and never mentioned to the parent
+  // who was actually owed them. Silently, once, with no way to get them back.
+  // Failing the run costs a day and loses nothing.
+  //
+  // `loadHouseholdContacts` chunks its own reads, so the size of this list is
+  // not what would break it.
+  const contacts = await loadHouseholdContacts(
+    db,
+    pending.map((r) => r.user_id),
+  );
+  const byContact = new Map<string, DigestCandidate[]>();
   for (const r of pending) {
-    const list = byUser.get(r.user_id) ?? [];
+    const contactId = contacts.contactUserId(r.user_id);
+    const list = byContact.get(contactId) ?? [];
     list.push({
       id: r.id,
+      user_id: r.user_id,
+      subject_id: r.subject_id,
       kind: r.kind as NotificationKind,
       title: r.title,
       body: r.body,
@@ -293,7 +347,40 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
       read_at: r.read_at,
       created_at: r.created_at,
     });
-    byUser.set(r.user_id, list);
+    byContact.set(contactId, list);
+  }
+
+  // Everything the loop below needs about the RECIPIENTS, read once for all of
+  // them rather than three round trips each. Chunked for the same reason
+  // `household-email.ts` chunks its own reads: PostgREST renders `.in()` into
+  // the query string, and this list is one entry per contact person across up
+  // to the 5000 rows the pending query reads.
+  // Chunk size matched to `household-email.ts`, which has the reasoning.
+  const ID_CHUNK = 100;
+  const recipientIds = [...byContact.keys()];
+  const prefsByUser = new Map<string, NotificationPreferenceRow>();
+  const nameByUser = new Map<string, PersonNameParts>();
+  for (let i = 0; i < recipientIds.length; i += ID_CHUNK) {
+    const slice = recipientIds.slice(i, i + ID_CHUNK);
+    const [{ data: prefs, error: prefErr }, { data: names, error: nameErr }] = await Promise.all([
+      db
+        .from("notification_preferences")
+        .select("user_id, reply_to_me, thread_activity, new_blog_post, manager_comment_alerts")
+        .in("user_id", slice),
+      db
+        .from("profiles")
+        .select("user_id, first_name, last_name, preferred_name")
+        .in("user_id", slice),
+    ]);
+    // A failed PREFERENCES read is not a degradation. Missing rows read as the
+    // club defaults, announcements are off in those, and the loop below stamps
+    // anything it decides nobody wanted -- so answering "no preferences" to a
+    // dropped connection would judge a day of mail unwanted and destroy it.
+    // The names are only a greeting, so those degrade.
+    if (prefErr) throw new Error(prefErr.message);
+    if (nameErr) console.error("[notifications] could not read names to greet:", nameErr.message);
+    for (const row of prefs ?? []) prefsByUser.set(row.user_id, row);
+    for (const row of names ?? []) nameByUser.set(row.user_id, row);
   }
 
   const apiKey = process.env.LOVABLE_API_KEY;
@@ -303,7 +390,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
     // stamping them would silently swallow a day of notifications the first
     // time the key went missing.
     console.warn("[notifications] LOVABLE_API_KEY not set — skipping the digest");
-    return { considered: pending.length, recipients: byUser.size, sent: 0 };
+    return { considered: pending.length, recipients: byContact.size, sent: 0 };
   }
 
   // The club's date, not the UTC one. The schedule fires in the evening UTC
@@ -318,24 +405,31 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
   const day = clubLocalDate(now, CLUB_TIME_ZONE);
   let sent = 0;
 
-  for (const [userId, items] of byUser) {
+  for (const [userId, candidates] of byContact) {
     try {
-      const [{ data: prefs }, { data: manager }, profile] = await Promise.all([
-        db
-          .from("notification_preferences")
-          .select("reply_to_me, thread_activity, new_blog_post, manager_comment_alerts")
-          .eq("user_id", userId)
-          .maybeSingle(),
-        db.rpc("has_role", { _user_id: userId, _role: "manager" }),
-        db
-          .from("profiles")
-          .select("first_name, last_name, preferred_name")
-          .eq("user_id", userId)
-          .maybeSingle(),
-      ]);
+      // Every question below is about the person who RECEIVES this email. Their
+      // switches govern their inbox, their manager role decides whether the
+      // moderation section applies, and the greeting is their name. A dependant
+      // has none of these in any meaningful sense: no preferences page they can
+      // reach, no role, and no need to be greeted in mail they never see.
+      const prefs = prefsByUser.get(userId) ?? null;
+      const { data: manager, error: roleErr } = await db.rpc("has_role", {
+        _user_id: userId,
+        _role: "manager",
+      });
+      // Same reasoning as the preferences read above, one step further along: a
+      // failed role check would drop the moderation section, and for a manager
+      // whose digest is nothing but moderation that leaves "nothing they want
+      // to hear about", which stamps. Throwing lands in the catch below, which
+      // skips this recipient with their rows still pending.
+      if (roleErr) throw new Error(roleErr.message);
 
+      const items = mergeHouseholdItems(candidates);
       const sections = digestSections(items, prefs, { isManager: Boolean(manager) });
-      const ids = items.map((i) => i.id);
+      // Every row that came in, including the duplicates the merge folded away.
+      // Stamping only what was rendered would leave the folded rows pending and
+      // mail the family the same post again tomorrow.
+      const ids = candidates.map((i) => i.id);
 
       if (!hasDigestContent(sections)) {
         // Nothing they want to hear about. Stamp and move on, so tomorrow's run
@@ -344,9 +438,17 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
         continue;
       }
 
-      const to = await emailFor(db, userId);
+      // Already loaded: `userId` here IS the contact person, and their address
+      // was resolved in the same pass that grouped them.
+      const to = contacts.deliveryEmail(userId);
       if (!to) {
-        await stampEmailed(db, ids);
+        // Deliberately NOT stamped, unlike everything else that ends this
+        // iteration early. Every person has an address -- it lives on their
+        // login record -- so a null here means the lookup failed rather than
+        // that the club holds none, and stamping would swallow the day's mail
+        // for this family permanently. Rows left pending cost a repeat read
+        // tomorrow and lose nothing.
+        console.error(`[notifications] no address resolved for ${userId}; leaving rows pending`);
         continue;
       }
 
@@ -363,7 +465,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
 
       const el = React.createElement(NotificationDigestEmail, {
         siteName: SITE_NAME,
-        greeting: profile.data ? greetingName(profile.data) : "Hi",
+        greeting: greetingName(nameByUser.get(userId) ?? {}) || "Hi",
         blocks,
         notificationsUrl: `${SITE_URL}/notifications`,
         settingsUrl: await settingsUrlFor(db, userId),
@@ -377,7 +479,19 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
         subject: digestSubject(SITE_NAME, sections),
         html,
         text,
-        idempotencyKey: `digest-${userId}-${day}`,
+        // Keyed on the RECIPIENT, which is the whole point of the grouping
+        // above: three children on one address are one send, and the key says
+        // so, so a re-run cannot turn them back into three.
+        //
+        // ...and on the CONTENT, which the recipient and the day alone do not
+        // capture. A second run later the same day picks up only rows the
+        // first one did not (`emailed_at` is the real guard), so it composes a
+        // genuinely different email -- and under a key that never varied, the
+        // send provider would discard it as a duplicate while this code
+        // stamped its rows as sent. The count and a hash of the ids move
+        // together, so the same set of rows still produces the same key and a
+        // true re-run is still deduplicated.
+        idempotencyKey: `digest-${userId}-${day}-${ids.length}${stableCode([...ids].sort().join(","))}`,
       });
       // Stamp only after a successful send, so a failure retries tomorrow
       // rather than silently dropping the day.
@@ -388,5 +502,5 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
     }
   }
 
-  return { considered: pending.length, recipients: byUser.size, sent };
+  return { considered: pending.length, recipients: byContact.size, sent };
 }

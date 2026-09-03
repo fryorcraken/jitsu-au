@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loading } from "@/components/site/Loading";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import { CardActions } from "./CardActions";
 import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
 
@@ -15,8 +16,12 @@ import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
  * (`waiverToProfileFields`), so a correction made here can be overwritten later
  * by a manager working through a backlog of older waivers.
  */
-export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ userId, profile, onSaved });
+export function ContactCard({ userId, voice, profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save, saveError, clearSaveError, retrySave } = useDetailsSave({
+    userId,
+    profile,
+    onSaved,
+  });
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
@@ -78,7 +83,7 @@ export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardPr
         emergency_contact_phone: ecPhone.trim(),
       },
       "Contact details saved",
-      "Could not save your contact details",
+      `Could not save ${voice.whose} contact details`,
     );
   }
 
@@ -87,9 +92,11 @@ export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardPr
       <CardHeader>
         <CardTitle>Contact</CardTitle>
         <CardDescription>
-          How we reach you, and who we call if something happens in class. Saving here updates our
-          current record straight away. It does not change a waiver you have already signed, which
-          keeps what you typed at the time.
+          {voice.isSelf
+            ? "How we reach you, and who we call if something happens in class."
+            : `How we reach you about ${voice.who}, and who we call if something happens in class.`}{" "}
+          Saving here updates our current record straight away. It does not change a waiver already
+          signed, which keeps what was typed at the time.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -98,25 +105,35 @@ export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardPr
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
-              <Label htmlFor="account-phone">Mobile</Label>
+              <Label htmlFor="account-phone">Mobile{voice.isSelf ? "" : " to reach you on"}</Label>
               <Input
                 id="account-phone"
                 type="tel"
                 required
                 maxLength={30}
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  clearSaveError();
+                }}
                 className="mt-1.5"
               />
               <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
                 <Checkbox
                   checked={smsConsent}
-                  onCheckedChange={(v) => setSmsConsent(v === true)}
+                  onCheckedChange={(v) => {
+                    setSmsConsent(v === true);
+                    clearSaveError();
+                  }}
                   className="mt-0.5"
-                  aria-label="Consent to SMS or WhatsApp contact"
                 />
                 <span>
-                  I agree to be contacted by SMS or WhatsApp, and added to club WhatsApp groups.
+                  {/* "I", not "we": everywhere else on this card "we" is the
+                      club, so "we agree" read as the club agreeing with itself.
+                      The person ticking is one parent. */}
+                  {voice.isSelf
+                    ? "I agree to be contacted by SMS or WhatsApp, and added to club WhatsApp groups."
+                    : `I agree to ${voice.who} being contacted by SMS or WhatsApp, and added to club WhatsApp groups.`}
                 </span>
               </label>
             </div>
@@ -127,7 +144,10 @@ export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardPr
                 required
                 maxLength={300}
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={(e) => {
+                  setAddress(e.target.value);
+                  clearSaveError();
+                }}
                 className="mt-1.5"
               />
             </div>
@@ -141,7 +161,10 @@ export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardPr
                   required
                   maxLength={120}
                   value={ecName}
-                  onChange={(e) => setEcName(e.target.value)}
+                  onChange={(e) => {
+                    setEcName(e.target.value);
+                    clearSaveError();
+                  }}
                   className="mt-1.5"
                 />
               </div>
@@ -152,7 +175,10 @@ export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardPr
                   required
                   maxLength={80}
                   value={ecRelationship}
-                  onChange={(e) => setEcRelationship(e.target.value)}
+                  onChange={(e) => {
+                    setEcRelationship(e.target.value);
+                    clearSaveError();
+                  }}
                   className="mt-1.5"
                 />
               </div>
@@ -164,12 +190,24 @@ export function ContactCard({ userId, profile, loading, onSaved }: DetailsCardPr
                   required
                   maxLength={30}
                   value={ecPhone}
-                  onChange={(e) => setEcPhone(e.target.value)}
+                  onChange={(e) => {
+                    setEcPhone(e.target.value);
+                    clearSaveError();
+                  }}
                   className="mt-1.5"
                 />
               </div>
             </fieldset>
 
+            {saveError && (
+              <SaveFailure
+                what="change to the contact details"
+                message={saveError}
+                onRetry={() => void retrySave?.()}
+                retrying={busy}
+                keptOnDevice={false}
+              />
+            )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />
           </form>
         )}

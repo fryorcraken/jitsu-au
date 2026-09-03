@@ -39,6 +39,7 @@ import { Route as EmailSettingsIndexRouteImport } from './routes/email-settings/
 import { Route as EmailSettingsTokenRouteImport } from './routes/email-settings/$token'
 import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as KbSlugRouteImport } from './routes/kb/$slug'
+import { Route as AuthenticatedAccountUserIdRouteImport } from './routes/_authenticated/account_.$userId'
 import { Route as AuthenticatedManagerIndexRouteImport } from './routes/_authenticated/manager.index'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
 import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenticated/manager.blog'
@@ -215,6 +216,12 @@ const KbSlugRoute = KbSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => KbRouteRoute,
 } as any)
+const AuthenticatedAccountUserIdRoute =
+  AuthenticatedAccountUserIdRouteImport.update({
+    id: '/account_/$userId',
+    path: '/account/$userId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerIndexRoute =
   AuthenticatedManagerIndexRouteImport.update({
     id: '/manager/',
@@ -389,6 +396,7 @@ export interface FileRoutesByFullPath {
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
+  '/account/$userId': typeof AuthenticatedAccountUserIdRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
@@ -444,6 +452,7 @@ export interface FileRoutesByTo {
   '/blog': typeof BlogIndexRoute
   '/email-settings': typeof EmailSettingsIndexRoute
   '/kb': typeof KbIndexRoute
+  '/account/$userId': typeof AuthenticatedAccountUserIdRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
@@ -502,6 +511,7 @@ export interface FileRoutesById {
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
+  '/_authenticated/account_/$userId': typeof AuthenticatedAccountUserIdRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/blog': typeof AuthenticatedManagerBlogRoute
   '/_authenticated/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
@@ -560,6 +570,7 @@ export interface FileRouteTypes {
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
+    | '/account/$userId'
     | '/manager/api-tokens'
     | '/manager/blog'
     | '/manager/blog-comments'
@@ -615,6 +626,7 @@ export interface FileRouteTypes {
     | '/blog'
     | '/email-settings'
     | '/kb'
+    | '/account/$userId'
     | '/manager/api-tokens'
     | '/manager/blog'
     | '/manager/blog-comments'
@@ -672,6 +684,7 @@ export interface FileRouteTypes {
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
+    | '/_authenticated/account_/$userId'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/blog'
     | '/_authenticated/manager/blog-comments'
@@ -945,6 +958,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KbSlugRouteImport
       parentRoute: typeof KbRouteRoute
     }
+    '/_authenticated/account_/$userId': {
+      id: '/_authenticated/account_/$userId'
+      path: '/account/$userId'
+      fullPath: '/account/$userId'
+      preLoaderRoute: typeof AuthenticatedAccountUserIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/': {
       id: '/_authenticated/manager/'
       path: '/manager'
@@ -1127,6 +1147,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAccountRoute: typeof AuthenticatedAccountRoute
   AuthenticatedMembershipRoute: typeof AuthenticatedMembershipRoute
   AuthenticatedNotificationsRoute: typeof AuthenticatedNotificationsRoute
+  AuthenticatedAccountUserIdRoute: typeof AuthenticatedAccountUserIdRoute
   AuthenticatedManagerApiTokensRoute: typeof AuthenticatedManagerApiTokensRoute
   AuthenticatedManagerBlogRoute: typeof AuthenticatedManagerBlogRoute
   AuthenticatedManagerBlogCommentsRoute: typeof AuthenticatedManagerBlogCommentsRoute
@@ -1152,6 +1173,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAccountRoute: AuthenticatedAccountRoute,
   AuthenticatedMembershipRoute: AuthenticatedMembershipRoute,
   AuthenticatedNotificationsRoute: AuthenticatedNotificationsRoute,
+  AuthenticatedAccountUserIdRoute: AuthenticatedAccountUserIdRoute,
   AuthenticatedManagerApiTokensRoute: AuthenticatedManagerApiTokensRoute,
   AuthenticatedManagerBlogRoute: AuthenticatedManagerBlogRoute,
   AuthenticatedManagerBlogCommentsRoute: AuthenticatedManagerBlogCommentsRoute,

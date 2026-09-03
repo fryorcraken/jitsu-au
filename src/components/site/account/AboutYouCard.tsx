@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loading } from "@/components/site/Loading";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import { commentDisplayName } from "@/lib/validation";
 import { CardActions } from "./CardActions";
 import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
@@ -12,8 +13,12 @@ import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
  * comments. `commentDisplayName` doubles as the placeholder, so the field shows
  * exactly what will be used if they clear it.
  */
-export function AboutYouCard({ userId, profile, loading, onSaved }: DetailsCardProps) {
-  const { busy, save } = useDetailsSave({ userId, profile, onSaved });
+export function AboutYouCard({ userId, voice, profile, loading, onSaved }: DetailsCardProps) {
+  const { busy, save, saveError, clearSaveError, retrySave } = useDetailsSave({
+    userId,
+    profile,
+    onSaved,
+  });
   const [preferredName, setPreferredName] = useState("");
   const [displayName, setDisplayName] = useState("");
 
@@ -59,9 +64,11 @@ export function AboutYouCard({ userId, profile, loading, onSaved }: DetailsCardP
   return (
     <Card>
       <CardHeader>
-        <CardTitle>About you</CardTitle>
+        <CardTitle>{voice.isSelf ? "About you" : `About ${voice.who}`}</CardTitle>
         <CardDescription>
-          What we call you in person, and the name other members see on your comments.
+          {voice.isSelf
+            ? "What we call you in person, and the name other members see on your comments."
+            : `What we call ${voice.who} in person.`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -74,29 +81,55 @@ export function AboutYouCard({ userId, profile, loading, onSaved }: DetailsCardP
               <Input
                 id="preferred-name"
                 value={preferredName}
-                onChange={(e) => setPreferredName(e.target.value)}
+                onChange={(e) => {
+                  setPreferredName(e.target.value);
+                  clearSaveError();
+                }}
                 maxLength={60}
                 className="mt-1.5"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                What you go by, if it is not your first name. We use it to greet you.
+                {voice.isSelf
+                  ? "What you go by, if it is not your first name. We use it to greet you."
+                  : `What ${voice.who} goes by, if it is not their first name. We use it to greet them.`}
               </p>
             </div>
-            <div>
-              <Label htmlFor="display-name">Display name</Label>
-              <Input
-                id="display-name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                maxLength={60}
-                placeholder={placeholder}
-                className="mt-1.5"
+            {/* Only for somebody who can comment. A dependant never signs in,
+                so a display name for their blog and knowledge base comments is
+                a field for an act they can never perform, and the hint below
+                would tell a parent what name "other members see" for a child no
+                member will ever see. Not rendered rather than hidden: a hidden
+                input still submits, and this card's save sends every key it
+                owns. */}
+            {voice.isSelf ? (
+              <div>
+                <Label htmlFor="display-name">Display name</Label>
+                <Input
+                  id="display-name"
+                  value={displayName}
+                  onChange={(e) => {
+                    setDisplayName(e.target.value);
+                    clearSaveError();
+                  }}
+                  maxLength={60}
+                  placeholder={placeholder}
+                  className="mt-1.5"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Shown on your blog and document comments. Leave blank to use{" "}
+                  {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
+                </p>
+              </div>
+            ) : null}
+            {saveError && (
+              <SaveFailure
+                what="name change"
+                message={saveError}
+                onRetry={() => void retrySave?.()}
+                retrying={busy}
+                keptOnDevice={false}
               />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Shown on your blog and document comments. Leave blank to use{" "}
-                {placeholder ? `"${placeholder}"` : "your first name and last initial"}.
-              </p>
-            </div>
+            )}
             <CardActions dirty={dirty} busy={busy} onRevert={revert} />
           </form>
         )}

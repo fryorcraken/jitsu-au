@@ -43,7 +43,12 @@ function listRouteFiles(): string[] {
 /** No session at all — an explicit empty state, not merely an unset one. */
 const SIGNED_OUT = { cookies: [], origins: [] };
 
-const signedIn = signedInPathsByPersona(listRouteFiles(), readClubFixture().params);
+const clubFixture = readClubFixture();
+const signedIn = signedInPathsByPersona(
+  listRouteFiles(),
+  clubFixture.params,
+  clubFixture.paramsByPath,
+);
 
 async function visit(page: Page, path: string) {
   const response = await page.goto(path, { waitUntil: "networkidle" });

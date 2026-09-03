@@ -17,6 +17,8 @@ import {
   nameWithPreferred,
   normalizeEmail,
 } from "./validation";
+import { contactUserIdFor } from "./household";
+import { householdContacts, type HouseholdContactProfile } from "./household-email";
 import type {
   LifecycleStatus,
   MembershipPlanKind,
@@ -46,6 +48,14 @@ export type ClubUserProfile = {
   gi_size: string | null;
   belt_size: string | null;
   created_at: string;
+  /**
+   * The account holder this person is a dependant of, or null for everybody
+   * else. REQUIRED rather than optional on purpose: it decides whose address is
+   * shown on this person's row, and an optional field defaulting to null would
+   * make a forgotten `.select()` render a child as an account holder with their
+   * own mailbox, silently. Required, the typecheck refuses the caller instead.
+   */
+  guardian_user_id: string | null;
 };
 
 /** A resolved auth email for a person (from the `user_emails` RPC). */
@@ -127,11 +137,31 @@ export type ClubUser = {
   name: string | null;
   /** What to call them: preferred name, else first name. Null for a bare lead. */
   greeting_name: string | null;
+  /**
+   * The address to WRITE TO about this person, which is not always their own.
+   *
+   * A dependant has no mailbox: their `auth.users` address is a reserved,
+   * non-deliverable string that is never printed and never sent to, so what
+   * appears here is their guardian's. `email_belongs_to` says so, and any
+   * screen printing this must print that too.
+   */
   email: string | null;
+  /**
+   * Whose address `email` is, when it is not this person's own. Null for every
+   * account holder, which is almost everybody.
+   *
+   * A screen that shows the address without this says a nine-year-old has an
+   * inbox, which is how a manager comes to write to one.
+   */
+  email_belongs_to: string | null;
   /**
    * When this address was proven, or null if never. Always null for a lead:
    * they have no person record to hold a confirmation, so their proof (if any)
    * is held on the token until they sign a waiver. See `email-verification.ts`.
+   *
+   * It is a fact about the ADDRESS, so for a dependant it is the guardian's
+   * confirmation state. That is the truthful thing to badge: the guardian is
+   * who proved they can read that mailbox.
    */
   email_confirmed_at: string | null;
   phone: string | null;
@@ -175,6 +205,25 @@ export function profileUserIds(profiles: Pick<ClubUserProfile, "user_id">[]): st
   return [...new Set(profiles.map((p) => p.user_id))];
 }
 
+/**
+ * Whose addresses a directory actually needs: the CONTACT person for each of
+ * these people, which is their guardian for a dependant and themselves for
+ * everybody else.
+ *
+ * Its own function beside `profileUserIds` because the two questions look
+ * identical and are not: roles and check-ins are asked about the person,
+ * addresses are asked about whoever the club writes to. Asking `user_emails`
+ * for the first set fetches a dependant's reserved, non-deliverable string --
+ * which nothing renders, but `household-email.ts` promises it is never looked
+ * up at all, and a guarantee that only holds because the value happens not to
+ * be read downstream is one edit away from being false.
+ */
+export function contactUserIds(
+  profiles: Pick<ClubUserProfile, "user_id" | "guardian_user_id">[],
+): string[] {
+  return [...new Set(profiles.map((p) => contactUserIdFor(p)))];
+}
+
 /** The name parts a person is displayed by when all a screen has is their id. */
 export type PersonNameRow = PersonNameParts & { user_id: string };
 
@@ -212,6 +261,16 @@ export function personLabelsById(input: {
 export function aggregateClubUsers(input: {
   profiles: ClubUserProfile[];
   emails: ClubUserEmail[];
+  /**
+   * Extra profile rows used ONLY to resolve contact addresses and name whose
+   * they are. Never emitted as a person of their own.
+   *
+   * `listClubUsers` needs none: it lists everybody, so a dependant's guardian
+   * is already in `profiles`. `getClubUser` reads one person, and if that
+   * person is a dependant their guardian is not in the list at all, so it
+   * passes them here.
+   */
+  guardians?: HouseholdContactProfile[];
   waivers: ClubUserWaiver[];
   memberships: ClubUserMembership[];
   plans: ClubUserPlan[];
@@ -224,6 +283,13 @@ export function aggregateClubUsers(input: {
   const emailConfirmedByUser = new Map(
     input.emails.map((e) => [e.user_id, e.email_confirmed_at ?? null]),
   );
+  // The display side of `household-email.ts`, resolved once for everybody on
+  // the page. A dependant's row shows their guardian's address and says whose
+  // it is; every account holder is unaffected.
+  const contacts = householdContacts({
+    people: [...input.profiles, ...(input.guardians ?? [])],
+    emails: input.emails,
+  });
 
   // Waiver states per person: latest APPROVED signature (the waiver on file)
   // plus whether any submission exists at all.
@@ -260,6 +326,7 @@ export function aggregateClubUsers(input: {
   }
 
   const users: ClubUser[] = input.profiles.map((p) => {
+    const contact = contacts.displayEmail(p.user_id);
     const ms = membershipsByUser.get(p.user_id) ?? [];
     const latest = ms[0] ?? null;
     const approvedSignedAt = approvedSignedByUser.get(p.user_id) ?? null;
@@ -301,8 +368,19 @@ export function aggregateClubUsers(input: {
       user_id: p.user_id,
       name: nameWithPreferred(p) || null,
       greeting_name: greetingName(p) || null,
-      email: emailByUser.get(p.user_id) ?? null,
-      email_confirmed_at: emailConfirmedByUser.get(p.user_id) ?? null,
+      email: contact.email,
+      // Set whenever the address belongs to somebody else, EVEN IF their name
+      // could not be resolved. Keyed on the name it would fail open: a guardian
+      // whose profile row did not come back would leave a child's row printing
+      // a bare address, which is the exact misreading the caption exists to
+      // stop, and it would happen precisely when something is already wrong.
+      email_belongs_to: contact.onBehalfOf
+        ? (contact.onBehalfOf.name ?? "the account holder")
+        : null,
+      // Keyed on whose address it actually is, so a dependant badges their
+      // guardian's confirmation rather than a reserved address nobody ever
+      // confirmed.
+      email_confirmed_at: emailConfirmedByUser.get(contacts.contactUserId(p.user_id)) ?? null,
       phone: p.phone,
       roles: rolesByUser.get(p.user_id) ?? [],
       lifecycle_status,
@@ -338,6 +416,9 @@ export function aggregateClubUsers(input: {
       name: lead.name.trim() || null,
       greeting_name: null,
       email,
+      // A lead is an address that wrote in. It is theirs by definition, and
+      // there is no household to resolve: a lead has no person record at all.
+      email_belongs_to: null,
       // A lead has no person record, so there is nothing here to badge.
       email_confirmed_at: null,
       phone: lead.phone,

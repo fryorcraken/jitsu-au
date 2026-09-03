@@ -39,6 +39,16 @@ approved, nothing expires, and nothing is blocked by its absence.
 6. **Re-signing is always allowed** and only ever adds a row. The state shown is
    the **highest version** agreed to, not the most recent row, so re-signing an
    older version is not a downgrade.
+7. **A parent may agree on behalf of a child, and only from a live session.** A
+   dependant has no login, ever, so somebody has to. `?for=<user id>` on
+   `/code-of-conduct` names them, and `codeOfConductSubject` gates it: reaching
+   past yourself needs a session, never an emailed link, because a token proves
+   an address and must never prove the right to read or write a household.
+   The row is filed under the CHILD (`user_id`), while `full_name`, `email` and
+   `signature_name` record the PARENT who actually agreed. That is the honest
+   record of an act somebody performed, and the same reading
+   `media_consent_updated_by` takes. `signer_meta.on_behalf_of` carries the
+   child's id so the two are never ambiguous.
 
 ## Who can sign, and how they are identified
 
@@ -102,6 +112,23 @@ that lands on a page they cannot sign from would be worse than no link.
 an older version, or not yet. It links to the document. Signing always happens on
 `/code-of-conduct`, because agreeing to a document you cannot see on the same
 screen is not agreement.
+
+The same card appears on `/account/<child id>`, and its button carries
+`?for=<child id>` so the agreement is filed against the child rather than
+quietly re-recording the parent's own. The page then says "Agreeing on behalf of
+Bea Lovelace, signed by you as Ada Lovelace" rather than "Signing as", because
+the two are different people and a parent needs to see which child they are
+agreeing for.
+
+**This is the only route by which a child's agreement can be taken, and that is
+deliberate.** A child's waiver mints no code-of-conduct link: the token
+identifies its holder by proving an address, `resolveSigner` re-checks that the
+token's person still has that address, and a dependant's is the reserved one, so
+a token minted for a child could never be opened by the parent it was posted to.
+Minting it against the parent instead would have them agree for themselves while
+the child never does. Teaching the token to reach a dependant through their
+guardian is the change that was ruled out. Nothing is lost by the wait: the code
+of conduct gates nothing.
 
 ### What a manager sees
 

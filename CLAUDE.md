@@ -34,7 +34,11 @@ requests, the CI logs, and the screenshot artifacts.
   `supabase/lint/client-grants-expected.txt` before granting anything to `anon`
   or `authenticated`.
 - **Fixture data must stay synthetic** — `@example.com`, `0400 000 xxx`. It is
-  published in the seed script and photographed into screenshot artifacts.
+  published in the seed script and photographed into screenshot artifacts. The
+  one other address shape allowed is `<uuid>@dependant.jitsu.au`, the club's own
+  reserved, non-deliverable domain: a seeded dependant has to carry the same
+  address the app would mint for them, or the fixture stops being a faithful
+  copy of the thing it stands in for (`docs/waivers.md`, rule 1).
 - **CI holds no production credential at all, and cannot.** It never reaches
   the live database: Lovable Cloud keeps the Supabase password and connection
   string out of the project UI, and the database is IPv6-only while

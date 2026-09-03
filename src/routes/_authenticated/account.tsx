@@ -18,6 +18,9 @@ import { AboutYouCard } from "@/components/site/account/AboutYouCard";
 import { CodeOfConductCard } from "@/components/site/account/CodeOfConductCard";
 import { ContactCard } from "@/components/site/account/ContactCard";
 import type { Profile } from "@/components/site/account/DetailsCard";
+import { subjectVoice } from "@/lib/subject-voice";
+import { HouseholdCard } from "@/components/site/account/HouseholdCard";
+import { listMyHousehold, type HouseholdPerson } from "@/lib/household.functions";
 import { KitSizingCard } from "@/components/site/account/KitSizingCard";
 import { MediaConsentCard } from "@/components/site/account/MediaConsentCard";
 import { WaiversCard } from "@/components/site/account/WaiversCard";
@@ -114,6 +117,7 @@ function AccountPage() {
   const { user } = useAuth();
   const { roles, isManager } = useRoles(user?.id);
   const fetchProfile = useServerFn(getMyProfile);
+  const fetchHousehold = useServerFn(listMyHousehold);
   // Every card below is about a PERSON rather than about the session, and this
   // page is the case where that person is the caller. The cards themselves
   // hold no opinion, which is what lets the same six render somebody else on
@@ -124,12 +128,38 @@ function AccountPage() {
   // read the same row, and three identical round trips would only give them
   // three chances to disagree about what is on file.
   const [profile, setProfile] = useState<Profile>(null);
+  // Who else is on this account. Fetched HERE rather than inside the card that
+  // lists them, because the page needs the same answer twice: once to list
+  // them, and once to decide whether the person reading has any records of
+  // their own to show. Two fetches would give the page two chances to disagree
+  // with the card sitting on it.
+  const [household, setHousehold] = useState<HouseholdPerson[]>([]);
+  const [householdError, setHouseholdError] = useState<string | null>(null);
+  // Tracked separately from `loading` below, which is about the profile row.
+  // Until this answers, the page does not yet know whether the person reading
+  // is a parent who never trains, and the four cards that depend on that must
+  // not be painted only to be taken away a moment later.
+  const [householdLoading, setHouseholdLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   // A failed fetch is NOT "you have no details". Conflating the two renders the
   // cards editable and empty, and one Save then writes those blanks over a
   // record that was there all along. Tracked separately so the page can say the
   // honest thing and offer a retry instead.
   const [loadFailed, setLoadFailed] = useState(false);
+
+  const loadHousehold = useCallback(() => {
+    setHouseholdLoading(true);
+    return fetchHousehold()
+      .then((rows) => {
+        setHousehold(rows);
+        setHouseholdError(null);
+      })
+      .catch((e) => {
+        setHousehold([]);
+        setHouseholdError(describeLoadError(e, "Could not load the people on your account"));
+      })
+      .finally(() => setHouseholdLoading(false));
+  }, [fetchHousehold]);
 
   const load = useCallback(() => {
     // Waiting for the id is a real (small) behaviour change, and in the right
@@ -148,13 +178,42 @@ function AccountPage() {
         setLoadFailed(true);
       })
       .finally(() => setLoading(false));
-  }, [fetchProfile, userId]);
+    // Its own failure, deliberately. A household that will not load must not
+    // take down the details cards below it, and it must not silently read as
+    // "nobody is on your account" either.
+    loadHousehold();
+  }, [fetchProfile, userId, loadHousehold]);
 
   useEffect(load, [load]);
 
   if (!user || !userId) return null;
 
-  const details = { userId, profile, loading, onSaved: setProfile };
+  const dependants = household.filter((p) => !p.is_self);
+  const self = household.find((p) => p.is_self) ?? null;
+  // A parent-only account: somebody who holds the login for their children and
+  // does not train themselves. They have no waiver, no kit sizes and no photo
+  // consent, so those cards would be four empty prompts to do things that do
+  // not apply to them.
+  //
+  // Both halves are required, and defaulting to "shows everything" is the
+  // safe direction. Somebody with no dependants is an ordinary member who has
+  // not signed yet and needs every card; and a household that failed to load
+  // leaves `self` null, which must not hide a member's own records behind a
+  // dropped connection.
+  const parentOnly = dependants.length > 0 && self != null && !self.has_any_waiver;
+  // "Show this person their own records." False while the household is still
+  // in flight as well as for a parent-only account: `parentOnly` is false
+  // during that window because `household` is still `[]`, so keying the cards
+  // on it alone paints kit sizing, photos, waivers and the code of conduct,
+  // each with its own spinner, and then removes all four when the answer
+  // lands. Withholding them for that moment and adding them is the calmer of
+  // the two, and it is the direction that never takes something away.
+  const ownRecords = !householdLoading && !parentOnly;
+
+  // Second person, because this page is about the person reading it. The same
+  // cards on `/account/<id>` are handed a name instead.
+  const voice = subjectVoice(null);
+  const details = { userId, voice, profile, loading, onSaved: setProfile };
 
   return (
     <section className="mx-auto max-w-2xl space-y-6 px-4 py-12">
@@ -197,6 +256,16 @@ function AccountPage() {
         </CardContent>
       </Card>
 
+      {/* Above "Your details", because who is on the account is the frame for
+          everything below it. Renders nothing at all for an account with no
+          dependants, which is almost every account. */}
+      <HouseholdCard
+        people={household}
+        loading={householdLoading}
+        loadError={householdError}
+        onRetry={loadHousehold}
+      />
+
       <SectionHeading>Your details</SectionHeading>
 
       {loadFailed ? (
@@ -216,25 +285,42 @@ function AccountPage() {
         <>
           <AboutYouCard {...details} />
 
-          <KitSizingCard {...details} />
+          {/* A parent who holds the login for their children and does not train
+              has no kit to be sized and is in no photograph, so these two would
+              be prompts to answer questions that do not apply to them. Contact
+              details still do: they are how the club reaches the family. */}
+          {ownRecords ? <KitSizingCard {...details} /> : null}
 
           <ContactCard {...details} />
 
-          <MediaConsentCard {...details} />
+          {ownRecords ? <MediaConsentCard {...details} /> : null}
         </>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        Your legal name and date of birth are not editable here, because a signed waiver records
-        them as they were given. Ask us and we will correct them. Your email is your login, so a
-        manager changes that one too.
-      </p>
+      {/* Held back until the household lands for the same reason as the cards
+          above: the two sentences say different things, and the majority case
+          is the second one, so guessing would show most people the wrong note
+          and then swap it under them. */}
+      {householdLoading ? null : (
+        <p className="text-xs text-muted-foreground">
+          {parentOnly
+            ? "Your email is your login, so a manager changes that one. Everything about the people on your account is on their own pages."
+            : "Your legal name and date of birth are not editable here, because a signed waiver records them as they were given. Ask us and we will correct them. Your email is your login, so a manager changes that one too."}
+        </p>
+      )}
 
-      <SectionHeading>Your records</SectionHeading>
+      {/* Nothing to show somebody who has signed nothing and agreed to nothing.
+          The people they look after each have their own records, on their own
+          pages, which the card above links to. */}
+      {ownRecords ? (
+        <>
+          <SectionHeading>Your records</SectionHeading>
 
-      <WaiversCard userId={userId} />
+          <WaiversCard userId={userId} voice={voice} />
 
-      <CodeOfConductCard userId={userId} />
+          <CodeOfConductCard userId={userId} voice={voice} />
+        </>
+      ) : null}
 
       <SectionHeading>Calendar</SectionHeading>
 

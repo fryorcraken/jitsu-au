@@ -15,7 +15,6 @@ import {
   matchTransactionSchema,
   membershipDeleteMessage,
   normalizeRef,
-  greetingName,
   nameWithPreferred,
   planMembershipWindow,
   planStartIsChoosable,
@@ -52,33 +51,36 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { userEmails } from "@/lib/supabase-rpc";
+import {
+  deliveryRecipientFor,
+  loadHouseholdContacts,
+  type ContactEmail,
+} from "@/lib/household-email";
+import { householdTargetSchema, resolveSubject } from "@/lib/household";
 import { requireManager } from "@/lib/require-manager";
 
 /**
- * Resolve auth emails (the one email store) for a set of user ids via the
- * service-role `user_emails` RPC. Returns an empty map on lookup failure so
- * callers degrade to missing emails rather than erroring. Degraded mode in the
- * directory: persons render with a null email, and leads (matched to persons by
- * email) are not deduped against them, so a person mid-funnel could transiently
- * appear twice — acceptable, since the RPC failing is rare and non-destructive.
- */
-async function emailsByUserId(
-  admin: MembershipClient,
-  userIds: string[],
-): Promise<Map<string, string>> {
-  if (!userIds.length) return new Map();
-  const { data, error } = await userEmails(admin, userIds);
-  if (error || !data) return new Map();
-  return new Map(data.map((e) => [e.user_id, e.email]));
-}
-
-/**
- * The same lookup, keeping the whole row rather than just the address.
+ * Resolve a set of addresses for the directory, with their verified state.
  *
- * The people directory needs `email_confirmed_at` alongside the email to badge
- * verified state, and it is the only caller that does — everywhere else wants a
- * plain user-id -> address map, so that stays the simpler helper above.
- * Degrades to an empty list on failure, matching `emailsByUserId`.
+ * ⚠️ It answers about exactly the ids it is GIVEN and resolves no household
+ * rule itself. Callers must hand it `contactUserIds(...)` -- whoever the club
+ * writes to about each person -- not the people themselves: a dependant's own
+ * id would fetch the reserved, non-deliverable string, and `household-email.ts`
+ * promises that string is never looked up at all. `aggregateClubUsers` then
+ * keys these rows by contact id and puts the guardian's name beside the
+ * address, so a child's row never shows a bare address that reads as a mailbox
+ * somebody could write to.
+ *
+ * The directory also needs `email_confirmed_at` to badge verified state. That
+ * fact belongs to the ADDRESS, so for a dependant it is the guardian's
+ * confirmation state, which is the truthful thing to badge: it is the guardian
+ * who proved they can read that mailbox.
+ *
+ * Degrades to an empty list on failure, matching the helper above. Degraded
+ * mode in the directory: persons render with a null email, and leads (matched
+ * to persons by email) are not deduped against them, so a person mid-funnel
+ * could transiently appear twice — acceptable, since the RPC failing is rare
+ * and non-destructive.
  */
 async function clubUserEmailRows(
   admin: MembershipClient,
@@ -376,21 +378,18 @@ export async function recordMembershipPayment(
   // report a recorded payment as a failure and invite a retry.
   if (membership.user_id) {
     try {
-      const [{ data: profile }, emails] = await Promise.all([
-        admin
-          .from("profiles")
-          .select("first_name, middle_name, last_name, preferred_name")
-          .eq("user_id", membership.user_id)
-          .maybeSingle(),
-        emailsByUserId(admin, [membership.user_id]),
-      ]);
-      const email = emails.get(membership.user_id) ?? null;
-      if (email) {
+      // The greeting and the address have to come from the SAME person, and
+      // that person is whoever reads the mail. Reading the subject's profile
+      // for a greeting while sending to their guardian produced "Hi Bea, we
+      // have received $90" into Bea's mother's inbox.
+      const recipient = await deliveryRecipientFor(admin, membership.user_id);
+      if (recipient.email) {
         const { sendMembershipPaidEmail } = await import("./membership-email.server");
         await sendMembershipPaidEmail({
           membershipId: membership.id,
-          memberGreetingName: profile ? greetingName(profile) : "",
-          memberEmail: email,
+          memberGreetingName: recipient.greetingName,
+          memberEmail: recipient.email,
+          forName: recipient.forName,
           planName: input.plan?.name ?? "your membership",
           validity: input.plan ? validityLabel(input.plan) : "",
           amount: formatCents(membership.price_cents),
@@ -449,16 +448,17 @@ export async function ensureCasualInvoiceEmailed(
     if (error) throw new Error(error.message);
     if (!membership || !membership.user_id) return;
 
-    const [{ data: plan }, { data: profile }, emails] = await Promise.all([
+    const [{ data: plan }, { data: profile }, recipient] = await Promise.all([
       admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
       admin
         .from("profiles")
         .select("first_name, middle_name, last_name, preferred_name")
         .eq("user_id", membership.user_id)
         .maybeSingle(),
-      emailsByUserId(admin, [membership.user_id]),
+      // Same rule as above: greet whoever reads it, name whoever it is about.
+      deliveryRecipientFor(admin, membership.user_id),
     ]);
-    const email = emails.get(membership.user_id) ?? null;
+    const email = recipient.email;
     if (!email) return;
 
     if (membership.paid_at) {
@@ -469,8 +469,9 @@ export async function ensureCasualInvoiceEmailed(
       const { sendMembershipPaidEmail } = await import("./membership-email.server");
       await sendMembershipPaidEmail({
         membershipId: membership.id,
-        memberGreetingName: profile ? greetingName(profile) : "",
+        memberGreetingName: recipient.greetingName,
         memberEmail: email,
+        forName: recipient.forName,
         planName: plan?.name ?? "your casual class",
         validity: plan ? validityLabel(plan) : "",
         amount: formatCents(membership.price_cents),
@@ -521,10 +522,14 @@ export async function ensureCasualInvoiceEmailed(
 
     const { sendMembershipPaymentEmail } = await import("./membership-email.server");
     await sendMembershipPaymentEmail({
-      membershipId: membership.id,
+      // `memberName` is the MANAGER copy's "who is this", so it stays the
+      // subject's legal name. Only the greeting and the address move to the
+      // person who actually reads the member copy.
       memberName: profile ? profileFullName(profile) : "",
-      memberGreetingName: profile ? greetingName(profile) : "",
+      membershipId: membership.id,
+      memberGreetingName: recipient.greetingName,
       memberEmail: email,
+      forName: recipient.forName,
       planName,
       amount: formatCents(totalCents),
       reference: membership.payment_reference,
@@ -646,9 +651,15 @@ export const listMembershipPlans = createServerFn({ method: "GET" })
 // ---- Member: my memberships + lifecycle ----
 export const getMyMemberships = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .handler(async ({ data: input, context }) => {
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
+
+    // WHOSE memberships. Absent means the caller's own, which is what
+    // `/membership` sent before a household could exist. `resolveSubject` IS
+    // the gate, so every read below is about somebody the caller may act for.
+    const subjectId = await resolveSubject(admin, context.userId, input.userId);
 
     const [
       { data: rows, error },
@@ -660,26 +671,22 @@ export const getMyMemberships = createServerFn({ method: "GET" })
       admin
         .from("memberships")
         .select("*")
-        .eq("user_id", context.userId)
+        .eq("user_id", subjectId)
         .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("*"),
       // The student number lives on the profile; used to prefill the student
       // rate on the membership page.
-      admin
-        .from("profiles")
-        .select("uts_student_number")
-        .eq("user_id", context.userId)
-        .maybeSingle(),
+      admin.from("profiles").select("uts_student_number").eq("user_id", subjectId).maybeSingle(),
       // Waiver states feed the lifecycle: approved => visitor+, pending-only
       // => applicant.
-      admin.from("waivers").select("approval_status").eq("user_id", context.userId).limit(100),
+      admin.from("waivers").select("approval_status").eq("user_id", subjectId).limit(100),
       // How many classes they have trained. Deliberately just the count: a
       // member has no business reading the club's coverage bookkeeping, and
       // "no cover" against a class they attended reads as an accusation.
       admin
         .from("session_checkins")
         .select("id", { count: "exact", head: true })
-        .eq("user_id", context.userId),
+        .eq("user_id", subjectId),
     ]);
     // An errored waivers read would tell an approved member they are still a
     // lead on their own membership page; an errored plans read would price every
@@ -1041,17 +1048,19 @@ export async function enrolMember(
   // member does not care that it lands as two invoices on our side.
   if (input.sendEmail !== false) {
     try {
-      const emails = await emailsByUserId(admin, [userId]);
-      const email = emails.get(userId) ?? null;
-      if (email) {
+      const recipient = await deliveryRecipientFor(admin, userId);
+      if (recipient.email) {
         const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
         const planName = insuranceInvoice ? `${plan.name} + ${insurancePlan!.name}` : plan.name;
         const { sendMembershipPaymentEmail } = await import("./membership-email.server");
         await sendMembershipPaymentEmail({
           membershipId: inserted.id,
+          // The manager copy still identifies the SUBJECT by their legal name;
+          // only the member copy's greeting and address follow the household.
           memberName: who ? profileFullName(who) : "",
-          memberGreetingName: who ? greetingName(who) : "",
-          memberEmail: email,
+          memberGreetingName: recipient.greetingName,
+          memberEmail: recipient.email,
+          forName: recipient.forName,
           planName,
           amount: formatCents(totalCents),
           reference: inserted.payment_reference,
@@ -1081,6 +1090,14 @@ export const startMembership = createServerFn({ method: "POST" })
     if (data.hp) return { ok: true as const, activated: false, reference: null as string | null };
     const admin = await adminClient();
 
+    // WHO this is for: the caller, or one of their dependants. `resolveSubject`
+    // IS the gate -- you cannot get the subject without going through it -- so
+    // every question below asks about the right person by construction. Note
+    // `enrolMember` already takes a user and needs no change, and
+    // `assignTrialMembership` is already per-person, so each child correctly
+    // gets their own free trial rather than sharing the parent's.
+    const subjectId = await resolveSubject(admin, context.userId, data.userId);
+
     const { data: plan, error: planErr } = await admin
       .from("membership_plans")
       .select("*")
@@ -1096,8 +1113,15 @@ export const startMembership = createServerFn({ method: "POST" })
     // One free trial per member. This is the member-driven half of the pair with
     // `assignTrialMembership`, so it is the easier one to hit: the member can
     // keep pressing until a read fails.
-    if (plan.kind === "trial" && (await hasUsedTrial(admin, context.userId, plan.id)))
-      throw new Error("You've already started your free trial.");
+    // Asked about the SUBJECT. Keyed on the caller it would refuse a second
+    // child their trial because their sibling had already had one, which is
+    // #102's bug in a new place.
+    if (plan.kind === "trial" && (await hasUsedTrial(admin, subjectId, plan.id)))
+      throw new Error(
+        subjectId === context.userId
+          ? "You've already started your free trial."
+          : "That person has already had their free trial.",
+      );
 
     // ---- Yearly insurance: required cover bundled into the purchase ----
     //
@@ -1105,7 +1129,7 @@ export const startMembership = createServerFn({ method: "POST" })
     // caller opting out: all three. A club with no insurance plan never blocks a
     // purchase here, and `include_insurance` from a covered member is their own
     // choice to renew early.
-    const { insurancePlan, coverEndsAt } = await resolveInsuranceCover(admin, context.userId, plan);
+    const { insurancePlan, coverEndsAt } = await resolveInsuranceCover(admin, subjectId, plan);
     if (insurancePlan && !coverEndsAt && !data.include_insurance) {
       throw new Error(
         "Yearly insurance is required to train with us. Keep it selected and choose the plan again.",
@@ -1113,7 +1137,7 @@ export const startMembership = createServerFn({ method: "POST" })
     }
 
     return enrolMember(admin, {
-      userId: context.userId,
+      userId: subjectId,
       plan,
       utsStudentNumber: data.uts_student_number ?? null,
       sessionDate: data.session_date,
@@ -1295,17 +1319,20 @@ export const listMemberships = createServerFn({ method: "GET" })
     // from the auth user (the one email store).
     const userIds = [...new Set((rows ?? []).map((r) => r.user_id).filter(Boolean))] as string[];
     const nameByUser = new Map<string, string>();
-    let emailByUser = new Map<string, string>();
+    // DISPLAY, not delivery: this is a manager reading a list, so a dependant's
+    // row shows their guardian's address AND says whose it is. A bare address
+    // under a child's name would read as the child's own mailbox.
+    let contactByUser = new Map<string, ContactEmail>();
     if (userIds.length) {
-      const [{ data: profiles, error: prErr }, emails] = await Promise.all([
+      const [{ data: profiles, error: prErr }, contacts] = await Promise.all([
         admin
           .from("profiles")
           .select("user_id, first_name, middle_name, last_name, preferred_name")
           .in("user_id", userIds),
-        emailsByUserId(admin, userIds),
+        loadHouseholdContacts(admin, userIds),
       ]);
       if (prErr) throw new Error(prErr.message);
-      emailByUser = emails;
+      contactByUser = new Map(userIds.map((id) => [id, contacts.displayEmail(id)]));
       for (const p of profiles ?? []) {
         nameByUser.set(p.user_id, nameWithPreferred(p));
       }
@@ -1324,7 +1351,13 @@ export const listMemberships = createServerFn({ method: "GET" })
       uts_student_number: r.uts_student_number,
       checkin_count: checkinCounts.get(r.id) ?? 0,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
-      member_email: (r.user_id ? emailByUser.get(r.user_id) : null) ?? null,
+      member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
+      // Null for the overwhelming majority: an account holder's address is
+      // their own and needs no caption. Set only when the address on this row
+      // belongs to somebody else, so the screen can say so instead of implying
+      // a child has a mailbox.
+      member_email_belongs_to:
+        (r.user_id ? contactByUser.get(r.user_id)?.onBehalfOf?.name : null) ?? null,
     }));
   });
 
@@ -1334,7 +1367,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context);
     const admin = await adminClient();
-    const { aggregateClubUsers, profileUserIds, LEADS_LIMIT, CHECKINS_LIMIT } =
+    const { aggregateClubUsers, contactUserIds, profileUserIds, LEADS_LIMIT, CHECKINS_LIMIT } =
       await import("@/lib/club-users");
 
     const [
@@ -1348,7 +1381,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
       admin
         .from("profiles")
         .select(
-          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at",
+          "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at, guardian_user_id",
         )
         .limit(5000),
       admin.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
@@ -1405,7 +1438,8 @@ export const listClubUsers = createServerFn({ method: "GET" })
       // a failed roles read must not silently strip everyone's manager pill.
       const [{ data: roles, error: rErr }, resolved] = await Promise.all([
         admin.from("user_roles").select("user_id, role").in("user_id", userIds),
-        clubUserEmailRows(admin, userIds),
+        // The CONTACT ids, not `userIds`: see the helper's own warning.
+        clubUserEmailRows(admin, contactUserIds(profileRows)),
       ]);
       if (rErr) throw new Error(rErr.message);
       rolesRows = (roles ?? []) as { user_id: string; role: string }[];

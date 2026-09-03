@@ -33,7 +33,7 @@ import {
   waiverClass,
 } from "@/lib/status-colours";
 import { lifecycleLabel, membershipStatusLabel } from "@/lib/status-labels";
-import { mediaConsentLabel } from "@/lib/waiver-acknowledgements";
+import { mediaConsentLabel, mediaConsentProvenance } from "@/lib/waiver-acknowledgements";
 import { cn } from "@/lib/utils";
 import {
   deriveExpandedWaivers,
@@ -106,12 +106,21 @@ function MediaConsentCard({
   value,
   updatedAt,
   setBy,
+  guardianUserId,
+  guardianName,
 }: {
   userId: string;
   value: boolean | null;
   updatedAt: string | null;
-  /** Who last set it by hand: this person themselves, a manager (historically), or nobody. */
+  /**
+   * Who last set it by hand: this person themselves, the account holder who
+   * looks after them, a manager, or nobody.
+   */
   setBy: string | null;
+  /** Whose account this person is on, when they are on somebody else's. */
+  guardianUserId: string | null;
+  /** That person's name, for the sentence. Null when the lookup failed. */
+  guardianName: string | null;
 }) {
   return (
     <div className="rounded-lg border p-4">
@@ -129,31 +138,28 @@ function MediaConsentCard({
         </span>
       </div>
 
-      {/* Where the current answer came from. Three different facts wear the same
-          "No": one the member ticked when they signed, one they set themselves
-          on /account afterwards, and one a manager recorded by hand before this
-          page stopped allowing that. Only the first is in a signed PDF, so the
-          page never blurs them.
-
-          `setBy === userId` is what separates the member's own change from a
-          manager's -- both paths stamp the actor's id into the same column.
-
-          No branch claims a waiver exists: a profile can predate any submission
-          (the ensure_profile trigger gives every auth user one), so "their
-          signed waiver shows..." would be a statement the card cannot back up. */}
+      {/* Where the current answer came from. The rule is in
+          `mediaConsentProvenance`, with its reasoning and its tests: it is one
+          sentence, but it makes a statement about who decided something on
+          somebody else's behalf, and it got that wrong once already. */}
       <p className="mb-3 text-xs text-muted-foreground">
-        {setBy === userId
-          ? `They set this themselves on ${formatDateTime(updatedAt)}, from their account page.`
-          : setBy
-            ? `Set by a manager on ${formatDateTime(updatedAt)}, not read off a waiver.`
-            : value === null
-              ? "Nothing recorded yet."
-              : "From their approved waiver."}
+        {mediaConsentProvenance({
+          userId,
+          guardianUserId,
+          guardianName,
+          setBy,
+          updatedAt: formatDateTime(updatedAt),
+          value,
+        })}
       </p>
 
       <p className="text-xs text-muted-foreground">
-        This is read-only here. They can change it themselves on their account page, and approving a
-        newer waiver that asks about photos replaces it with what they ticked on it.
+        This is read-only here.{" "}
+        {guardianUserId
+          ? "Whoever holds their account can change it from their page there"
+          : "They can change it themselves on their account page"}
+        , and approving a newer waiver that asks about photos replaces it with what they ticked on
+        it.
       </p>
     </div>
   );
@@ -194,18 +200,31 @@ function SignerMeta({ meta }: { meta: unknown }) {
 function EmailCard({
   userId,
   email,
+  belongsTo,
   emailConfirmedAt,
   onChanged,
 }: {
   userId: string;
   email: string | null;
+  /**
+   * Whose address `email` is, when it is not this person's own. Set only for a
+   * dependant, whose mailbox is their guardian's.
+   */
+  belongsTo: string | null;
   emailConfirmedAt: string | null;
   onChanged: () => void;
 }) {
   const changeEmail = useServerFn(setClubUserEmail);
   const resend = useServerFn(resendClubUserVerification);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(email ?? "");
+  // ⚠️ NOT prefilled for a dependant. The address on screen is their
+  // GUARDIAN's, so prefilling it here would offer a manager a Save that writes
+  // the parent's address onto the child's login, which is precisely the thing
+  // nobody wants and which the address's whole reserved shape exists to
+  // prevent. Refusing that write outright is #107's (`setClubUserEmail`, in
+  // #102's sharp edges); not inviting it is this change's, because this change
+  // is what made the field look like a real address worth keeping.
+  const [draft, setDraft] = useState(belongsTo ? "" : (email ?? ""));
   const [busy, setBusy] = useState(false);
   const verified = isEmailVerified(emailConfirmedAt);
 
@@ -254,9 +273,11 @@ function EmailCard({
     <div className="rounded-lg border p-4">
       <h2 className="mb-3 text-lg font-bold">Email</h2>
       <p className="mb-3 text-sm text-muted-foreground">
-        {verified
-          ? `Confirmed on ${formatDate(emailConfirmedAt)}, when they opened a link we sent here.`
-          : "Nobody has opened a link we sent to this address yet. Approving a waiver emails their account details here, and it is the address they sign in with, so a typo locks them out."}
+        {belongsTo
+          ? `This person is on ${belongsTo}'s account and has no email of their own, so everything about them goes to ${belongsTo}. Change it on ${belongsTo}'s own page.`
+          : verified
+            ? `Confirmed on ${formatDate(emailConfirmedAt)}, when they opened a link we sent here.`
+            : "Nobody has opened a link we sent to this address yet. Approving a waiver emails their account details here, and it is the address they sign in with, so a typo locks them out."}
       </p>
 
       {editing ? (
@@ -737,6 +758,13 @@ function ManagerUserPage() {
             {/* Every person has an email (it lives on their login record), so a
                 missing one here means the lookup failed, not that we hold none. */}
             <span>{summary.email ?? "Email lookup failed"}</span>
+            {/* A dependant has no mailbox of their own, so this is their
+                guardian's address and the page has to say so. Without it a
+                manager reads a child's page and believes they can write to the
+                child. Null for every account holder. */}
+            {summary.email_belongs_to ? (
+              <span>({summary.email_belongs_to}&apos;s address)</span>
+            ) : null}
             {summary.email ? (
               <Pill
                 label={emailVerificationLabel(summary.email_confirmed_at)}
@@ -762,6 +790,7 @@ function ManagerUserPage() {
       <EmailCard
         userId={userId}
         email={summary.email}
+        belongsTo={summary.email_belongs_to}
         emailConfirmedAt={summary.email_confirmed_at}
         onChanged={() => void load(false)}
       />
@@ -815,6 +844,8 @@ function ManagerUserPage() {
         value={profile.media_consent}
         updatedAt={profile.media_consent_updated_at}
         setBy={profile.media_consent_updated_by}
+        guardianUserId={profile.guardian_user_id}
+        guardianName={summary.email_belongs_to}
       />
 
       {/* House rules. Read-only on purpose: a manager cannot tick this on

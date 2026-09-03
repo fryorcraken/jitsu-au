@@ -77,16 +77,26 @@ system. (The contact form stores a message, not a person.)
    non-deliverable string the server generates, and their login is permanently
    banned. Nothing identifies a person by it.
 
-   ⚠️ **"Never printed, never sent to" is the intent, and it is not true yet.**
-   Until #106 splits display from delivery, a dependant's reserved address
-   **is** shown on `/manager/users` and on their person page, with an amber
-   "unverified" pill, and the person page's **Change email** and **Resend
-   verification** buttons act on it. Membership invoices and receipts also
-   resolve the recipient from the participant's own address, so an invoice
-   raised for a child is sent nowhere and the guardian is never told they owe
-   money. Nothing about a dependant reaches the guardian today except the
-   waiver confirmation and the account-activated email. Treat the rule as what
-   the product is committed to, and #106/#107 as the work that makes it so.
+   **"Never printed, never sent to" is now enforced rather than merely
+   intended.** The two questions a person's address answers are split in two
+   (`src/lib/household-email.ts`), and the reserved string is never looked up
+   at all: every lookup resolves the CONTACT person first and asks
+   `user_emails` only about them, so a dependant's own address does not enter
+   the process and cannot leak from a field somebody adds later.
+   - **Delivery.** Invoices, receipts, the daily digest and the transactional
+     emails all resolve the recipient through `deliveryRecipientFor` /
+     `deliveryEmailFor`, so a message about a child goes to their guardian,
+     greets the guardian, and names the child it is about.
+   - **Display.** `/manager/users` and a person's page show the guardian's
+     address and say whose it is (`email_belongs_to`), because a bare address
+     under a child's name reads as a mailbox somebody can write to. The
+     verification pill now reflects the **guardian's** login, not the child's
+     unverifiable one, and **Resend verification** is refused for a dependant.
+
+   ⚠️ One gap is left, deliberately: **Change email** (`setClubUserEmail`) still
+   acts on the person's own login record, so a manager can point it at a
+   dependant. #107 owns that, along with the rest of the manager-side household
+   work.
 
    So two children in one family are two people under one address, which is
    what the club actually has. Before this, the second child's waiver resolved
@@ -208,6 +218,22 @@ system. (The contact form stores a message, not a person.)
    of its own. A **dependant** never gets one, at any age. Their login record
    is created permanently banned and stays that way, so the auth page answers
    for their reserved address exactly as it does for an unknown one.
+
+   That first case reaches the screen. `/account` shows exactly four cards only
+   to somebody who has records of their own -- kit sizing, photos and video,
+   waivers and the code of conduct -- so a parent-only account keeps everything
+   that is still about them (the people on the account, the knowledge base,
+   their membership, their own details and contact details, their calendar link
+   and their password) and is asked nothing about sizing a gi they will never
+   wear. It takes BOTH halves to shrink the page: having somebody else on the
+   account AND no waiver of one's own. Somebody with no dependants is an
+   ordinary member about to sign their first waiver and needs every card, and a
+   household that fails to load leaves the page showing everything, because a
+   dropped connection must not hide a member's own records from them.
+
+   The page waits for that answer before drawing any of the four. Keyed on the
+   answer alone they would paint while the read was in flight and vanish when
+   it landed, which is a page changing its mind about who somebody is.
 
 ## Flows
 
@@ -681,6 +707,21 @@ Login exists only via approval (account-activated email, then a magic link they
 request at `/auth`, or a password they set). They see: the waiver form prefilled from their profile, their
 waiver history with the active one marked and PDFs downloadable, and
 memberships (buying a paid plan makes a visitor a member).
+
+**A guardian sees the same for each person on their account**, from
+`/account/<id>`: that child's waiver history, their PDFs, their details and
+their code of conduct. `getWaiverPdfUrl` allows three readers, and asks in this
+order: the waiver's owner, a manager, then the owner's guardian through
+`mayActFor`. All three refusals say "Waiver PDF not found.", the same sentence
+it gives for a waiver that does not exist, because it takes a bare uuid from
+anybody signed in and two different answers would let somebody enumerate real
+waiver ids.
+
+The `storage.objects` policies say the same thing (`docs/database.md`), but they
+are not what enforces it: the signed URL is minted with the service role, which
+bypasses storage RLS. They are the versioned statement of the access model for
+the direct-from-client path, kept in step so the next person to add one inherits
+the right answer.
 
 Every emailed auth link and code lasts as long as Supabase Auth's "Email OTP
 Expiration" setting, currently its 3600 second default. The emails say so, from

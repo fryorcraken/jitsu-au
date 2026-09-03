@@ -42,6 +42,20 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 
 - `list_users` — members and their lifecycle status, roles, and invoices.
 - `list_invoices` — invoices with member name/email (to find an id to edit).
+
+> [!IMPORTANT]
+> **An address on a person's row is not always that person's mailbox.** Somebody
+> on somebody else's account — a child, typically — has no address of their own
+> (`docs/waivers.md` has the reserved-address rule), so the `email` on their
+> `list_users` row and the `member_email` on their `list_invoices` row are the
+> **guardian's**. Both listings say whose it is in a field beside it,
+> `email_belongs_to` and `member_email_belongs_to`, null when the address really
+> is the person's own. A caller reporting an address without that caption tells
+> a manager they can write to a nine-year-old, which is the failure the split
+> exists to prevent — so print the two together or not at all. Neither field is
+> editable: `member_email_belongs_to` is a read-only decoration like
+> `member_name`, and `edit_invoice` refuses it by name.
+
 - `create_membership` — raise a membership for a person, the agent's equivalent
   of the manager screen's "Add a membership" and of a member choosing a plan
   themselves. Dispatches to `createMembershipForUser` in

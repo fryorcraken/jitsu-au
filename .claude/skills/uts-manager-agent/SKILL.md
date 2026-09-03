@@ -89,6 +89,14 @@ an `id` you can pass to `edit_invoice`). A `lead` (registered interest only) has
 > whether the club has been paid: null means the invoice is still outstanding.
 > Filtering by `status` to find who owes money will find nobody.
 
+> **An `email` is not always that person's mailbox.** Somebody on somebody
+> else's account — a child, typically — has no address of their own, so the
+> `email` on their row is their **guardian's**. `email_belongs_to` names whose
+> it is, and is `null` when the address really is the person's own. Report the
+> two together or neither: an address under a nine-year-old's name with no
+> caption tells a manager they can write to a nine-year-old, and nobody is
+> reading it. `list_invoices` says the same thing in `member_email_belongs_to`.
+
 `roles` is empty for a member on a **free** plan, including the trial: the
 `member` role follows an active, priced, non-trial membership, so an active $0
 invoice with `roles: []` is correct, not a missed grant.
@@ -106,7 +114,10 @@ curl -s "$UTS_MANAGER_API_URL/api/manager/agent" \
 
 ### `list_invoices` — find an invoice to edit
 
-Flat list of invoices (membership payment records) with member name/email. The
+Flat list of invoices (membership payment records) with member name/email, plus
+`member_email_belongs_to` — whose address that is when it is not the member's
+own (see the note under `list_users`; it is read-only, and `edit_invoice`
+refuses it by name). The
 response's `total` is the full matching count regardless of `limit`, so you can
 tell a capped page from a complete one. Each invoice also carries
 `sessions_allowed` and `sessions_remaining`, including what `null` means on each
@@ -199,7 +210,8 @@ Any other key is rejected, naming itself in the error — so a typo like `price`
 doesn't get silently ignored. This includes the read-only fields a `list_*`
 call decorates an invoice with (`plan_code`, `plan_name`, `price`, `is_student`,
 `paid_at`, `starts_at`, `ends_at`, `created_at`, `member_name`,
-`member_email`): send only `id` plus the field(s) you're actually changing,
+`member_email`, `member_email_belongs_to`): send only `id` plus the field(s)
+you're actually changing,
 never a listed invoice echoed back wholesale. `starts_at` / `ends_at` move only
 through `starts_on`, which names a day and lets the plan place it — you never
 write the two instants yourself. `plan_name` already names the

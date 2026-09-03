@@ -37,6 +37,14 @@ const pendingInsurance = {
 };
 const activePlan = { ...pendingPlan, id: "m3", status: "active", paid_at: "2026-08-02T00:00:00Z" };
 
+/**
+ * The page's `?for=` search, mutable so a test can put the page on a child.
+ *
+ * Reset to "the account holder" in `beforeEach`, which is what every case here
+ * that predates households is about.
+ */
+let search: { for?: string } = {};
+
 const getMyMemberships = vi.fn();
 const getPaymentInstructions = vi.fn();
 const listMembershipPlans = vi.fn();
@@ -67,7 +75,14 @@ function mine(memberships: unknown[]) {
 }
 
 vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => (opts: Record<string, unknown>) => opts,
+  // `useSearch` is part of what a route object gives its component, and the
+  // page now reads `?for=` off it to decide whose membership it is showing.
+  // Empty here, which is the account holder's own: every case below is a member
+  // with nobody else on their account.
+  createFileRoute: () => (opts: Record<string, unknown>) => ({
+    ...opts,
+    useSearch: () => search,
+  }),
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
   useNavigate: () => vi.fn(),
 }));
@@ -81,6 +96,15 @@ vi.mock("@/lib/membership.functions", () => ({
   getMyMemberships: (...args: unknown[]) => getMyMemberships(...args),
   getPaymentInstructions: (...args: unknown[]) => getPaymentInstructions(...args),
   startMembership: (...args: unknown[]) => startMembership(...args),
+}));
+
+// Household reads on this page: who is on the account, and what the account
+// owes. Mocked because `household.functions.ts` pulls in the real auth
+// middleware. Empty means an account with nobody else on it, which is what
+// every existing case here is about, so the selector never renders.
+vi.mock("@/lib/household.functions", () => ({
+  listMyHousehold: vi.fn().mockResolvedValue([]),
+  listHouseholdInvoices: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/lib/code-of-conduct.functions", () => ({
@@ -118,6 +142,9 @@ const ACCOUNT = {
 };
 
 beforeEach(() => {
+  // Back to "the account holder", which is what every case that predates
+  // households is about.
+  search = {};
   getMyMemberships.mockReset().mockResolvedValue(mine([pendingPlan]));
   getPaymentInstructions.mockReset().mockResolvedValue({ ok: true, details: ACCOUNT });
   listMembershipPlans.mockReset().mockResolvedValue([]);
@@ -365,5 +392,132 @@ describe("/membership: what a finished trial is called", () => {
     expect(screen.queryByText("Used up")).not.toBeInTheDocument();
     expect(screen.getByText("Lapsed")).toBeVisible();
     expect(screen.getByText(/membership has lapsed/i)).toBeVisible();
+  });
+});
+
+describe("/membership, when the page is about a child", () => {
+  // Everything the purchase form holds is about ONE person, so pointing the
+  // page at somebody else has to carry through to the server and drop what
+  // belonged to the last one.
+  const CHILD = "child-1";
+  const HOUSEHOLD = [
+    {
+      user_id: "parent-1",
+      name: "Ada Lovelace",
+      is_self: true,
+      lifecycle_status: "member",
+      has_any_waiver: true,
+      latest_plan_name: null,
+      latest_plan_kind: null,
+      latest_membership_status: null,
+      latest_sessions_remaining: null,
+    },
+    {
+      user_id: CHILD,
+      name: "Bea Lovelace",
+      is_self: false,
+      lifecycle_status: "visitor",
+      has_any_waiver: true,
+      latest_plan_name: null,
+      latest_plan_kind: null,
+      latest_membership_status: null,
+      latest_sessions_remaining: null,
+    },
+  ];
+
+  beforeEach(async () => {
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listMyHousehold).mockResolvedValue(HOUSEHOLD as never);
+  });
+
+  it("reads the CHILD's membership, not the caller's", async () => {
+    search = { for: CHILD };
+    await renderLoaded();
+    // Without the target this page shows a parent their own status and plans
+    // under a heading about their child, which is the silent wrong-person read
+    // the whole household project exists to end.
+    expect(getMyMemberships).toHaveBeenCalledWith({ data: { userId: CHILD } });
+  });
+
+  it("names the child in the status card, rather than saying 'your'", async () => {
+    search = { for: CHILD };
+    await renderLoaded();
+    expect(await screen.findByText("Bea's status")).toBeInTheDocument();
+  });
+
+  it("offers the choice of person, because there is somebody else on the account", async () => {
+    await renderLoaded();
+    expect(screen.getByText("Who is this for?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bea" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "You" })).toBeInTheDocument();
+  });
+
+  it("does not carry a parent's UTS student number onto a child's purchase", async () => {
+    // The server prices from the number it is sent without asking whose it is,
+    // so a student parent switching to their nine-year-old would have bought
+    // them a UTS student membership.
+    search = {};
+    getMyMemberships.mockResolvedValue({ ...mine([]), uts_student_number: "12345678" });
+    const { rerender } = render(<MembershipPage />);
+    await waitFor(() =>
+      expect(screen.getByLabelText(/UTS student number/i)).toHaveValue("12345678"),
+    );
+
+    // The same page, pointed at the child, whose own record has no number.
+    search = { for: CHILD };
+    getMyMemberships.mockResolvedValue(mine([]));
+    rerender(<MembershipPage />);
+    await waitFor(() => expect(screen.getByLabelText(/UTS student number/i)).toHaveValue(""));
+  });
+});
+
+describe("/membership, when an extra will not load", () => {
+  const CHILD = "child-1";
+
+  it("still shows a member their own page when the household read fails", async () => {
+    // The list of people is an EXTRA on a page whose job is one person's
+    // membership. Failing the whole page over it leaves a member who only
+    // wanted to renew looking at "try again", with nothing to do but press it.
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listMyHousehold).mockRejectedValue(new Error("network"));
+    search = {};
+    await renderLoaded();
+
+    expect(screen.getByRole("heading", { name: "Membership" })).toBeVisible();
+    expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument();
+    // ...and it says so where the picker would have been, rather than letting
+    // an account with children read as an account with none.
+    expect(screen.getByText(/not the same as having nobody else on it/i)).toBeInTheDocument();
+  });
+
+  it("does fail the page when the URL names somebody it can no longer identify", async () => {
+    // The one case where degrading is worse than failing: this read is the only
+    // thing that says who `?for=` is, so without it the page would show a
+    // child's memberships while calling the reader the member.
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listMyHousehold).mockRejectedValue(new Error("network"));
+    search = { for: CHILD };
+    render(<MembershipPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/membership could not be loaded/i)).toBeInTheDocument(),
+    );
+    // Not the child's page with the parent's words on it, which is the state
+    // this refuses to render.
+    expect(screen.queryByText("Bea's status")).toBeNull();
+    expect(screen.queryByText("Who is this for?")).toBeNull();
+  });
+
+  it("still shows what the member owes when the household's invoices fail", async () => {
+    // The fallback the doc promises. A broken extra must never be able to hide
+    // an invoice somebody has to pay.
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listHouseholdInvoices).mockRejectedValue(new Error("network"));
+    search = {};
+    getMyMemberships.mockResolvedValue(mine([pendingPlan]));
+    await renderLoaded();
+
+    await waitFor(() => expect(payCard()).toBeInTheDocument());
+    expect(within(payCard()!).getByText(PLAN_REF)).toBeVisible();
   });
 });

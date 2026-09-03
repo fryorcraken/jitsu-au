@@ -145,6 +145,7 @@ describe("signedInPaths, against the real src/routes tree", () => {
   it("finds the member area and every manager screen", () => {
     expect(paths).toEqual([
       "/account",
+      "/account/$userId",
       "/kb",
       "/kb/$slug",
       "/manager",
@@ -199,5 +200,47 @@ describe("signedInPathsByPersona", () => {
     expect(() => signedInPathsByPersona(["_authenticated/manager.index.tsx"], params)).toThrow(
       /no member pages/,
     );
+  });
+});
+
+describe("fillRouteParams, when one parameter name means two people", () => {
+  // `$userId` names somebody a MANAGER is looking at on /manager/users, and one
+  // of the MEMBER's own dependants on /account. The flat map cannot say both,
+  // which is exactly the case site-pages.ts predicted when it said the map
+  // "needs keying by path instead".
+  const params = { userId: "manager-is-looking-at" };
+  const byPath = { "/account/$userId": { userId: "the-members-own-child" } };
+
+  it("prefers the per-path value on the path that has one", () => {
+    expect(fillRouteParams("/account/$userId", params, byPath)).toBe(
+      "/account/the-members-own-child",
+    );
+  });
+
+  it("leaves every other path on the flat map", () => {
+    expect(fillRouteParams("/manager/users/$userId", params, byPath)).toBe(
+      "/manager/users/manager-is-looking-at",
+    );
+  });
+
+  it("falls back to the flat map for a fixture with no overrides at all", () => {
+    expect(fillRouteParams("/account/$userId", params, undefined)).toBe(
+      "/account/manager-is-looking-at",
+    );
+  });
+
+  it("still reports a parameter nothing can fill", () => {
+    expect(fillRouteParams("/account/$userId", {}, {})).toBeNull();
+  });
+
+  it("routes each persona's page to the right person", () => {
+    const files = [
+      "_authenticated/account_.$userId.tsx",
+      "_authenticated/manager.users_.$userId.tsx",
+    ];
+    expect(signedInPathsByPersona(files, params, byPath)).toEqual({
+      member: ["/account/the-members-own-child"],
+      manager: ["/manager/users/manager-is-looking-at"],
+    });
   });
 });

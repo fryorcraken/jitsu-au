@@ -18,6 +18,7 @@ import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-condu
 import type { MembershipClient } from "@/lib/membership-types";
 import { personLabelsById, type ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
+import { contactUserIdFor, isDependantUser } from "@/lib/household";
 
 /** Max waiver / membership rows one person's page pulls. */
 const WAIVERS_LIMIT = 100;
@@ -55,7 +56,6 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: memberships, error: mErr },
       { data: plans, error: plErr },
       { data: roles, error: rErr },
-      { data: emailRows, error: emailErr },
       { data: checkins, error: cErr },
       { count: checkinCount, error: ccErr },
       { data: codeOfConduct, error: cocErr },
@@ -75,7 +75,6 @@ export const getClubUser = createServerFn({ method: "POST" })
         .limit(MEMBERSHIPS_LIMIT),
       admin.from("membership_plans").select("id, name, kind, starts_on, ends_on, duration_days"),
       admin.from("user_roles").select("user_id, role").eq("user_id", data.userId),
-      userEmails(admin, [data.userId]),
       admin
         .from("session_checkins")
         .select("id, event_id, checked_in_at, coverage, membership_id, consumed_credit, warnings")
@@ -110,6 +109,37 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (cErr) throw new Error(cErr.message);
     if (ccErr) throw new Error(ccErr.message);
     if (!profile) throw new Error("User not found.");
+
+    // Whose address belongs on this page. For an account holder that is their
+    // own; for a dependant it is their guardian's, and the reserved,
+    // non-deliverable string on the child's own login is never asked for at
+    // all -- which is why this is a round of its own rather than part of the
+    // one above: the guardian's id is only known once the profile has come
+    // back. One extra round trip on a manager page, in exchange for never
+    // fetching an address that identifies nobody.
+    // Through the helper rather than an inline `??`: `household.ts` says why
+    // that is a function at all. "Which id do I ask for an address?" has to
+    // have exactly one answer, because the wrong one here is a reserved,
+    // non-deliverable string that identifies nobody.
+    const contactId = contactUserIdFor(profile);
+    const [contactEmails, guardianProfile] = await Promise.all([
+      userEmails(admin, [contactId]),
+      profile.guardian_user_id
+        ? admin
+            .from("profiles")
+            .select("user_id, guardian_user_id, first_name, middle_name, last_name, preferred_name")
+            .eq("user_id", profile.guardian_user_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    // Same posture as the lookup this replaced: a failed address read degrades
+    // to a missing email rather than taking down the screen a manager approves
+    // from. A failed GUARDIAN read is logged for the same reason: the page
+    // still works, it just cannot name whose address it is showing.
+    const emailErr = contactEmails.error;
+    const emailRows = contactEmails.data;
+    if (guardianProfile.error)
+      console.error("[getClubUser] guardian profile lookup failed:", guardianProfile.error);
 
     const waiverRows = waivers ?? [];
     const membershipRows = memberships ?? [];
@@ -159,6 +189,8 @@ export const getClubUser = createServerFn({ method: "POST" })
     const [summary] = aggregateClubUsers({
       profiles: [profile],
       emails,
+      // Not a person on this page, only the owner of the address shown on it.
+      guardians: guardianProfile.data ? [guardianProfile.data] : [],
       waivers: waiverRows.map((w) => ({
         user_id: w.user_id,
         signed_at: w.signed_at,
@@ -211,6 +243,8 @@ export const getClubUser = createServerFn({ method: "POST" })
             .select("user_id, first_name, middle_name, last_name, preferred_name")
             .in("user_id", approverIds)
         : { data: [], error: null },
+      // Approvers are managers, so never dependants: a dependant has no login
+      // and cannot approve anything. Left as a direct lookup on purpose.
       approverIds.length ? userEmails(admin, approverIds) : { data: [], error: null },
     ]);
     const eventById = new Map((events ?? []).map((e) => [e.id, e]));
@@ -248,6 +282,10 @@ export const getClubUser = createServerFn({ method: "POST" })
       user: {
         name: summary.name,
         email: summary.email,
+        // Whose address that is, when it is not this person's own. A dependant
+        // has no mailbox, so their page shows their guardian's and has to say
+        // so: printed bare it reads as a child a manager can write to.
+        email_belongs_to: summary.email_belongs_to,
         email_confirmed_at: summary.email_confirmed_at,
         phone: summary.phone,
         roles: summary.roles,
@@ -272,6 +310,12 @@ export const getClubUser = createServerFn({ method: "POST" })
       // record as complete while the column driving student pricing is null.
       profile: {
         preferred_name: profile.preferred_name,
+        // Who holds this person's account, when somebody else does. The page
+        // needs the ID rather than just the guardian's name (which the summary
+        // already carries) because it has one question the name cannot answer:
+        // whether the person who last set a photo-consent answer was the
+        // guardian or a manager. Both are "not the subject".
+        guardian_user_id: profile.guardian_user_id,
         phone: profile.phone,
         date_of_birth: profile.date_of_birth,
         address: profile.address,
@@ -508,6 +552,32 @@ export const resendClubUserVerification = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
 
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
+
+    // A dependant is never sent a verification link, and this is the one path
+    // that could have sent one. #102 asks for that guarantee and #106 asks for
+    // it to be CONFIRMED rather than assumed, so here is the confirmation: of
+    // the four places that mint an `email_verification_tokens` row, the waiver
+    // confirmation and the code-of-conduct link both resolve to the contact
+    // person already, an interest registration is a lead with no person record
+    // at all, and this one takes a bare `userId` from a manager's screen and
+    // would happily mint against a child.
+    //
+    // What that produced was not dangerous so much as incoherent: a token bound
+    // to a reserved address in a subdomain the club routes no mail for, posted
+    // nowhere, redeemable by nobody, sitting in the table looking like somebody
+    // was asked to confirm something. Refused outright instead.
+    //
+    // ⚠️ The neighbouring hole is NOT closed here: `setClubUserEmail` can still
+    // be pointed at a dependant and move them onto a real address. That is
+    // #107's, listed in #102's sharp edges and recorded again in #111 as
+    // deliberately untouched, and fixing it here would mean writing half of
+    // #107's rule in the wrong PR.
+    if (await isDependantUser(admin, data.userId)) {
+      throw new Error(
+        "This person is on somebody else's account and has no email of their own. Send the link to the account holder instead.",
+      );
+    }
+
     const { data: got, error } = await admin.auth.admin.getUserById(data.userId);
     if (error) throw new Error(error.message);
     if (!got.user?.email) throw new Error("That person has no email on file.");

@@ -276,6 +276,72 @@ function Waiver() {
   });
   const dependants = useMemo(() => dependantsQ.data ?? [], [dependantsQ.data]);
 
+  /**
+   * Open on a named child, when the button that got here said which one.
+   *
+   * `/account/<id>` has a "Sign an updated waiver" button, and following it
+   * should not land a parent on a form set to sign for themselves. Runs once
+   * the household has loaded and only if the id is really on this account, so
+   * a hand-typed `?for=` cannot preselect a stranger; and never over a restored
+   * draft or a choice already made, or it would fight the person using it.
+   */
+  const requestedDependantId = search.for;
+  const [appliedRequestedFor, setAppliedRequestedFor] = useState(false);
+  // Set when a `?for=` asked for somebody this form could not open on. Silence
+  // is the wrong answer: the parent pressed a button that named a child, and a
+  // form left quietly on "Myself" is how they sign their own waiver believing
+  // they signed their child's. Never says WHO was asked for -- the id came out
+  // of a URL and naming it back would confirm a stranger exists.
+  const [requestedForFailed, setRequestedForFailed] = useState<"missing" | "unreadable" | null>(
+    null,
+  );
+  useEffect(() => {
+    if (appliedRequestedFor || restored || !requestedDependantId) return;
+    if (dependantsQ.isPending) return;
+    setAppliedRequestedFor(true);
+    if (dependantsQ.isError) {
+      setRequestedForFailed("unreadable");
+      return;
+    }
+    // Case-insensitively, because the id came out of a URL. The server
+    // lowercases every target (`householdTargetUserId`), so an uppercase one is
+    // perfectly valid there; matching it exactly here would silently leave the
+    // form on "myself" for a link that the server would have honoured.
+    const picked = dependants.find(
+      (d) => d.user_id.toLowerCase() === requestedDependantId.toLowerCase(),
+    );
+    if (!picked) {
+      setRequestedForFailed("missing");
+      return;
+    }
+    // ⚠️ Through the SAME two functions the person using the picker goes
+    // through, rather than setting the fields this effect happens to care
+    // about. `chooseSigningFor` clears the participant block wholesale --
+    // medical notes, the health answers, gi size, UTS number, martial arts
+    // experience -- and every one of those is a field the profile prefill may
+    // already have filled with the PARENT's answers by the time the household
+    // lands. Setting only the name and date of birth here would leave a child's
+    // signed waiver carrying their parent's health record, which is the exact
+    // failure #102 exists to end, arrived at from a new direction.
+    //
+    // Flipping `signingFor` also cancels a prefill still in flight: that effect
+    // re-runs and its `cancelled` flag drops the old answer. So the race closes
+    // in both directions.
+    chooseSigningFor("dependant");
+    choosePickedDependant(picked.user_id);
+    // The two handlers above are re-created every render, so depending on them
+    // would re-run this forever. `appliedRequestedFor` is what makes it run
+    // once, which is the guard the rule cannot see.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    appliedRequestedFor,
+    restored,
+    requestedDependantId,
+    dependants,
+    dependantsQ.isPending,
+    dependantsQ.isError,
+  ]);
+
   useEffect(() => {
     if (authLoading || !user) return;
     // A restored draft is what this person actually typed, so it outranks the
@@ -1085,6 +1151,21 @@ function Waiver() {
                 account (#102). */}
             <fieldset className="space-y-3">
               <legend className="text-sm font-semibold">Who is this waiver for?</legend>
+
+              {/* `role="alert"`, because it corrects an answer the form has
+                  already given itself: the choice below reads "Myself", and
+                  nothing else would tell a screen-reader user that is not what
+                  they asked for. */}
+              {requestedForFailed && (
+                <p
+                  role="alert"
+                  className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+                >
+                  {requestedForFailed === "unreadable"
+                    ? "We could not load the people on your account just now, so this form has not opened on the person you picked. Choose below, or come back in a moment."
+                    : "We could not open this on the person you picked. They may not be on your account. Choose below before you sign."}
+                </p>
+              )}
               {/* Named the same way the health questions' groups are
                   (`aria-label`, line ~1555). A <legend> names the fieldset, not
                   the radiogroup inside it, so without this a screen-reader user

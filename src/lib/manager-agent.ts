@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "15",
+  version: "16",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,19 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "16",
+      // Additive: two new response fields, and a change in what an existing
+      // one MEANS for one kind of person. Every call that worked before still
+      // works; a caller that ignores the new fields is not broken, it is just
+      // missing the caption.
+      breaking: false,
+      notes: [
+        "A person on somebody else's account (a child, typically) has no mailbox of their own, so the `email` on their `list_users` row and the `member_email` on their `list_invoices` row are the GUARDIAN's address, not theirs. This was already true of what the club sends; it is now true of what these actions report.",
+        "list_users rows carry email_belongs_to, and list_invoices rows carry member_email_belongs_to: the name of the person whose address it is, or null when it is the person's own. Do not report an address to anybody without it. An address under a child's name with no caption reads as a mailbox you can write to, and nobody is reading it.",
+        "member_email_belongs_to is a read-only decoration like member_name and plan_name. edit_invoice rejects it by name, so send only `id` and the fields you are changing rather than echoing a listed invoice back.",
+      ],
+    },
     {
       version: "15",
       // Additive: one new optional param on file_waiver, and one existing param

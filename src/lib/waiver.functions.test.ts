@@ -1893,3 +1893,106 @@ describe("needsSignInToFileForDependant", () => {
     }
   });
 });
+
+describe("opening a waiver PDF", () => {
+  // The bug #106 exists to fix, from the side that actually causes it. Listing
+  // a dependant's waivers already worked (`waiversForCaller` goes through the
+  // gate on the service role); OPENING one did not, because this path read the
+  // row through the caller-scoped client and `public.waivers` RLS scopes that
+  // to `auth.uid()`. So a parent saw a Download PDF button beside every one of
+  // their child's waivers and got "Waiver PDF not found." from all of them.
+  const PARENT = "cccccccc-0000-4000-8000-000000000001";
+  const CHILD = "cccccccc-0000-4000-8000-000000000002";
+  const STRANGER = "cccccccc-0000-4000-8000-000000000003";
+  const WAIVER = "cccccccc-0000-4000-8000-0000000000ff";
+
+  const LINKS = [
+    { user_id: PARENT, guardian_user_id: null },
+    { user_id: CHILD, guardian_user_id: PARENT },
+    { user_id: STRANGER, guardian_user_id: null },
+  ];
+
+  /** A service-role client holding one waiver, owned by the child. */
+  function admin(waiver: { user_id: string; pdf_path: string | null } | null) {
+    return {
+      from: (table: string) => ({
+        select: () => ({
+          in: (_c: string, values: string[]) => {
+            if (table !== "profiles") throw new Error(`gate read the wrong table: ${table}`);
+            return Promise.resolve({
+              data: LINKS.filter((r) => values.includes(r.user_id)),
+              error: null,
+            });
+          },
+          eq: (_c: string, id: unknown) => ({
+            maybeSingle: () =>
+              Promise.resolve({ data: id === WAIVER ? waiver : null, error: null }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+  }
+
+  const owned = { user_id: CHILD, pdf_path: `${WAIVER}.pdf` };
+  const notManager = () => Promise.resolve(false);
+
+  it("gives a guardian their dependant's PDF", async () => {
+    const { waiverPdfPathForCaller } = await import("./waiver.functions");
+    await expect(
+      waiverPdfPathForCaller(admin(owned), { userId: PARENT, isManager: notManager }, WAIVER),
+    ).resolves.toBe(`${WAIVER}.pdf`);
+  });
+
+  it("gives the owner their own PDF without asking anything else", async () => {
+    const { waiverPdfPathForCaller } = await import("./waiver.functions");
+    const isManager = vi.fn(notManager);
+    await expect(
+      waiverPdfPathForCaller(admin(owned), { userId: CHILD, isManager }, WAIVER),
+    ).resolves.toBe(`${WAIVER}.pdf`);
+    // The common case stays one read. Asking the role RPC for every member
+    // opening their own waiver would be a round trip bought for nothing.
+    expect(isManager).not.toHaveBeenCalled();
+  });
+
+  it("gives a manager anybody's PDF", async () => {
+    const { waiverPdfPathForCaller } = await import("./waiver.functions");
+    await expect(
+      waiverPdfPathForCaller(
+        admin(owned),
+        { userId: STRANGER, isManager: () => Promise.resolve(true) },
+        WAIVER,
+      ),
+    ).resolves.toBe(`${WAIVER}.pdf`);
+  });
+
+  it("refuses somebody else's dependant in the same words as a waiver that does not exist", async () => {
+    const { waiverPdfPathForCaller } = await import("./waiver.functions");
+    // The whole point of the shared sentence: this takes a bare uuid from
+    // anyone signed in, so "not yours" and "no such thing" must be one answer
+    // or it becomes a way to enumerate real waiver ids.
+    const refused = waiverPdfPathForCaller(
+      admin(owned),
+      { userId: STRANGER, isManager: notManager },
+      WAIVER,
+    );
+    await expect(refused).rejects.toThrow("Waiver PDF not found.");
+
+    const missing = waiverPdfPathForCaller(
+      admin(null),
+      { userId: STRANGER, isManager: notManager },
+      WAIVER,
+    );
+    await expect(missing).rejects.toThrow("Waiver PDF not found.");
+  });
+
+  it("refuses a waiver whose PDF was never rendered", async () => {
+    const { waiverPdfPathForCaller } = await import("./waiver.functions");
+    await expect(
+      waiverPdfPathForCaller(
+        admin({ user_id: CHILD, pdf_path: null }),
+        { userId: PARENT, isManager: notManager },
+        WAIVER,
+      ),
+    ).rejects.toThrow("Waiver PDF not found.");
+  });
+});

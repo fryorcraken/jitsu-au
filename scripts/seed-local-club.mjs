@@ -218,6 +218,49 @@ async function createUser(persona) {
   return data.user.id;
 }
 
+/**
+ * Create a DEPENDANT of `guardianId`: a person with no login, ever.
+ *
+ * The shape the app itself mints (`resolveDependantId` in
+ * `waiver.functions.ts`): a reserved, non-deliverable address in a subdomain
+ * the club routes no mail for, left unconfirmed, and a permanent ban so the
+ * row can never hold a session even if the address were guessed. The guardian
+ * link is what actually makes them a dependant, and it is set below rather
+ * than here because `ensure_profile` creates the profile row.
+ *
+ * Synthetic like every other fixture person, and deliberately NOT `@example.com`
+ * -- the whole point of a dependant's address is that it is in the club's own
+ * mx-less subdomain, and a seed that used a different shape would photograph a
+ * screen the app cannot produce.
+ */
+async function createDependant(guardianId, person) {
+  const { data, error } = await admin.auth.admin.createUser({
+    email: `${crypto.randomUUID()}@dependant.jitsu.au`,
+    email_confirm: false,
+    ban_duration: "876000h",
+  });
+  if (error) throw new Error(`creating a dependant failed: ${error.message}`);
+  const id = data.user.id;
+  // The contact fields come from the guardian, because that is what the waiver
+  // that creates a dependant actually captures: a child has no phone of their
+  // own and no separate emergency contact. Seeding only the name and birthday
+  // would photograph `/account/<child>` with five blank required inputs, a
+  // state the product cannot produce.
+  await fillProfile(id, {
+    first_name: person.firstName,
+    last_name: person.lastName,
+    date_of_birth: person.dateOfBirth,
+    guardian_user_id: guardianId,
+    is_minor: true,
+    phone: person.contact.phone,
+    address: person.contact.address,
+    emergency_contact_name: person.contact.emergencyContactName,
+    emergency_contact_relationship: person.contact.emergencyContactRelationship,
+    emergency_contact_phone: person.contact.emergencyContactPhone,
+  });
+  return id;
+}
+
 const users = {
   manager: await createUser(PERSONAS.manager),
   member: await createUser(PERSONAS.member),
@@ -263,6 +306,33 @@ await fillProfile(users.applicant, {
   emergency_contact_phone: "0400 000 013",
 });
 console.log("[seed] profiles: 3");
+
+// A child on the member's account, so the tour photographs the per-child page
+// with a real dependant on it rather than the member reaching for themselves.
+// One is enough: what the screen has to prove is that somebody with no login of
+// their own has a full record, and a second child would only lengthen a list.
+const DEPENDANT = {
+  firstName: "Robin",
+  lastName: PERSONAS.member.lastName,
+  dateOfBirth: "2015-04-02",
+  contact: {
+    phone: "0400 000 002",
+    address: "42 Harris Street, Pyrmont NSW 2009",
+    emergencyContactName: "Ada Okafor",
+    emergencyContactRelationship: "Aunt",
+    emergencyContactPhone: "0400 000 012",
+  },
+};
+users.dependant = await createDependant(users.member, DEPENDANT);
+// The tour points `/account/$userId` at this person specifically. If the id
+// ever came back equal to the member's, `fillRouteParams` would fall through to
+// the flat map and photograph the member reaching for themselves -- passing
+// green while covering nothing. Cheap to assert, and impossible to notice
+// otherwise.
+if (users.dependant === users.member) {
+  throw new Error("the seeded dependant is the member: the per-child tour would cover nothing");
+}
+console.log("[seed] dependants: 1");
 
 await insert("user_roles", [
   { user_id: users.manager, role: "manager" },
@@ -342,6 +412,10 @@ if (sections.length === 0) throw new Error("no knowledge base sections: check th
 const waivers = {
   member: id(61),
   applicant: id(62),
+  // A dependant only ever comes into existence INSIDE a waiver submission, so
+  // one with no waiver is a person the product cannot produce -- and the child
+  // page the tour photographs is mostly waiver history.
+  dependant: id(63),
 };
 
 await insert("waivers", [
@@ -388,6 +462,36 @@ await insert("waivers", [
     signer_ip: "203.0.113.9",
     pdf_path: `${waivers.applicant}.pdf`,
   },
+  {
+    id: waivers.dependant,
+    user_id: users.dependant,
+    first_name: DEPENDANT.firstName,
+    last_name: DEPENDANT.lastName,
+    // The GUARDIAN's address, which is what a dependant filing submits: the
+    // child's own reserved string is never typed into a form and never stored
+    // as evidence of anything.
+    email: PERSONAS.member.email,
+    phone: DEPENDANT.contact.phone,
+    address: DEPENDANT.contact.address,
+    date_of_birth: DEPENDANT.dateOfBirth,
+    emergency_contact_name: DEPENDANT.contact.emergencyContactName,
+    emergency_contact_relationship: DEPENDANT.contact.emergencyContactRelationship,
+    emergency_contact_phone: DEPENDANT.contact.emergencyContactPhone,
+    media_consent: false,
+    is_minor: true,
+    guardian_name: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
+    guardian_relationship: "Parent",
+    guardian_address: "42 Harris Street, Pyrmont NSW 2009",
+    guardian_phone: "0400 000 002",
+    guardian_email: PERSONAS.member.email,
+    template_version: TEMPLATE_VERSION,
+    approval_status: "approved",
+    approved_at: at(-28),
+    approved_by: users.manager,
+    signed_at: at(-30),
+    signer_ip: "203.0.113.7",
+    pdf_path: `${waivers.dependant}.pdf`,
+  },
 ]);
 
 // A stand-in for the generated document. The account page and the manager's
@@ -410,7 +514,7 @@ for (const waiverId of Object.values(waivers)) {
     if (error) throw new Error(error.message);
   });
 }
-console.log("[seed] waiver PDFs: 2");
+console.log("[seed] waiver PDFs: 3");
 
 await insert("code_of_conduct_acceptances", {
   user_id: users.member,
@@ -775,6 +879,14 @@ const fixture = {
     userId: users.member,
     id: BLOG.welcome,
     slug: "welcome",
+  },
+  // Per-path overrides, for a parameter name that means different people on
+  // different pages. `$userId` is a person a MANAGER is looking at on
+  // /manager/users, and one of the MEMBER's own dependants on /account. The
+  // flat map above cannot say both, which `scripts/site-pages.ts` predicted in
+  // as many words; this is that fix.
+  paramsByPath: {
+    "/account/$userId": { userId: users.dependant },
   },
 };
 

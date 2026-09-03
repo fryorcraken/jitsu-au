@@ -97,13 +97,14 @@ Every other table grants the client roles **nothing**.
 Two traps worth knowing before you touch a policy or a grant:
 
 - **An RLS policy that references another table needs a grant on that table.**
-  Policy expressions are evaluated with the _caller's_ privileges, so the
-  `storage.objects` policy "Owners can read their own waiver PDF" — which tests
-  `EXISTS (SELECT 1 FROM public.waivers …)` — fails with `permission denied for
-table waivers` unless `authenticated` holds `SELECT` there. That is the only
-  reason `waivers` appears above. The sibling manager policy needs no grant
-  because it goes through `has_role()`, which is `SECURITY DEFINER` — the
-  standard way out.
+  Policy expressions are evaluated with the _caller's_ privileges, so a
+  `storage.objects` policy testing `EXISTS (SELECT 1 FROM public.waivers …)`
+  inline fails with `permission denied for table waivers` unless
+  `authenticated` holds `SELECT` there. That is the only reason `waivers`
+  appears above. The standard way out is a `SECURITY DEFINER` helper: the
+  manager branch goes through `has_role()`, and the owner/guardian branch
+  through `private.waiver_pdf_readable_by_caller()`, which is why widening that
+  policy to guardians needed no new grant on `profiles`.
 - **A write grant makes "defence in depth" policies real.** Owner-scoped write
   policies written on the assumption that no client grant exists become live,
   reachable code paths the moment one does, bypassing rules that live in the
@@ -339,10 +340,22 @@ different jobs. **Writing** such a row is refused by the server function that
 creates a dependant (#105); nothing stops it today because nothing creates one
 yet. **Walking** a chain that exists anyway is refused by `assertActingFor` in
 `src/lib/household.ts`, which turns away a caller who is themselves a dependant.
-That gate is the single authority on who may act for whom: `getMyProfile`,
-`updateMyProfile`, `listMyWaivers` and `getCodeOfConductSigner` each take an
-optional `userId` and reach it through `resolveSubject`, and nothing else
-re-derives the rule.
+That gate is the single authority on who may act for whom. `getMyProfile`,
+`updateMyProfile`, `listMyWaivers`, `getCodeOfConductSigner`,
+`acceptCodeOfConduct`, `getMyMemberships` and `startMembership` each take an
+optional `userId` and reach it through `resolveSubject`; `getWaiverPdfUrl` asks
+the same gate through `mayActFor`, the non-throwing form, because its own
+refusal has to stay the same sentence it gives for a waiver that does not
+exist. Nothing else re-derives the rule, and `mayActFor` is not a second gate:
+`assertActingFor` is defined in terms of it.
+
+⚠️ **Anything that reads a person in order to SHOW their contact has to select
+`guardian_user_id` too.** A dependant has no mailbox, so the address on their
+row is their guardian's and the screen has to say whose it is
+(`src/lib/household-email.ts`). `ClubUserProfile` makes the column required
+rather than optional for exactly this reason: an optional field defaulting to
+null would render a child as an account holder with their own address, silently,
+on any screen whose `.select()` forgot it.
 
 The partial index `profiles_guardian_user_id_idx` covers the non-null rows only,
 which is what "who are this person's dependants" reads.
@@ -397,11 +410,13 @@ which is what "who are this person's dependants" reads.
   it is about: absent means the caller, and any other value goes through
   `assertActingFor`, so a guardian can maintain a dependant's details and nobody
   can reach anybody else's. Because the stamp names the clicker, a guardian's
-  answer for a dependant records the GUARDIAN's id. ⚠️ The person page reads any
-  id that is not the person's own as a manager's, so it would describe a
-  parent's decision as "Set by a manager". Unreachable today because every
-  caller's target is themselves, not because nothing sends one; #106 owns the
-  fix, and needs it, since it is what first sends a different target.
+  answer for a dependant records the GUARDIAN's id, so the column has three
+  possible values rather than two: the person, whoever holds their account, or
+  a manager. `mediaConsentProvenance` (`src/lib/waiver-acknowledgements.ts`) is
+  the only thing that puts words to it, and it compares against the guardian as
+  well as against the subject — reading "not the person's own" as "a manager's"
+  would report a parent's decision about their own child as one the club made,
+  on the page a manager checks before publishing a photograph.
   ⚠️ Its contact fields OVERLAP with
   `waiverToProfileFields`, so a manager approving an older waiver can overwrite
   a correction made here; `/account` says so on the card.
@@ -524,20 +539,40 @@ Inserts are service-role only.
 named `<waiver id>.pdf`, which is exactly what `pdf_path` stores, so ownership
 is resolved by looking up the waiver row rather than by parsing the path.
 
-| Operation                  | Who                                                                                           |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| `SELECT`                   | the waiver's owner (`waivers.pdf_path = objects.name AND user_id = auth.uid()`), or a manager |
-| `INSERT`/`UPDATE`/`DELETE` | managers only                                                                                 |
+| Operation                  | Who                                                     |
+| -------------------------- | ------------------------------------------------------- |
+| `SELECT`                   | the waiver's owner, that owner's guardian, or a manager |
+| `INSERT`/`UPDATE`/`DELETE` | managers only                                           |
 
-Owners deliberately get **no** write access: the PDF is frozen evidence (the
-signatures and acknowledgement ticks exist only inside it), so a signer must not
-be able to overwrite or delete what they signed. `anon` gets nothing. None of
-this is on the app's hot path today, since uploads and downloads both run
-through the service-role client, which bypasses RLS. The owner `SELECT` branch
-does depend on `authenticated` holding `SELECT` on `public.waivers`, though: a
-policy's subquery runs with the caller's privileges, so revoking that grant
-would break it (`permission denied for table waivers`) while the manager branch,
-which goes through the `SECURITY DEFINER` `has_role()`, kept working.
+The owner and guardian branches are one policy ("Owners and guardians can read a
+waiver PDF"), and the whole test lives inside
+`private.waiver_pdf_readable_by_caller(text)`
+(`20260828000000_waiver_pdf_guardian_read.sql`). It has to: a policy expression
+runs as the querying role, and a guardian is refused their dependant's
+`public.waivers` rows, so an inline `EXISTS` could not answer the question
+without granting `authenticated` wider access to `waivers` and `profiles`. The
+helper is `SECURITY DEFINER` with `SET search_path = ''`, takes no user id (it
+asks about `auth.uid()` itself, so it cannot be pointed at anybody), and lives
+in `private` under the rule `20260802000000` set: an RLS-only helper belongs
+where PostgREST cannot route to it. It is not an existence oracle either,
+returning false both for a PDF that is not yours and for one that does not
+exist.
+
+Guardians get READ and nothing else. Owners deliberately get **no** write access:
+the PDF is frozen evidence (the signatures and acknowledgement ticks exist only
+inside it), so a signer must not be able to overwrite or delete what they
+signed, and the same reasoning applies to a parent. `anon` gets nothing.
+
+**None of this is on the app's hot path**, and that is worth being precise
+about, because #106 assumed otherwise. `getWaiverPdfUrl` mints its signed URL
+with the service-role client, which bypasses storage RLS entirely, so widening
+this policy is not what lets a guardian open a child's waiver. What used to
+refuse them was the caller-scoped `SELECT pdf_path FROM waivers` above it, gated
+by `public.waivers`'s own "Owners can view their own waivers"; that is fixed in
+code, through the household gate. These policies remain the versioned statement
+of who may read a waiver PDF, for the direct-from-client path
+`20260727120000` exists to define, and a defence-in-depth rule that is quietly
+out of step with the product is worse than none.
 
 ---
 
