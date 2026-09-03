@@ -12,6 +12,7 @@ import { coverageClass, UNREAD_CLASS } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
+import { formatDateOnly } from "@/lib/dates";
 import { coveragePreviewLabel, pickDefaultEvent } from "@/lib/checkin";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePersistentQuery } from "@/hooks/use-persistent-query";
@@ -220,7 +221,11 @@ function CheckInPage() {
         (r) =>
           !q ||
           (r.name ?? "").toLowerCase().includes(q) ||
-          (r.email ?? "").toLowerCase().includes(q),
+          (r.email ?? "").toLowerCase().includes(q) ||
+          // The account holder's name, so a parent standing at the door with
+          // two children can be found by their own name and not only by their
+          // address. Set for dependants only, so no other row is affected.
+          (r.guardian_name ?? "").toLowerCase().includes(q),
       );
     return rows.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   }, [board, checkedInIds, search]);
@@ -490,6 +495,21 @@ function CheckInPage() {
                 <tr key={r.user_id} className="border-t">
                   <td className="px-3 py-2 font-medium">
                     <UserLink userId={r.user_id} name={r.name} />
+                    {/* What tells one child from another when a search for a
+                        surname, or for a parent's address, returns the whole
+                        family. Getting it wrong files a class against the wrong
+                        child. Rendered only for a dependant, which is what
+                        `guardian_name` being set means. */}
+                    {r.guardian_name ? (
+                      <div className="mt-0.5 text-xs font-normal text-muted-foreground">
+                        {r.date_of_birth ? (
+                          <>Born {formatDateOnly(r.date_of_birth)}, on </>
+                        ) : (
+                          <>On </>
+                        )}
+                        {r.guardian_name}&apos;s account
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1">

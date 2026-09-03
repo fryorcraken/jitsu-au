@@ -5,6 +5,7 @@ import {
   lapsedMembershipIds,
   pickDefaultEvent,
   resolveCoverage,
+  rosterHouseholdFields,
 } from "./checkin";
 import type { CoverageCandidate } from "./checkin";
 import { planMembershipWindow } from "./validation";
@@ -504,5 +505,41 @@ describe("pickDefaultEvent", () => {
   it("resolves the club date correctly across a daylight-saving change", () => {
     const dstDay = event("dst", "2026-04-04T22:00:00.000Z"); // 09:00 AEDT on 5 Apr
     expect(pickDefaultEvent([dstDay], "2026-04-04T21:00:00.000Z")?.id).toBe("dst");
+  });
+});
+
+// The door has to tell two children in one family apart, and must not hand out
+// dates of birth to settle a question nobody is asking.
+describe("rosterHouseholdFields", () => {
+  it("carries the family and the date of birth for a dependant", () => {
+    expect(
+      rosterHouseholdFields({ guardianName: "Ada Lovelace", dateOfBirth: "2016-04-02" }),
+    ).toEqual({ guardian_name: "Ada Lovelace", date_of_birth: "2016-04-02" });
+  });
+
+  // Two siblings share a surname and a parent, so the parent's name cannot
+  // separate them. This is the field that does.
+  it("gives two siblings something that actually tells them apart", () => {
+    const bea = rosterHouseholdFields({ guardianName: "Ada Lovelace", dateOfBirth: "2016-04-02" });
+    const cara = rosterHouseholdFields({ guardianName: "Ada Lovelace", dateOfBirth: "2019-11-30" });
+    expect(bea.guardian_name).toBe(cara.guardian_name);
+    expect(bea.date_of_birth).not.toBe(cara.date_of_birth);
+  });
+
+  // The withholding half, and the reason this is a function rather than two
+  // fields written inline: an ordinary member's date of birth answers no
+  // question at the door, and the door is a tablet in a public hall.
+  it("withholds an account holder's date of birth even though it has one", () => {
+    expect(rosterHouseholdFields({ guardianName: null, dateOfBirth: "1990-01-01" })).toEqual({
+      guardian_name: null,
+      date_of_birth: null,
+    });
+  });
+
+  it("copes with a dependant whose date of birth is not on file", () => {
+    expect(rosterHouseholdFields({ guardianName: "Ada Lovelace", dateOfBirth: null })).toEqual({
+      guardian_name: "Ada Lovelace",
+      date_of_birth: null,
+    });
   });
 });

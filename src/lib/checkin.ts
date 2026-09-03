@@ -377,3 +377,32 @@ export function pickDefaultEvent<T extends PickableEvent>(
   // the next one than fixing the last one, so an exact tie goes to the future.
   return closestByStart(scheduled, nowMs, true);
 }
+
+/**
+ * What a roster row shows to tell one child from another at the door, and what
+ * it deliberately withholds about everybody else.
+ *
+ * The club takes children, so a search for a surname -- or, since the roster's
+ * contact address resolves through the guardian, for a parent's email --
+ * returns every sibling at once. Picking the wrong one files a class against
+ * the wrong child: their attendance, their credit, their grading record.
+ *
+ * `guardian_name` says which family; `date_of_birth` is the one that actually
+ * separates two children IN that family, which a parent's name cannot do.
+ *
+ * The rule worth having in one place is the withholding. A date of birth is not
+ * needed to tell two adults apart, and this screen lives on a tablet at the door
+ * of a public hall, so it is carried where it settles a question and nowhere
+ * else. Being a dependant is what makes it settle one, and `guardianName` is how
+ * this module knows: it is set for a dependant and null for everybody else.
+ */
+export function rosterHouseholdFields(input: {
+  guardianName: string | null;
+  dateOfBirth: string | null;
+}): { guardian_name: string | null; date_of_birth: string | null } {
+  const isDependant = input.guardianName != null;
+  return {
+    guardian_name: input.guardianName,
+    date_of_birth: isDependant ? input.dateOfBirth : null,
+  };
+}
