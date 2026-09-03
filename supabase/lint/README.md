@@ -146,10 +146,29 @@ Worth doing after a migration is applied, before a release, and any time someone
 has changed a grant or a policy by hand in the Lovable UI. That last one
 produces no commit and no signal, and is exactly the drift these catch.
 
-**Last run: 2026-08-22.** 68 migration files, 0 unapplied; 18 client grants
-live, 18 expected, 0 unexpected. The one ledger row with no file here
-(`20260722131547`) is the known duplicate re-emission described in
-`docs/database-changes.md`, not missing schema.
+**Last run: 2026-09-01**, straight after applying
+`20260828000000_waiver_pdf_guardian_read.sql`. 76 migration files, **2
+unapplied**; 18 client grants live, 18 expected, 0 unexpected. The one ledger
+row with no file here (`20260722131547`) is the known duplicate re-emission
+described in `docs/database-changes.md`, not missing schema.
+
+⚠️ **The two unapplied ones are real drift, and they are not new.** Both are
+notification-digest migrations that were committed and merged without ever
+being applied, which is the exact failure the rule in
+`docs/database-changes.md` exists to prevent:
+
+- `20260821000000_notification_digest_fails_loudly.sql` — makes the nightly job
+  RAISE rather than return quietly when it is not armed, so `cron.job_run_details`
+  stops recording `succeeded` for a night on which nothing was sent. Until it is
+  applied, the scheduler keeps reporting a green tick that means "the function
+  ran", not "the digest went out".
+- `20260823000000_notification_digest_morning_schedule.sql` — moves the digest
+  from 20:00 UTC to 22:00 UTC (6am/7am Sydney to 8am/9am). Until it is applied,
+  the club's digest keeps going out at 6am.
+
+Neither is this PR's and neither is allowlisted, so they are left for a separate
+decision rather than applied on the back of an approval that did not cover them
+("Approval of the PR covers the SQL described in it, and nothing else").
 
 ### When it reports drift
 
