@@ -1167,6 +1167,11 @@ export const listManagerAnnotations = createServerFn({ method: "POST" })
 
     return annotations.map((a) => ({
       id: a.id,
+      // So the manager screen can open whoever wrote it. The member-facing
+      // `listAnnotations` deliberately ships no author id at all, for the
+      // reason stated there; this list is manager-only (`requireManagerViewer`
+      // above), and identifying a commenter is the whole point of it.
+      user_id: a.user_id,
       body: a.body,
       visibility: a.visibility,
       block_id: a.block_id,

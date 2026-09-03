@@ -294,7 +294,10 @@ comment gets: the commenter's own
 Both manager-facing views of the same feedback, the "Feedback" panel on
 `/manager/kb` and the agent API's `list_kb_comments`, show the full legal name
 instead, since a manager needs to identify who wrote a comment for moderation.
-That difference from the member-facing view is deliberate.
+That difference from the member-facing view is deliberate. On the panel the
+name is a link to the commenter's record, like every name in a manager's list,
+which is why that list carries the author's id and the member-facing one
+deliberately does not.
 
 A manager can moderate (resolve a thread, delete an abusive comment) but can
 never **rewrite** words attributed to somebody else. A comment feature people
@@ -424,7 +427,8 @@ What is here that the waiver template does not have:
   Restoring publishes the stored version, not what is in the editor, and the
   screen says so before it does.
 - **Feedback.** Open shared threads members left, quoted passage and all.
-  Private notes are never listed here. Replying happens on the article itself.
+  Private notes are never listed here. The commenter's name opens their record.
+  Replying happens on the article itself.
 
 Widening who can read an article (managers → members) asks first. Narrowing does
 not: it takes an article away from people, which is recoverable.

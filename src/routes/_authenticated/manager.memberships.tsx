@@ -123,9 +123,10 @@ function ManagerMembershipsPage() {
                 {rows.map((r) => (
                   <tr key={r.id} className="border-t">
                     <td className="px-3 py-2">
-                      {/* A membership outlives the account it was raised for, so
-                          a row with no `user_id` left has a name and nowhere to
-                          send you. `UserLink` prints it rather than linking. */}
+                      {/* `memberships.user_id` is ON DELETE SET NULL, and the
+                          name is looked up through it, so a row whose person is
+                          gone has neither. `UserLink` renders the dash rather
+                          than a link to a page that is not there. */}
                       <div className="font-medium">
                         <UserLink userId={r.user_id} name={r.member_name} />
                       </div>

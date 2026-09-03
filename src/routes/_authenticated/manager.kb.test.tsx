@@ -18,7 +18,26 @@ import type { ReactNode } from "react";
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => opts,
   useNavigate: () => vi.fn(),
-  Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
+  Link: ({
+    to,
+    params,
+    children,
+    ...props
+  }: {
+    to?: string;
+    params?: Record<string, string>;
+    children: ReactNode;
+  }) => (
+    <a
+      href={Object.entries(params ?? {}).reduce(
+        (path, [key, value]) => path.replace(`$${key}`, value),
+        to ?? "",
+      )}
+      {...props}
+    >
+      {children}
+    </a>
+  ),
 }));
 
 vi.mock("@tanstack/react-start", () => ({
@@ -33,6 +52,13 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("react-markdown", () => ({
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
+
+/**
+ * The comments the feedback panel renders. Mutated by the tests that need one,
+ * and read lazily by the mocked server function, which `vi.mock` hoists above
+ * this declaration.
+ */
+let managerAnnotations: Record<string, unknown>[] = [];
 
 const article = {
   slug: "our-history",
@@ -126,7 +152,7 @@ vi.mock("@/lib/kb.functions", () => ({
         created_at: article.updated_at,
       },
     ]),
-  listManagerAnnotations: () => Promise.resolve([]),
+  listManagerAnnotations: () => Promise.resolve(managerAnnotations),
   saveManagerArticle: vi.fn(),
   saveManagerSection: vi.fn(),
   deleteManagerSection: vi.fn(),
@@ -330,6 +356,44 @@ describe("/manager/kb section editing", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /save the name/i })).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("/manager/kb feedback", () => {
+  // Every other manager list opens the person behind a name. This panel is
+  // where a manager decides whether a comment needs acting on, and knowing who
+  // wrote it is usually the next question.
+  it("opens the commenter's record from their name", async () => {
+    managerAnnotations = [
+      {
+        id: "a-1",
+        user_id: "u-9",
+        body: "This paragraph is out of date.",
+        visibility: "shared",
+        block_id: null,
+        quote: null,
+        parent_id: null,
+        article_version: 3,
+        author: "Sam Lee",
+        is_mine: false,
+        can_edit: false,
+        can_resolve: true,
+        resolved_at: null,
+        created_at: "2026-02-01T00:00:00Z",
+        updated_at: "2026-02-01T00:00:00Z",
+      },
+    ];
+    try {
+      render(<KnowledgeBaseManager />);
+
+      await screen.findByLabelText(/sidebar label/i);
+      expect(await screen.findByRole("link", { name: "Sam Lee" })).toHaveAttribute(
+        "href",
+        "/manager/users/u-9",
+      );
+    } finally {
+      managerAnnotations = [];
+    }
   });
 });
 
