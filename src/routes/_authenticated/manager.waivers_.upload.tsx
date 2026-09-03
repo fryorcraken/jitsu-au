@@ -9,7 +9,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { MAX_SCAN_BYTES, isMinorOn, scanMimeTypes } from "@/lib/validation";
+import {
+  MAX_SCAN_BYTES,
+  isMinorOn,
+  scanMimeTypes,
+  waiverNeedsGuardian,
+  type WaiverSigningFor,
+} from "@/lib/validation";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { getCurrentWaiverTemplate, uploadPaperWaiver } from "@/lib/waiver.functions";
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { newSubmissionId } from "@/lib/submit-resilience";
@@ -84,7 +91,8 @@ function UploadPaperWaiverPage() {
   // about a date they no longer mean.
   const [duplicateWarning, setDuplicateWarning] = useState<{
     rows: DuplicateWaiverRef[];
-    email: string;
+    /** Who it was raised about (`participantKey`), not necessarily an address. */
+    participant: string;
     signedOn: string;
   } | null>(null);
   // One id for this form fill, so a resend of the SAME scan resolves to the one
@@ -108,6 +116,11 @@ function UploadPaperWaiverPage() {
   // predates the media question, and a checkbox would make the manager choose
   // a yes or a no on behalf of somebody who was never asked one.
   const [mediaConsent, setMediaConsent] = useState<"unasked" | "yes" | "no">("unasked");
+  // Who the paper is for. The same question the online form asks first, so a
+  // manager files a paper child waiver identically and it produces the identical
+  // record. `paperWaiverUploadSchema` and `filePaperWaiver` have taken this
+  // since #111; this screen was the one caller that could not say it.
+  const [signingFor, setSigningFor] = useState<WaiverSigningFor>("self");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [studentNumber, setStudentNumber] = useState("");
@@ -143,11 +156,32 @@ function UploadPaperWaiverPage() {
   const totalBytes = useMemo(() => files.reduce((sum, f) => sum + f.size, 0), [files]);
   const tooLarge = totalBytes > MAX_SCAN_BYTES;
   const isMinor = Boolean(dob && signedOn && isMinorOn(dob, signedOn));
+  const forDependant = signingFor === "dependant";
+  // A dependant's form needs the guardian block whatever their age: #111 widened
+  // that trigger to `waiverNeedsGuardian` precisely so a dependant who has turned
+  // 18 does not produce a signed document with nobody's name on it.
+  const needsGuardian = waiverNeedsGuardian({ is_minor: isMinor, signing_for: signingFor });
+  /**
+   * Who this filing is about, as one comparable string.
+   *
+   * For somebody signing for themselves that is their address, which is how
+   * this always worked. A child has no address, so keying on one would key every
+   * child on the same empty string: a warning raised about one child would sit
+   * there through a rename and invite "File it anyway" about a different one,
+   * which is the exact staleness the warning is scoped to avoid. A dependant is
+   * identified the way `filePaperWaiver` identifies them, by their guardian plus
+   * their name and date of birth.
+   */
+  const participantKey = forDependant
+    ? ["dependant", guardianEmail, firstName, lastName, dob].join("|")
+    : email;
   // The warning only stands for the person and date it was raised about: edit
   // either and it disappears, rather than sitting there inviting a confirmation
   // of something that is no longer being filed.
   const duplicates =
-    duplicateWarning && duplicateWarning.email === email && duplicateWarning.signedOn === signedOn
+    duplicateWarning &&
+    duplicateWarning.participant === participantKey &&
+    duplicateWarning.signedOn === signedOn
       ? duplicateWarning.rows
       : null;
 
@@ -203,7 +237,11 @@ function UploadPaperWaiverPage() {
           date_of_birth: dob,
           address,
           phone,
-          email,
+          signing_for: signingFor,
+          // Refused by the schema for a dependant rather than merely ignored:
+          // they have no address of their own, and one typed here would be the
+          // parent's, which is what `guardian_email` is for.
+          email: forDependant ? "" : email,
           uts_student_number: studentNumber,
           sms_whatsapp_consent: smsConsent,
           media_consent: mediaConsent === "unasked" ? null : mediaConsent === "yes",
@@ -224,7 +262,7 @@ function UploadPaperWaiverPage() {
         },
       });
       if (!res.filed) {
-        setDuplicateWarning({ rows: res.duplicate, email, signedOn });
+        setDuplicateWarning({ rows: res.duplicate, participant: participantKey, signedOn });
         return;
       }
       toast.success("Waiver filed. It is pending until you approve it.");
@@ -464,23 +502,87 @@ function UploadPaperWaiverPage() {
             </p>
           </div>
 
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              required
-              maxLength={255}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1.5"
-            />
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              This is who the waiver belongs to. An address the club already knows attaches to that
-              person, a new one creates them. Check it against the paper carefully: a typo makes a
-              second person.
-            </p>
-          </div>
+          {/* Who is this waiver for?
+
+              Above the email field, because the answer decides whether there is
+              one at all. A child has no address of their own, so filing their
+              paper form under the parent's is exactly the bug #102 exists to
+              fix: the second child's submission lands on the first child's
+              record and overwrites their name, date of birth and medical notes. */}
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-semibold">Who is this waiver for?</legend>
+            {/* Named on the group as well as the fieldset, for the reason the
+                online form records: a <legend> names the fieldset, not the
+                radiogroup inside it. */}
+            <RadioGroup
+              value={signingFor}
+              onValueChange={(v) => {
+                const next = v as WaiverSigningFor;
+                setSigningFor(next);
+                // The address belongs to the SUBJECT, so it does not survive a
+                // change of subject. #112 found the same thing on /membership,
+                // where a student number left behind after switching person
+                // priced a nine-year-old as a UTS student. Here the field is
+                // hidden for a dependant and the payload sends none, so what
+                // this actually prevents is the address reappearing, filled in
+                // for somebody else, if the manager switches back.
+                if (next === "dependant") setEmail("");
+              }}
+              aria-label="Who is this waiver for?"
+              className="gap-2"
+            >
+              {/* The hint is a description rather than part of the option's
+                  name, the same way the online form does it: an accessible name
+                  that swallows a sentence also swallows the words in it, and
+                  "email" inside this label made the radio a second match for the
+                  Email field in the end-to-end suite. */}
+              <div className="flex items-start gap-2">
+                <RadioGroupItem value="self" id="signing_for_self" className="mt-0.5" />
+                <div className="text-sm">
+                  <Label htmlFor="signing_for_self" className="font-normal">
+                    The person who signed it
+                  </Label>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <RadioGroupItem
+                  value="dependant"
+                  id="signing_for_dependant"
+                  className="mt-0.5"
+                  aria-describedby="signing_for_dependant_hint"
+                />
+                <div className="text-sm">
+                  <Label htmlFor="signing_for_dependant" className="font-normal">
+                    A child on somebody else&apos;s account
+                  </Label>
+                  <p id="signing_for_dependant_hint" className="text-xs text-muted-foreground">
+                    They get their own record, their own trial and their own attendance, and no
+                    login. Name the parent below and everything about the child goes to them.
+                  </p>
+                </div>
+              </div>
+            </RadioGroup>
+          </fieldset>
+
+          {!forDependant && (
+            <div>
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                required
+                maxLength={255}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="mt-1.5"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                This is who the waiver belongs to. An address the club already knows attaches to
+                that person, a new one creates them. Check it against the paper carefully: a typo
+                makes a second person.
+              </p>
+            </div>
+          )}
 
           <div>
             <Label htmlFor="address">Address</Label>
@@ -511,25 +613,26 @@ function UploadPaperWaiverPage() {
           </div>
         </Section>
 
-        {isMinor && (
+        {needsGuardian && (
           <Section title="Parent or guardian who signed">
             <p className="text-xs text-muted-foreground">
-              The applicant was under 18 when this was signed. Fill in whoever signed the form, if
-              the paper names them apart from the emergency contact. Leave the address, mobile and
-              email blank when they are the applicant's, and leave the whole section blank for an
-              older form that has only one contact block.
+              {forDependant
+                ? "This form is for a child on somebody else's account. Their name and email are required: they identify the parent, who is who the club writes to and whose login approving this waiver opens. The child is matched within that parent's family on name and date of birth, so re-filing an updated form for the same child does not make a second person."
+                : "The applicant was under 18 when this was signed. Fill in whoever signed the form, if the paper names them apart from the emergency contact. Leave the address, mobile and email blank when they are the applicant's, and leave the whole section blank for an older form that has only one contact block."}
             </p>
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <Label htmlFor="guardian_name">
-                  Name <span className="text-muted-foreground">(optional)</span>
+                  Name{" "}
+                  {forDependant ? null : <span className="text-muted-foreground">(optional)</span>}
                 </Label>
                 <Input
                   id="guardian_name"
                   maxLength={120}
+                  required={forDependant}
                   value={guardianName}
                   onChange={(e) => setGuardianName(e.target.value)}
-                  placeholder="Same as the emergency contact"
+                  placeholder={forDependant ? undefined : "Same as the emergency contact"}
                   className="mt-1.5"
                 />
               </div>
@@ -562,15 +665,17 @@ function UploadPaperWaiverPage() {
               </div>
               <div>
                 <Label htmlFor="guardian_email">
-                  Email <span className="text-muted-foreground">(optional)</span>
+                  Email{" "}
+                  {forDependant ? null : <span className="text-muted-foreground">(optional)</span>}
                 </Label>
                 <Input
                   id="guardian_email"
                   type="email"
                   maxLength={255}
+                  required={forDependant}
                   value={guardianEmail}
                   onChange={(e) => setGuardianEmail(e.target.value)}
-                  placeholder="Same as the applicant's"
+                  placeholder={forDependant ? undefined : "Same as the applicant's"}
                   className="mt-1.5"
                 />
               </div>
