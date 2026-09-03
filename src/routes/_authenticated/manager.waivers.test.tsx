@@ -11,7 +11,26 @@ const listWaivers = vi.fn();
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => opts,
-  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  Link: ({
+    to,
+    params,
+    children,
+    ...props
+  }: {
+    to?: string;
+    params?: Record<string, string>;
+    children: ReactNode;
+  }) => (
+    <a
+      href={Object.entries(params ?? {}).reduce(
+        (path, [key, value]) => path.replace(`$${key}`, value),
+        to ?? "",
+      )}
+      {...props}
+    >
+      {children}
+    </a>
+  ),
   useNavigate: () => vi.fn(),
 }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
@@ -59,5 +78,31 @@ describe("manager waivers list", () => {
     render(<WaiversPage />);
 
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+  });
+
+  // The name used to be dead text here, so approving a waiver and then checking
+  // anything else about the person meant going back to the directory and
+  // searching for the name that was already on screen.
+  it("opens the signer's record from their name", async () => {
+    listWaivers.mockResolvedValue([
+      {
+        id: "w-1",
+        user_id: "u-1",
+        full_name: "Sam Lee",
+        email: "sam@example.com",
+        signed_at: "2026-08-01T00:00:00Z",
+        template_version: 3,
+        pdf_path: null,
+        status: "pending",
+        approved_at: null,
+        is_paper: false,
+      },
+    ]);
+    render(<WaiversPage />);
+
+    expect(await screen.findByRole("link", { name: "Sam Lee" })).toHaveAttribute(
+      "href",
+      "/manager/users/u-1",
+    );
   });
 });

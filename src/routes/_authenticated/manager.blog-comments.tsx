@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Pill } from "@/components/site/StatusPill";
+import { UserLink } from "@/components/site/UserLink";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
@@ -229,7 +230,9 @@ function BlogCommentsPage() {
                       {c.parent_comment_id && (
                         <span className="mr-1 text-xs text-muted-foreground">↳ reply</span>
                       )}
-                      <div>{c.author_name}</div>
+                      <div>
+                        <UserLink userId={c.user_id} name={c.author_name} />
+                      </div>
                       {c.author_email && (
                         <div className="text-xs text-muted-foreground">{c.author_email}</div>
                       )}
@@ -336,7 +339,9 @@ function BlogCommentsPage() {
               <tbody>
                 {blocked.map((row) => (
                   <tr key={row.user_id} className="border-t">
-                    <td className="p-3">{row.name}</td>
+                    <td className="p-3">
+                      <UserLink userId={row.user_id} name={row.name} />
+                    </td>
                     <td className="p-3 text-muted-foreground">{row.email ?? "—"}</td>
                     <td className="p-3 text-muted-foreground">{row.reason ?? "—"}</td>
                     <td className="p-3 text-muted-foreground">{formatDateTime(row.blocked_at)}</td>

@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
+import { UserLink } from "@/components/site/UserLink";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
@@ -122,7 +123,12 @@ function ManagerMembershipsPage() {
                 {rows.map((r) => (
                   <tr key={r.id} className="border-t">
                     <td className="px-3 py-2">
-                      <div className="font-medium">{r.member_name ?? "—"}</div>
+                      {/* A membership outlives the account it was raised for, so
+                          a row with no `user_id` left has a name and nowhere to
+                          send you. `UserLink` prints it rather than linking. */}
+                      <div className="font-medium">
+                        <UserLink userId={r.user_id} name={r.member_name} />
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {r.member_email ?? r.user_id ?? "—"}
                       </div>
