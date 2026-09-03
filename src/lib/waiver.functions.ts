@@ -1725,26 +1725,55 @@ export const listWaivers = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     const rows = data ?? [];
     const statuses = deriveWaiverListStatuses(rows);
-    return rows.map((row) => ({
-      id: row.id,
-      // Who signed it, so the list's name column can open their record. The
-      // waiver holds the name AS SUBMITTED, which is the evidence and may not
-      // match the profile any more; the person behind it is still this one.
-      user_id: row.user_id,
-      // The legal name as submitted, with the preferred name quoted in when
-      // they gave one: managers see who signed AND what to call them.
-      full_name: nameWithPreferred(row),
-      email: row.email,
-      signed_at: row.signed_at,
-      template_version: row.template_version,
-      pdf_path: row.pdf_path,
-      status: statuses.get(row.id) ?? "pending",
-      approved_at: row.approved_at ?? null,
-      // A scanned paper form filed by a manager. Shown on the list because the
-      // row otherwise looks identical to one signed online, and the difference
-      // matters: there is no signing IP or browser record behind it.
-      is_paper: isPaperWaiver(row.signer_meta),
-    }));
+
+    // Whether each waiver is a CHILD's, and whose account they are on.
+    //
+    // A reviewer cannot tell from the row otherwise. Since #111 a child's
+    // waiver freezes the GUARDIAN's address into `waivers.email`, so the
+    // submitted-email column shows a parent's address under a nine-year-old's
+    // name with nothing saying so, and the decision being made on this screen
+    // (approving it unlocks the PARENT's login, and gives the CHILD a trial) is
+    // a different decision from the one the row appears to describe.
+    //
+    // Read through the shared lookup rather than a second `profiles` query, so
+    // this screen cannot disagree with the directory about who is on whose
+    // account. Only `onBehalfOf` is used: the address stays exactly as it was
+    // submitted, because that is the evidence.
+    const { loadHouseholdContacts } = await import("@/lib/household-email");
+    const participantIds = [
+      ...new Set(rows.map((r) => r.user_id).filter((id): id is string => !!id)),
+    ];
+    const contacts = await loadHouseholdContacts(admin, participantIds);
+
+    return rows.map((row) => {
+      const onBehalfOf = row.user_id ? contacts.displayEmail(row.user_id).onBehalfOf : null;
+      return {
+        id: row.id,
+        // Who signed it, so the list's name column can open their record. The
+        // waiver holds the name AS SUBMITTED, which is the evidence and may not
+        // match the profile any more; the person behind it is still this one.
+        user_id: row.user_id,
+        // The legal name as submitted, with the preferred name quoted in when
+        // they gave one: managers see who signed AND what to call them.
+        full_name: nameWithPreferred(row),
+        email: row.email,
+        signed_at: row.signed_at,
+        template_version: row.template_version,
+        pdf_path: row.pdf_path,
+        status: statuses.get(row.id) ?? "pending",
+        approved_at: row.approved_at ?? null,
+        // A scanned paper form filed by a manager. Shown on the list because the
+        // row otherwise looks identical to one signed online, and the difference
+        // matters: there is no signing IP or browser record behind it.
+        is_paper: isPaperWaiver(row.signer_meta),
+        // Whose account the PARTICIPANT is on, when they are on somebody's.
+        // Deliberately describes the household as it stands rather than making a
+        // claim about the frozen address beside it: those agree today, and a
+        // guardian who changed later would make the second one a lie.
+        guardian_user_id: onBehalfOf?.user_id ?? null,
+        guardian_name: onBehalfOf?.name ?? null,
+      };
+    });
   });
 
 /**

@@ -14,6 +14,7 @@ import { Pill } from "@/components/site/StatusPill";
 import { UserLink } from "@/components/site/UserLink";
 import { AddMembershipCard } from "@/components/site/AddMembershipCard";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
+import { UserLink } from "@/components/site/UserLink";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
 import {
@@ -174,6 +175,83 @@ function MediaConsentCard({
         , and approving a newer waiver that asks about photos replaces it with what they ticked on
         it.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The family, in whichever direction this person sits in one.
+ *
+ * A dependant's records are reachable only through the person who looks after
+ * them, and the reverse question ("who else is on this account?") is the one a
+ * manager asks before chasing an invoice or reading a medical note. Neither was
+ * answerable from this page: a child's row named their parent in a caption
+ * beside an address, and a parent's page said nothing about their children at
+ * all.
+ *
+ * Rendered only when there IS a household, which is almost never. "Household:
+ * nobody" is a card that tells a manager nothing and pushes the record they
+ * came for further down the page, which is the same line the member-side card
+ * takes for the same reason.
+ *
+ * Presentational, and deliberately thin: names and a way through. Everything
+ * else about one of these people belongs on their own page, which is one tap
+ * away. `UserLink` is what makes it that tap, and it renders a name with no id
+ * behind it as plain text rather than a link to nowhere.
+ */
+function HouseholdCard({
+  household,
+}: {
+  household: {
+    guardian: { user_id: string; name: string | null } | null;
+    dependants: { user_id: string; name: string | null }[];
+  };
+}) {
+  const { guardian, dependants } = household;
+  // At most one of the two is ever non-empty: a dependant may not have
+  // dependants of their own (#102's one-level rule, held in `household.ts`).
+  if (!guardian && dependants.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border p-4">
+      <h2 className="mb-1 text-lg font-bold">Household</h2>
+      {guardian ? (
+        <>
+          <p className="mb-3 text-sm text-muted-foreground">
+            This person is on somebody else&apos;s account. They have no login and no mailbox of
+            their own, so everything about them goes to the account holder.
+          </p>
+          <p className="text-sm">
+            Account holder:{" "}
+            <UserLink
+              userId={guardian.user_id}
+              name={guardian.name}
+              fallback="a person whose record could not be read"
+              className="font-medium"
+            />
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mb-3 text-sm text-muted-foreground">
+            {dependants.length === 1
+              ? "One person is on this account. They have no login of their own, so everything about them comes here."
+              : `${dependants.length} people are on this account. They have no logins of their own, so everything about them comes here.`}
+          </p>
+          <ul className="space-y-1 text-sm">
+            {dependants.map((d) => (
+              <li key={d.user_id}>
+                <UserLink
+                  userId={d.user_id}
+                  name={d.name}
+                  fallback="a person whose record could not be read"
+                  className="font-medium"
+                />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
@@ -751,6 +829,7 @@ function ManagerUserPage() {
   const {
     user: summary,
     profile,
+    household,
     memberships,
     waivers,
     checkins,
@@ -816,6 +895,10 @@ function ManagerUserPage() {
         emailConfirmedAt={summary.email_confirmed_at}
         onChanged={() => void load(false)}
       />
+
+      {/* Directly under the address, because the two answer one question
+          between them: who the club actually talks to about this person. */}
+      <HouseholdCard household={household} />
 
       <div className="rounded-lg border p-4">
         <h2 className="mb-3 text-lg font-bold">Profile</h2>
