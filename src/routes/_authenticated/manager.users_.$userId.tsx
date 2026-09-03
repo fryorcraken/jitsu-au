@@ -293,7 +293,15 @@ function EmailCard({
             : "Nobody has opened a link we sent to this address yet. Approving a waiver emails their account details here, and it is the address they sign in with, so a typo locks them out."}
       </p>
 
-      {editing ? (
+      {/* A dependant's address is their guardian's, and both writes behind these
+          buttons now refuse one outright (`setClubUserEmail` and
+          `resendClubUserVerification`). Offering a manager a Save the server
+          will not take is worse than offering nothing: they would read the
+          refusal as the page being broken rather than as the rule it is. The
+          address still shows, captioned above with whose it is. */}
+      {belongsTo ? (
+        <p className="text-sm font-medium">{email ?? "—"}</p>
+      ) : editing ? (
         <form onSubmit={save} className="flex flex-wrap items-end gap-2">
           <div className="min-w-[16rem] flex-1">
             <Label htmlFor="member-email">New email</Label>
@@ -335,8 +343,9 @@ function EmailCard({
       )}
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Changing this moves their login too. Signed waivers keep the address as it was typed, as
-        evidence, so an older submission below can legitimately show a different one.
+        {belongsTo
+          ? "Signed waivers keep the address as it was typed, as evidence, so an older submission below can legitimately show a different one."
+          : "Changing this moves their login too. Signed waivers keep the address as it was typed, as evidence, so an older submission below can legitimately show a different one."}
       </p>
     </div>
   );

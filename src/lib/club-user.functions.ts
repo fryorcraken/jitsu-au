@@ -548,6 +548,28 @@ export async function changeClubUserEmail(
   userId: string,
   email: string,
 ) {
+  // #102's sharp edge, and the last of it: "refuse to point an account holder's
+  // address at a dependant, and refuse to edit a dependant's reserved address at
+  // all". One guard closes both, because the second contains the first.
+  //
+  // Asked BEFORE anything is read or written, so a refusal costs nothing and
+  // leaves nothing half-done.
+  //
+  // What it stops is not the obvious case. Typing the parent's own address onto
+  // a child was already refused by the clash check below, though for the wrong
+  // reason and in a sentence about somebody else. The real hole was a FRESH
+  // address: nothing stopped a manager giving a nine-year-old a working mailbox
+  // on their own login. That address would then sit on a person the whole
+  // product routes through their guardian, unread and unused, badged with a
+  // confirmation state about an inbox nobody watches, while the reserved,
+  // non-deliverable shape that makes a dependant safe (`waiver.functions.ts`,
+  // and the permanent ban beside it) was quietly gone.
+  if (await isDependantUser(admin, userId)) {
+    throw new Error(
+      "This person is on somebody else's account and has no email of their own. Change the address on the account holder's page instead.",
+    );
+  }
+
   const { data: got, error: getErr } = await admin.auth.admin.getUserById(userId);
   if (getErr) throw new Error(getErr.message);
   if (!got.user) throw new Error("User not found.");
@@ -672,11 +694,9 @@ export const resendClubUserVerification = createServerFn({ method: "POST" })
     // nowhere, redeemable by nobody, sitting in the table looking like somebody
     // was asked to confirm something. Refused outright instead.
     //
-    // ⚠️ The neighbouring hole is NOT closed here: `setClubUserEmail` can still
-    // be pointed at a dependant and move them onto a real address. That is
-    // #107's, listed in #102's sharp edges and recorded again in #111 as
-    // deliberately untouched, and fixing it here would mean writing half of
-    // #107's rule in the wrong PR.
+    // `changeClubUserEmail` above asks the same question for the same reason,
+    // and was the neighbouring hole this comment used to point at. Both are
+    // closed now: two call sites of one shared rule, not two rules.
     if (await isDependantUser(admin, data.userId)) {
       throw new Error(
         "This person is on somebody else's account and has no email of their own. Send the link to the account holder instead.",

@@ -37,12 +37,33 @@ function fakeAdmin(
     getFails?: string;
     clashFails?: string;
     clearFails?: string;
+    /** Whose account this person is on, for `isDependantUser`. */
+    guardianUserId?: string | null;
+    profileFails?: string;
   } = {},
 ) {
   const user = opts.user === undefined ? { ...ADA } : opts.user;
   const rpcCalls: { fn: string; args: unknown }[] = [];
 
   const admin = {
+    from: (table: string) => {
+      if (table !== "profiles") throw new Error(`unexpected table: ${table}`);
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () =>
+              Promise.resolve(
+                opts.profileFails
+                  ? { data: null, error: { message: opts.profileFails } }
+                  : {
+                      data: { user_id: "ada", guardian_user_id: opts.guardianUserId ?? null },
+                      error: null,
+                    },
+              ),
+          }),
+        }),
+      };
+    },
     auth: {
       admin: {
         getUserById: () =>
@@ -165,5 +186,45 @@ describe("changeClubUserEmail", () => {
   it("reports a person who is not there", async () => {
     const fake = fakeAdmin({ user: null });
     await expect(run(fake)).rejects.toThrow("User not found.");
+  });
+
+  // #102's last sharp edge. A dependant's address is a reserved,
+  // non-deliverable string with a permanent ban behind it; the whole product
+  // reaches them through their guardian.
+  describe("a dependant's address", () => {
+    it("refuses to move a dependant onto a real address", async () => {
+      // The hole this closes is a FRESH address, not the parent's own: the
+      // clash check never fired for one, so nothing stopped a manager giving a
+      // nine-year-old a working mailbox on their own login.
+      const fake = fakeAdmin({ guardianUserId: "parent" });
+      await expect(run(fake)).rejects.toThrow("has no email of their own");
+      expect(fake.user?.email).toBe("ada@example.com");
+    });
+
+    it("refuses before reading or writing anything", async () => {
+      // A refusal must leave nothing half-done, and must not be reachable only
+      // after the clash check has already told the caller about somebody else.
+      const fake = fakeAdmin({ guardianUserId: "parent" });
+      await expect(run(fake)).rejects.toThrow();
+      expect(fake.rpcCalls).toEqual([]);
+    });
+
+    it("says where to change it instead", async () => {
+      const fake = fakeAdmin({ guardianUserId: "parent" });
+      await expect(run(fake)).rejects.toThrow("account holder's page");
+    });
+
+    it("leaves an account holder alone", async () => {
+      const fake = fakeAdmin({ guardianUserId: null });
+      await expect(run(fake)).resolves.toMatchObject({ ok: true, changed: true });
+    });
+
+    it("fails loudly when it cannot tell whether they are a dependant", async () => {
+      // "We could not ask" is not "they are an account holder". Answering it as
+      // one is exactly how the address would move.
+      const fake = fakeAdmin({ profileFails: "connection reset" });
+      await expect(run(fake)).rejects.toThrow("connection reset");
+      expect(fake.user?.email).toBe("ada@example.com");
+    });
   });
 });
