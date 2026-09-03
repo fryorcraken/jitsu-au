@@ -89,6 +89,23 @@ club's traffic is phones and the header nav is behind a menu button down there
 directly). The manager screens are laptop-only, which is where that admin
 actually gets done.
 
+**The member persona is a parent of two children.** Both are seeded dependants
+of `member`, sharing a surname and a guardian and born three years apart. One
+child would be enough to photograph the per-child page, and is not enough for
+anything else: a family with a single child never produces the case #102 is
+about (a second waiver on the same address), never produces a check-in search
+that returns two people who look alike, and never produces two invoices a parent
+has to tell apart. The family is on the manifest as `household`, names included,
+because the flows that need it are driven through the screen the way a person
+drives them. It is optional in `ClubFixture` for the same reason `paramsByPath`
+is: an older fixture still runs everything that does not need it, and a spec
+that does need it says so up front rather than failing somewhere further in.
+
+**There is no third persona for the parent, deliberately.** A parent who signs
+in is exactly what `member` already is, so a separate one would need its own
+saved session, Playwright project, `auth.setup.ts` entry and manifest slot to be
+the same thing twice.
+
 ## Rules worth knowing before you add one
 
 - **The suite is serial, and the club is shared.** Every test reads and writes
@@ -185,8 +202,8 @@ dependants on `/account/$userId`, so the flat `params` map in the manifest
 cannot answer both. `paramsByPath` overrides it per path and wins where it is
 set; everything else still reads the flat map, because most parameters do mean
 one thing. `scripts/site-pages.ts` predicted this collision before it happened
-and this is the fix it named. The seed creates one dependant of the member for
-exactly this: without it the tour would photograph a parent reaching for
+and this is the fix it named. The seed creates dependants of the member for
+exactly this: without one the tour would photograph a parent reaching for
 themselves through the per-child page, which renders but is not the screen a
 reviewer needs to see. The seed asserts the two ids differ before it writes the
 fixture, because the fallback is silent -- a missing override photographs the
@@ -271,4 +288,17 @@ invoice flows are now covered (`manager/memberships.spec.ts`,
 new-member story end to end — register, sign, get approved, use the trial,
 buy a plan, get checked in on it, get paid, and later switch plans
 (`manager/new-member-journey.spec.ts`, one connected test rather than one
-screen). The obvious next thing left is the knowledge base.
+screen).
+
+The household is covered from both sides. `member/household.spec.ts` walks a
+parent: both children on their account, opening one and getting that child's
+records rather than their own, and buying for each so the two invoices come out
+with different payment references — which is what proves the two children are
+two people and not one record written over twice.
+`manager/new-member-journey.spec.ts` carries the other side as a second
+connected test: a signed-out parent signs for a child, and approving that
+waiver unlocks the **parent's** login while the child's stays banned forever,
+with the free trial going to the child. That asymmetry is the product, and it
+is the one thing about #102 that no screen states outright.
+
+The obvious next thing left is the knowledge base.

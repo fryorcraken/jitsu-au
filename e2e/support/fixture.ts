@@ -30,6 +30,18 @@ type ClubFixture = {
    * else, and `fillRouteParams` falls back to the flat map above.
    */
   paramsByPath?: Record<string, Record<string, string>>;
+  /**
+   * The member persona's family: they are a parent of two children, neither of
+   * whom has a login.
+   *
+   * Optional for the same reason `paramsByPath` is: a fixture written before
+   * this existed still runs everything that does not need it, and a spec that
+   * does need it says so rather than failing somewhere further in.
+   */
+  household?: {
+    guardianUserId: string;
+    children: { userId: string; name: string; dateOfBirth: string }[];
+  };
 };
 
 // Resolved against the repo root, not the working directory: the seed writes it
