@@ -1158,16 +1158,13 @@ function ManagerUserPage() {
                       <Field label="Approved" value={formatDateTime(w.approved_at)} />
                       {/* The approving manager is a real account, so this is
                           a way in to it, like every other name a manager sees.
-                          Still "—" while the waiver is pending: there is nobody
-                          to open, which is not the same as an approver we
-                          could not name. */}
+                          The dash covers both waivers nobody has decided yet
+                          and approvals recorded before the club stored who did
+                          it: either way there is no account to open, which is
+                          not the same as an approver we could not name. */}
                       <Field label="Approved by">
                         {w.approved_by ? (
-                          <UserLink
-                            userId={w.approved_by}
-                            name={w.approved_by_name}
-                            fallback="Unknown"
-                          />
+                          <UserLink userId={w.approved_by} name={w.approved_by_name} />
                         ) : (
                           "—"
                         )}

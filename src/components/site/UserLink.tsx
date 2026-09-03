@@ -18,27 +18,32 @@ import { Link } from "@tanstack/react-router";
  * Those render as plain text, because a link to a page that does not exist is
  * worse than no link.
  *
- * `fallback` is what a row with no name shows, and on a row that DOES have a
- * record it becomes the link's whole accessible name — so it has to read as
- * something openable ("View", "Unknown"), never as a bare placeholder. A link
- * announced to a screen reader as "link, —" says nothing about where it goes,
- * which is why the default is only ever reached by a row with nothing to open.
+ * `fallback` does two jobs, and the default has to survive both: it labels a
+ * nameless row's plain text AND becomes the whole accessible name of a nameless
+ * row that still has a record to open. That rules out the placeholder dash the
+ * rest of a table uses for an empty cell — "link, —" tells a screen-reader user
+ * nothing about where it goes — and equally rules out an action word like
+ * "View", which reads as a broken button on the row with nothing to open. A
+ * word that stands in for the person works in both: it names the link, and it
+ * says plainly that the name is missing.
  *
- * `py-1 -my-1` buys a thumb-sized hit area without moving anything on screen:
- * the padding grows the target, the negative margin gives the space back to the
- * layout. Two of these sit in `text-xs` rows, where the text line alone is a
- * ~16px target on the phone most of this club's admin happens on.
+ * `py-1 -my-1` grows the tap target without moving anything on screen: the
+ * padding enlarges it, the negative margin gives the space back to the layout.
+ * Two of these sit in `text-xs` rows, where the text line alone is a ~16px
+ * target on the phone most of this club's admin happens on. It buys 24px, which
+ * clears WCAG 2.5.8 AA rather than being genuinely thumb-sized.
  */
 export function UserLink({
   userId,
   name,
-  fallback = "—",
+  fallback = "Unknown",
 }: {
   userId: string | null | undefined;
   name: string | null | undefined;
   /**
-   * What to show when the row carries no name. Doubles as the link's accessible
-   * name when there is still a record to open, so word it accordingly.
+   * Stands in for a row that carries no name, as text or as the link's
+   * accessible name. Override it only with another word for the person
+   * ("Someone at the club"), never with a placeholder or an action.
    */
   fallback?: string;
 }) {
