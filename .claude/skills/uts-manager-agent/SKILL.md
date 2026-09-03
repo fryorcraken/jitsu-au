@@ -97,9 +97,35 @@ an `id` you can pass to `edit_invoice`). A `lead` (registered interest only) has
 > caption tells a manager they can write to a nine-year-old, and nobody is
 > reading it. `list_invoices` says the same thing in `member_email_belongs_to`.
 
+> **The family is on the row.** `guardian_user_id` is the account holder this
+> person is on, or `null` for almost everybody. `email_belongs_to` **names** that
+> person for a caption; this **identifies** them, so you can fetch or act on the
+> guardian rather than only mention them. `dependants` is the people on this
+> person's account, each `{ user_id, name }` — always present, empty for almost
+> everybody, and empty for a dependant too, because a household is one level
+> deep and a dependant can never have any.
+>
+> **Read `dependants`; do not rebuild it** from `guardian_user_id` across the
+> listing. A `status` filter can drop the children out of the response while
+> leaving the parent in it, so a household reconstructed from what came back
+> would report that parent as having none.
+>
+> This is how you learn that `create_membership` on a nine-year-old is expected
+> rather than a mistake, and who to chase for the invoice it raises: billing is
+> one invoice per child, and every one is delivered to the guardian. A child
+> never has a login, and approving a child's waiver opens the **guardian's**.
+
 `roles` is empty for a member on a **free** plan, including the trial: the
 `member` role follows an active, priced, non-trial membership, so an active $0
 invoice with `roles: []` is correct, not a missed grant.
+
+`roles` and `lifecycle_status` reach through the household: a parent who does not
+train reads as a `member`, and carries the `member` role, while a plan held by
+anybody on their account is live. That matches what members-only access has done
+for them since the household shipped. It stays a **label** either way — no policy
+reads the `member` role — and it does not mean they are covered to train:
+check-in coverage is strictly the person's own, so a parent at the door correctly
+shows no cover.
 
 ```bash
 scripts/agent.sh list_users '{"status":"member","limit":50}'
@@ -236,7 +262,9 @@ audit log with who made it and each field's old and new value.
 > **Cancelling is how a membership is closed**, and it is safe from any status.
 > Closing somebody's last membership also stops `list_users` calling them a
 > member, and closes their members-only access at the same moment — that is gated
-> on holding an active membership, never on the role.
+> on holding an active membership, never on the role. Closing a **child's**
+> membership re-syncs the **parent** too, so a parent whose last child's plan you
+> just closed stops reading as a member on the same call.
 >
 > **`status` says nothing about money.** `active` means authorised to train, and
 > every membership is authorised from the moment it is raised. To tell who owes

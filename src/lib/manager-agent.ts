@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "16",
+  version: "17",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "17",
+      // Additive: two new response fields on one action. Every call that worked
+      // before still works and still means the same thing.
+      breaking: false,
+      notes: [
+        "list_users rows carry guardian_user_id: the id of the account holder this person is on, or null for almost everybody. email_belongs_to already NAMED that person; this identifies them, so you can fetch or act on the guardian rather than only mention them.",
+        "list_users rows carry dependants: the people on this person's account, each with user_id and name. Always present and empty for almost everybody, including for a dependant, because a household is one level deep and a dependant can never have any. Read it rather than rebuilding the household from guardian_user_id across the listing: a `status` filter can drop the children out of the response while leaving the parent in it, and a household rebuilt from what came back would report that parent as having none.",
+        "Approving a child's waiver unlocks the GUARDIAN's login, not the child's, and gives the trial to the child. A child never has a login. So `dependants` is how you find out that create_membership on a nine-year-old is a thing the club expects, and who to chase for the invoice it raises.",
+      ],
+    },
     {
       version: "16",
       // Additive: two new response fields, and a change in what an existing

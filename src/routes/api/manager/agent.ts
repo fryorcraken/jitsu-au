@@ -379,6 +379,18 @@ async function handleListUsers(params: unknown) {
     membershipsByUser.set(m.user_id, list);
   }
 
+  // Who is on whose account, built from the rows already aggregated rather than
+  // a second read: this action lists everybody, so every dependant is already
+  // here. Names only, plus the id, because everything else about one of these
+  // people is their own row in the same response.
+  const dependantsByGuardian = new Map<string, { user_id: string; name: string | null }[]>();
+  for (const u of aggregated) {
+    if (!u.user_id || !u.guardian_user_id) continue;
+    const list = dependantsByGuardian.get(u.guardian_user_id) ?? [];
+    list.push({ user_id: u.user_id, name: u.name });
+    dependantsByGuardian.set(u.guardian_user_id, list);
+  }
+
   let users = aggregated.map((u) => ({
     user_id: u.user_id,
     name: u.name,
@@ -390,6 +402,20 @@ async function handleListUsers(params: unknown) {
     // `member_email_belongs_to`, and the two surfaces must not disagree about
     // whether they say it at all.
     email_belongs_to: u.email_belongs_to,
+    // Whose account this person is on. `email_belongs_to` NAMES that person for
+    // a caption; this identifies them, so an agent can fetch or act on the
+    // guardian rather than only mention them. Null for almost everybody.
+    guardian_user_id: u.guardian_user_id,
+    // The people on THIS person's account. Always present, empty for almost
+    // everybody, and empty for a dependant too: a household is one level deep,
+    // so a dependant can never have any (#102).
+    //
+    // Present rather than left to be reconstructed from `guardian_user_id`
+    // across the whole listing, because a `status` filter can drop the children
+    // out of the response while leaving the parent in it, and an agent that
+    // rebuilt the household from what came back would then confidently report a
+    // parent as having none.
+    dependants: u.user_id ? (dependantsByGuardian.get(u.user_id) ?? []) : [],
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,

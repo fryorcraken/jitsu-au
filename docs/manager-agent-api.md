@@ -56,6 +56,24 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 > editable: `member_email_belongs_to` is a read-only decoration like
 > `member_name`, and `edit_invoice` refuses it by name.
 
+> [!NOTE]
+> **The family, on a `list_users` row.** `guardian_user_id` is the account holder
+> this person is on, or null for almost everybody: `email_belongs_to` **names**
+> that person for a caption, this **identifies** them, so a caller can fetch or
+> act on the guardian rather than only mention them. `dependants` is the people
+> on this person's account, each `{ user_id, name }` — always present, empty for
+> almost everybody, and empty for a dependant too, because a household is one
+> level deep and a dependant can never have any.
+>
+> **Read `dependants` rather than rebuilding it** from `guardian_user_id` across
+> the listing. A `status` filter can drop the children out of the response while
+> leaving the parent in it, and a household reconstructed from what came back
+> would then report that parent as having none.
+>
+> This is also how a caller learns that `create_membership` on a nine-year-old is
+> a thing the club expects, and who to chase for the invoice it raises: billing
+> is one invoice per child, and every one of them is delivered to the guardian.
+
 - `create_membership` — raise a membership for a person, the agent's equivalent
   of the manager screen's "Add a membership" and of a member choosing a plan
   themselves. Dispatches to `createMembershipForUser` in
@@ -115,6 +133,12 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   closes. Members-only **access** was never gated on that role — it is gated
   live by the `has_active_paid_membership` SQL helper — so this corrects a label
   that used to be granted and never taken back, and changes nobody's access.
+  Since #107 that reconciliation reaches through the household: a person's label
+  counts the memberships of everybody on their account, and closing a **child's**
+  membership re-syncs the **parent** as well as the child. So a parent who does
+  not train reads as a `member` while their child's plan is live, which is what
+  the members-only gate has said about them since #103. It is still only a label:
+  no policy anywhere reads the `member` role.
 - `delete_invoice` — delete an invoice outright, for tidying up one that should
   never have existed. Dispatches to `deleteMembershipRow`, which the manager
   screens' Delete button also calls, so both refuse for the same reasons in the
