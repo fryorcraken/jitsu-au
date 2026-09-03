@@ -10,7 +10,7 @@
 // child never exercises the thing that went wrong: two people who look alike in
 // a list.
 
-import { expect, test } from "../support/test";
+import { expect, step, test } from "../support/test";
 import { adminClient, readClubFixture } from "../support/fixture";
 import { expectPageRendered } from "../support/page";
 
@@ -85,39 +85,51 @@ test("a parent opens a child and gets that child's records, not their own", asyn
 
 /** Buy the casual plan for one named child, through the page. */
 async function buyCasualFor(page: import("@playwright/test").Page, childName: string) {
-  await page.goto("/membership");
-
-  // The question comes before the plans, so this is the first thing a parent
-  // answers. Choosing a child re-points the whole page at them.
-  const who = page.getByRole("group", { name: "Who is this for?" });
-  await expect(who).toBeVisible();
   const firstName = childName.split(" ")[0];
-  await who.getByRole("button", { name: firstName }).click();
 
-  // Asserted BEFORE buying: a purchase made while the page still said "You"
-  // would be the parent's, and the screen afterwards looks identical either way.
-  await expect(who.getByRole("button", { name: firstName })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  // Walked in named steps rather than as one block, for the reason the
+  // new-member journey gives: each one leaves a picture of where it ended, so
+  // the gallery shows the flow a parent actually walks -- and, when it breaks,
+  // says which half of it broke without anyone needing the job log.
+  await step(page, `opens /membership and picks ${firstName}`, async () => {
+    await page.goto("/membership");
 
-  const heading = page.getByRole("heading", { name: "Casual class", level: 3 });
-  const card = heading.locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
-  // Named for the child, not "Choose & pay by transfer": the whole page takes
-  // the subject's voice, so the button a parent presses says whose plan it is.
-  // Asserting the child's name here is the point rather than an inconvenience.
-  await card.getByRole("button", { name: `Choose for ${firstName} & pay by transfer` }).click();
+    // The question comes before the plans, so this is the first thing a parent
+    // answers. Choosing a child re-points the whole page at them.
+    const who = page.getByRole("group", { name: "Who is this for?" });
+    await expect(who).toBeVisible();
+    await who.getByRole("button", { name: firstName }).click();
 
-  // Buying for somebody else ASKS first, and buying for yourself does not, which
-  // is why `member/membership.spec.ts` has no equivalent of this. The dialog is
-  // the point: a plan raised against the wrong child is an invoice, an email and
-  // a membership under the wrong name, so the confirm says whose it is before
-  // the money exists. Asserting its wording is asserting that guarantee.
-  const dialog = page.getByRole("alertdialog");
-  await expect(dialog).toContainText(`This is for ${firstName}, not for you.`);
-  await dialog.getByRole("button", { name: `Yes, for ${firstName}` }).click();
+    // Asserted BEFORE buying: a purchase made while the page still said "You"
+    // would be the parent's, and the screen afterwards looks identical either
+    // way.
+    await expect(who.getByRole("button", { name: firstName })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
 
-  await expect(page.getByText("How to pay")).toBeVisible();
+  await step(page, `chooses a casual class for ${firstName}`, async () => {
+    const heading = page.getByRole("heading", { name: "Casual class", level: 3 });
+    const card = heading.locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
+    // Named for the child, not "Choose & pay by transfer": the whole page takes
+    // the subject's voice, so the button a parent presses says whose plan it is.
+    // Asserting the child's name here is the point rather than an inconvenience.
+    await card.getByRole("button", { name: `Choose for ${firstName} & pay by transfer` }).click();
+  });
+
+  await step(page, `confirms the plan is for ${firstName}, not for them`, async () => {
+    // Buying for somebody else ASKS first, and buying for yourself does not,
+    // which is why `member/membership.spec.ts` has no equivalent of this. The
+    // dialog is the point: a plan raised against the wrong child is an invoice,
+    // an email and a membership under the wrong name, so the confirm says whose
+    // it is before the money exists. Asserting its wording asserts that
+    // guarantee.
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText(`This is for ${firstName}, not for you.`);
+    await dialog.getByRole("button", { name: `Yes, for ${firstName}` }).click();
+    await expect(dialog).toBeHidden();
+  });
 }
 
 test("a parent buys for both children, and each gets their own invoice", async ({ page }) => {
@@ -134,6 +146,12 @@ test("a parent buys for both children, and each gets their own invoice", async (
   if (!casualPlan) throw new Error("no seeded casual_session plan");
 
   for (const child of children) await buyCasualFor(page, child.name);
+
+  await step(page, "each child's invoice is their own", async () => {
+    // Nothing to click here: this step exists so the gallery distinguishes
+    // "the purchases did not happen" from "they happened and were wrong".
+    await expect(page.getByText("How to pay")).toBeVisible();
+  });
 
   // What proves it. Each row has to belong to the CHILD it was bought for: a
   // membership raised against the parent, or both against the same child, is
