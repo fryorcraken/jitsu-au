@@ -285,7 +285,9 @@ One row per person, keyed by their auth user id. Starts as a lightweight
 applicant profile (name/phone; the email lives on `auth.users`) created at
 first waiver submission; filled in by manager approval. The funnel phase (lead
 / applicant / visitor / member / lapsed) is derived by `deriveLifecycleStatus`,
-never stored.
+never stored. `member` is the one phase that reaches through a household, so it
+agrees with the `has_active_paid_membership` gate; the rest are strictly the
+person's own.
 
 | Column                           | Type          | Null | Notes                                                                                                                                                                           |
 | -------------------------------- | ------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -676,7 +678,10 @@ called" in `docs/memberships.md`).
 Constraint: the student rate requires a `uts_student_number`. The `member` role
 is reconciled against these rows by `syncMemberRole` after every activation,
 cancellation and deletion — it is a label, not the access gate (see the
-"Membership ledger" note in `docs/memberships.md`). The member's display
+"Membership ledger" note in `docs/memberships.md`). Since #107 that
+reconciliation reaches through a household in both directions: a person's label
+counts everybody on their account, and a **child's** membership moving re-syncs
+the **parent**, who is nobody's argument on any call site. The member's display
 name/email come from their profile (via `user_id`). For a dated plan,
 `starts_at`/`ends_at` are the plan's own dates (`starts_on` at 00:00 and
 `ends_on` at 23:59:59, both Australia/Sydney), computed once at activation and
@@ -723,9 +728,13 @@ person **or any of their dependants** (`profiles.guardian_user_id`) has an
 `active` membership whose plan `kind <> 'trial'` and whose `price_cents > 0`.
 The dependant half is what gets a parent who does not train into the
 members-only calendar their child's membership pays for
-(`20260827000000_household_guardian_link.sql`), and it is why this **no longer
-mirrors `deriveLifecycleStatus`**, which still counts only a person's own
-memberships. EXECUTE is revoked from
+(`20260827000000_household_guardian_link.sql`). `deriveLifecycleStatus` and
+`syncMemberRole` **mirror it again** since #107; between #103 and #107 they did
+not, and a guardian held live members-only access while the manager directory
+and the agent API labelled them a lead. The label was moved rather than this
+helper, because this one is the gate and its behaviour is a product decision,
+and because no RLS policy reads the `member` role the label writes. EXECUTE is
+revoked from
 PUBLIC/anon and granted to `authenticated` (it is evaluated inside RLS as the
 querying role) + `service_role`. It is acknowledged in
 `supabase/lint/advisors-allowlist.txt` for the same reason as `has_role`.

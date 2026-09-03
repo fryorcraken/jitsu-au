@@ -342,13 +342,32 @@ cent. `docs/blog.md` has always said so; this file disagreed with it.
 
 **The helper also answers for a person's dependants.** A parent who does not
 train holds no membership of their own, so without that they would be shut out
-of the class calendar they are paying for. It is the one place the "an active
-paid membership" rule reaches past the person being asked about, and it is
-deliberately NOT mirrored in `deriveLifecycleStatus` or `syncMemberRole` — a
-guardian is not themself a member, and the funnel phase should not say they are.
+of the class calendar they are paying for.
 
-Nobody has a dependant yet: `profiles.guardian_user_id` exists but nothing
-writes it, so today this sentence describes a rule with no rows to apply it to.
+`deriveLifecycleStatus` and `syncMemberRole` **now agree with it**, and did not
+until #107. The gap in between is worth knowing about, because it was live: a
+guardian read the members-only calendar while `/manager/users` and `list_users`
+called them a `lead`, or a `lapsed` one, which this file defines as somebody to
+chase for a renewal — pointing a chase at a family that is paid up. The label
+moved rather than the gate, because the gate is a product decision (#102: "a
+non-training parent gets members-only access, yes"), because the two were
+designed to mirror each other in the first place, and because moving the label
+grants nothing: no RLS policy anywhere asks for the `member` role.
+
+**The reach stops at `member`.** The gate only ever asks about an active paid
+membership, so that is the only phase where the two could disagree. `lapsed`
+stays a person's own, because folding a household in would put two rows on the
+chase list for one lapse and buy nothing — the child's own row already carries
+the parent's address to chase. `visitor` and `applicant` stay personal too:
+they come from a waiver, and each person signs their own.
+
+Two neighbours that deliberately do NOT reach through a household, so they read
+as considered rather than missed. **Check-in coverage** is strictly the person's
+own, so a guardian at the door correctly shows "No cover": "may this person see
+members-only pages" and "may this person train today" are different questions.
+And **`/membership`** shows the subject their own phase, because that page
+exists to sell them a plan and must not tell a parent with none that they are
+already a member.
 
 That helper's **name is now a leftover**: it never read `paid_at`, and since
 `active` means authorised rather than paid, what it actually asks is "do they
@@ -364,7 +383,15 @@ back, so somebody tidied up months ago still read as a member. `syncMemberRole`
 in `src/lib/membership.functions.ts` now owns that rule in one place and
 reconciles it after every activation, cancellation and deletion. A failed read
 leaves the label alone: "the query fell over" must never be answered the same
-way as "they hold nothing", because the second one revokes.
+way as "they hold nothing", because the second one revokes. That applies to the
+household read too — "we could not ask who is on this account" is not "nobody
+is", and answering it as one would strip the label off every paid-up parent at
+once.
+
+It reconciles **in both directions**. A person's label counts everybody on their
+account, and a **child's** membership opening or closing re-syncs the **parent**.
+Every caller hands the function the single user id whose membership just moved,
+so the parent is nobody's argument and would otherwise never be reconciled.
 
 **Expiry deliberately does not reconcile the label**, only an explicit cancel
 does. That is the same break rule as above: a period ending is not somebody

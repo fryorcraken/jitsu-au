@@ -93,10 +93,14 @@ system. (The contact form stores a message, not a person.)
      verification pill now reflects the **guardian's** login, not the child's
      unverifiable one, and **Resend verification** is refused for a dependant.
 
-   ⚠️ One gap is left, deliberately: **Change email** (`setClubUserEmail`) still
-   acts on the person's own login record, so a manager can point it at a
-   dependant. #107 owns that, along with the rest of the manager-side household
-   work.
+   - **Change email** (`setClubUserEmail`) is refused for a dependant outright,
+     and the person page stops offering the button. Not for the obvious reason:
+     typing the parent's own address onto a child was already refused by the
+     one-person-per-email check. The hole was a FRESH address, which nothing
+     stopped a manager giving a nine-year-old, leaving them a working mailbox on
+     their own login and losing the reserved, non-deliverable shape that makes a
+     dependant safe. The **Household** card on that page names the account
+     holder to change it on instead.
 
    So two children in one family are two people under one address, which is
    what the club actually has. Before this, the second child's waiver resolved
@@ -422,14 +426,14 @@ guardian's address, and approving it unlocks the guardian's login.
 
 ⚠️ **Today that is reachable only through the manager agent API**
 (`docs/manager-agent-api.md`, `file_waiver`), not from "Upload a paper waiver"
-on the site. The filing function and its validation take the question; the
-screen does not ask it yet, so a form uploaded there is still filed as being
-for the person whose email was typed. **The consequence is the bug this whole
-change exists to fix, still live on that one screen**: two siblings uploaded
-under one parent's address land on the same person, and approving the second
-overwrites the first. #107 adds the question to the screen. Until then, a
-child's paper waiver goes through the agent API, or the parent signs it on the
-site.
+on the site. The upload screen asks it too, since #107: the question sits above
+the email field, because the answer decides whether there is one. Choosing a
+child hides the participant's address entirely rather than leaving it optional,
+and the guardian block becomes required and appears whatever the child's age,
+through `waiverNeedsGuardian` rather than the date of birth. Until that screen
+asked, two siblings uploaded under one parent's address landed on the same
+person and approving the second overwrote the first, which is the bug this whole
+change exists to fix.
 
 From there it is an ordinary submission. It attaches to the email's existing
 person, or creates a locked applicant if that email is new, and it lands

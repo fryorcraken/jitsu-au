@@ -118,8 +118,24 @@ people in to a class that did not run.
 
 ## Manager actions
 
-1. **Check someone in** — search by name or email, see what will pay for it
-   before pressing the button, press it. Their sessions left goes down.
+1. **Check someone in** — search by name, email or the parent's name, see what
+   will pay for it before pressing the button, press it. Their sessions left
+   goes down.
+
+   The roster resolves a person's contact address through their guardian, so
+   typing a parent's email finds **every** child on that account at once. A
+   child's row therefore carries whose account they are on and their date of
+   birth: the parent's name says which family, and the date of birth is the only
+   thing that separates two children inside one, which is the case a surname
+   search actually produces. Picking the wrong sibling files the class against
+   the wrong child's attendance, credit and grading record, and no screen would
+   look wrong afterwards.
+
+   Carried for a dependant and **for nobody else**, which is the rule and not an
+   accident (`rosterHouseholdFields` in `src/lib/checkin.ts`): an ordinary
+   member's date of birth answers no question at the door, and this screen is a
+   tablet in the entrance of a public hall.
+
 2. **Undo** — removes the check-in and gives the session back.
 3. **Attach** — give an uncovered check-in its cover, from the needs-attention
    list or from the person's own page. By default it re-runs the same rules the
@@ -216,8 +232,9 @@ error panel where the roster should be. The class list and the roster are kept
 fetched behind them.
 
 - **A day, and no longer.** This data carries members' names and email
-  addresses, and memberships are raised and waivers signed between classes, so a
-  roster older than that is a wrong answer rather than a convenience.
+  addresses, and the dates of birth of the children on it, and memberships are
+  raised and waivers signed between classes, so a roster older than that is a
+  wrong answer rather than a convenience.
 - **Scoped to the manager who fetched it**, and wiped when anybody signs out, so
   a club laptop passed to the next person carries nothing.
 - **When it is the stored copy on screen, the screen says so** — a notice with
