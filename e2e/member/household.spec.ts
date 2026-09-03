@@ -14,12 +14,31 @@ import { expect, test } from "../support/test";
 import { adminClient, readClubFixture } from "../support/fixture";
 import { expectPageRendered } from "../support/page";
 
-/** Payment references the purchase test raises, for afterAll cleanup. */
-const references: string[] = [];
-
+/**
+ * Clean up after the purchase test.
+ *
+ * Keyed on the CHILDREN rather than on references collected as the test goes:
+ * a failure between the two purchases would leave the first one behind, and
+ * this file's whole subject is that there are two of them. `casual_session` is
+ * the only plan bought here, and the seeded children hold none of their own, so
+ * this removes exactly what the run added. The insurance the bundle raises
+ * alongside it shares the same reference, so it goes too.
+ */
 test.afterAll(async () => {
+  const admin = adminClient();
+  const fixture = readClubFixture();
+  const children = fixture.household?.children ?? [];
+  if (children.length === 0) return;
+  const { data: rows } = await admin
+    .from("memberships")
+    .select("payment_reference")
+    .in(
+      "user_id",
+      children.map((c) => c.userId),
+    );
+  const references = [...new Set((rows ?? []).map((r) => r.payment_reference))];
   if (references.length === 0) return;
-  await adminClient().from("memberships").delete().in("payment_reference", references);
+  await admin.from("memberships").delete().in("payment_reference", references);
 });
 
 /** The seeded family, or a failure that says which half of the setup is missing. */
@@ -38,9 +57,11 @@ test("a parent sees both children on their account", async ({ page }) => {
 
   await page.goto("/account");
 
-  const card = page.getByRole("region").filter({ hasText: "People on your account" });
+  // Located by its own words rather than by role: `Card` is a plain <div> and
+  // `CardTitle` is not a heading, so there is no `region` to scope to.
+  await expect(page.getByText("People on your account")).toBeVisible();
   for (const child of children) {
-    await expect(card.getByRole("link", { name: new RegExp(child.name) })).toBeVisible();
+    await expect(page.getByRole("link", { name: new RegExp(child.name) })).toBeVisible();
   }
   await expectPageRendered(page);
 });
@@ -82,7 +103,10 @@ async function buyCasualFor(page: import("@playwright/test").Page, childName: st
 
   const heading = page.getByRole("heading", { name: "Casual class", level: 3 });
   const card = heading.locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
-  await card.getByRole("button", { name: "Choose & pay by transfer" }).click();
+  // Named for the child, not "Choose & pay by transfer": the whole page takes
+  // the subject's voice, so the button a parent presses says whose plan it is.
+  // Asserting the child's name here is the point rather than an inconvenience.
+  await card.getByRole("button", { name: `Choose for ${firstName} & pay by transfer` }).click();
 
   await expect(page.getByText("How to pay")).toBeVisible();
 }
@@ -115,7 +139,6 @@ test("a parent buys for both children, and each gets their own invoice", async (
     .eq("plan_id", casualPlan.id)
     .order("created_at", { ascending: false });
   if (!rows) throw new Error("could not read back the invoices");
-  for (const row of rows) references.push(row.payment_reference);
 
   const byChild = new Map<string, string>();
   for (const child of children) {

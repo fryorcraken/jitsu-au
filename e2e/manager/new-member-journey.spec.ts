@@ -518,9 +518,11 @@ test("a parent signs for a child, and approving it unlocks the PARENT", async ({
     // what the rest of the form asks for. Choosing a child removes the
     // participant's own email field entirely: a nine-year-old is never asked
     // for one.
-    await visitorPage
-      .getByRole("radio", { name: "My child, or someone else I look after" })
-      .check();
+    // `getByLabel`, not `getByRole("radio", { name })`. These are Radix items,
+    // which render a <button role="radio"> named by a sibling <label for>, and
+    // getByLabel is the mechanism the health questions in the test above
+    // already drive them with.
+    await visitorPage.getByLabel("My child, or someone else I look after").check();
     await expect(visitorPage.getByLabel("Email", { exact: true })).toHaveCount(0);
 
     await visitorPage.getByLabel("First name").fill(childFirst);
