@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -29,20 +29,33 @@ interface CopyButtonProps {
  * with nothing to select.
  */
 export function CopyButton({ text, label, ariaLabel, className }: CopyButtonProps) {
-  const [copied, setCopied] = useState(false);
-  // The tick's timer has to be cancellable. Left running it outlives the
-  // component: it fires against a React tree that is gone, and in the test
-  // environment it lands after jsdom has been torn down, where touching
-  // `window` throws `ReferenceError` OUTSIDE any test body. That failure is
-  // attributed to no test, so the suite reports every test passing and still
-  // exits non-zero, which reads as a random red CI run on an unrelated change.
-  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (resetTimer.current) clearTimeout(resetTimer.current);
-    },
-    [],
-  );
+  // A counter, not a boolean, and the timer belongs to an effect rather than to
+  // the click. Both of those are load-bearing.
+  //
+  // The timer has to be cancellable. Left running it outlives the component: it
+  // fires against a React tree that is gone, and under the test runner it lands
+  // after jsdom has been torn down, where React reads `window.event` and throws
+  // `ReferenceError` OUTSIDE any test body. That failure belongs to no test, so
+  // the suite reports every test passing and still exits non-zero — a red CI run
+  // nobody can trace to a change. (The global `setTimeout` here is Node's, so
+  // jsdom's own teardown does not cancel it for us.)
+  //
+  // Starting it from the click cannot fix that on its own: the click is async,
+  // so an unmount while `writeText` is still in flight runs the cleanup BEFORE
+  // the timer exists, and the continuation then schedules one nothing will ever
+  // clear. An effect only ever runs on a mounted tree, so the timer and its
+  // `clearTimeout` are created and destroyed together.
+  //
+  // The counter is what makes a second click restart the full 1.5s: a boolean
+  // would already be `true`, the effect would not re-run, and the first click's
+  // timer would cut the new tick short.
+  const [copiedTick, setCopiedTick] = useState(0);
+  const copied = copiedTick > 0;
+  useEffect(() => {
+    if (!copiedTick) return;
+    const id = setTimeout(() => setCopiedTick(0), 1500);
+    return () => clearTimeout(id);
+  }, [copiedTick]);
   return (
     <Button
       type="button"
@@ -53,11 +66,7 @@ export function CopyButton({ text, label, ariaLabel, className }: CopyButtonProp
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
-          setCopied(true);
-          // Cleared first, so a second click restarts the 1.5s rather than
-          // letting the first click's timer cut the new tick short.
-          if (resetTimer.current) clearTimeout(resetTimer.current);
-          resetTimer.current = setTimeout(() => setCopied(false), 1500);
+          setCopiedTick((tick) => tick + 1);
         } catch {
           toast.error("Couldn't copy that automatically.", {
             description: `Select this and copy it by hand: ${text}`,

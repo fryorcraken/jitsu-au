@@ -63,6 +63,80 @@ describe("CopyButton", () => {
   // torn down, throwing outside any test body — a failure attributed to no
   // test, which exits the suite non-zero with every test reporting as passed.
   // That is a red CI run nobody can trace to a change.
+  // The narrower version of the same leak: the click is async, so unmounting
+  // while the clipboard write is still in flight ran the unmount cleanup BEFORE
+  // any timer existed, and the continuation then scheduled one nothing would
+  // ever clear. Starting the timer from an effect closes it, because an effect
+  // only ever runs on a mounted tree.
+  it("starts no timer when it is unmounted before the copy resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      const writeText = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      Object.assign(navigator, { clipboard: { writeText } });
+      const { unmount } = render(<CopyButton text="x" label="Copy link" />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+      });
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+
+      unmount();
+      await act(async () => {
+        release();
+      });
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A boolean would already be true on the second click, so the effect would
+  // not re-run and the first click's timer would cut the new tick short.
+  it("restarts the full countdown on a second click", async () => {
+    vi.useFakeTimers();
+    try {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+      render(<CopyButton text="x" label="Copy link" />);
+      const button = screen.getByRole("button", { name: "Copy link" });
+      const ticking = () => Boolean(button.querySelector(".lucide-check"));
+
+      await act(async () => {
+        fireEvent.click(button);
+      });
+      expect(ticking()).toBe(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      await act(async () => {
+        fireEvent.click(button);
+      });
+
+      // 600ms past the FIRST click's deadline, so a tick that survives here can
+      // only be the second click's own countdown.
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(ticking()).toBe(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(ticking()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels the tick's timer when it is unmounted mid-countdown", async () => {
     vi.useFakeTimers();
     try {
