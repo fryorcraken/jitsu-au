@@ -1213,9 +1213,38 @@ export function isFutureSigningDate(signedOn: string, nowIso: string): boolean {
 // a manager could set would only mean "a manager believed this", which is the
 // state the club is already in. Correcting an address sends a fresh link; that
 // is the whole remedy.
+/**
+ * The domain a dependant's reserved login address is minted in.
+ *
+ * Lives here, in the pure module, rather than beside the generator, because two
+ * different things need it and one of them is a SCHEMA: the generator mints
+ * these addresses (`waiver.functions.ts`, which carries the full reasoning for
+ * the domain and the GoTrue finding behind it), and the validator below refuses
+ * to let anybody type one in.
+ */
+export const DEPENDANT_EMAIL_DOMAIN = "dependant.jitsu.au";
+
+/** True for an address in the club's reserved, non-deliverable dependant domain. */
+export function isReservedDependantEmail(email: string): boolean {
+  return normalizeEmail(email).endsWith(`@${DEPENDANT_EMAIL_DOMAIN}`);
+}
+
 export const managerEmailChangeSchema = z.object({
   userId: z.string().uuid(),
-  email: z.string().trim().email().max(255),
+  email: z
+    .string()
+    .trim()
+    .email()
+    .max(255)
+    // The other direction of #102's sharp edge. Refusing to edit a DEPENDANT's
+    // address stops a child being given a real mailbox; this stops the reverse,
+    // an account holder being moved ONTO the reserved domain. Nothing allocates
+    // one of these by hand, so anything typed here is a mistake or worse, and
+    // accepting it costs a member whose login can never be verified plus an
+    // outbound send to the one domain the club routes no mail for.
+    .refine((email) => !isReservedDependantEmail(email), {
+      message: "That address is reserved by the club and cannot be used for a login.",
+    }),
 });
 export type ManagerEmailChangeInput = z.infer<typeof managerEmailChangeSchema>;
 

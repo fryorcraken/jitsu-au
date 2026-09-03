@@ -40,6 +40,8 @@ type ClubFixture = {
    */
   household?: {
     guardianUserId: string;
+    /** As the screens print it, for asserting whose account a child is on. */
+    guardianName: string;
     children: { userId: string; name: string; dateOfBirth: string }[];
   };
 };

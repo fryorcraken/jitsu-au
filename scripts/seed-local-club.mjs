@@ -354,7 +354,7 @@ if (users.dependant === users.member) {
 // Two DISTINCT children, for the same reason the assertion above exists: a
 // fixture that quietly collapsed them would leave every sibling case covering
 // nothing while staying green.
-if (users.sibling === users.dependant) {
+if (users.sibling === users.dependant || users.sibling === users.member) {
   throw new Error("the two seeded children are the same person: the sibling cases cover nothing");
 }
 console.log("[seed] dependants: 2");
@@ -939,6 +939,9 @@ const fixture = {
   // way a person drives them, and the screen shows names.
   household: {
     guardianUserId: users.member,
+    // The name as the screens print it, so a spec can assert WHOSE account a
+    // child is on rather than merely that some caption rendered.
+    guardianName: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
     children: [
       {
         userId: users.dependant,

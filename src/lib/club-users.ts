@@ -303,7 +303,7 @@ export function aggregateClubUsers(input: {
    * with the RLS gate that has been letting guardians read members-only pages
    * since #103, so the three manager readers opt in and nobody else does.
    *
-   * `getHousehold` is the caller this is off for, and it is not an oversight:
+   * `listMyHousehold` is the caller this is off for, and it is not an oversight:
    * it renders the "People on your account" card, where the parent's own row
    * sits directly above a line saying what they hold. Reaching there would
    * paint a member a green `Member` pill over the words "No membership yet".

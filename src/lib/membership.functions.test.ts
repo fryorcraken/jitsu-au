@@ -57,14 +57,26 @@ function fakeAdmin(reads: {
   trialPlans?: Result;
   existingTrial?: Result;
   profile?: Result;
-  dependants?: Result;
+  /**
+   * Who is on each person's account, keyed by GUARDIAN id.
+   *
+   * Per guardian rather than one shared answer: in a real household the child
+   * IS on the parent's list, so one global result cannot express the case this
+   * feature exists for, and would let a wrong second tally pass unnoticed.
+   */
+  dependants?: Record<string, Result>;
   activePaid?: Result;
   rolePlans?: Result;
   roleWriteFails?: boolean;
 }) {
   const inserts: unknown[] = [];
   const updates: unknown[] = [];
-  const roleWrites: ("grant" | "revoke")[] = [];
+  // WHO got written, and WHICH role -- not just which way it went. A recorder
+  // that keeps only "grant"/"revoke" cannot tell the parent's label from the
+  // child's, and cannot tell `member` from `manager`: three separate mutations
+  // survived it, including writing the household label onto the wrong person
+  // and granting `manager` to every paying member.
+  const roleWrites: { op: "grant" | "revoke"; user_id: unknown; role: unknown }[] = [];
   // Which ids each role tally was scoped to, in order. `syncMemberRole` runs
   // once per person whose label could have moved, so a child's activation
   // leaves two entries here: the child's, then their guardian's.
@@ -78,7 +90,7 @@ function fakeAdmin(reads: {
   const activePaid = reads.activePaid ?? ok([]);
   const rolePlans = reads.rolePlans ?? ok([]);
   // Default: nobody is on this person's account, which is almost everybody.
-  const dependants = reads.dependants ?? ok([]);
+  const dependantsFor = (guardianId: string): Result => reads.dependants?.[guardianId] ?? ok([]);
   const inserted = ok({ id: "mem-1", user_id: "user-1", plan_id: TRIAL_PLAN.id, price_cents: 0 });
 
   const admin = {
@@ -97,9 +109,9 @@ function fakeAdmin(reads: {
           // `guardian_user_id` and is awaited with no single-row terminator;
           // every other profiles read here ends in `.maybeSingle()`.
           return {
-            eq: (column: string) =>
+            eq: (column: string, value: string) =>
               column === "guardian_user_id"
-                ? Promise.resolve(dependants)
+                ? Promise.resolve(dependantsFor(value))
                 : { maybeSingle: () => Promise.resolve(profile) },
           };
         }
@@ -124,14 +136,17 @@ function fakeAdmin(reads: {
         updates.push(patch);
         return { eq: () => Promise.resolve(ok(null)) };
       },
-      upsert: () => {
-        roleWrites.push("grant");
+      upsert: (row: { user_id?: unknown; role?: unknown }) => {
+        roleWrites.push({ op: "grant", user_id: row?.user_id, role: row?.role });
         return Promise.resolve(roleResult);
       },
+      // `.delete().eq("user_id", id).eq("role", "member")`, so both filters are
+      // captured: revoking the wrong ROLE is how a lapsed member takes somebody
+      // else's manager access with them.
       delete: () => ({
-        eq: () => ({
-          eq: () => {
-            roleWrites.push("revoke");
+        eq: (_c1: string, userId: unknown) => ({
+          eq: (_c2: string, role: unknown) => {
+            roleWrites.push({ op: "revoke", user_id: userId, role });
             return Promise.resolve(roleResult);
           },
         }),
@@ -271,7 +286,7 @@ describe("syncMemberRole, via activation", () => {
       rolePlans: ok([{ id: PAID_PLAN.id, kind: "period" }]),
     });
     await assignTrial(fake);
-    expect(fake.roleWrites).toEqual(["grant"]);
+    expect(fake.roleWrites).toEqual([{ op: "grant", user_id: "user-1", role: "member" }]);
   });
 
   // The free trial is not membership. Someone holding only a trial reads as a
@@ -282,13 +297,13 @@ describe("syncMemberRole, via activation", () => {
       rolePlans: ok([{ id: TRIAL_PLAN.id, kind: "trial" }]),
     });
     await assignTrial(fake);
-    expect(fake.roleWrites).toEqual(["revoke"]);
+    expect(fake.roleWrites).toEqual([{ op: "revoke", user_id: "user-1", role: "member" }]);
   });
 
   it("takes the label back when nothing is active at all", async () => {
     const fake = fakeAdmin({ activePaid: ok([]) });
     await assignTrial(fake);
-    expect(fake.roleWrites).toEqual(["revoke"]);
+    expect(fake.roleWrites).toEqual([{ op: "revoke", user_id: "user-1", role: "member" }]);
   });
 
   // The case that must never become a mass revocation: a read that fell over is
@@ -322,7 +337,7 @@ describe("syncMemberRole, via activation", () => {
   describe("through the household", () => {
     it("counts the people on the person's account, not only their own rows", async () => {
       const fake = fakeAdmin({
-        dependants: ok([{ user_id: "child-1" }, { user_id: "child-2" }]),
+        dependants: { "user-1": ok([{ user_id: "child-1" }, { user_id: "child-2" }]) },
         activePaid: ok([{ plan_id: PAID_PLAN.id }]),
         rolePlans: ok([{ id: PAID_PLAN.id, kind: "period" }]),
       });
@@ -330,7 +345,8 @@ describe("syncMemberRole, via activation", () => {
       // The tally asked about all three, which is the only way a parent who
       // holds nothing themselves can come out holding the label.
       expect(fake.activePaidUserIds).toEqual([["user-1", "child-1", "child-2"]]);
-      expect(fake.roleWrites).toEqual(["grant"]);
+      // ...and the label lands on THIS person, as `member`.
+      expect(fake.roleWrites).toEqual([{ op: "grant", user_id: "user-1", role: "member" }]);
     });
 
     // Every caller hands this one user id -- the person whose membership just
@@ -339,20 +355,29 @@ describe("syncMemberRole, via activation", () => {
     it("re-syncs the guardian when a dependant's membership changes", async () => {
       const fake = fakeAdmin({
         profile: ok({ first_name: "Bea", last_name: "Lovelace", guardian_user_id: "parent-1" }),
+        // The child is on the parent's account, which is what makes the
+        // parent's tally count the child's plan rather than nothing.
+        dependants: { "parent-1": ok([{ user_id: "user-1" }]) },
         activePaid: ok([{ plan_id: PAID_PLAN.id }]),
         rolePlans: ok([{ id: PAID_PLAN.id, kind: "period" }]),
       });
       await assignTrial(fake);
       // Twice: the child's own tally, then their parent's.
-      expect(fake.activePaidUserIds).toEqual([["user-1"], ["parent-1"]]);
-      expect(fake.roleWrites).toEqual(["grant", "grant"]);
+      expect(fake.activePaidUserIds).toEqual([["user-1"], ["parent-1", "user-1"]]);
+      // The assertion the whole feature rests on: the second write is the
+      // PARENT's. Recording only "grant" here let a mutation that wrote the
+      // child's label twice pass, which is the bug this exists to prevent.
+      expect(fake.roleWrites).toEqual([
+        { op: "grant", user_id: "user-1", role: "member" },
+        { op: "grant", user_id: "parent-1", role: "member" },
+      ]);
     });
 
     it("does not walk upwards for somebody who is on nobody's account", async () => {
       const fake = fakeAdmin({ activePaid: ok([]) });
       await assignTrial(fake);
       expect(fake.activePaidUserIds).toEqual([["user-1"]]);
-      expect(fake.roleWrites).toEqual(["revoke"]);
+      expect(fake.roleWrites).toEqual([{ op: "revoke", user_id: "user-1", role: "member" }]);
     });
 
     // Same line as the failed membership read above, one level out: "we could
@@ -360,7 +385,7 @@ describe("syncMemberRole, via activation", () => {
     // blip on `profiles` strips the label off every paid-up parent at once.
     it("leaves every label alone when the household read fails", async () => {
       const fake = fakeAdmin({
-        dependants: fails("connection reset"),
+        dependants: { "user-1": fails("connection reset") },
         activePaid: ok([]),
       });
       await assignTrial(fake);

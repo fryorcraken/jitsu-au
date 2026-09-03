@@ -361,13 +361,32 @@ chase list for one lapse and buy nothing — the child's own row already carries
 the parent's address to chase. `visitor` and `applicant` stay personal too:
 they come from a waiver, and each person signs their own.
 
-Two neighbours that deliberately do NOT reach through a household, so they read
-as considered rather than missed. **Check-in coverage** is strictly the person's
-own, so a guardian at the door correctly shows "No cover": "may this person see
-members-only pages" and "may this person train today" are different questions.
-And **`/membership`** shows the subject their own phase, because that page
-exists to sell them a plan and must not tell a parent with none that they are
-already a member.
+The reach is **asked for, not automatic**: `aggregateClubUsers` takes
+`countHouseholdMemberships`, off unless a caller sets it, and the three manager
+readers set it (`listClubUsers`, `getClubUser`, and the agent API's
+`list_users`). Off is the conservative direction, because a caller that says
+nothing gets each person's own answer, which is never wrong about them, only
+less generous.
+
+Three neighbours deliberately do NOT reach, so they read as considered rather
+than missed:
+
+- **Check-in coverage** is strictly the person's own, so a guardian at the door
+  correctly shows "No cover". "May this person see members-only pages" and "may
+  this person train today" are different questions.
+- **`/membership`** shows the subject their own phase, because that page exists
+  to sell them a plan and must not tell a parent with none that they are already
+  a member.
+- **`listMyHousehold`**, which draws the "People on your account" card. The
+  parent's own row there sits directly above a line saying what they hold, so
+  reaching would paint a `Member` pill over the words "No membership yet".
+
+The consequence of the third is worth stating plainly, because two people see it
+at once: a non-training parent reads as a **member** on the manager's directory
+and as a **lead** on their own account card, at the same moment. Both answer
+honestly about different questions -- what the club is being paid for the
+household, and what this person holds -- and a member's own screens answer about
+the person they name, which is the line `/membership` already takes.
 
 That helper's **name is now a leftover**: it never read `paid_at`, and since
 `active` means authorised rather than paid, what it actually asks is "do they

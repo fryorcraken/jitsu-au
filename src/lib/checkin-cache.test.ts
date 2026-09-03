@@ -29,7 +29,7 @@ const board = {
       name: "Jane L.",
       email: "jane@example.com",
       guardian_name: null,
-      date_of_birth: null,
+      age: null,
       coverage: "trial",
       plan_name: "Free trial",
       sessions_remaining_before: 2,
@@ -110,26 +110,38 @@ describe("checkInBoardCacheSchema", () => {
   // not name, so a field missing from here is not a no-op: it is a silent loss
   // on exactly the offline relaunch this cache exists for.
   it("keeps the fields that tell one child from another", () => {
+    const child = { ...board.roster[0], guardian_name: "Ada Lovelace", age: 10 };
+    const parsed = checkInBoardCacheSchema.parse({ ...board, roster: [child] });
+    expect(parsed.roster[0].guardian_name).toBe("Ada Lovelace");
+    expect(parsed.roster[0].age).toBe(10);
+  });
+
+  // The roster is kept on a manager's own device and, for a class already
+  // taught, is never read again and so never pruned. The server sends an age
+  // rather than a date of birth precisely so nothing here can outlive its
+  // usefulness as an identity-document field: a stray one is stripped.
+  it("stores no date of birth, even if one is handed to it", () => {
     const child = {
       ...board.roster[0],
       guardian_name: "Ada Lovelace",
+      age: 10,
       date_of_birth: "2016-04-02",
     };
     const parsed = checkInBoardCacheSchema.parse({ ...board, roster: [child] });
-    expect(parsed.roster[0].guardian_name).toBe("Ada Lovelace");
-    expect(parsed.roster[0].date_of_birth).toBe("2016-04-02");
+    expect(JSON.stringify(parsed)).not.toContain("2016-04-02");
+    expect(parsed.roster[0]).not.toHaveProperty("date_of_birth");
   });
 
   // A board cached by the version before those fields existed. Required, they
   // would fail the whole schema and throw away a manager's stored roster on
   // their first load after a deploy, at the door and offline.
   it("still restores a roster cached before those fields existed", () => {
-    const { guardian_name: _g, date_of_birth: _d, ...old } = board.roster[0];
+    const { guardian_name: _g, age: _a, ...old } = board.roster[0];
     const parsed = checkInBoardCacheSchema.safeParse({ ...board, roster: [old] });
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.roster[0].guardian_name).toBeNull();
-      expect(parsed.data.roster[0].date_of_birth).toBeNull();
+      expect(parsed.data.roster[0].age).toBeNull();
     }
   });
 });

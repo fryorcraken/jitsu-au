@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { changeClubUserEmail } from "./club-user.functions";
+import { managerEmailChangeSchema } from "./validation";
 
 type AuthUser = { id: string; email: string | null; email_confirmed_at: string | null };
 
@@ -217,6 +218,33 @@ describe("changeClubUserEmail", () => {
     it("leaves an account holder alone", async () => {
       const fake = fakeAdmin({ guardianUserId: null });
       await expect(run(fake)).resolves.toMatchObject({ ok: true, changed: true });
+    });
+
+    // The other direction, and the one the target-side guard does not cover: an
+    // ACCOUNT HOLDER moved onto the reserved domain. Nothing allocates one of
+    // these by hand, and accepting it costs a member a login that can never be
+    // verified plus an outbound send to the one domain the club routes no mail
+    // for. Refused by the schema, so it never reaches this function at all.
+    it("refuses the reserved dependant domain as an address", () => {
+      const id = "11111111-1111-1111-1111-111111111111";
+      expect(
+        managerEmailChangeSchema.safeParse({ id, userId: id, email: "x@dependant.jitsu.au" })
+          .success,
+      ).toBe(false);
+      // Case and spacing are not a way around it.
+      expect(
+        managerEmailChangeSchema.safeParse({ userId: id, email: " X@Dependant.Jitsu.AU " }).success,
+      ).toBe(false);
+      // An ordinary address still goes through.
+      expect(
+        managerEmailChangeSchema.safeParse({ userId: id, email: "ada@example.com" }).success,
+      ).toBe(true);
+      // ...and a lookalike that is NOT the reserved domain is not caught by a
+      // sloppy substring match.
+      expect(
+        managerEmailChangeSchema.safeParse({ userId: id, email: "a@notdependant.jitsu.au" })
+          .success,
+      ).toBe(true);
     });
 
     it("fails loudly when it cannot tell whether they are a dependant", async () => {

@@ -12,7 +12,6 @@ import { coverageClass, UNREAD_CLASS } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
-import { formatDateOnly } from "@/lib/dates";
 import { coveragePreviewLabel, pickDefaultEvent } from "@/lib/checkin";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePersistentQuery } from "@/hooks/use-persistent-query";
@@ -502,11 +501,7 @@ function CheckInPage() {
                         `guardian_name` being set means. */}
                     {r.guardian_name ? (
                       <div className="mt-0.5 text-xs font-normal text-muted-foreground">
-                        {r.date_of_birth ? (
-                          <>Born {formatDateOnly(r.date_of_birth)}, on </>
-                        ) : (
-                          <>On </>
-                        )}
+                        {r.age !== null ? <>Age {r.age}, on </> : <>On </>}
                         {r.guardian_name}&apos;s account
                       </div>
                     ) : null}

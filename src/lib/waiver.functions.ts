@@ -17,6 +17,7 @@ import {
   splitFullName,
   nextUtcDay,
   normalizeEmail,
+  DEPENDANT_EMAIL_DOMAIN,
   paperWaiverUploadSchema,
   saveTemplateSchema,
   setCurrentTemplateSchema,
@@ -378,7 +379,8 @@ async function resolvePersonId(
  * If GoTrue ever does start checking DNS on create, the fallback still stands
  * and only this constant changes.
  */
-const DEPENDANT_EMAIL_DOMAIN = "dependant.jitsu.au";
+// Defined in `validation.ts` so the schemas that REFUSE one can consult the same
+// string this generator mints from. The reasoning above is why it is this domain.
 
 /**
  * A fresh reserved address for a dependant being created right now.
@@ -1739,7 +1741,7 @@ export const listWaivers = createServerFn({ method: "GET" })
     // this screen cannot disagree with the directory about who is on whose
     // account. Only `onBehalfOf` is used: the address stays exactly as it was
     // submitted, because that is the evidence.
-    const { loadHouseholdContacts } = await import("@/lib/household-email");
+    const { loadHouseholdContacts, householdContacts } = await import("@/lib/household-email");
     const participantIds = [
       ...new Set(rows.map((r) => r.user_id).filter((id): id is string => !!id)),
     ];
@@ -1747,7 +1749,19 @@ export const listWaivers = createServerFn({ method: "GET" })
     // the evidence, so the only thing wanted here is whose account the
     // participant is on. Without it a full page spends up to five service-role
     // `user_emails` calls resolving addresses that are then discarded.
-    const contacts = await loadHouseholdContacts(admin, participantIds, { namesOnly: true });
+    //
+    // Degrades rather than throwing. `loadHouseholdContacts` fails loudly on a
+    // bad `profiles` read, which is right where it decides whose ADDRESS to
+    // use, and wrong here: what this read produces is a caption and a link, and
+    // this screen is the club's approval queue. Losing a caption must not cost
+    // a manager the ability to approve anybody. `getClubUser` takes the same
+    // posture on the same data one screen over, and says so.
+    let contacts = householdContacts({ people: [], emails: [] });
+    try {
+      contacts = await loadHouseholdContacts(admin, participantIds, { namesOnly: true });
+    } catch (e) {
+      console.error("[listWaivers] could not resolve participant households:", e);
+    }
 
     return rows.map((row) => {
       const onBehalfOf = row.user_id ? contacts.displayEmail(row.user_id).onBehalfOf : null;

@@ -38,8 +38,30 @@ test.afterAll(async () => {
     );
   const references = [...new Set((rows ?? []).map((r) => r.payment_reference))];
   if (references.length === 0) return;
-  await admin.from("memberships").delete().in("payment_reference", references);
+  // Scoped to the children as well as to their references. A reference is
+  // unique in practice, but this runs against the club every other spec shares:
+  // if the seed ever gives a child a membership of their own, an unscoped delete
+  // on a matching reference would take seeded rows out from under later specs.
+  await admin
+    .from("memberships")
+    .delete()
+    .in("payment_reference", references)
+    .in(
+      "user_id",
+      children.map((c) => c.userId),
+    );
 });
+
+/**
+ * A link whose name STARTS with this child's, anchored and escaped.
+ *
+ * Anchored because one child's name can be a prefix of another's, so an
+ * unanchored pattern quietly matches the wrong row; escaped because a fixture
+ * name is data and a surname may carry a regex character.
+ */
+function childNamed(name: string): RegExp {
+  return new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+}
 
 /** The seeded family, or a failure that says which half of the setup is missing. */
 function household() {
@@ -61,7 +83,9 @@ test("a parent sees both children on their account", async ({ page }) => {
   // `CardTitle` is not a heading, so there is no `region` to scope to.
   await expect(page.getByText("People on your account")).toBeVisible();
   for (const child of children) {
-    await expect(page.getByRole("link", { name: new RegExp(child.name) })).toBeVisible();
+    // `.first()`: this page can legitimately carry a child's name more than
+    // once, and strict mode would call that a failure rather than the pass it is.
+    await expect(page.getByRole("link", { name: childNamed(child.name) }).first()).toBeVisible();
   }
   await expectPageRendered(page);
 });
@@ -71,7 +95,7 @@ test("a parent opens a child and gets that child's records, not their own", asyn
 
   await page.goto("/account");
   await page
-    .getByRole("link", { name: new RegExp(child.name) })
+    .getByRole("link", { name: childNamed(child.name) })
     .first()
     .click();
 

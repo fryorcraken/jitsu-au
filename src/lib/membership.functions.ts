@@ -124,8 +124,16 @@ function dedupeHash(row: {
  * `list_users`. That is why a cancel used to leave someone reading as a member
  * long after their last membership closed: nothing ever took the label back.
  *
- * So this reconciles rather than only granting, and every caller that opens or
- * closes a membership goes through it.
+ * So this reconciles rather than only granting, and every caller that RAISES,
+ * activates, cancels or deletes a membership goes through it.
+ *
+ * Three writers deliberately do not, and now leave two people's labels stale
+ * rather than one: `edit_invoice` syncs only when `status` changed, so a price
+ * moved across the zero boundary does not reconcile; and `spendCredit` /
+ * `refundCredit` in `checkin.functions.ts` close and reopen a session pack
+ * without it. Same line as date-based expiry in `docs/memberships.md`: a pack
+ * running out is not somebody's membership ending, and the next membership
+ * event on the household puts the label right.
  *
  * ## It reaches through the household, in both directions
  *

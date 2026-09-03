@@ -43,9 +43,14 @@ test("the waivers screen lists the club's submissions", async ({ page }) => {
   // And each child's waiver is listed under that child's own name, which is the
   // half a manager needs in order to tell them apart at all. The row also says
   // whose account they are on, which is what the address beside it belongs to.
+  const guardianName = household.guardianName;
   for (const child of children) {
     const row = rows.filter({ hasText: child.name.split(" ")[0] });
     await expect(row).toHaveCount(1);
-    await expect(row).toContainText("account");
+    // WHOSE account, not merely that a caption rendered: a row pointing every
+    // child at the wrong guardian would satisfy the weaker assertion.
+    await expect(row).toContainText(`On ${guardianName}'s account`);
+    // ...and the frozen address is captioned as belonging to that same person.
+    await expect(row).toContainText(`(${guardianName}'s)`);
   }
 });

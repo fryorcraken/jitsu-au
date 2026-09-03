@@ -103,6 +103,20 @@ email as submitted), `session_checkins`, `code_of_conduct_acceptances`,
 > here, not a field on their parent's record, and deleting a parent must never
 > be a way to delete a child by accident.
 >
+> ⚠️ **And reconcile the guardian's `member` role afterwards.** Since #107 that
+> label counts the memberships of everybody on a person's account, and the only
+> thing that reconciles it is a membership event. Deleting a child, or moving
+> them to another guardian, changes who is on whose account and fires no such
+> event, so the parent keeps a `member` row that describes a household they no
+> longer have (and a new guardian does not gain one). The row then contradicts
+> the funnel phase beside it, which is derived live and does update.
+>
+> There is no screen for it. After deleting or re-homing a child, delete any
+> stale row by hand -- `DELETE FROM public.user_roles WHERE user_id = '<the
+guardian>' AND role = 'member'` -- unless that person still holds, or still
+> looks after somebody who holds, an active paid membership. Raising or closing
+> any membership on the household puts it right automatically.
+
 > **So deal with the children first.** Whoever is doing the deletion has to
 > decide, per child, whether that person is also leaving the club:
 >

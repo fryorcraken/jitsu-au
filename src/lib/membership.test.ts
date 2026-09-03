@@ -175,6 +175,21 @@ describe("deriveLifecycleStatus", () => {
       ).toBe("lead");
     });
 
+    // The case the doc block reasons about at length and nothing pinned: the
+    // reach must not reach `lapsed`. A parent whose OWN plan expired is somebody
+    // to chase for a renewal, and a child's active TRIAL is not cover, so
+    // folding the two lists together (or guarding `lapsed` on the household)
+    // would quietly drop that parent off the chase list.
+    it("still reads a parent as lapsed when only a dependant's trial is active", () => {
+      expect(
+        deriveLifecycleStatus({
+          ...none,
+          memberships: [paid("expired")],
+          householdMemberships: [trial("active")],
+        }),
+      ).toBe("lapsed");
+    });
+
     it("ignores a dependant's ENDED paid membership, rather than reading it as their own", () => {
       // The reach stops at `member` deliberately. Folding this into `lapsed`
       // would put the child AND the parent on the chase list for one lapse,

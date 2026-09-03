@@ -226,7 +226,10 @@ function HouseholdCard({
             <UserLink
               userId={guardian.user_id}
               name={guardian.name}
-              fallback="a person whose record could not be read"
+              // Reads as a person, because it IS the link to one: a name that
+              // could not be resolved still leaves somewhere to go, which is
+              // the next step this line owes the reader.
+              fallback="Open the account holder"
               className="font-medium"
             />
           </p>
@@ -244,7 +247,7 @@ function HouseholdCard({
                 <UserLink
                   userId={d.user_id}
                   name={d.name}
-                  fallback="a person whose record could not be read"
+                  fallback="Open this person"
                   className="font-medium"
                 />
               </li>
@@ -312,9 +315,10 @@ function EmailCard({
   // GUARDIAN's, so prefilling it here would offer a manager a Save that writes
   // the parent's address onto the child's login, which is precisely the thing
   // nobody wants and which the address's whole reserved shape exists to
-  // prevent. Refusing that write outright is #107's (`setClubUserEmail`, in
-  // #102's sharp edges); not inviting it is this change's, because this change
-  // is what made the field look like a real address worth keeping.
+  // prevent. `changeClubUserEmail` now refuses that write outright, and the
+  // Change email button is not offered here at all for a dependant; this
+  // prefill guard is the third layer, kept because it is what stops the field
+  // ever looking like a real address worth keeping.
   const [draft, setDraft] = useState(belongsTo ? "" : (email ?? ""));
   const [busy, setBusy] = useState(false);
   const verified = isEmailVerified(emailConfirmedAt);

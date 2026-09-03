@@ -318,7 +318,7 @@ describe("aggregateClubUsers", () => {
     });
 
     it("stays off unless the caller asks, so a member's own screens are unaffected", () => {
-      // The default is each person's own answer. `getHousehold` renders "People
+      // The default is each person's own answer. `listMyHousehold` renders "People
       // on your account", where the parent's row sits directly above a line
       // saying what they hold: reaching there paints a green Member pill over
       // the words "No membership yet".
@@ -330,24 +330,33 @@ describe("aggregateClubUsers", () => {
     });
 
     it("never treats a contact-resolution guardian row as somebody's household", () => {
-      // `guardians` are the OWNER of an address on a page about somebody else.
-      // Folding them in would hand a household to a person not being reported on.
-      const [child1] = aggregate({
-        profiles: [profile({ user_id: "u2", guardian_user_id: "u1" })],
-        countHouseholdMemberships: true,
+      // `guardians` are the OWNER of an address shown on a page about somebody
+      // else. Folding them into the household index would hand a household to a
+      // person this call is not reporting on.
+      //
+      // Shaped so that folding them in CHANGES this answer: the person being
+      // listed (u3) is who the guardian row points at, and the guardian row's
+      // own id holds an active paid plan. Fold `guardians` in and u3 becomes a
+      // `member` off somebody else's plan. An earlier version of this test used
+      // a guardian row with a null link, which the index skips anyway, so it
+      // named the hazard and asserted nothing about it.
+      const [listed] = aggregate({
+        profiles: [profile({ user_id: "u3" })],
         guardians: [
           {
             user_id: "u1",
-            guardian_user_id: null,
+            guardian_user_id: "u3",
             first_name: "Ada",
             middle_name: null,
             last_name: "Lovelace",
             preferred_name: null,
           },
         ],
+        countHouseholdMemberships: true,
         memberships: [membership({ user_id: "u1" })],
       });
-      expect(child1.lifecycle_status).toBe("lead");
+      expect(listed.user_id).toBe("u3");
+      expect(listed.lifecycle_status).toBe("lead");
     });
   });
 

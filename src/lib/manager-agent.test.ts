@@ -513,6 +513,12 @@ describe("AGENT_MANIFEST", () => {
     const notes = AGENT_MANIFEST.changes.find((c) => c.version === "17")!.notes.join(" ");
     expect(notes).toMatch(/guardian_user_id/);
     expect(notes).toMatch(/dependants/);
+    // The note that matters most to a caching client, and the one #112's
+    // failure was: an EXISTING field whose meaning moved. `lifecycle_status`
+    // now reaches through the household, which also changes which rows a
+    // `status` filter returns.
+    expect(notes).toMatch(/lifecycle_status/);
+    expect(notes).toMatch(/roles/);
     // The trap worth naming, because a caller that falls into it reports a
     // parent as having no children rather than failing.
     expect(notes).toMatch(/status/);

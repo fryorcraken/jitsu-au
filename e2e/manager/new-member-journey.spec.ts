@@ -482,6 +482,8 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
 // the real screens for the same reason the journey above is.
 let childUserId: string | null = null;
 let parentUserId: string | null = null;
+/** Set before the flow starts, so cleanup can find the parent even if it fails. */
+let parentEmailForCleanup = "";
 
 test.afterAll(async () => {
   const admin = adminClient();
@@ -495,6 +497,26 @@ test.afterAll(async () => {
   }
   if (childUserId) await admin.auth.admin.deleteUser(childUserId);
   if (parentUserId) await admin.auth.admin.deleteUser(parentUserId);
+
+  // Belt and braces. `parentUserId` is only assigned AFTER the waiver is signed
+  // and looked up, so a failure in between leaks a real parent, child, waiver
+  // and trial into the club every other spec shares. Sweep by the address
+  // pattern this test mints, which nothing else uses.
+  const { data: strays } = await admin.rpc("user_id_by_email", { _email: parentEmailForCleanup });
+  if (strays && strays !== parentUserId) {
+    const { data: kids } = await admin
+      .from("profiles")
+      .select("user_id")
+      .eq("guardian_user_id", strays);
+    for (const kid of kids ?? []) {
+      await admin.from("memberships").delete().eq("user_id", kid.user_id);
+      await admin.from("waivers").delete().eq("user_id", kid.user_id);
+      await admin.auth.admin.deleteUser(kid.user_id);
+    }
+    await admin.from("memberships").delete().eq("user_id", strays);
+    await admin.from("waivers").delete().eq("user_id", strays);
+    await admin.auth.admin.deleteUser(strays);
+  }
 });
 
 test("a parent signs for a child, and approving it unlocks the PARENT", async ({
@@ -503,6 +525,7 @@ test("a parent signs for a child, and approving it unlocks the PARENT", async ({
 }) => {
   const NO_SESSION = { cookies: [], origins: [] };
   const parentEmail = `e2e-parent-${crypto.randomUUID()}@example.com`;
+  parentEmailForCleanup = parentEmail;
   const parentName = "Rowan Kestrel";
   const childFirst = "Wren";
   const childLast = "Kestrel";

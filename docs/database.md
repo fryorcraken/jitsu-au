@@ -338,9 +338,10 @@ Two rules sit either side of the schema. `profiles_guardian_not_self` forbids
 being your own guardian, in the database. The **one level only** rule — a
 dependant may not itself BE a guardian — has no constraint behind it, because a
 depth check would need a trigger, so it is held in two different places for two
-different jobs. **Writing** such a row is refused by the server function that
-creates a dependant (#105); nothing stops it today because nothing creates one
-yet. **Walking** a chain that exists anyway is refused by `assertActingFor` in
+different jobs. **Writing** such a row is refused by
+`assertMayHaveDependants` in `src/lib/household.ts`, called by the one thing
+that writes this column: `resolveDependantId`, which creates a dependant during
+a waiver filing. **Walking** a chain that exists anyway is refused by `assertActingFor` in
 `src/lib/household.ts`, which turns away a caller who is themselves a dependant.
 That gate is the single authority on who may act for whom. `getMyProfile`,
 `updateMyProfile`, `listMyWaivers`, `getCodeOfConductSigner`,

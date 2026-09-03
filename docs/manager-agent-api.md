@@ -74,6 +74,24 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 > a thing the club expects, and who to chase for the invoice it raises: billing
 > is one invoice per child, and every one of them is delivered to the guardian.
 
+> [!IMPORTANT]
+> **`lifecycle_status` and `roles` reach through the household, and that moves
+> what `status` filters.** A person counts as a `member`, and carries the
+> `member` role, while anybody on their account holds an active paid membership.
+> So a parent who does not train reads as `member` rather than `lead` or
+> `lapsed`, which is what members-only access has said about them since the
+> household shipped; it was the label that disagreed.
+>
+> Because `status` filters on that field, `list_users {"status":"lead"}` no
+> longer returns such a parent and `{"status":"member"}` now does. Anything you
+> cached that was filtered by status needs re-reading (manifest `"17"`).
+>
+> Only that one branch reaches. `lapsed` is still the person's own, so a parent
+> whose own plan ended is still somebody to chase. And `member` remains a
+> **label**: no policy reads the role, and it does not mean they are covered to
+> train. Check-in coverage is strictly personal, so a parent at the door
+> correctly shows no cover.
+
 - `create_membership` — raise a membership for a person, the agent's equivalent
   of the manager screen's "Add a membership" and of a member choosing a plan
   themselves. Dispatches to `createMembershipForUser` in
@@ -311,7 +329,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"14"`.
+test so the bump is a deliberate edit, and the current value is `"17"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

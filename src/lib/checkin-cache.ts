@@ -78,7 +78,11 @@ export const checkInBoardCacheSchema = z.object({
       // after a deploy -- at the door, offline, which is the one moment this
       // cache is for. They arrive on the next successful fetch.
       guardian_name: z.string().nullable().default(null),
-      date_of_birth: z.string().nullable().default(null),
+      // An AGE, never a date of birth. The server sends no date of birth for
+      // anybody (`rosterHouseholdFields`), so none can be stored here: this
+      // roster is kept on a manager's own device and is only pruned when it is
+      // next read, which for a class already taught is never.
+      age: z.number().nullable().default(null),
       coverage,
       plan_name: z.string().nullable(),
       sessions_remaining_before: z.number().nullable(),

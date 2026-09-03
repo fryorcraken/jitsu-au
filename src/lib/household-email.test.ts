@@ -172,6 +172,38 @@ describe("loadHouseholdContacts", () => {
     spy.mockRestore();
   });
 
+  // `namesOnly` exists for `listWaivers`, which prints the address FROZEN on
+  // each waiver and only wants to know whose account the participant is on.
+  // Untested, an early return placed one statement too high silently stopped
+  // naming the guardian while every caller stayed green.
+  describe("namesOnly", () => {
+    it("still names the guardian, including one who was not asked about", async () => {
+      const { client } = admin([PARENT, CHILD], [PARENT_EMAIL]);
+      const contacts = await loadHouseholdContacts(client, ["child"], { namesOnly: true });
+      // The guardian is not among the ids asked about, so this only holds if the
+      // second profile read still happens before the early return.
+      expect(contacts.displayEmail("child").onBehalfOf).toEqual({
+        user_id: "parent",
+        name: "Ada Lovelace",
+      });
+    });
+
+    it("asks user_emails nothing at all", async () => {
+      const { client, rpcCalls } = admin([PARENT, CHILD], [PARENT_EMAIL]);
+      const contacts = await loadHouseholdContacts(client, ["child"], { namesOnly: true });
+      expect(rpcCalls).toEqual([]);
+      // ...so there is no address, which is what a caller must not be relying on.
+      expect(contacts.displayEmail("child").email).toBeNull();
+      expect(contacts.deliveryEmail("child")).toBeNull();
+    });
+
+    it("still says an account holder is nobody's dependant", async () => {
+      const { client } = admin([PARENT], [PARENT_EMAIL]);
+      const contacts = await loadHouseholdContacts(client, ["parent"], { namesOnly: true });
+      expect(contacts.displayEmail("parent").onBehalfOf).toBeNull();
+    });
+  });
+
   it("throws when the guardian links cannot be read", async () => {
     // Not a degradation. With no links every dependant looks like an account
     // holder with no address, which is a wrong answer rather than a missing one.
