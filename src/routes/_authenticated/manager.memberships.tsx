@@ -125,8 +125,10 @@ function ManagerMembershipsPage() {
                     <td className="px-3 py-2">
                       {/* `memberships.user_id` is ON DELETE SET NULL, and the
                           name is looked up through it, so a row whose person is
-                          gone has neither. `UserLink` renders the dash rather
-                          than a link to a page that is not there. */}
+                          gone has neither. That row reads "Unknown" as plain
+                          text, not a link to a page that is not there. The
+                          invoice itself survives on purpose
+                          (`docs/erasing-personal-data.md`). */}
                       <div className="font-medium">
                         <UserLink userId={r.user_id} name={r.member_name} />
                       </div>

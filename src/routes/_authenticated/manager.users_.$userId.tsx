@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { ChevronDown, Download } from "lucide-react";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Pill } from "@/components/site/StatusPill";
+import { UserLink } from "@/components/site/UserLink";
 import { AddMembershipCard } from "@/components/site/AddMembershipCard";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
@@ -78,11 +79,23 @@ function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   return next;
 }
 
-function Field({ label, value }: { label: string; value: string | null | undefined }) {
+function Field({
+  label,
+  value,
+  children,
+}: {
+  label: string;
+  value?: string | null;
+  /**
+   * For a value that is not plain text, such as a link to another person. Wins
+   * over `value`, which every other caller uses.
+   */
+  children?: ReactNode;
+}) {
   return (
     <div>
       <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="whitespace-pre-wrap break-words">{value || "—"}</dd>
+      <dd className="whitespace-pre-wrap break-words">{children ?? (value || "—")}</dd>
     </div>
   );
 }
@@ -1143,7 +1156,19 @@ function ManagerUserPage() {
                           not a bug. */}
                       <Field label="Media consent" value={mediaConsentLabel(w.media_consent)} />
                       <Field label="Approved" value={formatDateTime(w.approved_at)} />
-                      <Field label="Approved by" value={w.approved_by_name} />
+                      {/* The approving manager is a real account, so this is
+                          a way in to it, like every other name a manager sees.
+                          The dash covers both waivers nobody has decided yet
+                          and approvals recorded before the club stored who did
+                          it: either way there is no account to open, which is
+                          not the same as an approver we could not name. */}
+                      <Field label="Approved by">
+                        {w.approved_by ? (
+                          <UserLink userId={w.approved_by} name={w.approved_by_name} />
+                        ) : (
+                          "—"
+                        )}
+                      </Field>
                     </dl>
 
                     {!w.has_pdf ? (

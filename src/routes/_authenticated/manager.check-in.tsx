@@ -421,7 +421,7 @@ function CheckInPage() {
               {(board?.checkins ?? []).map((c) => (
                 <tr key={c.id} className="border-t">
                   <td className="px-3 py-2 font-medium">
-                    <UserLink userId={c.user_id} name={c.name} fallback="Unknown" />
+                    <UserLink userId={c.user_id} name={c.name} />
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1">
@@ -489,7 +489,7 @@ function CheckInPage() {
               {matches.slice(0, MATCH_LIMIT).map((r) => (
                 <tr key={r.user_id} className="border-t">
                   <td className="px-3 py-2 font-medium">
-                    <UserLink userId={r.user_id} name={r.name} fallback="Unknown" />
+                    <UserLink userId={r.user_id} name={r.name} />
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1">
@@ -572,7 +572,7 @@ function CheckInPage() {
                 <Fragment key={row.id}>
                   <tr className="border-t">
                     <td className="px-3 py-2 font-medium">
-                      <UserLink userId={row.user_id} name={row.name} fallback="Unknown" />
+                      <UserLink userId={row.user_id} name={row.name} />
                     </td>
                     <td className="px-3 py-2">
                       {row.event_title ?? "Unknown class"}
