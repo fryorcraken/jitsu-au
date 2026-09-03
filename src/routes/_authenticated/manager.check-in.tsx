@@ -7,6 +7,7 @@ import { LoadFailure } from "@/components/site/LoadFailure";
 import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/site/StatusPill";
+import { UserLink } from "@/components/site/UserLink";
 import { coverageClass, UNREAD_CLASS } from "@/lib/status-colours";
 import { cn } from "@/lib/utils";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -420,13 +421,7 @@ function CheckInPage() {
               {(board?.checkins ?? []).map((c) => (
                 <tr key={c.id} className="border-t">
                   <td className="px-3 py-2 font-medium">
-                    <Link
-                      className="hover:underline"
-                      to="/manager/users/$userId"
-                      params={{ userId: c.user_id }}
-                    >
-                      {c.name ?? "Unknown"}
-                    </Link>
+                    <UserLink userId={c.user_id} name={c.name} fallback="Unknown" />
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1">
@@ -494,13 +489,7 @@ function CheckInPage() {
               {matches.slice(0, MATCH_LIMIT).map((r) => (
                 <tr key={r.user_id} className="border-t">
                   <td className="px-3 py-2 font-medium">
-                    <Link
-                      className="hover:underline"
-                      to="/manager/users/$userId"
-                      params={{ userId: r.user_id }}
-                    >
-                      {r.name ?? "Unknown"}
-                    </Link>
+                    <UserLink userId={r.user_id} name={r.name} fallback="Unknown" />
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1">
@@ -583,13 +572,7 @@ function CheckInPage() {
                 <Fragment key={row.id}>
                   <tr className="border-t">
                     <td className="px-3 py-2 font-medium">
-                      <Link
-                        className="hover:underline"
-                        to="/manager/users/$userId"
-                        params={{ userId: row.user_id }}
-                      >
-                        {row.name ?? "Unknown"}
-                      </Link>
+                      <UserLink userId={row.user_id} name={row.name} fallback="Unknown" />
                     </td>
                     <td className="px-3 py-2">
                       {row.event_title ?? "Unknown class"}

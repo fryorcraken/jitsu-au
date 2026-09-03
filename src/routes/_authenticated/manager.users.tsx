@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Pill } from "@/components/site/StatusPill";
+import { UserLink } from "@/components/site/UserLink";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
@@ -335,18 +336,11 @@ function ManagerUsersPage() {
                   {visible.map((r) => (
                     <tr key={r.user_id ?? r.email ?? r.name ?? ""} className="border-t align-top">
                       <td className="px-3 py-2 font-medium">
-                        {r.user_id ? (
-                          <Link
-                            to="/manager/users/$userId"
-                            params={{ userId: r.user_id }}
-                            className="underline underline-offset-2 hover:no-underline"
-                          >
-                            {r.name ?? r.email ?? "View"}
-                          </Link>
-                        ) : (
-                          // A lead has no person record yet, so nothing to open.
-                          (r.name ?? "—")
-                        )}
+                        {/* A lead has no person record yet, so `UserLink` prints
+                            the name instead of linking to a page that is not
+                            there. The address stands in when a row has no name:
+                            it is the only thing a lead is guaranteed to have. */}
+                        <UserLink userId={r.user_id} name={r.name ?? r.email} />
                       </td>
                       <td className="px-3 py-2">
                         {r.email ? (
