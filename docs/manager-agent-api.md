@@ -56,6 +56,42 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 > editable: `member_email_belongs_to` is a read-only decoration like
 > `member_name`, and `edit_invoice` refuses it by name.
 
+> [!NOTE]
+> **The family, on a `list_users` row.** `guardian_user_id` is the account holder
+> this person is on, or null for almost everybody: `email_belongs_to` **names**
+> that person for a caption, this **identifies** them, so a caller can fetch or
+> act on the guardian rather than only mention them. `dependants` is the people
+> on this person's account, each `{ user_id, name }` — always present, empty for
+> almost everybody, and empty for a dependant too, because a household is one
+> level deep and a dependant can never have any.
+>
+> **Read `dependants` rather than rebuilding it** from `guardian_user_id` across
+> the listing. A `status` filter can drop the children out of the response while
+> leaving the parent in it, and a household reconstructed from what came back
+> would then report that parent as having none.
+>
+> This is also how a caller learns that `create_membership` on a nine-year-old is
+> a thing the club expects, and who to chase for the invoice it raises: billing
+> is one invoice per child, and every one of them is delivered to the guardian.
+
+> [!IMPORTANT]
+> **`lifecycle_status` and `roles` reach through the household, and that moves
+> what `status` filters.** A person counts as a `member`, and carries the
+> `member` role, while anybody on their account holds an active paid membership.
+> So a parent who does not train reads as `member` rather than `lead` or
+> `lapsed`, which is what members-only access has said about them since the
+> household shipped; it was the label that disagreed.
+>
+> Because `status` filters on that field, `list_users {"status":"lead"}` no
+> longer returns such a parent and `{"status":"member"}` now does. Anything you
+> cached that was filtered by status needs re-reading (manifest `"17"`).
+>
+> Only that one branch reaches. `lapsed` is still the person's own, so a parent
+> whose own plan ended is still somebody to chase. And `member` remains a
+> **label**: no policy reads the role, and it does not mean they are covered to
+> train. Check-in coverage is strictly personal, so a parent at the door
+> correctly shows no cover.
+
 - `create_membership` — raise a membership for a person, the agent's equivalent
   of the manager screen's "Add a membership" and of a member choosing a plan
   themselves. Dispatches to `createMembershipForUser` in
@@ -115,6 +151,12 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   closes. Members-only **access** was never gated on that role — it is gated
   live by the `has_active_paid_membership` SQL helper — so this corrects a label
   that used to be granted and never taken back, and changes nobody's access.
+  Since #107 that reconciliation reaches through the household: a person's label
+  counts the memberships of everybody on their account, and closing a **child's**
+  membership re-syncs the **parent** as well as the child. So a parent who does
+  not train reads as a `member` while their child's plan is live, which is what
+  the members-only gate has said about them since #103. It is still only a label:
+  no policy anywhere reads the `member` role.
 - `delete_invoice` — delete an invoice outright, for tidying up one that should
   never have existed. Dispatches to `deleteMembershipRow`, which the manager
   screens' Delete button also calls, so both refuse for the same reasons in the
@@ -287,7 +329,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"14"`.
+test so the bump is a deliberate edit, and the current value is `"17"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

@@ -43,6 +43,17 @@ type Row = {
   approved_at: string | null;
   // A scanned paper form a manager filed, rather than one signed on the site.
   is_paper: boolean;
+  /**
+   * Whose account the participant is on, when they are on somebody's. Set only
+   * for a child's waiver, which is almost never.
+   *
+   * Describes the household as it stands, not the frozen address beside it:
+   * those agree today, and a guardian who changed later would make a claim
+   * about the evidence untrue.
+   */
+  guardian_user_id: string | null;
+  /** That person's name, for the row. Null when the lookup could not name them. */
+  guardian_name: string | null;
 };
 
 type DriveUpload = {
@@ -241,8 +252,37 @@ function WaiversPage() {
                             A manager reading this list is usually on their way
                             to the record behind a row anyway. */}
                         <UserLink userId={r.user_id} name={r.full_name} />
+                        {/* A child's waiver. Worth saying on the row, because
+                            approving one does something different from what the
+                            row looks like: it gives the CHILD their trial and
+                            unlocks the PARENT's login. Null for almost every
+                            row. */}
+                        {r.guardian_user_id ? (
+                          <div className="mt-0.5 text-xs font-normal text-muted-foreground">
+                            On{" "}
+                            <UserLink
+                              userId={r.guardian_user_id}
+                              name={r.guardian_name}
+                              fallback="another person"
+                            />
+                            &apos;s account
+                          </div>
+                        ) : null}
                       </td>
-                      <td className="px-3 py-2">{r.email}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span>{r.email}</span>
+                          {/* The address as SUBMITTED, which for a child's
+                              waiver is their guardian's: a child has no mailbox
+                              and never had one. Printed bare it reads as the
+                              child's own. */}
+                          {r.guardian_user_id ? (
+                            <span className="text-xs text-muted-foreground">
+                              ({r.guardian_name ?? "the account holder"}&apos;s)
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="px-3 py-2">
                         {formatDateTime(r.signed_at)}
                         {r.is_paper && (

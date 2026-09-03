@@ -6,6 +6,8 @@
 // read what was signed without leaving the page.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   deriveWaiverListStatuses,
@@ -59,6 +61,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: checkins, error: cErr },
       { count: checkinCount, error: ccErr },
       { data: codeOfConduct, error: cocErr },
+      { data: dependantProfiles, error: dErr },
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("user_id", data.userId).maybeSingle(),
       admin
@@ -94,6 +97,14 @@ export const getClubUser = createServerFn({ method: "POST" })
         .eq("user_id", data.userId)
         .order("accepted_at", { ascending: false })
         .limit(20),
+      // The people on THIS person's account. Read here rather than after the
+      // profile comes back because it is keyed on the id we were asked about,
+      // not on anything the profile tells us -- so it costs no extra round trip.
+      admin
+        .from("profiles")
+        .select("user_id, guardian_user_id, first_name, middle_name, last_name, preferred_name")
+        .eq("guardian_user_id", data.userId)
+        .order("first_name", { ascending: true }),
     ]);
     // Every read except the email RPC fails the whole page. This is the screen a
     // manager decides an approval from, so "the query failed" must never render
@@ -108,6 +119,12 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (rErr) throw new Error(rErr.message);
     if (cErr) throw new Error(cErr.message);
     if (ccErr) throw new Error(ccErr.message);
+    // Fails the page for the reason the comment above gives, not merely for
+    // symmetry: since #107 a guardian's `member` phase counts their dependants'
+    // memberships, so degrading this read to "nobody" would show a paid-up
+    // family's parent as a lead, on the screen a manager decides an approval
+    // from, and would disagree with the directory that lists the same person.
+    if (dErr) throw new Error(dErr.message);
     if (!profile) throw new Error("User not found.");
 
     // Whose address belongs on this page. For an account holder that is their
@@ -122,7 +139,9 @@ export const getClubUser = createServerFn({ method: "POST" })
     // have exactly one answer, because the wrong one here is a reserved,
     // non-deliverable string that identifies nobody.
     const contactId = contactUserIdFor(profile);
-    const [contactEmails, guardianProfile] = await Promise.all([
+    const dependantRows = dependantProfiles ?? [];
+    const dependantIds = dependantRows.map((d) => d.user_id);
+    const [contactEmails, guardianProfile, dependantMemberships] = await Promise.all([
       userEmails(admin, [contactId]),
       profile.guardian_user_id
         ? admin
@@ -131,7 +150,21 @@ export const getClubUser = createServerFn({ method: "POST" })
             .eq("user_id", profile.guardian_user_id)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      // Only what the `member` phase is derived from, and only when there is
+      // somebody to ask about. Not the whole membership history: these rows are
+      // never listed on this page, they only answer "is anybody on this
+      // person's account paid up right now".
+      dependantIds.length
+        ? admin
+            .from("memberships")
+            .select("id, user_id, plan_id, status, price_cents, created_at")
+            .in("user_id", dependantIds)
+        : Promise.resolve({ data: [], error: null }),
     ]);
+    // Fails the page, for the same reason the dependants read above does: it
+    // feeds the funnel phase, and a guardian silently demoted to `lead` is a
+    // wrong answer rather than a missing one.
+    if (dependantMemberships.error) throw new Error(dependantMemberships.error.message);
     // Same posture as the lookup this replaced: a failed address read degrades
     // to a missing email rather than taking down the screen a manager approves
     // from. A failed GUARDIAN read is logged for the same reason: the page
@@ -189,24 +222,47 @@ export const getClubUser = createServerFn({ method: "POST" })
     const [summary] = aggregateClubUsers({
       profiles: [profile],
       emails,
+      // A manager surface: the phase agrees with the members-only gate.
+      countHouseholdMemberships: true,
       // Not a person on this page, only the owner of the address shown on it.
       guardians: guardianProfile.data ? [guardianProfile.data] : [],
+      // Who is on this person's account. Not listed as people of their own --
+      // they have their own pages -- but their memberships below decide whether
+      // this person reads as a `member`, which is what makes this page agree
+      // with the directory that lists them.
+      dependants: dependantRows,
       waivers: waiverRows.map((w) => ({
         user_id: w.user_id,
         signed_at: w.signed_at,
         approval_status: w.approval_status,
       })),
       leads: [],
-      memberships: membershipRows.map((m) => ({
-        user_id: m.user_id,
-        plan_id: m.plan_id,
-        status: m.status,
-        price_cents: m.price_cents,
-        is_student: m.is_student,
-        uts_student_number: m.uts_student_number,
-        sessions_remaining: m.sessions_remaining,
-        created_at: m.created_at,
-      })),
+      memberships: [
+        ...membershipRows.map((m) => ({
+          user_id: m.user_id,
+          plan_id: m.plan_id,
+          status: m.status,
+          price_cents: m.price_cents,
+          is_student: m.is_student,
+          uts_student_number: m.uts_student_number,
+          sessions_remaining: m.sessions_remaining,
+          created_at: m.created_at,
+        })),
+        // The dependants' rows, which are read ONLY through the household index
+        // (nothing but `profiles` is emitted, and every per-person lookup is
+        // keyed on the person being emitted). They carry no student number or
+        // credit balance because nothing on this page reads either off them.
+        ...(dependantMemberships.data ?? []).map((m) => ({
+          user_id: m.user_id,
+          plan_id: m.plan_id,
+          status: m.status,
+          price_cents: m.price_cents,
+          is_student: false,
+          uts_student_number: null,
+          sessions_remaining: null,
+          created_at: m.created_at,
+        })),
+      ],
       plans: planRows,
       roles: roles ?? [],
       // Deliberately NOT passed: the aggregation counts the array it is given,
@@ -342,6 +398,33 @@ export const getClubUser = createServerFn({ method: "POST" })
         media_consent_updated_by: profile.media_consent_updated_by,
         updated_at: profile.updated_at,
       },
+      /**
+       * The family, in whichever direction this person sits in one: the account
+       * holder above them, and the people on their account below.
+       *
+       * Both are always present and at most one is ever non-empty, because a
+       * dependant may not have dependants of their own (#102's one-level rule,
+       * enforced in `household.ts`). The card renders nothing when both are.
+       *
+       * Names only, plus the id to link on. Everything else about one of these
+       * people belongs on THEIR page, which is a link away.
+       */
+      household: {
+        guardian: profile.guardian_user_id
+          ? {
+              user_id: profile.guardian_user_id,
+              // Null when the lookup failed, which the card says out loud
+              // rather than printing a bare uuid or, worse, nothing at all: a
+              // child whose parent silently vanished off this card reads as a
+              // child with no parent on file.
+              name: guardianProfile.data ? nameWithPreferred(guardianProfile.data) || null : null,
+            }
+          : null,
+        dependants: dependantRows.map((d) => ({
+          user_id: d.user_id,
+          name: nameWithPreferred(d) || null,
+        })),
+      },
       memberships: membershipRows.map((m) => ({
         id: m.id,
         plan_name: planById.get(m.plan_id)?.name ?? null,
@@ -448,6 +531,138 @@ export const getClubUser = createServerFn({ method: "POST" })
 // The rule this enforces: a changed address is ALWAYS unverified. Whatever was
 // proven about the old address says nothing about the new one, and the whole
 // point of the badge is that it cannot be set by someone's say-so.
+/**
+ * Change a person's login email, as a manager: the whole rule, with the client
+ * passed in.
+ *
+ * A plain function rather than the server handler's body for the reason
+ * `checkin.functions.ts` gives about `applyCoverage`: a `createServerFn`
+ * handler cannot be called from the test runner (it dies on "No Start context
+ * found in AsyncLocalStorage"), and this one carries enough rules worth pinning
+ * -- who may be pointed at what, that the address really moved, that the
+ * verified badge is dropped rather than assumed dropped -- to be worth reaching.
+ *
+ * `email` is normalised by the caller, which is also what makes the "re-saving
+ * the same address" comparison below meaningful.
+ */
+export async function changeClubUserEmail(
+  admin: SupabaseClient<Database>,
+  userId: string,
+  email: string,
+) {
+  // #102's sharp edge, and the last of it: "refuse to point an account holder's
+  // address at a dependant, and refuse to edit a dependant's reserved address at
+  // all". One guard closes both, because the second contains the first.
+  //
+  // Asked BEFORE anything is read or written, so a refusal costs nothing and
+  // leaves nothing half-done.
+  //
+  // What it stops is not the obvious case. Typing the parent's own address onto
+  // a child was already refused by the clash check below, though for the wrong
+  // reason and in a sentence about somebody else. The real hole was a FRESH
+  // address: nothing stopped a manager giving a nine-year-old a working mailbox
+  // on their own login. That address would then sit on a person the whole
+  // product routes through their guardian, unread and unused, badged with a
+  // confirmation state about an inbox nobody watches, while the reserved,
+  // non-deliverable shape that makes a dependant safe (`waiver.functions.ts`,
+  // and the permanent ban beside it) was quietly gone.
+  if (await isDependantUser(admin, userId)) {
+    throw new Error(
+      "This person is on somebody else's account and has no email of their own. Change the address on the account holder's page instead.",
+    );
+  }
+
+  const { data: got, error: getErr } = await admin.auth.admin.getUserById(userId);
+  if (getErr) throw new Error(getErr.message);
+  if (!got.user) throw new Error("User not found.");
+
+  const current = got.user.email ? normalizeEmail(got.user.email) : "";
+  // Re-saving the same address must not cost someone their verified badge.
+  if (current === email) {
+    return {
+      ok: true as const,
+      email,
+      changed: false,
+      verified: Boolean(got.user.email_confirmed_at),
+    };
+  }
+
+  // One person per email is the model's core invariant: profiles, waivers and
+  // memberships all hang off a single auth user resolved by address. Merging
+  // two people is a different problem, so refuse rather than half-do it.
+  const { data: clash, error: clashErr } = await userIdByEmail(admin, email);
+  if (clashErr) throw new Error(clashErr.message);
+  if (clash && clash !== userId) {
+    throw new Error("That email already belongs to another person.");
+  }
+
+  const { error: updErr } = await admin.auth.admin.updateUserById(userId, {
+    email,
+    email_confirm: false,
+  });
+  if (updErr) throw new Error(updErr.message);
+
+  // Assert the address actually MOVED, rather than trusting that it did.
+  // Some GoTrue configurations answer an email update by parking the new
+  // address in a pending `email_change` and leaving `email` alone. That would
+  // return success here while the person still holds the wrong address — the
+  // exact failure this feature exists to make visible. Re-read and check.
+  const { data: after, error: afterErr } = await admin.auth.admin.getUserById(userId);
+  if (afterErr) throw new Error(afterErr.message);
+  const moved = after.user?.email ? normalizeEmail(after.user.email) === email : false;
+  if (!moved) {
+    throw new Error(
+      "The login record did not accept that email. Nothing was changed. Check the address and try again.",
+    );
+  }
+
+  // The guarantee. The admin API declines to SET a confirmation when asked
+  // not to, but does not reliably CLEAR an existing one, so drop it outright
+  // rather than trusting GoTrue to have done it.
+  const { error: clearErr } = await admin.rpc("clear_email_confirmation", {
+    _user_id: userId,
+  });
+  if (clearErr) throw new Error(clearErr.message);
+
+  // Links already sitting in the old inbox go inert now rather than waiting
+  // out their expiry: whoever reads that mailbox is not the person we hold.
+  // Its own try/catch: a failed revoke must not skip the send below, or the
+  // manager would be told a link went out when none did. A stale token cannot
+  // verify the new address anyway (redemption re-checks the match), so this
+  // is tidiness rather than the security boundary.
+  if (current) {
+    try {
+      const { revokeVerificationTokensForEmail } = await import("@/lib/email-verification.server");
+      await revokeVerificationTokensForEmail(admin, current);
+    } catch (e) {
+      console.error("[setClubUserEmail] could not revoke old-address tokens:", e);
+    }
+  }
+
+  // Report what actually happened. The screen tells the manager a link was
+  // sent, so that claim has to be true: a mail provider outage must show as
+  // "address changed, no email sent", not as a confident lie they will only
+  // discover when the member says nothing arrived.
+  let verificationSent = false;
+  try {
+    const { sendVerificationEmail } = await import("@/lib/email-verification.server");
+    ({ sent: verificationSent } = await sendVerificationEmail({
+      admin,
+      to: email,
+      purpose: "email_change",
+      userId: userId,
+      next: "/account",
+    }));
+  } catch (e) {
+    console.error("[setClubUserEmail] verification email failed:", e);
+  }
+
+  // NB: waiver rows keep the address as SUBMITTED. They are frozen evidence of
+  // what was signed, so a corrected account email legitimately diverges from
+  // them, and the detail screen says so rather than looking broken.
+  return { ok: true as const, email, changed: true, verified: false, verificationSent };
+}
+
 export const setClubUserEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => managerEmailChangeSchema.parse(d))
@@ -455,98 +670,7 @@ export const setClubUserEmail = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
 
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
-    const email = normalizeEmail(data.email);
-
-    const { data: got, error: getErr } = await admin.auth.admin.getUserById(data.userId);
-    if (getErr) throw new Error(getErr.message);
-    if (!got.user) throw new Error("User not found.");
-
-    const current = got.user.email ? normalizeEmail(got.user.email) : "";
-    // Re-saving the same address must not cost someone their verified badge.
-    if (current === email) {
-      return {
-        ok: true as const,
-        email,
-        changed: false,
-        verified: Boolean(got.user.email_confirmed_at),
-      };
-    }
-
-    // One person per email is the model's core invariant: profiles, waivers and
-    // memberships all hang off a single auth user resolved by address. Merging
-    // two people is a different problem, so refuse rather than half-do it.
-    const { data: clash, error: clashErr } = await userIdByEmail(admin, email);
-    if (clashErr) throw new Error(clashErr.message);
-    if (clash && clash !== data.userId) {
-      throw new Error("That email already belongs to another person.");
-    }
-
-    const { error: updErr } = await admin.auth.admin.updateUserById(data.userId, {
-      email,
-      email_confirm: false,
-    });
-    if (updErr) throw new Error(updErr.message);
-
-    // Assert the address actually MOVED, rather than trusting that it did.
-    // Some GoTrue configurations answer an email update by parking the new
-    // address in a pending `email_change` and leaving `email` alone. That would
-    // return success here while the person still holds the wrong address — the
-    // exact failure this feature exists to make visible. Re-read and check.
-    const { data: after, error: afterErr } = await admin.auth.admin.getUserById(data.userId);
-    if (afterErr) throw new Error(afterErr.message);
-    const moved = after.user?.email ? normalizeEmail(after.user.email) === email : false;
-    if (!moved) {
-      throw new Error(
-        "The login record did not accept that email. Nothing was changed. Check the address and try again.",
-      );
-    }
-
-    // The guarantee. The admin API declines to SET a confirmation when asked
-    // not to, but does not reliably CLEAR an existing one, so drop it outright
-    // rather than trusting GoTrue to have done it.
-    const { error: clearErr } = await admin.rpc("clear_email_confirmation", {
-      _user_id: data.userId,
-    });
-    if (clearErr) throw new Error(clearErr.message);
-
-    // Links already sitting in the old inbox go inert now rather than waiting
-    // out their expiry: whoever reads that mailbox is not the person we hold.
-    // Its own try/catch: a failed revoke must not skip the send below, or the
-    // manager would be told a link went out when none did. A stale token cannot
-    // verify the new address anyway (redemption re-checks the match), so this
-    // is tidiness rather than the security boundary.
-    if (current) {
-      try {
-        const { revokeVerificationTokensForEmail } =
-          await import("@/lib/email-verification.server");
-        await revokeVerificationTokensForEmail(admin, current);
-      } catch (e) {
-        console.error("[setClubUserEmail] could not revoke old-address tokens:", e);
-      }
-    }
-
-    // Report what actually happened. The screen tells the manager a link was
-    // sent, so that claim has to be true: a mail provider outage must show as
-    // "address changed, no email sent", not as a confident lie they will only
-    // discover when the member says nothing arrived.
-    let verificationSent = false;
-    try {
-      const { sendVerificationEmail } = await import("@/lib/email-verification.server");
-      ({ sent: verificationSent } = await sendVerificationEmail({
-        admin,
-        to: email,
-        purpose: "email_change",
-        userId: data.userId,
-        next: "/account",
-      }));
-    } catch (e) {
-      console.error("[setClubUserEmail] verification email failed:", e);
-    }
-
-    // NB: waiver rows keep the address as SUBMITTED. They are frozen evidence of
-    // what was signed, so a corrected account email legitimately diverges from
-    // them, and the detail screen says so rather than looking broken.
-    return { ok: true as const, email, changed: true, verified: false, verificationSent };
+    return changeClubUserEmail(admin, data.userId, normalizeEmail(data.email));
   });
 
 /** Manager: send the person a fresh "confirm your email address" link. */
@@ -572,11 +696,9 @@ export const resendClubUserVerification = createServerFn({ method: "POST" })
     // nowhere, redeemable by nobody, sitting in the table looking like somebody
     // was asked to confirm something. Refused outright instead.
     //
-    // ⚠️ The neighbouring hole is NOT closed here: `setClubUserEmail` can still
-    // be pointed at a dependant and move them onto a real address. That is
-    // #107's, listed in #102's sharp edges and recorded again in #111 as
-    // deliberately untouched, and fixing it here would mean writing half of
-    // #107's rule in the wrong PR.
+    // `changeClubUserEmail` above asks the same question for the same reason,
+    // and was the neighbouring hole this comment used to point at. Both are
+    // closed now: two call sites of one shared rule, not two rules.
     if (await isDependantUser(admin, data.userId)) {
       throw new Error(
         "This person is on somebody else's account and has no email of their own. Send the link to the account holder instead.",

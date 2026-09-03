@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "16",
+  version: "17",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,23 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "17",
+      // Two new response fields, AND a change in what an existing one means for
+      // one kind of person -- which also moves which rows a `status` filter
+      // returns. Not breaking (no call starts failing), but a caller that acted
+      // on `lifecycle_status` or filtered on it gets different answers, so it is
+      // the note that matters most to somebody holding a cached manifest.
+      breaking: false,
+      notes: [
+        "list_users rows carry guardian_user_id: the id of the account holder this person is on, or null for almost everybody. email_belongs_to already NAMED that person; this identifies them, so you can fetch or act on the guardian rather than only mention them.",
+        "list_users rows carry dependants: the people on this person's account, each with user_id and name. Always present and empty for almost everybody, including for a dependant, because a household is one level deep and a dependant can never have any. Read it rather than rebuilding the household from guardian_user_id across the listing: a `status` filter can drop the children out of the response while leaving the parent in it, and a household rebuilt from what came back would report that parent as having none.",
+        "Approving a child's waiver unlocks the GUARDIAN's login, not the child's, and gives the trial to the child. A child never has a login. So `dependants` is how you find out that create_membership on a nine-year-old is a thing the club expects, and who to chase for the invoice it raises.",
+        "list_users rows now report lifecycle_status and roles through the HOUSEHOLD for one branch: a person counts as a `member`, and carries the `member` role, while anybody on their account holds an active paid membership. So a parent who does not train reads as `member` rather than `lead` or `lapsed`. This matches what members-only access has done for them since the household shipped; it was the label that disagreed.",
+        'That also moves which rows a status filter returns: list_users {"status":"lead"} no longer includes a non-training parent whose child is paid up, and {"status":"member"} now does. Re-read anything you cached that was filtered by status.',
+        "Only that branch reaches. `lapsed` is still the person's own, so a parent whose own plan ended is still somebody to chase. And `member` is still only a LABEL: no policy reads the member role, and it does not mean they are covered to train. Check-in coverage is strictly the person's own, so a parent at the door correctly shows no cover.",
+      ],
+    },
     {
       version: "16",
       // Additive: two new response fields, and a change in what an existing

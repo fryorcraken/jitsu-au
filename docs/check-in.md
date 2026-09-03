@@ -118,8 +118,32 @@ people in to a class that did not run.
 
 ## Manager actions
 
-1. **Check someone in** — search by name or email, see what will pay for it
-   before pressing the button, press it. Their sessions left goes down.
+1. **Check someone in** — search by name, email or the parent's name, see what
+   will pay for it before pressing the button, press it. Their sessions left
+   goes down.
+
+   The roster resolves a person's contact address through their guardian, so
+   typing a parent's email finds **every** child on that account at once. A
+   child's row therefore carries whose account they are on and their **age**:
+   the parent's name says which family, and the age is what separates two
+   children inside one, which is the case a surname search actually produces.
+   Picking the wrong sibling files the class against the wrong child's
+   attendance, credit and grading record, and no screen would look wrong
+   afterwards.
+
+   **An age, deliberately, and never a date of birth.** An age answers the
+   door's real question, because a child's apparent age is the thing a manager
+   can see; a birthday answers it no better, since two siblings far enough apart
+   to be told apart by their dates are told apart by their ages, and twins by
+   neither. So no date of birth crosses the wire, reaches a browser, or enters
+   the roster this screen keeps on the device. A date of birth is an
+   identity-document field and an age is not.
+
+   Carried for a dependant and **for nobody else**, which is the rule and not an
+   accident (`rosterHouseholdFields` in `src/lib/checkin.ts`): an ordinary
+   member's age answers no question at the door, and this screen is a tablet in
+   the entrance of a public hall.
+
 2. **Undo** — removes the check-in and gives the session back.
 3. **Attach** — give an uncovered check-in its cover, from the needs-attention
    list or from the person's own page. By default it re-runs the same rules the
@@ -215,9 +239,18 @@ error panel where the roster should be. The class list and the roster are kept
 **on that manager's device** and painted immediately while a fresh copy is
 fetched behind them.
 
-- **A day, and no longer.** This data carries members' names and email
-  addresses, and memberships are raised and waivers signed between classes, so a
-  roster older than that is a wrong answer rather than a convenience.
+- **A day, and no longer**, as an answer: a stored roster older than that is
+  refused on read, because memberships are raised and waivers signed between
+  classes, so it would be a wrong answer rather than a convenience. It carries
+  members' names and contact addresses, and each child's age, but no dates of
+  birth (above).
+
+  ⚠️ Refused-on-read is not the same as erased. An entry is keyed per class and
+  dropped when a read rejects it, so a roster for a class already taught is
+  never read again and therefore never pruned: it sits until somebody signs out,
+  which on a club tablet may be never. That is worth fixing on its own, and is
+  the reason the roster is kept as thin as it is.
+
 - **Scoped to the manager who fetched it**, and wiped when anybody signs out, so
   a club laptop passed to the next person carries nothing.
 - **When it is the stored copy on screen, the screen says so** — a notice with

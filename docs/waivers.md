@@ -46,14 +46,18 @@ they are an ordinary person record: their own waiver, their own trial, their own
 membership. The only difference is that phase 3 unlocks their guardian's login
 rather than one of their own.
 
-⚠️ A **guardian** does not, yet. `has_active_paid_membership` counts a
-dependant's membership, so a parent whose child is paid up gets the members-only
-calendar, but the phase above and the `member` role still count only a person's
-own memberships. So that parent reads as `lead` or `lapsed` on `/manager/users`
-and lands in the renewal-chasing list while holding live access. The migration
-that created the split recorded this as unreachable "until #105 creates the
-first dependant"; #105 is this change, so it is reachable now, and #107
-reconciles the two.
+A **guardian** reaches phase 4 on their household. `has_active_paid_membership`
+counts a dependant's membership, so a parent whose child is paid up gets the
+members-only calendar, and since #107 the phase above and the `member` role
+count it too: that parent reads as a `member` on `/manager/users` rather than
+sitting in the renewal-chasing list while holding live access.
+
+Only phase 4 reaches. `lapsed` stays a person's own, so a parent whose own plan
+ended is still somebody to chase even while a child trains, and phases 2 and 3
+come from a waiver, which each person signs for themselves. Two places
+deliberately answer about the person they name rather than their household, and
+`docs/memberships.md` ("Staying a member through the break") lists them with the
+reasoning: the door, where coverage is personal, and a member's own screens.
 
 **Managers** are club staff with the manager role, orthogonal to the funnel.
 Someone browsing the site who has not provided an email is nothing in the
@@ -87,16 +91,23 @@ system. (The contact form stores a message, not a person.)
      emails all resolve the recipient through `deliveryRecipientFor` /
      `deliveryEmailFor`, so a message about a child goes to their guardian,
      greets the guardian, and names the child it is about.
-   - **Display.** `/manager/users` and a person's page show the guardian's
-     address and say whose it is (`email_belongs_to`), because a bare address
-     under a child's name reads as a mailbox somebody can write to. The
-     verification pill now reflects the **guardian's** login, not the child's
+   - **Display.** Every screen that prints a dependant's contact address says
+     whose it is, because a bare address under a child's name reads as a mailbox
+     somebody can write to. Four of them: `/manager/users` and a person's page
+     (`email_belongs_to`), `/manager/memberships` (`member_email_belongs_to`, so
+     an invoice for a child names the parent to chase), and `/manager/waivers`,
+     which also says on the row whose account the participant is on. The
+     verification pill reflects the **guardian's** login, not the child's
      unverifiable one, and **Resend verification** is refused for a dependant.
 
-   ⚠️ One gap is left, deliberately: **Change email** (`setClubUserEmail`) still
-   acts on the person's own login record, so a manager can point it at a
-   dependant. #107 owns that, along with the rest of the manager-side household
-   work.
+   - **Change email** (`setClubUserEmail`) is refused for a dependant outright,
+     and the person page stops offering the button. Not for the obvious reason:
+     typing the parent's own address onto a child was already refused by the
+     one-person-per-email check. The hole was a FRESH address, which nothing
+     stopped a manager giving a nine-year-old, leaving them a working mailbox on
+     their own login and losing the reserved, non-deliverable shape that makes a
+     dependant safe. The **Household** card on that page names the account
+     holder to change it on instead.
 
    So two children in one family are two people under one address, which is
    what the club actually has. Before this, the second child's waiver resolved
@@ -422,14 +433,15 @@ guardian's address, and approving it unlocks the guardian's login.
 
 ⚠️ **Today that is reachable only through the manager agent API**
 (`docs/manager-agent-api.md`, `file_waiver`), not from "Upload a paper waiver"
-on the site. The filing function and its validation take the question; the
-screen does not ask it yet, so a form uploaded there is still filed as being
-for the person whose email was typed. **The consequence is the bug this whole
-change exists to fix, still live on that one screen**: two siblings uploaded
-under one parent's address land on the same person, and approving the second
-overwrites the first. #107 adds the question to the screen. Until then, a
-child's paper waiver goes through the agent API, or the parent signs it on the
-site.
+on the site. The upload screen asks it too, since #107: the question sits above
+the email field, because the answer decides whether there is one. Choosing a
+child hides the participant's EMAIL field entirely rather than leaving it
+optional (their postal address is still asked for, and still required),
+and the guardian block becomes required and appears whatever the child's age,
+through `waiverNeedsGuardian` rather than the date of birth. Until that screen
+asked, two siblings uploaded under one parent's address landed on the same
+person and approving the second overwrote the first, which is the bug this whole
+change exists to fix.
 
 From there it is an ordinary submission. It attaches to the email's existing
 person, or creates a locked applicant if that email is new, and it lands

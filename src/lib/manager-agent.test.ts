@@ -478,7 +478,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("16");
+    expect(AGENT_MANIFEST.version).toBe("17");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -503,6 +503,25 @@ describe("AGENT_MANIFEST", () => {
     const notes = AGENT_MANIFEST.changes.find((c) => c.version === "2")!.notes.join(" ");
     expect(notes).toMatch(/reconciled_invoice/);
     expect(notes).toMatch(/duplicate_waiver/);
+  });
+
+  // #112 shipped a field whose MEANING changed with no manifest bump, no note
+  // and no doc, and the review caught it rather than a test. This is that test:
+  // a response field an agent is told to read has to be announced, or a client
+  // holding a cached manifest never learns it exists.
+  it("announces the household fields list_users now carries", () => {
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "17")!.notes.join(" ");
+    expect(notes).toMatch(/guardian_user_id/);
+    expect(notes).toMatch(/dependants/);
+    // The note that matters most to a caching client, and the one #112's
+    // failure was: an EXISTING field whose meaning moved. `lifecycle_status`
+    // now reaches through the household, which also changes which rows a
+    // `status` filter returns.
+    expect(notes).toMatch(/lifecycle_status/);
+    expect(notes).toMatch(/roles/);
+    // The trap worth naming, because a caller that falls into it reports a
+    // parent as having no children rather than failing.
+    expect(notes).toMatch(/status/);
   });
 
   it("documents the confirmation flags the schemas actually accept", () => {

@@ -108,7 +108,7 @@ test("a membership blocked from deletion by a check-in can be freed by moving it
   await page.goto("/manager/check-in");
   await expectPageRendered(page);
   await page.locator("#class-picker").selectOption(eventId);
-  await page.getByPlaceholder("Search by name or email").fill(APPLICANT_EMAIL);
+  await page.getByPlaceholder("Search by name, email or parent").fill(APPLICANT_EMAIL);
   await page.getByRole("button", { name: "Check in" }).click();
   await expect(page.getByText(/are in/)).toBeVisible();
 
@@ -206,12 +206,12 @@ test("a check-in that outruns the trial's two sessions lands uncovered on the th
   await page.goto("/manager/check-in");
 
   await page.locator("#class-picker").selectOption(event1);
-  await page.getByPlaceholder("Search by name or email").fill(APPLICANT_EMAIL);
+  await page.getByPlaceholder("Search by name, email or parent").fill(APPLICANT_EMAIL);
   await page.getByRole("button", { name: "Check in" }).click();
   await expect(page.getByText(/Free trial, 1 left/)).toBeVisible();
 
   await page.locator("#class-picker").selectOption(event2);
-  await page.getByPlaceholder("Search by name or email").fill(APPLICANT_EMAIL);
+  await page.getByPlaceholder("Search by name, email or parent").fill(APPLICANT_EMAIL);
   await page.getByRole("button", { name: "Check in" }).click();
   await expect(page.getByText(/Free trial, 0 left/)).toBeVisible();
 
@@ -227,7 +227,7 @@ test("a check-in that outruns the trial's two sessions lands uncovered on the th
   // (docs/check-in.md, rule 5) — it lands uncovered instead, for a manager to
   // sort out later, rather than turning someone away at the door.
   await page.locator("#class-picker").selectOption(event3);
-  await page.getByPlaceholder("Search by name or email").fill(APPLICANT_EMAIL);
+  await page.getByPlaceholder("Search by name, email or parent").fill(APPLICANT_EMAIL);
   await page.getByRole("button", { name: "Check in" }).click();
   await expect(page.getByText(/nothing covers it\. Added to needs attention\./)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs attention (1)" })).toBeVisible();
@@ -291,7 +291,7 @@ test("a manager raises a membership after the trial, checks the person in, and p
 
   await page.goto("/manager/check-in");
   await page.locator("#class-picker").selectOption(event.id);
-  await page.getByPlaceholder("Search by name or email").fill(APPLICANT_EMAIL);
+  await page.getByPlaceholder("Search by name, email or parent").fill(APPLICANT_EMAIL);
   await page.getByRole("button", { name: "Check in" }).click();
 
   // Unpaid is not a reason to refuse a check-in either — a membership is

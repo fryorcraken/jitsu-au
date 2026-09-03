@@ -25,7 +25,12 @@ import {
   undoCheckInSchema,
 } from "@/lib/validation";
 import type { CheckInWarning } from "@/lib/validation";
-import { attachableMemberships, lapsedMembershipIds, resolveCoverage } from "@/lib/checkin";
+import {
+  attachableMemberships,
+  lapsedMembershipIds,
+  resolveCoverage,
+  rosterHouseholdFields,
+} from "@/lib/checkin";
 import type { CoverageCandidate, CoverageDecision } from "@/lib/checkin";
 import { topUpHorizon } from "@/lib/calendar.functions";
 import { ensureCasualInvoiceEmailed } from "@/lib/membership.functions";
@@ -147,34 +152,50 @@ async function coverageCandidatesByUser(
   return byUser;
 }
 
+/** What a roster row needs to know about the household behind a person. */
+type RosterContact = {
+  /**
+   * The contact address, resolved through their guardian where they have one.
+   *
+   * ⚠️ Read what this feeds before changing it. #106 classifies this call site
+   * as a DELIVERY one, "check-in receipts", and there is no such thing: nothing
+   * in this module sends an email, and the only consumer is the roster's
+   * `email` field, which `manager.check-in.tsx` uses solely to filter the list
+   * as a manager types. It is never printed. So this is neither of #106's two
+   * sides -- it is a search key -- and resolving it through the guardian is
+   * what makes a parent's address find their children at the door.
+   *
+   * If a roster ever starts PRINTING it, it has to say whose address it is, for
+   * the reason every other display does: a bare address under a nine-year-old's
+   * name reads as a mailbox somebody could write to.
+   */
+  email: string | null;
+  /**
+   * Whose account they are on, when they are on somebody's. This one IS
+   * printed, which is the whole point of it: see the roster below.
+   */
+  guardianName: string | null;
+};
+
 /**
- * The contact address for each person on a roster, resolved through their
- * guardian where they have one.
+ * The household facts for each person on a roster, in one lookup.
  *
- * ⚠️ Read what this feeds before changing it. #106 classifies this call site as
- * a DELIVERY one, "check-in receipts", and there is no such thing: nothing in
- * this module sends an email, and the only consumer of the map is the roster's
- * `email` field, which `manager.check-in.tsx` uses solely to filter the list as
- * a manager types. It is never printed. So this is neither of #106's two sides
- * -- it is a search key -- and resolving it through the guardian is what makes
- * a parent's address find their children at the door, which is the useful
- * behaviour for the person holding the tablet.
- *
- * If a roster ever starts PRINTING this, it has to move to
- * `displayEmail`/`onBehalfOf` and say whose address it is, for the reason every
- * other display does: a bare address under a nine-year-old's name reads as a
- * mailbox somebody could write to.
+ * One read rather than two because both answers come out of the same place: a
+ * second lookup would give the door two chances to disagree with itself about
+ * who a child belongs to.
  */
-async function contactEmailsByUserId(
+async function rosterContactsByUserId(
   admin: CheckinClient,
   userIds: string[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, RosterContact>> {
   if (!userIds.length) return new Map();
   const contacts = await loadHouseholdContacts(admin, userIds);
-  const map = new Map<string, string>();
+  const map = new Map<string, RosterContact>();
   for (const id of userIds) {
-    const email = contacts.deliveryEmail(id);
-    if (email) map.set(id, email);
+    map.set(id, {
+      email: contacts.deliveryEmail(id),
+      guardianName: contacts.displayEmail(id).onBehalfOf?.name ?? null,
+    });
   }
   return map;
 }
@@ -431,7 +452,7 @@ export const getCheckInBoard = createServerFn({ method: "POST" })
     const [{ data: profiles, error: pErr }, { data: checkins, error: cErr }] = await Promise.all([
       admin
         .from("profiles")
-        .select("user_id, first_name, middle_name, last_name, preferred_name")
+        .select("user_id, first_name, middle_name, last_name, preferred_name, date_of_birth")
         .limit(ROSTER_LIMIT),
       admin
         .from("session_checkins")
@@ -447,7 +468,7 @@ export const getCheckInBoard = createServerFn({ method: "POST" })
 
     const userIds = people.map((p) => p.user_id);
     const [emails, candidates] = await Promise.all([
-      contactEmailsByUserId(admin, userIds),
+      rosterContactsByUserId(admin, userIds),
       coverageCandidatesByUser(admin, userIds),
     ]);
 
@@ -461,10 +482,19 @@ export const getCheckInBoard = createServerFn({ method: "POST" })
         memberships: candidates.get(p.user_id) ?? [],
         at: event.starts_at,
       });
+      const contact = emails.get(p.user_id);
       return {
         user_id: p.user_id,
         name: nameByUser.get(p.user_id) ?? null,
-        email: emails.get(p.user_id) ?? null,
+        email: contact?.email ?? null,
+        // What tells one child from another at the door, and what is withheld
+        // about everybody else. The rule is in `checkin.ts` with its reasoning
+        // and its tests, because the withholding half is a privacy decision
+        // rather than a rendering detail.
+        ...rosterHouseholdFields({
+          guardianName: contact?.guardianName ?? null,
+          dateOfBirth: p.date_of_birth,
+        }),
         coverage: decision.coverage,
         plan_name: decision.plan_name,
         // Named to match `coveragePreviewLabel`, so the screen labels a roster

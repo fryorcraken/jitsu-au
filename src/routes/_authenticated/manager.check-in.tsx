@@ -220,7 +220,11 @@ function CheckInPage() {
         (r) =>
           !q ||
           (r.name ?? "").toLowerCase().includes(q) ||
-          (r.email ?? "").toLowerCase().includes(q),
+          (r.email ?? "").toLowerCase().includes(q) ||
+          // The account holder's name, so a parent standing at the door with
+          // two children can be found by their own name and not only by their
+          // address. Set for dependants only, so no other row is affected.
+          (r.guardian_name ?? "").toLowerCase().includes(q),
       );
     return rows.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   }, [board, checkedInIds, search]);
@@ -459,7 +463,7 @@ function CheckInPage() {
         <h2 className="text-xl font-bold">Check someone in</h2>
         <Input
           autoFocus
-          placeholder="Search by name or email"
+          placeholder="Search by name, email or parent"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => {
@@ -490,6 +494,17 @@ function CheckInPage() {
                 <tr key={r.user_id} className="border-t">
                   <td className="px-3 py-2 font-medium">
                     <UserLink userId={r.user_id} name={r.name} />
+                    {/* What tells one child from another when a search for a
+                        surname, or for a parent's address, returns the whole
+                        family. Getting it wrong files a class against the wrong
+                        child. Rendered only for a dependant, which is what
+                        `guardian_name` being set means. */}
+                    {r.guardian_name ? (
+                      <div className="mt-0.5 text-xs font-normal text-muted-foreground">
+                        {r.age !== null ? <>Age {r.age}, on </> : <>On </>}
+                        {r.guardian_name}&apos;s account
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1">

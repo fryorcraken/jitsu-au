@@ -263,6 +263,114 @@ describe("aggregateClubUsers", () => {
     }
   });
 
+  // #107. `has_active_paid_membership` has answered yes for a guardian whose
+  // dependant holds a paid plan since #103, so the directory has been labelling
+  // parents `lead` while they read the members-only calendar. The phase now
+  // agrees with the gate.
+  describe("the funnel phase through a household", () => {
+    const parent = () => profile({ user_id: "u1" });
+    const child = () => profile({ user_id: "u2", first_name: "Bea", guardian_user_id: "u1" });
+
+    it("reads a parent as a member on the strength of their child's paid plan", () => {
+      const users = aggregate({
+        profiles: [parent(), child()],
+        countHouseholdMemberships: true,
+        memberships: [membership({ user_id: "u2" })],
+      });
+      expect(users.find((u) => u.user_id === "u1")!.lifecycle_status).toBe("member");
+      expect(users.find((u) => u.user_id === "u2")!.lifecycle_status).toBe("member");
+    });
+
+    it("does not read a child as a member because their PARENT holds a plan", () => {
+      // The reach is one way. A child with no cover of their own is not a
+      // member, which is also what the door tells a manager at check-in.
+      const users = aggregate({
+        profiles: [parent(), child()],
+        countHouseholdMemberships: true,
+        memberships: [membership({ user_id: "u1" })],
+      });
+      expect(users.find((u) => u.user_id === "u2")!.lifecycle_status).toBe("lead");
+    });
+
+    it("leaves an unrelated person's phase alone", () => {
+      const users = aggregate({
+        profiles: [parent(), profile({ user_id: "u2", guardian_user_id: null })],
+        countHouseholdMemberships: true,
+        memberships: [membership({ user_id: "u2" })],
+      });
+      expect(users.find((u) => u.user_id === "u1")!.lifecycle_status).toBe("lead");
+    });
+
+    // `getClubUser` reads ONE person, so a guardian's dependants are not in
+    // `profiles` at all. Without this the person page would say `lead` about
+    // somebody the directory listing them calls a `member`.
+    it("counts dependants passed in for a single-person read", () => {
+      const [only] = aggregate({
+        profiles: [parent()],
+        countHouseholdMemberships: true,
+        dependants: [{ user_id: "u2", guardian_user_id: "u1" }],
+        memberships: [membership({ user_id: "u2" })],
+      });
+      expect(only.lifecycle_status).toBe("member");
+      // ...and the dependant's rows are not counted as the parent's own.
+      expect(only.membership_count).toBe(0);
+      expect(only.latest_membership_status).toBeNull();
+    });
+
+    it("stays off unless the caller asks, so a member's own screens are unaffected", () => {
+      // The default is each person's own answer. `listMyHousehold` renders "People
+      // on your account", where the parent's row sits directly above a line
+      // saying what they hold: reaching there paints a green Member pill over
+      // the words "No membership yet".
+      const users = aggregate({
+        profiles: [parent(), child()],
+        memberships: [membership({ user_id: "u2" })],
+      });
+      expect(users.find((u) => u.user_id === "u1")!.lifecycle_status).toBe("lead");
+    });
+
+    it("never treats a contact-resolution guardian row as somebody's household", () => {
+      // `guardians` are the OWNER of an address shown on a page about somebody
+      // else. Folding them into the household index would hand a household to a
+      // person this call is not reporting on.
+      //
+      // Shaped so that folding them in CHANGES this answer: the person being
+      // listed (u3) is who the guardian row points at, and the guardian row's
+      // own id holds an active paid plan. Fold `guardians` in and u3 becomes a
+      // `member` off somebody else's plan. An earlier version of this test used
+      // a guardian row with a null link, which the index skips anyway, so it
+      // named the hazard and asserted nothing about it.
+      const [listed] = aggregate({
+        profiles: [profile({ user_id: "u3" })],
+        guardians: [
+          {
+            user_id: "u1",
+            guardian_user_id: "u3",
+            first_name: "Ada",
+            middle_name: null,
+            last_name: "Lovelace",
+            preferred_name: null,
+          },
+        ],
+        countHouseholdMemberships: true,
+        memberships: [membership({ user_id: "u1" })],
+      });
+      expect(listed.user_id).toBe("u3");
+      expect(listed.lifecycle_status).toBe("lead");
+    });
+  });
+
+  it("carries guardian_user_id so a manager list can link to the account holder", () => {
+    const users = aggregate({
+      profiles: [profile({ user_id: "u1" }), profile({ user_id: "u2", guardian_user_id: "u1" })],
+      leads: [lead()],
+    });
+    expect(users.find((u) => u.user_id === "u1")!.guardian_user_id).toBeNull();
+    expect(users.find((u) => u.user_id === "u2")!.guardian_user_id).toBe("u1");
+    // A lead has no person record, so they cannot be on anybody's account.
+    expect(users.find((u) => u.user_id === null)!.guardian_user_id).toBeNull();
+  });
+
   it("marks has_waiver only for approved waivers, tracking the latest approved date", () => {
     const [pendingOnly] = aggregate({
       profiles: [profile()],

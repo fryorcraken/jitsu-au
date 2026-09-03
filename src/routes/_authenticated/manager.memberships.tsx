@@ -132,8 +132,19 @@ function ManagerMembershipsPage() {
                       <div className="font-medium">
                         <UserLink userId={r.user_id} name={r.member_name} />
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {r.member_email ?? r.user_id ?? "—"}
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                        <span>{r.member_email ?? r.user_id ?? "—"}</span>
+                        {/* Whose address that is. An invoice for a child carries
+                            the PARENT's address, because the parent is who to
+                            chase for the money, and printed bare it reads as a
+                            nine-year-old with a bank account. `listMemberships`
+                            has carried this since #112 and no screen printed it;
+                            `list_invoices` already says the same thing, and the
+                            two surfaces must not disagree about whether they say
+                            it at all. Null for every account holder. */}
+                        {r.member_email_belongs_to ? (
+                          <span>({r.member_email_belongs_to}&apos;s)</span>
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-3 py-2">{r.plan_name ?? "—"}</td>

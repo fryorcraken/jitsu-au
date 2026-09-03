@@ -1,13 +1,14 @@
 // The household gate. What is pinned here is WHO may act for whom, because
 // every server function that grows an optional target defers to this and none
 // of them re-derives the rule.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
   assertActingFor,
   assertMayHaveDependants,
   contactUserIdFor,
+  householdRoleScope,
   householdTargetSchema,
   isDependant,
   isDependantUser,
@@ -72,6 +73,12 @@ function admin(rows: Row[]) {
                   ),
                   error: null,
                 }),
+              // Awaited with no terminator, which is how `householdRoleScope`
+              // reads a set of rows. A real builder is a thenable too.
+              then: (
+                resolve: (v: { data: Row[]; error: null }) => unknown,
+                reject: (e: unknown) => unknown,
+              ) => Promise.resolve({ data: matched, error: null }).then(resolve, reject),
             };
           },
         }),
@@ -88,10 +95,55 @@ const erroringAdmin = {
       eq: () => ({
         maybeSingle: () => Promise.resolve({ data: null, error: { message: "boom" } }),
         order: () => Promise.resolve({ data: null, error: { message: "boom" } }),
+        then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+          Promise.resolve({ data: null, error: { message: "boom" } }).then(resolve, reject),
       }),
     }),
   }),
 } as unknown as SupabaseClient<Database>;
+
+/**
+ * A fake whose `profiles` read fails on ONE of the two questions
+ * `householdRoleScope` asks, and answers the other normally.
+ *
+ * The realistic outage is one-sided: the `guardian_user_id` scan times out
+ * while the primary-key lookup beside it succeeds. A fake that fails both at
+ * once cannot tell "returns null when it could not ask" from "returns null when
+ * everything is broken", and the half that matters is the first: a lone failed
+ * dependants read collapses to "nobody is on this account", which is what takes
+ * the label off every paid-up parent.
+ */
+function halfErroringAdmin(failOn: "self" | "dependants"): SupabaseClient<Database> {
+  const boom = { data: null, error: { message: "statement timeout" } };
+  const rows = EVERYONE;
+  return {
+    from: () => ({
+      select: (columns: string) => ({
+        eq: (column: keyof Row, value: string) => {
+          const failing = column === "guardian_user_id" ? "dependants" : "self";
+          const matched = rows
+            .filter((r) => r[column] === value)
+            .map((r) =>
+              Object.fromEntries(
+                columns.split(",").map((c) => [c.trim(), (r as Record<string, unknown>)[c.trim()]]),
+              ),
+            );
+          return {
+            maybeSingle: () =>
+              Promise.resolve(
+                failing === failOn ? boom : { data: matched[0] ?? null, error: null },
+              ),
+            then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+              Promise.resolve(failing === failOn ? boom : { data: matched, error: null }).then(
+                resolve,
+                reject,
+              ),
+          };
+        },
+      }),
+    }),
+  } as unknown as SupabaseClient<Database>;
+}
 
 describe("isDependantUser", () => {
   it("answers for a person the caller only has an id for", async () => {
@@ -392,5 +444,61 @@ describe("mayActFor", () => {
     // "We could not ask" is not "no". Flattening it would turn an outage into a
     // refusal at every call site.
     await expect(mayActFor(erroringAdmin, "parent", "child")).rejects.toThrow("boom");
+  });
+});
+
+// `syncMemberRole`'s two questions, and the reason they are one function: both
+// are answered from the same pair of rows. The `member` label reaches through a
+// household since #107, so a child's plan moving has to move their parent's row
+// as well as their own.
+describe("householdRoleScope", () => {
+  // The failed-read case logs before returning null; keep it out of the report.
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts a guardian plus everyone on their account", async () => {
+    const scope = await householdRoleScope(admin(EVERYONE), "parent");
+    expect(scope).toEqual({ countsFor: ["parent", "child", "sibling"], guardianUserId: null });
+  });
+
+  it("names the account holder whose label also moves, for a dependant", async () => {
+    // A dependant may have no dependants of their own, so `countsFor` is just
+    // them -- the one-level rule producing that, not a special case here.
+    const scope = await householdRoleScope(admin(EVERYONE), "child");
+    expect(scope).toEqual({ countsFor: ["child"], guardianUserId: "parent" });
+  });
+
+  it("keeps households apart", async () => {
+    const scope = await householdRoleScope(admin(EVERYONE), "stranger");
+    expect(scope).toEqual({ countsFor: ["stranger", "their-child"], guardianUserId: null });
+  });
+
+  it("answers for somebody with no profile row as an account holder alone", async () => {
+    const scope = await householdRoleScope(admin(EVERYONE), "nobody");
+    expect(scope).toEqual({ countsFor: ["nobody"], guardianUserId: null });
+  });
+
+  // The distinction the whole return type exists for. `syncMemberRole` REVOKES
+  // on "they hold nothing", so a failed read answered as an empty household
+  // would strip the label off every paid-up parent the moment `profiles`
+  // hiccuped. Null is not a household with nobody in it.
+  it("returns null on a failed read rather than an empty household", async () => {
+    await expect(householdRoleScope(erroringAdmin, "parent")).resolves.toBeNull();
+  });
+
+  // Each read on its own, because the realistic outage is one-sided and the
+  // dependants half is the dangerous one: answered as an empty household it
+  // reads as "this parent looks after nobody", and `syncMemberRole` revokes on
+  // "they hold nothing".
+  it("returns null when only the dependants read fails", async () => {
+    await expect(householdRoleScope(halfErroringAdmin("dependants"), "parent")).resolves.toBeNull();
+  });
+
+  it("returns null when only the person's own row fails", async () => {
+    await expect(householdRoleScope(halfErroringAdmin("self"), "parent")).resolves.toBeNull();
   });
 });

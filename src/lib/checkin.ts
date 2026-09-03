@@ -377,3 +377,64 @@ export function pickDefaultEvent<T extends PickableEvent>(
   // the next one than fixing the last one, so an exact tie goes to the future.
   return closestByStart(scheduled, nowMs, true);
 }
+
+/**
+ * What a roster row shows to tell one child from another at the door, and what
+ * it deliberately withholds about everybody else.
+ *
+ * The club takes children, so a search for a surname -- or, since the roster's
+ * contact address resolves through the guardian, for a parent's email --
+ * returns every sibling at once. Picking the wrong one files a class against
+ * the wrong child: their attendance, their credit, their grading record.
+ *
+ * `guardian_name` says which family; `age` is the one that separates two
+ * children IN that family, which a parent's name cannot do.
+ *
+ * ## Why an age and not the date of birth
+ *
+ * An age answers the door's actual question -- which of these two is the child
+ * in front of me -- because a child's apparent age is the thing a manager can
+ * see. A full date of birth answers it no better: two siblings far enough apart
+ * to be told apart by their birthdays are told apart by their ages, and twins
+ * are told apart by neither.
+ *
+ * What it costs is nothing, and what it saves is that a child's date of birth
+ * never crosses the wire, never reaches a browser, and never enters the roster
+ * the screen keeps on the device (`checkin-cache.ts`). A date of birth is an
+ * identity-document field; an age is not. This screen is a tablet in the
+ * entrance of a public hall, so the difference is worth having.
+ *
+ * The withholding is the rule worth keeping in one place: an age is carried for
+ * a dependant and for nobody else, because an ordinary member's answers no
+ * question at the door. Being a dependant is what makes it answer one, and
+ * `guardianName` is how this module knows: set for a dependant, null otherwise.
+ */
+export function rosterHouseholdFields(input: {
+  guardianName: string | null;
+  dateOfBirth: string | null;
+  /** Injected so the rule is testable without freezing the clock. */
+  now?: Date;
+}): { guardian_name: string | null; age: number | null } {
+  const isDependant = input.guardianName != null;
+  return {
+    guardian_name: input.guardianName,
+    age: isDependant ? ageOn(input.dateOfBirth, input.now ?? new Date()) : null,
+  };
+}
+
+/**
+ * Whole years from `dateOfBirth` to `now`, or null when there is no usable date.
+ *
+ * Not derived from a day count: a leap year makes that wrong by a day around a
+ * birthday, and "10" turning into "9" on the wrong morning is exactly the kind
+ * of small wrongness a manager stops trusting the column over.
+ */
+function ageOn(dateOfBirth: string | null, now: Date): number | null {
+  if (!dateOfBirth) return null;
+  const born = new Date(`${dateOfBirth}T00:00:00Z`);
+  if (Number.isNaN(born.getTime())) return null;
+  let age = now.getUTCFullYear() - born.getUTCFullYear();
+  const monthDiff = now.getUTCMonth() - born.getUTCMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getUTCDate() < born.getUTCDate())) age -= 1;
+  return age >= 0 ? age : null;
+}

@@ -5,6 +5,7 @@ import {
   lapsedMembershipIds,
   pickDefaultEvent,
   resolveCoverage,
+  rosterHouseholdFields,
 } from "./checkin";
 import type { CoverageCandidate } from "./checkin";
 import { planMembershipWindow } from "./validation";
@@ -504,5 +505,95 @@ describe("pickDefaultEvent", () => {
   it("resolves the club date correctly across a daylight-saving change", () => {
     const dstDay = event("dst", "2026-04-04T22:00:00.000Z"); // 09:00 AEDT on 5 Apr
     expect(pickDefaultEvent([dstDay], "2026-04-04T21:00:00.000Z")?.id).toBe("dst");
+  });
+});
+
+// The door has to tell two children in one family apart, and must not hand out
+// dates of birth to settle a question an age already settles.
+describe("rosterHouseholdFields", () => {
+  // Fixed, so a birthday passing does not turn this suite red overnight.
+  const NOW = new Date("2026-09-03T00:00:00Z");
+
+  it("carries the family and an age for a dependant", () => {
+    expect(
+      rosterHouseholdFields({
+        guardianName: "Ada Lovelace",
+        dateOfBirth: "2016-04-02",
+        now: NOW,
+      }),
+    ).toEqual({ guardian_name: "Ada Lovelace", age: 10 });
+  });
+
+  // Two siblings share a surname and a parent, so the parent's name cannot
+  // separate them. This is the field that does.
+  it("gives two siblings something that actually tells them apart", () => {
+    const bea = rosterHouseholdFields({
+      guardianName: "Ada Lovelace",
+      dateOfBirth: "2016-04-02",
+      now: NOW,
+    });
+    const cara = rosterHouseholdFields({
+      guardianName: "Ada Lovelace",
+      dateOfBirth: "2019-11-30",
+      now: NOW,
+    });
+    expect(bea.guardian_name).toBe(cara.guardian_name);
+    expect(bea.age).not.toBe(cara.age);
+  });
+
+  // The whole reason this is an age. A date of birth is an identity-document
+  // field and answers the door's question no better, so none is ever produced
+  // here -- which is also what keeps one out of the roster the screen stores on
+  // the device.
+  it("never returns a date of birth, for anybody", () => {
+    const forChild = rosterHouseholdFields({
+      guardianName: "Ada Lovelace",
+      dateOfBirth: "2016-04-02",
+      now: NOW,
+    });
+    expect(Object.keys(forChild).sort()).toEqual(["age", "guardian_name"]);
+    expect(JSON.stringify(forChild)).not.toContain("2016");
+  });
+
+  // The withholding half, and the reason this is a function rather than two
+  // fields written inline: an ordinary member's age answers no question at the
+  // door, and the door is a tablet in a public hall.
+  it("withholds an account holder's age even though their date of birth is known", () => {
+    expect(
+      rosterHouseholdFields({ guardianName: null, dateOfBirth: "1990-01-01", now: NOW }),
+    ).toEqual({ guardian_name: null, age: null });
+  });
+
+  it("copes with a dependant whose date of birth is not on file", () => {
+    expect(
+      rosterHouseholdFields({ guardianName: "Ada Lovelace", dateOfBirth: null, now: NOW }),
+    ).toEqual({ guardian_name: "Ada Lovelace", age: null });
+  });
+
+  it("counts whole years, so a birthday still to come this year has not happened", () => {
+    // Born in December, asked in September: nine, not ten.
+    expect(
+      rosterHouseholdFields({
+        guardianName: "Ada Lovelace",
+        dateOfBirth: "2016-12-25",
+        now: NOW,
+      }).age,
+    ).toBe(9);
+    // ...and on the birthday itself, ten.
+    expect(
+      rosterHouseholdFields({
+        guardianName: "Ada Lovelace",
+        dateOfBirth: "2016-09-03",
+        now: NOW,
+      }).age,
+    ).toBe(10);
+  });
+
+  it("returns null rather than a negative age for an unusable date", () => {
+    for (const dateOfBirth of ["not-a-date", "2099-01-01"]) {
+      expect(
+        rosterHouseholdFields({ guardianName: "Ada Lovelace", dateOfBirth, now: NOW }).age,
+      ).toBeNull();
+    }
   });
 });

@@ -164,12 +164,12 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   await step(page, "a manager checks them in twice, using up the trial", async () => {
     await page.goto("/manager/check-in");
     await page.locator("#class-picker").selectOption(event1);
-    await page.getByPlaceholder("Search by name or email").fill(email);
+    await page.getByPlaceholder("Search by name, email or parent").fill(email);
     await page.getByRole("button", { name: "Check in" }).click();
     await expect(page.getByText(/Free trial, 1 left/)).toBeVisible();
 
     await page.locator("#class-picker").selectOption(event2);
-    await page.getByPlaceholder("Search by name or email").fill(email);
+    await page.getByPlaceholder("Search by name, email or parent").fill(email);
     await page.getByRole("button", { name: "Check in" }).click();
     await expect(page.getByText(/Free trial, 0 left/)).toBeVisible();
   });
@@ -227,7 +227,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     async () => {
       await page.goto("/manager/check-in");
       await page.locator("#class-picker").selectOption(event3);
-      await page.getByPlaceholder("Search by name or email").fill(email);
+      await page.getByPlaceholder("Search by name, email or parent").fill(email);
       await page.getByRole("button", { name: "Check in" }).click();
       // One credit, spent: the casual class closes itself on the same check-in
       // that used it, exactly like the trial did above.
@@ -420,7 +420,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     async () => {
       await page.goto("/manager/check-in");
       await page.locator("#class-picker").selectOption(event4);
-      await page.getByPlaceholder("Search by name or email").fill(email);
+      await page.getByPlaceholder("Search by name, email or parent").fill(email);
       await page.getByRole("button", { name: "Check in" }).click();
       // One credit, spent, exactly like the first casual purchase — the credit
       // pack precedence still outranks the now-active period plan.
@@ -472,4 +472,197 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     await expect(row).toContainText("Used up");
     await expect(row).not.toContainText("Expired");
   });
+});
+
+// The other half of the same story, and the one #102 is actually about: the
+// person who signs is not the person who trains.
+//
+// A parent signs for a child who will never have a login, a manager approves it,
+// and the login that opens is the PARENT's. Everything here is walked through
+// the real screens for the same reason the journey above is.
+let childUserId: string | null = null;
+let parentUserId: string | null = null;
+/** Set before the flow starts, so cleanup can find the parent even if it fails. */
+let parentEmailForCleanup = "";
+
+test.afterAll(async () => {
+  const admin = adminClient();
+  // The child FIRST. `profiles.guardian_user_id` is ON DELETE RESTRICT, so
+  // deleting a parent who still has children fails with a raw 23503 and removes
+  // nothing at all (`docs/erasing-personal-data.md`).
+  for (const id of [childUserId, parentUserId]) {
+    if (!id) continue;
+    await admin.from("memberships").delete().eq("user_id", id);
+    await admin.from("waivers").delete().eq("user_id", id);
+  }
+  if (childUserId) await admin.auth.admin.deleteUser(childUserId);
+  if (parentUserId) await admin.auth.admin.deleteUser(parentUserId);
+
+  // Belt and braces. `parentUserId` is only assigned AFTER the waiver is signed
+  // and looked up, so a failure in between leaks a real parent, child, waiver
+  // and trial into the club every other spec shares. Sweep by the address
+  // pattern this test mints, which nothing else uses.
+  const { data: strays } = await admin.rpc("user_id_by_email", { _email: parentEmailForCleanup });
+  if (strays && strays !== parentUserId) {
+    const { data: kids } = await admin
+      .from("profiles")
+      .select("user_id")
+      .eq("guardian_user_id", strays);
+    for (const kid of kids ?? []) {
+      await admin.from("memberships").delete().eq("user_id", kid.user_id);
+      await admin.from("waivers").delete().eq("user_id", kid.user_id);
+      await admin.auth.admin.deleteUser(kid.user_id);
+    }
+    await admin.from("memberships").delete().eq("user_id", strays);
+    await admin.from("waivers").delete().eq("user_id", strays);
+    await admin.auth.admin.deleteUser(strays);
+  }
+});
+
+test("a parent signs for a child, and approving it unlocks the PARENT", async ({
+  page,
+  browser,
+}) => {
+  const NO_SESSION = { cookies: [], origins: [] };
+  const parentEmail = `e2e-parent-${crypto.randomUUID()}@example.com`;
+  parentEmailForCleanup = parentEmail;
+  const parentName = "Rowan Kestrel";
+  const childFirst = "Wren";
+  const childLast = "Kestrel";
+
+  const visitor = await browser.newContext({ storageState: NO_SESSION });
+  const visitorPage = await visitor.newPage();
+
+  await step(visitorPage, "a parent signs a waiver for their child", async () => {
+    await visitorPage.goto("/waiver");
+    await visitorPage.waitForLoadState("networkidle");
+
+    // The question is asked FIRST, before any field, because the answer changes
+    // what the rest of the form asks for. Choosing a child removes the
+    // participant's own email field entirely: a nine-year-old is never asked
+    // for one.
+    // `getByLabel`, not `getByRole("radio", { name })`. These are Radix items,
+    // which render a <button role="radio"> named by a sibling <label for>, and
+    // getByLabel is the mechanism the health questions in the test above
+    // already drive them with.
+    await visitorPage.getByLabel("My child, or someone else I look after").check();
+    await expect(visitorPage.getByLabel("Email", { exact: true })).toHaveCount(0);
+
+    await visitorPage.getByLabel("First name").fill(childFirst);
+    await visitorPage.getByLabel("Last name").fill(childLast);
+    // A child, so the guardian block is required whatever else is on the form.
+    await visitorPage.getByLabel("Date of birth").fill("2016-03-08");
+    // `exact`, because the guardian block this form has now put on screen
+    // brings its own "Guardian address" and "Guardian mobile", and getByLabel
+    // matches a SUBSTRING case-insensitively: a bare "Address" resolves to two
+    // fields and fails on strict mode. The test above never hit this because an
+    // adult signing for themselves has no guardian block at all.
+    await visitorPage.getByLabel("Phone", { exact: true }).fill("0400 000 557");
+    await visitorPage
+      .getByLabel("Address", { exact: true })
+      .fill("7 Pyrmont Bridge Road, Pyrmont NSW 2009");
+
+    await visitorPage.getByLabel("Parent or guardian name").fill(parentName);
+    await visitorPage.getByLabel("Relationship to the participant").fill("Parent");
+    await visitorPage.getByLabel(/Guardian mobile/).fill("0400 000 558");
+    // Required for a child, where it is optional for a minor signing for
+    // themselves: this address IS the club's only way to reach the family.
+    await visitorPage.getByLabel(/Guardian email/).fill(parentEmail);
+
+    const healthQuestions = [
+      "Is the participant prescribed any drugs which may impair reaction time or judgement?",
+      "Has the participant, within the past 5 years, suffered any blackout, seizure, convulsion, fainting or dizzy spells, or any incapacity that would render it unsafe to participate in martial arts?",
+      "Is the participant fitted with any electronic device or shunt?",
+      "Does the participant have any current physical impairment, injuries or medical conditions (for example back injuries, weak ankles)?",
+      "Is there any other medical information or health needs our instructors should be aware of for the participant's safety?",
+    ];
+    for (const question of healthQuestions) {
+      await visitorPage.getByRole("radiogroup", { name: question }).getByLabel("No").check();
+    }
+
+    const acks = visitorPage.locator('[id^="ack_"]');
+    const ackCount = await acks.count();
+    for (let i = 0; i < ackCount; i++) await acks.nth(i).check();
+
+    // Two signatures, and both are the PARENT's hand: the child's name on the
+    // participant line, signed by the person who may consent for them.
+    const typeTabs = visitorPage.getByRole("tab", { name: "Type" });
+    await typeTabs.nth(0).click();
+    await visitorPage.getByLabel("Type your full name to sign").fill(`${childFirst} ${childLast}`);
+    await typeTabs.nth(1).click();
+    await visitorPage.getByPlaceholder("Guardian full name").fill(parentName);
+
+    await shot(visitorPage, "a child's waiver, filled in by their parent");
+
+    await visitorPage.getByRole("button", { name: "Sign and download waiver" }).click();
+    await expect(
+      visitorPage.getByRole("heading", { name: "Waiver signed", level: 1 }),
+    ).toBeVisible();
+  });
+
+  await visitor.close();
+
+  const admin = adminClient();
+
+  // The parent is resolved from the address they gave; the child is found
+  // through the household link, because they have no address to look up. That
+  // asymmetry is the model: a dependant is identified by whose account they are
+  // on, never by an email.
+  const { data: parentId, error: parentErr } = await admin.rpc("user_id_by_email", {
+    _email: parentEmail,
+  });
+  if (parentErr || !parentId) {
+    throw new Error(`the filing did not create the parent: ${parentErr?.message}`);
+  }
+  parentUserId = parentId;
+
+  const { data: kids, error: kidsErr } = await admin
+    .from("profiles")
+    .select("user_id, first_name, guardian_user_id")
+    .eq("guardian_user_id", parentId);
+  if (kidsErr) throw new Error(`could not read the household: ${kidsErr.message}`);
+  expect(kids, "the filing did not put a child on the parent's account").toHaveLength(1);
+  childUserId = kids![0].user_id;
+  expect(kids![0].first_name).toBe(childFirst);
+  // Two people, not one. The child is their own person record, which is the
+  // whole of #102.
+  expect(childUserId).not.toBe(parentUserId);
+
+  await step(page, "a manager approves the child's waiver", async () => {
+    await page.goto(`/manager/users/${childUserId}`);
+    await expectPageRendered(page);
+
+    // The page says whose child this is before the manager approves anything.
+    await expect(page.getByRole("heading", { name: "Household", level: 2 })).toBeVisible();
+    await expect(page.getByRole("link", { name: new RegExp(parentName) })).toBeVisible();
+
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
+    await page.getByRole("button", { name: "Approve waiver" }).click();
+    await expect(page.getByRole("button", { name: "Revoke approval" })).toBeVisible();
+  });
+
+  // The assertion this whole test exists for. Approving a CHILD's waiver opens
+  // the PARENT's login, because the child will never have one: #102's "a
+  // parent-only account is normal", and `docs/waivers.md` rule 6.
+  const { data: parentUser } = await admin.auth.admin.getUserById(parentUserId!);
+  expect(parentUser.user?.banned_until ?? null, "the parent's login was not unlocked").toBeFalsy();
+
+  // And the child stays locked, forever. A child never gets a login, so an
+  // approval that unlocked them would be handing one out.
+  const { data: childUser } = await admin.auth.admin.getUserById(childUserId!);
+  expect(childUser.user?.banned_until, "the child's login was unlocked").toBeTruthy();
+
+  // The trial goes to the person who trains, not to the person who signed.
+  const { data: trials } = await admin
+    .from("memberships")
+    .select("user_id")
+    .eq("user_id", childUserId!);
+  expect(trials?.length, "the child did not get their own free trial").toBeGreaterThan(0);
+  const { data: parentTrials } = await admin
+    .from("memberships")
+    .select("user_id")
+    .eq("user_id", parentUserId!);
+  expect(parentTrials ?? [], "the parent was given a membership they did not ask for").toHaveLength(
+    0,
+  );
 });

@@ -278,10 +278,18 @@ await fillProfile(users.manager, {
   emergency_contact_relationship: "Partner",
   emergency_contact_phone: "0400 000 011",
 });
+/**
+ * What the member goes by. Hoisted because the fixture manifest has to report
+ * this person's name AS THE SCREENS PRINT IT, and a preferred name changes that
+ * form: `nameWithPreferred` renders `Tom "Tommy" Okafor`, not `Tom Okafor`.
+ * One constant, so the profile and the manifest cannot drift apart.
+ */
+const MEMBER_PREFERRED_NAME = "Tommy";
+
 await fillProfile(users.member, {
   first_name: PERSONAS.member.firstName,
   last_name: PERSONAS.member.lastName,
-  preferred_name: "Tommy",
+  preferred_name: MEMBER_PREFERRED_NAME,
   phone: "0400 000 002",
   address: "42 Harris Street, Pyrmont NSW 2009",
   date_of_birth: "1999-11-02",
@@ -307,23 +315,42 @@ await fillProfile(users.applicant, {
 });
 console.log("[seed] profiles: 3");
 
-// A child on the member's account, so the tour photographs the per-child page
-// with a real dependant on it rather than the member reaching for themselves.
-// One is enough: what the screen has to prove is that somebody with no login of
-// their own has a full record, and a second child would only lengthen a list.
+// TWO children on the member's account, which makes the member a parent of a
+// family rather than of one child.
+//
+// The first is what the tour needs: a real dependant on the per-child page,
+// rather than the member reaching for themselves. The SECOND is the fixture
+// #102 is actually about, and one child cannot stand in for it. A family with
+// one child never exercises the bug ("sign a waiver for a second child on the
+// same email"), never produces the check-in search that returns two people who
+// share a surname and a parent, and never shows a parent an invoice list where
+// telling one child's from another's is the whole difficulty.
+//
+// They share a surname and a guardian deliberately: that is the pair a manager
+// at the door has to tell apart, and their birthdays are three years apart
+// because the date of birth is the only field on that screen that separates
+// them.
+const DEPENDANT_CONTACT = {
+  phone: "0400 000 002",
+  address: "42 Harris Street, Pyrmont NSW 2009",
+  emergencyContactName: "Ada Okafor",
+  emergencyContactRelationship: "Aunt",
+  emergencyContactPhone: "0400 000 012",
+};
 const DEPENDANT = {
   firstName: "Robin",
   lastName: PERSONAS.member.lastName,
   dateOfBirth: "2015-04-02",
-  contact: {
-    phone: "0400 000 002",
-    address: "42 Harris Street, Pyrmont NSW 2009",
-    emergencyContactName: "Ada Okafor",
-    emergencyContactRelationship: "Aunt",
-    emergencyContactPhone: "0400 000 012",
-  },
+  contact: DEPENDANT_CONTACT,
+};
+const SIBLING = {
+  firstName: "Alex",
+  lastName: PERSONAS.member.lastName,
+  dateOfBirth: "2018-09-14",
+  contact: DEPENDANT_CONTACT,
 };
 users.dependant = await createDependant(users.member, DEPENDANT);
+users.sibling = await createDependant(users.member, SIBLING);
 // The tour points `/account/$userId` at this person specifically. If the id
 // ever came back equal to the member's, `fillRouteParams` would fall through to
 // the flat map and photograph the member reaching for themselves -- passing
@@ -332,7 +359,13 @@ users.dependant = await createDependant(users.member, DEPENDANT);
 if (users.dependant === users.member) {
   throw new Error("the seeded dependant is the member: the per-child tour would cover nothing");
 }
-console.log("[seed] dependants: 1");
+// Two DISTINCT children, for the same reason the assertion above exists: a
+// fixture that quietly collapsed them would leave every sibling case covering
+// nothing while staying green.
+if (users.sibling === users.dependant || users.sibling === users.member) {
+  throw new Error("the two seeded children are the same person: the sibling cases cover nothing");
+}
+console.log("[seed] dependants: 2");
 
 await insert("user_roles", [
   { user_id: users.manager, role: "manager" },
@@ -414,9 +447,47 @@ const waivers = {
   applicant: id(62),
   // A dependant only ever comes into existence INSIDE a waiver submission, so
   // one with no waiver is a person the product cannot produce -- and the child
-  // page the tour photographs is mostly waiver history.
+  // page the tour photographs is mostly waiver history. Both children get one,
+  // for the same reason: the second child's waiver, filed on the same address as
+  // the first, IS the thing #102 exists to make possible.
   dependant: id(63),
+  sibling: id(64),
 };
+
+/** A child's waiver, as a dependant filing actually submits one. */
+function dependantWaiver({ waiverId, userId, person, signedDaysAgo }) {
+  return {
+    id: waiverId,
+    user_id: userId,
+    first_name: person.firstName,
+    last_name: person.lastName,
+    // The GUARDIAN's address, which is what a dependant filing submits: the
+    // child's own reserved string is never typed into a form and never stored
+    // as evidence of anything. BOTH children carry the same one, which is the
+    // whole point of the fixture.
+    email: PERSONAS.member.email,
+    phone: person.contact.phone,
+    address: person.contact.address,
+    date_of_birth: person.dateOfBirth,
+    emergency_contact_name: person.contact.emergencyContactName,
+    emergency_contact_relationship: person.contact.emergencyContactRelationship,
+    emergency_contact_phone: person.contact.emergencyContactPhone,
+    media_consent: false,
+    is_minor: true,
+    guardian_name: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
+    guardian_relationship: "Parent",
+    guardian_address: "42 Harris Street, Pyrmont NSW 2009",
+    guardian_phone: "0400 000 002",
+    guardian_email: PERSONAS.member.email,
+    template_version: TEMPLATE_VERSION,
+    approval_status: "approved",
+    approved_at: at(signedDaysAgo + 2),
+    approved_by: users.manager,
+    signed_at: at(signedDaysAgo),
+    signer_ip: "203.0.113.7",
+    pdf_path: `${waiverId}.pdf`,
+  };
+}
 
 await insert("waivers", [
   {
@@ -424,7 +495,7 @@ await insert("waivers", [
     user_id: users.member,
     first_name: PERSONAS.member.firstName,
     last_name: PERSONAS.member.lastName,
-    preferred_name: "Tommy",
+    preferred_name: MEMBER_PREFERRED_NAME,
     email: PERSONAS.member.email,
     phone: "0400 000 002",
     address: "42 Harris Street, Pyrmont NSW 2009",
@@ -462,36 +533,18 @@ await insert("waivers", [
     signer_ip: "203.0.113.9",
     pdf_path: `${waivers.applicant}.pdf`,
   },
-  {
-    id: waivers.dependant,
-    user_id: users.dependant,
-    first_name: DEPENDANT.firstName,
-    last_name: DEPENDANT.lastName,
-    // The GUARDIAN's address, which is what a dependant filing submits: the
-    // child's own reserved string is never typed into a form and never stored
-    // as evidence of anything.
-    email: PERSONAS.member.email,
-    phone: DEPENDANT.contact.phone,
-    address: DEPENDANT.contact.address,
-    date_of_birth: DEPENDANT.dateOfBirth,
-    emergency_contact_name: DEPENDANT.contact.emergencyContactName,
-    emergency_contact_relationship: DEPENDANT.contact.emergencyContactRelationship,
-    emergency_contact_phone: DEPENDANT.contact.emergencyContactPhone,
-    media_consent: false,
-    is_minor: true,
-    guardian_name: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
-    guardian_relationship: "Parent",
-    guardian_address: "42 Harris Street, Pyrmont NSW 2009",
-    guardian_phone: "0400 000 002",
-    guardian_email: PERSONAS.member.email,
-    template_version: TEMPLATE_VERSION,
-    approval_status: "approved",
-    approved_at: at(-28),
-    approved_by: users.manager,
-    signed_at: at(-30),
-    signer_ip: "203.0.113.7",
-    pdf_path: `${waivers.dependant}.pdf`,
-  },
+  dependantWaiver({
+    waiverId: waivers.dependant,
+    userId: users.dependant,
+    person: DEPENDANT,
+    signedDaysAgo: -30,
+  }),
+  dependantWaiver({
+    waiverId: waivers.sibling,
+    userId: users.sibling,
+    person: SIBLING,
+    signedDaysAgo: -20,
+  }),
 ]);
 
 // A stand-in for the generated document. The account page and the manager's
@@ -514,7 +567,7 @@ for (const waiverId of Object.values(waivers)) {
     if (error) throw new Error(error.message);
   });
 }
-console.log("[seed] waiver PDFs: 3");
+console.log(`[seed] waiver PDFs: ${Object.keys(waivers).length}`);
 
 await insert("code_of_conduct_acceptances", {
   user_id: users.member,
@@ -887,6 +940,39 @@ const fixture = {
   // as many words; this is that fix.
   paramsByPath: {
     "/account/$userId": { userId: users.dependant },
+  },
+  // The family, for the specs that are about being one. Names rather than only
+  // ids, because the flows they cover -- a parent picking a child, a manager
+  // telling two siblings apart at the door -- are driven through the screen the
+  // way a person drives them, and the screen shows names.
+  household: {
+    guardianUserId: users.member,
+    /**
+     * The name as the screens PRINT it, so a spec can assert whose account a
+     * child is on rather than merely that some caption rendered.
+     *
+     * Not `first last`: every manager screen names a person through
+     * `nameWithPreferred`, which quotes a preferred name into the middle
+     * (`Tom "Tommy" Okafor`). This member has one, so the two forms differ and
+     * a spec written against the plain form fails on a page that is correct.
+     * Mirrored here rather than imported because this is a `.mjs` seed and that
+     * helper is TypeScript; if the display rule changes, this changes with it.
+     */
+    guardianName: MEMBER_PREFERRED_NAME
+      ? `${PERSONAS.member.firstName} "${MEMBER_PREFERRED_NAME}" ${PERSONAS.member.lastName}`
+      : `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
+    children: [
+      {
+        userId: users.dependant,
+        name: `${DEPENDANT.firstName} ${DEPENDANT.lastName}`,
+        dateOfBirth: DEPENDANT.dateOfBirth,
+      },
+      {
+        userId: users.sibling,
+        name: `${SIBLING.firstName} ${SIBLING.lastName}`,
+        dateOfBirth: SIBLING.dateOfBirth,
+      },
+    ],
   },
 };
 

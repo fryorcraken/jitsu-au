@@ -179,6 +179,87 @@ function MediaConsentCard({
 }
 
 /**
+ * The family, in whichever direction this person sits in one.
+ *
+ * A dependant's records are reachable only through the person who looks after
+ * them, and the reverse question ("who else is on this account?") is the one a
+ * manager asks before chasing an invoice or reading a medical note. Neither was
+ * answerable from this page: a child's row named their parent in a caption
+ * beside an address, and a parent's page said nothing about their children at
+ * all.
+ *
+ * Rendered only when there IS a household, which is almost never. "Household:
+ * nobody" is a card that tells a manager nothing and pushes the record they
+ * came for further down the page, which is the same line the member-side card
+ * takes for the same reason.
+ *
+ * Presentational, and deliberately thin: names and a way through. Everything
+ * else about one of these people belongs on their own page, which is one tap
+ * away. `UserLink` is what makes it that tap, and it renders a name with no id
+ * behind it as plain text rather than a link to nowhere.
+ */
+function HouseholdCard({
+  household,
+}: {
+  household: {
+    guardian: { user_id: string; name: string | null } | null;
+    dependants: { user_id: string; name: string | null }[];
+  };
+}) {
+  const { guardian, dependants } = household;
+  // At most one of the two is ever non-empty: a dependant may not have
+  // dependants of their own (#102's one-level rule, held in `household.ts`).
+  if (!guardian && dependants.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border p-4">
+      <h2 className="mb-1 text-lg font-bold">Household</h2>
+      {guardian ? (
+        <>
+          <p className="mb-3 text-sm text-muted-foreground">
+            This person is on somebody else&apos;s account. They have no login and no mailbox of
+            their own, so everything about them goes to the account holder.
+          </p>
+          <p className="text-sm">
+            Account holder:{" "}
+            {/* No `className`: #115 moved the link's styling inside
+                `UserLink`, including a tap target the rows here need. The
+                weight goes on the wrapper instead. */}
+            <span className="font-medium">
+              {/* A word for the PERSON, never an action, which is the contract
+                  `UserLink` states: this doubles as the whole accessible name
+                  of a link whose row has no name on file. */}
+              <UserLink
+                userId={guardian.user_id}
+                name={guardian.name}
+                fallback="The account holder"
+              />
+            </span>
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mb-3 text-sm text-muted-foreground">
+            {dependants.length === 1
+              ? "One person is on this account. They have no login of their own, so everything about them comes here."
+              : `${dependants.length} people are on this account. They have no logins of their own, so everything about them comes here.`}
+          </p>
+          <ul className="space-y-1 text-sm">
+            {dependants.map((d) => (
+              <li key={d.user_id}>
+                <span className="font-medium">
+                  <UserLink userId={d.user_id} name={d.name} fallback="Someone on this account" />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
  * The signing context blob, rendered as plain rows so nothing is hidden.
  * Emits bare <Field>s: the caller owns the surrounding <dl>.
  */
@@ -234,9 +315,10 @@ function EmailCard({
   // GUARDIAN's, so prefilling it here would offer a manager a Save that writes
   // the parent's address onto the child's login, which is precisely the thing
   // nobody wants and which the address's whole reserved shape exists to
-  // prevent. Refusing that write outright is #107's (`setClubUserEmail`, in
-  // #102's sharp edges); not inviting it is this change's, because this change
-  // is what made the field look like a real address worth keeping.
+  // prevent. `changeClubUserEmail` now refuses that write outright, and the
+  // Change email button is not offered here at all for a dependant; this
+  // prefill guard is the third layer, kept because it is what stops the field
+  // ever looking like a real address worth keeping.
   const [draft, setDraft] = useState(belongsTo ? "" : (email ?? ""));
   const [busy, setBusy] = useState(false);
   const verified = isEmailVerified(emailConfirmedAt);
@@ -293,7 +375,15 @@ function EmailCard({
             : "Nobody has opened a link we sent to this address yet. Approving a waiver emails their account details here, and it is the address they sign in with, so a typo locks them out."}
       </p>
 
-      {editing ? (
+      {/* A dependant's address is their guardian's, and both writes behind these
+          buttons now refuse one outright (`setClubUserEmail` and
+          `resendClubUserVerification`). Offering a manager a Save the server
+          will not take is worse than offering nothing: they would read the
+          refusal as the page being broken rather than as the rule it is. The
+          address still shows, captioned above with whose it is. */}
+      {belongsTo ? (
+        <p className="text-sm font-medium">{email ?? "—"}</p>
+      ) : editing ? (
         <form onSubmit={save} className="flex flex-wrap items-end gap-2">
           <div className="min-w-[16rem] flex-1">
             <Label htmlFor="member-email">New email</Label>
@@ -335,8 +425,9 @@ function EmailCard({
       )}
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Changing this moves their login too. Signed waivers keep the address as it was typed, as
-        evidence, so an older submission below can legitimately show a different one.
+        {belongsTo
+          ? "Signed waivers keep the address as it was typed, as evidence, so an older submission below can legitimately show a different one."
+          : "Changing this moves their login too. Signed waivers keep the address as it was typed, as evidence, so an older submission below can legitimately show a different one."}
       </p>
     </div>
   );
@@ -742,6 +833,7 @@ function ManagerUserPage() {
   const {
     user: summary,
     profile,
+    household,
     memberships,
     waivers,
     checkins,
@@ -807,6 +899,10 @@ function ManagerUserPage() {
         emailConfirmedAt={summary.email_confirmed_at}
         onChanged={() => void load(false)}
       />
+
+      {/* Directly under the address, because the two answer one question
+          between them: who the club actually talks to about this person. */}
+      <HouseholdCard household={household} />
 
       <div className="rounded-lg border p-4">
         <h2 className="mb-3 text-lg font-bold">Profile</h2>
