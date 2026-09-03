@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
+import { UserLink } from "@/components/site/UserLink";
 import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -848,7 +849,11 @@ function ManagerCalendarPage() {
                                 {rsvpRows.map((r) => (
                                   <li key={r.user_id} className="flex flex-wrap gap-2">
                                     <span className="font-medium">
-                                      {r.name || r.email || "Someone"}
+                                      <UserLink
+                                        userId={r.user_id}
+                                        name={r.name || r.email}
+                                        fallback="Someone"
+                                      />
                                     </span>
                                     {r.name && r.email && (
                                       <span className="text-muted-foreground">{r.email}</span>

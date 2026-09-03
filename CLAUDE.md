@@ -882,8 +882,8 @@ Then hold the change to this:
   you the timeout, the retry that carries the same `client_submission_id`, the
   "did it actually land?" confirm, and a failure panel that stays on screen with
   a button in it. Do not write another `setLoading(true) / catch / toast.error`
-  form. Also `StatusPill`, `SiteLayout` / `MemberLayout` / `KbLayout`, and
-  `components/ui/*`.
+  form. Also `StatusPill`, `UserLink`, `SiteLayout` / `MemberLayout` / `KbLayout`,
+  and `components/ui/*`.
 - **A toast is not a UI for anything that matters.** It auto-dismisses, it is
   easy to miss on a phone, and it leaves nothing to press. Use it for "saved",
   not for "your waiver did not go through".
@@ -939,6 +939,13 @@ Then hold the change to this:
   `aria-live="polite"` wiring `AuthPending` and `SubmitStatus` already have.
   Without it a screen-reader user gets no signal that a page started fetching
   or finished.
+- **A person's name in a manager's list is always a link to their record.**
+  Use **`components/site/UserLink`**, never a bare `<Link>` or plain text: it
+  carries the route, the always-visible underline (a hover-only one is invisible
+  on the phone most of this club's admin happens on), and the plain-text
+  fallback for a row with no account behind it, such as a lead who has only
+  registered interest. A name a manager cannot click sends them back to
+  `/manager/users` to search for the person already in front of them.
 - **Never lose someone's input.** A failed submit keeps the form filled and
   offers the retry. Ask for as little as possible in the first place, and prefill
   what we already know (the waiver does this with `getMyLatestWaiver`). Every

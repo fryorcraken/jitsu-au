@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
+import { UserLink } from "@/components/site/UserLink";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/_authenticated/manager/waivers")({
 
 type Row = {
   id: string;
+  user_id: string;
   full_name: string;
   email: string;
   signed_at: string;
@@ -234,7 +236,12 @@ function WaiversPage() {
                   const up = uploads[r.id];
                   return (
                     <tr key={r.id} className="border-t">
-                      <td className="px-3 py-2 font-medium">{r.full_name}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {/* The name as signed, opening the person who signed it.
+                            A manager reading this list is usually on their way
+                            to the record behind a row anyway. */}
+                        <UserLink userId={r.user_id} name={r.full_name} />
+                      </td>
                       <td className="px-3 py-2">{r.email}</td>
                       <td className="px-3 py-2">
                         {formatDateTime(r.signed_at)}

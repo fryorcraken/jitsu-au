@@ -49,6 +49,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MarkdownEditor } from "@/components/site/MarkdownEditor";
 import { CopyButton } from "@/components/site/CopyButton";
+import { UserLink } from "@/components/site/UserLink";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -2022,7 +2023,11 @@ function KnowledgeBaseManager() {
                     <div key={f.id} className="rounded-md bg-muted/50 p-3 text-sm">
                       <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span className="font-medium text-foreground">
-                          {f.author ?? "Someone at the club"}
+                          <UserLink
+                            userId={f.user_id}
+                            name={f.author}
+                            fallback="Someone at the club"
+                          />
                         </span>
                         <span>v{f.article_version}</span>
                         <span>{formatDate(f.created_at)}</span>

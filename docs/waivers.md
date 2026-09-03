@@ -578,7 +578,9 @@ step happens. See `docs/notifications.md` for the two items and how each clears.
 
 The manager waivers screen lists submissions newest first with the submitted
 name/email, date, template version, status badge (pending / active /
-superseded), the PDF, and Approve / Revoke approval. Approve = promote + unlock +
+superseded), the PDF, and Approve / Revoke approval. The submitted name opens
+the person who signed it: every name in a manager's list is a link to that
+person's record, through `components/site/UserLink`. Approve = promote + unlock +
 assign the trial (see rule 6). The applicant becomes a visitor.
 
 Approve asks first, in the app's own dialog (`useConfirm`), naming the three
@@ -589,8 +591,8 @@ Revoking is not gated: it flips the row back to pending and re-approving
 restores it, which is why the button no longer says "Unapprove". It never
 undid the email, the login or the trial, and the old label promised it did.
 
-For one person there is a user page (`/manager/users/:userId`, reached from the
-directory), which is where a review normally happens: the profile (the club's
+For one person there is a user page (`/manager/users/:userId`), which is where a
+review normally happens: the profile (the club's
 current record), their memberships, and every submission they ever made, newest
 first. Each submission is a collapsible panel holding the frozen submission in
 full, the signing record (IP + browser context), when it was approved and by

@@ -1727,6 +1727,10 @@ export const listWaivers = createServerFn({ method: "GET" })
     const statuses = deriveWaiverListStatuses(rows);
     return rows.map((row) => ({
       id: row.id,
+      // Who signed it, so the list's name column can open their record. The
+      // waiver holds the name AS SUBMITTED, which is the evidence and may not
+      // match the profile any more; the person behind it is still this one.
+      user_id: row.user_id,
       // The legal name as submitted, with the preferred name quoted in when
       // they gave one: managers see who signed AND what to call them.
       full_name: nameWithPreferred(row),
