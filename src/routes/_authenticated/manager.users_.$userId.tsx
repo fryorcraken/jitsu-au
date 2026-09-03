@@ -14,7 +14,6 @@ import { Pill } from "@/components/site/StatusPill";
 import { UserLink } from "@/components/site/UserLink";
 import { AddMembershipCard } from "@/components/site/AddMembershipCard";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
-import { UserLink } from "@/components/site/UserLink";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
 import {
@@ -223,15 +222,19 @@ function HouseholdCard({
           </p>
           <p className="text-sm">
             Account holder:{" "}
-            <UserLink
-              userId={guardian.user_id}
-              name={guardian.name}
-              // Reads as a person, because it IS the link to one: a name that
-              // could not be resolved still leaves somewhere to go, which is
-              // the next step this line owes the reader.
-              fallback="Open the account holder"
-              className="font-medium"
-            />
+            {/* No `className`: #115 moved the link's styling inside
+                `UserLink`, including a tap target the rows here need. The
+                weight goes on the wrapper instead. */}
+            <span className="font-medium">
+              {/* A word for the PERSON, never an action, which is the contract
+                  `UserLink` states: this doubles as the whole accessible name
+                  of a link whose row has no name on file. */}
+              <UserLink
+                userId={guardian.user_id}
+                name={guardian.name}
+                fallback="The account holder"
+              />
+            </span>
           </p>
         </>
       ) : (
@@ -244,12 +247,9 @@ function HouseholdCard({
           <ul className="space-y-1 text-sm">
             {dependants.map((d) => (
               <li key={d.user_id}>
-                <UserLink
-                  userId={d.user_id}
-                  name={d.name}
-                  fallback="Open this person"
-                  className="font-medium"
-                />
+                <span className="font-medium">
+                  <UserLink userId={d.user_id} name={d.name} fallback="Someone on this account" />
+                </span>
               </li>
             ))}
           </ul>
