@@ -56,7 +56,7 @@ import {
   loadHouseholdContacts,
   type ContactEmail,
 } from "@/lib/household-email";
-import { householdTargetSchema, resolveSubject } from "@/lib/household";
+import { householdRoleScope, householdTargetSchema, resolveSubject } from "@/lib/household";
 import { requireManager } from "@/lib/require-manager";
 
 /**
@@ -127,6 +127,27 @@ function dedupeHash(row: {
  * So this reconciles rather than only granting, and every caller that opens or
  * closes a membership goes through it.
  *
+ * ## It reaches through the household, in both directions
+ *
+ * Since #103, `has_active_paid_membership` answers yes for a guardian whose
+ * DEPENDANT holds an active paid membership, and #107 moved this label to agree
+ * with it (`deriveLifecycleStatus` in `src/lib/validation.ts` carries the full
+ * reasoning, including why nothing else about a household is folded in). Two
+ * consequences, and missing either one leaves a stale label on somebody's row:
+ *
+ *  - A person's row counts the memberships of everybody on their account, not
+ *    only their own, so a parent who never trains holds the label while their
+ *    child's plan is live.
+ *  - A **child's** membership opening or closing has to re-sync their **parent**.
+ *    Every caller hands this function the one user id whose membership just
+ *    moved, so the parent is nobody's argument and would simply never be
+ *    reconciled.
+ *
+ * Widening the label grants nothing: no RLS policy asks for the `member` role
+ * (all 73 `has_role` calls in the migrations ask for `'manager'`), and nothing in
+ * `src/` reads it either. It is read by the manager directory and the agent API,
+ * and that is the whole of it.
+ *
  * A failed read leaves the role exactly as it is. "The query fell over" and
  * "they hold nothing" must never be the same answer here: the second one
  * revokes, and revoking on a blip would strip the label off paid-up members en
@@ -140,10 +161,43 @@ export async function syncMemberRole(
 ): Promise<void> {
   if (!userId) return;
 
+  // Whose memberships count towards this person's label, and whose label ALSO
+  // moves because of this change. A child's plan opening or closing changes
+  // their parent's label as well as their own, and every caller hands this one
+  // user id, so the second person has to be found here or never at all.
+  const scope = await householdRoleScope(admin, userId);
+  // Could not ask. Same posture as a failed membership read below: leave every
+  // role exactly as it is rather than treating "we don't know" as "nobody".
+  if (!scope) return;
+
+  await syncOneMemberRole(admin, userId, scope.countsFor);
+
+  if (scope.guardianUserId) {
+    const guardianScope = await householdRoleScope(admin, scope.guardianUserId);
+    if (guardianScope)
+      await syncOneMemberRole(admin, scope.guardianUserId, guardianScope.countsFor);
+  }
+}
+
+/**
+ * The half of `syncMemberRole` that writes one person's row, given the ids whose
+ * memberships count towards it (`householdRoleScope().countsFor`: themselves,
+ * plus anyone on their account).
+ *
+ * Split out so the household walk above reads as the household walk and this
+ * reads as the rule, and so the reconcile-rather-than-only-grant behaviour is
+ * written once for both the person whose membership changed and the account
+ * holder who was not mentioned.
+ */
+async function syncOneMemberRole(
+  admin: MembershipClient,
+  userId: string,
+  countsFor: string[],
+): Promise<void> {
   const { data: active, error } = await admin
     .from("memberships")
     .select("plan_id")
-    .eq("user_id", userId)
+    .in("user_id", countsFor)
     .eq("status", "active")
     .gt("price_cents", 0);
   if (error) {

@@ -303,3 +303,50 @@ export async function listHousehold(
   if (dependants.error) throw new Error(dependants.error.message);
   return [...(self.data ? [self.data] : []), ...(dependants.data ?? [])];
 }
+
+/**
+ * Whose memberships bear on `userId`'s `member` role, and whose role moves when
+ * `userId`'s own memberships change.
+ *
+ * Two questions, one pair of reads, because they are answered from the same two
+ * rows. `syncMemberRole` is the only caller and needs both: it is handed a
+ * single user id by whichever membership just opened or closed, and a child's
+ * plan changes their PARENT's label as well as their own.
+ *
+ * `countsFor` is this person plus their dependants. For a dependant that is just
+ * themselves, which the one-level rule guarantees rather than this code
+ * special-casing it.
+ *
+ * Returns **null when the question could not be asked**, which is deliberately
+ * not the same value as "nobody". `syncMemberRole` revokes on "they hold
+ * nothing", so collapsing a failed read into an empty household would strip the
+ * label off paid-up parents the moment `profiles` had a blip -- the same reason
+ * that function already returns early on a failed membership read.
+ */
+export async function householdRoleScope(
+  admin: AdminClient,
+  userId: string,
+): Promise<{ countsFor: string[]; guardianUserId: string | null } | null> {
+  const [self, dependants] = await Promise.all([
+    admin.from("profiles").select("user_id, guardian_user_id").eq("user_id", userId).maybeSingle(),
+    admin.from("profiles").select("user_id").eq("guardian_user_id", userId),
+  ]);
+  if (self.error) {
+    console.error(
+      `[householdRoleScope] could not read the profile for ${userId}:`,
+      self.error.message,
+    );
+    return null;
+  }
+  if (dependants.error) {
+    console.error(
+      `[householdRoleScope] could not read the dependants of ${userId}:`,
+      dependants.error.message,
+    );
+    return null;
+  }
+  return {
+    countsFor: [userId, ...(dependants.data ?? []).map((d) => d.user_id)],
+    guardianUserId: self.data?.guardian_user_id ?? null,
+  };
+}

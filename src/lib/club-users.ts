@@ -155,6 +155,15 @@ export type ClubUser = {
    */
   email_belongs_to: string | null;
   /**
+   * The account holder this person is a dependant of, or null for everybody
+   * else -- which is almost everybody.
+   *
+   * `email_belongs_to` names that person for a sentence; this identifies them,
+   * so a manager list can LINK to them. Null for a lead, who has no person
+   * record at all and therefore cannot be on anybody's account.
+   */
+  guardian_user_id: string | null;
+  /**
    * When this address was proven, or null if never. Always null for a lead:
    * they have no person record to hold a confirmation, so their proof (if any)
    * is held on the token until they sign a waiver. See `email-verification.ts`.
@@ -271,6 +280,19 @@ export function aggregateClubUsers(input: {
    * passes them here.
    */
   guardians?: HouseholdContactProfile[];
+  /**
+   * Household rows for people who are NOT being listed, used only to work out
+   * whose account somebody holds. Never emitted as a person of their own.
+   *
+   * `listClubUsers` needs none: it lists everybody, so a guardian's dependants
+   * are already in `profiles`. `getClubUser` reads one person, so if that
+   * person is a guardian their dependants are not in the list at all and their
+   * `member` phase would silently disagree with the directory that lists them.
+   * Their membership rows go in `memberships` alongside everybody else's: only
+   * `profiles` is emitted, so rows belonging to anyone else are read through
+   * the household index below and nowhere else.
+   */
+  dependants?: Pick<ClubUserProfile, "user_id" | "guardian_user_id">[];
   waivers: ClubUserWaiver[];
   memberships: ClubUserMembership[];
   plans: ClubUserPlan[];
@@ -314,6 +336,22 @@ export function aggregateClubUsers(input: {
     list.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   }
 
+  // Who is on whose account, so a guardian's row can count their dependants'
+  // memberships towards the `member` phase. `deriveLifecycleStatus` carries the
+  // reasoning; this is only the index it needs.
+  //
+  // Built from the people being listed plus `input.dependants`, and never from
+  // `input.guardians`: those are contact-resolution rows for the OWNER of an
+  // address, so folding them in would attribute somebody else's household to a
+  // person this call is not reporting on.
+  const dependantsByGuardian = new Map<string, string[]>();
+  for (const p of [...input.profiles, ...(input.dependants ?? [])]) {
+    if (!p.guardian_user_id) continue;
+    const list = dependantsByGuardian.get(p.guardian_user_id) ?? [];
+    list.push(p.user_id);
+    dependantsByGuardian.set(p.guardian_user_id, list);
+  }
+
   const checkinsByUser = new Map<string, number>();
   for (const c of input.checkins ?? [])
     checkinsByUser.set(c.user_id, (checkinsByUser.get(c.user_id) ?? 0) + 1);
@@ -333,14 +371,21 @@ export function aggregateClubUsers(input: {
     const hasApprovedWaiver = approvedSignedAt != null;
     const hasPendingWaiver = !hasApprovedWaiver && hasAnyWaiverByUser.has(p.user_id);
 
+    const toLifecycleMembership = (m: ClubUserMembership) => ({
+      status: m.status as MembershipStatus,
+      kind: (planById.get(m.plan_id)?.kind ?? "session") as MembershipPlanKind,
+      price_cents: m.price_cents,
+    });
     const lifecycle_status = deriveLifecycleStatus({
       hasApprovedWaiver,
       hasPendingWaiver,
-      memberships: ms.map((m) => ({
-        status: m.status as MembershipStatus,
-        kind: (planById.get(m.plan_id)?.kind ?? "session") as MembershipPlanKind,
-        price_cents: m.price_cents,
-      })),
+      memberships: ms.map(toLifecycleMembership),
+      // The people on this person's account. Only ever promotes a guardian to
+      // `member`, which is what makes the directory agree with the RLS gate
+      // that has been letting them read members-only pages since #103.
+      householdMemberships: (dependantsByGuardian.get(p.user_id) ?? []).flatMap((id) =>
+        (membershipsByUser.get(id) ?? []).map(toLifecycleMembership),
+      ),
     });
 
     // UTS-student status is trust-based on a non-empty student number. Prefer
@@ -377,6 +422,7 @@ export function aggregateClubUsers(input: {
       email_belongs_to: contact.onBehalfOf
         ? (contact.onBehalfOf.name ?? "the account holder")
         : null,
+      guardian_user_id: p.guardian_user_id,
       // Keyed on whose address it actually is, so a dependant badges their
       // guardian's confirmation rather than a reserved address nobody ever
       // confirmed.
@@ -419,6 +465,7 @@ export function aggregateClubUsers(input: {
       // A lead is an address that wrote in. It is theirs by definition, and
       // there is no household to resolve: a lead has no person record at all.
       email_belongs_to: null,
+      guardian_user_id: null,
       // A lead has no person record, so there is nothing here to badge.
       email_confirmed_at: null,
       phone: lead.phone,

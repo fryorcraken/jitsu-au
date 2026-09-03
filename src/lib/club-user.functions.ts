@@ -59,6 +59,7 @@ export const getClubUser = createServerFn({ method: "POST" })
       { data: checkins, error: cErr },
       { count: checkinCount, error: ccErr },
       { data: codeOfConduct, error: cocErr },
+      { data: dependantProfiles, error: dErr },
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("user_id", data.userId).maybeSingle(),
       admin
@@ -94,6 +95,14 @@ export const getClubUser = createServerFn({ method: "POST" })
         .eq("user_id", data.userId)
         .order("accepted_at", { ascending: false })
         .limit(20),
+      // The people on THIS person's account. Read here rather than after the
+      // profile comes back because it is keyed on the id we were asked about,
+      // not on anything the profile tells us -- so it costs no extra round trip.
+      admin
+        .from("profiles")
+        .select("user_id, guardian_user_id, first_name, middle_name, last_name, preferred_name")
+        .eq("guardian_user_id", data.userId)
+        .order("first_name", { ascending: true }),
     ]);
     // Every read except the email RPC fails the whole page. This is the screen a
     // manager decides an approval from, so "the query failed" must never render
@@ -108,6 +117,12 @@ export const getClubUser = createServerFn({ method: "POST" })
     if (rErr) throw new Error(rErr.message);
     if (cErr) throw new Error(cErr.message);
     if (ccErr) throw new Error(ccErr.message);
+    // Fails the page for the reason the comment above gives, not merely for
+    // symmetry: since #107 a guardian's `member` phase counts their dependants'
+    // memberships, so degrading this read to "nobody" would show a paid-up
+    // family's parent as a lead, on the screen a manager decides an approval
+    // from, and would disagree with the directory that lists the same person.
+    if (dErr) throw new Error(dErr.message);
     if (!profile) throw new Error("User not found.");
 
     // Whose address belongs on this page. For an account holder that is their
@@ -122,7 +137,9 @@ export const getClubUser = createServerFn({ method: "POST" })
     // have exactly one answer, because the wrong one here is a reserved,
     // non-deliverable string that identifies nobody.
     const contactId = contactUserIdFor(profile);
-    const [contactEmails, guardianProfile] = await Promise.all([
+    const dependantRows = dependantProfiles ?? [];
+    const dependantIds = dependantRows.map((d) => d.user_id);
+    const [contactEmails, guardianProfile, dependantMemberships] = await Promise.all([
       userEmails(admin, [contactId]),
       profile.guardian_user_id
         ? admin
@@ -131,7 +148,21 @@ export const getClubUser = createServerFn({ method: "POST" })
             .eq("user_id", profile.guardian_user_id)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      // Only what the `member` phase is derived from, and only when there is
+      // somebody to ask about. Not the whole membership history: these rows are
+      // never listed on this page, they only answer "is anybody on this
+      // person's account paid up right now".
+      dependantIds.length
+        ? admin
+            .from("memberships")
+            .select("id, user_id, plan_id, status, price_cents, created_at")
+            .in("user_id", dependantIds)
+        : Promise.resolve({ data: [], error: null }),
     ]);
+    // Fails the page, for the same reason the dependants read above does: it
+    // feeds the funnel phase, and a guardian silently demoted to `lead` is a
+    // wrong answer rather than a missing one.
+    if (dependantMemberships.error) throw new Error(dependantMemberships.error.message);
     // Same posture as the lookup this replaced: a failed address read degrades
     // to a missing email rather than taking down the screen a manager approves
     // from. A failed GUARDIAN read is logged for the same reason: the page
@@ -191,22 +222,43 @@ export const getClubUser = createServerFn({ method: "POST" })
       emails,
       // Not a person on this page, only the owner of the address shown on it.
       guardians: guardianProfile.data ? [guardianProfile.data] : [],
+      // Who is on this person's account. Not listed as people of their own --
+      // they have their own pages -- but their memberships below decide whether
+      // this person reads as a `member`, which is what makes this page agree
+      // with the directory that lists them.
+      dependants: dependantRows,
       waivers: waiverRows.map((w) => ({
         user_id: w.user_id,
         signed_at: w.signed_at,
         approval_status: w.approval_status,
       })),
       leads: [],
-      memberships: membershipRows.map((m) => ({
-        user_id: m.user_id,
-        plan_id: m.plan_id,
-        status: m.status,
-        price_cents: m.price_cents,
-        is_student: m.is_student,
-        uts_student_number: m.uts_student_number,
-        sessions_remaining: m.sessions_remaining,
-        created_at: m.created_at,
-      })),
+      memberships: [
+        ...membershipRows.map((m) => ({
+          user_id: m.user_id,
+          plan_id: m.plan_id,
+          status: m.status,
+          price_cents: m.price_cents,
+          is_student: m.is_student,
+          uts_student_number: m.uts_student_number,
+          sessions_remaining: m.sessions_remaining,
+          created_at: m.created_at,
+        })),
+        // The dependants' rows, which are read ONLY through the household index
+        // (nothing but `profiles` is emitted, and every per-person lookup is
+        // keyed on the person being emitted). They carry no student number or
+        // credit balance because nothing on this page reads either off them.
+        ...(dependantMemberships.data ?? []).map((m) => ({
+          user_id: m.user_id,
+          plan_id: m.plan_id,
+          status: m.status,
+          price_cents: m.price_cents,
+          is_student: false,
+          uts_student_number: null,
+          sessions_remaining: null,
+          created_at: m.created_at,
+        })),
+      ],
       plans: planRows,
       roles: roles ?? [],
       // Deliberately NOT passed: the aggregation counts the array it is given,
@@ -341,6 +393,33 @@ export const getClubUser = createServerFn({ method: "POST" })
         media_consent_updated_at: profile.media_consent_updated_at,
         media_consent_updated_by: profile.media_consent_updated_by,
         updated_at: profile.updated_at,
+      },
+      /**
+       * The family, in whichever direction this person sits in one: the account
+       * holder above them, and the people on their account below.
+       *
+       * Both are always present and at most one is ever non-empty, because a
+       * dependant may not have dependants of their own (#102's one-level rule,
+       * enforced in `household.ts`). The card renders nothing when both are.
+       *
+       * Names only, plus the id to link on. Everything else about one of these
+       * people belongs on THEIR page, which is a link away.
+       */
+      household: {
+        guardian: profile.guardian_user_id
+          ? {
+              user_id: profile.guardian_user_id,
+              // Null when the lookup failed, which the card says out loud
+              // rather than printing a bare uuid or, worse, nothing at all: a
+              // child whose parent silently vanished off this card reads as a
+              // child with no parent on file.
+              name: guardianProfile.data ? nameWithPreferred(guardianProfile.data) || null : null,
+            }
+          : null,
+        dependants: dependantRows.map((d) => ({
+          user_id: d.user_id,
+          name: nameWithPreferred(d) || null,
+        })),
       },
       memberships: membershipRows.map((m) => ({
         id: m.id,

@@ -139,6 +139,79 @@ describe("deriveLifecycleStatus", () => {
       deriveLifecycleStatus({ ...approved, memberships: [trial("active"), paid("expired")] }),
     ).toBe("visitor");
   });
+
+  // #107. `has_active_paid_membership` has answered yes for a guardian whose
+  // dependant holds a paid plan since #103, so a parent has been reading the
+  // members-only calendar while this labelled them `lead`. These are the cases
+  // that made the two disagree.
+  describe("through the household", () => {
+    it("is member when a dependant holds an active paid membership and they hold nothing", () => {
+      expect(
+        deriveLifecycleStatus({
+          ...none,
+          memberships: [],
+          householdMemberships: [paid("active")],
+        }),
+      ).toBe("member");
+    });
+
+    it("promotes a parent who would otherwise read as lapsed", () => {
+      expect(
+        deriveLifecycleStatus({
+          ...approved,
+          memberships: [paid("expired")],
+          householdMemberships: [paid("active")],
+        }),
+      ).toBe("member");
+    });
+
+    it("ignores a dependant's trial: the gate asks about PAID cover", () => {
+      expect(
+        deriveLifecycleStatus({
+          ...none,
+          memberships: [],
+          householdMemberships: [trial("active")],
+        }),
+      ).toBe("lead");
+    });
+
+    it("ignores a dependant's ENDED paid membership, rather than reading it as their own", () => {
+      // The reach stops at `member` deliberately. Folding this into `lapsed`
+      // would put the child AND the parent on the chase list for one lapse,
+      // and the child's own row already carries the parent's address to chase.
+      expect(
+        deriveLifecycleStatus({
+          ...none,
+          memberships: [],
+          householdMemberships: [paid("expired")],
+        }),
+      ).toBe("lead");
+    });
+
+    it("leaves a parent's own waiver phase alone", () => {
+      // A parent who signed their own waiver is a visitor, not something else,
+      // when nobody on the account holds paid cover.
+      expect(
+        deriveLifecycleStatus({
+          ...approved,
+          memberships: [],
+          householdMemberships: [trial("active")],
+        }),
+      ).toBe("visitor");
+    });
+
+    it("reads an omitted household exactly as an empty one", () => {
+      // Every caller that has no household to hand omits it, so the two must
+      // not differ: `getMyMemberships` is one of them on purpose.
+      expect(deriveLifecycleStatus({ ...approved, memberships: [paid("expired")] })).toBe(
+        deriveLifecycleStatus({
+          ...approved,
+          memberships: [paid("expired")],
+          householdMemberships: [],
+        }),
+      );
+    });
+  });
 });
 
 // Deleting a membership is the only irreversible thing a manager can do to one,

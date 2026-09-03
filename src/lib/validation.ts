@@ -1377,24 +1377,74 @@ export function formatCents(cents: number): string {
 /**
  * Derive a person's lifecycle status from their waivers + membership records.
  * Precedence:
- *   1. member  — any ACTIVE paid membership (kind != trial, price > 0).
- *   2. lapsed  — a trial or paid membership ended (expired/cancelled) and
- *                nothing is active: someone to chase for a renewal.
+ *   1. member  — any ACTIVE paid membership (kind != trial, price > 0), held by
+ *                THEM or by anyone on their account (see `householdMemberships`).
+ *   2. lapsed  — a trial or paid membership of their OWN ended
+ *                (expired/cancelled) and nothing of their own is active:
+ *                someone to chase for a renewal.
  *   3. visitor — an approved waiver (the free trial is assigned at approval).
  *   4. applicant — waiver submission(s), none approved yet.
  *   5. lead    — nothing beyond a registration (or a bare profile).
+ *
+ * ## Why `member` reaches through the household and nothing else does
+ *
+ * `public.has_active_paid_membership` — the SQL helper RLS uses to gate the
+ * members-only calendar and blog comments — answers yes for a guardian whose
+ * DEPENDANT holds an active paid membership. That was #102's product decision
+ * ("Members-only access for a non-training parent? Yes"), and #103 shipped it
+ * while leaving this function counting only a person's own rows, which left a
+ * guardian holding live members-only access while this labelled them `lead` or
+ * `lapsed`. `20260726000000_calendar.sql` says in as many words that the two are
+ * meant to mirror each other. This is the half that moves, because the other
+ * half is a settled product decision and because nothing reads the label for
+ * access: no RLS policy anywhere asks for the `member` role, so widening it
+ * changes what a manager READS and cannot widen what anybody can REACH.
+ *
+ * The reach stops at `member` on purpose, and matching the gate is the whole
+ * reason: the gate only ever asks about an ACTIVE PAID membership, so that is
+ * the only branch where the two could disagree. Folding the household into
+ * `lapsed` as well would put a second row on the chase list for one lapse — the
+ * child who lapsed, and their parent — and it would buy nothing, because the
+ * child's own row already carries the parent's address to chase (#112).
+ *
+ * `visitor` and `applicant` stay personal for a different reason: they come from
+ * a waiver, and each person signs their own. A parent who has never signed one
+ * is not a visitor, whatever their children have signed.
+ *
+ * Two neighbours that deliberately do NOT reach through the household, so this
+ * comment is the record that they were considered rather than missed:
+ *   - **Check-in coverage** (`resolveCoverage`) is strictly personal. "May this
+ *     person see members-only content" and "may this person train today" are
+ *     different questions, and a guardian at the door correctly reads "No cover".
+ *   - **`getMyMemberships`** renders `/membership`, which exists to sell the
+ *     SUBJECT a plan and says things like "Renew below to keep training". A
+ *     parent with no plan of their own must not be told they are already a
+ *     member there, so that caller passes no household.
  */
 export function deriveLifecycleStatus(input: {
   hasApprovedWaiver: boolean;
   hasPendingWaiver: boolean;
   memberships: { status: MembershipStatus; kind: MembershipPlanKind; price_cents: number }[];
+  /**
+   * Memberships held by the people on this person's account — their dependants.
+   * Only ever promotes them to `member`; never affects any other phase.
+   *
+   * Omitted by callers that have no household to hand, which reads the same as a
+   * person with nobody on their account.
+   */
+  householdMemberships?: {
+    status: MembershipStatus;
+    kind: MembershipPlanKind;
+    price_cents: number;
+  }[];
 }): LifecycleStatus {
   const isPaid = (m: { kind: MembershipPlanKind; price_cents: number }) =>
     m.kind !== "trial" && m.price_cents > 0;
   const isEnded = (m: { status: MembershipStatus }) =>
     m.status === "expired" || m.status === "cancelled";
   const active = input.memberships.filter((m) => m.status === "active");
-  if (active.some(isPaid)) return "member";
+  const householdActive = (input.householdMemberships ?? []).filter((m) => m.status === "active");
+  if (active.some(isPaid) || householdActive.some(isPaid)) return "member";
   if (active.length === 0 && input.memberships.some(isEnded)) return "lapsed";
   if (input.hasApprovedWaiver) return "visitor";
   if (input.hasPendingWaiver) return "applicant";

@@ -1,13 +1,14 @@
 // The household gate. What is pinned here is WHO may act for whom, because
 // every server function that grows an optional target defers to this and none
 // of them re-derives the rule.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
   assertActingFor,
   assertMayHaveDependants,
   contactUserIdFor,
+  householdRoleScope,
   householdTargetSchema,
   isDependant,
   isDependantUser,
@@ -72,6 +73,12 @@ function admin(rows: Row[]) {
                   ),
                   error: null,
                 }),
+              // Awaited with no terminator, which is how `householdRoleScope`
+              // reads a set of rows. A real builder is a thenable too.
+              then: (
+                resolve: (v: { data: Row[]; error: null }) => unknown,
+                reject: (e: unknown) => unknown,
+              ) => Promise.resolve({ data: matched, error: null }).then(resolve, reject),
             };
           },
         }),
@@ -88,6 +95,8 @@ const erroringAdmin = {
       eq: () => ({
         maybeSingle: () => Promise.resolve({ data: null, error: { message: "boom" } }),
         order: () => Promise.resolve({ data: null, error: { message: "boom" } }),
+        then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+          Promise.resolve({ data: null, error: { message: "boom" } }).then(resolve, reject),
       }),
     }),
   }),
@@ -392,5 +401,49 @@ describe("mayActFor", () => {
     // "We could not ask" is not "no". Flattening it would turn an outage into a
     // refusal at every call site.
     await expect(mayActFor(erroringAdmin, "parent", "child")).rejects.toThrow("boom");
+  });
+});
+
+// `syncMemberRole`'s two questions, and the reason they are one function: both
+// are answered from the same pair of rows. The `member` label reaches through a
+// household since #107, so a child's plan moving has to move their parent's row
+// as well as their own.
+describe("householdRoleScope", () => {
+  // The failed-read case logs before returning null; keep it out of the report.
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts a guardian plus everyone on their account", async () => {
+    const scope = await householdRoleScope(admin(EVERYONE), "parent");
+    expect(scope).toEqual({ countsFor: ["parent", "child", "sibling"], guardianUserId: null });
+  });
+
+  it("names the account holder whose label also moves, for a dependant", async () => {
+    // A dependant may have no dependants of their own, so `countsFor` is just
+    // them -- the one-level rule producing that, not a special case here.
+    const scope = await householdRoleScope(admin(EVERYONE), "child");
+    expect(scope).toEqual({ countsFor: ["child"], guardianUserId: "parent" });
+  });
+
+  it("keeps households apart", async () => {
+    const scope = await householdRoleScope(admin(EVERYONE), "stranger");
+    expect(scope).toEqual({ countsFor: ["stranger", "their-child"], guardianUserId: null });
+  });
+
+  it("answers for somebody with no profile row as an account holder alone", async () => {
+    const scope = await householdRoleScope(admin(EVERYONE), "nobody");
+    expect(scope).toEqual({ countsFor: ["nobody"], guardianUserId: null });
+  });
+
+  // The distinction the whole return type exists for. `syncMemberRole` REVOKES
+  // on "they hold nothing", so a failed read answered as an empty household
+  // would strip the label off every paid-up parent the moment `profiles`
+  // hiccuped. Null is not a household with nobody in it.
+  it("returns null on a failed read rather than an empty household", async () => {
+    await expect(householdRoleScope(erroringAdmin, "parent")).resolves.toBeNull();
   });
 });

@@ -45,11 +45,19 @@ const TRIAL_PLAN = {
  * `activePaid`/`rolePlans` are the two reads `syncMemberRole` makes at the end
  * of every activation; `roleWrites` records which way it went so a test can
  * assert on the label without a roles table to inspect.
+ *
+ * Since #107 that label reaches through the household, so `syncMemberRole` also
+ * walks `householdRoleScope`: one `profiles` read for the person (which is the
+ * same `profile` row above, now also consulted for `guardian_user_id`) and one
+ * for `dependants`. `activePaidUserIds` records the ids the tally was actually
+ * scoped to, which is the only way to prove a parent's label counted their
+ * child rather than merely coming out the same by luck.
  */
 function fakeAdmin(reads: {
   trialPlans?: Result;
   existingTrial?: Result;
   profile?: Result;
+  dependants?: Result;
   activePaid?: Result;
   rolePlans?: Result;
   roleWriteFails?: boolean;
@@ -57,6 +65,10 @@ function fakeAdmin(reads: {
   const inserts: unknown[] = [];
   const updates: unknown[] = [];
   const roleWrites: ("grant" | "revoke")[] = [];
+  // Which ids each role tally was scoped to, in order. `syncMemberRole` runs
+  // once per person whose label could have moved, so a child's activation
+  // leaves two entries here: the child's, then their guardian's.
+  const activePaidUserIds: string[][] = [];
   const roleResult = reads.roleWriteFails ? fails("deadlock detected") : ok(null);
 
   const trialPlans = reads.trialPlans ?? ok([TRIAL_PLAN]);
@@ -65,6 +77,8 @@ function fakeAdmin(reads: {
   // Default: the trial is all they hold, so the label comes off.
   const activePaid = reads.activePaid ?? ok([]);
   const rolePlans = reads.rolePlans ?? ok([]);
+  // Default: nobody is on this person's account, which is almost everybody.
+  const dependants = reads.dependants ?? ok([]);
   const inserted = ok({ id: "mem-1", user_id: "user-1", plan_id: TRIAL_PLAN.id, price_cents: 0 });
 
   const admin = {
@@ -79,16 +93,27 @@ function fakeAdmin(reads: {
           };
         }
         if (table === "profiles") {
-          return { eq: () => ({ maybeSingle: () => Promise.resolve(profile) }) };
+          // Two shapes. `householdRoleScope`'s dependants read is keyed on
+          // `guardian_user_id` and is awaited with no single-row terminator;
+          // every other profiles read here ends in `.maybeSingle()`.
+          return {
+            eq: (column: string) =>
+              column === "guardian_user_id"
+                ? Promise.resolve(dependants)
+                : { maybeSingle: () => Promise.resolve(profile) },
+          };
         }
         // memberships, reached two ways: the "have they had a trial before"
         // guard (.eq.in.limit.maybeSingle) and syncMemberRole's active-and-paid
-        // read (.eq.eq.gt).
+        // read, which is scoped to a household and so filters `.in.eq.gt`.
         return {
           eq: () => ({
             in: () => ({ limit: () => ({ maybeSingle: () => Promise.resolve(existingTrial) }) }),
-            eq: () => ({ gt: () => Promise.resolve(activePaid) }),
           }),
+          in: (_column: string, ids: string[]) => {
+            activePaidUserIds.push(ids);
+            return { eq: () => ({ gt: () => Promise.resolve(activePaid) }) };
+          },
         };
       },
       insert: (row: unknown) => {
@@ -114,7 +139,7 @@ function fakeAdmin(reads: {
     }),
   };
 
-  return { admin, inserts, updates, roleWrites };
+  return { admin, inserts, updates, roleWrites, activePaidUserIds };
 }
 
 /** The module under test lazy-imports the admin client; hand it the fake. */
@@ -291,6 +316,58 @@ describe("syncMemberRole, via activation", () => {
     await expect(assignTrial(fake)).resolves.toBeUndefined();
     expect(fake.inserts[0]).toMatchObject({ status: "active" });
   });
+
+  // #107: the label reaches through the household, because the access gate it
+  // is supposed to describe has done so since #103.
+  describe("through the household", () => {
+    it("counts the people on the person's account, not only their own rows", async () => {
+      const fake = fakeAdmin({
+        dependants: ok([{ user_id: "child-1" }, { user_id: "child-2" }]),
+        activePaid: ok([{ plan_id: PAID_PLAN.id }]),
+        rolePlans: ok([{ id: PAID_PLAN.id, kind: "period" }]),
+      });
+      await assignTrial(fake);
+      // The tally asked about all three, which is the only way a parent who
+      // holds nothing themselves can come out holding the label.
+      expect(fake.activePaidUserIds).toEqual([["user-1", "child-1", "child-2"]]);
+      expect(fake.roleWrites).toEqual(["grant"]);
+    });
+
+    // Every caller hands this one user id -- the person whose membership just
+    // moved. A child's plan changes their PARENT's label, and the parent is
+    // nobody's argument, so without this walk they are never reconciled at all.
+    it("re-syncs the guardian when a dependant's membership changes", async () => {
+      const fake = fakeAdmin({
+        profile: ok({ first_name: "Bea", last_name: "Lovelace", guardian_user_id: "parent-1" }),
+        activePaid: ok([{ plan_id: PAID_PLAN.id }]),
+        rolePlans: ok([{ id: PAID_PLAN.id, kind: "period" }]),
+      });
+      await assignTrial(fake);
+      // Twice: the child's own tally, then their parent's.
+      expect(fake.activePaidUserIds).toEqual([["user-1"], ["parent-1"]]);
+      expect(fake.roleWrites).toEqual(["grant", "grant"]);
+    });
+
+    it("does not walk upwards for somebody who is on nobody's account", async () => {
+      const fake = fakeAdmin({ activePaid: ok([]) });
+      await assignTrial(fake);
+      expect(fake.activePaidUserIds).toEqual([["user-1"]]);
+      expect(fake.roleWrites).toEqual(["revoke"]);
+    });
+
+    // Same line as the failed membership read above, one level out: "we could
+    // not ask who is on this account" must not be answered as "nobody is", or a
+    // blip on `profiles` strips the label off every paid-up parent at once.
+    it("leaves every label alone when the household read fails", async () => {
+      const fake = fakeAdmin({
+        dependants: fails("connection reset"),
+        activePaid: ok([]),
+      });
+      await assignTrial(fake);
+      expect(fake.activePaidUserIds).toEqual([]);
+      expect(fake.roleWrites).toEqual([]);
+    });
+  });
 });
 
 // ---- Bank reconciliation ----
@@ -367,14 +444,21 @@ function fakeReconcileAdmin(reads: {
           return {
             // The unpaid pool: .is(paid_at, null).neq(status, cancelled).gt(price_cents, 0)
             is: () => ({ neq: () => ({ gt: () => Promise.resolve(pending) }) }),
-            // syncMemberRole's tally: .eq.eq.gt
-            eq: () => ({ eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }) }),
+            // syncMemberRole's tally, scoped to a household since #107: .in.eq.gt
+            in: () => ({ eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }) }),
           };
         }
         if (table === "membership_plans")
           return { in: () => Promise.resolve(reads.plans ?? ok([PAID_PLAN])) };
         if (table === "profiles")
-          return { eq: () => ({ maybeSingle: () => Promise.resolve(ok(null)) }) };
+          // The dependants read (keyed on `guardian_user_id`) is awaited with no
+          // single-row terminator; the person's own row ends in `.maybeSingle()`.
+          return {
+            eq: (column: string) =>
+              column === "guardian_user_id"
+                ? Promise.resolve(ok([]))
+                : { maybeSingle: () => Promise.resolve(ok(null)) },
+          };
         throw new Error(`unexpected select on ${table}`);
       },
       update: (patch: Record<string, unknown>) => ({
@@ -729,14 +813,19 @@ function fakeDeleteAdmin(reads: {
         if (table === "session_checkins")
           return { eq: () => Promise.resolve(reads.checkinCount ?? counted(0)) };
         if (table === "membership_plans") return { in: () => Promise.resolve(ok([])) };
+        if (table === "profiles")
+          return {
+            eq: (column: string) =>
+              column === "guardian_user_id"
+                ? Promise.resolve(ok([]))
+                : { maybeSingle: () => Promise.resolve(ok(null)) },
+          };
         void opts;
-        // memberships, read two ways: the row under deletion, and
-        // syncMemberRole's active-and-paid tally afterwards.
+        // memberships, read two ways: the row under deletion (.eq.maybeSingle),
+        // and syncMemberRole's household-scoped tally afterwards (.in.eq.gt).
         return {
-          eq: () => ({
-            maybeSingle: () => Promise.resolve(membership),
-            eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }),
-          }),
+          eq: () => ({ maybeSingle: () => Promise.resolve(membership) }),
+          in: () => ({ eq: () => ({ gt: () => Promise.resolve(reads.activePaid ?? ok([])) }) }),
         };
       },
       // `memberships` deletes with one .eq (the row); `user_roles` with two
@@ -844,21 +933,26 @@ function fakeEnrolAdmin(existing: Result) {
     from: (table: string) => ({
       select: () => {
         if (table === "profiles")
-          return { eq: () => ({ maybeSingle: () => Promise.resolve(ok({ last_name: "Lee" })) }) };
+          return {
+            eq: (column: string) =>
+              column === "guardian_user_id"
+                ? Promise.resolve(ok([]))
+                : { maybeSingle: () => Promise.resolve(ok({ last_name: "Lee" })) },
+          };
         if (table === "membership_plans") return { in: () => Promise.resolve(ok([])) };
-        // memberships, two readers sharing a `.eq.eq` prefix: the reuse lookup
-        // (`.is("paid_at", null).neq("status", "cancelled")[.eq(session)]
-        // .limit.maybeSingle`) and syncMemberRole's tally (`.gt`).
+        // memberships, two readers: the reuse lookup
+        // (`.eq.eq.is("paid_at", null).eq("status", "active")[.eq(session)]
+        // .limit.maybeSingle`) and syncMemberRole's household-scoped tally
+        // (`.in.eq.gt`).
         const found = { limit: () => ({ maybeSingle: () => Promise.resolve(existing) }) };
         return {
           eq: () => ({
             eq: () => ({
               // reuse: .is(paid_at, null).eq(status, active)[.eq(session_date)]
               is: () => ({ eq: () => ({ ...found, eq: () => found }) }),
-              // syncMemberRole's tally
-              gt: () => Promise.resolve(ok([])),
             }),
           }),
+          in: () => ({ eq: () => ({ gt: () => Promise.resolve(ok([])) }) }),
         };
       },
       insert: (row: unknown) => {
