@@ -1504,6 +1504,8 @@ export const listClubUsers = createServerFn({ method: "GET" })
     return aggregateClubUsers({
       profiles: profileRows,
       emails,
+      // A manager surface: the phase agrees with the members-only gate.
+      countHouseholdMemberships: true,
       waivers: waiverRows,
       leads,
       memberships: memberships.map((m) => ({

@@ -222,6 +222,8 @@ export const getClubUser = createServerFn({ method: "POST" })
     const [summary] = aggregateClubUsers({
       profiles: [profile],
       emails,
+      // A manager surface: the phase agrees with the members-only gate.
+      countHouseholdMemberships: true,
       // Not a person on this page, only the owner of the address shown on it.
       guardians: guardianProfile.data ? [guardianProfile.data] : [],
       // Who is on this person's account. Not listed as people of their own --

@@ -559,7 +559,7 @@ for (const waiverId of Object.values(waivers)) {
     if (error) throw new Error(error.message);
   });
 }
-console.log("[seed] waiver PDFs: 3");
+console.log(`[seed] waiver PDFs: ${Object.keys(waivers).length}`);
 
 await insert("code_of_conduct_acceptances", {
   user_id: users.member,

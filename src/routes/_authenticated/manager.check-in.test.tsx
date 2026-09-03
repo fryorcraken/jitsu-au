@@ -55,6 +55,8 @@ const BOARD = {
       user_id: "user-1",
       name: "Jane L.",
       email: "jane@example.com",
+      guardian_name: null,
+      date_of_birth: null,
       coverage: "period",
       plan_name: "Semester",
       sessions_remaining_before: null,

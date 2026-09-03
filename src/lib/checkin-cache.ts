@@ -65,6 +65,20 @@ export const checkInBoardCacheSchema = z.object({
       user_id: z.string(),
       name: z.string().nullable(),
       email: z.string().nullable(),
+      // Both null for everybody but a dependant. They are what tells two
+      // siblings apart at the door, so a restored board that dropped them
+      // would put a manager back in front of the ambiguity this cache is
+      // meant to survive -- and Zod STRIPS what it does not name, so leaving
+      // them out here is not a no-op, it is a silent loss on exactly the
+      // offline relaunch the cache exists for.
+      //
+      // Defaulted rather than required, so a board cached by the version
+      // BEFORE these existed still restores. Required, it would fail the whole
+      // schema and throw away a manager's stored roster on their first load
+      // after a deploy -- at the door, offline, which is the one moment this
+      // cache is for. They arrive on the next successful fetch.
+      guardian_name: z.string().nullable().default(null),
+      date_of_birth: z.string().nullable().default(null),
       coverage,
       plan_name: z.string().nullable(),
       sessions_remaining_before: z.number().nullable(),

@@ -172,6 +172,23 @@ export function householdContacts(input: {
 export async function loadHouseholdContacts(
   admin: AdminClient,
   userIds: string[],
+  opts: {
+    /**
+     * Skip the `user_emails` round trips entirely, for a caller that only wants
+     * to know WHO somebody's contact person is, never their address.
+     *
+     * `displayEmail().onBehalfOf` still answers, because whose account a person
+     * is on and what that person is called both come from `profiles`. Only
+     * `email` and `deliveryEmail` go null, so a caller that needs an address
+     * must not pass this.
+     *
+     * It exists for `listWaivers`, which prints the address FROZEN on each
+     * waiver as evidence and only asks this module who the participant belongs
+     * to. Resolving addresses for 500 rows and discarding every one of them is
+     * up to five service-role RPCs spent on an answer nobody reads.
+     */
+    namesOnly?: boolean;
+  } = {},
 ): Promise<HouseholdContacts> {
   const ids = [...new Set(userIds.map((id) => id.toLowerCase()))].filter(Boolean);
   if (ids.length === 0) return householdContacts({ people: [], emails: [] });
@@ -193,6 +210,8 @@ export async function loadHouseholdContacts(
   // to name them. One extra read rather than a name the screen has to guess.
   const missingGuardians = contactIds.filter((id) => !byId.has(id));
   if (missingGuardians.length > 0) rows.push(...(await readProfiles(admin, missingGuardians)));
+
+  if (opts.namesOnly) return householdContacts({ people: rows, emails: [] });
 
   // Chunked for the same reason as the profile read: `user_emails` takes the
   // ids as an argument PostgREST renders into the request.

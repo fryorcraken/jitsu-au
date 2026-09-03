@@ -274,6 +274,7 @@ describe("aggregateClubUsers", () => {
     it("reads a parent as a member on the strength of their child's paid plan", () => {
       const users = aggregate({
         profiles: [parent(), child()],
+        countHouseholdMemberships: true,
         memberships: [membership({ user_id: "u2" })],
       });
       expect(users.find((u) => u.user_id === "u1")!.lifecycle_status).toBe("member");
@@ -285,6 +286,7 @@ describe("aggregateClubUsers", () => {
       // member, which is also what the door tells a manager at check-in.
       const users = aggregate({
         profiles: [parent(), child()],
+        countHouseholdMemberships: true,
         memberships: [membership({ user_id: "u1" })],
       });
       expect(users.find((u) => u.user_id === "u2")!.lifecycle_status).toBe("lead");
@@ -293,6 +295,7 @@ describe("aggregateClubUsers", () => {
     it("leaves an unrelated person's phase alone", () => {
       const users = aggregate({
         profiles: [parent(), profile({ user_id: "u2", guardian_user_id: null })],
+        countHouseholdMemberships: true,
         memberships: [membership({ user_id: "u2" })],
       });
       expect(users.find((u) => u.user_id === "u1")!.lifecycle_status).toBe("lead");
@@ -304,6 +307,7 @@ describe("aggregateClubUsers", () => {
     it("counts dependants passed in for a single-person read", () => {
       const [only] = aggregate({
         profiles: [parent()],
+        countHouseholdMemberships: true,
         dependants: [{ user_id: "u2", guardian_user_id: "u1" }],
         memberships: [membership({ user_id: "u2" })],
       });
@@ -313,11 +317,24 @@ describe("aggregateClubUsers", () => {
       expect(only.latest_membership_status).toBeNull();
     });
 
+    it("stays off unless the caller asks, so a member's own screens are unaffected", () => {
+      // The default is each person's own answer. `getHousehold` renders "People
+      // on your account", where the parent's row sits directly above a line
+      // saying what they hold: reaching there paints a green Member pill over
+      // the words "No membership yet".
+      const users = aggregate({
+        profiles: [parent(), child()],
+        memberships: [membership({ user_id: "u2" })],
+      });
+      expect(users.find((u) => u.user_id === "u1")!.lifecycle_status).toBe("lead");
+    });
+
     it("never treats a contact-resolution guardian row as somebody's household", () => {
       // `guardians` are the OWNER of an address on a page about somebody else.
       // Folding them in would hand a household to a person not being reported on.
       const [child1] = aggregate({
         profiles: [profile({ user_id: "u2", guardian_user_id: "u1" })],
+        countHouseholdMemberships: true,
         guardians: [
           {
             user_id: "u1",

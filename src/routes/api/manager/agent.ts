@@ -350,6 +350,8 @@ async function handleListUsers(params: unknown) {
 
   // Shared aggregation: one row per person with name/roles/lifecycle resolved.
   const aggregated = aggregateClubUsers({
+    // A manager surface: the phase agrees with the members-only gate.
+    countHouseholdMemberships: true,
     profiles: profileRows,
     emails,
     waivers: waiverRows,

@@ -464,7 +464,7 @@ function CheckInPage() {
         <h2 className="text-xl font-bold">Check someone in</h2>
         <Input
           autoFocus
-          placeholder="Search by name or email"
+          placeholder="Search by name, email or parent"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => {

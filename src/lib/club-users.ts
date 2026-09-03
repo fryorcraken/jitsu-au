@@ -293,6 +293,24 @@ export function aggregateClubUsers(input: {
    * the household index below and nowhere else.
    */
   dependants?: Pick<ClubUserProfile, "user_id" | "guardian_user_id">[];
+  /**
+   * Whether a person's `member` phase counts the memberships of everybody on
+   * their account (`deriveLifecycleStatus` carries the reasoning).
+   *
+   * **Off unless asked**, which is the conservative direction: a caller that
+   * says nothing gets each person's own answer, which is never WRONG about
+   * them, only less generous. The reach exists so the MANAGER surfaces agree
+   * with the RLS gate that has been letting guardians read members-only pages
+   * since #103, so the three manager readers opt in and nobody else does.
+   *
+   * `getHousehold` is the caller this is off for, and it is not an oversight:
+   * it renders the "People on your account" card, where the parent's own row
+   * sits directly above a line saying what they hold. Reaching there would
+   * paint a member a green `Member` pill over the words "No membership yet".
+   * It is the same line `getMyMemberships` takes on `/membership`, for the same
+   * reason: a member's own screens answer about the person they name.
+   */
+  countHouseholdMemberships?: boolean;
   waivers: ClubUserWaiver[];
   memberships: ClubUserMembership[];
   plans: ClubUserPlan[];
@@ -345,11 +363,13 @@ export function aggregateClubUsers(input: {
   // address, so folding them in would attribute somebody else's household to a
   // person this call is not reporting on.
   const dependantsByGuardian = new Map<string, string[]>();
-  for (const p of [...input.profiles, ...(input.dependants ?? [])]) {
-    if (!p.guardian_user_id) continue;
-    const list = dependantsByGuardian.get(p.guardian_user_id) ?? [];
-    list.push(p.user_id);
-    dependantsByGuardian.set(p.guardian_user_id, list);
+  if (input.countHouseholdMemberships) {
+    for (const p of [...input.profiles, ...(input.dependants ?? [])]) {
+      if (!p.guardian_user_id) continue;
+      const list = dependantsByGuardian.get(p.guardian_user_id) ?? [];
+      list.push(p.user_id);
+      dependantsByGuardian.set(p.guardian_user_id, list);
+    }
   }
 
   const checkinsByUser = new Map<string, number>();

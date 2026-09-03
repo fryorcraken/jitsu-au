@@ -1743,7 +1743,11 @@ export const listWaivers = createServerFn({ method: "GET" })
     const participantIds = [
       ...new Set(rows.map((r) => r.user_id).filter((id): id is string => !!id)),
     ];
-    const contacts = await loadHouseholdContacts(admin, participantIds);
+    // `namesOnly`: this list prints the address FROZEN on each waiver, which is
+    // the evidence, so the only thing wanted here is whose account the
+    // participant is on. Without it a full page spends up to five service-role
+    // `user_emails` calls resolving addresses that are then discarded.
+    const contacts = await loadHouseholdContacts(admin, participantIds, { namesOnly: true });
 
     return rows.map((row) => {
       const onBehalfOf = row.user_id ? contacts.displayEmail(row.user_id).onBehalfOf : null;
