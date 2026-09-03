@@ -6,6 +6,8 @@
 // read what was signed without leaving the page.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   deriveWaiverListStatuses,
@@ -527,6 +529,116 @@ export const getClubUser = createServerFn({ method: "POST" })
 // The rule this enforces: a changed address is ALWAYS unverified. Whatever was
 // proven about the old address says nothing about the new one, and the whole
 // point of the badge is that it cannot be set by someone's say-so.
+/**
+ * Change a person's login email, as a manager: the whole rule, with the client
+ * passed in.
+ *
+ * A plain function rather than the server handler's body for the reason
+ * `checkin.functions.ts` gives about `applyCoverage`: a `createServerFn`
+ * handler cannot be called from the test runner (it dies on "No Start context
+ * found in AsyncLocalStorage"), and this one carries enough rules worth pinning
+ * -- who may be pointed at what, that the address really moved, that the
+ * verified badge is dropped rather than assumed dropped -- to be worth reaching.
+ *
+ * `email` is normalised by the caller, which is also what makes the "re-saving
+ * the same address" comparison below meaningful.
+ */
+export async function changeClubUserEmail(
+  admin: SupabaseClient<Database>,
+  userId: string,
+  email: string,
+) {
+  const { data: got, error: getErr } = await admin.auth.admin.getUserById(userId);
+  if (getErr) throw new Error(getErr.message);
+  if (!got.user) throw new Error("User not found.");
+
+  const current = got.user.email ? normalizeEmail(got.user.email) : "";
+  // Re-saving the same address must not cost someone their verified badge.
+  if (current === email) {
+    return {
+      ok: true as const,
+      email,
+      changed: false,
+      verified: Boolean(got.user.email_confirmed_at),
+    };
+  }
+
+  // One person per email is the model's core invariant: profiles, waivers and
+  // memberships all hang off a single auth user resolved by address. Merging
+  // two people is a different problem, so refuse rather than half-do it.
+  const { data: clash, error: clashErr } = await userIdByEmail(admin, email);
+  if (clashErr) throw new Error(clashErr.message);
+  if (clash && clash !== userId) {
+    throw new Error("That email already belongs to another person.");
+  }
+
+  const { error: updErr } = await admin.auth.admin.updateUserById(userId, {
+    email,
+    email_confirm: false,
+  });
+  if (updErr) throw new Error(updErr.message);
+
+  // Assert the address actually MOVED, rather than trusting that it did.
+  // Some GoTrue configurations answer an email update by parking the new
+  // address in a pending `email_change` and leaving `email` alone. That would
+  // return success here while the person still holds the wrong address — the
+  // exact failure this feature exists to make visible. Re-read and check.
+  const { data: after, error: afterErr } = await admin.auth.admin.getUserById(userId);
+  if (afterErr) throw new Error(afterErr.message);
+  const moved = after.user?.email ? normalizeEmail(after.user.email) === email : false;
+  if (!moved) {
+    throw new Error(
+      "The login record did not accept that email. Nothing was changed. Check the address and try again.",
+    );
+  }
+
+  // The guarantee. The admin API declines to SET a confirmation when asked
+  // not to, but does not reliably CLEAR an existing one, so drop it outright
+  // rather than trusting GoTrue to have done it.
+  const { error: clearErr } = await admin.rpc("clear_email_confirmation", {
+    _user_id: userId,
+  });
+  if (clearErr) throw new Error(clearErr.message);
+
+  // Links already sitting in the old inbox go inert now rather than waiting
+  // out their expiry: whoever reads that mailbox is not the person we hold.
+  // Its own try/catch: a failed revoke must not skip the send below, or the
+  // manager would be told a link went out when none did. A stale token cannot
+  // verify the new address anyway (redemption re-checks the match), so this
+  // is tidiness rather than the security boundary.
+  if (current) {
+    try {
+      const { revokeVerificationTokensForEmail } = await import("@/lib/email-verification.server");
+      await revokeVerificationTokensForEmail(admin, current);
+    } catch (e) {
+      console.error("[setClubUserEmail] could not revoke old-address tokens:", e);
+    }
+  }
+
+  // Report what actually happened. The screen tells the manager a link was
+  // sent, so that claim has to be true: a mail provider outage must show as
+  // "address changed, no email sent", not as a confident lie they will only
+  // discover when the member says nothing arrived.
+  let verificationSent = false;
+  try {
+    const { sendVerificationEmail } = await import("@/lib/email-verification.server");
+    ({ sent: verificationSent } = await sendVerificationEmail({
+      admin,
+      to: email,
+      purpose: "email_change",
+      userId: userId,
+      next: "/account",
+    }));
+  } catch (e) {
+    console.error("[setClubUserEmail] verification email failed:", e);
+  }
+
+  // NB: waiver rows keep the address as SUBMITTED. They are frozen evidence of
+  // what was signed, so a corrected account email legitimately diverges from
+  // them, and the detail screen says so rather than looking broken.
+  return { ok: true as const, email, changed: true, verified: false, verificationSent };
+}
+
 export const setClubUserEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => managerEmailChangeSchema.parse(d))
@@ -534,98 +646,7 @@ export const setClubUserEmail = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
 
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
-    const email = normalizeEmail(data.email);
-
-    const { data: got, error: getErr } = await admin.auth.admin.getUserById(data.userId);
-    if (getErr) throw new Error(getErr.message);
-    if (!got.user) throw new Error("User not found.");
-
-    const current = got.user.email ? normalizeEmail(got.user.email) : "";
-    // Re-saving the same address must not cost someone their verified badge.
-    if (current === email) {
-      return {
-        ok: true as const,
-        email,
-        changed: false,
-        verified: Boolean(got.user.email_confirmed_at),
-      };
-    }
-
-    // One person per email is the model's core invariant: profiles, waivers and
-    // memberships all hang off a single auth user resolved by address. Merging
-    // two people is a different problem, so refuse rather than half-do it.
-    const { data: clash, error: clashErr } = await userIdByEmail(admin, email);
-    if (clashErr) throw new Error(clashErr.message);
-    if (clash && clash !== data.userId) {
-      throw new Error("That email already belongs to another person.");
-    }
-
-    const { error: updErr } = await admin.auth.admin.updateUserById(data.userId, {
-      email,
-      email_confirm: false,
-    });
-    if (updErr) throw new Error(updErr.message);
-
-    // Assert the address actually MOVED, rather than trusting that it did.
-    // Some GoTrue configurations answer an email update by parking the new
-    // address in a pending `email_change` and leaving `email` alone. That would
-    // return success here while the person still holds the wrong address — the
-    // exact failure this feature exists to make visible. Re-read and check.
-    const { data: after, error: afterErr } = await admin.auth.admin.getUserById(data.userId);
-    if (afterErr) throw new Error(afterErr.message);
-    const moved = after.user?.email ? normalizeEmail(after.user.email) === email : false;
-    if (!moved) {
-      throw new Error(
-        "The login record did not accept that email. Nothing was changed. Check the address and try again.",
-      );
-    }
-
-    // The guarantee. The admin API declines to SET a confirmation when asked
-    // not to, but does not reliably CLEAR an existing one, so drop it outright
-    // rather than trusting GoTrue to have done it.
-    const { error: clearErr } = await admin.rpc("clear_email_confirmation", {
-      _user_id: data.userId,
-    });
-    if (clearErr) throw new Error(clearErr.message);
-
-    // Links already sitting in the old inbox go inert now rather than waiting
-    // out their expiry: whoever reads that mailbox is not the person we hold.
-    // Its own try/catch: a failed revoke must not skip the send below, or the
-    // manager would be told a link went out when none did. A stale token cannot
-    // verify the new address anyway (redemption re-checks the match), so this
-    // is tidiness rather than the security boundary.
-    if (current) {
-      try {
-        const { revokeVerificationTokensForEmail } =
-          await import("@/lib/email-verification.server");
-        await revokeVerificationTokensForEmail(admin, current);
-      } catch (e) {
-        console.error("[setClubUserEmail] could not revoke old-address tokens:", e);
-      }
-    }
-
-    // Report what actually happened. The screen tells the manager a link was
-    // sent, so that claim has to be true: a mail provider outage must show as
-    // "address changed, no email sent", not as a confident lie they will only
-    // discover when the member says nothing arrived.
-    let verificationSent = false;
-    try {
-      const { sendVerificationEmail } = await import("@/lib/email-verification.server");
-      ({ sent: verificationSent } = await sendVerificationEmail({
-        admin,
-        to: email,
-        purpose: "email_change",
-        userId: data.userId,
-        next: "/account",
-      }));
-    } catch (e) {
-      console.error("[setClubUserEmail] verification email failed:", e);
-    }
-
-    // NB: waiver rows keep the address as SUBMITTED. They are frozen evidence of
-    // what was signed, so a corrected account email legitimately diverges from
-    // them, and the detail screen says so rather than looking broken.
-    return { ok: true as const, email, changed: true, verified: false, verificationSent };
+    return changeClubUserEmail(admin, data.userId, normalizeEmail(data.email));
   });
 
 /** Manager: send the person a fresh "confirm your email address" link. */
