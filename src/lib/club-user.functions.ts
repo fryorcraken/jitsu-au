@@ -427,6 +427,11 @@ export const getClubUser = createServerFn({ method: "POST" })
         // Who signed off. Null both while pending and for an approval recorded
         // before the column existed, so the screen shows it as unknown rather
         // than claiming nobody approved it.
+        // The id as well as the name, so the panel can open the approver's own
+        // record. Null while pending; a non-null id with a null name is an
+        // approver whose profile and email both failed to resolve, which the
+        // screen shows as an openable "Unknown" rather than as nobody.
+        approved_by: w.approved_by ?? null,
         approved_by_name: w.approved_by ? (approverLabels.get(w.approved_by) ?? null) : null,
         signer_ip: w.signer_ip,
         signer_meta: w.signer_meta,

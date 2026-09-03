@@ -231,7 +231,7 @@ function BlogCommentsPage() {
                         <span className="mr-1 text-xs text-muted-foreground">↳ reply</span>
                       )}
                       <div>
-                        <UserLink userId={c.user_id} name={c.author_name} />
+                        <UserLink userId={c.user_id} name={c.author_name} fallback="View" />
                       </div>
                       {c.author_email && (
                         <div className="text-xs text-muted-foreground">{c.author_email}</div>
@@ -340,7 +340,7 @@ function BlogCommentsPage() {
                 {blocked.map((row) => (
                   <tr key={row.user_id} className="border-t">
                     <td className="p-3">
-                      <UserLink userId={row.user_id} name={row.name} />
+                      <UserLink userId={row.user_id} name={row.name} fallback="View" />
                     </td>
                     <td className="p-3 text-muted-foreground">{row.email ?? "—"}</td>
                     <td className="p-3 text-muted-foreground">{row.reason ?? "—"}</td>

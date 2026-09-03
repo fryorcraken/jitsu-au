@@ -240,7 +240,7 @@ function WaiversPage() {
                         {/* The name as signed, opening the person who signed it.
                             A manager reading this list is usually on their way
                             to the record behind a row anyway. */}
-                        <UserLink userId={r.user_id} name={r.full_name} />
+                        <UserLink userId={r.user_id} name={r.full_name} fallback="View" />
                       </td>
                       <td className="px-3 py-2">{r.email}</td>
                       <td className="px-3 py-2">

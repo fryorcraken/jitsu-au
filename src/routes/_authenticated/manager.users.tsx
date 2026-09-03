@@ -340,7 +340,7 @@ function ManagerUsersPage() {
                             the name instead of linking to a page that is not
                             there. The address stands in when a row has no name:
                             it is the only thing a lead is guaranteed to have. */}
-                        <UserLink userId={r.user_id} name={r.name ?? r.email} />
+                        <UserLink userId={r.user_id} name={r.name ?? r.email} fallback="View" />
                       </td>
                       <td className="px-3 py-2">
                         {r.email ? (

@@ -128,7 +128,7 @@ function ManagerMembershipsPage() {
                           gone has neither. `UserLink` renders the dash rather
                           than a link to a page that is not there. */}
                       <div className="font-medium">
-                        <UserLink userId={r.user_id} name={r.member_name} />
+                        <UserLink userId={r.user_id} name={r.member_name} fallback="View" />
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {r.member_email ?? r.user_id ?? "—"}
