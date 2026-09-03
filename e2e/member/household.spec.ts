@@ -108,6 +108,15 @@ async function buyCasualFor(page: import("@playwright/test").Page, childName: st
   // Asserting the child's name here is the point rather than an inconvenience.
   await card.getByRole("button", { name: `Choose for ${firstName} & pay by transfer` }).click();
 
+  // Buying for somebody else ASKS first, and buying for yourself does not, which
+  // is why `member/membership.spec.ts` has no equivalent of this. The dialog is
+  // the point: a plan raised against the wrong child is an invoice, an email and
+  // a membership under the wrong name, so the confirm says whose it is before
+  // the money exists. Asserting its wording is asserting that guarantee.
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText(`This is for ${firstName}, not for you.`);
+  await dialog.getByRole("button", { name: `Yes, for ${firstName}` }).click();
+
   await expect(page.getByText("How to pay")).toBeVisible();
 }
 

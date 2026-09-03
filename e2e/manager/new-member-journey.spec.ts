@@ -164,12 +164,12 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
   await step(page, "a manager checks them in twice, using up the trial", async () => {
     await page.goto("/manager/check-in");
     await page.locator("#class-picker").selectOption(event1);
-    await page.getByPlaceholder("Search by name or email").fill(email);
+    await page.getByPlaceholder("Search by name, email or parent").fill(email);
     await page.getByRole("button", { name: "Check in" }).click();
     await expect(page.getByText(/Free trial, 1 left/)).toBeVisible();
 
     await page.locator("#class-picker").selectOption(event2);
-    await page.getByPlaceholder("Search by name or email").fill(email);
+    await page.getByPlaceholder("Search by name, email or parent").fill(email);
     await page.getByRole("button", { name: "Check in" }).click();
     await expect(page.getByText(/Free trial, 0 left/)).toBeVisible();
   });
@@ -227,7 +227,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     async () => {
       await page.goto("/manager/check-in");
       await page.locator("#class-picker").selectOption(event3);
-      await page.getByPlaceholder("Search by name or email").fill(email);
+      await page.getByPlaceholder("Search by name, email or parent").fill(email);
       await page.getByRole("button", { name: "Check in" }).click();
       // One credit, spent: the casual class closes itself on the same check-in
       // that used it, exactly like the trial did above.
@@ -420,7 +420,7 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     async () => {
       await page.goto("/manager/check-in");
       await page.locator("#class-picker").selectOption(event4);
-      await page.getByPlaceholder("Search by name or email").fill(email);
+      await page.getByPlaceholder("Search by name, email or parent").fill(email);
       await page.getByRole("button", { name: "Check in" }).click();
       // One credit, spent, exactly like the first casual purchase — the credit
       // pack precedence still outranks the now-active period plan.
@@ -529,8 +529,15 @@ test("a parent signs for a child, and approving it unlocks the PARENT", async ({
     await visitorPage.getByLabel("Last name").fill(childLast);
     // A child, so the guardian block is required whatever else is on the form.
     await visitorPage.getByLabel("Date of birth").fill("2016-03-08");
-    await visitorPage.getByLabel("Phone").fill("0400 000 557");
-    await visitorPage.getByLabel("Address").fill("7 Pyrmont Bridge Road, Pyrmont NSW 2009");
+    // `exact`, because the guardian block this form has now put on screen
+    // brings its own "Guardian address" and "Guardian mobile", and getByLabel
+    // matches a SUBSTRING case-insensitively: a bare "Address" resolves to two
+    // fields and fails on strict mode. The test above never hit this because an
+    // adult signing for themselves has no guardian block at all.
+    await visitorPage.getByLabel("Phone", { exact: true }).fill("0400 000 557");
+    await visitorPage
+      .getByLabel("Address", { exact: true })
+      .fill("7 Pyrmont Bridge Road, Pyrmont NSW 2009");
 
     await visitorPage.getByLabel("Parent or guardian name").fill(parentName);
     await visitorPage.getByLabel("Relationship to the participant").fill("Parent");
