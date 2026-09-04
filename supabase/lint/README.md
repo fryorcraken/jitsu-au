@@ -146,29 +146,52 @@ Worth doing after a migration is applied, before a release, and any time someone
 has changed a grant or a policy by hand in the Lovable UI. That last one
 produces no commit and no signal, and is exactly the drift these catch.
 
-**Last run: 2026-09-01**, straight after applying
-`20260828000000_waiver_pdf_guardian_read.sql`. 76 migration files, **2
-unapplied**; 18 client grants live, 18 expected, 0 unexpected. The one ledger
-row with no file here (`20260722131547`) is the known duplicate re-emission
-described in `docs/database-changes.md`, not missing schema.
+**Migration drift last run: 2026-09-04.** 76 migration files, **0 unapplied**:
+two report as unapplied and are allowlisted as already-live re-emissions (below).
+**Client grants last run: 2026-09-01**, straight after applying
+`20260828000000_waiver_pdf_guardian_read.sql`: 18 live, 18 expected, 0
+unexpected. The one ledger row with no file here (`20260722131547`) is the known
+duplicate re-emission described in `docs/database-changes.md`, not missing
+schema.
 
-⚠️ **The two unapplied ones are real drift, and they are not new.** Both are
-notification-digest migrations that were committed and merged without ever
-being applied, which is the exact failure the rule in
-`docs/database-changes.md` exists to prevent:
+⚠️ **The two that report as unapplied are NOT drift, and one of them must never
+be applied.** This file said the opposite from 2026-09-01 until 2026-09-04, when
+the live objects were read instead of the SQL. Both changes are already in
+production, re-emitted by Lovable under filenames of its own — the same
+duplicate-re-emission case as the ledger row above:
 
-- `20260821000000_notification_digest_fails_loudly.sql` — makes the nightly job
-  RAISE rather than return quietly when it is not armed, so `cron.job_run_details`
-  stops recording `succeeded` for a night on which nothing was sent. Until it is
-  applied, the scheduler keeps reporting a green tick that means "the function
-  ran", not "the digest went out".
-- `20260823000000_notification_digest_morning_schedule.sql` — moves the digest
-  from 20:00 UTC to 22:00 UTC (6am/7am Sydney to 8am/9am). Until it is applied,
-  the club's digest keeps going out at 6am.
+- `20260821000000_notification_digest_fails_loudly.sql` — **superseded. Applying
+  it would stop the digest.** The RAISE it introduced is live, carried into
+  `20260822120041` (the function's third body, applied 2026-08-22). Re-applying
+  this file installs the _second_ body, which reads a `notification_digest_url`
+  Vault secret that `20260822120041` retired in favour of an inlined jitsu.au
+  URL. `vault.secrets` holds only `notification_digest_key`, so the job would
+  raise nightly and nobody would be emailed again.
 
-Neither is this PR's and neither is allowlisted, so they are left for a separate
-decision rather than applied on the back of an approval that did not cover them
-("Approval of the PR covers the SQL described in it, and nothing else").
+  ```sql
+  -- What proved it: RAISE EXCEPTION present, no RAISE WARNING, URL inlined.
+  SELECT prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'private' AND p.proname = 'run_notification_digest';
+  SELECT name FROM vault.secrets WHERE name LIKE 'notification_digest%';
+  ```
+
+- `20260823000000_notification_digest_morning_schedule.sql` — live via
+  `20260823002504`, which is its SQL byte for byte. Applying it would be a
+  harmless no-op, but it is not drift either.
+
+  ```sql
+  -- What proved it: '0 22 * * *', active, and a send that lands on it.
+  SELECT jobname, schedule, active FROM cron.job WHERE jobname = 'notification-digest';
+  SELECT max(emailed_at) FROM public.notifications;  -- 2026-09-02 22:00:06+00
+  ```
+
+**The general lesson, which is why this is written up rather than quietly
+fixed:** this check compares identities, not content (see "Known blind spots"),
+so a file with no ledger row raises a question. It does not answer it. Read the
+object — `pg_proc.prosrc`, `cron.job`, `information_schema` — before applying
+anything on the strength of this check, because the checker's own advice
+("apply each one against the live database") is, for a superseded migration,
+the outage.
 
 ### When it reports drift
 

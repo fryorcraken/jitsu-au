@@ -14,3 +14,45 @@
 # (20260101000000). Blank lines and everything after '#' are ignored.
 # Say WHY each entry is here and what unblocks it. An empty list is the
 # healthy state.
+
+# ---------------------------------------------------------------------------
+# There is a SECOND legitimate reason, added 2026-09-04: a file whose SQL is
+# already live under a DIFFERENT ledger version, because Lovable re-emitted it.
+#
+# docs/database-changes.md describes Lovable re-emitting hand-written SQL under
+# a filename of its own and recording THAT version in the ledger. When it does,
+# the hand-written file is left with no ledger row of its own and this check
+# reports it as drift forever. It is not drift: the database already has the
+# change. Unlike a contract-phase entry, an entry here is PERMANENT and the
+# migration must NEVER be applied -- re-running a superseded function body is
+# how you undo a later one.
+#
+# Before adding an entry here, prove the effect is live by reading the object
+# itself (pg_proc.prosrc, cron.job, information_schema), not by reading the SQL
+# and assuming. Say which live query proved it.
+# ---------------------------------------------------------------------------
+
+# Superseded, verified live 2026-09-04 against the club's database.
+#
+# Its whole payload -- the unarmed branch raising instead of returning quietly
+# -- was carried into 20260822120041 (the third body of the function, applied
+# 2026-08-22, ledger row present). Proof: pg_proc.prosrc for
+# private.run_notification_digest() contains RAISE EXCEPTION and no RAISE
+# WARNING.
+#
+# ⚠️ DO NOT APPLY THIS FILE. It would replace the live function body with the
+# SECOND one, which reads a `notification_digest_url` Vault secret that
+# 20260822120041 deliberately retired in favour of an inlined jitsu.au URL.
+# That row does not exist (vault.secrets holds only notification_digest_key),
+# so the function would raise every night and the digest would stop dead.
+# "Fixing the drift" here is the outage.
+20260821000000_notification_digest_fails_loudly
+
+# Duplicate re-emission, verified live 2026-09-04 against the club's database.
+#
+# 20260823002504 is this file's SQL byte for byte (Lovable's re-emission of it,
+# ledger row present), so the schedule move is live. Proof: cron.job reports
+# jobname 'notification-digest' on '0 22 * * *', active, and the most recent
+# notifications.emailed_at is 2026-09-02 22:00:06 UTC -- the 22:00 run itself.
+# Applying this file would be a harmless no-op, but it is still not drift.
+20260823000000_notification_digest_morning_schedule

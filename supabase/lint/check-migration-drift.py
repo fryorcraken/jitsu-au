@@ -34,6 +34,16 @@ that drops something must land AFTER the code that stopped using it deploys.
 List those in `migration-drift-allowlist.txt` while they wait, and remove the
 entry once applied.
 
+There is a second exception, and it is the dangerous one: a file whose SQL is
+already live under a DIFFERENT ledger version, because Lovable re-emitted it
+under a filename of its own. This check compares identities, not content, so it
+cannot tell that apart from a migration nobody ever ran. Applying such a file is
+not a harmless no-op when a LATER migration has since replaced the same object:
+it reinstates the older definition. That is not hypothetical — it was true of
+`20260821000000_notification_digest_fails_loudly.sql` from 2026-08-22 onward,
+where applying it would have taken the club's nightly digest offline. Read the
+live object before acting on anything this script reports.
+
 Usage
 -----
     check-migration-drift.py APPLIED_CSV [--migrations DIR] [--allowlist FILE]
@@ -238,11 +248,18 @@ def main():
         print(f"  supabase/migrations/{stem}.sql")
     print(
         "\nCommitting a migration does NOT apply it — nothing in this pipeline runs\n"
-        "supabase/migrations/*.sql. Apply each one against the live database (the\n"
+        "supabase/migrations/*.sql. But CHECK BEFORE YOU APPLY: this compares\n"
+        "identities, not content, so a file also lands here when its SQL is already\n"
+        "live under a different ledger version (Lovable re-emits hand-written SQL\n"
+        "under a filename of its own). Read the live object first — pg_proc.prosrc,\n"
+        "cron.job, information_schema — because applying a SUPERSEDED file reinstates\n"
+        "an older definition over a newer one, which is an outage, not a no-op.\n"
+        "\nIf it really has never run: apply it against the live database (the\n"
         "Lovable project's SQL access), record it in supabase_migrations.schema_migrations,\n"
-        "and re-run. If a migration is the contract (destructive) phase of an\n"
-        "expand/contract change and must land after the code deploys, add it to\n"
-        f"{allowlist_display(allowlist_path)} with a note, and remove it once applied.",
+        "and re-run. If it is the contract (destructive) phase of an expand/contract\n"
+        "change and must land after the code deploys, or it is already live under\n"
+        f"another version, add it to {allowlist_display(allowlist_path)} with a note\n"
+        "saying which live query proved it.",
         file=sys.stderr,
     )
     return 1

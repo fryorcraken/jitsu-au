@@ -53,31 +53,42 @@ requests, the CI logs, and the screenshot artifacts.
   - The two live checks survive as **scripts you run by hand** through Lovable's
     SQL access (`supabase/lint/README.md` has the queries, and **owns these
     figures** — this is a summary of that file, so change it there first). Last
-    run **2026-09-01**, straight after applying
-    `20260828000000_waiver_pdf_guardian_read.sql`: **76 migration files, 2
-    unapplied**, and **18 client grants live, 18 expected, 0 unexpected**. So
+    run **2026-09-04**: **76 migration files, 0 unapplied** (2 report as
+    unapplied and are allowlisted as already-live re-emissions, see below), and
+    **18 client grants live, 18 expected, 0 unexpected** as of **2026-09-01**. So
     `supabase/lint/client-grants-expected.txt` is verified against production as
     of that date, not just against the migration files, and `profiles` still
     holds nothing for `anon` or `authenticated`. It goes stale the moment
     anyone changes a grant by hand in the Lovable UI, which produces no commit
     and no signal — so re-run them after applying a migration and before a
     release. Nothing does it for you.
-  - ⚠️ **The two unapplied migrations are real drift, not a naming artefact**,
-    and they are older than the run that found them. Both are notification-digest
-    migrations that were committed and merged without ever being applied, which
-    is the exact failure `docs/database-changes.md` exists to prevent, caught by
-    the check written to catch it. Do not confuse them with the ledger row below,
-    which is a different thing entirely.
-    - `20260821000000_notification_digest_fails_loudly.sql` — until it is
-      applied, `cron.job_run_details` keeps recording `succeeded` for a night on
-      which nothing was sent: the tick means "the function ran", not "the digest
-      went out".
-    - `20260823000000_notification_digest_morning_schedule.sql` — until it is
-      applied, the club's digest keeps going out at 6am rather than 8am.
+  - ⚠️ **The two notification-digest migrations that report as unapplied are
+    NOT drift, and one of them must never be applied.** This file said the
+    opposite until 2026-09-04, when the live database was finally read rather
+    than reasoned about. Both effects are already in production, carried there
+    by Lovable re-emissions of the same SQL under filenames of its own — the
+    duplicate-re-emission case, the same one as the ledger row below, not a
+    different thing. Both are now in `supabase/lint/migration-drift-allowlist.txt`
+    with the queries that proved it.
+    - `20260821000000_notification_digest_fails_loudly.sql` — **superseded, and
+      applying it now would stop the digest.** Its payload (the unarmed branch
+      raising instead of returning quietly) went live inside `20260822120041`,
+      which is the function's third body. Re-applying this file would install
+      the second body, which reads a `notification_digest_url` Vault secret that
+      `20260822120041` deliberately retired for an inlined URL. That secret does
+      not exist, so the job would raise every night and no member would be
+      emailed again.
+    - `20260823000000_notification_digest_morning_schedule.sql` — live via
+      `20260823002504`, its own SQL byte for byte. `cron.job` reports
+      `0 22 * * *`, so the digest goes out at 8am/9am Sydney and has since
+      2026-08-23. It never was going out at 6am after that date.
 
-    Neither is allowlisted, and neither belongs to whatever PR you are reading
-    this from, so they wait for a decision of their own: "approval of the PR
-    covers the SQL described in it, and nothing else".
+    The lesson is the one this section already teaches from the other end: the
+    drift check compares **identities, not content**, so a file with no ledger
+    row is a question, not a verdict. Read the object itself (`pg_proc.prosrc`,
+    `cron.job`) before applying anything on its say-so. "Approval of the PR
+    covers the SQL described in it, and nothing else" still holds, and there is
+    now nothing here awaiting approval.
 
   - The live ledger also carries one row with no file here
     (`20260722131544_3de60949-…`, recorded as version `20260722131547`). Its SQL

@@ -334,12 +334,18 @@ means the digest has stopped, whatever the scheduler thinks.
 Two changes, and the split between them is the point. One makes the scheduler
 stop lying; the other stops relying on the scheduler at all.
 
-- **An unarmed run is now recorded as failed**
-  (`20260821000000_notification_digest_fails_loudly.sql`). The fail-closed branch
-  raises instead of returning, naming whichever Vault secret is missing, so
+- **An unarmed run is now recorded as failed.** The fail-closed branch raises
+  instead of returning, naming the missing Vault secret, so
   `cron.job_run_details` says `failed` for a job that emailed nobody. This is
   narrow on purpose: it only catches the half of the problem the database can
   see. An armed job still records success no matter what the site answered.
+
+  Written in `20260821000000_notification_digest_fails_loudly.sql`, but that
+  file is **not** how it reached production and must never be applied: the
+  behaviour went live inside `20260822120041`, the function's third body, which
+  keeps the RAISE and drops the `notification_digest_url` read. See the entry in
+  `supabase/lint/migration-drift-allowlist.txt`.
+
 - **A stalled digest is an attention item on `/notifications`.** Any notification
   row that has sat unemailed for more than `DIGEST_STALL_HOURS` (36) raises "The
   daily email summary has stopped going out", with the backlog size and the date
@@ -362,9 +368,10 @@ Three things about that item are deliberate and will look like bugs otherwise:
   can stay up for weeks. It clears when the digest actually sends, or when
   somebody stamps the backlog as emailed. That is the correct behaviour while
   members are silently getting no email.
-- **It fires while the digest has simply never been armed**, which is the state
-  the club is in today. That is not a false positive: the rows are owed and
-  nobody has had them.
+- **It fires while the digest has simply never been armed**, which was the
+  state the club was in until 2026-08-22. That is not a false positive: the rows
+  are owed and nobody has had them. It is not the state today — the digest is
+  armed and sending.
 
 Still not built: a second job that reads `net._http_response` back and raises on
 a non-2xx, so an ARMED failure lands in `cron.job_run_details` the same night
@@ -438,11 +445,20 @@ SELECT name, created_at FROM vault.secrets WHERE name = 'notification_digest_key
 One row is the secret existing; there is nothing to compare it against, since
 there is no second copy any more.
 
-**What is still outstanding: the first real send has not been proved yet.** The
-code that reads the key from Vault had not been deployed at the time the migration
-was applied, so the endpoint was still answering 503 from the old env-var path.
-Steps 3 and 4 below are the remaining verification, and they need a deploy of the
-merged code first.
+**The first real send is now proved, as of 2026-09-04.** It was outstanding when
+this was written: the code that reads the key from Vault had not been deployed
+when the migration was applied, so the endpoint was still answering 503 from the
+old env-var path. It has since deployed and the digest is sending. Read
+read-only against the live database on 2026-09-04:
+
+```
+cron.job          notification-digest, '0 22 * * *', active
+notifications     30 emailed, 0 unemailed, last emailed_at 2026-09-02 22:00:06+00
+```
+
+That last timestamp lands on the 22:00 run itself, which is the end-to-end
+evidence steps 3 and 4 below were written to gather. Keep them for the next time
+the key is rotated or the endpoint stops answering.
 
 **3. Prove it works, without waiting for the scheduled run.** Run the job by hand and
 read the response back inside pg_net's 6-hour TTL:
@@ -637,28 +653,27 @@ Two consequences worth knowing:
 
 ## Where the code lives
 
-| Concern                      | File                                                                          |
-| ---------------------------- | ----------------------------------------------------------------------------- |
-| The rules (pure, tested)     | `src/lib/notifications.ts`                                                    |
-| The attention list           | `src/lib/manager-notifications.functions.ts`                                  |
-| Contact messages             | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`            |
-| Interest registrations       | `src/lib/leads.functions.ts`                                                  |
-| Waivers waiting on a manager | `countWaiversAwaitingApproval` in `src/lib/waiver.functions.ts`               |
-| The club-wide watermarks     | `src/lib/seen-markers.ts`                                                     |
-| Who hears about what         | `src/lib/notification-events.server.ts`                                       |
-| Sending, and the digest run  | `src/lib/notification-email.server.ts`                                        |
-| Page and settings server fns | `src/lib/notifications.functions.ts`                                          |
-| The shared query             | `src/hooks/useNotifications.ts`                                               |
-| The page                     | `src/routes/_authenticated/notifications.tsx`                                 |
-| The signed-out settings      | `src/routes/email-settings/index.tsx`                                         |
-| The link exchange            | `src/routes/email-settings/$token.ts`                                         |
-| The settings cookie          | `src/lib/email-settings-session.ts`                                           |
-| The switches                 | `src/components/site/NotificationSwitches.tsx`                                |
-| The sidebar badge            | `src/components/site/MemberLayout.tsx`                                        |
-| The digest endpoint          | `src/routes/api/notifications/digest.ts`                                      |
-| The schedule                 | `supabase/migrations/20260807000000_notification_digest_cron.sql`             |
-| Failing loudly when unarmed  | `supabase/migrations/20260821000000_notification_digest_fails_loudly.sql`     |
-| One key, minted once         | `supabase/migrations/20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql` |
-| The key's typed RPC wrapper  | `notificationDigestKey` in `src/lib/supabase-rpc.ts`                          |
-| The stalled-digest item      | `digestStalledNotifications` in `src/lib/validation.ts`                       |
-| Email templates              | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx`        |
+| Concern                                          | File                                                                          |
+| ------------------------------------------------ | ----------------------------------------------------------------------------- |
+| The rules (pure, tested)                         | `src/lib/notifications.ts`                                                    |
+| The attention list                               | `src/lib/manager-notifications.functions.ts`                                  |
+| Contact messages                                 | `src/lib/contact-messages.functions.ts`, `contact-email.server.ts`            |
+| Interest registrations                           | `src/lib/leads.functions.ts`                                                  |
+| Waivers waiting on a manager                     | `countWaiversAwaitingApproval` in `src/lib/waiver.functions.ts`               |
+| The club-wide watermarks                         | `src/lib/seen-markers.ts`                                                     |
+| Who hears about what                             | `src/lib/notification-events.server.ts`                                       |
+| Sending, and the digest run                      | `src/lib/notification-email.server.ts`                                        |
+| Page and settings server fns                     | `src/lib/notifications.functions.ts`                                          |
+| The shared query                                 | `src/hooks/useNotifications.ts`                                               |
+| The page                                         | `src/routes/_authenticated/notifications.tsx`                                 |
+| The signed-out settings                          | `src/routes/email-settings/index.tsx`                                         |
+| The link exchange                                | `src/routes/email-settings/$token.ts`                                         |
+| The settings cookie                              | `src/lib/email-settings-session.ts`                                           |
+| The switches                                     | `src/components/site/NotificationSwitches.tsx`                                |
+| The sidebar badge                                | `src/components/site/MemberLayout.tsx`                                        |
+| The digest endpoint                              | `src/routes/api/notifications/digest.ts`                                      |
+| The schedule                                     | `supabase/migrations/20260823002504_98356929-b00a-46da-941d-0aceb9f3bab7.sql` |
+| One key, minted once, and the live function body | `supabase/migrations/20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql` |
+| The key's typed RPC wrapper                      | `notificationDigestKey` in `src/lib/supabase-rpc.ts`                          |
+| The stalled-digest item                          | `digestStalledNotifications` in `src/lib/validation.ts`                       |
+| Email templates                                  | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx`        |

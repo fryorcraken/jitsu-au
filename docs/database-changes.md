@@ -262,3 +262,23 @@ the Supabase lint workflow could not run on any PR.
 - Prefer `DROP … IF EXISTS` before a deliberate re-create (see
   `on_auth_user_created_assign_role` in `20260721091500_…`), which is what makes
   a genuine re-point replay cleanly.
+
+⚠️ **The re-emitted copy is the one with the ledger row, so the hand-written
+original reports as unapplied forever — and applying it can be an outage.**
+`check-migration-drift.py` compares identities, not content, so it cannot tell
+"never ran" from "already live under Lovable's filename". Following its advice
+blindly re-runs SQL that a LATER migration has since superseded, reinstating the
+older definition. Two live examples, both allowlisted with their proof in
+`supabase/lint/migration-drift-allowlist.txt`:
+
+- `20260823000000_notification_digest_morning_schedule.sql` is byte-identical to
+  the applied `20260823002504_…`, so applying it would be a no-op. Benign.
+- `20260821000000_notification_digest_fails_loudly.sql` is **not** benign. Its
+  behaviour is live via the later `20260822120041_…`, which also retired the
+  `notification_digest_url` Vault secret. Applying the older file would restore
+  the read of a secret that no longer exists and stop the club's nightly digest.
+
+So when this check reports a file: **read the live object first**
+(`pg_proc.prosrc`, `cron.job`, `information_schema`), and check whether a later
+migration touches the same object. Only then decide between applying it and
+allowlisting it.
