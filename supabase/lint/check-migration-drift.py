@@ -44,6 +44,10 @@ it reinstates the older definition. That is not hypothetical — it was true of
 where applying it would have taken the club's nightly digest offline. Read the
 live object before acting on anything this script reports.
 
+Those go in `migration-drift-allowlist.txt` too, but PERMANENTLY: unlike a
+contract-phase entry, there is nothing to apply later and the entry never comes
+out. Record which live query proved the effect is already there.
+
 Usage
 -----
     check-migration-drift.py APPLIED_CSV [--migrations DIR] [--allowlist FILE]

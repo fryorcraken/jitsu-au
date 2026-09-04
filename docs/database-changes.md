@@ -271,8 +271,9 @@ blindly re-runs SQL that a LATER migration has since superseded, reinstating the
 older definition. Two live examples, both allowlisted with their proof in
 `supabase/lint/migration-drift-allowlist.txt`:
 
-- `20260823000000_notification_digest_morning_schedule.sql` is byte-identical to
-  the applied `20260823002504_…`, so applying it would be a no-op. Benign.
+- `20260823000000_notification_digest_morning_schedule.sql` carries the same
+  executable statements as the applied `20260823002504_…` (the re-emission keeps
+  the SQL and drops the commentary), so applying it would be a no-op. Benign.
 - `20260821000000_notification_digest_fails_loudly.sql` is **not** benign. Its
   behaviour is live via the later `20260822120041_…`, which also retired the
   `notification_digest_url` Vault secret. Applying the older file would restore

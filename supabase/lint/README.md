@@ -176,8 +176,10 @@ duplicate-re-emission case as the ledger row above:
   ```
 
 - `20260823000000_notification_digest_morning_schedule.sql` — live via
-  `20260823002504`, which is its SQL byte for byte. Applying it would be a
-  harmless no-op, but it is not drift either.
+  `20260823002504`, which carries the same executable statements (Lovable's
+  re-emission strips the commentary, so the files are 2819 and 576 bytes; the
+  SQL matches once comments are removed, the prose does not). Applying it would
+  be a harmless no-op, but it is not drift either.
 
   ```sql
   -- What proved it: '0 22 * * *', active, and a send that lands on it.
@@ -186,8 +188,9 @@ duplicate-re-emission case as the ledger row above:
   ```
 
 **The general lesson, which is why this is written up rather than quietly
-fixed:** this check compares identities, not content (see "Known blind spots"),
-so a file with no ledger row raises a question. It does not answer it. Read the
+fixed:** this check compares identities, not content (it is the fourth entry
+under "Known blind spots" below), so a file with no ledger row raises a
+question. It does not answer it. Read the
 object — `pg_proc.prosrc`, `cron.job`, `information_schema` — before applying
 anything on the strength of this check, because the checker's own advice
 ("apply each one against the live database") is, for a superseded migration,
@@ -197,8 +200,17 @@ the outage.
 
 A migration legitimately waiting to be applied (the contract phase of an
 expand/contract change, which must land _after_ the code deploys) goes in
-`migration-drift-allowlist.txt` with a note. Everything else failing there is
-real drift: apply the migration and record it in the ledger.
+`migration-drift-allowlist.txt` with a note, and the entry comes out once it is
+applied.
+
+A migration whose SQL is **already live under another ledger version** goes in
+the same file, but permanently, and is never applied. Establish which of the two
+you have by reading the live object, not the file: if a later migration touches
+the same object, applying the earlier one reinstates the older definition. See
+the two worked entries above.
+
+Everything else failing there is real drift: apply the migration and record it
+in the ledger.
 
 ### Known blind spots
 

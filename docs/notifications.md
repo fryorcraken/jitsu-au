@@ -290,7 +290,8 @@ honest:
   still owed.
 
 `0 22 * * *` is 9am in Sydney during daylight saving and 8am outside it
-(`20260823000000_notification_digest_morning_schedule.sql`; it was `0 20 * * *`,
+(written in `20260823000000_notification_digest_morning_schedule.sql`, live via
+Lovable's re-emission `20260823002504_98356929-…`; it was `0 20 * * *`,
 so 7am and 6am, until the club owner saw the first real run land at 6am). pg_cron
 schedules are UTC and have no notion of DST, and an hour's drift on a club digest
 is not worth a scheduler of our own.
@@ -452,13 +453,22 @@ old env-var path. It has since deployed and the digest is sending. Read
 read-only against the live database on 2026-09-04:
 
 ```
-cron.job          notification-digest, '0 22 * * *', active
-notifications     30 emailed, 0 unemailed, last emailed_at 2026-09-02 22:00:06+00
+cron.job        notification-digest, '0 22 * * *', active
+notifications   0 unemailed; emailed_at by day: 2026-08-22 x12 (the stamping
+                below), then 08-24 x3, 08-26 x6, 09-02 x9
 ```
 
-That last timestamp lands on the 22:00 run itself, which is the end-to-end
-evidence steps 3 and 4 below were written to gather. Keep them for the next time
-the key is rotated or the endpoint stops answering.
+Those last three days are real digest runs: nothing but the job stamps a row
+after 2026-08-22, and 2026-09-02's rows carry 22:00:06+00, the run itself. Days
+with no rows are nights nobody was owed anything, which is the expected shape.
+
+⚠️ The 12 rows still dated 2026-08-22 are fewer than the **34** stamped that day
+below. Notifications are deleted when what they point at is, so rows have gone
+since; the gap is not evidence of a failed send, and nothing here re-derives the
+34 from today's table. Count runs, not totals.
+
+Steps 3 and 4 below are what gathered this. Keep them for the next time the key
+is rotated or the endpoint stops answering.
 
 **3. Prove it works, without waiting for the scheduled run.** Run the job by hand and
 read the response back inside pg_net's 6-hour TTL:
@@ -672,7 +682,8 @@ Two consequences worth knowing:
 | The switches                                     | `src/components/site/NotificationSwitches.tsx`                                |
 | The sidebar badge                                | `src/components/site/MemberLayout.tsx`                                        |
 | The digest endpoint                              | `src/routes/api/notifications/digest.ts`                                      |
-| The schedule                                     | `supabase/migrations/20260823002504_98356929-b00a-46da-941d-0aceb9f3bab7.sql` |
+| The job, the function and its REVOKE             | `supabase/migrations/20260807000000_notification_digest_cron.sql`             |
+| The schedule as it runs today                    | `supabase/migrations/20260823002504_98356929-b00a-46da-941d-0aceb9f3bab7.sql` |
 | One key, minted once, and the live function body | `supabase/migrations/20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql` |
 | The key's typed RPC wrapper                      | `notificationDigestKey` in `src/lib/supabase-rpc.ts`                          |
 | The stalled-digest item                          | `digestStalledNotifications` in `src/lib/validation.ts`                       |

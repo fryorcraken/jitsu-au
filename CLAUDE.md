@@ -79,7 +79,8 @@ requests, the CI logs, and the screenshot artifacts.
       not exist, so the job would raise every night and no member would be
       emailed again.
     - `20260823000000_notification_digest_morning_schedule.sql` — live via
-      `20260823002504`, its own SQL byte for byte. `cron.job` reports
+      `20260823002504`, which carries the same executable statements (the
+      re-emission strips the commentary). `cron.job` reports
       `0 22 * * *`, so the digest goes out at 8am/9am Sydney and has since
       2026-08-23. It never was going out at 6am after that date.
 

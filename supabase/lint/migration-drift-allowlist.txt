@@ -50,8 +50,9 @@
 
 # Duplicate re-emission, verified live 2026-09-04 against the club's database.
 #
-# 20260823002504 is this file's SQL byte for byte (Lovable's re-emission of it,
-# ledger row present), so the schedule move is live. Proof: cron.job reports
+# 20260823002504 carries this file's executable statements verbatim (Lovable's
+# re-emission of it, ledger row present; the re-emission drops the commentary,
+# so the files differ in size but not in SQL), so the schedule move is live. Proof: cron.job reports
 # jobname 'notification-digest' on '0 22 * * *', active, and the most recent
 # notifications.emailed_at is 2026-09-02 22:00:06 UTC -- the 22:00 run itself.
 # Applying this file would be a harmless no-op, but it is still not drift.

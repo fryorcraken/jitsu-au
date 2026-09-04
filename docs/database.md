@@ -1286,8 +1286,11 @@ reached from a link rather than by looking the token up.
 Added by `20260807000000_notification_digest_cron.sql`, which enables **pg_cron**
 (schema `cron`) and **pg_net** (schema `net`) and registers one job,
 `notification-digest`, at `0 20 * * *` UTC, moved to `0 22 * * *` by
-`20260823000000_notification_digest_morning_schedule.sql` so it lands at 8am
-Sydney in AEST and 9am in AEDT rather than 6am and 7am. It replaced a GitHub Actions
+`20260823002504_98356929-…` so it lands at 8am Sydney in AEST and 9am in AEDT
+rather than 6am and 7am. (That is Lovable's re-emission of
+`20260823000000_notification_digest_morning_schedule.sql`, which is the file
+carrying the reasoning but has no ledger row of its own — see
+`supabase/lint/migration-drift-allowlist.txt`.) It replaced a GitHub Actions
 workflow: scheduling production work from CI put a credential that makes the site
 email its members into a repo that takes same-repo branches from Lovable and from
 coding agents.
@@ -1358,10 +1361,13 @@ see `src/lib/supabase-rpc.ts` for why this RPC gets a typed wrapper (its real
 return is nullable; the generated type says otherwise) rather than being called
 directly.
 
-`20260821000000_notification_digest_fails_loudly.sql` made the unarmed branch
-**raise** instead of warning and returning, naming the missing secret, and that
-behaviour is unchanged by the third body above. A plpgsql function that returns
-is one pg_cron records as `succeeded`, so before that migration every unarmed
+The unarmed branch **raises** instead of warning and returning, naming the
+missing secret. That was written in
+`20260821000000_notification_digest_fails_loudly.sql`, but it reached production
+inside the third body above — the older file was never applied and must not be,
+since it still reads the retired `notification_digest_url` secret (see
+`supabase/lint/migration-drift-allowlist.txt`). A plpgsql function that returns
+is one pg_cron records as `succeeded`, so before that change every unarmed
 night went into `cron.job_run_details` as a success; it now goes in as a
 failure, which is what it is. Arming the job is what clears it; a club that does
 not want the digest at all should `cron.unschedule('notification-digest')`
