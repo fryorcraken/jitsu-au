@@ -231,8 +231,10 @@ does not actually need — after it there is no staging tier to absorb the mista
   `docs/database.md` aligned in the **code** PR that introduces the usage.
 
 Note: the unit suite never sees a live DB, and `bun run build` is Rollup-only
-(no type-check). The migration-drift workflow catches an _unapplied_ migration
-(but only after merge, and only once its secret is set), and `bun run typecheck`
+(no type-check). **Nothing automated catches an unapplied migration**: the
+migration-drift workflow was deleted on 2026-08-22 because the credential it
+needed can never exist on this project, so `check-migration-drift.py` is a
+script somebody runs by hand (see `supabase/lint/README.md`). `bun run typecheck`
 catches code that reads a column the generated types don't have — but neither
 sees a preview-only bundler-interop fault, and neither can prove the ordering
 above was respected. Sequencing and a browser/DB smoke check are still the real
@@ -273,7 +275,9 @@ older definition. Two live examples, both allowlisted with their proof in
 
 - `20260823000000_notification_digest_morning_schedule.sql` carries the same
   executable statements as the applied `20260823002504_…` (the re-emission keeps
-  the SQL and drops the commentary), so applying it would be a no-op. Benign.
+  the SQL and drops the commentary), so applying it would re-register the job
+  unchanged: a new jobid, the same name, schedule and command. Benign, though
+  still not drift.
 - `20260821000000_notification_digest_fails_loudly.sql` is **not** benign. Its
   behaviour is live via the later `20260822120041_…`, which also retired the
   `notification_digest_url` Vault secret. Applying the older file would restore

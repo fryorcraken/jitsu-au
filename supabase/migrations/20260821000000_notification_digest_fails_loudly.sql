@@ -1,7 +1,10 @@
 -- ⛔ DO NOT APPLY THIS FILE. IT IS SUPERSEDED, AND APPLYING IT IS AN OUTAGE.
 --
 -- Added 2026-09-04. This file has no row in the live ledger, so
--- check-migration-drift.py prints this path and tells you to apply it. Do not.
+-- check-migration-drift.py would report it as unapplied and tell you to apply
+-- it. It is allowlisted now, so it prints under "Allowlisted, so not counted"
+-- instead -- which is a pointer to this warning, never a clearance. Do not
+-- apply it.
 -- Everything below went to production inside 20260822120041 instead (the third
 -- body of this function), which keeps the RAISE and replaces the two Vault
 -- reads with ONE: it retired `notification_digest_url` in favour of an inlined

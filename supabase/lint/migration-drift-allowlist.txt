@@ -4,16 +4,17 @@
 # never run against the live database, because committing a migration does not
 # apply it (see the script's header, and "Schema drift" in CLAUDE.md).
 #
-# The one legitimate reason to be unapplied is the CONTRACT phase of an
+# There are two legitimate reasons. The FIRST is the CONTRACT phase of an
 # expand/contract change: a migration that drops a column, table or function
 # must land AFTER the code that stopped using it has deployed. Park it here
-# while it waits, then apply it and delete the entry.
+# while it waits, then apply it and delete the entry. The second is below.
 #
 # One entry per line, either the full file stem
 # (20260101000000_drop_old_column) or just the version prefix
 # (20260101000000). Blank lines and everything after '#' are ignored.
-# Say WHY each entry is here and what unblocks it. An empty list is the
-# healthy state.
+# Say WHY each entry is here. For a contract-phase entry say what unblocks it;
+# a second-category entry is permanent and nothing unblocks it. An empty list
+# is the healthy state for the first category only.
 
 # ---------------------------------------------------------------------------
 # There is a SECOND legitimate reason, added 2026-09-04: a file whose SQL is
@@ -36,9 +37,15 @@
 #
 # Its whole payload -- the unarmed branch raising instead of returning quietly
 # -- was carried into 20260822120041 (the third body of the function, applied
-# 2026-08-22, ledger row present). Proof: pg_proc.prosrc for
-# private.run_notification_digest() contains RAISE EXCEPTION and no RAISE
-# WARNING.
+# 2026-08-22, ledger row present).
+#
+# Proof, and note WHICH query settles it: "contains RAISE EXCEPTION" does NOT,
+# because this file's body raises too -- it separates body 1 from bodies 2 and
+# 3, not 2 from 3. What discriminates is the Vault read. pg_proc.prosrc for
+# private.run_notification_digest() has NO 'notification_digest_url' and DOES
+# have the literal 'https://jitsu.au/api/notifications/digest', which only the
+# third body has. Corroborated by: SELECT name FROM vault.secrets WHERE name
+# LIKE 'notification_digest%' -> notification_digest_key alone.
 #
 # ⚠️ DO NOT APPLY THIS FILE. It would replace the live function body with the
 # SECOND one, which reads a `notification_digest_url` Vault secret that
@@ -52,8 +59,8 @@
 #
 # 20260823002504 carries this file's executable statements verbatim (Lovable's
 # re-emission of it, ledger row present; the re-emission drops the commentary,
-# so the files differ in size but not in SQL), so the schedule move is live. Proof: cron.job reports
-# jobname 'notification-digest' on '0 22 * * *', active, and the most recent
-# notifications.emailed_at is 2026-09-02 22:00:06 UTC -- the 22:00 run itself.
-# Applying this file would be a harmless no-op, but it is still not drift.
+# so the files differ in size but not in SQL), so the schedule move is live.
+# Proof: cron.job reports jobname 'notification-digest' on '0 22 * * *', active,
+# and notifications rows stamped 2026-09-02 22:00:06 UTC -- the 22:00 run
+# itself. Applying this file would be a harmless no-op, but it is not drift.
 20260823000000_notification_digest_morning_schedule

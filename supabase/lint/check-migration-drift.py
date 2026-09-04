@@ -39,10 +39,10 @@ already live under a DIFFERENT ledger version, because Lovable re-emitted it
 under a filename of its own. This check compares identities, not content, so it
 cannot tell that apart from a migration nobody ever ran. Applying such a file is
 not a harmless no-op when a LATER migration has since replaced the same object:
-it reinstates the older definition. That is not hypothetical — it was true of
-`20260821000000_notification_digest_fails_loudly.sql` from 2026-08-22 onward,
-where applying it would have taken the club's nightly digest offline. Read the
-live object before acting on anything this script reports.
+it reinstates the older definition. That is not hypothetical — it has been true
+of `20260821000000_notification_digest_fails_loudly.sql` since 2026-08-22, and
+applying it today would take the club's nightly digest offline. Read the live
+object before acting on anything this script reports.
 
 Those go in `migration-drift-allowlist.txt` too, but PERMANENTLY: unlike a
 contract-phase entry, there is nothing to apply later and the entry never comes
@@ -237,6 +237,18 @@ def main():
 
     missing = unapplied(stems, versions, names, allowed)
     print(f"{len(stems)} migration files, {len(missing)} not applied to the live database.")
+
+    # Name the allowlisted files rather than passing over them in silence. A
+    # contract-phase entry is temporary and harmless to omit, but a permanently
+    # allowlisted one carries a warning the reader needs (the second category in
+    # migration-drift-allowlist.txt: already live under another ledger version,
+    # and for a SUPERSEDED file, applying it is an outage). Skipping it silently
+    # is how that warning ends up living only in prose that goes stale.
+    silenced = sorted(set(unapplied(stems, versions, names, set())) - set(missing))
+    if silenced:
+        print("\nAllowlisted, so not counted above (read the note beside each entry):")
+        for stem in silenced:
+            print(f"  {stem}")
 
     orphans = orphan_rows(rows, stems)
     if orphans:

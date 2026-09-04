@@ -53,8 +53,9 @@ requests, the CI logs, and the screenshot artifacts.
   - The two live checks survive as **scripts you run by hand** through Lovable's
     SQL access (`supabase/lint/README.md` has the queries, and **owns these
     figures** — this is a summary of that file, so change it there first). Last
-    run **2026-09-04**: **76 migration files, 0 unapplied** (2 report as
-    unapplied and are allowlisted as already-live re-emissions, see below), and
+    run **2026-09-04**: **76 migration files, 2 reported unapplied**, both then
+    allowlisted as already-live re-emissions (see below), so the next run
+    reports 0 and lists them separately. Also
     **18 client grants live, 18 expected, 0 unexpected** as of **2026-09-01**. So
     `supabase/lint/client-grants-expected.txt` is verified against production as
     of that date, not just against the migration files, and `profiles` still
@@ -66,10 +67,12 @@ requests, the CI logs, and the screenshot artifacts.
     NOT drift, and one of them must never be applied.** This file said the
     opposite until 2026-09-04, when the live database was finally read rather
     than reasoned about. Both effects are already in production, carried there
-    by Lovable re-emissions of the same SQL under filenames of its own — the
-    duplicate-re-emission case, the same one as the ledger row below, not a
-    different thing. Both are now in `supabase/lint/migration-drift-allowlist.txt`
-    with the queries that proved it.
+    by Lovable re-emissions of the same SQL under filenames of its own. Same
+    cause as the ledger row below, opposite symptom: that one is a row with no
+    file, this is a file whose row sits under the re-emission's version. Both
+    are now in `supabase/lint/migration-drift-allowlist.txt` with the queries
+    that proved it, and the checker lists them rather than silently skipping
+    them.
     - `20260821000000_notification_digest_fails_loudly.sql` — **superseded, and
       applying it now would stop the digest.** Its payload (the unarmed branch
       raising instead of returning quietly) went live inside `20260822120041`,
@@ -84,7 +87,8 @@ requests, the CI logs, and the screenshot artifacts.
       `0 22 * * *`, so the digest goes out at 8am/9am Sydney and has since
       2026-08-23. It never was going out at 6am after that date.
 
-    The lesson is the one this section already teaches from the other end: the
+    The lesson is the one the orphan-row bullet below teaches from the other
+    end: the
     drift check compares **identities, not content**, so a file with no ledger
     row is a question, not a verdict. Read the object itself (`pg_proc.prosrc`,
     `cron.job`) before applying anything on its say-so. "Approval of the PR
