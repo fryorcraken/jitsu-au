@@ -1,3 +1,29 @@
+-- ⛔ DO NOT APPLY THIS FILE. IT IS SUPERSEDED, AND APPLYING IT IS AN OUTAGE.
+--
+-- Added 2026-09-04. This file has no row in the live ledger, so
+-- check-migration-drift.py would report it as unapplied and tell you to apply
+-- it. It is allowlisted now, so it prints under "Allowlisted, so not counted"
+-- instead -- which is a pointer to this warning, never a clearance. Do not
+-- apply it.
+-- Everything below went to production inside 20260822120041 instead (the third
+-- body of this function), which keeps the RAISE and replaces the two Vault
+-- reads with ONE: it retired `notification_digest_url` in favour of an inlined
+-- https://jitsu.au/... URL, and that Vault row no longer exists.
+--
+-- So applying this file installs the SECOND body over the third. It would read
+-- a secret that is not there, raise every night, and the club's digest would
+-- stop. Verified live 2026-09-04: pg_proc.prosrc holds the third body, and
+-- vault.secrets holds only `notification_digest_key`.
+--
+-- The file stays for the history and the reasoning, and because a from-scratch
+-- replay applies it BEFORE 20260822120041 and therefore still ends on the right
+-- body. It is allowlisted permanently in
+-- supabase/lint/migration-drift-allowlist.txt. The sequencing note below was
+-- true when written and is kept as written; it is no longer a reason to apply
+-- this.
+--
+-- ---------------------------------------------------------------------------
+
 -- The nightly digest job stops reporting success when it did nothing.
 --
 -- WHY. `private.run_notification_digest()` (20260807000000) reads two Vault

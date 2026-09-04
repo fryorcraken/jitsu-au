@@ -34,6 +34,20 @@ that drops something must land AFTER the code that stopped using it deploys.
 List those in `migration-drift-allowlist.txt` while they wait, and remove the
 entry once applied.
 
+There is a second exception, and it is the dangerous one: a file whose SQL is
+already live under a DIFFERENT ledger version, because Lovable re-emitted it
+under a filename of its own. This check compares identities, not content, so it
+cannot tell that apart from a migration nobody ever ran. Applying such a file is
+not a harmless no-op when a LATER migration has since replaced the same object:
+it reinstates the older definition. That is not hypothetical — it has been true
+of `20260821000000_notification_digest_fails_loudly.sql` since 2026-08-22, and
+applying it today would take the club's nightly digest offline. Read the live
+object before acting on anything this script reports.
+
+Those go in `migration-drift-allowlist.txt` too, but PERMANENTLY: unlike a
+contract-phase entry, there is nothing to apply later and the entry never comes
+out. Record which live query proved the effect is already there.
+
 Usage
 -----
     check-migration-drift.py APPLIED_CSV [--migrations DIR] [--allowlist FILE]
@@ -224,6 +238,18 @@ def main():
     missing = unapplied(stems, versions, names, allowed)
     print(f"{len(stems)} migration files, {len(missing)} not applied to the live database.")
 
+    # Name the allowlisted files rather than passing over them in silence. A
+    # contract-phase entry is temporary and harmless to omit, but a permanently
+    # allowlisted one carries a warning the reader needs (the second category in
+    # migration-drift-allowlist.txt: already live under another ledger version,
+    # and for a SUPERSEDED file, applying it is an outage). Skipping it silently
+    # is how that warning ends up living only in prose that goes stale.
+    silenced = sorted(set(unapplied(stems, versions, names, set())) - set(missing))
+    if silenced:
+        print("\nAllowlisted, so not counted above (read the note beside each entry):")
+        for stem in silenced:
+            print(f"  {stem}")
+
     orphans = orphan_rows(rows, stems)
     if orphans:
         print("\nNote: ledger rows with no matching migration file (deleted or renamed here?):")
@@ -238,11 +264,18 @@ def main():
         print(f"  supabase/migrations/{stem}.sql")
     print(
         "\nCommitting a migration does NOT apply it — nothing in this pipeline runs\n"
-        "supabase/migrations/*.sql. Apply each one against the live database (the\n"
+        "supabase/migrations/*.sql. But CHECK BEFORE YOU APPLY: this compares\n"
+        "identities, not content, so a file also lands here when its SQL is already\n"
+        "live under a different ledger version (Lovable re-emits hand-written SQL\n"
+        "under a filename of its own). Read the live object first — pg_proc.prosrc,\n"
+        "cron.job, information_schema — because applying a SUPERSEDED file reinstates\n"
+        "an older definition over a newer one, which is an outage, not a no-op.\n"
+        "\nIf it really has never run: apply it against the live database (the\n"
         "Lovable project's SQL access), record it in supabase_migrations.schema_migrations,\n"
-        "and re-run. If a migration is the contract (destructive) phase of an\n"
-        "expand/contract change and must land after the code deploys, add it to\n"
-        f"{allowlist_display(allowlist_path)} with a note, and remove it once applied.",
+        "and re-run. If it is the contract (destructive) phase of an expand/contract\n"
+        "change and must land after the code deploys, or it is already live under\n"
+        f"another version, add it to {allowlist_display(allowlist_path)} with a note\n"
+        "saying which live query proved it.",
         file=sys.stderr,
     )
     return 1
