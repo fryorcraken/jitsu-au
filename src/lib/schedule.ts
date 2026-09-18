@@ -27,6 +27,14 @@ export type ClassSession = {
   /** Who the session is for, printed under the time. */
   note: string;
   /**
+   * How often the session runs, when it is not every week. Both pages list
+   * these cards under a heading about training "this week", so a session that
+   * does not run weekly has to say so beside the day, where somebody scanning
+   * the times will see it. Left undefined for the weekly nights, which would
+   * only be carrying a badge that repeats the heading.
+   */
+  cadence?: string;
+  /**
    * True where someone with no experience can just turn up. Drives the prose
    * on the register-interest confirmation, so adding a beginners night updates
    * that sentence too.
@@ -40,6 +48,7 @@ export const weeklySchedule: ClassSession[] = [
   {
     day: "Saturday",
     time: "11:00am – 12:30pm",
+    cadence: "Once a month",
     // The year is not decoration. Without it this reads as "next month" every
     // August, so a promise that never arrived would look fresh forever.
     note: "Colour belts only, from September 2026",

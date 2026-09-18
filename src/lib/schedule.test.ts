@@ -26,7 +26,7 @@ describe("the weekly schedule", () => {
       expect(session.time, `${session.day} should use an en dash range`).toMatch(
         /^\d{1,2}:\d{2}(am|pm)? – \d{1,2}:\d{2}(am|pm)$/,
       );
-      expect(`${session.day} ${session.note}`).not.toContain("—");
+      expect(`${session.day} ${session.note} ${session.cadence ?? ""}`).not.toContain("—");
     }
   });
 
@@ -39,6 +39,25 @@ describe("the weekly schedule", () => {
       if (!months.test(session.note)) continue;
       expect(session.note, `"${session.note}" needs the year`).toMatch(/\b20\d{2}\b/);
     }
+  });
+
+  // The cards sit under "Train with us this week", so a session that does not
+  // run every week reads as weekly unless it says otherwise next to the day.
+  it("names the cadence of the session that does not run weekly", () => {
+    const saturday = weeklySchedule.find((s) => s.day === "Saturday");
+    expect(saturday?.cadence).toBe("Once a month");
+  });
+
+  it("leaves the cadence off the weekly nights, and never leaves it blank", () => {
+    for (const session of weeklySchedule) {
+      if (session.cadence === undefined) continue;
+      expect(session.cadence.trim().length, `${session.day} has an empty cadence`).toBeGreaterThan(
+        0,
+      );
+    }
+    expect(weeklySchedule.filter((s) => s.cadence !== undefined).length).toBeLessThan(
+      weeklySchedule.length,
+    );
   });
 
   it("has at least one session a beginner can walk into", () => {

@@ -176,9 +176,14 @@ function Home() {
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {weeklySchedule.map((s) => (
               <div key={s.day} className="rounded-xl border bg-card p-6">
-                <div className="flex items-center gap-2 text-primary">
+                <div className="flex flex-wrap items-center gap-2 text-primary">
                   <Clock className="h-4 w-4" />
                   <span className="text-xs font-semibold uppercase tracking-wider">{s.day}</span>
+                  {s.cadence ? (
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider">
+                      {s.cadence}
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-2 text-2xl font-bold">{s.time}</p>
                 <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
