@@ -49,15 +49,15 @@ describe("the weekly schedule", () => {
   });
 
   it("leaves the cadence off the weekly nights, and never leaves it blank", () => {
+    expect(weeklySchedule.filter((s) => s.cadence !== undefined).map((s) => s.day)).toEqual([
+      "Saturday",
+    ]);
     for (const session of weeklySchedule) {
       if (session.cadence === undefined) continue;
       expect(session.cadence.trim().length, `${session.day} has an empty cadence`).toBeGreaterThan(
         0,
       );
     }
-    expect(weeklySchedule.filter((s) => s.cadence !== undefined).length).toBeLessThan(
-      weeklySchedule.length,
-    );
   });
 
   it("has at least one session a beginner can walk into", () => {

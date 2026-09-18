@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Clock, MapPin, Phone } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta } from "@/lib/seo";
 import { scheduleDays, weeklySchedule } from "@/lib/schedule";
@@ -16,7 +17,7 @@ export const Route = createFileRoute("/classes")({
   head: () => ({
     meta: buildPageMeta({
       title: "Classes & Schedule | UTS Jitsu",
-      description: `Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. ${scheduleDays}.`,
+      description: `Japanese Jiu-Jitsu class times at ActivateFit Gym, Ultimo. ${scheduleDays}.`,
       ogDescription: `${scheduleDays} classes at ActivateFit Gym, Ultimo.`,
       path: "/classes",
     }),
@@ -45,9 +46,9 @@ function Classes() {
                 <Clock className="h-4 w-4" />
                 <span className="text-xs font-semibold uppercase tracking-wider">{s.day}</span>
                 {s.cadence ? (
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider">
+                  <Badge variant="secondary" className="uppercase tracking-wider">
                     {s.cadence}
-                  </span>
+                  </Badge>
                 ) : null}
               </div>
               <p className="mt-2 text-2xl font-bold">{s.time}</p>
