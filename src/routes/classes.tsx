@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Clock, MapPin, Phone } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta } from "@/lib/seo";
 import { scheduleDays, weeklySchedule } from "@/lib/schedule";
@@ -16,7 +17,7 @@ export const Route = createFileRoute("/classes")({
   head: () => ({
     meta: buildPageMeta({
       title: "Classes & Schedule | UTS Jitsu",
-      description: `Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. ${scheduleDays}.`,
+      description: `Japanese Jiu-Jitsu class times at ActivateFit Gym, Ultimo. ${scheduleDays}.`,
       ogDescription: `${scheduleDays} classes at ActivateFit Gym, Ultimo.`,
       path: "/classes",
     }),
@@ -41,9 +42,14 @@ function Classes() {
         <div className="grid gap-4 md:grid-cols-3">
           {weeklySchedule.map((s) => (
             <div key={s.day} className="rounded-xl border bg-card p-6">
-              <div className="flex items-center gap-2 text-primary">
+              <div className="flex flex-wrap items-center gap-2 text-primary">
                 <Clock className="h-4 w-4" />
                 <span className="text-xs font-semibold uppercase tracking-wider">{s.day}</span>
+                {s.cadence ? (
+                  <Badge variant="secondary" className="uppercase tracking-wider">
+                    {s.cadence}
+                  </Badge>
+                ) : null}
               </div>
               <p className="mt-2 text-2xl font-bold">{s.time}</p>
               <p className="mt-3 text-sm text-muted-foreground">{s.note}</p>

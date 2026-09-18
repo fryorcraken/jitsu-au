@@ -4,9 +4,10 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { YouTubeEmbed } from "@/components/site/YouTubeEmbed";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
-import { weeklySchedule } from "@/lib/schedule";
+import { beginnerDaysShort, weeklySchedule } from "@/lib/schedule";
 import { VENUE_ADDRESS_SHORT, VENUE_BUILDING, VENUE_NAME } from "@/lib/venue";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
@@ -14,8 +15,10 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: buildPageMeta({
       title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney",
-      description:
-        "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+      // The nights come from the schedule rather than a fourth hand-kept copy
+      // of it. It named Saturday until the monthly, colour-belt session made
+      // that a search snippet inviting a beginner to a class not open to them.
+      description: `Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes ${beginnerDaysShort}. First two sessions free.`,
       path: "/",
     }),
     links: [
@@ -176,9 +179,14 @@ function Home() {
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {weeklySchedule.map((s) => (
               <div key={s.day} className="rounded-xl border bg-card p-6">
-                <div className="flex items-center gap-2 text-primary">
+                <div className="flex flex-wrap items-center gap-2 text-primary">
                   <Clock className="h-4 w-4" />
                   <span className="text-xs font-semibold uppercase tracking-wider">{s.day}</span>
+                  {s.cadence ? (
+                    <Badge variant="secondary" className="uppercase tracking-wider">
+                      {s.cadence}
+                    </Badge>
+                  ) : null}
                 </div>
                 <p className="mt-2 text-2xl font-bold">{s.time}</p>
                 <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
