@@ -41,6 +41,13 @@ describe("the weekly schedule", () => {
     }
   });
 
+  // The cards sit under "Train with us this week", so a session that does not
+  // run every week reads as weekly unless its note says otherwise.
+  it("says in its note that the Saturday session does not run weekly", () => {
+    const saturday = weeklySchedule.find((s) => s.day === "Saturday");
+    expect(saturday?.note).toContain("once a month");
+  });
+
   it("has at least one session a beginner can walk into", () => {
     expect(weeklySchedule.some((s) => s.openToBeginners)).toBe(true);
   });

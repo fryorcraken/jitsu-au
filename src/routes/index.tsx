@@ -6,7 +6,7 @@ import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { YouTubeEmbed } from "@/components/site/YouTubeEmbed";
 import { Button } from "@/components/ui/button";
 import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
-import { weeklySchedule } from "@/lib/schedule";
+import { beginnerDaysShort, weeklySchedule } from "@/lib/schedule";
 import { VENUE_ADDRESS_SHORT, VENUE_BUILDING, VENUE_NAME } from "@/lib/venue";
 import heroAsset from "@/assets/training1.jpg.asset.json";
 
@@ -14,8 +14,10 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: buildPageMeta({
       title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney",
-      description:
-        "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
+      // The nights come from the schedule rather than a fourth hand-kept copy
+      // of it. It named Saturday until the monthly, colour-belt session made
+      // that a search snippet inviting a beginner to a class not open to them.
+      description: `Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes ${beginnerDaysShort}. First two sessions free.`,
       path: "/",
     }),
     links: [

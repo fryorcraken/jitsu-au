@@ -40,9 +40,9 @@ export const weeklySchedule: ClassSession[] = [
   {
     day: "Saturday",
     time: "11:00am – 12:30pm",
-    // The year is not decoration. Without it this reads as "next month" every
-    // August, so a promise that never arrived would look fresh forever.
-    note: "Colour belts only, from September 2026",
+    // Both pages list these cards under a heading about training "this week",
+    // so a session that does not run weekly has to say so here.
+    note: "Colour belts only, once a month",
     openToBeginners: false,
   },
 ];

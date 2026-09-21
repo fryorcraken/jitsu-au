@@ -16,7 +16,7 @@ export const Route = createFileRoute("/classes")({
   head: () => ({
     meta: buildPageMeta({
       title: "Classes & Schedule | UTS Jitsu",
-      description: `Weekly Japanese Jiu-Jitsu classes at ActivateFit Gym, Ultimo. ${scheduleDays}.`,
+      description: `Japanese Jiu-Jitsu class times at ActivateFit Gym, Ultimo. ${scheduleDays}.`,
       ogDescription: `${scheduleDays} classes at ActivateFit Gym, Ultimo.`,
       path: "/classes",
     }),
