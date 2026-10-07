@@ -17,6 +17,7 @@
 // What a status is CALLED is the sibling question, and lives in
 // `./status-labels` for the same reason this file exists.
 import type { VerificationLabel } from "./email-verification";
+import type { ItemInvoiceState } from "./item-invoices";
 import type {
   BlogCommentStatus,
   BlogPostStatus,
@@ -87,6 +88,15 @@ const BLOG_COMMENT: Record<BlogCommentStatus, string> = {
   hidden: "bg-red-100 text-red-800",
 };
 
+// An item invoice (docs/item-invoices.md). The same family as a membership
+// invoice: amber for money still owed, green once it lands, neutral for one a
+// manager withdrew.
+const ITEM_INVOICE: Record<ItemInvoiceState, string> = {
+  unpaid: "bg-amber-100 text-amber-800",
+  paid: "bg-green-100 text-green-800",
+  cancelled: NEUTRAL_STATUS_CLASS,
+};
+
 /** A role assignment (`member`, `manager`). One colour covers every role. */
 export const ROLE_CLASS = "bg-indigo-100 text-indigo-800";
 
@@ -105,6 +115,11 @@ export function lifecycleClass(status: string): string {
 /** Colour for an enrollment's state (`pending` … `cancelled`). */
 export function membershipClass(status: string): string {
   return MEMBERSHIP[status as MembershipStatus] ?? NEUTRAL_STATUS_CLASS;
+}
+
+/** Colour for an item invoice's state (`unpaid` / `paid` / `cancelled`). */
+export function itemInvoiceClass(state: string): string {
+  return ITEM_INVOICE[state as ItemInvoiceState] ?? NEUTRAL_STATUS_CLASS;
 }
 
 /** Colour for the email badge (`verified` / `unverified`). */

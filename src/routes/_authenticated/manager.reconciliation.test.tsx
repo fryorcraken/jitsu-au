@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
 
 const listBankTransactions = vi.fn();
 const listMemberships = vi.fn();
+const listItemInvoices = vi.fn().mockResolvedValue([]);
+const matchTransactionToItem = vi.fn().mockResolvedValue({ ok: true });
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => opts,
@@ -22,6 +24,10 @@ vi.mock("@/lib/membership.functions", () => ({
   listBankTransactions: (...args: unknown[]) => listBankTransactions(...args),
   listMemberships: (...args: unknown[]) => listMemberships(...args),
   matchTransaction: vi.fn(),
+}));
+vi.mock("@/lib/item-invoices.functions", () => ({
+  listItemInvoices: (...args: unknown[]) => listItemInvoices(...args),
+  matchTransactionToItem: (...args: unknown[]) => matchTransactionToItem(...args),
 }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: { id: "manager-1" }, session: null, loading: false }),
@@ -62,5 +68,41 @@ describe("manager reconciliation", () => {
     render(<ReconciliationPage />);
 
     expect(await screen.findByText(/everything imported has been matched/i)).toBeInTheDocument();
+  });
+
+  // A transfer for a gi has to be matchable by hand like any other payment, or
+  // it sits on this list for ever with nothing it can be linked to.
+  it("offers unpaid item invoices for a leftover transfer, and records the match", async () => {
+    listBankTransactions.mockResolvedValue([
+      {
+        id: "txn-1",
+        posted_at: "2026-10-02",
+        amount_cents: 8500,
+        description: "OSKO A SMITH GI",
+        reference: null,
+        status: "unmatched",
+        matched_membership_id: null,
+        matched_at: null,
+        created_at: "2026-10-02T00:00:00Z",
+      },
+    ]);
+    listMemberships.mockResolvedValue([]);
+    listItemInvoices.mockResolvedValue([
+      {
+        id: "inv-7",
+        payment_reference: "INV0007",
+        member_name: "Ada Lovelace",
+        member_email: "ada@example.com",
+        total_cents: 8500,
+      },
+    ]);
+    render(<ReconciliationPage />);
+
+    const select = await screen.findByRole("combobox", { name: /match the \$85 transfer/i });
+    expect(screen.getByRole("option", { name: /INV0007/ })).toBeInTheDocument();
+    await userEvent.selectOptions(select, "i:inv-7");
+    expect(matchTransactionToItem).toHaveBeenCalledWith({
+      data: { transaction_id: "txn-1", item_invoice_id: "inv-7" },
+    });
   });
 });

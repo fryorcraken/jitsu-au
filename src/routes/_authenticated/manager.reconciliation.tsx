@@ -16,6 +16,11 @@ import {
   matchTransaction,
 } from "@/lib/membership.functions";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import {
+  listItemInvoices,
+  matchTransactionToItem,
+  type ManagerItemInvoiceView,
+} from "@/lib/item-invoices.functions";
 
 export const Route = createFileRoute("/_authenticated/manager/reconciliation")({
   head: () => ({
@@ -35,10 +40,15 @@ function ReconciliationPage() {
   const fetchTxns = useServerFn(listBankTransactions);
   const fetchMemberships = useServerFn(listMemberships);
   const runMatch = useServerFn(matchTransaction);
+  const fetchItemInvoices = useServerFn(listItemInvoices);
+  const runItemMatch = useServerFn(matchTransactionToItem);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [txns, setTxns] = useState<BankTxn[]>([]);
   const [memberships, setMemberships] = useState<Membership[]>([]);
+  // Unpaid item invoices (docs/item-invoices.md), the other thing a transfer
+  // can pay. Already filtered to unpaid by the server.
+  const [itemInvoices, setItemInvoices] = useState<ManagerItemInvoiceView[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // Without this the card below reports "Everything imported has been matched."
@@ -58,11 +68,16 @@ function ReconciliationPage() {
 
   const reload = useMemo(
     () => () =>
-      Promise.all([fetchTxns(), fetchMemberships()]).then(([t, m]) => {
+      Promise.all([
+        fetchTxns(),
+        fetchMemberships(),
+        fetchItemInvoices({ data: { state: "unpaid" } }),
+      ]).then(([t, m, items]) => {
         setTxns(t as BankTxn[]);
         setMemberships(m as Membership[]);
+        setItemInvoices(items);
       }),
-    [fetchTxns, fetchMemberships],
+    [fetchTxns, fetchMemberships, fetchItemInvoices],
   );
 
   // Wrapped so the "Try again" button runs the same fetch the mount effect does,
@@ -117,13 +132,18 @@ function ReconciliationPage() {
     }
   }
 
-  async function manualMatch(txnId: string, membershipId: string) {
-    if (!membershipId) return;
+  // The option value says which kind of invoice it is: `m:<id>` for a
+  // membership, `i:<id>` for an item invoice.
+  async function manualMatch(txnId: string, choice: string) {
+    if (!choice) return;
+    const [kind, id] = choice.split(":");
     setBusy(true);
     try {
-      await runMatch({ data: { transaction_id: txnId, membership_id: membershipId } });
+      if (kind === "i")
+        await runItemMatch({ data: { transaction_id: txnId, item_invoice_id: id } });
+      else await runMatch({ data: { transaction_id: txnId, membership_id: id } });
       await reload();
-      toast.success("Matched and activated");
+      toast.success("Matched, and the payment is recorded");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Match failed");
     } finally {
@@ -140,8 +160,8 @@ function ReconciliationPage() {
           <div>
             <h1 className="text-3xl font-black">Bank reconciliation</h1>
             <p className="text-sm text-muted-foreground">
-              Import a bank statement (CSV). Transfers are auto-matched to pending memberships by
-              payment reference and amount.
+              Import a bank statement (CSV). Transfers are matched to unpaid membership and item
+              invoices by payment reference and amount.
             </p>
           </div>
           <Button asChild variant="outline">
@@ -185,7 +205,7 @@ function ReconciliationPage() {
               <CardDescription>
                 {unmatched.length === 0
                   ? "Everything imported has been matched."
-                  : "Link any leftover transfers to a pending membership by hand."}
+                  : "Link any leftover transfers to an unpaid invoice by hand."}
               </CardDescription>
             </CardHeader>
             {unmatched.length > 0 && (
@@ -197,7 +217,7 @@ function ReconciliationPage() {
                         <th className="px-3 py-2">Date</th>
                         <th className="px-3 py-2">Amount</th>
                         <th className="px-3 py-2">Description</th>
-                        <th className="px-3 py-2">Match to pending</th>
+                        <th className="px-3 py-2">Match to an unpaid invoice</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -210,21 +230,39 @@ function ReconciliationPage() {
                           </td>
                           <td className="px-3 py-2">
                             <select
-                              disabled={busy || pending.length === 0}
+                              aria-label={`Match the ${formatCents(t.amount_cents)} transfer to an invoice`}
+                              disabled={busy || (pending.length === 0 && itemInvoices.length === 0)}
                               defaultValue=""
                               onChange={(e) => manualMatch(t.id, e.target.value)}
                               className="rounded-md border bg-background px-2 py-1 text-sm"
                             >
                               <option value="">
-                                {pending.length === 0 ? "No pending memberships" : "Select…"}
+                                {pending.length === 0 && itemInvoices.length === 0
+                                  ? "Nothing unpaid"
+                                  : "Select…"}
                               </option>
-                              {pending.map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.payment_reference} ·{" "}
-                                  {m.member_name ?? m.member_email ?? "member"} ·{" "}
-                                  {formatCents(m.price_cents)}
-                                </option>
-                              ))}
+                              {pending.length > 0 && (
+                                <optgroup label="Memberships">
+                                  {pending.map((m) => (
+                                    <option key={m.id} value={`m:${m.id}`}>
+                                      {m.payment_reference} ·{" "}
+                                      {m.member_name ?? m.member_email ?? "member"} ·{" "}
+                                      {formatCents(m.price_cents)}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              {itemInvoices.length > 0 && (
+                                <optgroup label="Item invoices">
+                                  {itemInvoices.map((inv) => (
+                                    <option key={inv.id} value={`i:${inv.id}`}>
+                                      {inv.payment_reference} ·{" "}
+                                      {inv.member_name ?? inv.member_email ?? "member"} ·{" "}
+                                      {formatCents(inv.total_cents)}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
                             </select>
                           </td>
                         </tr>
