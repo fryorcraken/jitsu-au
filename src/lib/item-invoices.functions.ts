@@ -277,7 +277,38 @@ export async function createItemInvoiceForUser(
   reference: string;
   total_cents: number;
   emailed: boolean;
+  /** True when this was a retry of a raise that had already landed. */
+  already_raised: boolean;
 }> {
+  // A retry of a raise that already landed (its reply was lost) gets the same
+  // invoice back and sends nothing: the first attempt sent the email.
+  const submissionId = input.client_submission_id ?? null;
+  const alreadyRaised = async () => {
+    if (!submissionId) return null;
+    const { data, error } = await admin
+      .from("item_invoices")
+      .select("id, payment_reference, total_cents, user_id")
+      .eq("client_submission_id", submissionId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    // The same id for somebody else is not a retry of this request. Refuse it
+    // rather than hand back a stranger's invoice.
+    if (data && data.user_id !== input.user_id)
+      throw new Error("That submission id was already used for a different invoice.");
+    return data
+      ? {
+          ok: true as const,
+          id: data.id,
+          reference: data.payment_reference,
+          total_cents: data.total_cents,
+          emailed: false,
+          already_raised: true,
+        }
+      : null;
+  };
+  const earlier = await alreadyRaised();
+  if (earlier) return earlier;
+
   // A person the club has a record of, not just any auth id: an invoice for an
   // id with no profile would have no name on any screen and nobody to email.
   const { data: person, error: pErr } = await admin
@@ -301,9 +332,21 @@ export async function createItemInvoiceForUser(
 
   const { data: row, error } = await admin
     .from("item_invoices")
-    .insert({ user_id: input.user_id, lines, total_cents, created_by: createdBy })
+    .insert({
+      user_id: input.user_id,
+      lines,
+      total_cents,
+      created_by: createdBy,
+      client_submission_id: submissionId,
+    })
     .select("*")
     .single();
+  // 23505 on the submission id: a first attempt still committing when this
+  // retry arrived. It won, so answer with its invoice.
+  if (error?.code === "23505" && submissionId) {
+    const raced = await alreadyRaised();
+    if (raced) return raced;
+  }
   if (error || !row) throw new Error(error?.message || "That invoice was not raised. Try again.");
 
   let emailed = false;
@@ -330,7 +373,14 @@ export async function createItemInvoiceForUser(
     console.error(`[item-invoices] invoice ${row.id} was raised but its email failed:`, e);
   }
 
-  return { ok: true, id: row.id, reference: row.payment_reference, total_cents, emailed };
+  return {
+    ok: true,
+    id: row.id,
+    reference: row.payment_reference,
+    total_cents,
+    emailed,
+    already_raised: false,
+  };
 }
 
 /**

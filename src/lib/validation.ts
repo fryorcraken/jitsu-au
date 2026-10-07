@@ -3795,10 +3795,17 @@ export type RecordIdInput = z.infer<typeof recordIdSchema>;
  * at the moment the invoice was raised, whatever a stale screen was showing.
  * The same item twice is refused rather than merged: it is almost always a
  * double click on a list that should have said "2 ×".
+ *
+ * `client_submission_id` is what makes a retry safe. The screen retries a raise
+ * that timed out, and a timed-out request may still have committed on the
+ * server, so without it a bad connection would invoice somebody twice.
  */
 export const createItemInvoiceSchema = z
   .object({
     user_id: z.string().uuid(),
+    // One per form fill, resent on every retry: a raise whose reply was lost
+    // finds the invoice it already made rather than emailing a second one.
+    client_submission_id: z.string().uuid().optional(),
     lines: z
       .array(
         z

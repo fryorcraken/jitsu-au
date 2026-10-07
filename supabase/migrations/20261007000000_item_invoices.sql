@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS public.item_invoices (
   payment_method TEXT,
   cancelled_at TIMESTAMPTZ,
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  -- One per form fill, resent unchanged on every retry, so a raise whose reply
+  -- was lost and is sent again finds the invoice it already made instead of
+  -- making (and emailing) a second one. Same idea as the intake paths
+  -- (docs/database.md, "client_submission_id"). Nullable: an agent may omit it.
+  client_submission_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT item_invoices_lines_shape CHECK (
     jsonb_typeof(lines) = 'array' AND jsonb_array_length(lines) BETWEEN 1 AND 20
@@ -84,6 +89,9 @@ CREATE TABLE IF NOT EXISTS public.item_invoices (
 
 CREATE UNIQUE INDEX IF NOT EXISTS item_invoices_payment_reference_key
   ON public.item_invoices (payment_reference);
+CREATE UNIQUE INDEX IF NOT EXISTS item_invoices_client_submission_id_key
+  ON public.item_invoices (client_submission_id)
+  WHERE client_submission_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS item_invoices_user_id_idx
   ON public.item_invoices (user_id);
 -- The bank match and the "unpaid charges" list both ask for exactly this.

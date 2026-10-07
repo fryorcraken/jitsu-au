@@ -63,6 +63,7 @@ const INVOICE = {
   payment_method: null,
   cancelled_at: null,
   created_by: null,
+  client_submission_id: null,
   created_at: "2026-10-01T00:00:00Z",
 };
 
@@ -235,7 +236,35 @@ describe("createItemInvoiceForUser", () => {
       lines: [{ name: "Club gi", unit_price_cents: 8500, quantity: 2 }],
       total_cents: 17000,
       created_by: "manager-1",
+      client_submission_id: null,
     });
+  });
+
+  // The screen retries a raise that timed out, and the first attempt may have
+  // committed. The retry must find that invoice, not raise and email another.
+  it("hands back the invoice a retried raise already made, and writes nothing", async () => {
+    const { createItemInvoiceForUser } = await import("./item-invoices.functions");
+    const fake = fakeAdmin({
+      item_invoices: {
+        select: ok({
+          id: "inv-12",
+          payment_reference: "INV0012",
+          total_cents: 8500,
+          user_id: "u1",
+        }),
+      },
+    });
+    const res = await createItemInvoiceForUser(
+      fake.admin as never,
+      {
+        user_id: "u1",
+        client_submission_id: "44444444-4444-4444-8444-444444444444",
+        lines: [{ item_id: "i1", quantity: 1 }],
+      },
+      "manager-1",
+    );
+    expect(res).toMatchObject({ id: "inv-12", already_raised: true, emailed: false });
+    expect(fake.writes).toEqual([]);
   });
 
   it("refuses somebody the club has no record of, before writing anything", async () => {
