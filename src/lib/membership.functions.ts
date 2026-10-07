@@ -1981,6 +1981,9 @@ export async function reconcileUnmatched(
 
   let matched = 0;
   const remaining = new Set(pendingList.map((m) => m.id));
+  // Lines the membership pass settled, so the item-invoice pass below only sees
+  // what is left and one transfer can never pay two things.
+  const settledTxnIds = new Set<string>();
   for (const txn of (txns ?? []) as BankTransactionRow[]) {
     // Some banks put the payer's reference in a dedicated field rather than the
     // narrative, so match against both. References are stable per member (not
@@ -2059,6 +2062,7 @@ export async function reconcileUnmatched(
           })
           .eq("id", txn.id);
         matched++;
+        settledTxnIds.add(txn.id);
       }
       continue;
     }
@@ -2091,6 +2095,20 @@ export async function reconcileUnmatched(
       .eq("id", txn.id);
     remaining.delete(hit.id);
     matched++;
+    settledTxnIds.add(txn.id);
+  }
+
+  // Then item invoices (docs/item-invoices.md), against whatever is left. Their
+  // references (`INV0007`) never collide with a membership's, so the order only
+  // matters for the odd line that fits neither cleanly. A failure here is
+  // logged, not thrown: every membership match above has already committed, and
+  // failing the import now would report work that landed as work that did not.
+  try {
+    const { settleItemInvoicesFromStatement } = await import("./item-invoices.functions");
+    const leftover = ((txns ?? []) as BankTransactionRow[]).filter((t) => !settledTxnIds.has(t.id));
+    matched += (await settleItemInvoicesFromStatement(admin, leftover)).size;
+  } catch (e) {
+    console.error("[reconcile] matching item invoices failed; left for a manager:", e);
   }
 
   // The one read here that does not throw. Every match above has already

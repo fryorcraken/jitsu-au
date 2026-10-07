@@ -248,24 +248,35 @@ export const listHouseholdInvoices = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     if (plErr) throw new Error(plErr.message);
 
+    // Item invoices (a gi, a patch) are owed the same way and paid the same
+    // way, so they join the same list rather than getting a panel of their own.
+    // Each is its own transfer under its own reference. Throws like the reads
+    // above: a parent shown no charges because a read fell over would pay too
+    // little and never know.
+    const { unpaidItemInvoicesByPerson } = await import("@/lib/item-invoices.functions");
+    const itemsOwed = await unpaidItemInvoicesByPerson(admin, ids);
+
     const planName = new Map((plans ?? []).map((p) => [p.id, p.name]));
     return household
       .map((person) => ({
         user_id: person.user_id,
         name: nameWithPreferred(person) || null,
         is_self: person.user_id === context.userId,
-        invoices: unpaidInvoices(
-          (rows ?? [])
-            .filter((m) => m.user_id === person.user_id)
-            .map((m) => ({
-              id: m.id,
-              status: m.status,
-              paid_at: m.paid_at,
-              plan_name: planName.get(m.plan_id) ?? null,
-              price_cents: m.price_cents,
-              payment_reference: m.payment_reference,
-            })),
-        ),
+        invoices: [
+          ...unpaidInvoices(
+            (rows ?? [])
+              .filter((m) => m.user_id === person.user_id)
+              .map((m) => ({
+                id: m.id,
+                status: m.status,
+                paid_at: m.paid_at,
+                plan_name: planName.get(m.plan_id) ?? null,
+                price_cents: m.price_cents,
+                payment_reference: m.payment_reference,
+              })),
+          ),
+          ...(itemsOwed.get(person.user_id) ?? []),
+        ],
       }))
       .filter((person) => person.invoices.length > 0);
   });
