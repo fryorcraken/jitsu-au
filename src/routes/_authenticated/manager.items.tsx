@@ -63,9 +63,17 @@ function validationError(name: string, price: string): string | null {
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? "Check the name and price.");
 }
 
+/**
+ * One attempt, not three. Adding an item carries no submission id, so an
+ * automatic retry after a timeout whose first attempt had in fact committed
+ * would put the same item on the list twice. A manager pressing the button
+ * again after the failure panel is a choice they make looking at the list.
+ */
+const ADD_ITEM_SUBMIT = { ...INTAKE_SUBMIT, attempts: 1 } as const;
+
 function AddItemForm({ onAdded }: { onAdded: () => Promise<unknown> }) {
   const save = useServerFn(saveChargeItem);
-  const send = useResilientSubmit<Item>(INTAKE_SUBMIT);
+  const send = useResilientSubmit<Item>(ADD_ITEM_SUBMIT);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [touched, setTouched] = useState(false);

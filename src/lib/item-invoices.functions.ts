@@ -75,6 +75,18 @@ export class ItemInvoiceSettledError extends Error {
   }
 }
 
+/**
+ * The request clashes with something already recorded: a submission id reused
+ * for a different person, or a transfer that is not free to link. The agent API
+ * answers it as a 409, since retrying the same call can never succeed.
+ */
+export class ItemInvoiceConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ItemInvoiceConflictError";
+  }
+}
+
 // ---------------------------------------------------------------- price list
 
 /** Every item on the price list, alphabetically: there is no other order to keep. */
@@ -247,7 +259,11 @@ export async function listItemInvoiceRows(
   });
 }
 
-async function readItemInvoice(admin: MembershipClient, id: string): Promise<ItemInvoiceRow> {
+/** One invoice by id, or `ItemRecordNotFoundError`. Shared with the agent API. */
+export async function readItemInvoice(
+  admin: MembershipClient,
+  id: string,
+): Promise<ItemInvoiceRow> {
   const { data, error } = await admin.from("item_invoices").select("*").eq("id", id).maybeSingle();
   if (error) throw new Error(error.message);
   if (!data)
@@ -279,6 +295,12 @@ export async function createItemInvoiceForUser(
   emailed: boolean;
   /** True when this was a retry of a raise that had already landed. */
   already_raised: boolean;
+  /**
+   * What the invoice is actually for. Matters on `already_raised`: a manager
+   * who changed the items after a failed attempt is handed back the invoice
+   * that landed, which is the FIRST version, and has to be told what is on it.
+   */
+  summary: string;
 }> {
   // A retry of a raise that already landed (its reply was lost) gets the same
   // invoice back and sends nothing: the first attempt sent the email.
@@ -287,14 +309,17 @@ export async function createItemInvoiceForUser(
     if (!submissionId) return null;
     const { data, error } = await admin
       .from("item_invoices")
-      .select("id, payment_reference, total_cents, user_id")
+      .select("id, payment_reference, total_cents, user_id, lines")
       .eq("client_submission_id", submissionId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    // The same id for somebody else is not a retry of this request. Refuse it
-    // rather than hand back a stranger's invoice.
+    // The same id for somebody else (or for a person since erased, whose
+    // `user_id` went to null) is not a retry of this request. Refuse it rather
+    // than hand back a stranger's invoice.
     if (data && data.user_id !== input.user_id)
-      throw new Error("That submission id was already used for a different invoice.");
+      throw new ItemInvoiceConflictError(
+        "That submission id was already used for a different invoice. Send a new one.",
+      );
     return data
       ? {
           ok: true as const,
@@ -303,6 +328,7 @@ export async function createItemInvoiceForUser(
           total_cents: data.total_cents,
           emailed: false,
           already_raised: true,
+          summary: itemInvoiceSummary(parseItemInvoiceLines(data.lines)),
         }
       : null;
   };
@@ -380,6 +406,7 @@ export async function createItemInvoiceForUser(
     total_cents,
     emailed,
     already_raised: false,
+    summary: itemInvoiceSummary(lines),
   };
 }
 
@@ -630,7 +657,21 @@ export async function settleItemInvoicesFromStatement(
     }
     const invoice = hits[0];
     try {
-      await recordItemInvoicePayment(admin, { invoice, method: "bank_transfer" });
+      const { recorded } = await recordItemInvoicePayment(admin, {
+        invoice,
+        method: "bank_transfer",
+      });
+      // Paid by somebody else between the read above and this write (a manager
+      // marking it paid for cash, most likely). This line is then a SECOND
+      // payment for the same invoice, and marking it matched would hide the
+      // member's double payment as reconciled. Leave it for a manager.
+      if (!recorded) {
+        remaining.delete(invoice.id);
+        console.warn(
+          `[reconcile] item invoice ${invoice.id} was already paid; transaction ${txn.id} left for a manager`,
+        );
+        continue;
+      }
     } catch (e) {
       console.error(
         `[reconcile] recording the payment failed for item invoice ${invoice.id} (transaction ${txn.id}):`,
@@ -664,8 +705,30 @@ export async function matchTransactionToItemInvoice(
   admin: MembershipClient,
   input: { transactionId: string; invoiceId: string; matchedBy: string },
 ): Promise<void> {
+  // The transfer first: it has to exist and still be free, or the payment
+  // below would be recorded against nothing.
+  const { data: txn, error: tErr } = await admin
+    .from("bank_transactions")
+    .select("id, status")
+    .eq("id", input.transactionId)
+    .maybeSingle();
+  if (tErr) throw new Error(tErr.message);
+  if (!txn)
+    throw new ItemRecordNotFoundError("That transfer is no longer there. Refresh the page.");
+  if (txn.status !== "unmatched")
+    throw new ItemInvoiceConflictError(
+      "That transfer has already been matched. Refresh the page to see what it paid.",
+    );
+
   const invoice = await readItemInvoice(admin, input.invoiceId);
-  await recordItemInvoicePayment(admin, { invoice, method: "bank_transfer" });
+  const { recorded } = await recordItemInvoicePayment(admin, { invoice, method: "bank_transfer" });
+  // Already paid: this transfer would be a second payment for it, which is a
+  // refund to sort out, not a match. Linking it would hide the money.
+  if (!recorded)
+    throw new ItemInvoiceConflictError(
+      `Invoice ${invoice.payment_reference} is already paid, so this transfer was not linked to it. If they paid twice, it needs refunding.`,
+    );
+
   const { error } = await admin
     .from("bank_transactions")
     .update({
@@ -674,7 +737,8 @@ export async function matchTransactionToItemInvoice(
       matched_by: input.matchedBy,
       status: "matched",
     })
-    .eq("id", input.transactionId);
+    .eq("id", input.transactionId)
+    .eq("status", "unmatched");
   if (error) throw new Error(error.message);
 }
 

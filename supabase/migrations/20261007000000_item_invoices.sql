@@ -53,7 +53,15 @@ CREATE TABLE IF NOT EXISTS public.item_invoices (
   -- unique by construction and nobody has to mint one: two invoices for the
   -- same person can be outstanding at once, so a per-person reference (the
   -- shape membership invoices use) could not tell them apart on a statement.
-  payment_reference TEXT GENERATED ALWAYS AS ('INV' || lpad(invoice_number::text, 4, '0')) STORED,
+  --
+  -- `greatest(4, ...)`, not a bare 4: `lpad` TRUNCATES a value longer than the
+  -- target width, so `lpad('10000', 4, '0')` is '1000' and invoice 10000 would
+  -- collide with invoice 1000 on the unique index below, failing every raise
+  -- from then on. Padding to at least four keeps INV0007 while letting
+  -- INV10000 grow.
+  payment_reference TEXT GENERATED ALWAYS AS (
+    'INV' || lpad(invoice_number::text, greatest(4, length(invoice_number::text)), '0')
+  ) STORED,
   -- Who it is for. ON DELETE SET NULL to match memberships.user_id: erasing a
   -- person keeps the club's record that money was owed or paid.
   user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,

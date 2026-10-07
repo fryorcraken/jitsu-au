@@ -44,6 +44,7 @@ beforeEach(() => {
     total_cents: 11000,
     emailed: true,
     already_raised: false,
+    summary: "Club gi, 2 × Club patch",
   });
 });
 
@@ -133,5 +134,60 @@ describe("PersonCharges", () => {
       /their item invoices could not be loaded/i,
     );
     expect(screen.queryByText(/no item invoices yet/i)).toBeNull();
+  });
+});
+
+describe("PersonCharges, when the price list moves under an open card", () => {
+  // The server charges the price on the list at the moment of raising. The
+  // confirm must never quote an older one.
+  it("re-reads the prices before asking, and stops to show the new total", async () => {
+    await openCard();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Add an item" }), "i-gi");
+    listChargeItems.mockResolvedValue([{ ...GI, price_cents: 9500 }, PATCH]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Send invoice for $85" }));
+    expect(await screen.findByText(/prices changed since you opened this/i)).toBeVisible();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(createItemInvoice).not.toHaveBeenCalled();
+    // Pressing again now confirms the CURRENT price.
+    await userEvent.click(screen.getByRole("button", { name: "Send invoice for $95" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("an invoice for $95?");
+  });
+
+  it("says which item came off the list, and drops it", async () => {
+    await openCard();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Add an item" }), "i-gi");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Add an item" }), "i-patch");
+    listChargeItems.mockResolvedValue([GI]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Send invoice for $97.50" }));
+    expect(
+      await screen.findByText(/Club patch has come off the item list, so it is no longer here/),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send invoice for $85" })).toBeVisible();
+    expect(createItemInvoice).not.toHaveBeenCalled();
+  });
+
+  // A retried raise hands back the version that landed first. If the manager
+  // changed the items in between, they have to be told what is actually on it.
+  it("names what the invoice that landed is for when a retry finds it", async () => {
+    createItemInvoice.mockResolvedValue({
+      ok: true,
+      id: "inv-7",
+      reference: "INV0007",
+      total_cents: 8500,
+      emailed: false,
+      already_raised: true,
+      summary: "Club gi",
+    });
+    await openCard();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Add an item" }), "i-gi");
+    await userEvent.click(screen.getByRole("button", { name: "Send invoice for $85" }));
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Send invoice" }),
+    );
+    expect(
+      await screen.findByText(/INV0007 \(Club gi, \$85\) had already gone through/),
+    ).toBeVisible();
   });
 });

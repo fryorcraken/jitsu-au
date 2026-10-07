@@ -228,7 +228,14 @@ export const listHouseholdInvoices = createServerFn({ method: "GET" })
     const ids = household.map((p) => p.user_id);
     if (ids.length === 0) return [];
 
-    const [{ data: rows, error }, { data: plans, error: plErr }] = await Promise.all([
+    // Item invoices (a gi, a patch) are owed the same way and paid the same
+    // way, so they join the same list rather than getting a panel of their own,
+    // each its own transfer under its own reference. Read alongside the
+    // memberships rather than after them, so the page waits for one round trip,
+    // and it throws like those reads: a parent shown no charges because a read
+    // fell over would pay too little and never know.
+    const { unpaidItemInvoicesByPerson } = await import("@/lib/item-invoices.functions");
+    const [{ data: rows, error }, { data: plans, error: plErr }, itemsOwed] = await Promise.all([
       admin
         .from("memberships")
         .select("id, user_id, plan_id, status, paid_at, price_cents, payment_reference")
@@ -241,20 +248,13 @@ export const listHouseholdInvoices = createServerFn({ method: "GET" })
         // have not paid would be reading a list that moves.
         .order("created_at", { ascending: false }),
       admin.from("membership_plans").select("id, name"),
+      unpaidItemInvoicesByPerson(admin, ids),
     ]);
     // Both fail the panel. An errored read reaching `unpaidInvoices` as an
     // empty list would tell a parent they owe nothing, which is the one wrong
     // answer this panel must never give.
     if (error) throw new Error(error.message);
     if (plErr) throw new Error(plErr.message);
-
-    // Item invoices (a gi, a patch) are owed the same way and paid the same
-    // way, so they join the same list rather than getting a panel of their own.
-    // Each is its own transfer under its own reference. Throws like the reads
-    // above: a parent shown no charges because a read fell over would pay too
-    // little and never know.
-    const { unpaidItemInvoicesByPerson } = await import("@/lib/item-invoices.functions");
-    const itemsOwed = await unpaidItemInvoicesByPerson(admin, ids);
 
     const planName = new Map((plans ?? []).map((p) => [p.id, p.name]));
     return household

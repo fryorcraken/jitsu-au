@@ -730,7 +730,7 @@ needs, so removing an item is a plain `DELETE`.
 ### `item_invoices` — an invoice for items, against a person
 
 `id` PK, `invoice_number` (`GENERATED ALWAYS AS IDENTITY`), `payment_reference`
-(`GENERATED ... STORED` as `'INV' || lpad(invoice_number, 4, '0')`, unique),
+(`GENERATED ... STORED`: `INV` plus the number padded to at least four digits, so `INV0007` and later `INV10000`, never truncated; unique),
 `user_id → auth.users(id) ON DELETE SET NULL` (same as `memberships.user_id`),
 `lines` (jsonb array of `{ name, unit_price_cents, quantity }`, 1 to 20 entries:
 a frozen copy, never a reference to `charge_items`), `total_cents` (> 0, the lines

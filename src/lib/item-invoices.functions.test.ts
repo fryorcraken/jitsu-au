@@ -126,12 +126,13 @@ describe("settleItemInvoicesFromStatement", () => {
     await expect(settle(fake, [txn()])).rejects.toThrow("statement timeout");
   });
 
-  // A manager marked it paid a moment before the import ran. The money on this
-  // line is still what paid it, so the line is matched; the guarded write is
-  // what stops a second payment and a second receipt being recorded.
-  it("still matches the line when another writer recorded the payment first", async () => {
+  // A manager marked it paid (cash) a moment before the import got to it. This
+  // transfer is then a SECOND payment for the same invoice, and matching it
+  // would hide the member's double payment as reconciled.
+  it("leaves the line for a manager when somebody else recorded the payment first", async () => {
     const fake = fakeAdmin({ item_invoices: { select: ok([INVOICE]), update: ok([]) } });
-    expect((await settle(fake, [txn()])).size).toBe(1);
+    expect((await settle(fake, [txn()])).size).toBe(0);
+    expect(fake.writes.some((w) => w.table === "bank_transactions")).toBe(false);
   });
 });
 
@@ -251,6 +252,7 @@ describe("createItemInvoiceForUser", () => {
           payment_reference: "INV0012",
           total_cents: 8500,
           user_id: "u1",
+          lines: [{ name: "Club gi", unit_price_cents: 8500, quantity: 1 }],
         }),
       },
     });
@@ -263,7 +265,42 @@ describe("createItemInvoiceForUser", () => {
       },
       "manager-1",
     );
-    expect(res).toMatchObject({ id: "inv-12", already_raised: true, emailed: false });
+    // `summary` is what DID land, so a manager who changed the items after a
+    // failed attempt can see the difference.
+    expect(res).toMatchObject({
+      id: "inv-12",
+      already_raised: true,
+      emailed: false,
+      summary: "Club gi",
+    });
+    expect(fake.writes).toEqual([]);
+  });
+
+  it("refuses a submission id already used for somebody else, as a conflict", async () => {
+    const { createItemInvoiceForUser, ItemInvoiceConflictError } =
+      await import("./item-invoices.functions");
+    const fake = fakeAdmin({
+      item_invoices: {
+        select: ok({
+          id: "inv-12",
+          payment_reference: "INV0012",
+          total_cents: 8500,
+          user_id: "u2",
+          lines: [],
+        }),
+      },
+    });
+    await expect(
+      createItemInvoiceForUser(
+        fake.admin as never,
+        {
+          user_id: "u1",
+          client_submission_id: "44444444-4444-4444-8444-444444444444",
+          lines: [{ item_id: "i1", quantity: 1 }],
+        },
+        null,
+      ),
+    ).rejects.toBeInstanceOf(ItemInvoiceConflictError);
     expect(fake.writes).toEqual([]);
   });
 
@@ -279,5 +316,49 @@ describe("createItemInvoiceForUser", () => {
       ),
     ).rejects.toBeInstanceOf(ItemRecordNotFoundError);
     expect(fake.writes).toEqual([]);
+  });
+});
+
+describe("matchTransactionToItemInvoice", () => {
+  const input = { transactionId: "txn-1", invoiceId: "inv-12", matchedBy: "m-1" };
+
+  // Two managers on stale screens: the second must not link a second transfer
+  // to an invoice the first already settled.
+  it("refuses an invoice that is already paid, and leaves the transfer unmatched", async () => {
+    const { matchTransactionToItemInvoice, ItemInvoiceConflictError } =
+      await import("./item-invoices.functions");
+    const fake = fakeAdmin({
+      bank_transactions: { select: ok({ id: "txn-1", status: "unmatched" }) },
+      item_invoices: { select: ok({ ...INVOICE, paid_at: "2026-10-01T00:00:00Z" }) },
+    });
+    await expect(matchTransactionToItemInvoice(fake.admin as never, input)).rejects.toBeInstanceOf(
+      ItemInvoiceConflictError,
+    );
+    expect(fake.writes.some((w) => w.table === "bank_transactions")).toBe(false);
+  });
+
+  it("refuses a transfer that has already been matched, recording no payment", async () => {
+    const { matchTransactionToItemInvoice, ItemInvoiceConflictError } =
+      await import("./item-invoices.functions");
+    const fake = fakeAdmin({
+      bank_transactions: { select: ok({ id: "txn-1", status: "matched" }) },
+      item_invoices: { select: ok(INVOICE) },
+    });
+    await expect(matchTransactionToItemInvoice(fake.admin as never, input)).rejects.toBeInstanceOf(
+      ItemInvoiceConflictError,
+    );
+    expect(fake.writes).toEqual([]);
+  });
+
+  it("records the payment and links the transfer when both are free", async () => {
+    const { matchTransactionToItemInvoice } = await import("./item-invoices.functions");
+    const fake = fakeAdmin({
+      bank_transactions: { select: ok({ id: "txn-1", status: "unmatched" }) },
+      item_invoices: { select: ok(INVOICE) },
+    });
+    await matchTransactionToItemInvoice(fake.admin as never, input);
+    const link = fake.writes.find((w) => w.table === "bank_transactions");
+    expect(link?.patch).toMatchObject({ matched_item_invoice_id: "inv-12", matched_by: "m-1" });
+    expect(link?.filters).toContainEqual(["eq", "status", "unmatched"]);
   });
 });

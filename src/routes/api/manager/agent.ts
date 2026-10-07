@@ -113,10 +113,12 @@ import {
   createItemInvoiceForUser,
   deleteChargeItemRow,
   deleteItemInvoiceRow,
+  ItemInvoiceConflictError,
   ItemInvoiceSettledError,
   ItemRecordNotFoundError,
   listChargeItemRows,
   listItemInvoiceRows,
+  readItemInvoice,
   recordItemInvoicePayment,
   saveChargeItemRow,
 } from "@/lib/item-invoices.functions";
@@ -900,6 +902,8 @@ function itemAgentError(e: unknown): unknown {
     return new AgentError(409, "item_invoice_settled", e.message);
   if (e instanceof ItemNoLongerListedError)
     return new AgentError(422, "item_not_listed", e.message);
+  if (e instanceof ItemInvoiceConflictError)
+    return new AgentError(409, "submission_conflict", e.message);
   return e;
 }
 
@@ -946,20 +950,12 @@ async function handleCreateItemInvoice(params: unknown, actingAs: string) {
   }
 }
 
-/** Read one item invoice for an action that needs the row, or 404. */
-async function readItemInvoiceForAgent(db: MembershipClient, id: string) {
-  const { data, error } = await db.from("item_invoices").select("*").eq("id", id).maybeSingle();
-  if (error) throw new AgentError(500, "db_error", error.message);
-  if (!data) throw new AgentError(404, "not_found", "Item invoice not found.");
-  return data;
-}
-
 async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
   const input = markItemInvoicePaidSchema.parse(params);
   const db = await adminClient();
-  const invoice = await readItemInvoiceForAgent(db, input.id);
   let recorded: boolean;
   try {
+    const invoice = await readItemInvoice(db, input.id);
     ({ recorded } = await recordItemInvoicePayment(db, {
       invoice,
       method: input.payment_method,

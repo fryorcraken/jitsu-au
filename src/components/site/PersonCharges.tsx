@@ -62,6 +62,8 @@ function ChargeItemsCard({
   const [itemsError, setItemsError] = useState<string | null>(null);
   const [picked, setPicked] = useState<Picked[]>([]);
   const [lastRaised, setLastRaised] = useState<Raised | null>(null);
+  // Set when the price list moved under an open card. Cleared on any edit.
+  const [listChanged, setListChanged] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || items || itemsError) return;
@@ -74,17 +76,63 @@ function ChargeItemsCard({
   const notPicked = (items ?? []).filter((i) => !picked.some((p) => p.item.id === i.id));
 
   function add(id: string) {
+    setListChanged(null);
     const item = items?.find((i) => i.id === id);
     if (item) setPicked((prev) => [...prev, { item, quantity: 1 }]);
   }
 
   function setQuantity(id: string, quantity: number) {
+    setListChanged(null);
     const q = Math.max(1, Math.min(ITEM_INVOICE_MAX_QUANTITY, Math.round(quantity) || 1));
     setPicked((prev) => prev.map((p) => (p.item.id === id ? { ...p, quantity: q } : p)));
   }
 
+  /**
+   * Re-read the price list and bring what is picked into line with it.
+   *
+   * The server charges the price on the list at the moment of raising, never
+   * the one this card loaded. So the confirm has to quote the CURRENT price, or
+   * a manager agrees to $85 and the member is emailed $95. Returns false when
+   * anything moved, so the manager looks at the new total before sending.
+   */
+  async function checkPricesStillCurrent(): Promise<boolean> {
+    const fresh = await fetchItems();
+    setItems(fresh);
+    const byId = new Map(fresh.map((i) => [i.id, i]));
+    const removed = picked.filter((p) => !byId.has(p.item.id)).map((p) => p.item.name);
+    const changed = picked.filter((p) => {
+      const now = byId.get(p.item.id);
+      return now && (now.price_cents !== p.item.price_cents || now.name !== p.item.name);
+    });
+    if (!removed.length && !changed.length) return true;
+    setPicked((prev) =>
+      prev.filter((p) => byId.has(p.item.id)).map((p) => ({ ...p, item: byId.get(p.item.id)! })),
+    );
+    setListChanged(
+      [
+        removed.length
+          ? `${removed.join(", ")} ${removed.length === 1 ? "has" : "have"} come off the item list, so ${removed.length === 1 ? "it is" : "they are"} no longer here.`
+          : "",
+        changed.length ? "Some prices changed since you opened this, so the total is updated." : "",
+        "Check it, then send again.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+    return false;
+  }
+
   async function submit() {
     if (!picked.length) return;
+    setListChanged(null);
+    try {
+      if (!(await checkPricesStillCurrent())) return;
+    } catch (e) {
+      setListChanged(
+        `${describeLoadError(e, "We could not check the current prices")}. Nothing was sent; try again.`,
+      );
+      return;
+    }
     const recipient = emailGoesTo ? `${emailGoesTo} (${personName}'s guardian)` : personName;
     const ok = await confirm({
       title: `Send ${personName} an invoice for ${formatCents(total)}?`,
@@ -267,6 +315,14 @@ function ChargeItemsCard({
           )}
 
           <div className="space-y-3">
+            {listChanged && (
+              <p
+                role="alert"
+                className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+              >
+                {listChanged}
+              </p>
+            )}
             <Button onClick={() => void submit()} disabled={!picked.length || send.busy}>
               {send.busy
                 ? "Sending..."
@@ -294,7 +350,7 @@ function RaisedNotice({ raised }: { raised: Raised }) {
   return (
     <p role="status" className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
       {raised.already_raised
-        ? `Invoice ${raised.reference} had already gone through, so nothing new was sent.`
+        ? `Invoice ${raised.reference} (${raised.summary}, ${formatCents(raised.total_cents)}) had already gone through before the connection dropped, so nothing new was sent. Anything you changed after that is not on it: raise another invoice for it.`
         : raised.emailed
           ? `Invoice ${raised.reference} for ${formatCents(raised.total_cents)} is raised and emailed.`
           : `Invoice ${raised.reference} for ${formatCents(raised.total_cents)} is raised, but the email did not go out. It is on their membership page; let them know it is there.`}
