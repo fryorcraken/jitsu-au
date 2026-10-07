@@ -9,7 +9,8 @@ description: >-
   via its manager agent HTTP API. Use when a club
   manager asks an agent to look up members/invoices, put a member on a plan or
   swap them onto a different one, cancel or delete a membership, correct invoice
-  details (price, payment reference, notes, status), migrate/bulk-file waivers
+  details (price, payment reference, notes, status), keep the club's item price
+  list and charge somebody for items, migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
   version of it (or roll back to an earlier one), add or edit a membership
   window's start/end dates, or edit a
@@ -423,6 +424,89 @@ and dates, not a second date range on an existing one.
 > the old separate windows table) — a plan whose dates overlap another's is a
 > product decision a manager can make deliberately (e.g. running two prices
 > side by side briefly), not an error.
+
+### Charging for items (`list_items`, `save_item`, `delete_item`, and the item invoices)
+
+For things the club sells that are not a membership: a gi, a patch, a grading
+fee. Two parts, both kept deliberately small (docs/item-invoices.md):
+
+- **The price list**: each item is a name and a price, and nothing else. No
+  stock, no categories, no photos.
+- **Item invoices**: one or more items, each with a quantity, raised against a
+  person and emailed to them. **An item invoice is not a membership**: it never
+  appears in `list_invoices`, and `edit_invoice` / `delete_invoice` do not touch
+  it. Its reference looks like `INV0007` and is unique per invoice.
+
+```bash
+scripts/agent.sh list_items '{}'
+scripts/agent.sh save_item '{"name":"Club gi","price_cents":8500}'          # add
+scripts/agent.sh save_item '{"id":"<uuid>","name":"Club gi","price_cents":9000}'  # reprice
+scripts/agent.sh delete_item '{"id":"<uuid>"}'
+```
+
+> **Repricing or removing an item never changes an invoice already raised.**
+> Each invoice carries its own copy of every line's name and price. That is why
+> `delete_item` is always safe.
+
+### `create_item_invoice` — charge somebody, and email them
+
+`params`: `user_id` (**required**, from `list_users`), `lines` (**required**, 1
+to 20 of `{ "item_id", "quantity" }`, quantity 1 to 99), `client_submission_id`
+(a UUID you mint; **send it**).
+
+```bash
+scripts/agent.sh create_item_invoice '{
+  "user_id": "<uuid>",
+  "client_submission_id": "<a uuid you generate once for this invoice>",
+  "lines": [{"item_id":"<gi uuid>","quantity":1},{"item_id":"<patch uuid>","quantity":2}]
+}'
+```
+
+> **It emails the invoice straight away**, to the person, or to their guardian
+> for a child, and **an email cannot be unsent**. Confirm the person and the
+> items with the manager before sending anything in bulk.
+>
+> **The price is read off the price list at that moment.** A line carrying a
+> price is refused (`400 invalid_params`) rather than quietly ignored. The same
+> item twice is refused too: set its `quantity`.
+>
+> **Resend the same `client_submission_id` on a retry.** If the reply was lost
+> but the invoice was raised, the retry returns that invoice with
+> `already_raised: true` and sends nothing. Without it, a retry raises and
+> emails a second invoice.
+>
+> `emailed: false` means the invoice exists but the send failed. It is on their
+> membership page; tell the manager so they can let the person know.
+>
+> `404 not_found` for an unknown person; `422 item_not_listed` when an item was
+> removed from the list since you read it.
+
+### `list_item_invoices` / `mark_item_invoice_paid` / `cancel_item_invoice` / `delete_item_invoice`
+
+```bash
+scripts/agent.sh list_item_invoices '{"state":"unpaid"}'
+scripts/agent.sh list_item_invoices '{"user_id":"<uuid>"}'
+scripts/agent.sh mark_item_invoice_paid '{"id":"<uuid>"}'
+scripts/agent.sh cancel_item_invoice '{"id":"<uuid>"}'
+scripts/agent.sh delete_item_invoice '{"id":"<uuid>"}'
+```
+
+Each row carries `payment_reference`, `lines`, `summary`, `total_cents`,
+`state` (`unpaid | paid | cancelled`), and who it is for. Same rule as the
+membership listings: for a child, `member_email` is the guardian's and
+`member_email_belongs_to` names them, so **print the two together or not at
+all**.
+
+> **Bank reconciliation settles these by itself** when a statement line carries
+> the reference and exactly the total. Reach for `mark_item_invoice_paid` only
+> for money that never touched the club account (cash). It emails a receipt,
+> defaults `payment_method` to `manual`, and is idempotent (`recorded: false` on
+> a second call).
+>
+> **A paid item invoice is finished.** Cancel and delete both refuse it with
+> `409 item_invoice_settled`, and there is no refund flow. Cancel keeps the
+> record and stops it showing as owed; delete removes it as though it was never
+> raised. Neither emails anybody, and neither can be undone.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 

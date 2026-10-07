@@ -520,6 +520,9 @@ own), and reconciliation, activation and cancellation follow the same
 `edit_invoice` / bank-reconciliation flow as any other plan — see
 `.claude/skills/uts-manager-agent/SKILL.md` and `/manager/reconciliation`.
 
+The same import also settles **item invoices** (a gi, a grading fee), from the
+lines the membership pass leaves: see `docs/item-invoices.md`, "Getting paid".
+
 ### Reading the statement CSV
 
 The file a manager drops on `/manager/reconciliation` is parsed by

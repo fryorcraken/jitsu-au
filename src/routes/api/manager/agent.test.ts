@@ -923,3 +923,88 @@ describe("manager agent route: the waiver template", () => {
     expect(promoteWaiverTemplateMock).not.toHaveBeenCalled();
   });
 });
+
+describe("manager agent route: item invoices", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const ITEM_INVOICE_ID = "7d4b6f0e-3a39-4a77-9d8b-2a1c1f0e5b11";
+
+  /** A fake whose item_invoices table holds one row (or none) and records writes. */
+  function fakeItemInvoices(row: Record<string, unknown> | null) {
+    const writes: string[] = [];
+    const chain = (op: string): Record<string, unknown> => {
+      const c: Record<string, unknown> = {};
+      for (const m of ["eq", "is", "select"]) c[m] = () => c;
+      c.maybeSingle = () => Promise.resolve(ok(row));
+      c.then = (resolve: (r: unknown) => void) => {
+        writes.push(op);
+        resolve(ok([{ id: ITEM_INVOICE_ID }]));
+      };
+      return c;
+    };
+    return {
+      writes,
+      db: {
+        from: (table: string) => {
+          if (table !== "item_invoices") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => chain("select"),
+            update: () => chain("update"),
+            delete: () => chain("delete"),
+          };
+        },
+      },
+    };
+  }
+
+  const PAID = {
+    id: ITEM_INVOICE_ID,
+    payment_reference: "INV0007",
+    user_id: null,
+    lines: [{ name: "Club gi", unit_price_cents: 8500, quantity: 1 }],
+    total_cents: 8500,
+    paid_at: "2026-10-01T00:00:00Z",
+    cancelled_at: null,
+  };
+
+  // A paid invoice is the club's record of money. The refusal has to reach a
+  // caller as something it can act on (stop), not a 500 to retry.
+  it.each(["delete_item_invoice", "cancel_item_invoice"])(
+    "refuses %s on a paid invoice as 409 item_invoice_settled, writing nothing",
+    async (action) => {
+      const fake = fakeItemInvoices(PAID);
+      currentAdmin = fake.db;
+      const res = await post({ action, params: { id: ITEM_INVOICE_ID } });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error.code).toBe("item_invoice_settled");
+      expect(fake.writes).toEqual([]);
+    },
+  );
+
+  it("reports an unknown item invoice as not_found", async () => {
+    currentAdmin = fakeItemInvoices(null).db;
+    const res = await post({ action: "mark_item_invoice_paid", params: { id: ITEM_INVOICE_ID } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+  });
+
+  // The price comes off the price list. A caller sending one must hear that it
+  // was not used, not have it silently dropped.
+  it("refuses a price sent with a line of create_item_invoice", async () => {
+    currentAdmin = {};
+    const res = await post({
+      action: "create_item_invoice",
+      params: {
+        user_id: "22222222-2222-4222-8222-222222222222",
+        lines: [{ item_id: ITEM_INVOICE_ID, quantity: 1, unit_price_cents: 1 }],
+      },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_params");
+  });
+});

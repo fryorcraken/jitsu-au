@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "17",
+  version: "18",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "18",
+      // Purely additive: eight new actions. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "New actions for charging people for things that are not a membership (a gi, a patch, a grading fee): list_items, save_item and delete_item keep the club's price list (a name and a price, nothing else); list_item_invoices, create_item_invoice, mark_item_invoice_paid, cancel_item_invoice and delete_item_invoice raise and settle invoices from it. The same writes the manager's Items screen and a person's page make.",
+        "An item invoice is NOT a membership and does not appear in list_invoices, edit_invoice or delete_invoice. Its reference looks like INV0007, is unique per invoice, and is settled by bank reconciliation the same way: a transfer carrying the reference and exactly the total.",
+        "create_item_invoice prices each line off the price list at that moment and emails the invoice straight away (to the guardian, for a child). Pass client_submission_id and resend the same one on a retry: a retry of a raise that already landed returns that invoice with already_raised true and sends nothing.",
+        "A paid item invoice is finished: cancel_item_invoice and delete_item_invoice refuse it with 409 item_invoice_settled, and there is no refund flow. Removing an item from the price list never changes an invoice already raised, because each invoice keeps its own copy of every line.",
+      ],
+    },
     {
       version: "17",
       // Two new response fields, AND a change in what an existing one means for
@@ -936,6 +947,99 @@ export const AGENT_MANIFEST: {
           description: "Max comments to return (1-500, default 200).",
         },
       ],
+    },
+    {
+      name: "list_items",
+      method: "POST",
+      summary:
+        "List the club's price list for things that are not a membership (a gi, a patch, a grading fee): each item's id, name and price_cents, alphabetically. These are what create_item_invoice charges for.",
+      params: [],
+    },
+    {
+      name: "save_item",
+      method: "POST",
+      summary:
+        "Add an item to the price list (omit id) or rename / reprice one (pass id). A new price applies only to invoices raised from now on: every invoice already raised keeps its own copy of the name and price it was raised with. 404 not_found when id names no item.",
+      params: [
+        {
+          name: "id",
+          required: false,
+          description: "The item's UUID, to change it. Omit to add one.",
+        },
+        { name: "name", required: true, description: "What it is called, up to 80 characters." },
+        {
+          name: "price_cents",
+          required: true,
+          description: "Its price in integer cents, from 1 to 1000000 ($10,000).",
+        },
+      ],
+    },
+    {
+      name: "delete_item",
+      method: "POST",
+      summary:
+        "Remove an item from the price list. Always safe: invoices already raised carry their own copy of every line, so nothing that has been sent changes. 404 not_found when it is already gone.",
+      params: [{ name: "id", required: true, description: "The item's UUID." }],
+    },
+    {
+      name: "list_item_invoices",
+      method: "POST",
+      summary:
+        "List item invoices, newest first (at most 500): everyone's or one person's, optionally in one state. Each carries its reference (INV0007), lines (name, unit_price_cents, quantity), summary, total_cents, state (unpaid | paid | cancelled), and who it is for (member_name, member_email). For a child, member_email is the guardian's and member_email_belongs_to names them: print the two together or not at all.",
+      params: [
+        { name: "user_id", required: false, description: "Only this person's invoices." },
+        { name: "state", required: false, description: "unpaid | paid | cancelled." },
+      ],
+    },
+    {
+      name: "create_item_invoice",
+      method: "POST",
+      summary:
+        "Raise an invoice for one or more items against a person and EMAIL it to them straight away (to the guardian, for a child), with the club's bank details and the invoice's own reference. An email cannot be unsent, so confirm the person and the items first. Each line names an item by id with a quantity; the price is read off the price list at this moment and a price sent with a line is refused. The same item twice is refused: set its quantity. Returns id, reference, total_cents, emailed (false when the send failed: the invoice still exists and is on their membership page) and already_raised. 404 not_found for an unknown person; 422 item_not_listed when an item has been removed from the list.",
+      params: [
+        { name: "user_id", required: true, description: "The person's UUID, from list_users." },
+        {
+          name: "lines",
+          required: true,
+          description:
+            "1 to 20 of { item_id, quantity }: item_id from list_items, quantity 1 to 99.",
+        },
+        {
+          name: "client_submission_id",
+          required: false,
+          description:
+            "A UUID you mint per invoice and resend unchanged on a retry. A retry of a raise that already landed returns that invoice with already_raised true and emails nothing. Without it, a retry after a lost reply raises and emails a second invoice.",
+        },
+      ],
+    },
+    {
+      name: "mark_item_invoice_paid",
+      method: "POST",
+      summary:
+        "Record a payment against an item invoice, for money that never touches the club account (cash at the door). Bank reconciliation does this itself when a statement line carries the reference and the exact total, so reach for this only when it cannot. Emails a receipt, and makes the invoice permanent: a paid invoice can never be cancelled or deleted. Idempotent: a second call records nothing and sends nothing (recorded: false). 409 item_invoice_settled on a cancelled invoice.",
+      params: [
+        { name: "id", required: true, description: "The item invoice's UUID." },
+        {
+          name: "payment_method",
+          required: false,
+          description:
+            "bank_transfer | manual. Defaults to manual; say bank_transfer only for a real transfer you are recording by hand.",
+        },
+      ],
+    },
+    {
+      name: "cancel_item_invoice",
+      method: "POST",
+      summary:
+        "Withdraw an unpaid item invoice and keep the record. It stops showing as owed on the member's page; nothing is emailed and it cannot be reopened (raise a new one instead). A second call on a cancelled invoice is a no-op. 409 item_invoice_settled when it has been paid.",
+      params: [{ name: "id", required: true, description: "The item invoice's UUID." }],
+    },
+    {
+      name: "delete_item_invoice",
+      method: "POST",
+      summary:
+        "Remove an unpaid (or cancelled) item invoice outright, for one raised by mistake. Cannot be undone, and nothing tells the member, who may already have the email. 409 item_invoice_settled when it has been paid: a paid invoice is the club's record of money and is never deleted.",
+      params: [{ name: "id", required: true, description: "The item invoice's UUID." }],
     },
   ],
 };

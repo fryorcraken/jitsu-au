@@ -2727,6 +2727,14 @@ export const managerAgentActions = [
   "get_kb_article",
   "save_kb_article",
   "list_kb_comments",
+  "list_items",
+  "save_item",
+  "delete_item",
+  "list_item_invoices",
+  "create_item_invoice",
+  "mark_item_invoice_paid",
+  "cancel_item_invoice",
+  "delete_item_invoice",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
