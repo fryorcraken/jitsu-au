@@ -1814,10 +1814,16 @@ export function sellablePlans<T extends PlanWindow & { is_active: boolean }>(
 
 // ---- Member: what is still owed ----
 
-/** One thing on an unpaid invoice: a plan, and what it costs. */
+/**
+ * One thing on an unpaid invoice, and what it costs: a membership plan, or a
+ * line of an item invoice (`item-invoices.ts`). The panel that lists these does
+ * not care which, so neither does the shape.
+ */
 export interface UnpaidInvoiceLine {
-  membership_id: string;
-  plan_name: string | null;
+  /** Stable key for the line: a membership id, or an item invoice's id plus its position. */
+  id: string;
+  /** What it is for. Null when a membership's plan could not be resolved. */
+  name: string | null;
   price_cents: number;
 }
 
@@ -1859,7 +1865,7 @@ export function unpaidInvoices(
   const byReference = new Map<string, UnpaidInvoice>();
   for (const m of memberships) {
     if (!isUnpaid(m)) continue;
-    const line = { membership_id: m.id, plan_name: m.plan_name, price_cents: m.price_cents };
+    const line = { id: m.id, name: m.plan_name, price_cents: m.price_cents };
     const existing = byReference.get(m.payment_reference);
     if (existing) {
       existing.lines.push(line);

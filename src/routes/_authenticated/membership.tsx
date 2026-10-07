@@ -228,8 +228,8 @@ function WhoIsThisFor({
 }
 
 /** How a line of an invoice is named when its plan could not be resolved. */
-function lineName(planName: string | null) {
-  return planName ?? "Membership";
+function lineName(name: string | null) {
+  return name ?? "Membership";
 }
 
 /**
@@ -285,7 +285,7 @@ function HowToPay({
               </p>
             )}
             <p className="text-sm font-medium">
-              {invoice.lines.map((l) => lineName(l.plan_name)).join(" + ")}
+              {invoice.lines.map((l) => lineName(l.name)).join(" + ")}
             </p>
             <dl className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
@@ -314,8 +314,8 @@ function HowToPay({
             {invoice.lines.length > 1 && (
               <ul className="mt-4 space-y-1 border-t pt-3 text-sm text-muted-foreground">
                 {invoice.lines.map((line) => (
-                  <li key={line.membership_id} className="flex justify-between gap-4">
-                    <span>{lineName(line.plan_name)}</span>
+                  <li key={line.id} className="flex justify-between gap-4">
+                    <span>{lineName(line.name)}</span>
                     <span>{formatCents(line.price_cents)}</span>
                   </li>
                 ))}
