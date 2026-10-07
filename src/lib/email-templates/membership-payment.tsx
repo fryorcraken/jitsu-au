@@ -12,14 +12,13 @@ import {
   Section,
   Text,
 } from "@react-email/components";
-import ReactMarkdown from "react-markdown";
-import {
-  CLUB_ACCOUNT_FIELDS,
-  CLUB_INTERNATIONAL_FIELDS,
-  clubPaymentFieldValue,
-  hasInternationalDetails,
-} from "@/lib/validation";
 import type { ClubPaymentDetails } from "@/lib/validation";
+import { ClubAccountSection } from "./club-account-section";
+import {
+  emailHr as hr,
+  emailRowLabel as rowLabel,
+  emailRowValue as rowValue,
+} from "./invoice-styles";
 
 interface MembershipPaymentEmailProps {
   siteName: string;
@@ -38,30 +37,6 @@ interface MembershipPaymentEmailProps {
   /** Where a member can read the same details on the site. */
   membershipUrl: string;
 }
-
-/**
- * The club's account, as labelled rows. Same fields, same order and same source
- * as the "how to pay" panel on `/membership`, walked from the same list so the
- * email and the page cannot come to quote different bank details.
- *
- * No copy buttons here: this is an email, and every client renders it
- * differently. The page is where copying works, which is why the email links to
- * it.
- */
-const AccountRows = ({ details }: { details: ClubPaymentDetails }) => (
-  <>
-    {CLUB_ACCOUNT_FIELDS.map((field) => {
-      const value = clubPaymentFieldValue(details, field.key);
-      if (!value) return null;
-      return (
-        <React.Fragment key={field.key}>
-          <Text style={rowLabel}>{field.label}</Text>
-          <Text style={field.mono ? rowValueMono : rowValue}>{value}</Text>
-        </React.Fragment>
-      );
-    })}
-  </>
-);
 
 export const MembershipPaymentEmail = ({
   siteName,
@@ -99,45 +74,7 @@ export const MembershipPaymentEmail = ({
           <Text style={reference_}>{reference}</Text>
         </Section>
 
-        {details ? (
-          <Section style={instructionsBox}>
-            <AccountRows details={details} />
-            {hasInternationalDetails(details) && (
-              <>
-                <Hr style={hr} />
-                <Text style={sectionHeading}>Paying from overseas</Text>
-                {CLUB_INTERNATIONAL_FIELDS.map((field) => {
-                  const value = clubPaymentFieldValue(details, field.key);
-                  if (!value) return null;
-                  return (
-                    <React.Fragment key={field.key}>
-                      <Text style={rowLabel}>{field.label}</Text>
-                      <Text style={field.mono ? rowValueMono : rowValue}>{value}</Text>
-                    </React.Fragment>
-                  );
-                })}
-                <Text style={smallNote}>
-                  Banks along the way can take fees out of an international transfer, so ask yours
-                  to send the full amount. If it arrives short we will still sort it out, it just
-                  takes us a little longer.
-                </Text>
-              </>
-            )}
-            {details.note && (
-              <>
-                <Hr style={hr} />
-                <ReactMarkdown>{details.note}</ReactMarkdown>
-              </>
-            )}
-          </Section>
-        ) : (
-          <Section style={instructionsBox}>
-            <Text style={text}>
-              We have not published our account details yet. Reply to this email and we'll send them
-              straight over.
-            </Text>
-          </Section>
-        )}
+        <ClubAccountSection details={details} />
 
         <Text style={text}>
           <strong>Please include the payment reference in your transfer description.</strong> It's
@@ -173,41 +110,6 @@ const box = {
   padding: "16px 20px",
   margin: "0 0 20px",
 };
-const instructionsBox = {
-  borderLeft: "3px solid #008eaa",
-  padding: "2px 16px",
-  margin: "0 0 25px",
-  fontSize: "14px",
-  color: "#55575d",
-  lineHeight: "1.5",
-};
-const rowLabel = {
-  fontSize: "11px",
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.04em",
-  color: "#999999",
-  margin: "8px 0 0",
-};
-const rowValue = {
-  fontSize: "16px",
-  color: "#222222",
-  fontWeight: "bold" as const,
-  margin: "2px 0 0",
-};
-// Digit strings people transcribe into a banking app. Monospace so a misread
-// character is visible, and letter-spaced for the same reason.
-const rowValueMono = {
-  ...rowValue,
-  fontFamily: "'Courier New', Courier, monospace",
-  letterSpacing: "0.04em",
-};
-const sectionHeading = {
-  fontSize: "13px",
-  color: "#222222",
-  fontWeight: "bold" as const,
-  margin: "0 0 4px",
-};
-const smallNote = { fontSize: "12px", color: "#777777", margin: "12px 0 0", lineHeight: "1.5" };
 const reference_ = {
   fontSize: "20px",
   color: "#008eaa",
@@ -215,5 +117,4 @@ const reference_ = {
   letterSpacing: "0.06em",
   margin: "2px 0 0",
 };
-const hr = { borderColor: "#e0e6e8", margin: "14px 0" };
 const footer = { fontSize: "12px", color: "#999999", margin: "30px 0 0" };
