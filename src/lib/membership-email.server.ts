@@ -1,4 +1,7 @@
-// Server-only helpers for the transactional emails in the membership flow.
+// Server-only helpers for the transactional emails that ask for or confirm
+// money: membership invoices and receipts, and item invoices and receipts
+// (docs/item-invoices.md). They share a sender, a site URL and a bank-details
+// block, which is why they share a file.
 //
 // Pulls in server-only dependencies (the Lovable send API, the React-email
 // renderer) so it must never reach the client bundle — it is named `*.server.ts`
@@ -11,6 +14,8 @@ import type { Database } from "@/integrations/supabase/types";
 import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment";
 import { MembershipPaidEmail } from "@/lib/email-templates/membership-paid";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
+import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templates/item-invoice";
+import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
 
@@ -245,6 +250,134 @@ export async function sendMembershipPaidEmail({
     return { sent: true, skipped: false };
   } catch (e) {
     console.error(`[membership-email] failed to email member ${memberEmail}:`, e);
+    return { sent: false, skipped: false };
+  }
+}
+
+export interface ItemInvoiceEmailParams {
+  invoiceId: string;
+  /** What to call the reader to their face. */
+  memberGreetingName: string;
+  memberEmail: string;
+  /** The person the invoice is FOR, when that is not the reader (a child). */
+  forName?: string | null;
+  lines: ItemInvoiceEmailLine[];
+  /** Human-readable total, e.g. "$110". */
+  total: string;
+  reference: string;
+  admin: AdminClient;
+}
+
+/**
+ * Email somebody an invoice for items. Best-effort, like every email here: the
+ * invoice is already saved and already on their membership page, so a failed
+ * send is logged rather than reported as a failed invoice, which would invite a
+ * manager to raise it a second time.
+ *
+ * No manager copy. The membership invoice tells managers because a MEMBER can
+ * raise one; an item invoice is only ever raised by a manager, who already
+ * knows.
+ */
+export async function sendItemInvoiceEmail({
+  invoiceId,
+  memberGreetingName,
+  memberEmail,
+  forName,
+  lines,
+  total,
+  reference,
+  admin,
+}: ItemInvoiceEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
+    console.warn("[item-invoice-email] LOVABLE_API_KEY not set — skipping invoice email");
+    return { sent: false, skipped: true };
+  }
+  const { details } = await readClubPaymentDetails(admin);
+  const el = React.createElement(ItemInvoiceEmail, {
+    siteName: SITE_NAME,
+    siteUrl: SITE_URL,
+    memberName: memberGreetingName,
+    forName,
+    lines,
+    total,
+    reference,
+    details,
+    membershipUrl: ACCOUNT_URL,
+  });
+  try {
+    const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
+    await sendOne({
+      apiKey,
+      sendUrl: process.env.LOVABLE_SEND_URL,
+      to: memberEmail,
+      // Named for the child when it is theirs, for the same reason as the
+      // membership invoice: a parent's inbox holds several of these.
+      subject: forName
+        ? `Invoice ${reference} for ${forName}: ${total}`
+        : `Invoice ${reference}: ${total}`,
+      html,
+      text,
+      idempotencyKey: `item-invoice-${invoiceId}`,
+    });
+    return { sent: true, skipped: false };
+  } catch (e) {
+    console.error(`[item-invoice-email] failed to email ${memberEmail}:`, e);
+    return { sent: false, skipped: false };
+  }
+}
+
+export interface ItemInvoicePaidEmailParams {
+  invoiceId: string;
+  memberGreetingName: string;
+  memberEmail: string;
+  forName?: string | null;
+  reference: string;
+  summary: string;
+  amount: string;
+}
+
+/** The receipt for an item invoice. Best-effort; keyed to the invoice, so sent once. */
+export async function sendItemInvoicePaidEmail({
+  invoiceId,
+  memberGreetingName,
+  memberEmail,
+  forName,
+  reference,
+  summary,
+  amount,
+}: ItemInvoicePaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
+    console.warn("[item-invoice-email] LOVABLE_API_KEY not set — skipping receipt");
+    return { sent: false, skipped: true };
+  }
+  const el = React.createElement(ItemInvoicePaidEmail, {
+    siteName: SITE_NAME,
+    siteUrl: SITE_URL,
+    memberName: memberGreetingName,
+    forName,
+    reference,
+    summary,
+    amount,
+    membershipUrl: ACCOUNT_URL,
+  });
+  try {
+    const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
+    await sendOne({
+      apiKey,
+      sendUrl: process.env.LOVABLE_SEND_URL,
+      to: memberEmail,
+      subject: forName
+        ? `Payment received for ${forName}'s invoice ${reference}`
+        : `Payment received for invoice ${reference}`,
+      html,
+      text,
+      idempotencyKey: `item-invoice-paid-${invoiceId}`,
+    });
+    return { sent: true, skipped: false };
+  } catch (e) {
+    console.error(`[item-invoice-email] failed to email ${memberEmail}:`, e);
     return { sent: false, skipped: false };
   }
 }

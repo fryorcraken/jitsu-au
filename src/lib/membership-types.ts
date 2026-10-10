@@ -20,6 +20,8 @@ export type MembershipRow = Tables["memberships"]["Row"];
 export type BankTransactionRow = Tables["bank_transactions"]["Row"];
 export type ClubSettingRow = Tables["club_settings"]["Row"];
 export type ManagerApiTokenRow = Tables["manager_api_tokens"]["Row"];
+export type ChargeItemRow = Tables["charge_items"]["Row"];
+export type ItemInvoiceRow = Tables["item_invoices"]["Row"];
 
 export type MembershipDatabase = Database;
 export type MembershipClient = SupabaseClient<Database>;

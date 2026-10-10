@@ -16,6 +16,7 @@ import {
   Newspaper,
   ScrollText,
   Settings,
+  ShoppingBag,
   User,
   Users,
   Wallet,
@@ -72,6 +73,7 @@ const managerNav: NavItem[] = [
   { to: "/manager/users", label: "Users", icon: Users },
   { to: "/manager/memberships", label: "Memberships", icon: CreditCard },
   { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
+  { to: "/manager/items", label: "Items", icon: ShoppingBag },
   { to: "/manager/waivers", label: "Signed waivers", icon: FileText },
   { to: "/manager/waiver-template", label: "Waiver template", icon: FileText },
   // "editor" in the label because the member group above already has a

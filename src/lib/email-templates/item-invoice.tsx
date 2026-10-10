@@ -20,55 +20,75 @@ import {
   emailRowValue as rowValue,
 } from "./invoice-styles";
 
-interface MembershipPaymentEmailProps {
+/** One line as the email prints it: already described and already totalled. */
+export type ItemInvoiceEmailLine = { description: string; amount: string };
+
+interface ItemInvoiceEmailProps {
   siteName: string;
   siteUrl: string;
+  /** The greeting: whoever reads this inbox. */
   memberName: string;
   /**
-   * The person the membership is FOR, when that is not the person reading
-   * this. See `membership-paid.tsx`: one inbox, possibly several children.
+   * The person the invoice is FOR, when that is not the person reading it. A
+   * parent has one inbox and possibly several children, so an invoice that
+   * named nobody would leave them guessing whose gi this is.
    */
   forName?: string | null;
-  planName: string;
-  amount: string;
+  lines: ItemInvoiceEmailLine[];
+  total: string;
   reference: string;
   /** The club's bank account, or null when it has not published one. */
   details: ClubPaymentDetails | null;
-  /** Where a member can read the same details on the site. */
+  /** Where the member can read the same invoice, with copy buttons. */
   membershipUrl: string;
 }
 
-export const MembershipPaymentEmail = ({
+/**
+ * An invoice for things on the club's price list (a gi, a patch, a grading
+ * fee), raised by a manager. The club's bank details are the same block the
+ * membership invoice prints, from the same component, so the two can never ask
+ * for money into different accounts.
+ *
+ * Not a tax invoice, and it does not say it is one: the club is not registered
+ * for GST, so there is no ABN or GST line to print.
+ */
+export const ItemInvoiceEmail = ({
   siteName,
   siteUrl,
   memberName,
   forName,
-  planName,
-  amount,
+  lines,
+  total,
   reference,
   details,
   membershipUrl,
-}: MembershipPaymentEmailProps) => (
+}: ItemInvoiceEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
     <Preview>
-      Pay {amount} to activate your {planName}
+      Invoice {reference} from {siteName}: {total}
     </Preview>
     <Body style={main}>
       <Container style={container}>
-        <Heading style={h1}>Almost there. Pay to activate your membership</Heading>
+        <Heading style={h1}>Invoice {reference}</Heading>
         <Text style={text}>
-          Hi {memberName || "there"}, thanks for signing {forName ? `${forName} ` : ""}up for{" "}
-          <strong>{planName}</strong> at{" "}
+          Hi {memberName || "there"}, here is {forName ? `${forName}'s` : "your"} invoice from{" "}
           <Link href={siteUrl} style={link}>
             <strong>{siteName}</strong>
           </Link>
-          . To activate it, pay <strong>{amount}</strong> using the details below.
+          . Please pay <strong>{total}</strong> using the details below.
         </Text>
 
         <Section style={box}>
-          <Text style={rowLabel}>Amount</Text>
-          <Text style={rowValue}>{amount}</Text>
+          {lines.map((line, i) => (
+            <Text key={i} style={lineRow}>
+              {line.description}
+              <span style={lineAmount}>{line.amount}</span>
+            </Text>
+          ))}
+          <Hr style={hr} />
+          <Text style={rowLabel}>Total</Text>
+          <Text style={rowValue}>{total}</Text>
           <Hr style={hr} />
           <Text style={rowLabel}>Payment reference (important)</Text>
           <Text style={reference_}>{reference}</Text>
@@ -78,26 +98,24 @@ export const MembershipPaymentEmail = ({
 
         <Text style={text}>
           <strong>Please include the payment reference in your transfer description.</strong> It's
-          how we match your payment to your membership. Once we see it, we'll activate your
-          membership and email you a confirmation.
+          how we match your payment to this invoice. We'll email you a receipt once it lands.
         </Text>
         <Text style={text}>
-          You can see these details any time on your{" "}
+          You can see this invoice any time on your{" "}
           <Link href={membershipUrl} style={link}>
             membership page
           </Link>
-          , where each one has a copy button.
+          , where each detail has a copy button.
         </Text>
         <Text style={footer}>
-          Paying a different way or already transferred? Just reply to this email and we'll sort it
-          out.
+          Paying a different way or already paid? Just reply to this email and we'll sort it out.
         </Text>
       </Container>
     </Body>
   </Html>
 );
 
-export default MembershipPaymentEmail;
+export default ItemInvoiceEmail;
 
 const main = { backgroundColor: "#ffffff", fontFamily: "Arial, sans-serif" };
 const container = { padding: "20px 25px" };
@@ -110,6 +128,10 @@ const box = {
   padding: "16px 20px",
   margin: "0 0 20px",
 };
+const lineRow = { fontSize: "14px", color: "#222222", margin: "4px 0" };
+// Floated rather than a table: a two-column layout is the part of an email most
+// likely to fall apart in a phone mail client, and this degrades to one line.
+const lineAmount = { float: "right" as const, fontWeight: "bold" as const };
 const reference_ = {
   fontSize: "20px",
   color: "#008eaa",

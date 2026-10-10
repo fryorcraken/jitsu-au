@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Pill } from "@/components/site/StatusPill";
 import { UserLink } from "@/components/site/UserLink";
 import { AddMembershipCard } from "@/components/site/AddMembershipCard";
+import { PersonCharges } from "@/components/site/PersonCharges";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
@@ -1031,6 +1032,14 @@ function ManagerUserPage() {
         )}
         <AddMembershipCard userId={userId} onAdded={() => load(false)} />
       </div>
+
+      {/* Charges for things that are not a membership (docs/item-invoices.md).
+          Loads on its own, so a failure here never takes the record down. */}
+      <PersonCharges
+        userId={userId}
+        personName={summary.name ?? summary.email ?? "this person"}
+        emailGoesTo={summary.email_belongs_to}
+      />
 
       <div className="space-y-3">
         <h2 className="text-lg font-bold">Sessions</h2>
