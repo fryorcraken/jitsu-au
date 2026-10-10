@@ -422,7 +422,7 @@ export async function createItemInvoiceForUser(
  */
 export async function recordItemInvoicePayment(
   admin: MembershipClient,
-  input: { invoice: ItemInvoiceRow; method: "bank_transfer" | "manual"; at?: string },
+  input: { invoice: ItemInvoiceRow; method: "bank_transfer" | "manual" },
 ): Promise<{ recorded: boolean }> {
   const { invoice } = input;
   if (invoice.paid_at) return { recorded: false };
@@ -433,7 +433,7 @@ export async function recordItemInvoicePayment(
 
   const { data: claimed, error } = await admin
     .from("item_invoices")
-    .update({ paid_at: input.at ?? new Date().toISOString(), payment_method: input.method })
+    .update({ paid_at: new Date().toISOString(), payment_method: input.method })
     .eq("id", invoice.id)
     .is("paid_at", null)
     .is("cancelled_at", null)
@@ -466,6 +466,34 @@ export async function recordItemInvoicePayment(
 }
 
 /**
+ * A guarded cancel or delete matched no row. Say WHY, from the row as it is
+ * now, rather than assuming: "it was paid a moment ago" told a manager whose
+ * colleague had just deleted the invoice that a payment existed, and the agent
+ * API answered a 409 for what is really a 404.
+ *
+ * Returns quietly only when the row now holds the state the caller wanted
+ * (`alreadyDone`), which makes a cancel racing another cancel a no-op.
+ */
+async function explainMissedWrite(
+  admin: MembershipClient,
+  id: string,
+  alreadyDone: (row: ItemInvoiceRow) => boolean,
+): Promise<void> {
+  const { data, error } = await admin.from("item_invoices").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data)
+    throw new ItemRecordNotFoundError(
+      "That invoice has just been deleted by someone else. Refresh the page.",
+    );
+  if (data.paid_at)
+    throw new ItemInvoiceSettledError(
+      "That invoice was paid a moment ago, so it stays. Refresh the page to see it.",
+    );
+  if (alreadyDone(data)) return;
+  throw new Error("That did not go through. Refresh the page and try again.");
+}
+
+/**
  * Withdraw an unpaid invoice and keep the record. Idempotent on one already
  * cancelled. Sends nothing: it simply stops showing as owed.
  */
@@ -483,10 +511,7 @@ export async function cancelItemInvoiceRow(admin: MembershipClient, id: string):
     .is("paid_at", null)
     .select("id");
   if (error) throw new Error(error.message);
-  if (!data?.length)
-    throw new ItemInvoiceSettledError(
-      "That invoice was paid a moment ago, so it stays. Refresh the page to see it.",
-    );
+  if (!data?.length) await explainMissedWrite(admin, id, (row) => Boolean(row.cancelled_at));
 }
 
 /** Remove an unpaid invoice outright, for one raised by mistake. */
@@ -501,10 +526,7 @@ export async function deleteItemInvoiceRow(admin: MembershipClient, id: string):
     .is("paid_at", null)
     .select("id");
   if (error) throw new Error(error.message);
-  if (!data?.length)
-    throw new ItemInvoiceSettledError(
-      "That invoice was paid a moment ago, so it stays. Refresh the page to see it.",
-    );
+  if (!data?.length) await explainMissedWrite(admin, id, () => false);
 }
 
 export const listItemInvoices = createServerFn({ method: "GET" })
@@ -656,80 +678,54 @@ export async function settleItemInvoicesFromStatement(
       continue;
     }
     const invoice = hits[0];
+    let outcome: LineSettlement;
     try {
-      const { recorded } = await recordItemInvoicePayment(admin, {
-        invoice,
-        method: "bank_transfer",
-      });
-      // Paid by somebody else between the read above and this write (a manager
-      // marking it paid for cash, most likely). This line is then a SECOND
-      // payment for the same invoice, and marking it matched would hide the
-      // member's double payment as reconciled. Leave it for a manager.
-      if (!recorded) {
-        remaining.delete(invoice.id);
-        console.warn(
-          `[reconcile] item invoice ${invoice.id} was already paid; transaction ${txn.id} left for a manager`,
-        );
-        continue;
-      }
+      outcome = await settleInvoiceFromLine(admin, { txnId: txn.id, invoice, matchedBy: null });
     } catch (e) {
       console.error(
-        `[reconcile] recording the payment failed for item invoice ${invoice.id} (transaction ${txn.id}):`,
+        `[reconcile] settling item invoice ${invoice.id} from transaction ${txn.id} failed; left for a manager:`,
         e,
       );
       continue;
     }
-    const { error: tErr } = await admin
-      .from("bank_transactions")
-      .update({
-        matched_item_invoice_id: invoice.id,
-        matched_at: new Date().toISOString(),
-        status: "matched",
-      })
-      .eq("id", txn.id);
-    if (tErr) {
-      console.error(`[reconcile] could not mark transaction ${txn.id} matched:`, tErr.message);
+    if (outcome === "paid") {
+      remaining.delete(invoice.id);
+      matched.add(txn.id);
       continue;
     }
-    remaining.delete(invoice.id);
-    matched.add(txn.id);
+    // Anything else leaves the line for a manager. An invoice paid by somebody
+    // else in the meantime makes this transfer a SECOND payment, and matching
+    // it would hide the member's double payment as reconciled.
+    if (outcome !== "line_taken") remaining.delete(invoice.id);
+    console.warn(`[reconcile] transaction ${txn.id} not matched to ${invoice.id}: ${outcome}`);
   }
   return matched;
 }
 
+/** How settling one invoice from one statement line ended. */
+type LineSettlement = "paid" | "line_taken" | "invoice_paid" | "invoice_cancelled" | "invoice_gone";
+
 /**
- * Link one statement line to one item invoice by hand, recording the payment.
- * The manual counterpart to the match above, from `/manager/reconciliation`.
+ * Pay one item invoice from one bank statement line, the line CLAIMED FIRST.
+ *
+ * The order is the whole point. Recording the payment first, as this used to,
+ * left two holes: two managers (or a manager and an import) could both pay
+ * different invoices off the same line, since only one of their line updates
+ * could land and nothing checked; and a line update that failed after the
+ * payment committed left the line unmatched against an invoice that was now
+ * paid, so the next manager to link it was told the member had paid twice.
+ *
+ * So: claim the line with a guarded update (only while still `unmatched`),
+ * then record the payment. If the payment does not go through, release the
+ * line again and report why, read off the invoice as it now is. A receipt is
+ * only ever sent for a payment that was recorded with its line held.
  */
-export async function matchTransactionToItemInvoice(
+async function settleInvoiceFromLine(
   admin: MembershipClient,
-  input: { transactionId: string; invoiceId: string; matchedBy: string },
-): Promise<void> {
-  // The transfer first: it has to exist and still be free, or the payment
-  // below would be recorded against nothing.
-  const { data: txn, error: tErr } = await admin
-    .from("bank_transactions")
-    .select("id, status")
-    .eq("id", input.transactionId)
-    .maybeSingle();
-  if (tErr) throw new Error(tErr.message);
-  if (!txn)
-    throw new ItemRecordNotFoundError("That transfer is no longer there. Refresh the page.");
-  if (txn.status !== "unmatched")
-    throw new ItemInvoiceConflictError(
-      "That transfer has already been matched. Refresh the page to see what it paid.",
-    );
-
-  const invoice = await readItemInvoice(admin, input.invoiceId);
-  const { recorded } = await recordItemInvoicePayment(admin, { invoice, method: "bank_transfer" });
-  // Already paid: this transfer would be a second payment for it, which is a
-  // refund to sort out, not a match. Linking it would hide the money.
-  if (!recorded)
-    throw new ItemInvoiceConflictError(
-      `Invoice ${invoice.payment_reference} is already paid, so this transfer was not linked to it. If they paid twice, it needs refunding.`,
-    );
-
-  const { error } = await admin
+  input: { txnId: string; invoice: ItemInvoiceRow; matchedBy: string | null },
+): Promise<LineSettlement> {
+  const { txnId, invoice } = input;
+  const { data: claimed, error: claimErr } = await admin
     .from("bank_transactions")
     .update({
       matched_item_invoice_id: invoice.id,
@@ -737,9 +733,92 @@ export async function matchTransactionToItemInvoice(
       matched_by: input.matchedBy,
       status: "matched",
     })
-    .eq("id", input.transactionId)
-    .eq("status", "unmatched");
-  if (error) throw new Error(error.message);
+    .eq("id", txnId)
+    .eq("status", "unmatched")
+    .select("id");
+  if (claimErr) throw new Error(claimErr.message);
+  if (!claimed?.length) return "line_taken";
+
+  let recorded = false;
+  let failure: unknown = null;
+  try {
+    ({ recorded } = await recordItemInvoicePayment(admin, { invoice, method: "bank_transfer" }));
+  } catch (e) {
+    failure = e;
+  }
+  if (recorded) return "paid";
+
+  // Give the line back, but only if it is still ours.
+  const { error: releaseErr } = await admin
+    .from("bank_transactions")
+    .update({
+      matched_item_invoice_id: null,
+      matched_at: null,
+      matched_by: null,
+      status: "unmatched",
+    })
+    .eq("id", txnId)
+    .eq("matched_item_invoice_id", invoice.id);
+  if (releaseErr)
+    console.error(
+      `[reconcile] transaction ${txnId} is held for item invoice ${invoice.id}, which was NOT paid; release it by hand:`,
+      releaseErr.message,
+    );
+
+  if (failure && !(failure instanceof ItemInvoiceSettledError)) throw failure;
+  const { data: now, error: readErr } = await admin
+    .from("item_invoices")
+    .select("paid_at, cancelled_at")
+    .eq("id", invoice.id)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (!now) return "invoice_gone";
+  if (now.paid_at) return "invoice_paid";
+  return "invoice_cancelled";
+}
+
+/**
+ * Link one statement line to one item invoice by hand, recording the payment.
+ * The manual counterpart to the match above, from `/manager/reconciliation`.
+ * Every refusal is the manager's to act on, so each says what to do.
+ */
+export async function matchTransactionToItemInvoice(
+  admin: MembershipClient,
+  input: { transactionId: string; invoiceId: string; matchedBy: string },
+): Promise<void> {
+  const invoice = await readItemInvoice(admin, input.invoiceId);
+  const outcome = await settleInvoiceFromLine(admin, {
+    txnId: input.transactionId,
+    invoice,
+    matchedBy: input.matchedBy,
+  });
+  if (outcome === "paid") return;
+  if (outcome === "line_taken") {
+    const { data: txn, error } = await admin
+      .from("bank_transactions")
+      .select("id")
+      .eq("id", input.transactionId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!txn)
+      throw new ItemRecordNotFoundError("That transfer is no longer there. Refresh the page.");
+    throw new ItemInvoiceConflictError(
+      "That transfer has already been matched. Refresh the page to see what it paid.",
+    );
+  }
+  if (outcome === "invoice_gone")
+    throw new ItemRecordNotFoundError(
+      `Invoice ${invoice.payment_reference} has just been deleted, so this transfer was not linked. Refresh the page.`,
+    );
+  if (outcome === "invoice_cancelled")
+    throw new ItemInvoiceConflictError(
+      `Invoice ${invoice.payment_reference} was cancelled, so this transfer was not linked to it. If it is still owed, raise a new invoice and match the transfer to that.`,
+    );
+  // Already paid: this transfer is a second payment for it, which is a refund
+  // to sort out, not a match. Linking it would hide the money.
+  throw new ItemInvoiceConflictError(
+    `Invoice ${invoice.payment_reference} is already paid, so this transfer was not linked to it. If they paid twice, it needs refunding.`,
+  );
 }
 
 export const matchTransactionToItem = createServerFn({ method: "POST" })

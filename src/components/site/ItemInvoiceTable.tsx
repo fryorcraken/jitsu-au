@@ -10,7 +10,10 @@
 // (CLAUDE.md, "The UX bar"): marking paid emails a receipt and makes the invoice
 // permanent, and neither a cancel nor a delete has an undo. A failure stays in
 // the dialog with the button still there, the same shape as
-// `MembershipRowActions`, rather than a toast that fades on a phone.
+// `MembershipRowActions`, rather than a toast that fades on a phone. That is
+// also why this is an `AlertDialog` and not `useConfirm`: a yes/no promise
+// closes on the answer and cannot hold a failure and a retry, which is the
+// exception `use-confirm.tsx` already names for `MembershipRowActions`.
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Check, Loader2, Trash2, Undo2 } from "lucide-react";

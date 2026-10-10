@@ -49,6 +49,12 @@ function ReconciliationPage() {
   // Unpaid item invoices (docs/item-invoices.md), the other thing a transfer
   // can pay. Already filtered to unpaid by the server.
   const [itemInvoices, setItemInvoices] = useState<ManagerItemInvoiceView[]>([]);
+  // Its own failure, never the page's: matching a membership transfer must not
+  // depend on the item invoice list loading.
+  const [itemInvoicesError, setItemInvoicesError] = useState<string | null>(null);
+  // A refused manual match, kept beside the transfer it was about. It can say a
+  // member paid twice and needs refunding, which must not fade like a toast.
+  const [matchErrors, setMatchErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   // Without this the card below reports "Everything imported has been matched."
@@ -71,11 +77,15 @@ function ReconciliationPage() {
       Promise.all([
         fetchTxns(),
         fetchMemberships(),
-        fetchItemInvoices({ data: { state: "unpaid" } }),
+        fetchItemInvoices({ data: { state: "unpaid" } }).catch((e: unknown) => {
+          console.error("[reconciliation] unpaid item invoices failed to load:", e);
+          return null;
+        }),
       ]).then(([t, m, items]) => {
         setTxns(t as BankTxn[]);
         setMemberships(m as Membership[]);
-        setItemInvoices(items);
+        setItemInvoices(items ?? []);
+        setItemInvoicesError(items ? null : "They are not offered below until they load.");
       }),
     [fetchTxns, fetchMemberships, fetchItemInvoices],
   );
@@ -138,14 +148,27 @@ function ReconciliationPage() {
     if (!choice) return;
     const [kind, id] = choice.split(":");
     setBusy(true);
+    setMatchErrors(({ [txnId]: _dropped, ...rest }) => rest);
     try {
       if (kind === "i")
         await runItemMatch({ data: { transaction_id: txnId, item_invoice_id: id } });
       else await runMatch({ data: { transaction_id: txnId, membership_id: id } });
-      await reload();
-      toast.success("Matched, and the payment is recorded");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Match failed");
+      setMatchErrors((prev) => ({
+        ...prev,
+        [txnId]: e instanceof Error ? e.message : "That match did not go through. Try again.",
+      }));
+      setBusy(false);
+      return;
+    }
+    // Outside the try: the match has landed, so a failed refresh is a stale
+    // list, not a failed match. Reporting it as one invited a second attempt,
+    // which for an item invoice then claimed the member had paid twice.
+    toast.success("Matched, and the payment is recorded");
+    try {
+      await reload();
+    } catch (e) {
+      setLoadError(describeLoadError(e, "Matched, but the list could not be refreshed"));
     } finally {
       setBusy(false);
     }
@@ -209,7 +232,15 @@ function ReconciliationPage() {
               </CardDescription>
             </CardHeader>
             {unmatched.length > 0 && (
-              <CardContent>
+              <CardContent className="space-y-3">
+                {itemInvoicesError && (
+                  <LoadFailure
+                    what="Unpaid item invoices"
+                    message={itemInvoicesError}
+                    hint="Memberships can still be matched below."
+                    onRetry={() => void load()}
+                  />
+                )}
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50 text-left">
@@ -232,7 +263,9 @@ function ReconciliationPage() {
                             <select
                               aria-label={`Match the ${formatCents(t.amount_cents)} transfer to an invoice`}
                               disabled={busy || (pending.length === 0 && itemInvoices.length === 0)}
-                              defaultValue=""
+                              // Always back to "Select…": after a refused match
+                              // the same choice has to be pickable again.
+                              value=""
                               onChange={(e) => manualMatch(t.id, e.target.value)}
                               className="rounded-md border bg-background px-2 py-1 text-sm"
                             >
@@ -264,6 +297,11 @@ function ReconciliationPage() {
                                 </optgroup>
                               )}
                             </select>
+                            {matchErrors[t.id] && (
+                              <p role="alert" className="mt-2 max-w-xs text-sm text-destructive">
+                                {matchErrors[t.id]}
+                              </p>
+                            )}
                           </td>
                         </tr>
                       ))}

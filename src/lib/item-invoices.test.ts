@@ -183,6 +183,19 @@ describe("createItemInvoiceSchema", () => {
     expect(parsed.lines[0].quantity).toBe(2);
   });
 
+  // Postgres hands ids back lowercase, and a retry is recognised by comparing
+  // the two. The same uuid in capitals must still be the same person.
+  it("lowercases the ids it is given", () => {
+    const parsed = createItemInvoiceSchema.parse({
+      user_id: USER.toUpperCase(),
+      client_submission_id: GI.id.toUpperCase(),
+      lines: [{ item_id: GI.id.toUpperCase(), quantity: 1 }],
+    });
+    expect(parsed.user_id).toBe(USER);
+    expect(parsed.client_submission_id).toBe(GI.id);
+    expect(parsed.lines[0].item_id).toBe(GI.id);
+  });
+
   it("refuses an empty invoice and a zero quantity", () => {
     expect(createItemInvoiceSchema.safeParse({ user_id: USER, lines: [] }).success).toBe(false);
     expect(

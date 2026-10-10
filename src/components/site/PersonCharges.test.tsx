@@ -191,3 +191,26 @@ describe("PersonCharges, when the price list moves under an open card", () => {
     ).toBeVisible();
   });
 });
+
+describe("PersonCharges, typing a quantity", () => {
+  // Backspacing the "1" used to snap it straight back to 1, so typing 3 gave
+  // 13 and an invoice for thirteen.
+  it("lets the box be cleared and retyped", async () => {
+    await openCard();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Add an item" }), "i-patch");
+    const box = screen.getByLabelText("How many Club patch");
+    await userEvent.clear(box);
+    await userEvent.type(box, "3");
+    expect(box).toHaveValue(3);
+    expect(screen.getByRole("button", { name: "Send invoice for $37.50" })).toBeVisible();
+  });
+
+  it("goes back to the last real count when left empty", async () => {
+    await openCard();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Add an item" }), "i-patch");
+    const box = screen.getByLabelText("How many Club patch");
+    await userEvent.clear(box);
+    await userEvent.tab();
+    expect(box).toHaveValue(1);
+  });
+});

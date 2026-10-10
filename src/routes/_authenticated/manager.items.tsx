@@ -45,11 +45,6 @@ export const Route = createFileRoute("/_authenticated/manager/items")({
 
 type Item = Awaited<ReturnType<typeof listChargeItems>>[number];
 
-/** "$85" or "12.50" as typed, to cents. Null when it is not a price at all. */
-function priceFromInput(value: string): number | null {
-  return parseMoneyToCents(value);
-}
-
 /** Cents back to what goes in the price box: "85" or "12.50", no dollar sign. */
 function priceForInput(cents: number): string {
   return Number.isInteger(cents / 100) ? String(cents / 100) : (cents / 100).toFixed(2);
@@ -57,7 +52,7 @@ function priceForInput(cents: number): string {
 
 /** The schema's own words for what is wrong, or null when it would save. */
 function validationError(name: string, price: string): string | null {
-  const price_cents = priceFromInput(price);
+  const price_cents = parseMoneyToCents(price);
   if (price_cents === null) return "Type a price, like 85 or 12.50.";
   const parsed = saveChargeItemSchema.safeParse({ name, price_cents });
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? "Check the name and price.");
@@ -83,7 +78,7 @@ function AddItemForm({ onAdded }: { onAdded: () => Promise<unknown> }) {
     e?.preventDefault();
     setTouched(true);
     if (problem) return;
-    const price_cents = priceFromInput(price)!;
+    const price_cents = parseMoneyToCents(price)!;
     const outcome = await send.submit({
       run: (signal) => save({ signal, data: { name: name.trim(), price_cents } }),
     });
@@ -153,43 +148,49 @@ function AddItemForm({ onAdded }: { onAdded: () => Promise<unknown> }) {
 function ItemRow({ item, onChanged }: { item: Item; onChanged: () => Promise<unknown> }) {
   const save = useServerFn(saveChargeItem);
   const remove = useServerFn(deleteChargeItem);
+  // A rename or reprice is an UPDATE of one row to the same values, so the
+  // automatic retry after a timeout is safe here, unlike adding an item.
+  const send = useResilientSubmit<Item>(INTAKE_SUBMIT);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(priceForInput(item.price_cents));
-  const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  // A name or price the form will not send, or a remove that did not go through.
   const [error, setError] = useState<string | null>(null);
+  const busy = send.busy || removing;
 
-  async function saveEdit(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveEdit(e?: React.FormEvent) {
+    e?.preventDefault();
     const problem = validationError(name, price);
     if (problem) return setError(problem);
-    setBusy(true);
     setError(null);
-    try {
-      await save({ data: { id: item.id, name: name.trim(), price_cents: priceFromInput(price)! } });
-    } catch (err) {
-      // Stays beside the form with the values still in it, not in a toast.
-      setError(err instanceof Error ? err.message : "That did not save. Try again.");
-      setBusy(false);
-      return;
-    }
-    await onChanged().catch(() => {});
-    setBusy(false);
+    const outcome = await send.submit({
+      run: (signal) =>
+        save({
+          signal,
+          data: { id: item.id, name: name.trim(), price_cents: parseMoneyToCents(price)! },
+        }),
+    });
+    // A failure stays in SubmitStatus beside the form, values still in it.
+    if (!outcome.ok) return;
+    send.reset();
     setEditing(false);
+    await onChanged().catch(() => {});
   }
 
   async function removeItem() {
-    setBusy(true);
+    setRemoving(true);
     setError(null);
     try {
       await remove({ data: { id: item.id } });
+      toast.success(`${item.name} removed. Invoices already sent are unchanged.`);
+      await onChanged().catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "That was not removed. Try again.");
-      setBusy(false);
-      return;
+    } finally {
+      // Always, so a row whose refresh failed is not left with dead buttons.
+      setRemoving(false);
     }
-    toast.success(`${item.name} removed. Invoices already sent are unchanged.`);
-    await onChanged().catch(() => {});
   }
 
   if (editing) {
@@ -228,7 +229,7 @@ function ItemRow({ item, onChanged }: { item: Item; onChanged: () => Promise<unk
           </div>
           <div className="flex gap-2">
             <Button type="submit" disabled={busy}>
-              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {send.busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save
             </Button>
             <Button
@@ -240,6 +241,7 @@ function ItemRow({ item, onChanged }: { item: Item; onChanged: () => Promise<unk
                 setName(item.name);
                 setPrice(priceForInput(item.price_cents));
                 setError(null);
+                send.reset();
               }}
             >
               Cancel
@@ -254,6 +256,16 @@ function ItemRow({ item, onChanged }: { item: Item; onChanged: () => Promise<unk
             {error}
           </p>
         )}
+        <div className="mt-2">
+          <SubmitStatus
+            status={send.status}
+            attempt={send.attempt}
+            attempts={send.attempts}
+            error={send.error}
+            failureKind={send.failureKind}
+            onRetry={() => void saveEdit()}
+          />
+        </div>
       </li>
     );
   }
@@ -268,7 +280,7 @@ function ItemRow({ item, onChanged }: { item: Item; onChanged: () => Promise<unk
             <Pencil className="mr-1 h-3 w-3" /> Edit
           </Button>
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void removeItem()}>
-            {busy ? (
+            {removing ? (
               <Loader2 className="mr-1 h-3 w-3 animate-spin" />
             ) : (
               <Trash2 className="mr-1 h-3 w-3" />
@@ -356,7 +368,9 @@ function ItemsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <AddItemForm onAdded={loadItems} />
+          {/* Not beside a failed list: an add form next to a list that did not
+              load invites adding everything again. */}
+          {!itemsError && <AddItemForm onAdded={loadItems} />}
           {itemsError ? (
             <LoadFailure
               what="The item list"

@@ -105,4 +105,47 @@ describe("manager reconciliation", () => {
       data: { transaction_id: "txn-1", item_invoice_id: "inv-7" },
     });
   });
+
+  const TXN = {
+    id: "txn-1",
+    posted_at: "2026-10-02",
+    amount_cents: 8500,
+    description: "OSKO A SMITH GI",
+    reference: null,
+    status: "unmatched",
+    matched_membership_id: null,
+    matched_at: null,
+    created_at: "2026-10-02T00:00:00Z",
+  };
+
+  // Matching membership transfers must not depend on the item invoice list.
+  it("keeps the page working when only the item invoices fail to load", async () => {
+    listBankTransactions.mockResolvedValue([TXN]);
+    listMemberships.mockResolvedValue([]);
+    listItemInvoices.mockRejectedValueOnce(new Error("network"));
+    render(<ReconciliationPage />);
+
+    expect(await screen.findByText(/unpaid item invoices could not be loaded/i)).toBeVisible();
+    expect(screen.getByRole("combobox", { name: /match the \$85 transfer/i })).toBeVisible();
+    expect(screen.queryByText(/imported transactions could not be loaded/i)).toBeNull();
+  });
+
+  // The refusal can say a member paid twice. A toast would fade with that in it.
+  it("keeps a refused match on screen beside its transfer", async () => {
+    listBankTransactions.mockResolvedValue([TXN]);
+    listMemberships.mockResolvedValue([]);
+    listItemInvoices.mockResolvedValue([
+      { id: "inv-7", payment_reference: "INV0007", member_name: "Ada", total_cents: 8500 },
+    ]);
+    matchTransactionToItem.mockRejectedValueOnce(
+      new Error("Invoice INV0007 is already paid, so this transfer was not linked to it."),
+    );
+    render(<ReconciliationPage />);
+
+    await userEvent.selectOptions(
+      await screen.findByRole("combobox", { name: /match the \$85 transfer/i }),
+      "i:inv-7",
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(/INV0007 is already paid/);
+  });
 });

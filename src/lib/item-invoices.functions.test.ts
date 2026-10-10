@@ -132,9 +132,63 @@ describe("settleItemInvoicesFromStatement", () => {
   it("leaves the line for a manager when somebody else recorded the payment first", async () => {
     const fake = fakeAdmin({ item_invoices: { select: ok([INVOICE]), update: ok([]) } });
     expect((await settle(fake, [txn()])).size).toBe(0);
-    expect(fake.writes.some((w) => w.table === "bank_transactions")).toBe(false);
+    // The line was claimed, then handed back.
+    expect(lastLineWrite(fake)?.patch).toMatchObject({ status: "unmatched" });
+  });
+
+  // The line is claimed BEFORE any payment is recorded. If somebody else took
+  // it first, no invoice may be paid from it: that is how one transfer paid two.
+  it("pays nothing when the line was claimed by somebody else first", async () => {
+    const fake = fakeAdmin({
+      item_invoices: { select: ok([INVOICE]) },
+      bank_transactions: { update: ok([]) },
+    });
+    expect((await settle(fake, [txn()])).size).toBe(0);
+    expect(fake.writes.some((w) => w.table === "item_invoices")).toBe(false);
+  });
+
+  it("claims the line before it records the payment", async () => {
+    const fake = fakeAdmin({ item_invoices: { select: ok([INVOICE]) } });
+    await settle(fake, [txn()]);
+    const order = fake.writes.map((w) => w.table);
+    expect(order.indexOf("bank_transactions")).toBeLessThan(order.indexOf("item_invoices"));
+    expect(fake.writes[0].filters).toContainEqual(["eq", "status", "unmatched"]);
+  });
+
+  // A payment write that fails must not leave the line held against an
+  // invoice that was never paid, or the next import cannot see it.
+  it("hands the line back when recording the payment fails", async () => {
+    const fake = fakeAdmin({
+      item_invoices: { select: ok([INVOICE]), update: fails("deadlock detected") },
+    });
+    expect((await settle(fake, [txn()])).size).toBe(0);
+    expect(lastLineWrite(fake)?.patch).toMatchObject({
+      status: "unmatched",
+      matched_item_invoice_id: null,
+    });
   });
 });
+
+/**
+ * Make every `.maybeSingle()` on item_invoices after the first answer `later`:
+ * the row as another writer left it, between this function's read and its write.
+ */
+function changesAfterFirstRead(fake: ReturnType<typeof fakeAdmin>, later: unknown) {
+  const from = fake.admin.from.bind(fake.admin);
+  let reads = 0;
+  fake.admin.from = (table: string) => {
+    const chain = from(table) as Record<string, unknown>;
+    if (table === "item_invoices") {
+      const maybeSingle = chain.maybeSingle as () => Promise<unknown>;
+      chain.maybeSingle = () => (reads++ === 0 ? maybeSingle() : Promise.resolve(ok(later)));
+    }
+    return chain;
+  };
+}
+
+function lastLineWrite(fake: ReturnType<typeof fakeAdmin>) {
+  return fake.writes.filter((w) => w.table === "bank_transactions").at(-1);
+}
 
 describe("recordItemInvoicePayment", () => {
   it("does nothing to an invoice that is already paid", async () => {
@@ -197,10 +251,22 @@ describe("cancelling and deleting", () => {
   it("deletes only while still unpaid, and says so when a payment won the race", async () => {
     const { deleteItemInvoiceRow } = await import("./item-invoices.functions");
     const fake = fakeAdmin({ item_invoices: { select: ok(INVOICE), delete: ok([]) } });
+    changesAfterFirstRead(fake, { ...INVOICE, paid_at: "2026-10-01T00:00:00Z" });
     await expect(deleteItemInvoiceRow(fake.admin as never, "inv-12")).rejects.toThrow(
       /paid a moment ago/,
     );
     expect(fake.writes[0].filters).toContainEqual(["is", "paid_at", null]);
+  });
+
+  // A colleague deleted it first. Saying "it was paid" would be false.
+  it("says a missed delete was because the invoice is gone, not paid", async () => {
+    const { deleteItemInvoiceRow, ItemRecordNotFoundError } =
+      await import("./item-invoices.functions");
+    const fake = fakeAdmin({ item_invoices: { select: ok(INVOICE), delete: ok([]) } });
+    changesAfterFirstRead(fake, null);
+    await expect(deleteItemInvoiceRow(fake.admin as never, "inv-12")).rejects.toBeInstanceOf(
+      ItemRecordNotFoundError,
+    );
   });
 
   it("treats cancelling an already-cancelled invoice as done", async () => {
@@ -331,23 +397,42 @@ describe("matchTransactionToItemInvoice", () => {
       bank_transactions: { select: ok({ id: "txn-1", status: "unmatched" }) },
       item_invoices: { select: ok({ ...INVOICE, paid_at: "2026-10-01T00:00:00Z" }) },
     });
+    await expect(matchTransactionToItemInvoice(fake.admin as never, input)).rejects.toThrow(
+      /already paid.*needs refunding/,
+    );
     await expect(matchTransactionToItemInvoice(fake.admin as never, input)).rejects.toBeInstanceOf(
       ItemInvoiceConflictError,
     );
-    expect(fake.writes.some((w) => w.table === "bank_transactions")).toBe(false);
+    // Claimed, then released: the transfer is left unmatched for the refund.
+    expect(lastLineWrite(fake)?.patch).toMatchObject({ status: "unmatched" });
   });
 
   it("refuses a transfer that has already been matched, recording no payment", async () => {
     const { matchTransactionToItemInvoice, ItemInvoiceConflictError } =
       await import("./item-invoices.functions");
     const fake = fakeAdmin({
-      bank_transactions: { select: ok({ id: "txn-1", status: "matched" }) },
+      bank_transactions: { select: ok({ id: "txn-1" }), update: ok([]) },
       item_invoices: { select: ok(INVOICE) },
     });
-    await expect(matchTransactionToItemInvoice(fake.admin as never, input)).rejects.toBeInstanceOf(
-      ItemInvoiceConflictError,
+    await expect(matchTransactionToItemInvoice(fake.admin as never, input)).rejects.toThrow(
+      /already been matched/,
     );
-    expect(fake.writes).toEqual([]);
+    expect(fake.writes.some((w) => w.table === "item_invoices")).toBe(false);
+  });
+
+  // A colleague deleted it a moment ago. That is not a double payment, and
+  // saying "needs refunding" would send a manager chasing money nobody sent.
+  it("says the invoice is gone, not paid, when it was deleted mid-match", async () => {
+    const { matchTransactionToItemInvoice, ItemRecordNotFoundError } =
+      await import("./item-invoices.functions");
+    const fake = fakeAdmin({
+      item_invoices: { select: ok(INVOICE), update: ok([]) },
+    });
+    // The first read finds it; by the re-read it is gone.
+    changesAfterFirstRead(fake, null);
+    await expect(matchTransactionToItemInvoice(fake.admin as never, input)).rejects.toBeInstanceOf(
+      ItemRecordNotFoundError,
+    );
   });
 
   it("records the payment and links the transfer when both are free", async () => {

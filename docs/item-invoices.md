@@ -101,6 +101,13 @@ and would not here. The two shapes never collide.
 - **Mark as paid**, for cash at the door. Asks first: it emails a receipt and
   makes the invoice permanent.
 
+Both bank paths **claim the statement line first** (a guarded update, only while
+it is still unmatched) and only then record the payment; if the payment does not
+go through, the line is handed back and the refusal says why, read off the
+invoice as it now is (paid, cancelled, or deleted by a colleague). Recording the
+payment first let two managers pay two invoices off one transfer, and left a
+line stuck unmatched against an invoice that was by then paid.
+
 Both go through `recordItemInvoicePayment`, the only writer of `paid_at`, which is
 guarded on the invoice still being unpaid at the moment of writing: two managers
 pressing at once, or a manual mark racing an import, record one payment and send

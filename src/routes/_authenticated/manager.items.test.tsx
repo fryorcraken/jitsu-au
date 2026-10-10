@@ -118,4 +118,24 @@ describe("/manager/items", () => {
     // The price list still works.
     expect(screen.getByText("Club gi")).toBeVisible();
   });
+
+  // An add form beside a list that did not load invites adding it all again.
+  it("takes the add form away while the item list cannot be loaded", async () => {
+    listChargeItems.mockRejectedValue(new Error("network"));
+    render(<ItemsPage />);
+    expect(await screen.findByText(/item list could not be loaded/i)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add item" })).toBeNull();
+  });
+
+  // The remove landed; only the refresh after it failed. That has to read as
+  // a list to retry, never as a row frozen with its buttons greyed out.
+  it("offers a retry when the refresh after a remove fails", async () => {
+    render(<ItemsPage />);
+    const remove = await screen.findByRole("button", { name: /remove/i });
+    listChargeItems.mockRejectedValueOnce(new Error("network"));
+    await userEvent.click(remove);
+    await waitFor(() => expect(deleteChargeItem).toHaveBeenCalled());
+    expect(await screen.findByText(/item list could not be loaded/i)).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /try again/i })[0]).toBeEnabled();
+  });
 });

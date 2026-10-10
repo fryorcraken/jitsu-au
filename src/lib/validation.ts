@@ -3810,15 +3810,18 @@ export type RecordIdInput = z.infer<typeof recordIdSchema>;
  */
 export const createItemInvoiceSchema = z
   .object({
-    user_id: z.string().uuid(),
+    // Lowercased, as Postgres returns them: the retry check below compares the
+    // stored id with this one, and an agent sending the same uuid in capitals
+    // was told its own retry was somebody else's invoice.
+    user_id: z.string().uuid().toLowerCase(),
     // One per form fill, resent on every retry: a raise whose reply was lost
     // finds the invoice it already made rather than emailing a second one.
-    client_submission_id: z.string().uuid().optional(),
+    client_submission_id: z.string().uuid().toLowerCase().optional(),
     lines: z
       .array(
         z
           .object({
-            item_id: z.string().uuid(),
+            item_id: z.string().uuid().toLowerCase(),
             quantity: z
               .number()
               .int()
@@ -3856,7 +3859,7 @@ export const itemInvoiceStates = ["unpaid", "paid", "cancelled"] as const;
 /** Read item invoices: everybody's, or one person's, optionally one state. */
 export const listItemInvoicesSchema = z
   .object({
-    user_id: z.string().uuid().optional(),
+    user_id: z.string().uuid().toLowerCase().optional(),
     state: z.enum(itemInvoiceStates).optional(),
   })
   .strict();

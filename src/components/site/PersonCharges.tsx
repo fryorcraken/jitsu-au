@@ -81,6 +81,23 @@ function ChargeItemsCard({
     if (item) setPicked((prev) => [...prev, { item, quantity: 1 }]);
   }
 
+  // What is typed in each quantity box while it is being edited. Kept apart
+  // from the quantity itself so the box can be empty for a moment: forcing it
+  // straight back to 1 meant backspacing "1" and typing 3 gave 13.
+  const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
+
+  function typeQuantity(id: string, raw: string) {
+    setQtyDrafts((prev) => ({ ...prev, [id]: raw }));
+    const n = Number(raw);
+    // Only a real count moves the total; anything else waits for the blur.
+    if (raw.trim() !== "" && Number.isInteger(n) && n >= 1 && n <= ITEM_INVOICE_MAX_QUANTITY)
+      setQuantity(id, n);
+  }
+
+  function settleQuantity(id: string) {
+    setQtyDrafts(({ [id]: _settled, ...rest }) => rest);
+  }
+
   function setQuantity(id: string, quantity: number) {
     setListChanged(null);
     const q = Math.max(1, Math.min(ITEM_INVOICE_MAX_QUANTITY, Math.round(quantity) || 1));
@@ -124,6 +141,8 @@ function ChargeItemsCard({
 
   async function submit() {
     if (!picked.length) return;
+    // A box left half-typed shows the count that will actually be charged.
+    setQtyDrafts({});
     setListChanged(null);
     try {
       if (!(await checkPricesStillCurrent())) return;
@@ -254,9 +273,10 @@ function ChargeItemsCard({
                       inputMode="numeric"
                       min={1}
                       max={ITEM_INVOICE_MAX_QUANTITY}
-                      value={p.quantity}
+                      value={qtyDrafts[p.item.id] ?? String(p.quantity)}
                       disabled={send.busy}
-                      onChange={(e) => setQuantity(p.item.id, Number(e.target.value))}
+                      onChange={(e) => typeQuantity(p.item.id, e.target.value)}
+                      onBlur={() => settleQuantity(p.item.id)}
                       className="h-9 w-16 text-center"
                     />
                     <Button

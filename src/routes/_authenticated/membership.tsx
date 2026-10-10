@@ -28,7 +28,7 @@ import {
   type ClubPaymentDetails,
   type LifecycleStatus,
 } from "@/lib/validation";
-import { formatDateOnly } from "@/lib/dates";
+import { formatDate, formatDateOnly } from "@/lib/dates";
 import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
 import {
   getMyMemberships,
@@ -50,6 +50,7 @@ import {
   ITEM_INVOICE_STATE_LABEL,
   describeItemInvoiceLine,
   itemInvoiceAsUnpaid,
+  lineTotalCents,
   isItemInvoiceUnpaid,
 } from "@/lib/item-invoices";
 import { itemInvoiceClass } from "@/lib/status-colours";
@@ -402,15 +403,15 @@ function ItemInvoicesCard({
                 {inv.lines.map((line, i) => (
                   <li key={i} className="flex justify-between gap-4">
                     <span>{describeItemInvoiceLine(line)}</span>
-                    <span>{formatCents(line.unit_price_cents * line.quantity)}</span>
+                    <span>{formatCents(lineTotalCents(line))}</span>
                   </li>
                 ))}
               </ul>
               <p className="flex justify-between gap-4 text-sm font-medium">
                 <span>
                   {inv.state === "paid" && inv.paid_at
-                    ? `Paid ${new Date(inv.paid_at).toLocaleDateString("en-AU")}`
-                    : `Sent ${new Date(inv.created_at).toLocaleDateString("en-AU")}`}
+                    ? `Paid ${formatDate(inv.paid_at)}`
+                    : `Sent ${formatDate(inv.created_at)}`}
                 </span>
                 <span>{formatCents(inv.total_cents)}</span>
               </p>
