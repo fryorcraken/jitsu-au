@@ -237,7 +237,7 @@ export async function sendWaiverEmails({
     });
     sent.push(memberEmail);
   } catch (e) {
-    console.error(`[waiver-email] failed to email member ${memberEmail}:`, e);
+    console.error(`[waiver-email] failed to email the member:`, e);
   }
 
   // Review prompt to each manager.
@@ -254,7 +254,7 @@ export async function sendWaiverEmails({
       });
       sent.push(to);
     } catch (e) {
-      console.error(`[waiver-email] failed to email manager ${to}:`, e);
+      console.error(`[waiver-email] failed to email a manager:`, e);
     }
   }
 

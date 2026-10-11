@@ -35,7 +35,7 @@ export const Route = createFileRoute("/api/verify-email/$token")({
           // an address the account no longer has, which is the signal that a
           // correction happened and the member is still using the old email.
           if (outcome.result === "stale") {
-            console.warn(`[verify-email] stale token for ${outcome.email}; account has moved on`);
+            console.warn(`[verify-email] stale token redeemed; account has moved on`);
           }
         } catch (e) {
           // Verification failing must never strand somebody on an error page.

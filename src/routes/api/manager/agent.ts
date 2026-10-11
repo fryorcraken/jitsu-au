@@ -242,6 +242,13 @@ async function authenticate(request: Request): Promise<string> {
 /** Shape any thrown value into a stable JSON error response. */
 function errorResponse(e: unknown): Response {
   if (e instanceof AgentError) {
+    // A database failure's own text names tables, columns and constraints. It
+    // stays in the server log; the caller gets a plain retryable message.
+    const message =
+      e.code === "db_error"
+        ? "The club database could not answer just now. Try again shortly."
+        : e.message;
+    if (e.code === "db_error") console.error("[agent] db_error:", e.message);
     // `details` is NESTED, not spread. Flat-merging shared one namespace with
     // the envelope: ordering code/message last resolved the collision by
     // silently discarding a detail that happened to be named either, and it
@@ -253,7 +260,7 @@ function errorResponse(e: unknown): Response {
       {
         ok: false,
         version: AGENT_MANIFEST.version,
-        error: { code: e.code, message: e.message, ...(e.details && { details: e.details }) },
+        error: { code: e.code, message, ...(e.details && { details: e.details }) },
       },
       e.httpStatus,
       // A retry policy reads headers, not prose. Without this, "safe to retry"
@@ -860,7 +867,9 @@ async function handleDeleteInvoice(params: unknown, actingAs: string) {
       invoiceId: result.id,
       actor: actingAs,
       at: new Date().toISOString(),
-      deleted: before ?? null,
+      // Identifiers only: the member, amount and payment details stay in the
+      // database, not the log stream.
+      deleted: before ? { id: before.id } : null,
     }),
   );
   return { deleted: true as const, id: result.id };

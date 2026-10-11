@@ -160,7 +160,7 @@ export async function sendInterestEmails({
     });
     sent.push(email);
   } catch (e) {
-    console.error(`[interest-email] failed to email applicant ${email}:`, e);
+    console.error(`[interest-email] failed to email the applicant:`, e);
   }
 
   // New-lead notification to each manager.
@@ -177,7 +177,7 @@ export async function sendInterestEmails({
       });
       sent.push(to);
     } catch (e) {
-      console.error(`[interest-email] failed to email manager ${to}:`, e);
+      console.error(`[interest-email] failed to email a manager:`, e);
     }
   }
 
