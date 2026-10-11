@@ -1029,7 +1029,11 @@ function ManagerUserPage() {
             </table>
           </div>
         )}
-        <AddMembershipCard userId={userId} onAdded={() => load(false)} />
+        <AddMembershipCard
+          userId={userId}
+          studentNumberOnFile={profile.uts_student_number}
+          onAdded={() => load(false)}
+        />
       </div>
 
       <div className="space-y-3">

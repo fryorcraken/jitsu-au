@@ -19,6 +19,20 @@
 // Plans no longer on sale are offered under their own heading, since backfilling
 // a past training period is most of what this is for, but a manager should never
 // pick one by accident.
+//
+// The rate is a choice the manager makes on screen, with the price written on
+// each side of it. It used to be a side effect of a free-text box below the
+// plan list: type a number and the invoice quietly came out at the student
+// rate, while every price on the panel still said the public one, and a box that
+// started empty invoiced a UTS student the public rate unless the manager copied
+// their number across by hand. Now the plan list shows both prices, the student
+// rate is preselected when their record holds a number, and the number sits
+// inside that choice as what it is: the evidence for it, required to pick it.
+//
+// The server is unchanged and still decides: a number means the student rate,
+// none means public (`isUtsStudent`). So picking public sends no number, and
+// picking student refuses to submit without one rather than invoicing at the
+// public rate with the student option visibly ticked.
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
@@ -27,16 +41,35 @@ import { Label } from "@/components/ui/label";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
-import { clubToday, formatCents, planStartIsChoosable, sellablePlans } from "@/lib/validation";
+import { cn } from "@/lib/utils";
+import {
+  clubToday,
+  formatCents,
+  isUtsStudent,
+  planStartIsChoosable,
+  sellablePlans,
+} from "@/lib/validation";
 import { createMembership, listAllMembershipPlans } from "@/lib/membership.functions";
 
 type Plan = Awaited<ReturnType<typeof listAllMembershipPlans>>[number];
 
+type Rate = "student" | "public";
+
+/** Both prices where a plan has two, so the list reads the same before any choice. */
+function planLabel(plan: Plan): string {
+  const publicPrice = formatCents(plan.public_price_cents);
+  if (plan.student_price_cents == null) return `${plan.name} (${publicPrice})`;
+  return `${plan.name} (${publicPrice}, students ${formatCents(plan.student_price_cents)})`;
+}
+
 export function AddMembershipCard({
   userId,
+  studentNumberOnFile,
   onAdded,
 }: {
   userId: string;
+  /** The UTS student number on their record, if any. Prefills the box. */
+  studentNumberOnFile: string | null;
   onAdded: () => Promise<unknown>;
 }) {
   const fetchPlans = useServerFn(listAllMembershipPlans);
@@ -47,6 +80,7 @@ export function AddMembershipCard({
   const [plansError, setPlansError] = useState<string | null>(null);
   const [planCode, setPlanCode] = useState("");
   const [studentNumber, setStudentNumber] = useState("");
+  const [rate, setRate] = useState<Rate>("public");
   const [sessionDate, setSessionDate] = useState("");
   // Prefilled with today rather than left blank, because today is the answer
   // almost every time and an empty date field asks a question nobody had.
@@ -94,9 +128,16 @@ export function AddMembershipCard({
   // something. A training period's dates belong to the plan, and a class-credit
   // plan has no window to place.
   const startIsChoosable = chosen ? planStartIsChoosable(chosen) : false;
+  const onFile = studentNumberOnFile?.trim() || "";
+  // Only a plan with a student price asks which rate. On any other plan the
+  // number changes nothing about the price, and is sent only so the invoice
+  // records the same thing a member's own purchase would.
+  const hasStudentRate = chosen?.student_price_cents != null;
+  const sentNumber = rate === "student" ? studentNumber.trim() || null : null;
+  const missingNumber = hasStudentRate && rate === "student" && !isUtsStudent(studentNumber);
 
   async function submit() {
-    if (!planCode) return;
+    if (!planCode || missingNumber) return;
     const outcome = await send.submit({
       run: async (signal) => {
         const res = await create({
@@ -104,7 +145,7 @@ export function AddMembershipCard({
           data: {
             user_id: userId,
             plan_code: planCode,
-            uts_student_number: studentNumber.trim() || null,
+            uts_student_number: sentNumber,
             session_date: sessionDate || null,
             // Sent only where it means something: the server refuses a start
             // date on a plan that has none, and sending today's date for every
@@ -128,9 +169,18 @@ export function AddMembershipCard({
     }
   }
 
+  function openPanel() {
+    // Taken from the record each time the panel opens rather than once, so a
+    // number edited for one invoice does not quietly ride on the next, and a
+    // number added to their profile since is picked up.
+    setStudentNumber(onFile);
+    setRate(onFile ? "student" : "public");
+    setOpen(true);
+  }
+
   if (!open) {
     return (
-      <Button variant="outline" onClick={() => setOpen(true)}>
+      <Button variant="outline" onClick={openPanel}>
         Add a membership
       </Button>
     );
@@ -198,7 +248,7 @@ export function AddMembershipCard({
                 <optgroup label="On sale">
                   {onSale.map((p) => (
                     <option key={p.code} value={p.code}>
-                      {p.name} ({formatCents(p.public_price_cents)})
+                      {planLabel(p)}
                     </option>
                   ))}
                 </optgroup>
@@ -207,7 +257,7 @@ export function AddMembershipCard({
                 <optgroup label="No longer on sale">
                   {retired.map((p) => (
                     <option key={p.code} value={p.code}>
-                      {p.name} ({formatCents(p.public_price_cents)})
+                      {planLabel(p)}
                     </option>
                   ))}
                 </optgroup>
@@ -215,18 +265,57 @@ export function AddMembershipCard({
             </select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="add-student-number">UTS student number</Label>
-            <Input
-              id="add-student-number"
-              value={studentNumber}
-              onChange={(e) => setStudentNumber(e.target.value)}
-              placeholder="Leave blank for the public rate"
-            />
-            <p className="text-xs text-muted-foreground">
-              A number here is what applies the student rate. The price is worked out on the server.
-            </p>
-          </div>
+          {chosen?.student_price_cents != null && (
+            <fieldset className="space-y-3 sm:col-span-2">
+              <legend className="mb-2 text-sm font-medium">Rate</legend>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="add-rate"
+                  className="mt-1"
+                  checked={rate === "student"}
+                  onChange={() => setRate("student")}
+                />
+                <span>
+                  Student rate, {formatCents(chosen.student_price_cents)}
+                  <span className="block text-xs text-muted-foreground">
+                    For a UTS student. Needs their student number, which goes on the invoice.
+                  </span>
+                </span>
+              </label>
+              {rate === "student" && (
+                <div className="ml-6 max-w-sm space-y-2">
+                  <Label htmlFor="add-student-number">UTS student number</Label>
+                  <Input
+                    id="add-student-number"
+                    value={studentNumber}
+                    onChange={(e) => setStudentNumber(e.target.value)}
+                    aria-invalid={missingNumber || undefined}
+                    aria-describedby="add-student-number-hint"
+                  />
+                  <p
+                    id="add-student-number-hint"
+                    className={cn(
+                      "text-xs",
+                      missingNumber ? "text-destructive" : "text-muted-foreground",
+                    )}
+                  >
+                    {studentNumberHint(onFile, studentNumber.trim())}
+                  </p>
+                </div>
+              )}
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="add-rate"
+                  className="mt-1"
+                  checked={rate === "public"}
+                  onChange={() => setRate("public")}
+                />
+                <span>Public rate, {formatCents(chosen.public_price_cents)}</span>
+              </label>
+            </fieldset>
+          )}
 
           {/* Only a casual class reconciles per session, so this only appears
               for one. Every other plan kind ignores it. */}
@@ -300,7 +389,10 @@ export function AddMembershipCard({
           </label>
 
           <div className="space-y-3 sm:col-span-2">
-            <Button onClick={() => void submit()} disabled={!planCode || send.busy}>
+            <Button
+              onClick={() => void submit()}
+              disabled={!planCode || missingNumber || send.busy}
+            >
               {send.busy ? "Adding..." : "Add membership"}
             </Button>
             <SubmitStatus
@@ -316,4 +408,13 @@ export function AddMembershipCard({
       )}
     </div>
   );
+}
+
+/** Where the number came from, or what is missing. */
+function studentNumberHint(onFile: string, typed: string): string {
+  if (!typed)
+    return "Add their UTS student number to use the student rate, or choose the public rate.";
+  if (onFile && typed === onFile) return "From their profile.";
+  if (onFile) return `For this invoice only. Their profile still says ${onFile}.`;
+  return "For this invoice only. Their profile has no student number.";
 }
