@@ -260,7 +260,7 @@ export async function sendVerificationEmail(opts: {
     );
     return { sent: true };
   } catch (e) {
-    console.error(`[email-verification] failed to send verification to ${opts.to}:`, e);
+    console.error(`[email-verification] failed to send a verification email:`, e);
     return { sent: false };
   }
 }
