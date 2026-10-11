@@ -28,7 +28,7 @@ import {
   type ClubPaymentDetails,
   type LifecycleStatus,
 } from "@/lib/validation";
-import { formatDateOnly } from "@/lib/dates";
+import { formatDate, formatDateOnly } from "@/lib/dates";
 import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
 import {
   getMyMemberships,
@@ -45,6 +45,15 @@ import {
   type HouseholdPerson,
 } from "@/lib/household.functions";
 import { getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
+import { getMyItemInvoices, type ItemInvoiceView } from "@/lib/item-invoices.functions";
+import {
+  ITEM_INVOICE_STATE_LABEL,
+  describeItemInvoiceLine,
+  itemInvoiceAsUnpaid,
+  lineTotalCents,
+  isItemInvoiceUnpaid,
+} from "@/lib/item-invoices";
+import { itemInvoiceClass } from "@/lib/status-colours";
 import type { CodeOfConductState } from "@/lib/code-of-conduct";
 
 export const Route = createFileRoute("/_authenticated/membership")({
@@ -228,8 +237,8 @@ function WhoIsThisFor({
 }
 
 /** How a line of an invoice is named when its plan could not be resolved. */
-function lineName(planName: string | null) {
-  return planName ?? "Membership";
+function lineName(name: string | null) {
+  return name ?? "Membership";
 }
 
 /**
@@ -273,7 +282,7 @@ function HowToPay({
         <CardDescription>
           {transfers.length > 1
             ? "Each of these is a separate transfer. Put its own reference in the description, or we cannot tell which one it pays."
-            : "Transfer the amount below and put the reference in the description. We activate the membership as soon as it lands, and email you to confirm."}
+            : "Transfer the amount below and put the reference in the description. We match it as soon as it lands, and email you to confirm."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -285,7 +294,7 @@ function HowToPay({
               </p>
             )}
             <p className="text-sm font-medium">
-              {invoice.lines.map((l) => lineName(l.plan_name)).join(" + ")}
+              {invoice.lines.map((l) => lineName(l.name)).join(" + ")}
             </p>
             <dl className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
@@ -314,8 +323,8 @@ function HowToPay({
             {invoice.lines.length > 1 && (
               <ul className="mt-4 space-y-1 border-t pt-3 text-sm text-muted-foreground">
                 {invoice.lines.map((line) => (
-                  <li key={line.membership_id} className="flex justify-between gap-4">
-                    <span>{lineName(line.plan_name)}</span>
+                  <li key={line.id} className="flex justify-between gap-4">
+                    <span>{lineName(line.name)}</span>
                     <span>{formatCents(line.price_cents)}</span>
                   </li>
                 ))}
@@ -338,6 +347,82 @@ function HowToPay({
   );
 }
 
+/**
+ * Everything the club has charged this person for that is not a membership: a
+ * gi, a patch, a grading fee (docs/item-invoices.md). Every state is listed, so
+ * a paid one stays as the record and a cancelled one reads as withdrawn rather
+ * than vanishing. What is still owed ALSO appears in "How to pay" above, which
+ * is where the bank details are; this card is the history.
+ *
+ * Its own failure, in its own place: the rest of the page is about the
+ * membership, and an invoice list that will not load must not take that down,
+ * nor read as "you have none".
+ */
+function ItemInvoicesCard({
+  invoices,
+  error,
+  onRetry,
+  voice,
+}: {
+  invoices: ItemInvoiceView[];
+  error: string | null;
+  onRetry: () => void;
+  voice: SubjectVoice;
+}) {
+  if (error)
+    return (
+      <LoadFailure
+        what={voice.isSelf ? "Your item invoices" : `${voice.Whose} item invoices`}
+        message={error}
+        hint="This is not the same as having none."
+        onRetry={onRetry}
+      />
+    );
+  if (invoices.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Item invoices</CardTitle>
+        <CardDescription>
+          Things the club has charged {voice.isSelf ? "you" : voice.who} for besides a membership.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="divide-y rounded-lg border">
+          {invoices.map((inv) => (
+            <li key={inv.id} className="space-y-1 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono text-sm font-semibold">{inv.payment_reference}</span>
+                <Pill
+                  label={ITEM_INVOICE_STATE_LABEL[inv.state]}
+                  preserveCase
+                  className={itemInvoiceClass(inv.state)}
+                />
+              </div>
+              <ul className="text-sm text-muted-foreground">
+                {inv.lines.map((line, i) => (
+                  <li key={i} className="flex justify-between gap-4">
+                    <span>{describeItemInvoiceLine(line)}</span>
+                    <span>{formatCents(lineTotalCents(line))}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="flex justify-between gap-4 text-sm font-medium">
+                <span>
+                  {inv.state === "paid" && inv.paid_at
+                    ? `Paid ${formatDate(inv.paid_at)}`
+                    : `Sent ${formatDate(inv.created_at)}`}
+                </span>
+                <span>{formatCents(inv.total_cents)}</span>
+              </p>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 function MembershipPage() {
   const navigate = useNavigate();
   const { confirm, confirmDialog } = useConfirm();
@@ -347,6 +432,7 @@ function MembershipPage() {
   const fetchInstructions = useServerFn(getPaymentInstructions);
   const fetchHousehold = useServerFn(listMyHousehold);
   const fetchOwed = useServerFn(listHouseholdInvoices);
+  const fetchItemInvoices = useServerFn(getMyItemInvoices);
   const start = useServerFn(startMembership);
 
   // WHO this page is about. Absent means the account holder, which is what
@@ -362,6 +448,10 @@ function MembershipPage() {
   // failed read must not be able to make it.
   const [householdError, setHouseholdError] = useState<string | null>(null);
   const [owedError, setOwedError] = useState<string | null>(null);
+  // This person's item invoices. An extra like the two above, with its own
+  // failure, so a list that will not load never reads as "you have none".
+  const [itemInvoices, setItemInvoices] = useState<ItemInvoiceView[]>([]);
+  const [itemInvoicesError, setItemInvoicesError] = useState<string | null>(null);
   // Lowercased to match the server, which normalises every target through
   // `householdTargetUserId`. An uppercase `?for=` is perfectly valid there, so
   // comparing it raw here would leave the page speaking in the wrong voice and
@@ -479,7 +569,12 @@ function MembershipPage() {
           console.error("[membership] the account's outstanding invoices failed to load:", e);
           return null;
         }),
-      ]).then(([p, m, s, people, outstanding]) => {
+        // About the SUBJECT, like the memberships: the gate is the same one.
+        fetchItemInvoices({ data: subjectId ? { userId: subjectId } : {} }).catch((e: unknown) => {
+          console.error("[membership] item invoices failed to load:", e);
+          return null;
+        }),
+      ]).then(([p, m, s, people, outstanding, items]) => {
         setPlans(p);
         setMine(m);
         setHousehold(people ?? []);
@@ -488,6 +583,8 @@ function MembershipPage() {
         );
         setOwed(outstanding ?? []);
         setOwedError(outstanding ? null : "We could not load what the rest of your account owes.");
+        setItemInvoices(items ?? []);
+        setItemInvoicesError(items ? null : "We could not load them just now.");
         setAccount({ details: s.details, unreadable: !s.ok });
         // Prefill the student number from the member's waiver so they don't
         // retype it (blank there means they never gave one).
@@ -497,7 +594,15 @@ function MembershipPage() {
         return m;
       });
     },
-    [fetchPlans, fetchMine, fetchInstructions, fetchHousehold, fetchOwed, subjectId],
+    [
+      fetchPlans,
+      fetchMine,
+      fetchInstructions,
+      fetchHousehold,
+      fetchOwed,
+      fetchItemInvoices,
+      subjectId,
+    ],
   );
 
   // `reload()` on its own runs after choosing a plan, where that handler
@@ -659,7 +764,13 @@ function MembershipPage() {
   const status = lifecycleCopy(lifecycle, mine?.memberships ?? [], voice);
   // What the member still owes, as transfers rather than as rows: a bundled
   // plan + insurance is two memberships behind one reference and one payment.
-  const unpaid = unpaidInvoices(mine?.memberships ?? []);
+  //
+  // Item invoices join it here only for the fallback below, when the
+  // account-wide read failed: they are already inside `owed` otherwise.
+  const unpaid = [
+    ...unpaidInvoices(mine?.memberships ?? []),
+    ...itemInvoices.filter(isItemInvoiceUnpaid).map(itemInvoiceAsUnpaid),
+  ];
 
   // A dated plan drops off this list on its own once its `ends_on` passes —
   // there is no manager step to retire it, and no pro rata either way.
@@ -819,6 +930,13 @@ function MembershipPage() {
             />
           </div>
         )}
+
+        <ItemInvoicesCard
+          invoices={itemInvoices}
+          error={itemInvoicesError}
+          onRetry={() => void load()}
+          voice={voice}
+        />
 
         <CodeOfConductNudge subjectId={subjectId} voice={voice} />
 

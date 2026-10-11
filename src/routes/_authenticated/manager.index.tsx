@@ -70,6 +70,11 @@ function ManagerDashboard() {
               title: "Membership plans",
               blurb: "Prices, dates and availability.",
             },
+            {
+              to: "/manager/items",
+              title: "Items",
+              blurb: "Price list, and item invoices still owed.",
+            },
             { to: "/manager/users", title: "Users", blurb: "Everyone in the funnel." },
             { to: "/manager/waivers", title: "Signed waivers", blurb: "Approvals and uploads." },
             {

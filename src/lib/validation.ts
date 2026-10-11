@@ -1814,10 +1814,16 @@ export function sellablePlans<T extends PlanWindow & { is_active: boolean }>(
 
 // ---- Member: what is still owed ----
 
-/** One thing on an unpaid invoice: a plan, and what it costs. */
+/**
+ * One thing on an unpaid invoice, and what it costs: a membership plan, or a
+ * line of an item invoice (`item-invoices.ts`). The panel that lists these does
+ * not care which, so neither does the shape.
+ */
 export interface UnpaidInvoiceLine {
-  membership_id: string;
-  plan_name: string | null;
+  /** Stable key for the line: a membership id, or an item invoice's id plus its position. */
+  id: string;
+  /** What it is for. Null when a membership's plan could not be resolved. */
+  name: string | null;
   price_cents: number;
 }
 
@@ -1859,7 +1865,7 @@ export function unpaidInvoices(
   const byReference = new Map<string, UnpaidInvoice>();
   for (const m of memberships) {
     if (!isUnpaid(m)) continue;
-    const line = { membership_id: m.id, plan_name: m.plan_name, price_cents: m.price_cents };
+    const line = { id: m.id, name: m.plan_name, price_cents: m.price_cents };
     const existing = byReference.get(m.payment_reference);
     if (existing) {
       existing.lines.push(line);
@@ -2685,6 +2691,14 @@ export const matchTransactionSchema = z.object({
 });
 export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 
+/** The same manual link, to an item invoice rather than a membership. */
+export const matchTransactionToItemInvoiceSchema = z
+  .object({
+    transaction_id: z.string().uuid(),
+    item_invoice_id: z.string().uuid(),
+  })
+  .strict();
+
 // ---- Manager agent API (see src/lib/manager-agent.ts + docs/manager-agent-api.md) ----
 //
 // A small HTTP surface a manager's AI agent can drive (via MCP or a skill). The
@@ -2713,6 +2727,14 @@ export const managerAgentActions = [
   "get_kb_article",
   "save_kb_article",
   "list_kb_comments",
+  "list_items",
+  "save_item",
+  "delete_item",
+  "list_item_invoices",
+  "create_item_invoice",
+  "mark_item_invoice_paid",
+  "cancel_item_invoice",
+  "delete_item_invoice",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -3731,3 +3753,114 @@ export const managerKitSizesSchema = z.object({
   belt_size: z.enum(beltSizes).nullable(),
 });
 export type ManagerKitSizesInput = z.infer<typeof managerKitSizesSchema>;
+
+// ---- Item invoices (see docs/item-invoices.md) ----
+//
+// Charging somebody for things that are not a membership: a price list a
+// manager keeps (name + price), and invoices raised from it. The rules about an
+// invoice once it exists (what it owes, when it can be deleted, what pays it)
+// live in `src/lib/item-invoices.ts`; this file only validates what crosses
+// the wire. The bounds mirror the CHECK constraints in
+// `20261007000000_item_invoices.sql`, so the screen and the agent API refuse
+// exactly what the database would, in words rather than as a constraint name.
+
+/** The most an item can cost, in cents ($10,000). */
+export const CHARGE_ITEM_MAX_PRICE_CENTS = 1_000_000;
+/** The longest an item's name may be. */
+export const CHARGE_ITEM_MAX_NAME = 80;
+/** How many different items one invoice can carry. */
+export const ITEM_INVOICE_MAX_LINES = 20;
+/** The most of one item one line can charge for. */
+export const ITEM_INVOICE_MAX_QUANTITY = 99;
+
+/** Add an item to the price list (no `id`), or rename / reprice one (`id`). */
+export const saveChargeItemSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    name: z
+      .string()
+      .trim()
+      .min(1, "Give the item a name.")
+      .max(CHARGE_ITEM_MAX_NAME, `Keep the name under ${CHARGE_ITEM_MAX_NAME} characters.`),
+    price_cents: z
+      .number()
+      .int("Prices are whole cents.")
+      .min(1, "An item needs a price above $0.")
+      .max(CHARGE_ITEM_MAX_PRICE_CENTS, "That price is more than $10,000. Check it again."),
+  })
+  .strict();
+export type SaveChargeItemInput = z.infer<typeof saveChargeItemSchema>;
+
+/** Anything that names one item, or one item invoice, and nothing else. */
+export const recordIdSchema = z.object({ id: z.string().uuid() }).strict();
+export type RecordIdInput = z.infer<typeof recordIdSchema>;
+
+/**
+ * Raise an invoice for somebody: which items, and how many of each.
+ *
+ * Lines name an item by id, never by price. The server reads the price off the
+ * price list itself, so what a member is charged is always what the list said
+ * at the moment the invoice was raised, whatever a stale screen was showing.
+ * The same item twice is refused rather than merged: it is almost always a
+ * double click on a list that should have said "2 ×".
+ *
+ * `client_submission_id` is what makes a retry safe. The screen retries a raise
+ * that timed out, and a timed-out request may still have committed on the
+ * server, so without it a bad connection would invoice somebody twice.
+ */
+export const createItemInvoiceSchema = z
+  .object({
+    // Lowercased, as Postgres returns them: the retry check below compares the
+    // stored id with this one, and an agent sending the same uuid in capitals
+    // was told its own retry was somebody else's invoice.
+    user_id: z.string().uuid().toLowerCase(),
+    // One per form fill, resent on every retry: a raise whose reply was lost
+    // finds the invoice it already made rather than emailing a second one.
+    client_submission_id: z.string().uuid().toLowerCase().optional(),
+    lines: z
+      .array(
+        z
+          .object({
+            item_id: z.string().uuid().toLowerCase(),
+            quantity: z
+              .number()
+              .int()
+              .min(1, "Charge at least one of each item.")
+              .max(ITEM_INVOICE_MAX_QUANTITY, `At most ${ITEM_INVOICE_MAX_QUANTITY} of one item.`),
+          })
+          .strict(),
+      )
+      .min(1, "Pick at least one item to charge for.")
+      .max(ITEM_INVOICE_MAX_LINES, `One invoice can carry at most ${ITEM_INVOICE_MAX_LINES} items.`)
+      .refine((lines) => new Set(lines.map((l) => l.item_id)).size === lines.length, {
+        message: "The same item is listed twice. Set its quantity instead.",
+      }),
+  })
+  .strict();
+export type CreateItemInvoiceInput = z.infer<typeof createItemInvoiceSchema>;
+
+/**
+ * Record a payment against an item invoice. `manual` by default, for the same
+ * reason as `mark_invoice_paid`: a manager reaching for this is recording money
+ * the bank statement will not show, and guessing "bank transfer" would put a
+ * claim in the club's books the statement never backs up.
+ */
+export const markItemInvoicePaidSchema = z
+  .object({
+    id: z.string().uuid(),
+    payment_method: z.enum(["bank_transfer", "manual"]).optional().default("manual"),
+  })
+  .strict();
+export type MarkItemInvoicePaidInput = z.infer<typeof markItemInvoicePaidSchema>;
+
+/** The three states an item invoice can be in, as a filter. */
+export const itemInvoiceStates = ["unpaid", "paid", "cancelled"] as const;
+
+/** Read item invoices: everybody's, or one person's, optionally one state. */
+export const listItemInvoicesSchema = z
+  .object({
+    user_id: z.string().uuid().toLowerCase().optional(),
+    state: z.enum(itemInvoiceStates).optional(),
+  })
+  .strict();
+export type ListItemInvoicesInput = z.infer<typeof listItemInvoicesSchema>;

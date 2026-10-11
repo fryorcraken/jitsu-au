@@ -256,7 +256,7 @@ export async function sendReplyNotification(
     await stampEmailed(db, [opts.notificationId]);
     return true;
   } catch (e) {
-    console.error(`[notifications] failed to email a reply to ${opts.recipientId}:`, e);
+    console.error(`[notifications] failed to email a reply:`, e);
     return false;
   }
 }
@@ -448,7 +448,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
         // that the club holds none, and stamping would swallow the day's mail
         // for this family permanently. Rows left pending cost a repeat read
         // tomorrow and lose nothing.
-        console.error(`[notifications] no address resolved for ${userId}; leaving rows pending`);
+        console.error(`[notifications] no address resolved for a recipient; leaving rows pending`);
         continue;
       }
 
@@ -498,7 +498,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
       await stampEmailed(db, ids);
       sent += 1;
     } catch (e) {
-      console.error(`[notifications] digest failed for ${userId}:`, e);
+      console.error(`[notifications] digest failed for a recipient:`, e);
     }
   }
 

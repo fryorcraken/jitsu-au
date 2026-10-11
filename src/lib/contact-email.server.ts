@@ -130,7 +130,7 @@ export async function sendContactEmails({
     });
     sent.push(email);
   } catch (e) {
-    console.error(`[contact-email] failed to email sender ${email}:`, e);
+    console.error(`[contact-email] failed to email the sender:`, e);
   }
 
   // The message itself, to each manager.
@@ -149,7 +149,7 @@ export async function sendContactEmails({
       });
       sent.push(to);
     } catch (e) {
-      console.error(`[contact-email] failed to email manager ${to}:`, e);
+      console.error(`[contact-email] failed to email a manager:`, e);
     }
   }
 

@@ -49,6 +49,10 @@ function NotFoundComponent() {
   );
 }
 
+// The router's own props type, not a hand-written `{ error: Error }`. Since
+// @tanstack/react-router 1.170.41 it types `error` as `unknown` (anything can be
+// thrown), and nothing below needs it to be an Error: it is logged and handed
+// to `reportLovableError`, which already takes `unknown`.
 function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();

@@ -6,6 +6,7 @@ import {
   blogCommentClass,
   blogPostClass,
   coverageClass,
+  itemInvoiceClass,
   lifecycleClass,
   mediaConsentClass,
   membershipClass,
@@ -16,6 +17,7 @@ import {
   blogCommentStatuses,
   blogPostStatuses,
   coverageSources,
+  itemInvoiceStates,
   lifecycleStatuses,
   membershipStatuses,
   waiverListStatuses,
@@ -26,6 +28,14 @@ describe("status colours", () => {
     for (const status of lifecycleStatuses) {
       expect(lifecycleClass(status)).toMatch(/^bg-/);
     }
+  });
+
+  it("gives every item invoice state a colour, and flags only the unpaid one", () => {
+    for (const state of itemInvoiceStates) {
+      expect(itemInvoiceClass(state)).toMatch(/^bg-/);
+    }
+    expect(itemInvoiceClass("unpaid")).toContain("amber");
+    expect(itemInvoiceClass("cancelled")).toBe(NEUTRAL_STATUS_CLASS);
   });
 
   it("gives every membership state a colour", () => {

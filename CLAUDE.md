@@ -418,6 +418,11 @@ Core tables:
   derived and clear by being fixed, which is why they have no read state.
   Preferences govern **email only** — every row is written regardless. Product
   flows: `docs/notifications.md`.
+- `charge_items` / `item_invoices` — charging for things that are not a
+  membership (a gi, a grading fee): a price list of name + price, and invoices
+  raised from it against a person, emailed, shown in the member's "How to pay"
+  panel, and settled by the same bank statement import or a manager marking
+  them paid. Deliberately minimal. Product flows: `docs/item-invoices.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix,
