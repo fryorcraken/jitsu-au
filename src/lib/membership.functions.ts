@@ -872,6 +872,17 @@ export async function resolveInsuranceCover(
   return { insurancePlan, coverEndsAt };
 }
 
+/** Whether an existing invoice was raised at the rate this request asks for. */
+function sameRate(
+  row: { is_student?: boolean | null; uts_student_number?: string | null },
+  isStudent: boolean,
+  utsStudentNumber: string | null,
+): boolean {
+  return (
+    Boolean(row.is_student) === isStudent && (row.uts_student_number ?? null) === utsStudentNumber
+  );
+}
+
 /**
  * Raise somebody's invoice for a plan and, if asked, bundle yearly insurance
  * onto the same payment reference.
@@ -1002,15 +1013,27 @@ export async function enrolMember(
     // `+00:00` and `rescheduleMembershipStart` writes `Z`, so a string compare
     // would never match and every re-raise would write the window it already had.
     const wanted = effectiveFrom ? rescheduleMembershipStart(inserted, startsOn!) : null;
-    if (wanted && !sameInstant(wanted.starts_at, inserted.starts_at)) {
-      const { data: moved, error: mvErr } = await admin
+    const move = wanted && !sameInstant(wanted.starts_at, inserted.starts_at) ? wanted : null;
+    // Nor may it swallow a change of rate. A manager who raised a semester at
+    // the public rate and re-raises it with the student rate ticked is
+    // correcting the invoice, and the panel shows them the price they picked;
+    // returning the old row unchanged would report success over the old price.
+    // Repriced only when the rate inputs differ, so a plain repeat (a double
+    // press, a retry) leaves a price a manager corrected by hand alone. Same
+    // rule as the bundled insurance below: an unpaid row holds no payment to
+    // keep consistent with.
+    const repriced = sameRate(inserted, isStudent, utsStudentNumber)
+      ? null
+      : { is_student: isStudent, uts_student_number: utsStudentNumber, price_cents: price };
+    if (move || repriced) {
+      const { data: updated, error: upErr } = await admin
         .from("memberships")
-        .update(wanted)
+        .update({ ...move, ...repriced })
         .eq("id", inserted.id)
         .select("*")
         .single();
-      if (mvErr || !moved) throw new Error(mvErr?.message || "Could not set the start date.");
-      inserted = moved;
+      if (upErr || !updated) throw new Error(upErr?.message || "Could not update the invoice.");
+      inserted = updated;
     }
   } else {
     const insert = {

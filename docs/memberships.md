@@ -497,6 +497,36 @@ often writing down an enrolment that already happened rather than selling one:
   now, because that is when they are buying it; a manager can say when it
   actually began. See "Setting the day yearly cover starts".
 
+**The rate is picked on screen, not implied by a text box.** The pricing rule
+is the same one a member's purchase follows (a UTS student number means the
+student rate, `isUtsStudent`), but on the manager's panel it used to show up
+only as a free-text box below the plan list, so typing a number changed the
+invoice while every price on screen still read as the public one, and a box
+that started empty invoiced a UTS student at the public rate. Now:
+
+- the plan list shows both prices (`Semester 2 2026 ($445, students $245)`);
+- a plan with a student price asks **Rate**, with the price on each option,
+  preselected to the student rate when the person's profile holds a number;
+- the number sits inside the student option, prefilled from the profile and
+  required to submit it. Choosing public sends no number, so the server cannot
+  charge the student rate behind a ticked "Public rate". A number typed or
+  cleared here is for that invoice only and never changes the profile. Every
+  invoice starts from the profile again: on opening the panel, on choosing a
+  plan, and after each raise, since the panel stays open for the next one;
+- a plan with one price asks nothing, sends the number on the profile, and
+  says so on screen, so nothing hidden decides what the invoice records;
+- **re-raising a plan whose invoice is still unpaid reprices that invoice** when
+  the rate differs from the one it was raised at (`enrolMember`'s reuse path).
+  Without that, correcting a student from the public rate would resolve back to
+  the old invoice and report success over the old price. A repeat at the same
+  rate changes nothing, so a price a manager corrected by hand survives a double
+  press. The payment email is keyed on the membership, so the corrected amount
+  is not emailed again; the member sees it on `/membership`. This applies to a
+  member re-choosing a plan too, for the same reason.
+
+The agent's `create_membership` takes `uts_student_number` as before and does
+not read the profile: an agent states the rate it means.
+
 `send_email: false` records the invoice without telling anyone about it, so
 backfilling last semester does not invoice the whole club for it. The free trial
 is still once per person ever, however it is raised.
