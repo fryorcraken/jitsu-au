@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildItemInvoiceLines,
   describeItemInvoiceLine,
+  invoiceReference,
   isItemInvoiceUnpaid,
   itemInvoiceAsUnpaid,
   itemInvoiceState,
@@ -125,6 +126,23 @@ describe("itemInvoiceAsUnpaid", () => {
         { id: "inv:1", name: "2 × Club patch", price_cents: 2500 },
       ],
     });
+  });
+});
+
+describe("invoiceReference", () => {
+  // Generated columns read as nullable in the generated types. A null here is
+  // impossible in the schema, so it is refused rather than passed on.
+  it("returns the reference, and refuses an invoice without one", () => {
+    expect(invoiceReference({ id: "inv", payment_reference: "INV0007" })).toBe("INV0007");
+    expect(() => invoiceReference({ id: "inv", payment_reference: null })).toThrow(
+      /no payment reference/,
+    );
+  });
+
+  it("is never matched off a statement when it has no reference", () => {
+    expect(
+      statementLinePaysItemInvoice("INV0007", 100, { payment_reference: null, total_cents: 100 }),
+    ).toBe(false);
   });
 });
 

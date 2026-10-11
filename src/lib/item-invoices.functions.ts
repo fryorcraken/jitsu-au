@@ -34,6 +34,7 @@ import type {
 import {
   buildItemInvoiceLines,
   describeItemInvoiceLine,
+  invoiceReference,
   itemInvoiceAsUnpaid,
   itemInvoiceState,
   itemInvoiceSummary,
@@ -190,7 +191,7 @@ function projectItemInvoice(row: ItemInvoiceRow): ItemInvoiceView {
   const lines = parseItemInvoiceLines(row.lines);
   return {
     id: row.id,
-    payment_reference: row.payment_reference,
+    payment_reference: invoiceReference(row),
     user_id: row.user_id,
     lines,
     summary: itemInvoiceSummary(lines),
@@ -324,7 +325,7 @@ export async function createItemInvoiceForUser(
       ? {
           ok: true as const,
           id: data.id,
-          reference: data.payment_reference,
+          reference: invoiceReference(data),
           total_cents: data.total_cents,
           emailed: false,
           already_raised: true,
@@ -374,6 +375,7 @@ export async function createItemInvoiceForUser(
     if (raced) return raced;
   }
   if (error || !row) throw new Error(error?.message || "That invoice was not raised. Try again.");
+  const reference = invoiceReference(row);
 
   let emailed = false;
   try {
@@ -390,7 +392,7 @@ export async function createItemInvoiceForUser(
           amount: formatCents(lineTotalCents(line)),
         })),
         total: formatCents(total_cents),
-        reference: row.payment_reference,
+        reference,
         admin,
       });
       emailed = result.sent;
@@ -402,7 +404,7 @@ export async function createItemInvoiceForUser(
   return {
     ok: true,
     id: row.id,
-    reference: row.payment_reference,
+    reference,
     total_cents,
     emailed,
     already_raised: false,
@@ -453,7 +455,7 @@ export async function recordItemInvoicePayment(
           memberGreetingName: recipient.greetingName,
           memberEmail: recipient.email,
           forName: recipient.forName,
-          reference: invoice.payment_reference,
+          reference: invoiceReference(invoice),
           summary: itemInvoiceSummary(parseItemInvoiceLines(invoice.lines)),
           amount: formatCents(invoice.total_cents),
         });
@@ -629,7 +631,13 @@ export async function unpaidItemInvoicesByPerson(
   for (const row of data ?? []) {
     if (!row.user_id) continue;
     const list = byPerson.get(row.user_id) ?? [];
-    list.push(itemInvoiceAsUnpaid({ ...row, lines: parseItemInvoiceLines(row.lines) }));
+    list.push(
+      itemInvoiceAsUnpaid({
+        ...row,
+        payment_reference: invoiceReference(row),
+        lines: parseItemInvoiceLines(row.lines),
+      }),
+    );
     byPerson.set(row.user_id, list);
   }
   return byPerson;

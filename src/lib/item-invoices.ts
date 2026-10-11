@@ -112,6 +112,25 @@ export class ItemNoLongerListedError extends Error {
   }
 }
 
+/**
+ * An invoice's payment reference, which is never empty in practice.
+ *
+ * The column is generated from the invoice number (`INV0007`), and that number
+ * is NOT NULL, so the reference cannot be null. Postgres still reports every
+ * generated column as nullable, so the generated types say `string | null`.
+ * This is the one place that gap is closed, and it is closed by refusing
+ * rather than by a cast: an invoice with no reference cannot be paid, matched
+ * or emailed, so going on as if it had one would be the worse failure.
+ */
+export function invoiceReference(invoice: {
+  id: string;
+  payment_reference: string | null;
+}): string {
+  if (!invoice.payment_reference)
+    throw new Error(`Invoice ${invoice.id} has no payment reference, so it cannot be used.`);
+  return invoice.payment_reference;
+}
+
 /** The facts about an invoice's state, and nothing else. */
 type StateFields = { paid_at: string | null; cancelled_at: string | null };
 
@@ -180,8 +199,11 @@ export function itemInvoiceAsUnpaid(invoice: {
 export function statementLinePaysItemInvoice(
   haystack: string,
   amountCents: number,
-  invoice: { payment_reference: string; total_cents: number },
+  invoice: { payment_reference: string | null; total_cents: number },
 ): boolean {
+  // No reference, nothing on a statement can name it. Skipped, not thrown: one
+  // bad row must not stop the rest of an import.
+  if (!invoice.payment_reference) return false;
   return (
     amountCents === invoice.total_cents && haystackContainsRef(haystack, invoice.payment_reference)
   );
