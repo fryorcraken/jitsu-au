@@ -236,6 +236,51 @@ describe("AddMembershipCard rate", () => {
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
   });
 
+  // The panel stays open after a raise so the next one is quick, which is
+  // exactly when a rate picked for the last invoice would ride on this one.
+  it("starts the next invoice from the record after a raise", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    expect(await sent(user)).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText(/^plan$/i)).toHaveValue(""));
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "2026-s2");
+    expect(screen.getByRole("radio", { name: /student rate/i })).toBeChecked();
+  });
+
+  it("starts from the record again when the plan changes", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "insurance_yearly");
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "2026-s2");
+    expect(screen.getByRole("radio", { name: /student rate/i })).toBeChecked();
+  });
+
+  // No radio on screen, so nothing hidden may decide what is sent: the number
+  // on their record goes on the invoice, and the panel says so.
+  it("sends and shows the number on record for a plan with one price", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "insurance_yearly");
+    expect(screen.getByText(/one price for everyone/i)).toHaveTextContent("12345678");
+    expect(await sent(user)).toBe("12345678");
+  });
+
+  // The server caps the number at 32 characters; a longer paste would fail
+  // there with a validation dump rather than at the field.
+  it("caps the number at the length the server accepts", async () => {
+    await openOn("12345678");
+    expect(screen.getByLabelText(/uts student number/i)).toHaveAttribute("maxLength", "32");
+  });
+
+  it("reads a free student price as free, not as a price called Free", async () => {
+    listAllMembershipPlans.mockResolvedValue([{ ...SEMESTER, student_price_cents: 0 }]);
+    await openOn("12345678");
+    expect(
+      screen.getByRole("option", { name: "Semester 2 2026 ($445, free for students)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /student rate, free/i })).toBeInTheDocument();
+  });
+
   // An edit is for one invoice. Reopening starts from the record again.
   it("goes back to the record each time the panel opens", async () => {
     const user = await openOn("12345678");

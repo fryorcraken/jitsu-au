@@ -58,8 +58,15 @@ type Rate = "student" | "public";
 /** Both prices where a plan has two, so the list reads the same before any choice. */
 function planLabel(plan: Plan): string {
   const publicPrice = formatCents(plan.public_price_cents);
-  if (plan.student_price_cents == null) return `${plan.name} (${publicPrice})`;
-  return `${plan.name} (${publicPrice}, students ${formatCents(plan.student_price_cents)})`;
+  const student = plan.student_price_cents;
+  if (student == null) return `${plan.name} (${publicPrice})`;
+  if (student === 0) return `${plan.name} (${publicPrice}, free for students)`;
+  return `${plan.name} (${publicPrice}, students ${formatCents(student)})`;
+}
+
+/** A price as it reads after "Student rate, ": "$245", or "free" rather than "Free". */
+function rateLabel(cents: number): string {
+  return cents === 0 ? "free" : formatCents(cents);
 }
 
 export function AddMembershipCard({
@@ -129,12 +136,19 @@ export function AddMembershipCard({
   // plan has no window to place.
   const startIsChoosable = chosen ? planStartIsChoosable(chosen) : false;
   const onFile = studentNumberOnFile?.trim() || "";
-  // Only a plan with a student price asks which rate. On any other plan the
-  // number changes nothing about the price, and is sent only so the invoice
-  // records the same thing a member's own purchase would.
-  const hasStudentRate = chosen?.student_price_cents != null;
-  const sentNumber = rate === "student" ? studentNumber.trim() || null : null;
-  const missingNumber = hasStudentRate && rate === "student" && !isUtsStudent(studentNumber);
+  // Null when the chosen plan has one price, and that is the whole rule for
+  // whether the panel asks which rate. On a one-price plan the number changes
+  // nothing about the price: the one on their record is sent, and said so on
+  // screen, so the invoice records what a member's own purchase would. It never
+  // falls to a rate radio left over from another plan, which is not on screen.
+  const studentPrice = chosen?.student_price_cents ?? null;
+  const sentNumber =
+    studentPrice == null
+      ? onFile || null
+      : rate === "student"
+        ? studentNumber.trim() || null
+        : null;
+  const missingNumber = studentPrice != null && rate === "student" && !isUtsStudent(studentNumber);
 
   async function submit() {
     if (!planCode || missingNumber) return;
@@ -165,16 +179,22 @@ export function AddMembershipCard({
       setPlanCode("");
       setSessionDate("");
       forgetStartDate();
+      startRateFromRecord();
       await onAdded();
     }
   }
 
-  function openPanel() {
-    // Taken from the record each time the panel opens rather than once, so a
-    // number edited for one invoice does not quietly ride on the next, and a
-    // number added to their profile since is picked up.
+  // Every invoice starts from the record: on opening, on choosing a plan, and
+  // after each raise, since the panel stays open for the next one. So a rate or
+  // number changed for one invoice never rides on the next, and a number added
+  // to their profile since is picked up.
+  function startRateFromRecord() {
     setStudentNumber(onFile);
     setRate(onFile ? "student" : "public");
+  }
+
+  function openPanel() {
+    startRateFromRecord();
     setOpen(true);
   }
 
@@ -241,6 +261,7 @@ export function AddMembershipCard({
               onChange={(e) => {
                 setPlanCode(e.target.value);
                 forgetStartDate();
+                startRateFromRecord();
               }}
             >
               <option value="">Choose a plan...</option>
@@ -265,7 +286,14 @@ export function AddMembershipCard({
             </select>
           </div>
 
-          {chosen?.student_price_cents != null && (
+          {chosen && studentPrice == null && onFile && (
+            <p className="text-sm text-muted-foreground sm:col-span-2">
+              One price for everyone. Their UTS student number from their profile, {onFile}, is
+              recorded on the invoice.
+            </p>
+          )}
+
+          {chosen && studentPrice != null && (
             <fieldset className="space-y-3 sm:col-span-2">
               <legend className="mb-2 text-sm font-medium">Rate</legend>
               <label className="flex items-start gap-2 text-sm">
@@ -277,7 +305,7 @@ export function AddMembershipCard({
                   onChange={() => setRate("student")}
                 />
                 <span>
-                  Student rate, {formatCents(chosen.student_price_cents)}
+                  Student rate, {rateLabel(studentPrice)}
                   <span className="block text-xs text-muted-foreground">
                     For a UTS student. Needs their student number, which goes on the invoice.
                   </span>
@@ -290,6 +318,7 @@ export function AddMembershipCard({
                     id="add-student-number"
                     value={studentNumber}
                     onChange={(e) => setStudentNumber(e.target.value)}
+                    maxLength={32}
                     aria-invalid={missingNumber || undefined}
                     aria-describedby="add-student-number-hint"
                   />
@@ -312,7 +341,7 @@ export function AddMembershipCard({
                   checked={rate === "public"}
                   onChange={() => setRate("public")}
                 />
-                <span>Public rate, {formatCents(chosen.public_price_cents)}</span>
+                <span>Public rate, {rateLabel(chosen.public_price_cents)}</span>
               </label>
             </fieldset>
           )}
