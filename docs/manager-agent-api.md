@@ -157,6 +157,17 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   not train reads as a `member` while their child's plan is live, which is what
   the members-only gate has said about them since #103. It is still only a label:
   no policy anywhere reads the `member` role.
+- **Item invoices** (`"18"`): `list_items`, `save_item`, `delete_item` keep the
+  price list; `list_item_invoices`, `create_item_invoice`,
+  `mark_item_invoice_paid`, `cancel_item_invoice`, `delete_item_invoice` raise
+  and settle invoices from it. Each dispatches to the same shared function in
+  `src/lib/item-invoices.functions.ts` that the manager screens call. An item
+  invoice is **not** a membership row, so the "invoice" actions above never
+  see one. `create_item_invoice` takes a `client_submission_id` so a retry
+  cannot raise and email twice, and refuses a price on a line (the price list
+  is the only source of price). Refusals: `404 not_found`,
+  `409 item_invoice_settled` (cancel or delete of a paid invoice),
+  `422 item_not_listed`. Product rules: `docs/item-invoices.md`.
 - `delete_invoice` — delete an invoice outright, for tidying up one that should
   never have existed. Dispatches to `deleteMembershipRow`, which the manager
   screens' Delete button also calls, so both refuse for the same reasons in the
@@ -329,7 +340,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"17"`.
+test so the bump is a deliberate edit, and the current value is `"18"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

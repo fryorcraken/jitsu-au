@@ -706,9 +706,42 @@ fail.
 
 `id` PK, `import_batch`, `posted_at`, `amount_cents`, `description`, `reference`,
 `raw` (jsonb), `dedupe_hash` (unique), `matched_membership_id → memberships(id)`,
+`matched_item_invoice_id → item_invoices(id) ON DELETE SET NULL`,
 `matched_at`, `matched_by → auth.users(id)`, `status`
-(`unmatched|matched|ignored`), `created_at`. **RLS:** managers read; service role
-writes.
+(`unmatched|matched|ignored`), `created_at`. A matched line points at one of the
+two, never both: the membership pass takes its lines first and the item-invoice
+pass only sees what is left. **RLS:** managers read; service role writes.
+
+## Item invoices
+
+See `docs/item-invoices.md` for the product flows. Both tables are **closed**:
+`REVOKE ALL FROM anon, authenticated`, RLS on, and only a manager `ALL` policy as
+defence in depth. Every read and write is a service-role server function behind
+the manager gate, or the household gate for a member reading their own
+(`src/lib/item-invoices.functions.ts`). Added by
+`20261007000000_item_invoices.sql`.
+
+### `charge_items` — the price list
+
+`id` PK, `name` (1-80 chars after trimming), `price_cents` (1 to 1,000,000),
+`created_at`, `updated_at`. Nothing references it: an invoice copies what it
+needs, so removing an item is a plain `DELETE`.
+
+### `item_invoices` — an invoice for items, against a person
+
+`id` PK, `invoice_number` (`GENERATED ALWAYS AS IDENTITY`), `payment_reference`
+(`GENERATED ... STORED`: `INV` plus the number padded to at least four digits, so `INV0007` and later `INV10000`, never truncated; unique),
+`user_id → auth.users(id) ON DELETE SET NULL` (same as `memberships.user_id`),
+`lines` (jsonb array of `{ name, unit_price_cents, quantity }`, 1 to 20 entries:
+a frozen copy, never a reference to `charge_items`), `total_cents` (> 0, the lines
+added up, stored so the bank match reads one number), `paid_at`,
+`payment_method` (`bank_transfer|manual`, null until paid), `cancelled_at`,
+`created_by → auth.users(id)`, `client_submission_id` (nullable uuid, partial
+unique index; a retried raise finds the invoice it already made, as in
+"`client_submission_id`" below), `created_at`. CHECK: never both paid and
+cancelled. Unpaid means `paid_at IS NULL AND cancelled_at IS NULL`, and a partial
+index covers exactly that. `paid_at` is written only by
+`recordItemInvoicePayment`, guarded on the row still being unpaid.
 
 ---
 

@@ -47,6 +47,7 @@ import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
 import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
 import { Route as AuthenticatedManagerContactMessagesRouteImport } from './routes/_authenticated/manager.contact-messages'
+import { Route as AuthenticatedManagerItemsRouteImport } from './routes/_authenticated/manager.items'
 import { Route as AuthenticatedManagerKbRouteImport } from './routes/_authenticated/manager.kb'
 import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './routes/_authenticated/manager.membership-plans'
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
@@ -264,6 +265,12 @@ const AuthenticatedManagerContactMessagesRoute =
     path: '/manager/contact-messages',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerItemsRoute =
+  AuthenticatedManagerItemsRouteImport.update({
+    id: '/manager/items',
+    path: '/manager/items',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerKbRoute = AuthenticatedManagerKbRouteImport.update({
   id: '/manager/kb',
   path: '/manager/kb',
@@ -403,6 +410,7 @@ export interface FileRoutesByFullPath {
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
+  '/manager/items': typeof AuthenticatedManagerItemsRoute
   '/manager/kb': typeof AuthenticatedManagerKbRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
@@ -459,6 +467,7 @@ export interface FileRoutesByTo {
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
+  '/manager/items': typeof AuthenticatedManagerItemsRoute
   '/manager/kb': typeof AuthenticatedManagerKbRoute
   '/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
@@ -518,6 +527,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
   '/_authenticated/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
+  '/_authenticated/manager/items': typeof AuthenticatedManagerItemsRoute
   '/_authenticated/manager/kb': typeof AuthenticatedManagerKbRoute
   '/_authenticated/manager/membership-plans': typeof AuthenticatedManagerMembershipPlansRoute
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
@@ -577,6 +587,7 @@ export interface FileRouteTypes {
     | '/manager/calendar'
     | '/manager/check-in'
     | '/manager/contact-messages'
+    | '/manager/items'
     | '/manager/kb'
     | '/manager/membership-plans'
     | '/manager/memberships'
@@ -633,6 +644,7 @@ export interface FileRouteTypes {
     | '/manager/calendar'
     | '/manager/check-in'
     | '/manager/contact-messages'
+    | '/manager/items'
     | '/manager/kb'
     | '/manager/membership-plans'
     | '/manager/memberships'
@@ -691,6 +703,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/calendar'
     | '/_authenticated/manager/check-in'
     | '/_authenticated/manager/contact-messages'
+    | '/_authenticated/manager/items'
     | '/_authenticated/manager/kb'
     | '/_authenticated/manager/membership-plans'
     | '/_authenticated/manager/memberships'
@@ -1014,6 +1027,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerContactMessagesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/items': {
+      id: '/_authenticated/manager/items'
+      path: '/manager/items'
+      fullPath: '/manager/items'
+      preLoaderRoute: typeof AuthenticatedManagerItemsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/kb': {
       id: '/_authenticated/manager/kb'
       path: '/manager/kb'
@@ -1154,6 +1174,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
   AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
   AuthenticatedManagerContactMessagesRoute: typeof AuthenticatedManagerContactMessagesRoute
+  AuthenticatedManagerItemsRoute: typeof AuthenticatedManagerItemsRoute
   AuthenticatedManagerKbRoute: typeof AuthenticatedManagerKbRoute
   AuthenticatedManagerMembershipPlansRoute: typeof AuthenticatedManagerMembershipPlansRoute
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
@@ -1181,6 +1202,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
   AuthenticatedManagerContactMessagesRoute:
     AuthenticatedManagerContactMessagesRoute,
+  AuthenticatedManagerItemsRoute: AuthenticatedManagerItemsRoute,
   AuthenticatedManagerKbRoute: AuthenticatedManagerKbRoute,
   AuthenticatedManagerMembershipPlansRoute:
     AuthenticatedManagerMembershipPlansRoute,

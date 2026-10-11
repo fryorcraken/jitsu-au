@@ -35,6 +35,11 @@ import {
   savePlanSchema,
   saveKbArticleSchema,
   saveKbSectionSchema,
+  createItemInvoiceSchema,
+  listItemInvoicesSchema,
+  markItemInvoicePaidSchema,
+  recordIdSchema,
+  saveChargeItemSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -101,6 +106,21 @@ import {
   syncMemberRole,
 } from "@/lib/membership.functions";
 import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
+import {
+  cancelItemInvoiceRow,
+  createItemInvoiceForUser,
+  deleteChargeItemRow,
+  deleteItemInvoiceRow,
+  ItemInvoiceConflictError,
+  ItemInvoiceSettledError,
+  ItemRecordNotFoundError,
+  listChargeItemRows,
+  listItemInvoiceRows,
+  readItemInvoice,
+  recordItemInvoicePayment,
+  saveChargeItemRow,
+} from "@/lib/item-invoices.functions";
+import { ItemNoLongerListedError } from "@/lib/item-invoices";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
@@ -868,6 +888,135 @@ async function handleSaveMembershipPlan(params: unknown) {
   }
 }
 
+// ---- item invoices (docs/item-invoices.md) ----
+//
+// Every one of these is the same shared function the manager screens call, so
+// an agent and a manager get the same writes, the same emails and the same
+// refusals. This block only turns the refusals a caller can act on into the
+// endpoint's envelope rather than a 500.
+function itemAgentError(e: unknown): unknown {
+  if (e instanceof ItemRecordNotFoundError) return new AgentError(404, "not_found", e.message);
+  if (e instanceof ItemInvoiceSettledError)
+    return new AgentError(409, "item_invoice_settled", e.message);
+  if (e instanceof ItemNoLongerListedError)
+    return new AgentError(422, "item_not_listed", e.message);
+  if (e instanceof ItemInvoiceConflictError)
+    return new AgentError(409, "submission_conflict", e.message);
+  return e;
+}
+
+async function handleListItems() {
+  const items = await listChargeItemRows(await adminClient());
+  return {
+    count: items.length,
+    items: items.map((i) => ({ id: i.id, name: i.name, price_cents: i.price_cents })),
+  };
+}
+
+async function handleSaveItem(params: unknown) {
+  const input = saveChargeItemSchema.parse(params);
+  try {
+    const item = await saveChargeItemRow(await adminClient(), input);
+    return { id: item.id, name: item.name, price_cents: item.price_cents, created: !input.id };
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+}
+
+async function handleDeleteItem(params: unknown) {
+  const input = recordIdSchema.parse(params);
+  try {
+    await deleteChargeItemRow(await adminClient(), input.id);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  return { deleted: true as const, id: input.id };
+}
+
+async function handleListItemInvoices(params: unknown) {
+  const input = listItemInvoicesSchema.parse(params);
+  const invoices = await listItemInvoiceRows(await adminClient(), input);
+  return { count: invoices.length, invoices };
+}
+
+async function handleCreateItemInvoice(params: unknown, actingAs: string) {
+  const input = createItemInvoiceSchema.parse(params);
+  try {
+    return await createItemInvoiceForUser(await adminClient(), input, actingAs);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+}
+
+async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
+  const input = markItemInvoicePaidSchema.parse(params);
+  const db = await adminClient();
+  let recorded: boolean;
+  try {
+    const invoice = await readItemInvoice(db, input.id);
+    ({ recorded } = await recordItemInvoicePayment(db, {
+      invoice,
+      method: input.payment_method,
+    }));
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  // Same reason as mark_invoice_paid: money moving is what the club most needs
+  // to reconstruct, and the server log is the whole history of who did it.
+  console.info(
+    "[agent.mark_item_invoice_paid] audit",
+    JSON.stringify({
+      invoiceId: input.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      method: input.payment_method,
+      recorded,
+    }),
+  );
+  return { paid: true as const, id: input.id, recorded };
+}
+
+async function handleCancelItemInvoice(params: unknown, actingAs: string) {
+  const input = recordIdSchema.parse(params);
+  try {
+    await cancelItemInvoiceRow(await adminClient(), input.id);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  console.info(
+    "[agent.cancel_item_invoice] audit",
+    JSON.stringify({ invoiceId: input.id, actor: actingAs, at: new Date().toISOString() }),
+  );
+  return { cancelled: true as const, id: input.id };
+}
+
+async function handleDeleteItemInvoice(params: unknown, actingAs: string) {
+  const input = recordIdSchema.parse(params);
+  const db = await adminClient();
+  // Read before deleting, for the audit line: once the row is gone nothing
+  // says what it was. Not fatal, the same trade delete_invoice makes.
+  const { data: before } = await db
+    .from("item_invoices")
+    .select("id, user_id, payment_reference, total_cents, lines, paid_at, cancelled_at")
+    .eq("id", input.id)
+    .maybeSingle();
+  try {
+    await deleteItemInvoiceRow(db, input.id);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  console.info(
+    "[agent.delete_item_invoice] audit",
+    JSON.stringify({
+      invoiceId: input.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      deleted: before ?? null,
+    }),
+  );
+  return { deleted: true as const, id: input.id };
+}
+
 // ---- action: list_waiver_templates ----
 async function handleListWaiverTemplates() {
   const db = await adminClient();
@@ -1248,6 +1397,22 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleSaveKbArticle(params, actingAs);
     case "list_kb_comments":
       return handleListKbComments(params);
+    case "list_items":
+      return handleListItems();
+    case "save_item":
+      return handleSaveItem(params);
+    case "delete_item":
+      return handleDeleteItem(params);
+    case "list_item_invoices":
+      return handleListItemInvoices(params);
+    case "create_item_invoice":
+      return handleCreateItemInvoice(params, actingAs);
+    case "mark_item_invoice_paid":
+      return handleMarkItemInvoicePaid(params, actingAs);
+    case "cancel_item_invoice":
+      return handleCancelItemInvoice(params, actingAs);
+    case "delete_item_invoice":
+      return handleDeleteItemInvoice(params, actingAs);
   }
 }
 

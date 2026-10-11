@@ -979,7 +979,7 @@ describe("unpaidInvoices", () => {
       {
         reference: "UTSJ-LOVE-A1B2",
         total_cents: 24500,
-        lines: [{ membership_id: "m1", plan_name: "Semester 2 2026", price_cents: 24500 }],
+        lines: [{ id: "m1", name: "Semester 2 2026", price_cents: 24500 }],
       },
     ]);
   });
@@ -994,10 +994,7 @@ describe("unpaidInvoices", () => {
     ]);
     expect(invoices).toHaveLength(1);
     expect(invoices[0].total_cents).toBe(30500);
-    expect(invoices[0].lines.map((l) => l.plan_name)).toEqual([
-      "Semester 2 2026",
-      "Yearly insurance",
-    ]);
+    expect(invoices[0].lines.map((l) => l.name)).toEqual(["Semester 2 2026", "Yearly insurance"]);
   });
 
   it("keeps separate references apart, in the order given", () => {
@@ -1020,13 +1017,13 @@ describe("unpaidInvoices", () => {
       {
         reference: "UTSJ-LOVE-A1B2",
         total_cents: 6000,
-        lines: [{ membership_id: "m2", plan_name: "Yearly insurance", price_cents: 6000 }],
+        lines: [{ id: "m2", name: "Yearly insurance", price_cents: 6000 }],
       },
     ]);
   });
 
   it("still bills a line whose plan could not be resolved", () => {
-    expect(unpaidInvoices([row({ plan_name: null })])[0].lines[0].plan_name).toBeNull();
+    expect(unpaidInvoices([row({ plan_name: null })])[0].lines[0].name).toBeNull();
   });
 });
 

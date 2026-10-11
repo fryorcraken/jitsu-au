@@ -49,7 +49,26 @@ const getMyMemberships = vi.fn();
 const getPaymentInstructions = vi.fn();
 const listMembershipPlans = vi.fn();
 const startMembership = vi.fn();
+const getMyItemInvoices = vi.fn();
 const toastSuccess = vi.fn();
+
+/** An unpaid item invoice for the account holder (docs/item-invoices.md). */
+const ITEM_INVOICE = {
+  id: "inv-7",
+  payment_reference: "INV0007",
+  user_id: "self",
+  lines: [
+    { name: "Club gi", unit_price_cents: 8500, quantity: 1 },
+    { name: "Club patch", unit_price_cents: 1250, quantity: 2 },
+  ],
+  summary: "Club gi, 2 × Club patch",
+  total_cents: 11000,
+  state: "unpaid",
+  paid_at: null,
+  payment_method: null,
+  cancelled_at: null,
+  created_at: "2026-10-01T00:00:00Z",
+};
 
 const FREE_PLAN = {
   code: "open_mat",
@@ -107,6 +126,10 @@ vi.mock("@/lib/household.functions", () => ({
   listHouseholdInvoices: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("@/lib/item-invoices.functions", () => ({
+  getMyItemInvoices: (...args: unknown[]) => getMyItemInvoices(...args),
+}));
+
 vi.mock("@/lib/code-of-conduct.functions", () => ({
   getCodeOfConductSigner: vi.fn().mockResolvedValue({ status: null }),
 }));
@@ -149,6 +172,7 @@ beforeEach(() => {
   getPaymentInstructions.mockReset().mockResolvedValue({ ok: true, details: ACCOUNT });
   listMembershipPlans.mockReset().mockResolvedValue([]);
   startMembership.mockReset().mockResolvedValue({ ok: true, activated: true, reference: null });
+  getMyItemInvoices.mockReset().mockResolvedValue([]);
   toastSuccess.mockReset();
 });
 
@@ -519,5 +543,64 @@ describe("/membership, when an extra will not load", () => {
 
     await waitFor(() => expect(payCard()).toBeInTheDocument());
     expect(within(payCard()!).getByText(PLAN_REF)).toBeVisible();
+  });
+});
+
+describe("/membership: item invoices", () => {
+  it("lists each item invoice with its lines, total and state", async () => {
+    getMyItemInvoices.mockResolvedValue([
+      ITEM_INVOICE,
+      {
+        ...ITEM_INVOICE,
+        id: "inv-3",
+        payment_reference: "INV0003",
+        lines: [{ name: "Grading fee", unit_price_cents: 4000, quantity: 1 }],
+        summary: "Grading fee",
+        total_cents: 4000,
+        state: "paid",
+        paid_at: "2026-09-01T00:00:00Z",
+      },
+    ]);
+    await renderLoaded();
+
+    const card = (await screen.findByText("Item invoices")).closest(
+      "div.rounded-xl",
+    ) as HTMLElement;
+    expect(within(card).getByText("INV0007")).toBeVisible();
+    expect(within(card).getByText("2 × Club patch")).toBeVisible();
+    expect(within(card).getByText("$110")).toBeVisible();
+    expect(within(card).getByText("Unpaid")).toBeVisible();
+    // Paid ones stay, as the record.
+    expect(within(card).getByText("INV0003")).toBeVisible();
+    expect(within(card).getByText("Paid")).toBeVisible();
+  });
+
+  it("asks for the item invoice's money in How to pay when the account-wide read fails", async () => {
+    // Normally the account-wide read carries it. When that read fails, the
+    // person's own unpaid item invoice must still be in front of them with its
+    // reference, or the panel under-bills them without saying so.
+    const household = await import("@/lib/household.functions");
+    vi.mocked(household.listHouseholdInvoices).mockRejectedValueOnce(new Error("network"));
+    getMyMemberships.mockResolvedValue(mine([]));
+    getMyItemInvoices.mockResolvedValue([ITEM_INVOICE]);
+    await renderLoaded();
+
+    await waitFor(() => expect(payCard()).toBeInTheDocument());
+    expect(within(payCard()!).getByText("INV0007")).toBeVisible();
+    expect(within(payCard()!).getByText("$110")).toBeVisible();
+  });
+
+  // A list that would not load must never read as "you have none".
+  it("says so when the item invoices cannot be loaded, and offers the retry", async () => {
+    getMyItemInvoices.mockRejectedValue(new Error("network"));
+    await renderLoaded();
+
+    const alert = await screen.findByText(/your item invoices could not be loaded/i);
+    expect(alert.closest("[role=alert]")).toHaveTextContent(/not the same as having none/i);
+  });
+
+  it("asks about the person on screen, not whoever is signed in", async () => {
+    await renderLoaded();
+    expect(getMyItemInvoices).toHaveBeenCalledWith({ data: {} });
   });
 });
