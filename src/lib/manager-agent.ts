@@ -165,6 +165,35 @@ function omit<T extends object, K extends string>(value: T, keys: readonly K[]):
   return copy as Omit<T, K>;
 }
 
+/**
+ * One stored code-of-conduct version as `list_code_of_conduct_versions` reports
+ * it: no body (one call away on `get_code_of_conduct`), the same
+ * Live/Previous/Draft word the editor screen shows, and whether publishing it
+ * asked everybody to agree again. Structural, like `AgentWaiverTemplate`, so
+ * this module stays server-import-free.
+ */
+export function projectAgentCodeOfConductVersion(
+  version: {
+    version: number;
+    title: string;
+    body_md: string;
+    asks_reagreement: boolean;
+    is_current: boolean;
+    created_at: string;
+  },
+  liveVersion: number | null,
+) {
+  return {
+    version: version.version,
+    title: version.title,
+    is_current: version.is_current,
+    status: versionLabel(version, liveVersion),
+    asks_reagreement: version.asks_reagreement,
+    body_chars: version.body_md.length,
+    created_at: version.created_at,
+  };
+}
+
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
 export type AgentActionSpec = {
   name: string;
@@ -188,7 +217,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "20",
+  version: "21",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -201,6 +230,18 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "21",
+      // Four new actions and one new field. Nothing that worked before changes,
+      // though what "outdated" means did move, which a caller acting on it
+      // should read.
+      breaking: false,
+      notes: [
+        "The code of conduct is now a document managers edit, in numbered versions with one live, like the waiver. New actions: list_code_of_conduct_versions, get_code_of_conduct, save_code_of_conduct and publish_code_of_conduct, with the same contract as the four waiver template actions: keyed on the version number, saving publishes, an omitted title/body is carried over from base_version (default the live one) and based_on names it, refusals are 404 not_found, 422 save_code_of_conduct_failed / publish_code_of_conduct_failed, and 503 code_of_conduct_not_published with Retry-After.",
+        "save_code_of_conduct takes asks_reagreement (default false): whether this version asks everybody who agreed to an older one to agree again. Leave it off for a correction. The reply's reprompted says how many people it put out of date. It also takes client_submission_id: resend the same one on a retry and you get already_saved true and no second version.",
+        "code_of_conduct on list_users rows and in get_user carries required_version: the newest version, at or below the live one, that asked everybody to agree again. state is now outdated only when accepted_version is below required_version, not below current_version, so a typo-fix version no longer puts anybody out of date. current_version is null if nothing is live.",
+      ],
+    },
     {
       version: "20",
       // A new read-only action and three new list_users fields. Nothing that
@@ -789,6 +830,71 @@ export const AGENT_MANIFEST: {
           required: true,
           description: "The version number to make live, as reported by list_waiver_templates.",
         },
+      ],
+    },
+    {
+      name: "list_code_of_conduct_versions",
+      method: "POST",
+      summary:
+        "Every stored version of the club's code of conduct, newest first, without the text: version, title, is_current, status (Live | Previous | Draft, the editor's own word), asks_reagreement (whether publishing it asked everybody to agree again) and body_chars. Also live_version (null means nobody can read or agree to it right now) and required_version (anybody whose highest agreement is below it is out of date).",
+      params: [],
+    },
+    {
+      name: "get_code_of_conduct",
+      method: "POST",
+      summary:
+        "One version's full text: title, body_md (a small markdown subset: # Heading, ## Section, - bullet, **bold**, bare https:// links, blank line between paragraphs), asks_reagreement, is_current. The live one when no version is named, which is the is_current row, not the newest: they differ after a rollback.",
+      params: [
+        {
+          name: "version",
+          required: false,
+          description: "The version number. Defaults to the live one.",
+        },
+      ],
+    },
+    {
+      name: "save_code_of_conduct",
+      method: "POST",
+      summary:
+        "Write a new version of the code of conduct and make it live on /code-of-conduct straight away (saving publishes; there is no draft). An omitted title/body_md is carried over from base_version, default the live one; title and body_md travel together. asks_reagreement (default false) decides whether everybody who agreed to an older version is now out of date: leave it off for a correction, turn it on when the rules change. The reply carries reprompted, how many people it put out of date. A call with no new text and asks_reagreement false is refused: there is nothing to save. Nobody is emailed either way, and being out of date never blocks anything.",
+      params: [
+        {
+          name: "title",
+          required: false,
+          description: "The new title. Send with body_md, or neither.",
+        },
+        {
+          name: "body_md",
+          required: false,
+          description:
+            "The new text, in the markdown subset get_code_of_conduct describes. Send with title, or neither.",
+        },
+        {
+          name: "asks_reagreement",
+          required: false,
+          description:
+            "true to ask everybody who agreed to an earlier version to agree again. Default false.",
+        },
+        {
+          name: "base_version",
+          required: false,
+          description: "Which version an omitted field is carried over from. Default the live one.",
+        },
+        {
+          name: "client_submission_id",
+          required: false,
+          description:
+            "A UUID you choose. Resend the same one on a retry: a save that already landed comes back with already_saved true instead of writing a second version.",
+        },
+      ],
+    },
+    {
+      name: "publish_code_of_conduct",
+      method: "POST",
+      summary:
+        "Make an existing version the live one, e.g. to roll back. published false means it was already live and nothing changed. The reply's required_version says who is out of date afterwards: rolling back below a version that asked everybody to agree again undoes that ask.",
+      params: [
+        { name: "version", required: true, description: "The version number to make live." },
       ],
     },
     {

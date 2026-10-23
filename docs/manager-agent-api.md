@@ -298,6 +298,27 @@ waiver_template_not_published` with a `Retry-After`, and it carries
   the insert rather than only inside `promoteWaiverTemplate`, so a refused save
   no longer leaves an unwanted draft version behind in the editor's list.
 
+- `list_code_of_conduct_versions` / `get_code_of_conduct` /
+  `save_code_of_conduct` / `publish_code_of_conduct` — the club's code of
+  conduct, the agent's equivalent of `/manager/code-of-conduct`. Both go through
+  `listCodeOfConductVersionRows`, `loadCodeOfConductVersion`,
+  `saveCodeOfConductVersion` and `promoteCodeOfConductVersion` in
+  `src/lib/code-of-conduct.functions.ts`, and promotion through the same
+  `promoteDocumentVersion` the waiver uses, so the contract is the waiver
+  template's: version-keyed, saving publishes, omitted text carried over from
+  `base_version` with `based_on` naming it, and the same classified refusals
+  (`503 code_of_conduct_not_published` with `Retry-After` and
+  `error.details.version`). Two things are the code of conduct's own:
+  - **`asks_reagreement`** (default false) is stored on the version and decides
+    who is out of date (`docs/code-of-conduct.md`, rule 3). The save's reply
+    carries `reprompted`, the number of people it put out of date, counted
+    before the write so a failed count refuses the call rather than reporting a
+    number nobody checked. A call with no new text is refused unless it asks,
+    which is how a rewrite published without asking gets its ask afterwards.
+  - **`client_submission_id`** makes a save safe to retry, as on
+    `create_item_invoice`: the same id comes back as the version it already
+    wrote, with `already_saved: true` and `reprompted: 0`.
+
 ### `file_waiver`: the parts that have bitten us
 
 - **The two surfaces present that one check differently on purpose, and
@@ -403,7 +424,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"20"`.
+test so the bump is a deliberate edit, and the current value is `"21"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

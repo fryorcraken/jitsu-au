@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_MANIFEST,
+  projectAgentCodeOfConductVersion,
   AgentError,
   bearerToken,
   buildInvoicePatch,
@@ -478,7 +479,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("20");
+    expect(AGENT_MANIFEST.version).toBe("21");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -536,6 +537,30 @@ describe("AGENT_MANIFEST", () => {
     expect(notes).toMatch(/signer_ip/);
     const getUser = AGENT_MANIFEST.actions.find((a) => a.name === "get_user")!;
     expect(getUser.params.map((p) => [p.name, p.required])).toEqual([["user_id", true]]);
+  });
+
+  it("announces the code of conduct actions, and the change in what outdated means", () => {
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "21")!.notes.join(" ");
+    for (const action of [
+      "list_code_of_conduct_versions",
+      "get_code_of_conduct",
+      "save_code_of_conduct",
+      "publish_code_of_conduct",
+    ]) {
+      expect(notes).toContain(action);
+    }
+    expect(notes).toMatch(/asks_reagreement/);
+    // The note a caller acting on `state` needs: an existing field moved.
+    expect(notes).toMatch(/required_version/);
+    const save = AGENT_MANIFEST.actions.find((a) => a.name === "save_code_of_conduct")!;
+    expect(save.params.map((p) => p.name)).toEqual([
+      "title",
+      "body_md",
+      "asks_reagreement",
+      "base_version",
+      "client_submission_id",
+    ]);
+    expect(save.params.every((p) => !p.required)).toBe(true);
   });
 
   it("documents the confirmation flags the schemas actually accept", () => {
@@ -764,6 +789,29 @@ describe("projectAgentWaiverTemplate", () => {
       is_current: false,
       title: "Training Waiver",
       created_at: "2026-08-01T00:00:00Z",
+    });
+  });
+});
+
+describe("projectAgentCodeOfConductVersion", () => {
+  const version = {
+    version: 3,
+    title: "UTS Jitsu Code of Conduct",
+    body_md: "# Rules",
+    asks_reagreement: true,
+    is_current: false,
+    created_at: "2026-10-01T00:00:00.000Z",
+  };
+
+  it("reports a version without its text, with the editor's own label", () => {
+    expect(projectAgentCodeOfConductVersion(version, 4)).toEqual({
+      version: 3,
+      title: "UTS Jitsu Code of Conduct",
+      is_current: false,
+      status: "Previous",
+      asks_reagreement: true,
+      body_chars: 7,
+      created_at: "2026-10-01T00:00:00.000Z",
     });
   });
 });
