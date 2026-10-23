@@ -25,6 +25,7 @@ import {
   digestSections,
   digestSubject,
   hasDigestContent,
+  isSwitchableKind,
   mergeHouseholdItems,
   shouldEmail,
   type DigestCandidate,
@@ -161,6 +162,28 @@ async function emailFor(db: AdminClient, userId: string): Promise<string | null>
 }
 
 /**
+ * Whether this person's switches let a notification of this kind be emailed.
+ *
+ * For a kind no switch governs (`isSwitchableKind`) the answer is yes without
+ * reading anything, so an email that must always go out cannot be stopped by a
+ * preferences row, nor delayed by a read of one. Every immediate send asks
+ * here rather than reading `notification_preferences` itself.
+ */
+async function wantsEmail(
+  db: AdminClient,
+  userId: string,
+  kind: NotificationKind,
+): Promise<boolean> {
+  if (!isSwitchableKind(kind)) return true;
+  const { data: prefs } = await db
+    .from("notification_preferences")
+    .select("reply_to_me, thread_activity, new_blog_post, manager_comment_alerts")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return shouldEmail(prefs, kind);
+}
+
+/**
  * Email somebody straight away that they were replied to, then stamp the row so
  * the digest never mentions it again.
  *
@@ -185,12 +208,7 @@ export async function sendReplyNotification(
     return false;
   }
 
-  const { data: prefs } = await db
-    .from("notification_preferences")
-    .select("reply_to_me, thread_activity, new_blog_post, manager_comment_alerts")
-    .eq("user_id", opts.recipientId)
-    .maybeSingle();
-  if (!shouldEmail(prefs, "reply")) {
+  if (!(await wantsEmail(db, opts.recipientId, "reply"))) {
     // Switched off. Stamp it anyway so the digest does not pick it up later as
     // an unemailed row: a preference is forward-looking, not a queue.
     await stampEmailed(db, [opts.notificationId]);

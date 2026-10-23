@@ -11,6 +11,7 @@ import {
   digestSubject,
   emailPreferenceKeys,
   hasDigestContent,
+  isSwitchableKind,
   kbAnnotationHref,
   mergeHouseholdItems,
   notificationKinds,
@@ -19,6 +20,7 @@ import {
   resolveNotificationPreferences,
   shouldEmail,
   threadActivityRecipients,
+  UNSWITCHABLE_NOTIFICATION_KINDS,
   type DigestCandidate,
   type NotificationItem,
   type NotificationKind,
@@ -47,10 +49,23 @@ function item(over: Partial<NotificationItem> = {}): NotificationItem {
 }
 
 describe("preferenceForKind", () => {
-  it("maps every kind to a switch", () => {
+  it("maps every kind to a switch, except the closed list nobody can switch off", () => {
     for (const kind of notificationKinds) {
-      expect(emailPreferenceKeys).toContain(preferenceForKind[kind]);
+      if (UNSWITCHABLE_NOTIFICATION_KINDS.includes(kind)) {
+        expect(preferenceForKind[kind]).toBeNull();
+        expect(isSwitchableKind(kind)).toBe(false);
+      } else {
+        expect(emailPreferenceKeys).toContain(preferenceForKind[kind]);
+        expect(isSwitchableKind(kind)).toBe(true);
+      }
     }
+  });
+
+  // Pinned exactly, so a kind can only stop being switchable by somebody
+  // editing this line on purpose. An announcement that lost its switch by
+  // accident would reach every inbox the club has with no way to turn it off.
+  it("keeps the un-switchable list closed", () => {
+    expect([...UNSWITCHABLE_NOTIFICATION_KINDS]).toEqual([]);
   });
 
   // Two kinds, one switch: "tell me about new comments" is one decision a
