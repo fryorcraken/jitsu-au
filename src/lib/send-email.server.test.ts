@@ -74,11 +74,17 @@ describe("sendEmail", () => {
     expect(retry.idempotency_key).toBe("k1-single-reply-to");
   });
 
-  it("does not resend after a failure the service did not decide", async () => {
-    // A timeout or a 5xx may have delivered the first attempt; a resend under a
-    // new key could then deliver it twice. Rate limiting is not a refusal of
-    // the Reply-To either.
-    for (const failure of [new Error("network down"), { status: 503 }, { status: 429 }]) {
+  it("does not resend after a failure that is not about the request's content", async () => {
+    // A timeout, a 5xx or a 409 may mean the first attempt went out or is still
+    // going; a resend under a new key could then deliver it twice. A 401 or a
+    // 429 is the key or the rate, and a resend would only fail again.
+    for (const failure of [
+      new Error("network down"),
+      { status: 503 },
+      { status: 429 },
+      { status: 409 },
+      { status: 401 },
+    ]) {
       sendLovableEmail.mockReset();
       sendLovableEmail.mockRejectedValue(failure);
 
@@ -87,6 +93,20 @@ describe("sendEmail", () => {
       ).rejects.toBe(failure);
       expect(sendLovableEmail).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("reports the first error when the one-address retry fails too", async () => {
+    // Rejected again with a single Reply-To, so that was never the problem:
+    // whoever reads the log should see the original rejection.
+    const first = Object.assign(new Error("recipient suppressed"), { status: 422 });
+    sendLovableEmail.mockRejectedValueOnce(first).mockRejectedValueOnce(new Error("again"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      sendEmail({ ...base, replyTo: ["teen@example.com", "parent@example.com"] }),
+    ).rejects.toBe(first);
+    expect(sendLovableEmail).toHaveBeenCalledTimes(2);
   });
 
   it("does not resend a refused email that had only one Reply-To", async () => {
