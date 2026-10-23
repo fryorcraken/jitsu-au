@@ -8,6 +8,7 @@ import {
   UNKNOWN_LINK_MESSAGE,
   feedTokenVerdict,
 } from "./calendar-feed-token";
+import { SITE_HOST } from "./seo";
 
 describe("feedTokenVerdict", () => {
   it("serves a live link, and hands the row back", () => {
@@ -45,7 +46,10 @@ describe("feedTokenVerdict", () => {
   // where the new one is.
   it("tells the holder of a replaced link what to do next", () => {
     expect(REPLACED_LINK_MESSAGE).toContain("replaced");
-    expect(REPLACED_LINK_MESSAGE).toContain("utsjitsu.com.au/account");
+    expect(REPLACED_LINK_MESSAGE).toContain("/account");
+    // The site's own host, never a literal: the old domain redirects, and
+    // naming it here would send people the long way round after every move.
+    expect(REPLACED_LINK_MESSAGE).toContain(`${SITE_HOST}/account`);
     // Copy voice: no em dashes (AGENTS.md).
     expect(REPLACED_LINK_MESSAGE).not.toContain("—");
   });

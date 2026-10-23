@@ -411,10 +411,11 @@ The evidence, and the query for each:
 No member missed an email over it: no notification had been written since
 2026-10-08, so on 2026-10-23 nothing was owed. The fix is the URL literal,
 `20261023000000_notification_digest_new_domain.sql`. **If the primary domain
-changes again, that literal changes with it, the same week.** (Everything the
-app itself links to follows `SITE_ORIGIN` in `src/lib/seo.ts`; this literal
-lives in the database and cannot.) Nothing else will
-tell you, for the reasons below.
+changes again, that literal changes with it, in the same change.**
+`src/lib/notification-digest-url.test.ts` now fails if the newest digest
+migration's URL is not `SITE_ORIGIN` plus the endpoint path, so a domain move
+that forgets it cannot merge green. That test reads the files, not the live
+database, so the apply gate still applies.
 
 **Why the stalled-digest item did not and could not catch it.** It watches the
 backlog, and there was no backlog: it is blind whenever nothing is owed, which

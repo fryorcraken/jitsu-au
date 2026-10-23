@@ -43,7 +43,7 @@ export const Route = createFileRoute("/code-of-conduct")({
       },
       { property: "og:url", content: canonicalUrl("/code-of-conduct") },
     ],
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/code-of-conduct" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/code-of-conduct") }],
   }),
   component: CodeOfConduct,
 });

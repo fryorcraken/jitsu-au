@@ -13,12 +13,13 @@ import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { SOCIAL_IMAGE, canonicalUrl } from "../lib/seo";
+import { SOCIAL_IMAGE } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
 import { reportsIdentity, resolveAuthRefresh } from "../lib/auth-events";
 import { clearCacheFor } from "../lib/local-cache";
 import { writeLastVisit } from "../lib/last-visit";
 import { isResumablePath } from "../lib/pwa";
+import { canonicalUrl } from "@/lib/seo";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  SITE_HOST,
   SITE_ORIGIN,
   PUBLIC_PAGES,
   CRAWLER_DISALLOW,
@@ -36,6 +37,10 @@ describe("canonicalUrl", () => {
 
   it("appends other paths to the origin without a trailing slash", () => {
     expect(canonicalUrl("/about")).toBe("https://utsjitsu.com.au/about");
+  });
+
+  it("names the host on its own for copy, with no scheme", () => {
+    expect(SITE_HOST).toBe("utsjitsu.com.au");
   });
 });
 
@@ -547,19 +552,27 @@ describe("sitemap coverage of the route files", () => {
     for (const page of PUBLIC_PAGES) {
       const file = routeFiles.find((r) => r.path === page.path);
       expect(file, `no route file serves ${page.path}`).toBeDefined();
-      expect(file!.source).toContain(`rel: "canonical", href: "${canonicalUrl(page.path)}"`);
+      expect(file!.source).toContain(`rel: "canonical", href: canonicalUrl("${page.path}")`);
     }
   });
 
   // The test above only reaches pages in the sitemap. A noindex page with a
   // canonical (/waiver, /thank-you, /email-settings) is just as wrong pointing
-  // at a retired host, so every literal in every route file is held to it.
-  it("puts every canonical in the route files on SITE_ORIGIN, noindex pages included", () => {
-    const hrefs = routeFiles.flatMap(({ source }) =>
-      [...source.matchAll(/rel: "canonical", href: "([^"]+)"/g)].map((m) => m[1]),
+  // at a retired host, so every canonical in every route file has to be built
+  // by canonicalUrl, the one place that knows the origin. Matched on the
+  // object rather than one line, so a reformatted or reordered link is still
+  // seen: any `rel: "canonical"` whose href is not canonicalUrl(...) fails.
+  it("builds every canonical in the route files with canonicalUrl, noindex pages included", () => {
+    const canonicalLinks = routeFiles.flatMap(({ path, source }) =>
+      [...source.matchAll(/\{[^{}]*rel:\s*"canonical"[^{}]*\}/g)].map((m) => ({
+        path,
+        link: m[0],
+      })),
     );
-    expect(hrefs.length).toBeGreaterThan(PUBLIC_PAGES.length);
-    for (const href of hrefs) expect(href.startsWith(`${SITE_ORIGIN}/`), href).toBe(true);
+    expect(canonicalLinks.length).toBeGreaterThan(PUBLIC_PAGES.length);
+    for (const { path, link } of canonicalLinks) {
+      expect(link, `${path} spells its canonical by hand`).toMatch(/href:\s*canonicalUrl\(/);
+    }
   });
 
   // PUBLIC_NOINDEX_PATHS is the one page list nothing can derive: a noindex

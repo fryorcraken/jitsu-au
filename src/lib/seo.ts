@@ -23,16 +23,10 @@ import {
 import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
-/**
- * Canonical origin. Every `rel="canonical"` on the site points here, and so
- * does every link in an email, which is why the email modules import it rather
- * than spelling the host themselves: a link to a host that only redirects drops
- * whatever the request carried across hosts (see "The October domain move" in
- * `docs/notifications.md`).
- */
+/** Canonical origin. Every `rel="canonical"` on the site points here. */
 export const SITE_ORIGIN = "https://utsjitsu.com.au";
 
-/** The bare host, for copy that names the address a person types ("utsjitsu.com.au/account"). */
+/** The origin without its scheme, for copy that names the address to a person. */
 export const SITE_HOST = new URL(SITE_ORIGIN).host;
 
 /**
@@ -42,9 +36,8 @@ export const SITE_HOST = new URL(SITE_ORIGIN).host;
  * engines penalise. Those hosts get a "stay out" robots.txt instead.
  *
  * The club's other domains are listed here on purpose, and are NOT blocked.
- * They serve the same site (jitsu.au, the original domain, now redirects
- * instead), and every page canonicals to utsjitsu.com.au, so letting crawlers
- * in is what consolidates the ranking signal onto it. Blocking
+ * They serve the same site, and every page canonicals to utsjitsu.com.au, so
+ * letting crawlers in is what consolidates the ranking signal there. Blocking
  * them would stop a crawler ever reading that canonical and leave bare,
  * contentless URLs eligible for the index instead.
  *
@@ -236,7 +229,7 @@ function postalAddress(): Record<string, string> {
 /**
  * Structured data describing the club, emitted once on the home page.
  *
- * This is what lets a search engine understand that the site is a martial arts
+ * This is what lets a search engine understand that this site is a martial arts
  * club that trains at a specific Sydney address, rather than a page that
  * happens to mention Ultimo. It carries only facts the site already states in
  * its own copy: name, address, phone and social profiles.

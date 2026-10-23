@@ -4,7 +4,7 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { formatDate } from "@/lib/dates";
 import { blogListSearchSchema } from "@/lib/validation";
 import { listPublishedBlogPosts } from "@/lib/blog.functions";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 
 type ListResult = Awaited<ReturnType<typeof listPublishedBlogPosts>>;
 type LoaderData = { result: ListResult | null; error: boolean };
@@ -31,7 +31,7 @@ export const Route = createFileRoute("/blog/")({
         "News, tips and updates from UTS Jitsu, Japanese Jiu-Jitsu at UTS Ultimo, Sydney.",
       path: "/blog",
     }),
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/blog" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/blog") }],
   }),
   component: BlogIndex,
 });

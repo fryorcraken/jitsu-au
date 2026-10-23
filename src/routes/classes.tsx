@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Clock, MapPin, Phone } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { scheduleDays, weeklySchedule } from "@/lib/schedule";
 import {
   VENUE_ADDRESS_SHORT,
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/classes")({
       ogDescription: `${scheduleDays} classes at ActivateFit Gym, Ultimo.`,
       path: "/classes",
     }),
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/classes" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/classes") }],
   }),
   component: Classes,
 });

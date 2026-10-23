@@ -14,6 +14,9 @@
 // also why this is an `AlertDialog` and not `useConfirm`: a yes/no promise
 // closes on the answer and cannot hold a failure and a retry, which is the
 // exception `use-confirm.tsx` already names for `MembershipRowActions`.
+//
+// Marking paid asks when the money arrived and what it was known by, with the
+// same fields as a membership invoice (`PaymentReceivedFields`).
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Check, Loader2, Trash2, Undo2 } from "lucide-react";
@@ -40,6 +43,13 @@ import { ITEM_INVOICE_STATE_LABEL, whyItemInvoiceIsSettled } from "@/lib/item-in
 import { itemInvoiceClass } from "@/lib/status-colours";
 import { formatCents } from "@/lib/validation";
 import { formatDate } from "@/lib/dates";
+import { PaidNote, PaymentReceivedFields } from "@/components/site/PaymentReceived";
+import {
+  newPaymentReceived,
+  paymentReceivedParams,
+  paymentReceivedProblem,
+  type PaymentReceived,
+} from "@/lib/payment-received";
 
 type Action = "pay" | "cancel" | "delete";
 type Pending = { kind: Action; error: string | null; busy: boolean };
@@ -56,6 +66,7 @@ function ItemInvoiceRowActions({
   const cancel = useServerFn(cancelItemInvoice);
   const remove = useServerFn(deleteItemInvoice);
   const [pending, setPending] = useState<Pending | null>(null);
+  const [payment, setPayment] = useState<PaymentReceived>(newPaymentReceived);
 
   // Paid is finished: nothing to do on it from here.
   if (whyItemInvoiceIsSettled(invoice)) return null;
@@ -63,7 +74,10 @@ function ItemInvoiceRowActions({
   async function run(kind: Action) {
     setPending({ kind, error: null, busy: true });
     try {
-      if (kind === "pay") await markPaid({ data: { id: invoice.id, payment_method: "manual" } });
+      if (kind === "pay")
+        await markPaid({
+          data: { id: invoice.id, payment_method: "manual", ...paymentReceivedParams(payment) },
+        });
       else if (kind === "cancel") await cancel({ data: { id: invoice.id } });
       else await remove({ data: { id: invoice.id } });
     } catch (e) {
@@ -102,7 +116,10 @@ function ItemInvoiceRowActions({
     },
   }[pending?.kind ?? "cancel"];
 
-  const open = (kind: Action) => setPending({ kind, error: null, busy: false });
+  const open = (kind: Action) => {
+    if (kind === "pay") setPayment(newPaymentReceived());
+    setPending({ kind, error: null, busy: false });
+  };
 
   return (
     <>
@@ -133,6 +150,17 @@ function ItemInvoiceRowActions({
             <AlertDialogTitle>{copy.title}</AlertDialogTitle>
             <AlertDialogDescription>{copy.body}</AlertDialogDescription>
           </AlertDialogHeader>
+          {pending?.kind === "pay" && (
+            <PaymentReceivedFields
+              idPrefix={`pay-${invoice.id}`}
+              value={payment}
+              onChange={(next) => {
+                setPayment(next);
+                setPending((p) => (p ? { ...p, error: null } : p));
+              }}
+              disabled={pending.busy}
+            />
+          )}
           {pending?.error && (
             <p
               role="alert"
@@ -154,7 +182,10 @@ function ItemInvoiceRowActions({
                   ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   : undefined
               }
-              disabled={pending?.busy}
+              disabled={
+                pending?.busy ||
+                (pending?.kind === "pay" && paymentReceivedProblem(payment) !== null)
+              }
               // Not the default close: the dialog has to stay open to show a failure.
               onClick={(e) => {
                 e.preventDefault();
@@ -223,6 +254,7 @@ export function ItemInvoiceTable({
                   preserveCase
                   className={itemInvoiceClass(inv.state)}
                 />
+                <PaidNote paidAt={inv.paid_at} reference={inv.paid_reference} />
               </td>
               <td className="px-3 py-2 whitespace-nowrap">{formatDate(inv.created_at)}</td>
               <td className="px-3 py-2">

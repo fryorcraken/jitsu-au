@@ -1560,3 +1560,73 @@ describe("ensureCasualInvoiceEmailed", () => {
     await expect(ensureInvoiceEmailed(fakeInvoiceEmailAdmin({}))).resolves.toBeUndefined();
   });
 });
+
+describe("recordMembershipPayment", () => {
+  /** A memberships table whose compare-and-swap always wins, recording each patch. */
+  function fakePaymentAdmin() {
+    const patches: Record<string, unknown>[] = [];
+    const admin = {
+      from: (table: string) => {
+        if (table !== "memberships") throw new Error(`unexpected table ${table}`);
+        return {
+          update: (patch: Record<string, unknown>) => {
+            patches.push(patch);
+            return {
+              eq: () => ({ is: () => ({ select: () => Promise.resolve(ok([{ id: "m-1" }])) }) }),
+            };
+          },
+        };
+      },
+    };
+    return { admin, patches };
+  }
+
+  // No `user_id`, so no receipt is attempted: that path is best-effort and its own concern.
+  const UNPAID = { id: "m-1", user_id: null, paid_at: null, price_cents: 9000 };
+
+  // A manager recording cash taken on Tuesday says so, and the receipt number
+  // goes with it, in the same write that records the payment.
+  it("records the day the money arrived and what it was known by", async () => {
+    const { recordMembershipPayment } = await import("./membership.functions");
+    const fake = fakePaymentAdmin();
+    const result = await recordMembershipPayment(fake.admin as never, {
+      membership: UNPAID as never,
+      method: "manual",
+      paidOn: "2026-10-01",
+      reference: "Receipt 42",
+    });
+    expect(result).toEqual({ recorded: true });
+    expect(fake.patches).toEqual([
+      {
+        paid_at: "2026-10-01T02:00:00.000Z",
+        payment_method: "manual",
+        paid_reference: "Receipt 42",
+      },
+    ]);
+  });
+
+  it("writes no reference when none was given", async () => {
+    const { recordMembershipPayment } = await import("./membership.functions");
+    const fake = fakePaymentAdmin();
+    await recordMembershipPayment(fake.admin as never, {
+      membership: UNPAID as never,
+      method: "bank_transfer",
+    });
+    expect(fake.patches[0]).not.toHaveProperty("paid_reference");
+  });
+
+  // The first record is the true one: a second call must not move its date or
+  // overwrite its reference.
+  it("leaves an already-paid membership exactly as it is", async () => {
+    const { recordMembershipPayment } = await import("./membership.functions");
+    const fake = fakePaymentAdmin();
+    const result = await recordMembershipPayment(fake.admin as never, {
+      membership: { ...UNPAID, paid_at: "2026-09-01T00:00:00Z" } as never,
+      method: "manual",
+      paidOn: "2026-10-01",
+      reference: "Receipt 43",
+    });
+    expect(result).toEqual({ recorded: false });
+    expect(fake.patches).toEqual([]);
+  });
+});

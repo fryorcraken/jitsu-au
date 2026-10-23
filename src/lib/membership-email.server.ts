@@ -8,9 +8,9 @@
 // and only ever lazy-imported from inside server-function handlers.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { sendEmail } from "@/lib/send-email.server";
 import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment";
 import { MembershipPaidEmail } from "@/lib/email-templates/membership-paid";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
@@ -21,41 +21,12 @@ import { readClubPaymentDetails } from "@/lib/club-settings.server";
 import { SITE_ORIGIN } from "@/lib/seo";
 
 const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = SITE_ORIGIN;
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */
-export const MEMBERSHIP_REVIEW_URL = `${SITE_URL}/manager/memberships`;
-const ACCOUNT_URL = `${SITE_URL}/membership`;
+export const MEMBERSHIP_REVIEW_URL = `${SITE_ORIGIN}/manager/memberships`;
+const ACCOUNT_URL = `${SITE_ORIGIN}/membership`;
 
 type AdminClient = SupabaseClient<Database>;
-
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
-}
 
 export interface MembershipPaymentEmailParams {
   membershipId: string;
@@ -107,7 +78,7 @@ export async function sendMembershipPaymentEmail({
 
   const memberEl = React.createElement(MembershipPaymentEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     // The member-facing greeting: call them what they asked to be called.
     memberName: memberGreetingName,
     forName,
@@ -142,7 +113,7 @@ export async function sendMembershipPaymentEmail({
 
   const sent: string[] = [];
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl,
       to: memberEmail,
@@ -161,9 +132,11 @@ export async function sendMembershipPaymentEmail({
     console.error(`[membership-email] failed to email member ${memberEmail}:`, e);
   }
 
+  // Replying to the manager copy reaches whoever was sent the invoice: the
+  // member, or the parent of a child on their account.
   for (const to of managers) {
     try {
-      await sendOne({
+      await sendEmail({
         apiKey,
         sendUrl,
         to,
@@ -171,6 +144,7 @@ export async function sendMembershipPaymentEmail({
         html: managerHtml,
         text: managerText,
         idempotencyKey: `membership-pending-${membershipId}-${to}`,
+        replyTo: memberEmail,
       });
       sent.push(to);
     } catch (e) {
@@ -227,7 +201,7 @@ export async function sendMembershipPaidEmail({
 
   const el = React.createElement(MembershipPaidEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     memberName: memberGreetingName,
     forName,
     planName,
@@ -237,7 +211,7 @@ export async function sendMembershipPaidEmail({
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl,
       to: memberEmail,
@@ -297,7 +271,7 @@ export async function sendItemInvoiceEmail({
   const { details } = await readClubPaymentDetails(admin);
   const el = React.createElement(ItemInvoiceEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     memberName: memberGreetingName,
     forName,
     lines,
@@ -308,7 +282,7 @@ export async function sendItemInvoiceEmail({
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl: process.env.LOVABLE_SEND_URL,
       to: memberEmail,
@@ -355,7 +329,7 @@ export async function sendItemInvoicePaidEmail({
   }
   const el = React.createElement(ItemInvoicePaidEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     memberName: memberGreetingName,
     forName,
     reference,
@@ -365,7 +339,7 @@ export async function sendItemInvoicePaidEmail({
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl: process.env.LOVABLE_SEND_URL,
       to: memberEmail,

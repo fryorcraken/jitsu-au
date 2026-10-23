@@ -453,6 +453,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         // The three inputs to the delete guard, so the screen can say why the
         // button is unavailable instead of only that it is.
         paid_at: m.paid_at,
+        paid_reference: m.paid_reference,
         checkin_count: checkinCounts.get(m.id) ?? 0,
       })),
       // Their attendance, newest first. `membership_id` with no cover is what

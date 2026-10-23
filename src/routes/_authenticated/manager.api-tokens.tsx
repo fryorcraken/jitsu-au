@@ -16,8 +16,8 @@ import { CopyButton } from "@/components/site/CopyButton";
 import { formatDateTime } from "@/lib/dates";
 import { createApiToken, listApiTokens, revokeApiToken } from "@/lib/manager-api-tokens.functions";
 import { buildAgentPrompt } from "@/lib/manager-api-tokens";
-import { SITE_ORIGIN } from "@/lib/seo";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 export const Route = createFileRoute("/_authenticated/manager/api-tokens")({
   head: () => ({

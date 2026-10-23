@@ -231,7 +231,8 @@ Everything downstream is per person and needed no change to become so:
   to tell which is still unpaid. The subject names the child
   (`Pay $245 to activate Bea's One semester`), the body greets the parent, and
   the manager's copy captions the address it carries as the parent's, for the
-  same reason the screens do.
+  same reason the screens do. Its Reply-To is that address too, so a manager
+  pressing reply reaches the parent.
 
 The gate is `assertActingFor`, through `resolveSubject`, in exactly one place:
 `startMembership` and `getMyMemberships` both resolve their subject before they
@@ -426,7 +427,13 @@ screens share `MembershipRowActions`, so the rules cannot drift between them.
 reconciliation, for cash at the door or anything else that never touches the club
 account. It writes `paid_at` through `recordMembershipPayment` — the only writer
 of that column — emails a receipt, and is idempotent, so a second press records
-nothing and re-sends nothing. There is no **Activate** button any more, because
+nothing and re-sends nothing. Its confirm asks the day the money arrived (today
+unless changed; a future day is refused, and so is one more than two years
+back, which is a mistyped year; an earlier one is fine, including one before
+the invoice was raised when backfilling) and an optional receipt or
+reference (`paid_reference`). Both tables print "Paid <date>" and that
+reference under the price. The reference is for managers only: a member's own
+page never shows it. There is no **Activate** button any more, because
 there is nothing left for it to do: a membership is authorised from the moment it
 is raised. **Reopen** is the narrow leftover, putting a cancelled or expired
 membership back into service, and it says nothing about money either way.

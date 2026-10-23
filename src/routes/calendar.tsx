@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { getCalendar, getMyRsvps, setRsvp } from "@/lib/calendar.functions";
 import { CalendarLinkPanel } from "@/components/site/CalendarLinkPanel";
 import type { RsvpResponse } from "@/lib/validation";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 
 export const Route = createFileRoute("/calendar")({
   head: () => ({
@@ -21,7 +21,7 @@ export const Route = createFileRoute("/calendar")({
       ogDescription: "Upcoming UTS Jitsu training sessions and club events.",
       path: "/calendar",
     }),
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/calendar" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/calendar") }],
   }),
   component: CalendarPage,
 });

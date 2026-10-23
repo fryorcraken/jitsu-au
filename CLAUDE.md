@@ -6,7 +6,7 @@ Guidance for AI assistants working in this repository.
 
 **UTS Jitsu** — the marketing + member website for a Japanese Jiu-Jitsu club
 that trains at UTS Ultimo, Sydney (public site: `https://utsjitsu.com.au`; the
-original domain, `jitsu.au`, now redirects to it). It handles
+old `jitsu.au` redirects there, see "The site's address" below). It handles
 public marketing pages, interest/contact form submissions, and a member area
 where people sign a training **waiver** (with a generated PDF) and managers
 review submissions.
@@ -712,27 +712,6 @@ missing from the sitemap (or a `noindex` one is listed), so the first list is
 enforced. The second cannot be derived from anything, so a new noindex page has
 to be added there by hand or nothing ever looks at it.
 
-**The site's address is `SITE_ORIGIN` in `src/lib/seo.ts`**, and every link the
-app builds for somebody outside the browser (canonicals, the sitemap, every
-link in every email) reads it. Never spell the host
-again in a new module: import it. A link to a domain that only redirects still
-lands, but it drops anything the request carried across hosts, and a canonical
-pointing at a redirect tells a search engine the real page does not exist.
-`seo.test.ts` fails on any link to `jitsu.au`, the domain the site left in
-October 2026. Moving the site again takes, in the same change: `SITE_ORIGIN`;
-each public route's literal canonical (the same test checks them against
-`canonicalUrl`); a migration for the digest's URL literal
-(`docs/notifications.md`, "The October domain move"); and the new host on
-`PRODUCTION_HOSTS`. The email **sender** (`notify.jitsu.au` today) is not a
-link and moves on its own schedule: it is a domain verified with the mail
-provider in Lovable Cloud, so the code may only switch to a new one after
-Lovable shows it verified, or every email (sign-in links included) fails. Two
-things stay on `jitsu.au` for good: the dependants' reserved
-`dependant.jitsu.au` addresses, and calendar event UIDs (`<id>@jitsu.au`),
-which a subscribed calendar uses to recognise an event it already has. Keep
-`jitsu.au` registered for as long as any of those, or a link already sent,
-still points at it.
-
 Two non-obvious rules:
 
 - **Never put a `rel="canonical"` in `__root.tsx`.** TanStack Router _replaces_
@@ -748,6 +727,31 @@ Two non-obvious rules:
 
 Non-production hosts (Lovable previews, branch deploys) are served a blanket
 `Disallow: /`, so a preview never competes with the real site in search results.
+
+### The site's address
+
+The site is served from **`https://utsjitsu.com.au`**, and that is `SITE_ORIGIN`
+in `src/lib/seo.ts`: every canonical, the sitemap, and every link in every email
+come from it (`SITE_HOST` is the same thing without the scheme, for copy). The
+one deliberate exception is the calendar subscription link on `/account`, which
+names the host the member is browsing on, so a local or preview stack hands out
+its own feed; in production that is the same host. `jitsu.au` (the address until October 2026) now
+redirects there. Three rules follow, and the first one has already cost the club
+its nightly email once:
+
+- **Never send a credential to a host that redirects.** A redirect to another
+  host drops the `Authorization` header, so a bearer-token caller pointed at
+  `jitsu.au` gets a 401 with a perfectly valid token. That is what stopped the
+  notification digest and broke the manager agent API for on-device agents
+  (`docs/notifications.md`, "The October domain move").
+- **The digest's URL is a literal in SQL**, not `SITE_ORIGIN`, because pg_cron
+  cannot read the app's config. `src/lib/notification-digest-url.test.ts` fails
+  if the two disagree, so moving the domain again takes a migration too.
+- **Not everything that says `jitsu.au` is the address.** `notify.jitsu.au` is
+  the verified email sender domain, the calendar feed's event UIDs end in
+  `@jitsu.au` (changing them would duplicate every event in every subscriber's
+  calendar), and `dependant.jitsu.au` is the reserved address domain for
+  dependants. All three stay as they are.
 
 ## Security headers
 

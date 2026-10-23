@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationSwitches } from "@/components/site/NotificationSwitches";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import type { EmailPreferenceKey } from "@/lib/notifications";
 import {
   getEmailSettingsPreferences,
@@ -51,7 +51,7 @@ export const Route = createFileRoute("/email-settings/")({
       }),
       { name: "robots", content: "noindex, nofollow" },
     ],
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/email-settings" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/email-settings") }],
   }),
   // No SSR. Nothing about one person's settings should travel through a server
   // render into HTML that might be held anywhere along the way. The `head()`
