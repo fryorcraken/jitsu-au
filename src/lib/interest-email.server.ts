@@ -13,12 +13,12 @@ import { sendEmail } from "@/lib/send-email.server";
 import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confirmation";
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 const SITE_NAME = "UTS Jitsu";
-const SITE_URL = "https://jitsu.au";
 
 /** Manager dashboard where the lead/member funnel is reviewed. */
-export const MANAGER_DASHBOARD_URL = `${SITE_URL}/manager/users`;
+export const MANAGER_DASHBOARD_URL = `${SITE_ORIGIN}/manager/users`;
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -45,7 +45,7 @@ export function buildWaiverUrl(params: {
   if (params.phone) search.set("phone", params.phone);
   if (params.token) search.set("vt", params.token);
   const qs = search.toString();
-  return qs ? `${SITE_URL}/waiver?${qs}` : `${SITE_URL}/waiver`;
+  return qs ? `${SITE_ORIGIN}/waiver?${qs}` : `${SITE_ORIGIN}/waiver`;
 }
 
 export interface InterestEmailParams {
@@ -95,7 +95,7 @@ export async function sendInterestEmails({
 
   const applicantEl = React.createElement(InterestConfirmationEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     name,
     waiverUrl,
   });

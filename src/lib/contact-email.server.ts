@@ -14,12 +14,12 @@ import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirma
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 const SITE_NAME = "UTS Jitsu";
-const SITE_URL = "https://jitsu.au";
 
 /** Manager screen listing every message the contact form has received. */
-export const MANAGER_CONTACT_URL = `${SITE_URL}/manager/contact-messages`;
+export const MANAGER_CONTACT_URL = `${SITE_ORIGIN}/manager/contact-messages`;
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -58,7 +58,7 @@ export async function sendContactEmails({
 
   const senderEl = React.createElement(ContactConfirmationEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     name,
     subject,
     message,

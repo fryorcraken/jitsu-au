@@ -25,9 +25,9 @@ import {
 import { VerifyEmail } from "@/lib/email-templates/verify-email";
 import { sendEmail } from "@/lib/send-email.server";
 import { userIdByEmail } from "@/lib/supabase-rpc";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 const SITE_NAME = "UTS Jitsu";
-export const SITE_URL = "https://jitsu.au";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -232,9 +232,9 @@ export async function sendVerificationEmail(opts: {
     });
     const el = React.createElement(VerifyEmail, {
       siteName: SITE_NAME,
-      siteUrl: SITE_URL,
+      siteUrl: SITE_ORIGIN,
       memberName: opts.greetingName || "",
-      verifyUrl: buildVerifyUrl({ siteUrl: SITE_URL, token, next: opts.next }),
+      verifyUrl: buildVerifyUrl({ siteUrl: SITE_ORIGIN, token, next: opts.next }),
     });
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
 

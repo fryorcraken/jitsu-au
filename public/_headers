@@ -4,7 +4,7 @@
 #
 # Cloudflare reads this file when it serves this project's assets. If it turns
 # out to be ignored here, nothing is lost: the middleware is the real fix and
-# covers every route. Confirm with `curl -I https://jitsu.au/` once deployed.
+# covers every route. Confirm with `curl -I https://utsjitsu.com.au/` once deployed.
 #
 # Keep these in step with TOKEN_PATH_PREFIXES in src/lib/security-headers.ts.
 # security-headers.test.ts fails if the two disagree, on the referrer policy and

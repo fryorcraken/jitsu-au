@@ -7,12 +7,12 @@ import { MagicLinkEmail } from "@/lib/email-templates/magic-link";
 import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
+import { SITE_ORIGIN } from "@/lib/seo";
 import { FROM, SENDER_DOMAIN } from "@/lib/email-sender";
 
 // Configuration. The sender comes from `email-sender.ts`, shared with every
 // other email the app sends.
 const SITE_NAME = "UTS Jitsu";
-const SITE_URL = "https://jitsu.au";
 
 // The SDK handler owns verification, dispatch, and retry semantics; this file
 // owns only the email decisions: subjects, templates, and per-type props.
@@ -33,7 +33,7 @@ function getHandler() {
         render: (data) =>
           React.createElement(SignupEmail, {
             siteName: SITE_NAME,
-            siteUrl: SITE_URL,
+            siteUrl: SITE_ORIGIN,
             recipient: data.email,
             confirmationUrl: data.url,
           }),
@@ -43,7 +43,7 @@ function getHandler() {
         render: (data) =>
           React.createElement(InviteEmail, {
             siteName: SITE_NAME,
-            siteUrl: SITE_URL,
+            siteUrl: SITE_ORIGIN,
             confirmationUrl: data.url,
           }),
       },

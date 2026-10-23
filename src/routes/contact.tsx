@@ -20,7 +20,7 @@ import {
   WHATSAPP_URL,
 } from "@/lib/venue";
 import { Phone, MessageCircle, MapPin, ExternalLink } from "lucide-react";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 
 export const Route = createFileRoute("/contact")({
   head: () => ({
@@ -30,7 +30,7 @@ export const Route = createFileRoute("/contact")({
       ogDescription: "Phone, WhatsApp, or send us a message.",
       path: "/contact",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/contact" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/contact") }],
   }),
   component: Contact,
 });

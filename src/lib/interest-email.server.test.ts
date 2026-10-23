@@ -17,30 +17,32 @@ describe("buildWaiverUrl", () => {
   it("carries name, email and phone as prefill search params", () => {
     expect(
       buildWaiverUrl({ name: "Ada Lovelace", email: "ada@example.com", phone: "0400000000" }),
-    ).toBe("https://jitsu.au/waiver?name=Ada+Lovelace&email=ada%40example.com&phone=0400000000");
+    ).toBe(
+      "https://utsjitsu.com.au/waiver?name=Ada+Lovelace&email=ada%40example.com&phone=0400000000",
+    );
   });
 
   it("omits an absent phone", () => {
     expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", phone: null })).toBe(
-      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com",
+      "https://utsjitsu.com.au/waiver?name=Ada&email=ada%40example.com",
     );
   });
 
   it("falls back to the bare waiver path when nothing is provided", () => {
-    expect(buildWaiverUrl({ name: "", email: "" })).toBe("https://jitsu.au/waiver");
+    expect(buildWaiverUrl({ name: "", email: "" })).toBe("https://utsjitsu.com.au/waiver");
   });
 
   it("carries the verification token when one was minted", () => {
     // This is what makes the EMAILED link different from the in-app one: the
     // name/email params prove nothing, an unguessable token does.
     expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", token: "utsj_abc123" })).toBe(
-      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com&vt=utsj_abc123",
+      "https://utsjitsu.com.au/waiver?name=Ada&email=ada%40example.com&vt=utsj_abc123",
     );
   });
 
   it("omits the token when minting failed, leaving a working prefill link", () => {
     expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", token: null })).toBe(
-      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com",
+      "https://utsjitsu.com.au/waiver?name=Ada&email=ada%40example.com",
     );
   });
 });
