@@ -746,7 +746,7 @@ unique index; a retried raise finds the invoice it already made, as in
 cancelled. Unpaid means `paid_at IS NULL AND cancelled_at IS NULL`, and a partial
 index covers exactly that. `paid_at` is written only by
 `recordItemInvoicePayment`, guarded on the row still being unpaid, and so is
-`paid_reference` (`20261023000000_paid_reference.sql`).
+`paid_reference` (`20261023100000_paid_reference.sql`).
 
 ---
 
