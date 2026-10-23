@@ -52,11 +52,17 @@ describe("kit-sizes charts", () => {
 });
 
 describe("kit-sizes labels", () => {
-  it("leads with the size code and keeps the measurement parenthetical", () => {
-    expect(giSizeLabel("000")).toBe("000 (110 cm)");
-    expect(giSizeLabel("1")).toBe("1 (140 cm)");
-    expect(giSizeLabel("3")).toBe("3 (160 cm)");
-    expect(giSizeLabel("7")).toBe("7 (200 cm)");
+  it("leads with the size code and keeps the height parenthetical", () => {
+    expect(giSizeLabel("000")).toBe("000 (for 110 cm tall)");
+    expect(giSizeLabel("1")).toBe("1 (for 140 cm tall)");
+    expect(giSizeLabel("3")).toBe("3 (for 160 cm tall)");
+    expect(giSizeLabel("7")).toBe("7 (for 200 cm tall)");
+  });
+
+  it("says 'tall' on every gi label, so the height is not read as the garment's", () => {
+    for (const size of giSizes) {
+      expect(giSizeLabel(size)).toMatch(/^\d+ \(for \d+ cm tall\)$/);
+    }
   });
 
   it("says 'belt' on every belt label, so the length is not read as a waist", () => {
@@ -67,7 +73,7 @@ describe("kit-sizes labels", () => {
   });
 
   it("formats a stored value, and returns null when there is nothing on file", () => {
-    expect(formatGiSize("2")).toBe("2 (150 cm)");
+    expect(formatGiSize("2")).toBe("2 (for 150 cm tall)");
     expect(formatBeltSize("2")).toBe("2 (220 cm belt)");
     expect(formatGiSize(null)).toBeNull();
     expect(formatBeltSize(undefined)).toBeNull();

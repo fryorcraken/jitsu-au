@@ -519,7 +519,6 @@ function KitSizesCard({
                 value={giDraft}
                 onChange={setGiDraft}
                 disabled={busy}
-                emptyLabel="Not on file"
                 className="mt-1.5"
               />
             </div>
@@ -530,7 +529,6 @@ function KitSizesCard({
                 value={beltDraft}
                 onChange={setBeltDraft}
                 disabled={busy}
-                emptyLabel="Not on file"
                 className="mt-1.5"
               />
             </div>

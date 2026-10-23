@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AlertCircle, CheckCircle2, Download } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { SignaturePad, type SignaturePadHandle } from "@/components/site/SignaturePad";
-import { GI_SIZE_HINT, GiSizeSelect } from "@/components/site/KitSizeSelect";
+import { GI_SIZE_HINT, GiSizeSelect, WAIVER_GI_EMPTY_LABEL } from "@/components/site/KitSizeSelect";
 import { type GiSize, isGiSize } from "@/lib/kit-sizes";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { WaiverDocument } from "@/components/site/WaiverDocument";
@@ -1475,9 +1475,18 @@ function Waiver() {
                 <Label htmlFor="gi_size">
                   Gi size <span className="text-muted-foreground">(optional)</span>
                 </Label>
-                <GiSizeSelect id="gi_size" value={giSize} onChange={setGiSize} className="mt-1.5" />
+                {/* Not the default "Not on file": an empty pick here keeps whatever
+                    size is on file (docs/waivers.md, rule 3), so it must not claim
+                    there is none. It is also the answer for somebody who does not
+                    know their size, which is most first-timers. */}
+                <GiSizeSelect
+                  id="gi_size"
+                  value={giSize}
+                  onChange={setGiSize}
+                  emptyLabel={WAIVER_GI_EMPTY_LABEL}
+                  className="mt-1.5"
+                />
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  The number in brackets is the wearer's height that gi size is cut for.{" "}
                   {GI_SIZE_HINT} This is just so we can order kit that fits, and it is not part of
                   the waiver. You can change it any time from your account.
                 </p>
