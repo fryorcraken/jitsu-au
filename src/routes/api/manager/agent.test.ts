@@ -187,6 +187,7 @@ vi.mock("@/lib/waiver.functions", () => ({
 // count, and which status each refusal becomes. Everything not named here is
 // the real module, so list_users still measures against the real standard.
 const listCodeOfConductVersionRowsMock = vi.fn();
+const listCodeOfConductVersionFlagsMock = vi.fn();
 const loadCodeOfConductVersionMock = vi.fn();
 const saveCodeOfConductVersionMock = vi.fn();
 const promoteCodeOfConductVersionMock = vi.fn();
@@ -194,6 +195,7 @@ const highestAcceptedVersionsMock = vi.fn();
 vi.mock("@/lib/code-of-conduct.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/code-of-conduct.functions")>()),
   listCodeOfConductVersionRows: (...args: unknown[]) => listCodeOfConductVersionRowsMock(...args),
+  listCodeOfConductVersionFlags: (...args: unknown[]) => listCodeOfConductVersionFlagsMock(...args),
   loadCodeOfConductVersion: (...args: unknown[]) => loadCodeOfConductVersionMock(...args),
   saveCodeOfConductVersion: (...args: unknown[]) => saveCodeOfConductVersionMock(...args),
   promoteCodeOfConductVersion: (...args: unknown[]) => promoteCodeOfConductVersionMock(...args),
@@ -1133,7 +1135,9 @@ describe("manager agent route: reading people", () => {
     code_of_conduct_acceptances: [
       { user_id: PERSON, version: 1, accepted_at: "2026-03-01T00:00:00Z", signature_name: "Ada L" },
     ],
-    code_of_conduct_versions: [{ version: 1, asks_reagreement: true, is_current: true }],
+    code_of_conduct_versions: [
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: true },
+    ],
     ...over,
   });
 
@@ -1267,6 +1271,7 @@ describe("manager agent route: the code of conduct", () => {
     title: "UTS Jitsu Code of Conduct",
     body_md: `# Version ${version}`,
     asks_reagreement: false,
+    required_version: 1,
     is_current: false,
     created_at: "2026-10-01T00:00:00.000Z",
     ...over,
@@ -1278,6 +1283,7 @@ describe("manager agent route: the code of conduct", () => {
     currentAdmin = {};
     for (const m of [
       listCodeOfConductVersionRowsMock,
+      listCodeOfConductVersionFlagsMock,
       loadCodeOfConductVersionMock,
       saveCodeOfConductVersionMock,
       promoteCodeOfConductVersionMock,
@@ -1319,7 +1325,7 @@ describe("manager agent route: the code of conduct", () => {
 
   it("carries the text over when only asking everybody to agree again", async () => {
     loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
-    listCodeOfConductVersionRowsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
     // Two people up to date on 1 and 2, one already behind (nothing below 1).
     highestAcceptedVersionsMock.mockResolvedValue([1, 2]);
     saveCodeOfConductVersionMock.mockResolvedValue({
@@ -1370,7 +1376,7 @@ describe("manager agent route: the code of conduct", () => {
 
   it("reports a replayed save as already saved, re-prompting nobody new", async () => {
     loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
-    listCodeOfConductVersionRowsMock.mockResolvedValue([LIVE]);
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE]);
     highestAcceptedVersionsMock.mockResolvedValue([2]);
     saveCodeOfConductVersionMock.mockResolvedValue({
       id: "id-3",
@@ -1404,11 +1410,8 @@ describe("manager agent route: the code of conduct", () => {
   });
 
   it("rolls back, saying who is out of date afterwards", async () => {
-    listCodeOfConductVersionRowsMock.mockResolvedValue([
-      v(3, { is_current: true, asks_reagreement: true }),
-      v(2),
-      v(1, { asks_reagreement: true }),
-    ]);
+    // Version 2 did not ask, so it requires what version 1 did.
+    loadCodeOfConductVersionMock.mockResolvedValue(v(2, { required_version: 1 }));
     promoteCodeOfConductVersionMock.mockResolvedValue({ version: 2 });
     const res = await post({ action: "publish_code_of_conduct", params: { version: 2 } });
     expect((await res.json()).result).toEqual({
@@ -1419,14 +1422,14 @@ describe("manager agent route: the code of conduct", () => {
   });
 
   it("changes nothing, and says so, for the version already live", async () => {
-    listCodeOfConductVersionRowsMock.mockResolvedValue([LIVE]);
+    loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
     const res = await post({ action: "publish_code_of_conduct", params: { version: 2 } });
     expect((await res.json()).result).toEqual({ version: 2, published: false });
     expect(promoteCodeOfConductVersionMock).not.toHaveBeenCalled();
   });
 
   it("404s a version that does not exist", async () => {
-    listCodeOfConductVersionRowsMock.mockResolvedValue([LIVE]);
+    loadCodeOfConductVersionMock.mockResolvedValue(null);
     const res = await post({ action: "publish_code_of_conduct", params: { version: 9 } });
     expect(res.status).toBe(404);
   });

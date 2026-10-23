@@ -149,6 +149,7 @@ const V1 = {
   title: "Code",
   body_md: "# Code",
   asks_reagreement: true,
+  required_version: 1,
   is_current: true,
   client_submission_id: null,
   created_at: "then",
@@ -168,10 +169,64 @@ describe("saveCodeOfConductVersion", () => {
     });
   });
 
-  it("records the choice to ask everybody to agree again on the version", async () => {
+  it("records the choice to ask everybody to agree again, and so requires itself", async () => {
     const store = versionStore([V1]);
     await saveCodeOfConductVersion(store.admin, { ...input, asks_reagreement: true }, null);
-    expect(store.rows.find((r) => r.version === 2)?.asks_reagreement).toBe(true);
+    expect(store.rows.find((r) => r.version === 2)).toMatchObject({
+      asks_reagreement: true,
+      required_version: 2,
+    });
+  });
+
+  it("keeps what is required now for a correction, even after a rollback below an ask", async () => {
+    const store = versionStore([
+      { ...V1, is_current: true },
+      { ...V1, id: "id-2", version: 2, required_version: 2, is_current: false },
+    ]);
+    await saveCodeOfConductVersion(store.admin, input, null);
+    expect(store.rows.find((r) => r.version === 3)).toMatchObject({
+      asks_reagreement: false,
+      required_version: 1,
+    });
+  });
+
+  it("refuses a repeated submission id carrying different text, rather than dropping it", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const store = versionStore([V1]);
+    await saveCodeOfConductVersion(store.admin, { ...input, client_submission_id: id }, null);
+    await expect(
+      saveCodeOfConductVersion(
+        store.admin,
+        { ...input, body_md: "# Something else", client_submission_id: id },
+        null,
+      ),
+    ).rejects.toMatchObject({ reason: "invalid", version: 2 });
+    expect(store.rows).toHaveLength(2);
+  });
+
+  // The first attempt wrote the version and lost the promotion; the retry is
+  // the caller asking for that save, so it finishes it.
+  it("makes a replayed version live when the first attempt did not", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const store = versionStore([
+      V1,
+      {
+        ...V1,
+        ...input,
+        id: "id-2",
+        version: 2,
+        required_version: 1,
+        is_current: false,
+        client_submission_id: id,
+      },
+    ]);
+    const again = await saveCodeOfConductVersion(
+      store.admin,
+      { ...input, client_submission_id: id },
+      null,
+    );
+    expect(again).toEqual({ id: "id-2", version: 2, is_current: true, already_saved: true });
+    expect(store.rows.filter((r) => r.is_current).map((r) => r.version)).toEqual([2]);
   });
 
   // A save whose reply was lost, retried with the same id, must come back as
@@ -221,8 +276,11 @@ describe("promoteCodeOfConductVersion", () => {
 });
 
 describe("loadCodeOfConductStandard", () => {
-  it("measures against the newest version that asked, at or below the live one", async () => {
-    const store = versionStore([V1, { ...V1, id: "id-2", version: 2, asks_reagreement: false }]);
+  it("measures against what the live version requires", async () => {
+    const store = versionStore([
+      V1,
+      { ...V1, id: "id-2", version: 2, asks_reagreement: false, required_version: 1 },
+    ]);
     store.rows[0].is_current = false;
     store.rows[1].is_current = true;
     await expect(loadCodeOfConductStandard(store.admin)).resolves.toEqual({

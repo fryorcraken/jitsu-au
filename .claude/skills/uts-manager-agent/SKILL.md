@@ -151,8 +151,9 @@ Each row also carries three headline fields, the ones the person page leads with
 - `code_of_conduct`: `{ state, current_version, required_version,
 accepted_version, accepted_at, signature_name }`, where `state` is
   `unsigned | signed | outdated`. `outdated` means `accepted_version` is below
-  `required_version`, the last version that asked everybody to agree again; a
-  newer live version that did not ask (a correction) puts nobody out of date.
+  `required_version`, the last version that asked everybody to agree again
+  (unless a rollback undid that ask); a newer live version that did not ask (a
+  correction) puts nobody out of date.
   It never blocks anything: an unsigned member can still train.
 
 For anything more about one person, call `get_user`.

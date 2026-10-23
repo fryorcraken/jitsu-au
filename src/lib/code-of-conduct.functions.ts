@@ -38,7 +38,9 @@ import {
   codeOfConductStandard,
   codeOfConductSummary,
   isSignableVersion,
+  requiredVersionForSave,
   type CodeOfConductStandard,
+  type CodeOfConductVersionFlags,
   type CodeOfConductState,
 } from "@/lib/code-of-conduct";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -213,9 +215,8 @@ async function listAcceptances(
 }
 
 /**
- * What the club currently asks of everybody: the live version, and the newest
- * one at or below it that asked everybody to agree again
- * (`codeOfConductStandard`).
+ * What the club currently asks of everybody: the live version, and the version
+ * it requires people to have agreed to (`codeOfConductStandard`).
  *
  * Exported because every surface that reports where somebody stands measures
  * against it: the member's screens through `codeOfConductStatusFor`, the
@@ -224,11 +225,22 @@ async function listAcceptances(
 export async function loadCodeOfConductStandard(
   admin: AdminClient,
 ): Promise<CodeOfConductStandard> {
+  return codeOfConductStandard(await listCodeOfConductVersionFlags(admin));
+}
+
+/**
+ * The facts of every stored version that decide who is out of date, without
+ * the text: what counting the effect of a save or a rollback needs, at a
+ * fraction of the size of every version's body.
+ */
+export async function listCodeOfConductVersionFlags(
+  admin: AdminClient,
+): Promise<CodeOfConductVersionFlags[]> {
   const { data, error } = await admin
     .from("code_of_conduct_versions")
-    .select("version, asks_reagreement, is_current");
+    .select("version, asks_reagreement, required_version, is_current");
   if (error) throw new Error(error.message);
-  return codeOfConductStandard(data ?? []);
+  return data ?? [];
 }
 
 /**
@@ -473,11 +485,13 @@ export type CodeOfConductVersion = {
   title: string;
   body_md: string;
   asks_reagreement: boolean;
+  required_version: number;
   is_current: boolean;
   created_at: string;
 };
 
-const VERSION_COLUMNS = "id, version, title, body_md, asks_reagreement, is_current, created_at";
+const VERSION_COLUMNS =
+  "id, version, title, body_md, asks_reagreement, required_version, is_current, created_at";
 
 /** Every stored version, newest first. */
 export async function listCodeOfConductVersionRows(
@@ -562,21 +576,47 @@ export async function saveCodeOfConductVersion(
   input: SaveCodeOfConductInput,
   createdBy: string | null,
 ): Promise<{ id: string; version: number; is_current: boolean; already_saved: boolean }> {
+  // What an earlier attempt of this same save already wrote, if anything.
+  //
+  // Refused when the id comes back with different words: reusing an id for a
+  // different save would otherwise drop the new text and report success. And
+  // finished when it never went live: the first attempt wrote the version and
+  // then lost the promotion (`not_published`), and this retry is the caller
+  // asking for that save, so it is promoted now rather than reported as done.
   const replay = async () => {
     if (!input.client_submission_id) return null;
     const { data, error } = await admin
       .from("code_of_conduct_versions")
-      .select("id, version, is_current")
+      .select("id, version, title, body_md, asks_reagreement, is_current")
       .eq("client_submission_id", input.client_submission_id)
       .maybeSingle();
     if (error) throw new DocumentVersionError(error.message, "not_published");
-    return data
-      ? { id: data.id, version: data.version, is_current: data.is_current, already_saved: true }
-      : null;
+    if (!data) return null;
+    if (
+      data.title !== input.title ||
+      data.body_md !== input.body_md ||
+      data.asks_reagreement !== input.asks_reagreement
+    ) {
+      throw new DocumentVersionError(
+        `That client_submission_id already saved version ${data.version} with different text. Use a new id for a new save.`,
+        "invalid",
+        data.version,
+      );
+    }
+    if (!data.is_current) await promoteCodeOfConductVersion(admin, data.id);
+    return { id: data.id, version: data.version, is_current: true, already_saved: true };
   };
   const earlier = await replay();
   if (earlier) return earlier;
 
+  // What the new version will require is fixed now, from what the live one
+  // requires: an ask that a rollback undid must stay undone.
+  let now: CodeOfConductStandard;
+  try {
+    now = await loadCodeOfConductStandard(admin);
+  } catch (e) {
+    throw new DocumentVersionError(e instanceof Error ? e.message : String(e), "not_published");
+  }
   const version = await nextDocumentVersion(admin, CODE_OF_CONDUCT_DOCUMENT.table);
   const { data: created, error } = await admin
     .from("code_of_conduct_versions")
@@ -585,6 +625,7 @@ export async function saveCodeOfConductVersion(
       title: input.title,
       body_md: input.body_md,
       asks_reagreement: input.asks_reagreement,
+      required_version: requiredVersionForSave(version, input.asks_reagreement, now),
       is_current: false,
       client_submission_id: input.client_submission_id ?? null,
       created_by: createdBy,
