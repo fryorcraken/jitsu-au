@@ -26,6 +26,9 @@ import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 /** Canonical origin. Every `rel="canonical"` on the site points here. */
 export const SITE_ORIGIN = "https://utsjitsu.com.au";
 
+/** The origin without its scheme, for copy that names the address to a person. */
+export const SITE_HOST = new URL(SITE_ORIGIN).host;
+
 /**
  * Hosts that serve the real site. Anything else (a Lovable preview, a
  * Cloudflare *.workers.dev URL, a branch deploy) is the same content on a

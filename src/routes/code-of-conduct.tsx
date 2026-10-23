@@ -23,6 +23,7 @@ import {
 } from "@/lib/code-of-conduct";
 import { acceptCodeOfConduct, getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
 import { codeOfConductSearchSchema } from "@/lib/validation";
+import { canonicalUrl } from "@/lib/seo";
 
 export const Route = createFileRoute("/code-of-conduct")({
   // `?t=` carries the token from the "sign it later" email.
@@ -40,9 +41,9 @@ export const Route = createFileRoute("/code-of-conduct")({
         property: "og:description",
         content: "The rules we train by at UTS Jitsu, and how to report an incident.",
       },
-      { property: "og:url", content: "https://utsjitsu.com.au/code-of-conduct" },
+      { property: "og:url", content: canonicalUrl("/code-of-conduct") },
     ],
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/code-of-conduct" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/code-of-conduct") }],
   }),
   component: CodeOfConduct,
 });

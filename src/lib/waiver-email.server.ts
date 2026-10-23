@@ -23,11 +23,10 @@ const SITE_NAME = "UTS Jitsu";
 // misaligned From-domains as spam).
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where waivers are reviewed and approved. */
-export const WAIVER_REVIEW_URL = `${SITE_URL}/manager/waivers`;
+export const WAIVER_REVIEW_URL = `${SITE_ORIGIN}/manager/waivers`;
 
 /**
  * Where a newly activated member goes to get in for the first time.
@@ -46,12 +45,12 @@ export const WAIVER_REVIEW_URL = `${SITE_URL}/manager/waivers`;
  * alternative is naming pages and making them go looking.
  */
 const ACTIVATION_LINKS = {
-  signInUrl: `${SITE_URL}/auth`,
-  kbUrl: `${SITE_URL}/kb`,
-  codeOfConductUrl: `${SITE_URL}/code-of-conduct`,
-  membershipUrl: `${SITE_URL}/membership`,
-  blogUrl: `${SITE_URL}/blog`,
-  contactUrl: `${SITE_URL}/contact`,
+  signInUrl: `${SITE_ORIGIN}/auth`,
+  kbUrl: `${SITE_ORIGIN}/kb`,
+  codeOfConductUrl: `${SITE_ORIGIN}/code-of-conduct`,
+  membershipUrl: `${SITE_ORIGIN}/membership`,
+  blogUrl: `${SITE_ORIGIN}/blog`,
+  contactUrl: `${SITE_ORIGIN}/contact`,
 } as const;
 
 type AdminClient = SupabaseClient<Database>;
@@ -160,7 +159,7 @@ async function verificationLinkFor(
     const { mintVerificationToken } = await import("@/lib/email-verification.server");
     const { buildVerifyUrl } = await import("@/lib/email-verification");
     const token = await mintVerificationToken(admin, { email, purpose: "waiver", userId });
-    return buildVerifyUrl({ siteUrl: SITE_URL, token, next: "/account" });
+    return buildVerifyUrl({ siteUrl: SITE_ORIGIN, token, next: "/account" });
   } catch (e) {
     // The waiver is already saved and the PDF already rendered; a missing
     // confirm button is not a reason to lose the confirmation email itself.
@@ -199,7 +198,7 @@ export async function sendWaiverEmails({
 
   const memberEl = React.createElement(WaiverConfirmationEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     // The member-facing greeting: call them what they asked to be called.
     memberName: memberGreetingName,
     pdfUrl,
@@ -207,7 +206,7 @@ export async function sendWaiverEmails({
     // Only offered when the token exists: a code-of-conduct link with no token
     // lands on a page the signer cannot sign from, which is worse than no link.
     codeOfConductUrl: codeOfConductToken
-      ? buildCodeOfConductUrl({ siteUrl: SITE_URL, token: codeOfConductToken })
+      ? buildCodeOfConductUrl({ siteUrl: SITE_ORIGIN, token: codeOfConductToken })
       : null,
   });
   const memberHtml = await render(memberEl);
@@ -317,7 +316,7 @@ export async function sendAccountActivatedEmail({
 
   const el = React.createElement(AccountActivatedEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     memberName: memberGreetingName,
     loginEmail: memberEmail,
     dependantName: dependantName ?? null,

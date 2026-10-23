@@ -31,7 +31,6 @@ import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { SITE_ORIGIN } from "@/lib/seo";
 
-const SITE_URL = SITE_ORIGIN;
 /**
  * How far ahead a repeating entry's dates are kept on the calendar. The manager
  * never asks for this: any calendar read tops the horizon back up, so a weekly
@@ -103,9 +102,9 @@ async function canSeeMembersOnly(userId: string): Promise<boolean> {
 async function requestOrigin(): Promise<string> {
   try {
     const { getRequestHeader } = await import("@tanstack/react-start/server");
-    return getRequestHeader("origin") || SITE_URL;
+    return getRequestHeader("origin") || SITE_ORIGIN;
   } catch {
-    return SITE_URL;
+    return SITE_ORIGIN;
   }
 }
 

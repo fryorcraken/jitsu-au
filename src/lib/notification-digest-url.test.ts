@@ -19,24 +19,57 @@ import { SITE_ORIGIN } from "./seo";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "..", "supabase", "migrations");
 
-/** The URL literal in the newest migration that (re)defines the digest function. */
-function newestDigestUrl(): { file: string; url: string | null } {
-  const bodies = readdirSync(MIGRATIONS)
+// Any spelling Postgres accepts for (re)defining the function: either case,
+// with or without OR REPLACE, quoted identifiers, any whitespace. A body this
+// misses would be silently skipped, and the test would pass against an older
+// one, which is the exact failure it exists to catch.
+const DEFINES_DIGEST =
+  /create\s+(?:or\s+replace\s+)?function\s+"?private"?\s*\.\s*"?run_notification_digest"?\s*\(/gi;
+
+/** Every definition of the digest function, in apply order, with its own body. */
+function digestBodies(): { file: string; body: string }[] {
+  const found: { file: string; body: string }[] = [];
+  const files = readdirSync(MIGRATIONS)
     .filter((f) => f.endsWith(".sql"))
-    .sort()
-    .map((file) => ({ file, sql: readFileSync(join(MIGRATIONS, file), "utf8") }))
-    .filter(({ sql }) =>
-      /CREATE OR REPLACE FUNCTION private\.run_notification_digest\(\)/.test(sql),
-    );
-  const newest = bodies.at(-1);
-  if (!newest) throw new Error("no migration defines private.run_notification_digest()");
-  return { file: newest.file, url: /url := '([^']+)'/.exec(newest.sql)?.[1] ?? null };
+    .sort();
+  for (const file of files) {
+    const sql = readFileSync(join(MIGRATIONS, file), "utf8");
+    for (const m of sql.matchAll(DEFINES_DIGEST)) {
+      // The body runs from the opening $$ after the header to the closing $$.
+      // Reading the URL from inside it, not from anywhere in the file, keeps a
+      // second net.http_post elsewhere in the same file from being mistaken
+      // for the digest's.
+      const open = sql.indexOf("$$", m.index);
+      const close = open === -1 ? -1 : sql.indexOf("$$", open + 2);
+      found.push({ file, body: close === -1 ? "" : sql.slice(open + 2, close) });
+    }
+  }
+  return found;
 }
 
 describe("the nightly digest's destination", () => {
   it("is the site's own origin, so no redirect can drop its token", () => {
-    const { file, url } = newestDigestUrl();
-    expect(url, `${file} has no inlined url := '...' literal`).not.toBeNull();
-    expect(url).toBe(`${SITE_ORIGIN}/api/notifications/digest`);
+    const bodies = digestBodies();
+    expect(bodies.length, "no migration defines private.run_notification_digest()").toBeGreaterThan(
+      0,
+    );
+    const newest = bodies.at(-1)!;
+    const url = /url\s*:=\s*'([^']+)'/i.exec(newest.body)?.[1] ?? null;
+    expect(url, `${newest.file} has no inlined url := '...' in the function body`).not.toBeNull();
+    expect(url, newest.file).toBe(`${SITE_ORIGIN}/api/notifications/digest`);
+  });
+
+  // Guards the scan itself: every body this repo has ever shipped is found,
+  // including the ones written in other spellings, so a regression in the
+  // pattern cannot quietly shrink what "newest" is chosen from.
+  it("finds every historical definition of the function", () => {
+    const files = digestBodies().map((b) => b.file);
+    expect(files).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^20260807000000_/),
+        expect.stringMatching(/^20260822120041_/),
+        expect.stringMatching(/^20261023000000_/),
+      ]),
+    );
   });
 });

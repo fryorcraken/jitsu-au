@@ -24,12 +24,11 @@ const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */
-export const MEMBERSHIP_REVIEW_URL = `${SITE_URL}/manager/memberships`;
-const ACCOUNT_URL = `${SITE_URL}/membership`;
+export const MEMBERSHIP_REVIEW_URL = `${SITE_ORIGIN}/manager/memberships`;
+const ACCOUNT_URL = `${SITE_ORIGIN}/membership`;
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -107,7 +106,7 @@ export async function sendMembershipPaymentEmail({
 
   const memberEl = React.createElement(MembershipPaymentEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     // The member-facing greeting: call them what they asked to be called.
     memberName: memberGreetingName,
     forName,
@@ -227,7 +226,7 @@ export async function sendMembershipPaidEmail({
 
   const el = React.createElement(MembershipPaidEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     memberName: memberGreetingName,
     forName,
     planName,
@@ -297,7 +296,7 @@ export async function sendItemInvoiceEmail({
   const { details } = await readClubPaymentDetails(admin);
   const el = React.createElement(ItemInvoiceEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     memberName: memberGreetingName,
     forName,
     lines,
@@ -355,7 +354,7 @@ export async function sendItemInvoicePaidEmail({
   }
   const el = React.createElement(ItemInvoicePaidEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     memberName: memberGreetingName,
     forName,
     reference,

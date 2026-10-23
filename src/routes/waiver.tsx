@@ -55,7 +55,7 @@ import {
   type HealthQuestionId,
   type WaiverSigningFor,
 } from "@/lib/validation";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/waiver")({
@@ -71,7 +71,7 @@ export const Route = createFileRoute("/waiver")({
       }),
       { name: "robots", content: "noindex" },
     ],
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/waiver" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/waiver") }],
   }),
   component: Waiver,
 });

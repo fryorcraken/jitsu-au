@@ -20,11 +20,10 @@ const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where the lead/member funnel is reviewed. */
-export const MANAGER_DASHBOARD_URL = `${SITE_URL}/manager/users`;
+export const MANAGER_DASHBOARD_URL = `${SITE_ORIGIN}/manager/users`;
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -51,7 +50,7 @@ export function buildWaiverUrl(params: {
   if (params.phone) search.set("phone", params.phone);
   if (params.token) search.set("vt", params.token);
   const qs = search.toString();
-  return qs ? `${SITE_URL}/waiver?${qs}` : `${SITE_URL}/waiver`;
+  return qs ? `${SITE_ORIGIN}/waiver?${qs}` : `${SITE_ORIGIN}/waiver`;
 }
 
 async function sendOne(opts: {
@@ -125,7 +124,7 @@ export async function sendInterestEmails({
 
   const applicantEl = React.createElement(InterestConfirmationEmail, {
     siteName: SITE_NAME,
-    siteUrl: SITE_URL,
+    siteUrl: SITE_ORIGIN,
     name,
     waiverUrl,
   });

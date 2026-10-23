@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import franckImg from "@/assets/franck-royer.jpg.asset.json";
 
 export const Route = createFileRoute("/instructors")({
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/instructors")({
       ogDescription: "Meet Franck Royer and the coaching team at UTS Jitsu.",
       path: "/instructors",
     }),
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/instructors" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/instructors") }],
   }),
   component: Instructors,
 });

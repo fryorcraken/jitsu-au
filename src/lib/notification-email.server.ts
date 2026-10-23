@@ -42,7 +42,6 @@ const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 type AdminClient = SupabaseClient<Database>;
@@ -73,7 +72,7 @@ async function sendOne(opts: {
 
 /** Turn a stored site-relative `href` into something an email client can open. */
 export function absoluteUrl(href: string): string {
-  return `${SITE_URL}${href}`;
+  return `${SITE_ORIGIN}${href}`;
 }
 
 /**
@@ -86,7 +85,7 @@ export function absoluteUrl(href: string): string {
  * which case the caller falls back to the signed-in page.
  */
 export async function settingsUrlFor(db: AdminClient, userId: string): Promise<string> {
-  const url = (token: string) => `${SITE_URL}/email-settings/${token}`;
+  const url = (token: string) => `${SITE_ORIGIN}/email-settings/${token}`;
 
   // The token belongs to the person who READS the mail, not the person the mail
   // is about. `notification_tokens` is one row per user, so minting one per
@@ -123,7 +122,7 @@ export async function settingsUrlFor(db: AdminClient, userId: string): Promise<s
   // No token, so no signed-out link. The signed-in page still works, and an
   // email with a settings link that needs a login beats no email at all.
   console.error(`[notifications] could not mint a settings token for ${contactId}`);
-  return `${SITE_URL}/notifications`;
+  return `${SITE_ORIGIN}/notifications`;
 }
 
 export type NotificationDraft = {
@@ -468,7 +467,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
         siteName: SITE_NAME,
         greeting: greetingName(nameByUser.get(userId) ?? {}) || "Hi",
         blocks,
-        notificationsUrl: `${SITE_URL}/notifications`,
+        notificationsUrl: `${SITE_ORIGIN}/notifications`,
         settingsUrl: await settingsUrlFor(db, userId),
       });
       const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);

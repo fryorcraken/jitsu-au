@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import aboutImg from "@/assets/training2.jpg.asset.json";
 import teamImg from "@/assets/training4.jpg.asset.json";
 
@@ -15,7 +15,7 @@ export const Route = createFileRoute("/about")({
         "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
       path: "/about",
     }),
-    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/about" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/about") }],
   }),
   component: About,
 });

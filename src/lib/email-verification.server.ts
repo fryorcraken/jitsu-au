@@ -32,7 +32,6 @@ const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-export const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 type AdminClient = SupabaseClient<Database>;
@@ -238,9 +237,9 @@ export async function sendVerificationEmail(opts: {
     });
     const el = React.createElement(VerifyEmail, {
       siteName: SITE_NAME,
-      siteUrl: SITE_URL,
+      siteUrl: SITE_ORIGIN,
       memberName: opts.greetingName || "",
-      verifyUrl: buildVerifyUrl({ siteUrl: SITE_URL, token, next: opts.next }),
+      verifyUrl: buildVerifyUrl({ siteUrl: SITE_ORIGIN, token, next: opts.next }),
     });
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
 
