@@ -46,6 +46,7 @@ import { Route as AuthenticatedManagerBlogRouteImport } from './routes/_authenti
 import { Route as AuthenticatedManagerBlogCommentsRouteImport } from './routes/_authenticated/manager.blog-comments'
 import { Route as AuthenticatedManagerCalendarRouteImport } from './routes/_authenticated/manager.calendar'
 import { Route as AuthenticatedManagerCheckInRouteImport } from './routes/_authenticated/manager.check-in'
+import { Route as AuthenticatedManagerCodeOfConductRouteImport } from './routes/_authenticated/manager.code-of-conduct'
 import { Route as AuthenticatedManagerContactMessagesRouteImport } from './routes/_authenticated/manager.contact-messages'
 import { Route as AuthenticatedManagerItemsRouteImport } from './routes/_authenticated/manager.items'
 import { Route as AuthenticatedManagerKbRouteImport } from './routes/_authenticated/manager.kb'
@@ -259,6 +260,12 @@ const AuthenticatedManagerCheckInRoute =
     path: '/manager/check-in',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerCodeOfConductRoute =
+  AuthenticatedManagerCodeOfConductRouteImport.update({
+    id: '/manager/code-of-conduct',
+    path: '/manager/code-of-conduct',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerContactMessagesRoute =
   AuthenticatedManagerContactMessagesRouteImport.update({
     id: '/manager/contact-messages',
@@ -409,6 +416,7 @@ export interface FileRoutesByFullPath {
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/manager/code-of-conduct': typeof AuthenticatedManagerCodeOfConductRoute
   '/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
   '/manager/items': typeof AuthenticatedManagerItemsRoute
   '/manager/kb': typeof AuthenticatedManagerKbRoute
@@ -466,6 +474,7 @@ export interface FileRoutesByTo {
   '/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/manager/code-of-conduct': typeof AuthenticatedManagerCodeOfConductRoute
   '/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
   '/manager/items': typeof AuthenticatedManagerItemsRoute
   '/manager/kb': typeof AuthenticatedManagerKbRoute
@@ -526,6 +535,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/blog-comments': typeof AuthenticatedManagerBlogCommentsRoute
   '/_authenticated/manager/calendar': typeof AuthenticatedManagerCalendarRoute
   '/_authenticated/manager/check-in': typeof AuthenticatedManagerCheckInRoute
+  '/_authenticated/manager/code-of-conduct': typeof AuthenticatedManagerCodeOfConductRoute
   '/_authenticated/manager/contact-messages': typeof AuthenticatedManagerContactMessagesRoute
   '/_authenticated/manager/items': typeof AuthenticatedManagerItemsRoute
   '/_authenticated/manager/kb': typeof AuthenticatedManagerKbRoute
@@ -586,6 +596,7 @@ export interface FileRouteTypes {
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
+    | '/manager/code-of-conduct'
     | '/manager/contact-messages'
     | '/manager/items'
     | '/manager/kb'
@@ -643,6 +654,7 @@ export interface FileRouteTypes {
     | '/manager/blog-comments'
     | '/manager/calendar'
     | '/manager/check-in'
+    | '/manager/code-of-conduct'
     | '/manager/contact-messages'
     | '/manager/items'
     | '/manager/kb'
@@ -702,6 +714,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/blog-comments'
     | '/_authenticated/manager/calendar'
     | '/_authenticated/manager/check-in'
+    | '/_authenticated/manager/code-of-conduct'
     | '/_authenticated/manager/contact-messages'
     | '/_authenticated/manager/items'
     | '/_authenticated/manager/kb'
@@ -1020,6 +1033,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerCheckInRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/code-of-conduct': {
+      id: '/_authenticated/manager/code-of-conduct'
+      path: '/manager/code-of-conduct'
+      fullPath: '/manager/code-of-conduct'
+      preLoaderRoute: typeof AuthenticatedManagerCodeOfConductRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/contact-messages': {
       id: '/_authenticated/manager/contact-messages'
       path: '/manager/contact-messages'
@@ -1173,6 +1193,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerBlogCommentsRoute: typeof AuthenticatedManagerBlogCommentsRoute
   AuthenticatedManagerCalendarRoute: typeof AuthenticatedManagerCalendarRoute
   AuthenticatedManagerCheckInRoute: typeof AuthenticatedManagerCheckInRoute
+  AuthenticatedManagerCodeOfConductRoute: typeof AuthenticatedManagerCodeOfConductRoute
   AuthenticatedManagerContactMessagesRoute: typeof AuthenticatedManagerContactMessagesRoute
   AuthenticatedManagerItemsRoute: typeof AuthenticatedManagerItemsRoute
   AuthenticatedManagerKbRoute: typeof AuthenticatedManagerKbRoute
@@ -1200,6 +1221,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerBlogCommentsRoute: AuthenticatedManagerBlogCommentsRoute,
   AuthenticatedManagerCalendarRoute: AuthenticatedManagerCalendarRoute,
   AuthenticatedManagerCheckInRoute: AuthenticatedManagerCheckInRoute,
+  AuthenticatedManagerCodeOfConductRoute:
+    AuthenticatedManagerCodeOfConductRoute,
   AuthenticatedManagerContactMessagesRoute:
     AuthenticatedManagerContactMessagesRoute,
   AuthenticatedManagerItemsRoute: AuthenticatedManagerItemsRoute,
