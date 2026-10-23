@@ -12,6 +12,8 @@ import {
   Text,
 } from "@react-email/components";
 
+import { waiverNotificationSubject } from "./waiver-notification-subject";
+
 interface WaiverNotificationEmailProps {
   siteName: string;
   /** Who the waiver is for: the person a manager is about to review. */
@@ -48,10 +50,7 @@ export const WaiverNotificationEmail = ({
   <Html lang="en" dir="ltr">
     <Head />
     <Preview>
-      {signedByName
-        ? `New waiver signed by ${signedByName} for ${memberName}`
-        : `New waiver signed by ${memberName || memberEmail}`}
-      : {siteName}
+      {waiverNotificationSubject({ memberName, memberEmail, signedByName })}: {siteName}
     </Preview>
     <Body style={main}>
       <Container style={container}>

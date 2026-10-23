@@ -1218,9 +1218,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         const { sendWaiverEmails } = await import("./waiver-email.server");
         await sendWaiverEmails({
           waiverId: inserted.id,
-          // The participant, for the managers' "new waiver signed by" line.
-          // Still the child on a child's waiver: they are who signed up, and a
-          // reviewer is about to look at their record.
+          // The participant: who the managers' email says the waiver is for.
+          // Still the child on a child's waiver, since they are who signed up
+          // and a reviewer is about to look at their record; the parent is
+          // named as the signer through `signedByName` below.
           memberName: full_name,
           // ...but the person READING the confirmation is the account holder,
           // so greet them. On a child's waiver that is the parent, taken from

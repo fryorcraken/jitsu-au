@@ -16,6 +16,7 @@ import { normalizeEmail } from "@/lib/validation";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
+import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
 
 const SITE_NAME = "UTS Jitsu";
 const SITE_URL = "https://jitsu.au";
@@ -246,9 +247,7 @@ export async function sendWaiverEmails({
         apiKey,
         sendUrl,
         to,
-        subject: signedByName
-          ? `New waiver signed by ${signedByName} for ${memberName}`
-          : `New waiver signed by ${memberName || memberEmail}`,
+        subject: waiverNotificationSubject({ memberName, memberEmail, signedByName }),
         html: managerHtml,
         text: managerText,
         idempotencyKey: `waiver-manager-${waiverId}-${to}`,
