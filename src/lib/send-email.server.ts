@@ -1,11 +1,11 @@
 // Server-only: the one place the app hands a transactional email to Lovable's
-// send API, and the one place the sender is spelled.
+// send API.
 //
 // Every `*-email.server.ts` module used to carry its own copy of this function
 // and of the From address. Keeping them in step by hand is how one copy grows
 // an option the others lack, so they all send through here. The auth-email
 // webhook is the exception: Lovable's `createAuthEmailHandler` sends on its own,
-// and only takes the From address as configuration.
+// and takes the same sender from `email-sender.ts`.
 //
 // Everything goes out from `noreply@`, so a reply goes nowhere unless the send
 // says otherwise. The rule: a manager's copy of an email ABOUT a person (a
@@ -16,11 +16,7 @@
 // Like the modules that call it, this must never reach the client bundle: it is
 // named `*.server.ts` and is only ever imported by other `*.server.ts` modules.
 import { sendLovableEmail } from "@lovable.dev/email-js";
-
-// The From domain must match the sender domain so DKIM/SPF align under DMARC
-// (Gmail flags misaligned From-domains as spam).
-const SENDER_DOMAIN = "notify.jitsu.au";
-const FROM = `UTS Jitsu <noreply@${SENDER_DOMAIN}>`;
+import { FROM, SENDER_DOMAIN } from "@/lib/email-sender";
 
 export async function sendEmail(opts: {
   apiKey: string;
