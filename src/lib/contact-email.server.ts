@@ -36,6 +36,7 @@ async function sendOne(opts: {
   html: string;
   text: string;
   idempotencyKey: string;
+  replyTo?: string;
 }) {
   await sendLovableEmail(
     {
@@ -47,6 +48,7 @@ async function sendOne(opts: {
       text: opts.text,
       purpose: "transactional",
       idempotency_key: opts.idempotencyKey,
+      reply_to: opts.replyTo,
     },
     { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
   );
@@ -133,7 +135,11 @@ export async function sendContactEmails({
     console.error(`[contact-email] failed to email the sender:`, e);
   }
 
-  // The message itself, to each manager.
+  // The message itself, to each manager. Reply-To is the visitor, so a
+  // manager's own "Reply" button answers them rather than the noreply sender.
+  // The bare address only: `name` is free text from a public form and has no
+  // business in a header. contactSchema has already rejected anything that is
+  // not a single well-formed address.
   for (const to of notifyRecipients) {
     try {
       await sendOne({
@@ -146,6 +152,7 @@ export async function sendContactEmails({
         html: managerHtml,
         text: managerText,
         idempotencyKey: `contact-manager-${messageId}-${to}`,
+        replyTo: email,
       });
       sent.push(to);
     } catch (e) {
