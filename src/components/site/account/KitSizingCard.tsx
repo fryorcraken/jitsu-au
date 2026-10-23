@@ -85,10 +85,7 @@ export function KitSizingCard({ userId, voice, profile, loading, onSaved }: Deta
                 disabled={busy}
                 className="mt-1.5"
               />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                The number in brackets is the wearer's height that gi size is cut for.{" "}
-                {GI_SIZE_HINT}
-              </p>
+              <p className="mt-1.5 text-xs text-muted-foreground">{GI_SIZE_HINT}</p>
             </div>
             <div>
               <Label htmlFor="belt-size">Belt size</Label>
