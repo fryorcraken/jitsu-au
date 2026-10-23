@@ -913,6 +913,77 @@ export const waiverApprovalSchema = z.object({
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 
+// ---- Code of conduct: managers edit it, in numbered versions ----
+//
+// Shaped like the waiver template schemas above, with two differences. There
+// are no acknowledgements (the undertaking a signer gives stays in code,
+// `code-of-conduct.ts`). And saving carries `asks_reagreement`: whether this
+// version puts everybody who agreed to an older one out of date. It is off by
+// default, because the commonest save is a correction, and a correction that
+// asked the whole club to agree again would be noise people learn to ignore.
+
+/** The body's ceiling. Generous: today's document is under 5000 characters. */
+export const CODE_OF_CONDUCT_BODY_MAX = 50000;
+
+/** The editor screen's save: a whole version, written and made live. */
+export const saveCodeOfConductSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  body_md: z.string().trim().min(1).max(CODE_OF_CONDUCT_BODY_MAX),
+  asks_reagreement: z.boolean().default(false),
+  // One per press of Save, resent unchanged on a retry, so a save whose reply
+  // was lost comes back as the version it already wrote rather than a second.
+  client_submission_id: z.string().uuid().optional(),
+});
+export type SaveCodeOfConductInput = z.infer<typeof saveCodeOfConductSchema>;
+
+/** The agent API reads one version by number, or the live one. */
+export const agentGetCodeOfConductSchema = z
+  .object({ version: z.number().int().positive().optional() })
+  .strict();
+
+/**
+ * The agent API's save. Every field optional, carried over from `base_version`
+ * (default the live one), exactly as `agentSaveWaiverTemplateSchema`: `title`
+ * and `body_md` travel together, and a call that changes nothing is refused.
+ *
+ * "Changes nothing" counts `asks_reagreement: true` as a change. Somebody who
+ * published a rewrite and forgot to ask everybody to agree again needs a way to
+ * ask without inventing an edit, and a new version that asks, with the same
+ * text, is exactly that.
+ */
+export const agentSaveCodeOfConductSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    body_md: z.string().trim().min(1).max(CODE_OF_CONDUCT_BODY_MAX).optional(),
+    asks_reagreement: z.boolean().optional().default(false),
+    base_version: z.number().int().positive().optional(),
+    client_submission_id: z.string().uuid().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (Boolean(value.title) !== Boolean(value.body_md)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [value.title ? "body_md" : "title"],
+        message: "Saving new text needs both title and body_md: a version is written as a whole.",
+      });
+    }
+    if (!value.title && !value.body_md && !value.asks_reagreement) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["body_md"],
+        message:
+          "Nothing to save: send title and body_md, or asks_reagreement true to ask everybody to agree to the current text again. To make an existing version live again, use publish_code_of_conduct.",
+      });
+    }
+  });
+export type AgentSaveCodeOfConductInput = z.infer<typeof agentSaveCodeOfConductSchema>;
+
+/** Make an existing stored version the live one. */
+export const agentPublishCodeOfConductSchema = z
+  .object({ version: z.number().int().positive() })
+  .strict();
+
 // ---- Code of conduct ----
 //
 // Deliberately small next to `waiverSubmitSchema`. The signer is a person the

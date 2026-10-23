@@ -74,6 +74,7 @@ import type {
 import { hashToken } from "@/lib/manager-api-tokens";
 import { ClubUserNotFoundError, loadClubUser } from "@/lib/club-user.functions";
 import { codeOfConductSummary } from "@/lib/code-of-conduct";
+import { loadCodeOfConductStandard } from "@/lib/code-of-conduct.functions";
 import {
   deleteKbSection,
   listKbSections,
@@ -476,6 +477,14 @@ async function handleListUsers(params: unknown) {
   // unlimited, so a capped read could drop somebody's only agreement and report
   // them as unsigned. Ordered by id so the pages cannot overlap or skip.
   const ids = capped.map((u) => u.user_id).filter((id): id is string => Boolean(id));
+  // What the state is measured against: the live version and the newest one
+  // at or below it that asked everybody to agree again.
+  let standard: Awaited<ReturnType<typeof loadCodeOfConductStandard>>;
+  try {
+    standard = await loadCodeOfConductStandard(db);
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
   const acceptances: {
     user_id: string;
     version: number;
@@ -516,7 +525,10 @@ async function handleListUsers(params: unknown) {
       ...u,
       // A lead has no person record and cannot sign, so it reads as unsigned,
       // which is true.
-      code_of_conduct: codeOfConductSummary(u.user_id ? acceptancesByUser.get(u.user_id) : null),
+      code_of_conduct: codeOfConductSummary(
+        u.user_id ? acceptancesByUser.get(u.user_id) : null,
+        standard,
+      ),
     })),
   };
 }

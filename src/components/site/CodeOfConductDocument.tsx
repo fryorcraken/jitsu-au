@@ -1,10 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import {
-  CODE_OF_CONDUCT_BODY_MD,
-  parseCodeOfConductBlocks,
-  parseCodeOfConductSpans,
-} from "@/lib/code-of-conduct";
+import { parseCodeOfConductBlocks, parseCodeOfConductSpans } from "@/lib/code-of-conduct";
 
 /**
  * The club's code of conduct, rendered for reading.
@@ -14,14 +10,12 @@ import {
  * be read in whichever theme the visitor is using. Nothing about a person
  * appears in it, because the document has no placeholders — it is house rules,
  * identical for everybody.
+ *
+ * The body is a version from the database. The public page and the manager's
+ * editor preview both render through here, so what a manager previews is what
+ * members read.
  */
-export function CodeOfConductDocument({
-  body = CODE_OF_CONDUCT_BODY_MD,
-  className,
-}: {
-  body?: string;
-  className?: string;
-}) {
+export function CodeOfConductDocument({ body, className }: { body: string; className?: string }) {
   const blocks = parseCodeOfConductBlocks(body);
 
   return (
