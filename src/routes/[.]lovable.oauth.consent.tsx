@@ -39,9 +39,7 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
   loaderDeps: ({ search }) => ({ authorizationId: search.authorization_id }),
   loader: async ({ deps }) => {
     if (!deps.authorizationId) return { state: "missing" as const };
-    const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(
-      deps.authorizationId,
-    );
+    const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(deps.authorizationId);
     if (error) throw error;
     if (!data) return { state: "missing" as const };
     // Already approved before: go straight back to the assistant.
@@ -127,9 +125,9 @@ function Consent() {
         <strong>{details.email}</strong>.
       </p>
       <p className="text-sm text-muted-foreground">
-        It will be able to look up members and invoices, and make the same changes you can make as
-        a manager, including ones that email members. Only connect an assistant you trust. Only
-        club managers can use these tools.
+        It will be able to look up members and invoices, and make the same changes you can make as a
+        manager, including ones that email members. Only connect an assistant you trust. Only club
+        managers can use these tools.
       </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">

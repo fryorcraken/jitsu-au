@@ -167,10 +167,8 @@ function MagicLinkSignIn({
       await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: new URL(
-            oauthReturnPath(redirect, "/account"),
-            window.location.origin,
-          ).href,
+          emailRedirectTo: new URL(oauthReturnPath(redirect, "/account"), window.location.origin)
+            .href,
           shouldCreateUser: false,
         },
       });
