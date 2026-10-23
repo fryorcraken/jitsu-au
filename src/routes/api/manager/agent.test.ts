@@ -1008,3 +1008,234 @@ describe("manager agent route: item invoices", () => {
     expect((await res.json()).error.code).toBe("invalid_params");
   });
 });
+
+// ---- Reading people: list_users and get_user ----
+//
+// Both run their REAL reads (`loadClubUser` for get_user) against a fake over
+// in-memory tables, because the point of get_user is that it is the person
+// page's own read: mocking that away would test a route nobody runs.
+describe("manager agent route: reading people", () => {
+  const PERSON = "11111111-1111-4111-8111-111111111111";
+  const GUARDIAN = "22222222-2222-4222-8222-222222222222";
+  const CHILD = "33333333-3333-4333-8333-333333333333";
+
+  type Row = Record<string, unknown>;
+
+  /** Honours `eq` / `in` and the `count` + `head` select; order and limit are no-ops. */
+  function fakeTables(
+    tables: Record<string, Row[]>,
+    opts: {
+      emails?: { user_id: string; email: string; email_confirmed_at: string | null }[];
+      fail?: Record<string, string>;
+    } = {},
+  ) {
+    return {
+      from: (table: string) => {
+        const filters: ((r: Row) => boolean)[] = [];
+        let head = false;
+        const result = () => {
+          if (opts.fail?.[table]) {
+            return { data: null, count: null, error: { message: opts.fail[table] } };
+          }
+          const rows = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+          return { data: head ? null : rows, count: rows.length, error: null };
+        };
+        const b = {
+          select: (_c?: string, o?: { head?: boolean }) => {
+            if (o?.head) head = true;
+            return b;
+          },
+          eq: (col: string, val: unknown) => {
+            filters.push((r) => r[col] === val);
+            return b;
+          },
+          in: (col: string, vals: unknown[]) => {
+            filters.push((r) => vals.includes(r[col]));
+            return b;
+          },
+          order: () => b,
+          limit: () => b,
+          maybeSingle: () => {
+            const r = result();
+            return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error });
+          },
+          then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+            Promise.resolve(result()).then(resolve, reject),
+        };
+        return b;
+      },
+      rpc: (name: string, args?: unknown) => {
+        if (name !== "user_emails") throw new Error(`unexpected rpc ${name}`);
+        const ids = (args as { _user_ids: string[] })._user_ids;
+        return Promise.resolve(ok((opts.emails ?? []).filter((e) => ids.includes(e.user_id))));
+      },
+    };
+  }
+
+  const profile = (user_id: string, first_name: string, over: Row = {}): Row => ({
+    user_id,
+    first_name,
+    middle_name: null,
+    last_name: "Lovelace",
+    preferred_name: null,
+    phone: "0400 000 001",
+    guardian_user_id: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    ...over,
+  });
+
+  const tables = (over: Record<string, Row[]> = {}): Record<string, Row[]> => ({
+    profiles: [
+      profile(PERSON, "Ada"),
+      profile(GUARDIAN, "Gus"),
+      profile(CHILD, "Bea", { guardian_user_id: GUARDIAN, phone: null }),
+    ],
+    memberships: [],
+    membership_plans: [],
+    waivers: [
+      {
+        id: "w1",
+        user_id: PERSON,
+        first_name: "Ada",
+        last_name: "Lovelace",
+        signed_at: "2026-02-01T00:00:00+00:00",
+        approval_status: "pending",
+        approved_by: null,
+        pdf_path: "w1.pdf",
+        template_version: 3,
+        signer_ip: "192.0.2.1",
+        signer_meta: { ua: "x" },
+      },
+    ],
+    session_checkins: [],
+    interest_registrations: [],
+    user_roles: [],
+    calendar_events: [],
+    code_of_conduct_acceptances: [
+      { user_id: PERSON, version: 1, accepted_at: "2026-03-01T00:00:00Z", signature_name: "Ada L" },
+    ],
+    ...over,
+  });
+
+  const EMAILS = [
+    { user_id: PERSON, email: "ada@example.com", email_confirmed_at: "2026-01-02T00:00:00Z" },
+    { user_id: GUARDIAN, email: "gus@example.com", email_confirmed_at: null },
+  ];
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  describe("list_users", () => {
+    it("carries phone, verification and the code of conduct on every row", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({ action: "list_users", params: {} });
+      expect(res.status).toBe(200);
+      const byId = new Map(
+        (await res.json()).result.users.map((u: { user_id: string }) => [u.user_id, u]),
+      );
+      expect(byId.get(PERSON)).toMatchObject({
+        phone: "0400 000 001",
+        email_confirmed_at: "2026-01-02T00:00:00Z",
+        code_of_conduct: {
+          state: "signed",
+          accepted_version: 1,
+          accepted_at: "2026-03-01T00:00:00Z",
+          signature_name: "Ada L",
+        },
+      });
+      expect(byId.get(GUARDIAN)).toMatchObject({
+        email_confirmed_at: null,
+        code_of_conduct: { state: "unsigned", accepted_version: null },
+      });
+      // A child's address is the guardian's, so its verified state is too.
+      expect(byId.get(CHILD)).toMatchObject({
+        email: "gus@example.com",
+        email_belongs_to: "Gus Lovelace",
+        email_confirmed_at: null,
+      });
+    });
+
+    it("refuses with db_error rather than reporting everybody as unsigned", async () => {
+      currentAdmin = fakeTables(tables(), {
+        emails: EMAILS,
+        fail: { code_of_conduct_acceptances: "boom" },
+      });
+      const res = await post({ action: "list_users", params: {} });
+      expect(res.status).toBe(500);
+      expect((await res.json()).error.code).toBe("db_error");
+    });
+  });
+
+  describe("get_user", () => {
+    it("returns the person page's read, less the signer's IP and browser context", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({ action: "get_user", params: { user_id: PERSON } });
+      expect(res.status).toBe(200);
+      const { result } = await res.json();
+      expect(result.user).toMatchObject({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        email_belongs_to: null,
+        email_confirmed_at: "2026-01-02T00:00:00Z",
+      });
+      expect(result.code_of_conduct).toMatchObject({ state: "signed", accepted_version: 1 });
+      expect(result.waivers).toEqual([
+        expect.objectContaining({ id: "w1", template_version: 3, has_pdf: true }),
+      ]);
+      expect(result.waivers[0]).not.toHaveProperty("signer_ip");
+      expect(result.waivers[0]).not.toHaveProperty("signer_meta");
+      expect(result).not.toHaveProperty("degraded");
+    });
+
+    it("captions a dependant's address as their guardian's", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({ action: "get_user", params: { user_id: CHILD } });
+      const { result } = await res.json();
+      expect(result.user).toMatchObject({
+        email: "gus@example.com",
+        email_belongs_to: "Gus Lovelace",
+      });
+      expect(result.household.guardian).toEqual({ user_id: GUARDIAN, name: "Gus Lovelace" });
+    });
+
+    it("404s an id with no person record", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({
+        action: "get_user",
+        params: { user_id: "99999999-9999-4999-8999-999999999999" },
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe("not_found");
+    });
+
+    it.each(["memberships", "session_checkins", "waivers"])(
+      "is a db_error, not an empty section, when the %s read fails",
+      async (table) => {
+        currentAdmin = fakeTables(tables(), { emails: EMAILS, fail: { [table]: "boom" } });
+        const res = await post({ action: "get_user", params: { user_id: PERSON } });
+        expect(res.status).toBe(500);
+        expect((await res.json()).error.code).toBe("db_error");
+      },
+    );
+
+    // The page shows these as "not signed yet" so a manager can still approve
+    // somebody. An agent would act on that guess, so it gets the failure.
+    it("is a db_error when the code of conduct could not be read", async () => {
+      currentAdmin = fakeTables(tables(), {
+        emails: EMAILS,
+        fail: { code_of_conduct_acceptances: "boom" },
+      });
+      const res = await post({ action: "get_user", params: { user_id: PERSON } });
+      expect(res.status).toBe(500);
+      expect((await res.json()).error.code).toBe("db_error");
+    });
+
+    it("refuses a call naming the person as id rather than user_id", async () => {
+      currentAdmin = {};
+      const res = await post({ action: "get_user", params: { id: PERSON } });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_params");
+    });
+  });
+});

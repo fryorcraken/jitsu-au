@@ -138,6 +138,10 @@ deliberately read-only. A manager cannot tick it on somebody's behalf, for the
 same reason there is no "mark as verified" button anywhere: an agreement a
 manager recorded would only mean "a manager believed this".
 
+The manager agent API reports the same block, from the same rule
+(`codeOfConductSummary`): on every `list_users` row and in `get_user`, which is
+the person page's own read. It is read-only there too.
+
 It sits above Memberships because that is when it matters. The club's intent is
 that this gets signed as somebody joins as a paying member, so the state is in
 front of the manager at exactly the moment they are setting that up.

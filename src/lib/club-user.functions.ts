@@ -337,6 +337,20 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
   );
 
   return {
+    /**
+     * The sections this read could not fill, and filled with a guess instead.
+     *
+     * The page tolerates both, on purpose: the address shows as missing and the
+     * code of conduct as "not signed yet", with a line in the server log, so a
+     * manager can still make the approval they came to make. A machine caller
+     * cannot read that log, and "no email" or "unsigned" is a confident wrong
+     * answer it would act on, so the API's `get_user` refuses a read with
+     * anything listed here as a `500 db_error` instead. Empty on a clean read.
+     */
+    degraded: [
+      ...(emailErr ? (["email"] as const) : []),
+      ...(cocErr ? (["code_of_conduct"] as const) : []),
+    ],
     // Only the derived headline fields, not the whole aggregate. Its
     // `uts_student_number` in particular falls back to a number captured on a
     // membership, which is exactly what the Profile card must not show — so
