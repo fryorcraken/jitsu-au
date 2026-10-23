@@ -11,6 +11,7 @@ import {
   Preview,
   Text,
 } from "@react-email/components";
+import { ReplyOrReachUs } from "./reply-or-reach-us";
 
 interface MembershipPaidEmailProps {
   siteName: string;
@@ -29,6 +30,13 @@ interface MembershipPaidEmailProps {
   /** What they paid, already formatted. */
   amount: string;
   accountUrl: string;
+  /**
+   * Where a reply to this email goes, or null when it reaches nobody. Decides
+   * whether the email offers "reply to this email" or the contact page (see
+   * `reply-or-reach-us.tsx`). Always the same value the sender set as the
+   * message's `Reply-To`.
+   */
+  replyTo: string | null;
 }
 
 /**
@@ -48,6 +56,7 @@ export const MembershipPaidEmail = ({
   validity,
   amount,
   accountUrl,
+  replyTo,
 }: MembershipPaidEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -66,7 +75,15 @@ export const MembershipPaidEmail = ({
         <Button style={button} href={accountUrl}>
           View your membership
         </Button>
-        <Text style={footer}>See you in class. Reply to this email if anything looks off.</Text>
+        <Text style={footer}>
+          See you in class.{" "}
+          <ReplyOrReachUs
+            replyTo={replyTo}
+            siteUrl={siteUrl}
+            reply="Reply to this email if anything looks off."
+            lead="If anything looks off, get in touch"
+          />
+        </Text>
       </Container>
     </Body>
   </Html>

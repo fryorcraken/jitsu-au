@@ -14,6 +14,7 @@ import {
 } from "@react-email/components";
 import type { ClubPaymentDetails } from "@/lib/validation";
 import { ClubAccountSection } from "./club-account-section";
+import { ReplyOrReachUs } from "./reply-or-reach-us";
 import {
   emailHr as hr,
   emailRowLabel as rowLabel,
@@ -36,6 +37,13 @@ interface MembershipPaymentEmailProps {
   details: ClubPaymentDetails | null;
   /** Where a member can read the same details on the site. */
   membershipUrl: string;
+  /**
+   * Where a reply to this email goes, or null when it reaches nobody. Decides
+   * whether the email offers "reply to this email" or the contact page (see
+   * `reply-or-reach-us.tsx`). Always the same value the sender set as the
+   * message's `Reply-To`.
+   */
+  replyTo: string | null;
 }
 
 export const MembershipPaymentEmail = ({
@@ -48,6 +56,7 @@ export const MembershipPaymentEmail = ({
   reference,
   details,
   membershipUrl,
+  replyTo,
 }: MembershipPaymentEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -74,7 +83,7 @@ export const MembershipPaymentEmail = ({
           <Text style={reference_}>{reference}</Text>
         </Section>
 
-        <ClubAccountSection details={details} />
+        <ClubAccountSection details={details} replyTo={replyTo} />
 
         <Text style={text}>
           <strong>Please include the payment reference in your transfer description.</strong> It's
@@ -89,8 +98,14 @@ export const MembershipPaymentEmail = ({
           , where each one has a copy button.
         </Text>
         <Text style={footer}>
-          Paying a different way or already transferred? Just reply to this email and we'll sort it
-          out.
+          Paying a different way or already transferred?{" "}
+          <ReplyOrReachUs
+            replyTo={replyTo}
+            siteUrl={siteUrl}
+            reply="Just reply to this email and we'll sort it out."
+            lead="Get in touch"
+            tail=", and we'll sort it out."
+          />
         </Text>
       </Container>
     </Body>

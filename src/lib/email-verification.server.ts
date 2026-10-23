@@ -23,7 +23,7 @@ import {
   type VerificationPurpose,
 } from "@/lib/email-verification";
 import { VerifyEmail } from "@/lib/email-templates/verify-email";
-import { sendEmail } from "@/lib/send-email.server";
+import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 import { SITE_ORIGIN } from "@/lib/seo";
 import { SITE_NAME } from "@/lib/email-sender";
@@ -247,6 +247,7 @@ export async function sendVerificationEmail(opts: {
       // Distinct per send: a resend must not be swallowed as a duplicate of
       // the one the member says never arrived.
       idempotencyKey: `verify-${await hashToken(token)}`,
+      replyTo: await clubReplyTo(opts.admin),
     });
     return { sent: true };
   } catch (e) {

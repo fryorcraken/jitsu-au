@@ -10,7 +10,8 @@ description: >-
   manager asks an agent to look up members/invoices, put a member on a plan or
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), keep the club's item price
-  list and charge somebody for items, migrate/bulk-file waivers
+  list and charge somebody for items, set where replies to club emails go,
+  migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
   version of it (or roll back to an earlier one), add or edit a membership
   window's start/end dates, or edit a
@@ -528,6 +529,30 @@ all**.
 > `409 item_invoice_settled`, and there is no refund flow. Cancel keeps the
 > record and stops it showing as owed; delete removes it as though it was never
 > raised. Neither emails anybody, and neither can be undone.
+
+### `get_club_settings` / `save_club_settings` — where replies to club emails go
+
+```bash
+scripts/agent.sh get_club_settings '{}'
+scripts/agent.sh save_club_settings '{"key":"email_reply_to","value":"hello@example.com"}'
+scripts/agent.sh save_club_settings '{"key":"email_reply_to","value":""}'   # clear it
+```
+
+`get_club_settings` returns `email_reply_to` (or null) and `payment_details`
+(the bank account, or null when not published). A `503 settings_unreadable`
+means the read failed, **not** that nothing is set: retry, never treat it as
+empty.
+
+Once `email_reply_to` is set, every email the club sends to a member or visitor
+carries it as `Reply-To` and says "reply to this email"; while it is unset
+those emails point at the contact page, phone and WhatsApp instead. Only set an
+inbox somebody actually reads, and confirm the address with the manager before
+saving it.
+
+> **The bank account is read-only here.** `save_club_settings` refuses
+> `invoice_payment_details` with `403 setting_read_only`. A manager changes it
+> on the Club settings screen, where members' view previews every keystroke.
+> Do not try to work around this.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 

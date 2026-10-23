@@ -40,6 +40,7 @@ import {
   markItemInvoicePaidSchema,
   recordIdSchema,
   saveChargeItemSchema,
+  agentSaveClubSettingsSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -124,6 +125,7 @@ import { ItemNoLongerListedError } from "@/lib/item-invoices";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
+import { loadClubSettings, writeClubSetting } from "@/lib/club-settings.functions";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -1376,6 +1378,60 @@ async function handleListKbComments(params: unknown) {
   return { count: projected.length, slug: doc.slug, annotations: projected };
 }
 
+// ---- actions: get_club_settings / save_club_settings ----
+//
+// Through `loadClubSettings` / `writeClubSetting`, the same functions
+// `/manager/settings` posts to, so a value an agent saves and one a manager
+// saves are the same row written the same way.
+async function handleGetClubSettings() {
+  try {
+    const { details, email_reply_to } = await loadClubSettings(await adminClient());
+    return { email_reply_to, payment_details: details };
+  } catch (e) {
+    // The screen refuses to show an empty form over a failed read; the API
+    // refuses to answer "nothing is set" for the same reason.
+    throw new AgentError(
+      503,
+      "settings_unreadable",
+      e instanceof Error ? e.message : "Could not read the club settings.",
+      undefined,
+      30,
+    );
+  }
+}
+
+async function handleSaveClubSettings(params: unknown, actingAs: string) {
+  if (
+    params &&
+    typeof params === "object" &&
+    (params as { key?: unknown }).key === "invoice_payment_details"
+  ) {
+    throw new AgentError(
+      403,
+      "setting_read_only",
+      "The club's bank account can only be changed by a manager on the Club settings screen, where the member's view previews every change. Nothing was saved.",
+    );
+  }
+  const input = agentSaveClubSettingsSchema.parse(params);
+  try {
+    await writeClubSetting(await adminClient(), input, actingAs);
+  } catch (e) {
+    // An upsert of one value: repeating it writes the same thing, so the
+    // caller is told it is safe to retry, like the read beside it.
+    throw new AgentError(
+      503,
+      "settings_not_saved",
+      e instanceof Error ? e.message : "Could not save the setting.",
+      undefined,
+      30,
+    );
+  }
+  console.info(
+    `[agent.save_club_settings] audit ${JSON.stringify({ actor: actingAs, key: input.key, value: input.value || null })}`,
+  );
+  return { key: input.key, value: input.value || null, saved: true as const };
+}
+
 async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
@@ -1434,6 +1490,10 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleCancelItemInvoice(params, actingAs);
     case "delete_item_invoice":
       return handleDeleteItemInvoice(params, actingAs);
+    case "get_club_settings":
+      return handleGetClubSettings();
+    case "save_club_settings":
+      return handleSaveClubSettings(params, actingAs);
   }
 }
 

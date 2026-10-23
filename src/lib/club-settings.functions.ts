@@ -23,22 +23,29 @@ async function adminClient(): Promise<MembershipClient> {
 }
 
 /**
- * Every setting a manager edits, for the screen and the agent API alike, plus
- * whatever free text is left in the old `invoice_payment_instructions` row.
- * That legacy string is shown read-only beside an empty form so a manager can
+ * Every setting a manager edits (the bank account, the reply-to address), for
+ * the screen and the agent API alike, plus whatever free text is left in the
+ * old `invoice_payment_instructions` row. That legacy string is shown read-only beside an empty form so a manager can
  * copy the account details across; nothing member-facing renders it any more.
  *
  * Throws when the store could not be read, for the reason in the header.
  */
 export async function loadClubSettings(admin: MembershipClient) {
-  const { readClubPaymentDetails, getInvoiceInstructions } =
+  const { readClubPaymentDetails, readClubReplyTo, getInvoiceInstructions } =
     await import("@/lib/club-settings.server");
-  const [{ ok, details }, legacyInstructions] = await Promise.all([
+  const [payment, replyTo, legacyInstructions] = await Promise.all([
     readClubPaymentDetails(admin),
+    readClubReplyTo(admin),
     getInvoiceInstructions(admin),
   ]);
-  if (!ok) throw new Error("Could not read the club settings. Try again.");
-  return { details, legacy_instructions: legacyInstructions };
+  // One screen, one load: if either read failed, the screen shows no form at
+  // all rather than one half-filled from what happened to come back.
+  if (!payment.ok || !replyTo.ok) throw new Error("Could not read the club settings. Try again.");
+  return {
+    details: payment.details,
+    email_reply_to: replyTo.address,
+    legacy_instructions: legacyInstructions,
+  };
 }
 
 /** How each key's validated value is stored in the `value` text column. */
@@ -46,6 +53,10 @@ function storedValue(input: SaveClubSettingsInput): string {
   switch (input.key) {
     case "invoice_payment_details":
       return JSON.stringify(input.value);
+    case "email_reply_to":
+      // Already trimmed and lowercased; "" is a cleared address, which reads
+      // back as unset.
+      return input.value;
   }
 }
 

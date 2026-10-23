@@ -13,7 +13,7 @@ import { render } from "@react-email/render";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
-import { sendEmail } from "@/lib/send-email.server";
+import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { CommentReplyEmail } from "@/lib/email-templates/comment-reply";
 import {
   NotificationDigestEmail,
@@ -221,6 +221,12 @@ export async function sendReplyNotification(
       // Keyed by the notification row, which is itself unique per person per
       // subject, so a retry cannot mail the same reply twice.
       idempotencyKey: `reply-${opts.notificationId}`,
+      // None, on purpose. Somebody pressing Reply here means to answer the
+      // commenter, and the email cannot reach them. Routing it to the club
+      // inbox instead would hand the committee a message written for another
+      // member, without the writer knowing. Nothing in this email offers a
+      // reply, and "Read the reply" takes them to where they can answer.
+      replyTo: null,
     });
     await stampEmailed(db, [opts.notificationId]);
     return true;
@@ -372,6 +378,9 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
   // this key is the second belt, and a second belt that changes halfway through
   // the window is not one.
   const day = clubLocalDate(now, CLUB_TIME_ZONE);
+  // Once for the whole run rather than per recipient: one morning's mail all
+  // carries the same answer.
+  const replyTo = await clubReplyTo(db);
   let sent = 0;
 
   for (const [userId, candidates] of byContact) {
@@ -461,6 +470,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
         // together, so the same set of rows still produces the same key and a
         // true re-run is still deduplicated.
         idempotencyKey: `digest-${userId}-${day}-${ids.length}${stableCode([...ids].sort().join(","))}`,
+        replyTo,
       });
       // Stamp only after a successful send, so a failure retries tomorrow
       // rather than silently dropping the day.

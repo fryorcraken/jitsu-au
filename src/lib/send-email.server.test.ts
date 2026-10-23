@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendEmail } from "./send-email.server";
+import { clubReplyTo, sendEmail } from "./send-email.server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 
 const { sendLovableEmail } = vi.hoisted(() => ({ sendLovableEmail: vi.fn() }));
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
+const readClubReplyTo = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/club-settings.server", () => ({ readClubReplyTo }));
 
 const base = {
   apiKey: "test-key",
@@ -12,6 +16,7 @@ const base = {
   html: "<p>Hello</p>",
   text: "Hello",
   idempotencyKey: "k1",
+  replyTo: null,
 };
 
 describe("sendEmail", () => {
@@ -138,5 +143,51 @@ describe("sendEmail", () => {
     sendLovableEmail.mockRejectedValue(new Error("provider down"));
 
     await expect(sendEmail(base)).rejects.toThrow("provider down");
+  });
+});
+
+// The club's reply-to is what makes "reply to this email" true. So it comes
+// back exactly when a manager has set one, never invented, and a failed read
+// costs the email its reply-to, never the email itself.
+describe("clubReplyTo", () => {
+  const admin = {} as SupabaseClient<Database>;
+
+  beforeEach(() => {
+    readClubReplyTo.mockReset();
+    sendLovableEmail.mockReset().mockResolvedValue({ success: true });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("resolves the club's address when one is set", async () => {
+    readClubReplyTo.mockResolvedValue({ ok: true, address: "hello@example.com" });
+    await expect(clubReplyTo(admin)).resolves.toBe("hello@example.com");
+  });
+
+  it("resolves null when nobody has set one", async () => {
+    readClubReplyTo.mockResolvedValue({ ok: true, address: null });
+    await expect(clubReplyTo(admin)).resolves.toBeNull();
+  });
+
+  it("resolves null, and says so, when the setting cannot be read", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    readClubReplyTo.mockResolvedValue({ ok: false, address: null });
+    await expect(clubReplyTo(admin)).resolves.toBeNull();
+    expect(error).toHaveBeenCalled();
+  });
+
+  it("still lets the email go out when reading the setting throws outright", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    readClubReplyTo.mockRejectedValue(new Error("connection reset"));
+    await sendEmail({ ...base, replyTo: await clubReplyTo(admin) });
+    expect(sendLovableEmail).toHaveBeenCalledTimes(1);
+    expect(sendLovableEmail.mock.calls[0][0].reply_to).toBeUndefined();
+  });
+
+  it("puts the club's address on the email when one is set", async () => {
+    readClubReplyTo.mockResolvedValue({ ok: true, address: "hello@example.com" });
+    await sendEmail({ ...base, replyTo: await clubReplyTo(admin) });
+    expect(sendLovableEmail.mock.calls[0][0].reply_to).toBe("hello@example.com");
   });
 });

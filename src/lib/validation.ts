@@ -2822,6 +2822,8 @@ export const managerAgentActions = [
   "mark_item_invoice_paid",
   "cancel_item_invoice",
   "delete_item_invoice",
+  "get_club_settings",
+  "save_club_settings",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -3006,6 +3008,42 @@ export const clubPaymentDetailsSchema = z.object({
 });
 export type ClubPaymentDetails = z.infer<typeof clubPaymentDetailsSchema>;
 
+/** Longest address SMTP allows (RFC 5321 path limit). */
+export const CLUB_REPLY_TO_MAX = 254;
+
+/**
+ * Where a reply to a club email goes: one address, trimmed and lowercased, or
+ * `""` to clear it back to unset (no reply-to, and no email promising a reply).
+ *
+ * Any domain is fine: the reply-to does not have to sit on the sending domain,
+ * which is the `From` address's job. The one address refused is a dependant's
+ * reserved one, which nothing delivers to, so setting it would bring back the
+ * exact problem this setting exists to fix.
+ */
+export const clubReplyToSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(CLUB_REPLY_TO_MAX, "That address is too long.")
+  .refine((v) => v === "" || z.string().email().safeParse(v).success, {
+    message: "Enter one email address, like hello@example.com.",
+  })
+  .refine((v) => v === "" || !isReservedDependantEmail(v), {
+    message: "That is a reserved address nobody can read. Use an inbox someone checks.",
+  });
+
+/**
+ * Read the stored reply-to back. Null for unset, and for anything stored that
+ * would not pass `clubReplyToSchema` today: a header pointing at a malformed
+ * address is worse than none, because the email copy would promise a reply
+ * that bounces.
+ */
+export function parseClubReplyTo(raw: string | null): string | null {
+  if (!raw?.trim()) return null;
+  const parsed = clubReplyToSchema.safeParse(raw);
+  return parsed.success && parsed.data ? parsed.data : null;
+}
+
 /**
  * One club setting to save, by key. Each key carries its own validation, so a
  * save names the key it writes and nothing can be stored under a key without
@@ -3014,8 +3052,24 @@ export type ClubPaymentDetails = z.infer<typeof clubPaymentDetailsSchema>;
  */
 export const saveClubSettingsSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("invoice_payment_details"), value: clubPaymentDetailsSchema }),
+  z.object({ key: z.literal("email_reply_to"), value: clubReplyToSchema }),
 ]);
 export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
+
+/**
+ * The settings an agent may WRITE, which is deliberately fewer than it may read.
+ *
+ * The bank account is read-only over the agent API. It is money: a wrong BSB
+ * sends members' transfers somewhere the club cannot get them back from, and
+ * the manager screen is where a person types it with the member's own panel
+ * previewing every keystroke. An agent has no such preview and no reason to
+ * change bank details unprompted, so `save_club_settings` refuses that key by
+ * name (`403 setting_read_only`) rather than letting it fail validation, so the
+ * caller learns where to go instead.
+ */
+export const agentSaveClubSettingsSchema = z
+  .object({ key: z.literal("email_reply_to"), value: clubReplyToSchema })
+  .strict();
 
 /**
  * The account rows, in the order a member reads them, shared by the membership

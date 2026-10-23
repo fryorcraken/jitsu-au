@@ -5,6 +5,10 @@
 // overseas ones). Both the member's "how to pay" panel and the invoice email
 // render it, so the read belongs to neither of them.
 //
+// `email_reply_to` is the address a reply to any club email reaches. Every
+// member-facing email reads it at send time, through `clubReplyTo` in
+// `send-email.server.ts`, and the manager settings screen edits it.
+//
 // `invoice_payment_instructions` is the free text this replaced. Nothing
 // member-facing reads it any more; it survives only so the manager settings
 // screen can show what was there while the new fields are still empty.
@@ -21,7 +25,11 @@
 // have to pick one of those.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { DEFAULT_INVOICE_INSTRUCTIONS, parseClubPaymentDetails } from "@/lib/validation";
+import {
+  DEFAULT_INVOICE_INSTRUCTIONS,
+  parseClubPaymentDetails,
+  parseClubReplyTo,
+} from "@/lib/validation";
 import type { ClubPaymentDetails } from "@/lib/validation";
 
 type AdminClient = SupabaseClient<Database>;
@@ -62,6 +70,19 @@ export async function readClubPaymentDetails(
 ): Promise<{ ok: boolean; details: ClubPaymentDetails | null }> {
   const { ok, value } = await readSetting(admin, "invoice_payment_details");
   return { ok, details: ok ? parseClubPaymentDetails(value) : null };
+}
+
+/**
+ * The club's reply-to address. `{ ok: true, address: null }` is a settled
+ * "nobody has set one", and `ok: false` is "the store could not be read", kept
+ * apart for the same reason as the bank details: the manager screen must not
+ * show an empty box over an address it merely failed to read. Never throws.
+ */
+export async function readClubReplyTo(
+  admin: AdminClient,
+): Promise<{ ok: boolean; address: string | null }> {
+  const { ok, value } = await readSetting(admin, "email_reply_to");
+  return { ok, address: ok ? parseClubReplyTo(value) : null };
 }
 
 /**

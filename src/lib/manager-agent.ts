@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "20",
+  version: "21",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,15 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "21",
+      // Purely additive: two new actions. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "New action get_club_settings: the club's reply-to address (email_reply_to, or null) and its bank account (payment_details, or null when not published). The same values the manager's Club settings screen shows. 503 settings_unreadable when they cannot be read, rather than an answer of nothing set.",
+        'New action save_club_settings, for the reply-to address only: {"key":"email_reply_to","value":"hello@example.com"}, or "value":"" to clear it. Once set, every email the club sends to a member carries it as Reply-To and says "reply to this email"; while unset, those emails point at the contact page instead. The bank account is read-only here and refused by name with 403 setting_read_only: change it on the Club settings screen.',
+      ],
+    },
     {
       version: "20",
       // Two new optional params and one new response field. A call that sends
@@ -1083,6 +1092,28 @@ export const AGENT_MANIFEST: {
       summary:
         "Remove an unpaid (or cancelled) item invoice outright, for one raised by mistake. Cannot be undone, and nothing tells the member, who may already have the email. 409 item_invoice_settled when it has been paid: a paid invoice is the club's record of money and is never deleted.",
       params: [{ name: "id", required: true, description: "The item invoice's UUID." }],
+    },
+    {
+      name: "get_club_settings",
+      method: "POST",
+      summary:
+        "Read the club-wide settings: email_reply_to (where a reply to any club email goes, or null when unset) and payment_details (the bank account members pay into, or null when not published). 503 settings_unreadable when they could not be read: that is not the same as nothing being set, so retry rather than treating it as empty.",
+      params: [],
+    },
+    {
+      name: "save_club_settings",
+      method: "POST",
+      summary:
+        'Set or clear the club\'s reply-to address. Once set, every email the club sends to a member or visitor carries it as Reply-To and its "reply to this email" lines appear; while unset they point at the contact page, phone and WhatsApp instead. Use an inbox somebody reads. Only key "email_reply_to" is writable: the bank account is refused with 403 setting_read_only and is changed on the Club settings screen.',
+      params: [
+        { name: "key", required: true, description: 'Always "email_reply_to".' },
+        {
+          name: "value",
+          required: true,
+          description:
+            'One email address (trimmed and lowercased, up to 254 characters), or "" to clear it.',
+        },
+      ],
     },
   ],
 };

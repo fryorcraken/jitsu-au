@@ -464,6 +464,7 @@ export async function recordMembershipPayment(
           planName: input.plan?.name ?? "your membership",
           validity: input.plan ? validityLabel(input.plan) : "",
           amount: formatCents(membership.price_cents),
+          admin,
         });
       }
     } catch (e) {
@@ -546,6 +547,7 @@ export async function ensureCasualInvoiceEmailed(
         planName: plan?.name ?? "your casual class",
         validity: plan ? validityLabel(plan) : "",
         amount: formatCents(membership.price_cents),
+        admin,
       });
       return;
     }

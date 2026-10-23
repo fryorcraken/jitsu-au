@@ -1046,3 +1046,117 @@ describe("manager agent route: item invoices", () => {
     expect((await res.json()).error.code).toBe("invalid_params");
   });
 });
+
+describe("manager agent route: club settings", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A fake `club_settings` store: reads by key, records every upsert. */
+  function fakeSettings(values: Record<string, string>, opts: { readFails?: boolean } = {}) {
+    const upserts: Record<string, unknown>[] = [];
+    return {
+      upserts,
+      db: {
+        from: (table: string) => {
+          if (table !== "club_settings") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => ({
+              eq: (_col: string, key: string) => ({
+                maybeSingle: () =>
+                  Promise.resolve(
+                    opts.readFails
+                      ? { data: null, error: { message: "connection reset" } }
+                      : ok(key in values ? { value: values[key] } : null),
+                  ),
+              }),
+            }),
+            upsert: (row: Record<string, unknown>) => {
+              upserts.push(row);
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      },
+    };
+  }
+
+  it("reads the reply-to address and the bank account", async () => {
+    currentAdmin = fakeSettings({ email_reply_to: "hello@example.com" }).db;
+    const res = await post({ action: "get_club_settings", params: {} });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.result).toMatchObject({
+      email_reply_to: "hello@example.com",
+      payment_details: null,
+    });
+  });
+
+  // "Could not read" must never come back as "nothing is set": a caller would
+  // then set an address over one that is perfectly fine.
+  it("answers a failed read with a retryable 503, not an empty answer", async () => {
+    currentAdmin = fakeSettings({}, { readFails: true }).db;
+    const res = await post({ action: "get_club_settings", params: {} });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("settings_unreadable");
+  });
+
+  it("saves the reply-to address through the same write the screen uses", async () => {
+    const fake = fakeSettings({});
+    currentAdmin = fake.db;
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const res = await post({
+      action: "save_club_settings",
+      params: { key: "email_reply_to", value: " Hello@Example.com " },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({
+      key: "email_reply_to",
+      value: "hello@example.com",
+      saved: true,
+    });
+    expect(fake.upserts).toEqual([
+      expect.objectContaining({ key: "email_reply_to", value: "hello@example.com" }),
+    ]);
+  });
+
+  it("clears it with an empty value", async () => {
+    const fake = fakeSettings({ email_reply_to: "hello@example.com" });
+    currentAdmin = fake.db;
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const res = await post({
+      action: "save_club_settings",
+      params: { key: "email_reply_to", value: "" },
+    });
+    expect((await res.json()).result).toMatchObject({ value: null });
+    expect(fake.upserts[0]).toMatchObject({ key: "email_reply_to", value: "" });
+  });
+
+  // The bank account is money. An agent can read it but never write it, and
+  // is told where a person goes to change it.
+  it("refuses the bank account by name, writing nothing", async () => {
+    const fake = fakeSettings({});
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_club_settings",
+      params: { key: "invoice_payment_details", value: { bsb: "062000" } },
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("setting_read_only");
+    expect(fake.upserts).toEqual([]);
+  });
+
+  it("refuses something that is not one address", async () => {
+    const fake = fakeSettings({});
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_club_settings",
+      params: { key: "email_reply_to", value: "a@example.com, b@example.com" },
+    });
+    expect(res.status).toBe(400);
+    expect(fake.upserts).toEqual([]);
+  });
+});

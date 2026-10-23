@@ -11,10 +11,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClubAccountDetails } from "@/components/site/ClubAccountDetails";
+import { SaveFailure } from "@/components/site/SaveFailure";
+import { SubmitStatus } from "@/components/site/SubmitStatus";
+import { useResilientSubmit } from "@/hooks/use-resilient-submit";
+import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { getClubSettings, saveClubSettings } from "@/lib/club-settings.functions";
 import { invoiceMarkdownComponents } from "@/lib/invoice-markdown";
 import { describeLoadError } from "@/lib/load-error";
-import { clubPaymentDetailsSchema, formatBsb } from "@/lib/validation";
+import {
+  CLUB_REPLY_TO_MAX,
+  clubPaymentDetailsSchema,
+  clubReplyToSchema,
+  formatBsb,
+} from "@/lib/validation";
 import type { ClubPaymentDetails } from "@/lib/validation";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
@@ -81,10 +90,15 @@ function SettingsPage() {
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [legacy, setLegacy] = useState("");
+  const [replyTo, setReplyTo] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // A failed save stays on screen beside the form, never only as a toast: what
+  // a toast leaves behind is a form that looks saved while members still see
+  // the old account.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // The load failing is its own state, not an absent one. See the panel below.
   const [loadFailed, setLoadFailed] = useState(false);
 
@@ -98,6 +112,7 @@ function SettingsPage() {
       .then((s) => {
         setLoadFailed(false);
         setLegacy(s.legacy_instructions);
+        setReplyTo(s.email_reply_to);
         setPublished(s.details != null);
         if (s.details) {
           setForm({ ...s.details, bsb: formatBsb(s.details.bsb) });
@@ -116,6 +131,8 @@ function SettingsPage() {
 
   function set(key: keyof FormState, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
+    // The panel describes the values that failed to save, not these.
+    setSaveError(null);
     // Clear this field's complaint as soon as it is touched. Leaving it up while
     // somebody fixes it reads as "still wrong" when it is not.
     setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
@@ -138,13 +155,15 @@ function SettingsPage() {
       return;
     }
     setSaving(true);
+    setSaveError(null);
     try {
       await save({ data: { key: "invoice_payment_details", value: parsed.data } });
       setErrors({});
       setPublished(true);
       toast.success("Saved. Members can see these details now.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Save failed");
+      const message = describeLoadError(e, "We could not reach the server.");
+      setSaveError(/[.!?]$/.test(message) ? message : `${message}.`);
     } finally {
       setSaving(false);
     }
@@ -170,7 +189,7 @@ function SettingsPage() {
         >
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
           <div className="text-sm">
-            <p className="font-medium">We could not load the club's payment settings.</p>
+            <p className="font-medium">We could not load the club's settings.</p>
             <p className="mt-1 text-muted-foreground">
               Nothing has changed, and members are unaffected. We have not shown the form because we
               cannot tell you what is in it right now, and saving over details we could not read is
@@ -197,8 +216,7 @@ function SettingsPage() {
           <div>
             <h1 className="text-3xl font-black">Club settings</h1>
             <p className="text-sm text-muted-foreground">
-              The account members pay into. These details appear on the membership page and on every
-              invoice email.
+              The account members pay into, and where replies to the club's emails go.
             </p>
           </div>
           <Button asChild variant="outline">
@@ -278,6 +296,15 @@ function SettingsPage() {
               {errors.note && <p className="mt-1 text-xs text-destructive">{errors.note}</p>}
             </div>
 
+            {saveError && (
+              <SaveFailure
+                what="account"
+                message={`${saveError} Members still see the details that were there before.`}
+                onRetry={() => void onSave()}
+                retrying={saving}
+                keptOnDevice={false}
+              />
+            )}
             <Button onClick={onSave} disabled={saving}>
               {saving ? "Saving..." : "Save"}
             </Button>
@@ -316,8 +343,127 @@ function SettingsPage() {
             )}
           </div>
         </div>
+
+        <ReplyToCard initial={replyTo} />
       </section>
     </>
+  );
+}
+
+/**
+ * The address a reply to any club email reaches. Its own card with its own
+ * Save, because it has nothing to do with the bank account and a manager
+ * fixing one should not have to re-validate the other.
+ *
+ * Saved through `useResilientSubmit`: the save is an upsert of one value, so a
+ * retry after a lost answer writes the same thing again and is safe.
+ */
+function ReplyToCard({ initial }: { initial: string | null }) {
+  const save = useServerFn(saveClubSettings);
+  const send = useResilientSubmit<{ ok: true }>(INTAKE_SUBMIT);
+  const [value, setValue] = useState(initial ?? "");
+  const [saved, setSaved] = useState<string | null>(initial);
+  const [touched, setTouched] = useState(false);
+
+  const parsed = clubReplyToSchema.safeParse(value);
+  const problem = parsed.success ? null : (parsed.error.issues[0]?.message ?? "Check the address.");
+  const unchanged = parsed.success && parsed.data === (saved ?? "");
+
+  function onChange(next: string) {
+    setValue(next);
+    // A failure panel describes the value that failed to save. Once the box is
+    // edited it is about something nobody has tried to save yet.
+    if (send.status === "failed") send.reset();
+  }
+
+  async function submit(e?: React.FormEvent) {
+    e?.preventDefault();
+    setTouched(true);
+    if (!parsed.success) return;
+    const address = parsed.data;
+    const outcome = await send.submit({
+      run: (signal) => save({ signal, data: { key: "email_reply_to", value: address } }),
+    });
+    if (outcome.ok) {
+      setSaved(address || null);
+      setValue(address);
+      setTouched(false);
+      send.reset();
+      toast.success(
+        address
+          ? `Saved. Replies to club emails now go to ${address}.`
+          : "Cleared. Club emails now point people at the contact page instead.",
+      );
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Replies to club emails</CardTitle>
+        <CardDescription>
+          When someone replies to an invoice, receipt or waiver email, it goes here. Use an inbox
+          someone reads.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={(e) => void submit(e)} className="space-y-3" noValidate>
+          <p className="text-sm" role="status">
+            {saved ? (
+              <>
+                Replies go to <strong>{saved}</strong>.
+              </>
+            ) : (
+              <>
+                Not set. Replies to club emails reach nobody, so every email points people at the
+                contact page, phone and WhatsApp instead.
+              </>
+            )}
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="email_reply_to">Reply-to address</Label>
+            <p id="email_reply_to-hint" className="text-xs text-muted-foreground">
+              Any address, on any domain. Leave it empty and save to stop offering replies.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="email_reply_to"
+                type="email"
+                inputMode="email"
+                autoComplete="off"
+                value={value}
+                maxLength={CLUB_REPLY_TO_MAX}
+                placeholder="hello@example.com"
+                onChange={(e) => onChange(e.target.value)}
+                disabled={send.busy}
+                aria-invalid={touched && problem ? true : undefined}
+                aria-describedby={
+                  touched && problem
+                    ? "email_reply_to-hint email_reply_to-error"
+                    : "email_reply_to-hint"
+                }
+              />
+              <Button type="submit" disabled={send.busy || unchanged}>
+                {send.busy ? "Saving..." : "Save address"}
+              </Button>
+            </div>
+            {touched && problem && (
+              <p id="email_reply_to-error" role="alert" className="text-xs text-destructive">
+                {problem}
+              </p>
+            )}
+          </div>
+          <SubmitStatus
+            status={send.status}
+            attempt={send.attempt}
+            attempts={send.attempts}
+            error={send.error}
+            failureKind={send.failureKind}
+            onRetry={() => void submit()}
+          />
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 
