@@ -1251,6 +1251,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           // close this tab without doing it now, and this is the only way back
           // in until a manager approves them.
           codeOfConductToken,
+          // So a manager's reply about a minor's waiver reaches the guardian
+          // too. On a child's waiver it is the address `email` already holds.
+          guardianEmail: needsGuardian ? contacts.guardianEmail : null,
         });
       } catch (e) {
         console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);

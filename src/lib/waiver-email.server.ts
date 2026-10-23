@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { sendEmail } from "@/lib/send-email.server";
 import { buildCodeOfConductUrl } from "@/lib/code-of-conduct";
+import { normalizeEmail } from "@/lib/validation";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
@@ -105,6 +106,15 @@ export interface WaiverEmailParams {
    * waiver confirmation over.
    */
   codeOfConductToken?: string | null;
+  /**
+   * The guardian named on the waiver, when there is one. On a minor's own
+   * waiver the managers' replies go to them as well as to the minor: the
+   * club writing to a fifteen-year-old about their health answers should not
+   * leave out the adult who co-signed them. Harmless when it is the same
+   * address as `memberEmail` (a waiver signed for a child on someone's account,
+   * or a guardian block left blank), which is deduplicated.
+   */
+  guardianEmail?: string | null;
 }
 
 /**
@@ -153,6 +163,7 @@ export async function sendWaiverEmails({
   admin,
   userId,
   codeOfConductToken,
+  guardianEmail,
 }: WaiverEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -211,8 +222,14 @@ export async function sendWaiverEmails({
   }
 
   // Review prompt to each manager, replying to the address the member's copy
-  // went to. On a waiver signed for a child on someone's account that is the
-  // parent's, never the child's reserved address, so a reply reaches somebody.
+  // went to, plus the guardian's on a minor's own waiver. On a waiver signed
+  // for a child on someone's account the copy went to the parent, never to the
+  // child's reserved address, so a reply reaches somebody.
+  const replyTo = [
+    ...new Set(
+      [memberEmail, guardianEmail].filter((e): e is string => Boolean(e)).map(normalizeEmail),
+    ),
+  ];
   for (const to of notifyRecipients) {
     try {
       await sendEmail({
@@ -223,7 +240,7 @@ export async function sendWaiverEmails({
         html: managerHtml,
         text: managerText,
         idempotencyKey: `waiver-manager-${waiverId}-${to}`,
-        replyTo: memberEmail,
+        replyTo,
       });
       sent.push(to);
     } catch (e) {

@@ -131,4 +131,49 @@ describe("sendWaiverEmails", () => {
     expect(toManagers.map((p) => p.to)).toEqual(["manager-a@example.com", "manager-b@example.com"]);
     for (const p of toManagers) expect(p.reply_to).toBe("ada@example.com");
   });
+
+  it("replies to the guardian as well on a minor's own waiver", async () => {
+    // A manager's question about a fifteen-year-old's waiver should reach the
+    // adult who co-signed it, not only the fifteen-year-old.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue({ success: true });
+
+    await sendWaiverEmails({
+      waiverId: "w3",
+      memberName: "Sam Lovelace",
+      memberGreetingName: "Sam",
+      memberEmail: "sam@example.com",
+      guardianEmail: "ada@example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin: fakeAdmin({ roles: [{ user_id: "a" }], users: { a: "manager-a@example.com" } }),
+    });
+
+    const toManager = sendLovableEmail.mock.calls
+      .map(([p]) => p)
+      .find((p) => p.to === "manager-a@example.com");
+    expect(toManager.reply_to).toBe("sam@example.com, ada@example.com");
+  });
+
+  it("lists one address once when the guardian's is the member's own", async () => {
+    // A waiver signed for a child on someone's account, or a guardian block
+    // left blank, resolves both to the same mailbox; it is listed once, case
+    // and spacing aside.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue({ success: true });
+
+    await sendWaiverEmails({
+      waiverId: "w4",
+      memberName: "Bea Lovelace",
+      memberGreetingName: "Ada",
+      memberEmail: "ada@example.com",
+      guardianEmail: " Ada@Example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin: fakeAdmin({ roles: [{ user_id: "a" }], users: { a: "manager-a@example.com" } }),
+    });
+
+    const toManager = sendLovableEmail.mock.calls
+      .map(([p]) => p)
+      .find((p) => p.to === "manager-a@example.com");
+    expect(toManager.reply_to).toBe("ada@example.com");
+  });
 });
