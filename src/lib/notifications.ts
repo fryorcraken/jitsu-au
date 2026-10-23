@@ -40,14 +40,33 @@ export const emailPreferenceKeys = [
 ] as const;
 export type EmailPreferenceKey = (typeof emailPreferenceKeys)[number];
 
-/** The switch that governs whether a given kind is emailed. */
-export const preferenceForKind: Record<NotificationKind, EmailPreferenceKey> = {
+/**
+ * The switch that governs whether a given kind is emailed, or `null` for a kind
+ * nobody can switch off.
+ *
+ * `null` is not "default on". It means the email is part of something the
+ * person has with the club rather than news about the club, the way an invoice
+ * is, so no setting may stop it. Every kind that is null here has to be listed
+ * in `UNSWITCHABLE_NOTIFICATION_KINDS` too, and a test holds the two together:
+ * an announcement that quietly lost its switch would reach every inbox the club
+ * has with no way to stop it, so it has to be a deliberate edit in two places
+ * rather than a missing key in one.
+ */
+export const preferenceForKind: Record<NotificationKind, EmailPreferenceKey | null> = {
   reply: "reply_to_me",
   thread_activity: "thread_activity",
   new_blog_post: "new_blog_post",
   blog_comment: "manager_comment_alerts",
   kb_comment: "manager_comment_alerts",
 };
+
+/** The closed list of kinds no switch governs. See `preferenceForKind`. */
+export const UNSWITCHABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = [];
+
+/** Whether a person's switches have any say over emailing this kind. */
+export function isSwitchableKind(kind: NotificationKind): boolean {
+  return preferenceForKind[kind] !== null;
+}
 
 /**
  * What somebody gets before they have touched anything.
@@ -109,6 +128,8 @@ export function shouldEmail(
   opts: { isManager?: boolean } = {},
 ): boolean {
   const key = preferenceForKind[kind];
+  // No switch governs it, so nothing the person has set can stop it.
+  if (key === null) return true;
   // A manager alert reaching somebody who is no longer a manager is a leak of
   // moderation traffic, so the role is re-checked at send time rather than
   // trusted from whenever the row was written.
