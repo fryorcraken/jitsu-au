@@ -19,6 +19,8 @@ export const notificationKinds = [
   "new_blog_post",
   "blog_comment",
   "kb_comment",
+  "insurance_ending_soon",
+  "insurance_ended",
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
@@ -33,7 +35,11 @@ export type NotificationKind = (typeof notificationKinds)[number];
  * `notifications.test.ts` pins the list so it cannot grow by accident.
  * Everything not listed keeps its switch.
  */
-export const unswitchableNotificationKinds = [] as const satisfies readonly NotificationKind[];
+export const unswitchableNotificationKinds = [
+  // Yearly insurance ending: docs/memberships.md, "When yearly insurance ends".
+  "insurance_ending_soon",
+  "insurance_ended",
+] as const satisfies readonly NotificationKind[];
 export type UnswitchableNotificationKind = (typeof unswitchableNotificationKinds)[number];
 export type SwitchableNotificationKind = Exclude<NotificationKind, UnswitchableNotificationKind>;
 
@@ -51,7 +57,12 @@ export const digestNotificationKinds: readonly SwitchableNotificationKind[] =
   notificationKinds.filter((k): k is SwitchableNotificationKind => !isUnswitchable(k));
 
 /** The things a notification can be about. Matches the `subject_type` CHECK. */
-export const notificationSubjectTypes = ["blog_comment", "kb_annotation", "blog_post"] as const;
+export const notificationSubjectTypes = [
+  "blog_comment",
+  "kb_annotation",
+  "blog_post",
+  "membership",
+] as const;
 export type NotificationSubjectType = (typeof notificationSubjectTypes)[number];
 
 /**
