@@ -32,7 +32,10 @@ of truth for the current action set.
 
 ## Configuration
 
-- `UTS_MANAGER_API_URL` — the site's base URL, e.g. `https://jitsu.au`
+- `UTS_MANAGER_API_URL` — the site's base URL, `https://utsjitsu.com.au`. Use the
+  host the site is served from, never `jitsu.au`: that domain now redirects, and
+  a redirect to another host drops the `Authorization` header, so every call
+  fails 401 with a token that is perfectly valid.
 - `UTS_MANAGER_API_KEY` — a manager agent token. A manager mints one at
   **`/manager/api-tokens`** on the site (it's shown once — copy it then). That is
   the only kind of token the endpoint accepts: there is no server-side
