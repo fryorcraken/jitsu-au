@@ -7,7 +7,7 @@
 // second person can make a successful-looking call be wrong.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { changeClubUserEmail } from "./club-user.functions";
+import { changeClubUserEmail, ClubUserNotFoundError, loadClubUser } from "./club-user.functions";
 import { managerEmailChangeSchema } from "./validation";
 
 type AuthUser = { id: string; email: string | null; email_confirmed_at: string | null };
@@ -255,4 +255,318 @@ describe("changeClubUserEmail", () => {
       expect(fake.user?.email).toBe("ada@example.com");
     });
   });
+});
+
+// ---- The person page's read ----
+//
+// `loadClubUser` is the one read behind both `/manager/users/<id>` and the
+// manager agent API's `get_user`. What is pinned here is the set of things the
+// two surfaces must agree on and a reader cannot check by eye: whose address is
+// shown for a dependant, which acceptance decides the code-of-conduct state, and
+// that a failed read fails rather than rendering as "nothing there".
+
+type Row = Record<string, unknown>;
+
+/**
+ * A fake admin client over in-memory tables, honouring the handful of filters
+ * the read uses (`eq`, `in`) and the `count` / `head` form of `select`. Order
+ * and limit are accepted and ignored: the fixtures are already newest first.
+ */
+function fakeReadAdmin(
+  tables: Record<string, Row[]>,
+  opts: {
+    emails?: { user_id: string; email: string; email_confirmed_at: string | null }[];
+    emailsFail?: string;
+    fail?: Record<string, string>;
+  } = {},
+) {
+  const emailAsks: string[][] = [];
+  const from = (table: string) => {
+    const filters: ((r: Row) => boolean)[] = [];
+    let countOnly = false;
+    const result = () => {
+      if (opts.fail?.[table])
+        return { data: null, count: null, error: { message: opts.fail[table] } };
+      const rows = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+      return { data: countOnly ? null : rows, count: rows.length, error: null };
+    };
+    const builder = {
+      select: (_cols?: string, o?: { count?: string; head?: boolean }) => {
+        if (o?.head) countOnly = true;
+        return builder;
+      },
+      eq: (col: string, val: unknown) => {
+        filters.push((r) => r[col] === val);
+        return builder;
+      },
+      in: (col: string, vals: unknown[]) => {
+        filters.push((r) => vals.includes(r[col]));
+        return builder;
+      },
+      order: () => builder,
+      limit: () => builder,
+      maybeSingle: () => {
+        const r = result();
+        return Promise.resolve({ data: r.data ? (r.data[0] ?? null) : null, error: r.error });
+      },
+      then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+        Promise.resolve(result()).then(resolve, reject),
+    };
+    return builder;
+  };
+  const admin = {
+    from,
+    rpc: (fn: string, args: { _user_ids?: string[] }) => {
+      if (fn !== "user_emails") throw new Error(`unexpected rpc: ${fn}`);
+      emailAsks.push(args._user_ids ?? []);
+      if (opts.emailsFail)
+        return Promise.resolve({ data: null, error: { message: opts.emailsFail } });
+      return Promise.resolve({
+        data: (opts.emails ?? []).filter((e) => args._user_ids?.includes(e.user_id)),
+        error: null,
+      });
+    },
+  };
+  return { admin, emailAsks };
+}
+
+const PERSON = "11111111-1111-4111-8111-111111111111";
+const GUARDIAN = "22222222-2222-4222-8222-222222222222";
+const MANAGER = "33333333-3333-4333-8333-333333333333";
+
+function profileRow(over: Row = {}): Row {
+  return {
+    user_id: PERSON,
+    first_name: "Ada",
+    middle_name: null,
+    last_name: "Lovelace",
+    preferred_name: null,
+    display_name: null,
+    phone: "0400 000 001",
+    date_of_birth: "1990-01-01",
+    address: "1 Example St",
+    uts_student_number: null,
+    emergency_contact_name: "Bea",
+    emergency_contact_relationship: "Sister",
+    emergency_contact_phone: "0400 000 002",
+    medical_notes: null,
+    is_minor: false,
+    guardian_user_id: null,
+    guardian_name: null,
+    guardian_relationship: null,
+    guardian_address: null,
+    guardian_phone: null,
+    guardian_email: null,
+    sms_whatsapp_consent: true,
+    gi_size: "A2",
+    belt_size: "3",
+    media_consent: true,
+    media_consent_updated_at: null,
+    media_consent_updated_by: null,
+    martial_arts_experience: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-02T00:00:00+00:00",
+    ...over,
+  };
+}
+
+function waiverRow(over: Row = {}): Row {
+  return {
+    id: "w1",
+    user_id: PERSON,
+    first_name: "Ada",
+    middle_name: null,
+    last_name: "Lovelace",
+    preferred_name: null,
+    email: "ada@example.com",
+    phone: "0400 000 001",
+    date_of_birth: "1990-01-01",
+    address: "1 Example St",
+    uts_student_number: null,
+    sms_whatsapp_consent: true,
+    media_consent: true,
+    emergency_contact_name: "Bea",
+    emergency_contact_relationship: "Sister",
+    emergency_contact_phone: "0400 000 002",
+    medical_notes: null,
+    is_minor: false,
+    guardian_name: null,
+    guardian_relationship: null,
+    guardian_address: null,
+    guardian_phone: null,
+    guardian_email: null,
+    signed_at: "2026-02-01T00:00:00+00:00",
+    template_version: 3,
+    pdf_path: "w1.pdf",
+    approval_status: "approved",
+    approved_at: "2026-02-02T00:00:00+00:00",
+    approved_by: MANAGER,
+    signer_ip: "192.0.2.1",
+    signer_meta: {},
+    ...over,
+  };
+}
+
+function baseTables(over: Record<string, Row[]> = {}): Record<string, Row[]> {
+  return {
+    profiles: [
+      profileRow(),
+      { ...profileRow(), user_id: MANAGER, first_name: "Mo", last_name: "Manager" },
+    ],
+    waivers: [waiverRow()],
+    memberships: [
+      {
+        id: "m1",
+        user_id: PERSON,
+        plan_id: "p1",
+        status: "active",
+        price_cents: 12000,
+        payment_reference: "REF1",
+        starts_at: "2026-02-03T00:00:00+00:00",
+        ends_at: "2026-06-30T00:00:00+00:00",
+        sessions_remaining: null,
+        paid_at: null,
+        is_student: false,
+        uts_student_number: null,
+        created_at: "2026-02-03T00:00:00+00:00",
+      },
+    ],
+    membership_plans: [
+      {
+        id: "p1",
+        name: "Semester 1 2026",
+        kind: "period",
+        starts_on: null,
+        ends_on: null,
+        duration_days: null,
+      },
+    ],
+    user_roles: [{ user_id: PERSON, role: "member" }],
+    session_checkins: [
+      {
+        id: "c1",
+        user_id: PERSON,
+        event_id: "e1",
+        checked_in_at: "2026-02-04T00:00:00+00:00",
+        coverage: "membership",
+        membership_id: "m1",
+        consumed_credit: false,
+        warnings: [],
+      },
+    ],
+    calendar_events: [{ id: "e1", title: "Tuesday class", starts_at: "2026-02-04T00:00:00+00:00" }],
+    code_of_conduct_acceptances: [],
+    ...over,
+  };
+}
+
+const ADA_EMAIL = {
+  user_id: PERSON,
+  email: "ada@example.com",
+  email_confirmed_at: "2026-01-01T00:00:00Z",
+};
+
+describe("loadClubUser", () => {
+  it("reads one person the way their page shows them", async () => {
+    const { admin } = fakeReadAdmin(baseTables(), { emails: [ADA_EMAIL] });
+    const read = await loadClubUser(admin as never, PERSON);
+
+    expect(read.user).toMatchObject({
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      email_belongs_to: null,
+      email_confirmed_at: "2026-01-01T00:00:00Z",
+      sessions_attended: 1,
+    });
+    // Straight off the profile row, not filled in from elsewhere.
+    expect(read.profile).toMatchObject({ gi_size: "A2", belt_size: "3", medical_notes: null });
+    expect(read.memberships).toEqual([
+      expect.objectContaining({ id: "m1", plan_name: "Semester 1 2026", checkin_count: 1 }),
+    ]);
+    expect(read.checkins).toEqual([
+      expect.objectContaining({
+        id: "c1",
+        event_title: "Tuesday class",
+        plan_name: "Semester 1 2026",
+      }),
+    ]);
+    expect(read.waivers).toEqual([
+      expect.objectContaining({
+        id: "w1",
+        // The approved waiver they hold now is their ACTIVE one.
+        status: "active",
+        template_version: 3,
+        has_pdf: true,
+        approved_by: MANAGER,
+        approved_by_name: "Mo Manager",
+      }),
+    ]);
+  });
+
+  it("shows a dependant their guardian's address, says whose it is, and never asks for the child's", async () => {
+    const tables = baseTables({
+      profiles: [
+        profileRow({ first_name: "Bea", guardian_user_id: GUARDIAN, is_minor: true }),
+        profileRow({ user_id: GUARDIAN, first_name: "Ada" }),
+      ],
+      waivers: [],
+    });
+    const { admin, emailAsks } = fakeReadAdmin(tables, {
+      emails: [{ user_id: GUARDIAN, email: "ada@example.com", email_confirmed_at: null }],
+    });
+    const read = await loadClubUser(admin as never, PERSON);
+
+    expect(read.user.email).toBe("ada@example.com");
+    expect(read.user.email_belongs_to).toBe("Ada Lovelace");
+    expect(read.household.guardian).toEqual({ user_id: GUARDIAN, name: "Ada Lovelace" });
+    expect(emailAsks).toEqual([[GUARDIAN]]);
+  });
+
+  it("reports the highest version agreed to, not the most recent signing", async () => {
+    const { admin } = fakeReadAdmin(
+      baseTables({
+        code_of_conduct_acceptances: [
+          {
+            user_id: PERSON,
+            version: 1,
+            accepted_at: "2026-03-01T00:00:00Z",
+            signature_name: "Ada L",
+          },
+          {
+            user_id: PERSON,
+            version: 2,
+            accepted_at: "2026-02-01T00:00:00Z",
+            signature_name: "Ada Lovelace",
+          },
+        ],
+      }),
+      { emails: [ADA_EMAIL] },
+    );
+    const read = await loadClubUser(admin as never, PERSON);
+    expect(read.code_of_conduct).toMatchObject({
+      accepted_version: 2,
+      accepted_at: "2026-02-01T00:00:00Z",
+      signature_name: "Ada Lovelace",
+    });
+  });
+
+  it("refuses an id with no profile as not found, not as a failure", async () => {
+    const { admin } = fakeReadAdmin(baseTables({ profiles: [] }));
+    await expect(loadClubUser(admin as never, PERSON)).rejects.toBeInstanceOf(
+      ClubUserNotFoundError,
+    );
+  });
+
+  it.each(["memberships", "waivers", "session_checkins", "user_roles", "membership_plans"])(
+    "fails when the %s read fails, rather than showing an empty section",
+    async (table) => {
+      const { admin } = fakeReadAdmin(baseTables(), {
+        emails: [ADA_EMAIL],
+        fail: { [table]: "boom" },
+      });
+      const err = await loadClubUser(admin as never, PERSON).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(ClubUserNotFoundError);
+    },
+  );
 });
