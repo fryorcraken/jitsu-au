@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   SITE_HOST,
   SITE_ORIGIN,
@@ -606,47 +606,67 @@ describe("sitemap coverage of the route files", () => {
 // now only redirects. A link to it still lands, but a redirect to another host
 // drops whatever the request carried across (the nightly digest lost its token
 // that way), and a canonical pointing at a redirect tells a search engine the
-// real page is one that does not exist. The origin belongs in SITE_ORIGIN; the
-// addresses that stay on the old domain on purpose (`dependant.jitsu.au`,
-// `notify.jitsu.au`, calendar UIDs `<id>@jitsu.au`) are not links, so neither
-// pattern below matches them.
+// real page is one that does not exist. The address belongs in SITE_ORIGIN.
+//
+// So any mention of the bare domain in code fails, written as a URL or as copy
+// ("Sign in at jitsu.au"). What is left out, and why:
+//   - the subdomains and addresses that stay on it on purpose
+//     (`notify.jitsu.au`, `dependant.jitsu.au`, calendar UIDs `<id>@jitsu.au`):
+//     the pattern needs the name not to follow a dot, `@` or word character;
+//   - comments, where the old name is history rather than a link;
+//   - tests, where URLs are input data rather than anything a person follows;
+//   - PRODUCTION_HOSTS, which lists jitsu.au so a crawler can read its redirect.
 describe("the old domain", () => {
-  const OLD_DOMAIN_LINK = [/https?:\/\/(www\.)?jitsu\.au\b/, /(^|[^\w.@-])(www\.)?jitsu\.au\//];
+  const OLD_DOMAIN = /(^|[^\w.@-])(www\.)?jitsu\.au(?![\w-])/;
+  const COMMENT = /^\s*(\/\/|\/\*|\*|#|<!--)/;
+  const ALLOWED = new Set([
+    'src/lib/site-origin.ts: "jitsu.au",',
+    'src/lib/site-origin.ts: "www.jitsu.au",',
+  ]);
+  const ROOT = join(import.meta.dirname, "..", "..");
+  const SCANNED = ["src", "public", "scripts", "e2e", ".claude/skills"];
 
-  function sourceFiles(dir: string): string[] {
+  function codeFiles(dir: string): string[] {
     const found: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
-      if (entry.isDirectory()) found.push(...sourceFiles(path));
-      else if (
-        /\.(tsx?|html|js|webmanifest)$/.test(entry.name) &&
-        !/\.test\.tsx?$/.test(entry.name)
-      )
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules") found.push(...codeFiles(path));
+      } else if (
+        /\.(tsx?|m?js|cjs|html|webmanifest|sh|py)$/.test(entry.name) &&
+        !/\.(test|spec)\.[a-z]+$/.test(entry.name)
+      ) {
         found.push(path);
+      }
     }
     return found;
   }
 
-  it("is never linked from the app's source or the files served beside it", () => {
-    const root = join(import.meta.dirname, "..", "..");
-    const offenders = [...sourceFiles(join(root, "src")), ...sourceFiles(join(root, "public"))]
+  const mentions = (text: string) => !COMMENT.test(text) && OLD_DOMAIN.test(text);
+
+  it("is never mentioned in code, as a link or as copy", () => {
+    const offenders = SCANNED.flatMap((dir) => codeFiles(join(ROOT, dir)))
       .flatMap((file) =>
         readFileSync(file, "utf8")
           .split("\n")
-          .map((line, i) => ({ file, line: i + 1, text: line }))
-          .filter(({ text }) => OLD_DOMAIN_LINK.some((pattern) => pattern.test(text))),
+          .map((text, i) => ({ file: relative(ROOT, file), line: i + 1, text: text.trim() })),
       )
-      .map(({ file, line, text }) => `${file}:${line}: ${text.trim()}`);
+      .filter(({ file, text }) => mentions(text) && !ALLOWED.has(`${file}: ${text}`))
+      .map(({ file, line, text }) => `${file}:${line}: ${text}`);
     expect(offenders).toEqual([]);
   });
 
-  it("catches both a full link and a bare one written as copy", () => {
-    const caught = (text: string) => OLD_DOMAIN_LINK.some((pattern) => pattern.test(text));
-    expect(caught('const SITE_URL = "https://jitsu.au";')).toBe(true);
-    expect(caught("Sign in at jitsu.au/account")).toBe(true);
-    expect(caught("Sign in at www.jitsu.au/account")).toBe(true);
-    expect(caught("https://utsjitsu.com.au/account")).toBe(false);
-    expect(caught("x@dependant.jitsu.au")).toBe(false);
-    expect(caught("noreply@notify.jitsu.au")).toBe(false);
+  it("catches the domain however it is written, and leaves what stays on it alone", () => {
+    expect(mentions('const SITE_URL = "https://jitsu.au";')).toBe(true);
+    expect(mentions("Sign in at jitsu.au/account")).toBe(true);
+    expect(mentions("Sign in at www.jitsu.au/account")).toBe(true);
+    expect(mentions("Visit jitsu.au.")).toBe(true);
+    expect(mentions("Visit jitsu.au")).toBe(true);
+    expect(mentions("https://utsjitsu.com.au/account")).toBe(false);
+    expect(mentions("x@dependant.jitsu.au")).toBe(false);
+    expect(mentions("noreply@notify.jitsu.au")).toBe(false);
+    expect(mentions("uid: `${e.id}@jitsu.au`,")).toBe(false);
+    expect(mentions('"uts-jitsu.auth.remember"')).toBe(false);
+    expect(mentions("// jitsu.au used to be the address")).toBe(false);
   });
 });
