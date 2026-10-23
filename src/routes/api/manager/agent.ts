@@ -91,7 +91,7 @@ import {
   saveKbSection,
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
-import { WaiverTemplateError } from "@/lib/waiver-template-editor";
+import { DocumentVersionError } from "@/lib/document-versions";
 import {
   filePaperWaiver,
   listWaiverTemplateRows,
@@ -1128,7 +1128,7 @@ async function handleListWaiverTemplates() {
 const TEMPLATE_RETRY_AFTER_SECONDS = 5;
 
 /**
- * Turn a refused template change into the right status code.
+ * Turn a refused change to a versioned document into the right status code.
  *
  * The distinction that matters is retryable vs not. SKILL.md tells agents that a
  * 4xx means the request itself has to change, so reporting "nobody can sign
@@ -1137,13 +1137,17 @@ const TEMPLATE_RETRY_AFTER_SECONDS = 5;
  * version when one was written — repeating the save would file a second draft,
  * where publishing that version finishes the job.
  */
-function templateFailure(e: unknown, refusedCode: string): AgentError {
-  if (e instanceof WaiverTemplateError) {
+function templateFailure(
+  e: unknown,
+  refusedCode: string,
+  notPublishedCode = "waiver_template_not_published",
+): AgentError {
+  if (e instanceof DocumentVersionError) {
     if (e.reason === "not_found") return new AgentError(404, "not_found", e.message);
     if (e.reason === "invalid") return new AgentError(422, refusedCode, e.message);
     return new AgentError(
       503,
-      "waiver_template_not_published",
+      notPublishedCode,
       e.message,
       e.version === undefined ? undefined : { version: e.version, published: false },
       TEMPLATE_RETRY_AFTER_SECONDS,

@@ -777,8 +777,8 @@ describe("manager agent route: the waiver template", () => {
     reason: "not_found" | "invalid" | "not_published",
     version?: number,
   ) {
-    const { WaiverTemplateError } = await import("@/lib/waiver-template-editor");
-    return new WaiverTemplateError(message, reason, version);
+    const { DocumentVersionError } = await import("@/lib/document-versions");
+    return new DocumentVersionError(message, reason, version);
   }
 
   it("lists versions without their bodies, naming the live one", async () => {

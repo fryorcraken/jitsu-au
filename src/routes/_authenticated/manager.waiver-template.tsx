@@ -29,8 +29,8 @@ import {
   isDirty,
   meaningfulAcks,
   parseAcksJson,
-  versionLabel,
 } from "@/lib/waiver-template-editor";
+import { versionLabel } from "@/lib/document-versions";
 import { MEDIA_ACK_ID } from "@/lib/waiver-acknowledgements";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";

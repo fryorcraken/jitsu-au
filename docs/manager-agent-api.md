@@ -287,8 +287,8 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 waiver_template_not_published` with a `Retry-After`, and it carries
   `error.details.version` when a version WAS written and is merely unpublished —
   the case where saving again would file a second numbered draft and publishing
-  that version finishes the job. `WaiverTemplateError` in
-  `src/lib/waiver-template-editor.ts` carries the reason (`not_found` |
+  that version finishes the job. `DocumentVersionError` in
+  `src/lib/document-versions.ts` carries the reason (`not_found` |
   `invalid` | `not_published`) that decides this; the editor screen shows the
   same message either way.
 
