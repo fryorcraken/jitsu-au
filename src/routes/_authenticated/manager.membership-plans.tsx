@@ -10,7 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { listAllMembershipPlans, saveMembershipPlan } from "@/lib/membership.functions";
+import {
+  listAllMembershipPlans,
+  listPlanAnnouncements,
+  saveMembershipPlan,
+} from "@/lib/membership.functions";
+import { announcedLine, type AnnouncementSummary } from "@/lib/plan-announcement";
+import { usePlanAnnouncement, type AnnounceResult } from "@/hooks/use-plan-announcement";
 import {
   PLAN_TYPE_KINDS,
   PLAN_TYPES,
@@ -167,6 +173,39 @@ function PlanTypeFields({
 }
 
 /**
+ * Save a plan. `beforeWrite` runs after the plan's own checks pass and before
+ * anything is written; answering false cancels the save. Resolves to whether
+ * the plan was saved, so the caller knows whether there is anything to
+ * announce.
+ */
+type SavePlan = (plan: MembershipPlanRow, beforeWrite?: () => Promise<boolean>) => Promise<boolean>;
+
+/** The "Email all members about this plan" tick box, beside a Save button. */
+function AnnounceBox({
+  id,
+  checked,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label htmlFor={id} className="flex items-center gap-2 text-sm">
+      <Checkbox
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(v) => onChange(v === true)}
+      />
+      Email all members about this plan
+    </label>
+  );
+}
+
+/**
  * One plan's editable card. Hoisted to module scope and driven entirely by
  * props: an inline function component re-created on every render of the
  * parent (as this used to be) gets a new identity each time, so React
@@ -178,9 +217,11 @@ function PlanCard({
   ended = false,
   dirty,
   savingId,
+  announcement,
   onPatch,
   onSave,
   onDuplicate,
+  onAnnounced,
 }: {
   plan: MembershipPlanRow;
   /** Its end date has passed, so the site refuses to sell it whatever the
@@ -189,11 +230,24 @@ function PlanCard({
   ended?: boolean;
   dirty: boolean;
   savingId: string | null;
+  /** The last time this plan was emailed to the club, if ever. */
+  announcement?: AnnouncementSummary;
   onPatch: (id: string, patch: Partial<MembershipPlanRow>) => void;
-  onSave: (plan: MembershipPlanRow) => void;
+  onSave: SavePlan;
   onDuplicate: (plan: MembershipPlanRow) => void;
+  onAnnounced: (result: AnnounceResult) => void;
 }) {
   const spec = planTypeOf(plan.kind);
+  const announce = usePlanAnnouncement(onAnnounced);
+
+  // Save first, then announce, as two steps the card reports separately. The
+  // confirm is asked inside the save, after the plan's own checks pass, so a
+  // manager is never asked "email 84 people?" about a plan that then fails to
+  // save for a missing date.
+  async function save() {
+    const saved = await onSave(plan, () => announce.confirmBeforeSave(plan.name));
+    if (saved && announce.ticked) await announce.send({ id: plan.id, name: plan.name });
+  }
   return (
     // `data-plan` scopes a card's own controls: every card renders the same
     // labels, so tests (and anyone inspecting the DOM) need a stable handle
@@ -299,14 +353,37 @@ function PlanCard({
           onKindChange={(kind) => onPatch(plan.id, planTypePatch(kind))}
           onFieldChange={(patch) => onPatch(plan.id, patch)}
         />
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" disabled={!dirty || savingId === plan.id} onClick={() => onSave(plan)}>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button
+            size="sm"
+            // Ticking the box is a reason to press Save on its own: announcing a
+            // plan nobody has edited is still a real thing to do.
+            disabled={(!dirty && !announce.ticked) || savingId === plan.id || announce.busy}
+            onClick={() => void save()}
+          >
             {savingId === plan.id ? "Saving..." : "Save"}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => onDuplicate(plan)}>
+          <AnnounceBox
+            id={`plan-${plan.id}-announce`}
+            checked={announce.ticked}
+            disabled={announce.busy}
+            onChange={announce.setTicked}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="sm:ml-auto"
+            onClick={() => onDuplicate(plan)}
+          >
             Duplicate
           </Button>
         </div>
+        {announcement && (
+          <p className="text-xs text-muted-foreground">
+            {announcedLine(announcement, clubLocalDate(new Date(announcement.announced_at)))}
+          </p>
+        )}
+        {announce.panel}
       </CardContent>
     </Card>
   );
@@ -320,17 +397,21 @@ function NotOnSaleRow({
   ended,
   dirty,
   savingId,
+  announcement,
   onPatch,
   onSave,
   onDuplicate,
+  onAnnounced,
 }: {
   plan: MembershipPlanRow;
   ended: boolean;
   dirty: boolean;
   savingId: string | null;
+  announcement?: AnnouncementSummary;
   onPatch: (id: string, patch: Partial<MembershipPlanRow>) => void;
-  onSave: (plan: MembershipPlanRow) => void;
+  onSave: SavePlan;
   onDuplicate: (plan: MembershipPlanRow) => void;
+  onAnnounced: (result: AnnounceResult) => void;
 }) {
   return (
     <details className="rounded-lg border bg-card">
@@ -347,9 +428,11 @@ function NotOnSaleRow({
             ended={ended}
             dirty={dirty}
             savingId={savingId}
+            announcement={announcement}
             onPatch={onPatch}
             onSave={onSave}
             onDuplicate={onDuplicate}
+            onAnnounced={onAnnounced}
           />
         </div>
       </div>
@@ -400,6 +483,7 @@ function PlansPage() {
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
   const fetchAll = useServerFn(listAllMembershipPlans);
+  const fetchAnnouncements = useServerFn(listPlanAnnouncements);
   const save = useServerFn(saveMembershipPlan);
 
   const [plans, setPlans] = useState<MembershipPlanRow[]>([]);
@@ -412,6 +496,29 @@ function PlansPage() {
   const [newPlan, setNewPlan] = useState<NewPlanForm>(emptyNewPlan);
   const [copiedFrom, setCopiedFrom] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  /** Each plan's latest announcement, keyed by plan id. */
+  const [announcements, setAnnouncements] = useState<Record<string, AnnouncementSummary>>({});
+  const newPlanAnnounce = usePlanAnnouncement(recordAnnouncement);
+
+  /** Fold a send's result into the plan's "Announced on..." line. */
+  function recordAnnouncement(result: AnnounceResult) {
+    if (!result.announced_at) return;
+    const announcedAt = result.announced_at;
+    setAnnouncements((prev) => {
+      const before = prev[result.plan_id];
+      const sameSend = before?.announcement_id === result.announcement_id;
+      return {
+        ...prev,
+        [result.plan_id]: {
+          announcement_id: result.announcement_id,
+          announced_at: announcedAt,
+          recipients: result.recipients,
+          emailed: result.emailed,
+          times: sameSend ? before.times : (before?.times ?? 0) + 1,
+        },
+      };
+    });
+  }
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -420,10 +527,11 @@ function PlansPage() {
   const load = useMemo(
     () => () => {
       setLoading(true);
-      return fetchAll()
-        .then((data) => {
+      return Promise.all([fetchAll(), fetchAnnouncements()])
+        .then(([data, sent]) => {
           setPlans(data as MembershipPlanRow[]);
           setBaseline(baselineOf(data as MembershipPlanRow[]));
+          setAnnouncements(sent);
           setLoadError(null);
         })
         .catch((e) => {
@@ -433,7 +541,7 @@ function PlansPage() {
         })
         .finally(() => setLoading(false));
     },
-    [fetchAll],
+    [fetchAll, fetchAnnouncements],
   );
 
   useEffect(() => {
@@ -456,7 +564,10 @@ function PlansPage() {
    * Deliberately NOT a full `reload()`: refetching every plan after one save
    * would throw away whatever another card had mid-edit but unsaved, since
    * every card shares the same `plans` array. */
-  async function onSave(plan: MembershipPlanRow) {
+  async function onSave(
+    plan: MembershipPlanRow,
+    beforeWrite?: () => Promise<boolean>,
+  ): Promise<boolean> {
     // Only hold a manager to the shape rules for a shape they are actually
     // changing. A row that arrived malformed (written by the manager agent
     // API, or predating these rules) must stay renameable and, above all,
@@ -466,8 +577,9 @@ function PlansPage() {
     const shapeError = planShapeError(plan);
     if (shapeError && !(stored && planShapeUnchanged(plan, stored))) {
       toast.error(shapeError);
-      return;
+      return false;
     }
+    if (beforeWrite && !(await beforeWrite())) return false;
     setSavingId(plan.id);
     try {
       const data: SavePlanInput = planEditPayload(plan);
@@ -478,8 +590,10 @@ function PlansPage() {
       // straight back to "no unsaved changes" and Save greys out again.
       setBaseline((prev) => ({ ...prev, [plan.id]: saved }));
       toast.success(`Saved ${plan.name}`);
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
+      return false;
     } finally {
       setSavingId(null);
     }
@@ -525,6 +639,9 @@ function PlansPage() {
       toast.error(shapeError);
       return;
     }
+    const name = newPlan.name.trim();
+    if (!(await newPlanAnnounce.confirmBeforeSave(name))) return;
+    let created: { id: string } | null = null;
     setCreating(true);
     try {
       const data: SavePlanInput = planEditPayload({
@@ -534,7 +651,7 @@ function PlansPage() {
         description: newPlan.description.trim(),
         public_price_cents: publicPrice,
       });
-      await save({ data });
+      created = await save({ data });
       toast.success("Plan added");
       setNewPlan(emptyNewPlan());
       setCopiedFrom(null);
@@ -559,6 +676,9 @@ function PlansPage() {
     } finally {
       setCreating(false);
     }
+    // After the create has settled, and against the id it returned: a retry
+    // from the panel announces this plan again, it never adds a second one.
+    if (created && newPlanAnnounce.ticked) await newPlanAnnounce.send({ id: created.id, name });
   }
 
   if (loading) return <Loading className="p-8" />;
@@ -620,9 +740,11 @@ function PlansPage() {
               plan={plan}
               dirty={isDirty(plan)}
               savingId={savingId}
+              announcement={announcements[plan.id]}
               onPatch={patch}
               onSave={onSave}
               onDuplicate={duplicate}
+              onAnnounced={recordAnnouncement}
             />
           ))}
         </div>
@@ -759,9 +881,22 @@ function PlansPage() {
               />
               Available to buy immediately
             </label>
-            <Button size="sm" disabled={creating} onClick={onCreate}>
-              {creating ? "Adding..." : "Add plan"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Button
+                size="sm"
+                disabled={creating || newPlanAnnounce.busy}
+                onClick={() => void onCreate()}
+              >
+                {creating ? "Adding..." : "Add plan"}
+              </Button>
+              <AnnounceBox
+                id="new-plan-announce"
+                checked={newPlanAnnounce.ticked}
+                disabled={newPlanAnnounce.busy}
+                onChange={newPlanAnnounce.setTicked}
+              />
+            </div>
+            {newPlanAnnounce.panel}
           </CardContent>
         </Card>
 
@@ -776,9 +911,11 @@ function PlansPage() {
                   ended={isEnded(plan)}
                   dirty={isDirty(plan)}
                   savingId={savingId}
+                  announcement={announcements[plan.id]}
                   onPatch={patch}
                   onSave={onSave}
                   onDuplicate={duplicate}
+                  onAnnounced={recordAnnouncement}
                 />
               ))}
             </div>

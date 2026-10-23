@@ -648,6 +648,18 @@ function MembershipPage() {
     setScrollToPay(false);
   }, [scrollToPay]);
 
+  // A plan announcement's email links to `#plan-<id>` (`planAnnouncementHref`).
+  // The browser looks for that anchor once, on arrival, before this page has
+  // loaded its plans, so it finds nothing. Look again once the cards exist.
+  const hashScrolled = useRef(false);
+  useEffect(() => {
+    if (hashScrolled.current || plans.length === 0) return;
+    const hash = window.location.hash;
+    if (!hash.startsWith("#plan-")) return;
+    hashScrolled.current = true;
+    document.getElementById(hash.slice(1))?.scrollIntoView?.({ block: "start" });
+  }, [plans]);
+
   async function choose(plan: Plan) {
     // ⚠️ Only when buying for somebody else, and that narrowness is the point.
     // Confirming every purchase would train people to click through, which is
@@ -1021,7 +1033,13 @@ function MembershipPage() {
               const hasStarted =
                 plan.kind !== "period" || !plan.starts_on || plan.starts_on <= today;
               return (
-                <div key={plan.code} className="flex flex-col rounded-2xl border bg-card p-6">
+                <div
+                  key={plan.code}
+                  // The target of a plan announcement's link
+                  // (`planAnnouncementHref`), so the email lands on this card.
+                  id={`plan-${plan.id}`}
+                  className="flex scroll-mt-24 flex-col rounded-2xl border bg-card p-6"
+                >
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-lg font-semibold">{plan.name}</h3>
                     {plan.kind === "period" && plan.starts_on && (
@@ -1120,7 +1138,11 @@ function MembershipPage() {
                 {otherPlans.map((plan) => {
                   const price = computeMembershipPrice(plan, isStudent);
                   return (
-                    <div key={plan.code} className="flex flex-col rounded-2xl border bg-card p-6">
+                    <div
+                      key={plan.code}
+                      id={`plan-${plan.id}`}
+                      className="flex scroll-mt-24 flex-col rounded-2xl border bg-card p-6"
+                    >
                       <h4 className="text-base font-semibold">{plan.name}</h4>
                       {plan.description && (
                         <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>

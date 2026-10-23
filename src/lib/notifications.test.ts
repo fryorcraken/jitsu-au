@@ -11,6 +11,7 @@ import {
   digestSubject,
   emailPreferenceKeys,
   hasDigestContent,
+  isSwitchableKind,
   kbAnnotationHref,
   mergeHouseholdItems,
   notificationKinds,
@@ -19,6 +20,7 @@ import {
   resolveNotificationPreferences,
   shouldEmail,
   threadActivityRecipients,
+  UNSWITCHABLE_NOTIFICATION_KINDS,
   type DigestCandidate,
   type NotificationItem,
   type NotificationKind,
@@ -47,10 +49,23 @@ function item(over: Partial<NotificationItem> = {}): NotificationItem {
 }
 
 describe("preferenceForKind", () => {
-  it("maps every kind to a switch", () => {
+  it("maps every kind to a switch, except the closed list nobody can switch off", () => {
     for (const kind of notificationKinds) {
-      expect(emailPreferenceKeys).toContain(preferenceForKind[kind]);
+      if (UNSWITCHABLE_NOTIFICATION_KINDS.includes(kind)) {
+        expect(preferenceForKind[kind]).toBeNull();
+        expect(isSwitchableKind(kind)).toBe(false);
+      } else {
+        expect(emailPreferenceKeys).toContain(preferenceForKind[kind]);
+        expect(isSwitchableKind(kind)).toBe(true);
+      }
     }
+  });
+
+  // Pinned exactly, so a kind can only stop being switchable by somebody
+  // editing this line on purpose. An announcement that lost its switch by
+  // accident would reach every inbox the club has with no way to turn it off.
+  it("keeps the un-switchable list closed", () => {
+    expect([...UNSWITCHABLE_NOTIFICATION_KINDS]).toEqual(["membership_plan_open"]);
   });
 
   // Two kinds, one switch: "tell me about new comments" is one decision a
@@ -140,6 +155,35 @@ describe("shouldEmail", () => {
     expect(shouldEmail(null, "new_blog_post")).toBe(false);
     expect(shouldEmail({ new_blog_post: true }, "new_blog_post")).toBe(true);
   });
+
+  // The membership plan announcement is a membership email, like an invoice.
+  // Nothing a person has switched off may stop it: not the announcement switch
+  // (off by default, so riding it would reach almost nobody), and not every
+  // switch at once.
+  it("emails an un-switchable kind whatever the switches say", () => {
+    const allOff = {
+      reply_to_me: false,
+      thread_activity: false,
+      new_blog_post: false,
+      manager_comment_alerts: false,
+    };
+    for (const kind of UNSWITCHABLE_NOTIFICATION_KINDS) {
+      expect(shouldEmail(allOff, kind)).toBe(true);
+      expect(shouldEmail(null, kind)).toBe(true);
+    }
+  });
+
+  it("still lets the switches stop every kind that has one", () => {
+    const allOff = {
+      reply_to_me: false,
+      thread_activity: false,
+      new_blog_post: false,
+      manager_comment_alerts: false,
+    };
+    for (const kind of notificationKinds.filter(isSwitchableKind)) {
+      expect(shouldEmail(allOff, kind, { isManager: true })).toBe(false);
+    }
+  });
 });
 
 describe("badgeCount", () => {
@@ -168,6 +212,7 @@ describe("digestSections", () => {
     item({ kind: "new_blog_post" }),
     item({ kind: "blog_comment" }),
     item({ kind: "kb_comment" }),
+    item({ kind: "membership_plan_open" }),
   ];
 
   it("groups the kinds a person wants into their sections", () => {
@@ -177,6 +222,7 @@ describe("digestSections", () => {
     expect(sections.posts).toHaveLength(1);
     // Both moderation kinds land in one section, matching the single switch.
     expect(sections.moderation).toHaveLength(2);
+    expect(sections.membership).toHaveLength(1);
   });
 
   it("drops the kinds a person has switched off", () => {
@@ -190,38 +236,67 @@ describe("digestSections", () => {
     expect(digestSections(rows, null).moderation).toHaveLength(0);
   });
 
-  it("leaves a person with everything off nothing to send", () => {
+  it("keeps a membership email for a person with every switch off", () => {
     const sections = digestSections(rows, {
       reply_to_me: false,
       thread_activity: false,
       new_blog_post: false,
       manager_comment_alerts: false,
     });
+    expect(sections.membership).toHaveLength(1);
+    expect(hasDigestContent(sections)).toBe(true);
+  });
+
+  it("leaves a person with everything off nothing else to send", () => {
+    const sections = digestSections(
+      rows.filter((r) => r.kind !== "membership_plan_open"),
+      {
+        reply_to_me: false,
+        thread_activity: false,
+        new_blog_post: false,
+        manager_comment_alerts: false,
+      },
+    );
     expect(hasDigestContent(sections)).toBe(false);
   });
 });
 
 describe("hasDigestContent", () => {
   it("is false for an empty digest, so no email goes out", () => {
-    expect(hasDigestContent({ replies: [], threads: [], posts: [], moderation: [] })).toBe(false);
+    expect(
+      hasDigestContent({ membership: [], replies: [], threads: [], posts: [], moderation: [] }),
+    ).toBe(false);
   });
 
   it("is true when any one section has something", () => {
-    expect(hasDigestContent({ replies: [], threads: [], posts: [item()], moderation: [] })).toBe(
-      true,
-    );
+    expect(
+      hasDigestContent({
+        membership: [],
+        replies: [],
+        threads: [],
+        posts: [item()],
+        moderation: [],
+      }),
+    ).toBe(true);
   });
 });
 
 describe("digestItemCount and digestSubject", () => {
   it("counts across every section", () => {
     expect(
-      digestItemCount({ replies: [item()], threads: [item()], posts: [], moderation: [item()] }),
-    ).toBe(3);
+      digestItemCount({
+        membership: [item()],
+        replies: [item()],
+        threads: [item()],
+        posts: [],
+        moderation: [item()],
+      }),
+    ).toBe(4);
   });
 
   it("says one thing in the singular", () => {
     const subject = digestSubject("UTS Jitsu", {
+      membership: [],
       replies: [item()],
       threads: [],
       posts: [],
@@ -232,6 +307,7 @@ describe("digestItemCount and digestSubject", () => {
 
   it("counts in the plural", () => {
     const subject = digestSubject("UTS Jitsu", {
+      membership: [],
       replies: [item(), item()],
       threads: [],
       posts: [],
@@ -244,6 +320,7 @@ describe("digestItemCount and digestSubject", () => {
   // subject line is the most-read copy the club writes.
   it("uses no em dash", () => {
     const subject = digestSubject("UTS Jitsu", {
+      membership: [],
       replies: [item()],
       threads: [],
       posts: [],
