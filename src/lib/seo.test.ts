@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   SITE_HOST,
   SITE_ORIGIN,
@@ -156,16 +156,16 @@ describe("root + page head merge (regression guard for the Twitter Card bug)", (
 
 describe("isProductionHost", () => {
   it("accepts the apex and www hosts", () => {
-    expect(isProductionHost("jitsu.au")).toBe(true);
-    expect(isProductionHost("www.jitsu.au")).toBe(true);
+    expect(isProductionHost("utsjitsu.com.au")).toBe(true);
+    expect(isProductionHost("www.utsjitsu.com.au")).toBe(true);
   });
 
   // These serve the same site. Missing one here would tell crawlers to drop it
   // from the index entirely, so each is pinned by name.
   it("accepts the club's other domains, apex and www alike", () => {
     for (const host of [
-      "utsjitsu.com.au",
-      "www.utsjitsu.com.au",
+      "jitsu.au",
+      "www.jitsu.au",
       "sydneyjitsu.com.au",
       "www.sydneyjitsu.com.au",
     ]) {
@@ -174,7 +174,7 @@ describe("isProductionHost", () => {
   });
 
   it("serves the real rules, not a blanket disallow, on the other domains", () => {
-    const robots = buildRobotsTxt("utsjitsu.com.au");
+    const robots = buildRobotsTxt("jitsu.au");
     expect(robots).toContain("Allow: /");
     // The sitemap pointer stays absolute so every domain funnels crawlers to
     // the canonical one.
@@ -182,21 +182,21 @@ describe("isProductionHost", () => {
   });
 
   it("ignores case and a port", () => {
-    expect(isProductionHost("JITSU.AU:443")).toBe(true);
+    expect(isProductionHost("UTSJITSU.COM.AU:443")).toBe(true);
   });
 
   it("rejects preview hosts, look-alikes and a missing host", () => {
     expect(isProductionHost("preview--utsjitsu.lovable.app")).toBe(false);
     expect(isProductionHost("localhost:5173")).toBe(false);
     // A suffix match would wrongly accept this one.
-    expect(isProductionHost("jitsu.au.example.com")).toBe(false);
+    expect(isProductionHost("utsjitsu.com.au.example.com")).toBe(false);
     expect(isProductionHost(null)).toBe(false);
     expect(isProductionHost("")).toBe(false);
   });
 });
 
 describe("buildRobotsTxt", () => {
-  const robots = buildRobotsTxt("jitsu.au");
+  const robots = buildRobotsTxt("utsjitsu.com.au");
 
   it("allows crawling and points at the sitemap", () => {
     expect(robots).toContain("User-agent: *");
@@ -556,6 +556,25 @@ describe("sitemap coverage of the route files", () => {
     }
   });
 
+  // The test above only reaches pages in the sitemap. A noindex page with a
+  // canonical (/waiver, /thank-you, /email-settings) is just as wrong pointing
+  // at a retired host, so every canonical in every route file has to be built
+  // by canonicalUrl, the one place that knows the origin. Matched on the
+  // object rather than one line, so a reformatted or reordered link is still
+  // seen: any `rel: "canonical"` whose href is not canonicalUrl(...) fails.
+  it("builds every canonical in the route files with canonicalUrl, noindex pages included", () => {
+    const canonicalLinks = routeFiles.flatMap(({ path, source }) =>
+      [...source.matchAll(/\{[^{}]*rel:\s*"canonical"[^{}]*\}/g)].map((m) => ({
+        path,
+        link: m[0],
+      })),
+    );
+    expect(canonicalLinks.length).toBeGreaterThan(PUBLIC_PAGES.length);
+    for (const { path, link } of canonicalLinks) {
+      expect(link, `${path} spells its canonical by hand`).toMatch(/href:\s*canonicalUrl\(/);
+    }
+  });
+
   // PUBLIC_NOINDEX_PATHS is the one page list nothing can derive: a noindex
   // page is deliberately absent from the sitemap, and the test above fails if
   // it is added there. The end-to-end tour walks it, so a typo in it would
@@ -580,5 +599,74 @@ describe("sitemap coverage of the route files", () => {
   it("keeps the canonical off the root route, so no page ships two", () => {
     const root = readFileSync(join(routesDir, "__root.tsx"), "utf8");
     expect(root).not.toContain('rel: "canonical"');
+  });
+});
+
+// The site moved from jitsu.au to utsjitsu.com.au in October 2026, and jitsu.au
+// now only redirects. A link to it still lands, but a redirect to another host
+// drops whatever the request carried across (the nightly digest lost its token
+// that way), and a canonical pointing at a redirect tells a search engine the
+// real page is one that does not exist. The address belongs in SITE_ORIGIN.
+//
+// So any mention of the bare domain in code fails, written as a URL or as copy
+// ("Sign in at jitsu.au"). What is left out, and why:
+//   - the subdomains and addresses that stay on it on purpose
+//     (`notify.jitsu.au`, `dependant.jitsu.au`, calendar UIDs `<id>@jitsu.au`):
+//     the pattern needs the name not to follow a dot, `@` or word character;
+//   - comments, where the old name is history rather than a link;
+//   - tests, where URLs are input data rather than anything a person follows;
+//   - PRODUCTION_HOSTS, which lists jitsu.au so a crawler can read its redirect.
+describe("the old domain", () => {
+  const OLD_DOMAIN = /(^|[^\w.@-])(www\.)?jitsu\.au(?![\w-])/;
+  const COMMENT = /^\s*(\/\/|\/\*|\*|#|<!--)/;
+  const ALLOWED = new Set([
+    'src/lib/site-origin.ts: "jitsu.au",',
+    'src/lib/site-origin.ts: "www.jitsu.au",',
+  ]);
+  const ROOT = join(import.meta.dirname, "..", "..");
+  const SCANNED = ["src", "public", "scripts", "e2e", ".claude/skills"];
+
+  function codeFiles(dir: string): string[] {
+    const found: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules") found.push(...codeFiles(path));
+      } else if (
+        /\.(tsx?|m?js|cjs|html|webmanifest|sh|py)$/.test(entry.name) &&
+        !/\.(test|spec)\.[a-z]+$/.test(entry.name)
+      ) {
+        found.push(path);
+      }
+    }
+    return found;
+  }
+
+  const mentions = (text: string) => !COMMENT.test(text) && OLD_DOMAIN.test(text);
+
+  it("is never mentioned in code, as a link or as copy", () => {
+    const offenders = SCANNED.flatMap((dir) => codeFiles(join(ROOT, dir)))
+      .flatMap((file) =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .map((text, i) => ({ file: relative(ROOT, file), line: i + 1, text: text.trim() })),
+      )
+      .filter(({ file, text }) => mentions(text) && !ALLOWED.has(`${file}: ${text}`))
+      .map(({ file, line, text }) => `${file}:${line}: ${text}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it("catches the domain however it is written, and leaves what stays on it alone", () => {
+    expect(mentions('const SITE_URL = "https://jitsu.au";')).toBe(true);
+    expect(mentions("Sign in at jitsu.au/account")).toBe(true);
+    expect(mentions("Sign in at www.jitsu.au/account")).toBe(true);
+    expect(mentions("Visit jitsu.au.")).toBe(true);
+    expect(mentions("Visit jitsu.au")).toBe(true);
+    expect(mentions("https://utsjitsu.com.au/account")).toBe(false);
+    expect(mentions("x@dependant.jitsu.au")).toBe(false);
+    expect(mentions("noreply@notify.jitsu.au")).toBe(false);
+    expect(mentions("uid: `${e.id}@jitsu.au`,")).toBe(false);
+    expect(mentions('"uts-jitsu.auth.remember"')).toBe(false);
+    expect(mentions("// jitsu.au used to be the address")).toBe(false);
   });
 });

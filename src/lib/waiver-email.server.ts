@@ -16,7 +16,7 @@ import { normalizeEmail } from "@/lib/validation";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";

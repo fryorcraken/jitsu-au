@@ -19,7 +19,7 @@ import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templat
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */

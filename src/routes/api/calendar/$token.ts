@@ -36,6 +36,9 @@ function toIcsEvent(e: CalendarFeedSelection): IcsEvent {
     .filter(Boolean)
     .join("\n\n");
   return {
+    // Stays on the original domain on purpose: a UID is how a subscribed
+    // calendar recognises an event it already has, so changing it would
+    // duplicate every session in every member's calendar.
     uid: `${e.id}@jitsu.au`,
     start: new Date(e.starts_at),
     end: new Date(e.ends_at),

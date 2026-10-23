@@ -1,7 +1,8 @@
 // Single source of truth for what search engines are told about this site.
 //
 // Four things live here because they have to agree with each other:
-//   - the canonical origin every public page points at,
+//   - the canonical URL every public page points at (built on SITE_ORIGIN,
+//     which lives in `site-origin.ts`),
 //   - the list of pages that belong in the sitemap,
 //   - the crawl rules served at /robots.txt,
 //   - the club's structured data (who we are, where we train).
@@ -20,40 +21,14 @@ import {
   VENUE_STREET_ADDRESS,
   VENUE_SUBURB,
 } from "./venue";
+import { SITE_ORIGIN, isProductionHost } from "./site-origin";
 import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
-/** Canonical origin. Every `rel="canonical"` on the site points here. */
-export const SITE_ORIGIN = "https://utsjitsu.com.au";
-
-/** The origin without its scheme, for copy that names the address to a person. */
-export const SITE_HOST = new URL(SITE_ORIGIN).host;
-
-/**
- * Hosts that serve the real site. Anything else (a Lovable preview, a
- * Cloudflare *.workers.dev URL, a branch deploy) is the same content on a
- * different hostname, which is exactly the duplicate-content case search
- * engines penalise. Those hosts get a "stay out" robots.txt instead.
- *
- * The club's other domains are listed here on purpose, and are NOT blocked.
- * They serve the same site, and every page canonicals to utsjitsu.com.au, so
- * letting crawlers in is what consolidates the ranking signal there. Blocking
- * them would stop a crawler ever reading that canonical and leave bare,
- * contentless URLs eligible for the index instead.
- *
- * This list is the site's off switch: a host that is missing here is told to
- * stay out entirely. `www.` variants are included whether or not they are
- * wired up today, because listing a host that never receives a request costs
- * nothing, while omitting one that does costs the site its search traffic.
- */
-export const PRODUCTION_HOSTS = [
-  "jitsu.au",
-  "www.jitsu.au",
-  "utsjitsu.com.au",
-  "www.utsjitsu.com.au",
-  "sydneyjitsu.com.au",
-  "www.sydneyjitsu.com.au",
-];
+// The site's address lives in its own dependency-free module so the email
+// senders and the calendar feed can read it without loading this one's page
+// list and image assets. Re-exported so SEO callers keep one import.
+export { PRODUCTION_HOSTS, SITE_HOST, SITE_ORIGIN, isProductionHost } from "./site-origin";
 
 /**
  * The image social platforms show when someone shares a link to the site.
@@ -170,14 +145,6 @@ export function buildPageMeta({
     { name: "twitter:title", content: ogTitle },
     { name: "twitter:description", content: ogDescription },
   ];
-}
-
-/** True when the request arrived on a hostname that serves the real site. */
-export function isProductionHost(host: string | null | undefined): boolean {
-  if (!host) return false;
-  // A Host header may carry a port; the rules do not depend on it.
-  const name = host.trim().toLowerCase().split(":")[0];
-  return PRODUCTION_HOSTS.includes(name);
 }
 
 /**
