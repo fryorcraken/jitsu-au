@@ -210,9 +210,9 @@ export async function sendWaiverEmails({
     console.error(`[waiver-email] failed to email the member:`, e);
   }
 
-  // Review prompt to each manager, replying to the signer. On a child's
-  // waiver `memberEmail` is the parent's, never the child's reserved address,
-  // so a reply reaches somebody.
+  // Review prompt to each manager, replying to the address the member's copy
+  // went to. On a waiver signed for a child on someone's account that is the
+  // parent's, never the child's reserved address, so a reply reaches somebody.
   for (const to of notifyRecipients) {
     try {
       await sendEmail({

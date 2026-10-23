@@ -112,7 +112,7 @@ describe("sendWaiverEmails", () => {
     sendLovableEmail.mockReset().mockResolvedValue({ success: true });
     const admin = fakeAdmin({
       roles: [{ user_id: "a" }, { user_id: "b" }],
-      users: { a: "sensei@club.test", b: "assistant@club.test" },
+      users: { a: "manager-a@example.com", b: "manager-b@example.com" },
     });
 
     await sendWaiverEmails({
@@ -128,7 +128,7 @@ describe("sendWaiverEmails", () => {
     const toMember = payloads.find((p) => p.to === "ada@example.com");
     const toManagers = payloads.filter((p) => p.to !== "ada@example.com");
     expect(toMember.reply_to).toBeUndefined();
-    expect(toManagers.map((p) => p.to)).toEqual(["sensei@club.test", "assistant@club.test"]);
+    expect(toManagers.map((p) => p.to)).toEqual(["manager-a@example.com", "manager-b@example.com"]);
     for (const p of toManagers) expect(p.reply_to).toBe("ada@example.com");
   });
 });

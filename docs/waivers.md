@@ -310,10 +310,12 @@ person, not one person by definition**. A tick above the emergency contact
 default and hides those three fields, so the common case is asked for once,
 exactly as it was before the split; unticking it asks for the other person.
 The guardian signs at the end. On submit the signer immediately gets the signed PDF and a copy
-by email; managers are notified, by an email whose Reply-To is the signer (the
-guardian, on a child's waiver), so pressing reply answers them. Behind the scenes, for a new email: a locked
-login record is created (their email, no way to sign in) and their profile is
-seeded with name + phone. An existing person is left untouched. Either way the
+by email; managers are notified, by an email whose Reply-To is the address the
+copy went to, so pressing reply answers whoever received it: the signer, or the
+parent on a waiver signed for a child on their account. A minor signing for
+themselves is replied to at their own address, not their guardian's. Behind the
+scenes, for a new email: a locked login record is created (their email, no way
+to sign in) and their profile is seeded with name + phone. An existing person is left untouched. Either way the
 waiver row stores the full submission, and the person is now an applicant.
 
 **For a child's waiver that happens twice over.** The address resolves to the
