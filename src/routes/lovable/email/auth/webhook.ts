@@ -8,7 +8,9 @@ import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
 
-// Configuration
+// Configuration. The sender has to stay the same as the one every other email
+// goes out from (`src/lib/send-email.server.ts`). Route files reach the client
+// bundle, so this one does not import a `*.server.ts` module for it.
 const SITE_NAME = "UTS Jitsu";
 const SENDER_DOMAIN = "notify.jitsu.au";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.

@@ -8,22 +8,16 @@
 // lazy-imported from inside server-function handlers.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { sendEmail } from "@/lib/send-email.server";
 import { buildCodeOfConductUrl } from "@/lib/code-of-conduct";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
 
-// Mirror the sender configuration used by the auth-email webhook.
 const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC (Gmail flags
-// misaligned From-domains as spam).
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
 const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where waivers are reviewed and approved. */
 export const WAIVER_REVIEW_URL = `${SITE_URL}/manager/waivers`;
@@ -80,30 +74,6 @@ export async function getManagerEmails(admin: AdminClient): Promise<string[]> {
   } catch {
     return [];
   }
-}
-
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
 }
 
 export interface WaiverEmailParams {
@@ -226,7 +196,7 @@ export async function sendWaiverEmails({
 
   // Confirmation to the member.
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl,
       to: memberEmail,
@@ -243,7 +213,7 @@ export async function sendWaiverEmails({
   // Review prompt to each manager.
   for (const to of notifyRecipients) {
     try {
-      await sendOne({
+      await sendEmail({
         apiKey,
         sendUrl,
         to,
@@ -324,7 +294,7 @@ export async function sendAccountActivatedEmail({
   });
 
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl: process.env.LOVABLE_SEND_URL,
       to: memberEmail,

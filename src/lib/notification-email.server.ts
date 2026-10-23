@@ -10,10 +10,10 @@
 // that across modules is how a row ends up mailed twice or never.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
+import { sendEmail } from "@/lib/send-email.server";
 import { CommentReplyEmail } from "@/lib/email-templates/comment-reply";
 import {
   NotificationDigestEmail,
@@ -35,40 +35,10 @@ import {
 import { greetingName, stableCode, type PersonNameParts } from "@/lib/validation";
 import { contactUserIdOf, deliveryEmailFor, loadHouseholdContacts } from "@/lib/household-email";
 
-// Sender configuration mirrors the auth-email webhook and every other email
-// this app sends.
 const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
 const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 type AdminClient = SupabaseClient<Database>;
-
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
-}
 
 /** Turn a stored site-relative `href` into something an email client can open. */
 export function absoluteUrl(href: string): string {
@@ -242,7 +212,7 @@ export async function sendReplyNotification(
   const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
 
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl: process.env.LOVABLE_SEND_URL,
       to,
@@ -472,7 +442,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
       });
       const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
 
-      await sendOne({
+      await sendEmail({
         apiKey,
         sendUrl,
         to,

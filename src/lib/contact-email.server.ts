@@ -7,52 +7,21 @@
 // the `submitContact` server-function handler.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { sendEmail } from "@/lib/send-email.server";
 import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirmation";
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 
-// Sender configuration mirrors the auth-email webhook and the interest emails.
 const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
 const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager screen listing every message the contact form has received. */
 export const MANAGER_CONTACT_URL = `${SITE_URL}/manager/contact-messages`;
 
 type AdminClient = SupabaseClient<Database>;
-
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-  replyTo?: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-      reply_to: opts.replyTo,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
-}
 
 export interface ContactEmailParams {
   /** Unique per-submission id used to key idempotent sends. */
@@ -118,7 +87,7 @@ export async function sendContactEmails({
 
   // Acknowledgement to whoever wrote in.
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl,
       to: email,
@@ -142,7 +111,7 @@ export async function sendContactEmails({
   // not a single well-formed address.
   for (const to of notifyRecipients) {
     try {
-      await sendOne({
+      await sendEmail({
         apiKey,
         sendUrl,
         to,
