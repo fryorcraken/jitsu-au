@@ -29,9 +29,9 @@ What an email says, who it is about and its idempotency key stay in the
 email's own module, next to the flow that sends it. One transport, not one
 giant file.
 
-`scripts/email-conventions.test.ts` fails if any module under `src/` calls
-`sendLovableEmail` directly, or spells the sending domain anywhere but the
-shared module. So a new email cannot quietly skip whatever the shared sender
+`scripts/email-conventions.test.ts` fails if any module under `src/` other than
+the shared one (and the auth webhook, below) imports `@lovable.dev/email-js`,
+or spells the sending domain anywhere but the shared module. So a new email cannot quietly skip whatever the shared sender
 does for every other one.
 
 **The auth emails are the one exception to `sendClubEmail`.** Supabase Auth
@@ -40,8 +40,8 @@ sends from inside its own code. That route still takes its `From` and sending
 domain from the shared module, so the identity is shared even where the call is
 not. The handler offers no `reply_to` option.
 
-**Best-effort, everywhere.** Every send is wrapped by its caller and a failure
-is logged, never thrown into the flow that triggered it: a waiver is saved, a
+**Best-effort, everywhere.** A failed send is caught by its caller and logged,
+never thrown into the flow that triggered it: a waiver is saved, a
 payment is recorded, a membership is raised whether or not the email about it
 lands. Each section of the code says why for its own flow.
 

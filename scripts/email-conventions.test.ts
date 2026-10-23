@@ -16,6 +16,12 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = resolve(process.cwd());
 const SENDER = "src/lib/email-send.server.ts";
+/**
+ * Supabase Auth's emails are sent by Lovable's `createAuthEmailHandler`, which
+ * does its own sending and so cannot go through `sendClubEmail`. Its identity
+ * still comes from the shared module (the sending-domain rule below).
+ */
+const AUTH_WEBHOOK = "src/routes/lovable/email/auth/webhook.ts";
 
 /** Every source file under src/, tests excluded (they mock the library). */
 function sourceFiles(): string[] {
@@ -37,9 +43,14 @@ describe("sending email", () => {
     expect(sourceFiles()).toContain(SENDER);
   });
 
-  it("goes through sendClubEmail, never the Lovable send API directly", () => {
+  it("goes through sendClubEmail, never the Lovable email library directly", () => {
+    // The import, not one function name: any other way into the library
+    // (a second auth handler, a future batch send) skips the seam just as well.
     const offenders = sourceFiles().filter(
-      (file) => file !== SENDER && /\bsendLovableEmail\b/.test(read(file)),
+      (file) =>
+        file !== SENDER &&
+        file !== AUTH_WEBHOOK &&
+        /from "@lovable\.dev\/email-js"|import\("@lovable\.dev\/email-js"\)/.test(read(file)),
     );
     expect(
       offenders,

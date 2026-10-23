@@ -5,8 +5,8 @@
 // seven private `sendOne`s, one per email module, so any change that had to
 // touch every email (a reply-to address, a resend) meant making it seven times
 // and hoping none was missed. `docs/emails.md` is the inventory of what goes
-// through here; `scripts/email-conventions.test.ts` fails if a module calls the Lovable send
-// API directly again.
+// through here; `scripts/email-conventions.test.ts` fails if any other module
+// imports the Lovable email library again.
 //
 // What this module owns, and what it deliberately does not:
 //
@@ -18,17 +18,21 @@
 //   next to the flow that triggers it. The goal is one transport, not one
 //   giant file.
 //
-// Server-only: it reads `LOVABLE_API_KEY`. Named `*.server.ts` and only ever
-// lazy-imported from inside server-function handlers and route handlers.
+// Server-only: it reads `LOVABLE_API_KEY`. The other `*.server.ts` email modules
+// import it at their top, which is safe only because THEY are lazy-imported
+// from inside handlers. Never import it at the top of a `*.functions.ts` or
+// route file, which are bundled to the client: lazy-import it inside the
+// handler, as the auth webhook does.
 import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 /** The name every email is signed with and every subject line uses. */
 export const SITE_NAME = "UTS Jitsu";
 
-/** The address every link in an email is built on. */
-export const SITE_URL = "https://jitsu.au";
+/** The address every link in an email is built on: the site's canonical origin. */
+export const SITE_URL = SITE_ORIGIN;
 
 /**
  * The domain mail is sent from (Mailgun, via Lovable). The `From` address must
@@ -46,9 +50,11 @@ type AdminClient = SupabaseClient<Database>;
 /**
  * Whether email can be sent at all in this environment.
  *
- * Every sender checks this before it does any work (reading the database,
- * minting a token, rendering a template), so a deploy without the key skips
- * cleanly rather than half-composing mail it can never send.
+ * Senders check this before composing anything (minting a token, rendering a
+ * template), so a deploy without the key skips cleanly and logs it as a skip
+ * rather than as a failed send. The digest reads its pending rows first, on
+ * purpose: it reports how much was owed even when it cannot send.
+ * `sendClubEmail` checks again and throws, as a net for a caller that forgot.
  */
 export function emailConfigured(): boolean {
   return Boolean(process.env.LOVABLE_API_KEY);
