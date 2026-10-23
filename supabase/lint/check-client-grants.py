@@ -44,7 +44,7 @@ Usage
     check-client-grants.py GRANTS_CSV [--expected FILE]
     check-client-grants.py --selftest
 
-GRANTS_CSV is a headerless three-column CSV of `table,grantee,privilege` from:
+GRANTS_CSV is a three-column CSV of `table,grantee,privilege` from:
 
     psql "$DB_URL" --csv --tuples-only -f supabase/lint/client-grants.sql
 
@@ -89,19 +89,22 @@ DEFAULT_EXPECTED = Path(__file__).resolve().parent / "client-grants-expected.txt
 
 CLIENT_ROLES = ("anon", "authenticated")
 
-# client-grants.sql's column names, as a console export writes them.
-HEADER = ("relname", "rolname", "PRIVILEGE_TYPE")
+# client-grants.sql's column names, which an SQL console's CSV export writes as
+# its first row, sometimes behind a UTF-8 byte-order mark.
+HEADER = ["relname", "rolname", "privilege_type"]
+
+
+def is_header(row):
+    return [cell.strip().lstrip("\ufeff").lower() for cell in row[:3]] == HEADER
 
 
 def parse_grants(text):
     """{(table, grantee, privilege)} as held by the live database."""
     out = set()
     for row in csv.reader(io.StringIO(text)):
-        if len(row) < 3:
+        if len(row) < 3 or is_header(row):
             continue
         table, grantee, privilege = (row[0].strip(), row[1].strip(), row[2].strip().upper())
-        if (table, grantee, privilege) == HEADER:
-            continue
         if table and grantee and privilege:
             out.add((table, grantee, privilege))
     return out
@@ -152,13 +155,14 @@ def expected_display(path):
 
 def selftest():
     live = parse_grants(
-        "relname,rolname,privilege_type\n"
+        "\ufeffrelname,rolname,privilege_type\n"
         "user_roles,authenticated,SELECT\n"
         "user_roles,authenticated,INSERT\n"
         "calendar_events,anon,SELECT\n"
         ",,\n"
         "profiles,anon,DELETE\n"
         "profiles(archived_at),authenticated,UPDATE\n"
+        "profiles,PUBLIC,SELECT\n"
     )
     assert live == {
         ("user_roles", "authenticated", "SELECT"),
@@ -166,6 +170,7 @@ def selftest():
         ("calendar_events", "anon", "SELECT"),
         ("profiles", "anon", "DELETE"),
         ("profiles(archived_at)", "authenticated", "UPDATE"),
+        ("profiles", "PUBLIC", "SELECT"),
     }, live
 
     expected = parse_expected(
@@ -183,16 +188,22 @@ def selftest():
     #
     # The column grant is the other half: a table whose relacl is empty can
     # still hand a client role one column, and that must fail like any other.
+    # A grant to PUBLIC reaches both client roles and can never be expected
+    # (parse_expected refuses the grantee), so it always fails.
     assert unexpected(live, expected) == [
+        ("profiles", "PUBLIC", "SELECT"),
         ("profiles", "anon", "DELETE"),
         ("profiles(archived_at)", "authenticated", "UPDATE"),
         ("user_roles", "authenticated", "INSERT"),
     ], unexpected(live, expected)
 
-    # A deliberate column grant is listed the way it is reported.
-    assert parse_expected("profiles(phone):authenticated:update\n") == {
-        ("profiles(phone)", "authenticated", "UPDATE")
-    }
+    # A deliberate column grant is listed the way it is reported, and then
+    # passes: held and listed is clean, listed and not held is a note.
+    column = parse_expected("profiles(phone):authenticated:update\n")
+    assert column == {("profiles(phone)", "authenticated", "UPDATE")}, column
+    held = parse_grants("profiles(phone),authenticated,UPDATE\n")
+    assert unexpected(held, column) == []
+    assert absent(set(), column) == [("profiles(phone)", "authenticated", "UPDATE")]
 
     # A clean database has nothing unexpected.
     assert unexpected(expected, expected) == []
@@ -204,7 +215,13 @@ def selftest():
     # Lowercase privileges from a hand-written file still match the live CSV.
     assert parse_expected("waivers:anon:select\n") == {("waivers", "anon", "SELECT")}
 
-    for bad in ("user_roles:authenticated", "a:b:c:d", "user_roles:postgres:SELECT", "a::SELECT"):
+    for bad in (
+        "user_roles:authenticated",
+        "a:b:c:d",
+        "user_roles:postgres:SELECT",
+        "user_roles:PUBLIC:SELECT",
+        "a::SELECT",
+    ):
         try:
             parse_expected(bad)
         except ValueError:

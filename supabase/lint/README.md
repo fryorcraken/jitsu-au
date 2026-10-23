@@ -135,8 +135,11 @@ of it is writable. A column grant is reported, and listed in
 `client-grants-expected.txt`, as `table(column)`. It was added on 2026-10-23 with
 `profiles.archived_at`, which a member must never be able to write, and **has not
 yet been run against the live database**: the 2026-09-01 figures below are
-table grants only. The next by-hand run should expect the same 18 and no
-column rows.
+table grants only. Nothing in the migrations makes a column or PUBLIC grant,
+so a `table(column)` or `PUBLIC` row from the first live run is a finding to
+investigate (a grant made by hand in the Lovable UI, most likely), not an
+artefact of the new query. The same query also reports any grant to `PUBLIC`,
+which both client roles inherit and a join on `pg_roles` used to drop.
 
 ```sh
 python3 supabase/lint/check-client-grants.py grants.csv
