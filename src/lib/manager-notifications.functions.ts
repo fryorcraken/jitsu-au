@@ -29,6 +29,7 @@ import {
   contactMessageNotifications,
   digestStalledNotifications,
   DIGEST_STALL_HOURS,
+  insuranceEndingNotifications,
   interestRegistrationNotifications,
   sellableWindowNotifications,
   waiverApprovalNotifications,
@@ -137,30 +138,43 @@ export async function digestBacklogNotifications(
   return digestStalledNotifications({ stalled, oldestAt: first?.created_at ?? null });
 }
 
+/**
+ * "3 people's insurance ends in the next 14 days." Lazy-imported: the server
+ * module carries the email sender, and this file is reachable from a
+ * `*.functions.ts` that ships to the client bundle.
+ */
+async function insuranceEndingCount(admin: MembershipClient): Promise<number> {
+  const { countPeopleWithInsuranceEnding } = await import("@/lib/insurance-reminders.server");
+  return countPeopleWithInsuranceEnding(admin, new Date());
+}
+
 export async function managerAttentionItems(
   admin: MembershipClient,
 ): Promise<ManagerNotification[]> {
   // Sources are independent, so fetch them together rather than in sequence.
   //
-  // The three counts and the digest backlog degrade to "nothing to report" on
+  // The counts and the digest backlog degrade to "nothing to report" on
   // their own failed reads, so one bad query cannot empty the queue around it.
   // The membership windows are the exception and still throw, which
   // `Promise.all` turns into a failed notifications payload: the page then says
   // it could not load and offers a retry, which is honest, rather than
   // reporting all quiet.
-  const [windows, unreadContact, waitingWaivers, newLeads, digestStalled] = await Promise.all([
-    membershipWindowNotifications(admin),
-    countUnreadContactMessages(admin),
-    countWaiversAwaitingApproval(admin),
-    countNewInterestRegistrations(admin),
-    digestBacklogNotifications(admin, new Date()),
-  ]);
+  const [windows, unreadContact, waitingWaivers, newLeads, digestStalled, insuranceEnding] =
+    await Promise.all([
+      membershipWindowNotifications(admin),
+      countUnreadContactMessages(admin),
+      countWaiversAwaitingApproval(admin),
+      countNewInterestRegistrations(admin),
+      digestBacklogNotifications(admin, new Date()),
+      insuranceEndingCount(admin),
+    ]);
 
   return composeManagerNotifications({
     waiverApprovals: waiverApprovalNotifications(waitingWaivers),
     contactMessages: contactMessageNotifications(unreadContact),
     digestStalled,
     interestRegistrations: interestRegistrationNotifications(newLeads),
+    insuranceEnding: insuranceEndingNotifications(insuranceEnding),
     membershipWindows: windows,
   });
 }

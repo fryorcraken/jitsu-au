@@ -202,6 +202,24 @@ describe("sendDailyDigests, for a household", () => {
     expect(stamped.flat().sort()).toEqual(["n1", "n2", "n3", "n4"]);
   });
 
+  it("leaves the insurance reminders alone: they are sent on their own, not in the summary", async () => {
+    const { sendDailyDigests } = await import("./notification-email.server");
+    // The digest has no section for these, so reading one would stamp it as
+    // "nothing they wanted" and the reminder would never go out.
+    const reminder: PendingRow = {
+      ...post("n9", CHILD_A, "membership-1"),
+      kind: "insurance_ending_soon",
+      title: "Bea's club insurance ends on 12 March",
+      href: "/membership?for=child-a",
+    };
+    const { db, stamped } = fakeDb([post("n1", PARENT), reminder]);
+
+    const result = await sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"));
+
+    expect(result.considered).toBe(1);
+    expect(stamped.flat()).toEqual(["n1"]);
+  });
+
   it("still sends a separate email to an unrelated household", async () => {
     const { sendDailyDigests } = await import("./notification-email.server");
     // The grouping folds a family together; it must not fold the club
