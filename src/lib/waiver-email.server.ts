@@ -115,6 +115,12 @@ export interface WaiverEmailParams {
    * or a guardian block left blank), which is deduplicated.
    */
   guardianEmail?: string | null;
+  /**
+   * The parent who signed, on a waiver signed for a child on their account.
+   * The managers' copy names them as the signer and `memberName` as who it is
+   * for, since `memberEmail` is theirs (see WaiverNotificationEmail).
+   */
+  signedByName?: string | null;
 }
 
 /**
@@ -164,6 +170,7 @@ export async function sendWaiverEmails({
   userId,
   codeOfConductToken,
   guardianEmail,
+  signedByName,
 }: WaiverEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -197,6 +204,7 @@ export async function sendWaiverEmails({
     siteName: SITE_NAME,
     memberName,
     memberEmail,
+    signedByName,
     pdfUrl,
     reviewUrl: WAIVER_REVIEW_URL,
   });
@@ -238,7 +246,9 @@ export async function sendWaiverEmails({
         apiKey,
         sendUrl,
         to,
-        subject: `New waiver signed by ${memberName || memberEmail}`,
+        subject: signedByName
+          ? `New waiver signed by ${signedByName} for ${memberName}`
+          : `New waiver signed by ${memberName || memberEmail}`,
         html: managerHtml,
         text: managerText,
         idempotencyKey: `waiver-manager-${waiverId}-${to}`,

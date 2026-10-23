@@ -312,7 +312,9 @@ exactly as it was before the split; unticking it asks for the other person.
 The guardian signs at the end. On submit the signer immediately gets the signed PDF and a copy
 by email; managers are notified, by an email whose Reply-To is the address the
 copy went to, so pressing reply answers whoever received it: the signer, or the
-parent on a waiver signed for a child on their account. A minor signing for
+parent on a waiver signed for a child on their account (whom that email names as
+the signer, with the child as who it is for, since the address shown beside
+them is theirs). A minor signing for
 themselves is replied to at both their own address and their guardian's (or,
 should the email service ever refuse two addresses, at the guardian's alone,
 and the server logs it). Behind the scenes, for a new email: a locked login

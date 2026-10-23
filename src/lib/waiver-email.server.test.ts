@@ -187,6 +187,28 @@ describe("sendWaiverEmails", () => {
     expect(delivered.reply_to).toBe("ada@example.com");
   });
 
+  it("names the parent as the signer in the subject of a child's waiver", async () => {
+    // The managers' copy carries the parent's address, so the subject says who
+    // signed and who for, not the child's name alone.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue({ success: true });
+
+    await sendWaiverEmails({
+      waiverId: "w6",
+      memberName: "Bea Lovelace",
+      memberGreetingName: "Ada",
+      memberEmail: "ada@example.com",
+      signedByName: "Ada Lovelace",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin: fakeAdmin({ roles: [{ user_id: "a" }], users: { a: "manager-a@example.com" } }),
+    });
+
+    const toManager = sendLovableEmail.mock.calls
+      .map(([p]) => p)
+      .find((p) => p.to === "manager-a@example.com");
+    expect(toManager.subject).toBe("New waiver signed by Ada Lovelace for Bea Lovelace");
+  });
+
   it("lists one address once when the guardian's is the member's own", async () => {
     // A waiver signed for a child on someone's account, or a guardian block
     // left blank, resolves both to the same mailbox; it is listed once, case

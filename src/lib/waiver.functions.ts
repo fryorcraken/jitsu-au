@@ -1255,6 +1255,9 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           // too. Blank for an adult; on a child's waiver it is the address
           // `email` already holds (see resolveWaiverContacts).
           guardianEmail: contacts.guardianEmail,
+          // On a child's waiver the managers' copy names the parent as the
+          // signer, because the address it carries is the parent's.
+          signedByName: signingForDependant ? contacts.guardianName || null : null,
         });
       } catch (e) {
         console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);
