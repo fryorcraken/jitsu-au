@@ -401,6 +401,7 @@ describe("projectInvoice", () => {
     uts_student_number: null,
     price_cents: 24500,
     payment_reference: "MEMNGUYEN7Q",
+    paid_reference: null,
     payment_method: "bank_transfer",
     paid_at: null,
     starts_at: null,
