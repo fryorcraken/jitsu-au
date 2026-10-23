@@ -1,7 +1,8 @@
 // Server-only helpers for the transactional emails that ask for or confirm
 // money: membership invoices and receipts, and item invoices and receipts
-// (docs/item-invoices.md). They share a sender, a site URL and a bank-details
-// block, which is why they share a file.
+// (docs/item-invoices.md). They share the club's bank-details block, which is
+// why they share a file. The sender and the site URL are every email's, from
+// `email-sender.ts` and `seo.ts` (docs/emails.md).
 //
 // Pulls in server-only dependencies (the Lovable send API, the React-email
 // renderer) so it must never reach the client bundle — it is named `*.server.ts`
@@ -16,11 +17,10 @@ import { MembershipPaidEmail } from "@/lib/email-templates/membership-paid";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
 import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templates/item-invoice";
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
-import { getManagerEmails } from "@/lib/waiver-email.server";
+import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
 import { SITE_ORIGIN } from "@/lib/seo";
-
-const SITE_NAME = "UTS Jitsu";
+import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */
 export const MEMBERSHIP_REVIEW_URL = `${SITE_ORIGIN}/manager/memberships`;

@@ -17,9 +17,9 @@ import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
 import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_NAME } from "@/lib/email-sender";
+import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
-
-const SITE_NAME = "UTS Jitsu";
 
 /** Manager dashboard where waivers are reviewed and approved. */
 export const WAIVER_REVIEW_URL = `${SITE_ORIGIN}/manager/waivers`;
@@ -50,33 +50,6 @@ const ACTIVATION_LINKS = {
 } as const;
 
 type AdminClient = SupabaseClient<Database>;
-
-/**
- * Resolve the email addresses of every manager (users holding the `manager`
- * role). Uses the service-role client to read `user_roles` and look up each
- * user's email via the auth admin API. Never throws — returns whatever it could
- * resolve so a lookup hiccup can't block the confirmation email to the member.
- */
-export async function getManagerEmails(admin: AdminClient): Promise<string[]> {
-  try {
-    const { data: roles, error } = await admin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "manager");
-    if (error || !roles) return [];
-
-    const emails: string[] = [];
-    for (const { user_id } of roles as { user_id: string }[]) {
-      const { data, error: uErr } = await admin.auth.admin.getUserById(user_id);
-      const email = data?.user?.email;
-      if (!uErr && email) emails.push(email);
-    }
-    // De-duplicate in case a user somehow holds the role twice.
-    return [...new Set(emails)];
-  } catch {
-    return [];
-  }
-}
 
 export interface WaiverEmailParams {
   waiverId: string;

@@ -12,11 +12,10 @@ import type { Database } from "@/integrations/supabase/types";
 import { sendEmail } from "@/lib/send-email.server";
 import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirmation";
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
-import { getManagerEmails } from "@/lib/waiver-email.server";
+import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 import { SITE_ORIGIN } from "@/lib/seo";
-
-const SITE_NAME = "UTS Jitsu";
+import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager screen listing every message the contact form has received. */
 export const MANAGER_CONTACT_URL = `${SITE_ORIGIN}/manager/contact-messages`;

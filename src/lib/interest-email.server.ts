@@ -12,10 +12,9 @@ import type { Database } from "@/integrations/supabase/types";
 import { sendEmail } from "@/lib/send-email.server";
 import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confirmation";
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
-import { getManagerEmails } from "@/lib/waiver-email.server";
+import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { SITE_ORIGIN } from "@/lib/seo";
-
-const SITE_NAME = "UTS Jitsu";
+import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager dashboard where the lead/member funnel is reviewed. */
 export const MANAGER_DASHBOARD_URL = `${SITE_ORIGIN}/manager/users`;

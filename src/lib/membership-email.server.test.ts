@@ -6,7 +6,7 @@ const sendLovableEmail = vi.fn();
 vi.mock("@lovable.dev/email-js", () => ({
   sendLovableEmail: (...args: unknown[]) => sendLovableEmail(...args),
 }));
-vi.mock("@/lib/waiver-email.server", () => ({ getManagerEmails: () => Promise.resolve([]) }));
+vi.mock("@/lib/manager-recipients.server", () => ({ getManagerEmails: () => Promise.resolve([]) }));
 vi.mock("@/lib/club-settings.server", () => ({
   readClubPaymentDetails: () => Promise.resolve({ ok: true, details: null }),
 }));
@@ -130,7 +130,7 @@ describe("who the subject line is about", () => {
   it("captions the address on the manager's copy", async () => {
     // The manager copy names the CHILD and carries the PARENT's address. Bare,
     // that is a mailbox a manager writes to and nobody reads.
-    const managers = await import("@/lib/waiver-email.server");
+    const managers = await import("@/lib/manager-recipients.server");
     vi.spyOn(managers, "getManagerEmails").mockResolvedValue(["manager@example.com"]);
 
     await sendMembershipPaymentEmail({
@@ -169,7 +169,7 @@ describe("who a reply reaches", () => {
   it("sets Reply-To on the manager's copy to whoever was invoiced, and only there", async () => {
     // A manager answering a pending-payment email presses reply. On a child's
     // invoice that has to reach the parent, the address the invoice went to.
-    const managers = await import("@/lib/waiver-email.server");
+    const managers = await import("@/lib/manager-recipients.server");
     vi.spyOn(managers, "getManagerEmails").mockResolvedValue(["manager@example.com"]);
 
     await sendMembershipPaymentEmail({
