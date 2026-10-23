@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClubAccountDetails } from "@/components/site/ClubAccountDetails";
-import { getClubSettings, saveClubSettings } from "@/lib/membership.functions";
+import { getClubSettings, saveClubSettings } from "@/lib/club-settings.functions";
 import { invoiceMarkdownComponents } from "@/lib/invoice-markdown";
 import { describeLoadError } from "@/lib/load-error";
 import { clubPaymentDetailsSchema, formatBsb } from "@/lib/validation";
@@ -139,7 +139,7 @@ function SettingsPage() {
     }
     setSaving(true);
     try {
-      await save({ data: parsed.data });
+      await save({ data: { key: "invoice_payment_details", value: parsed.data } });
       setErrors({});
       setPublished(true);
       toast.success("Saved. Members can see these details now.");

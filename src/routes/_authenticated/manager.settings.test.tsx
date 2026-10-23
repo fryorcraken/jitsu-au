@@ -32,7 +32,7 @@ vi.mock("@tanstack/react-start", () => ({
   useServerFn: (fn: unknown) => fn,
 }));
 
-vi.mock("@/lib/membership.functions", () => ({
+vi.mock("@/lib/club-settings.functions", () => ({
   getClubSettings: (...args: unknown[]) => getClubSettings(...args),
   saveClubSettings: (...args: unknown[]) => saveClubSettings(...args),
 }));
@@ -104,7 +104,8 @@ describe("/manager/settings", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(saveClubSettings).toHaveBeenCalled());
-    expect(saveClubSettings.mock.calls[0][0].data.bsb).toBe("062000");
+    expect(saveClubSettings.mock.calls[0][0].data.key).toBe("invoice_payment_details");
+    expect(saveClubSettings.mock.calls[0][0].data.value.bsb).toBe("062000");
   });
 
   it("refuses to save a half-filled account and says which box is wrong", async () => {

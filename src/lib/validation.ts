@@ -3006,9 +3006,16 @@ export const clubPaymentDetailsSchema = z.object({
 });
 export type ClubPaymentDetails = z.infer<typeof clubPaymentDetailsSchema>;
 
-/** The manager form posts exactly the details. */
-export const saveClubSettingsSchema = clubPaymentDetailsSchema;
-export type SaveClubSettingsInput = ClubPaymentDetails;
+/**
+ * One club setting to save, by key. Each key carries its own validation, so a
+ * save names the key it writes and nothing can be stored under a key without
+ * passing that key's rules. `/manager/settings` and the manager agent API both
+ * post this.
+ */
+export const saveClubSettingsSchema = z.discriminatedUnion("key", [
+  z.object({ key: z.literal("invoice_payment_details"), value: clubPaymentDetailsSchema }),
+]);
+export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
 
 /**
  * The account rows, in the order a member reads them, shared by the membership
