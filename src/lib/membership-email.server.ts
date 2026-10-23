@@ -18,7 +18,7 @@ import { MembershipNotificationEmail } from "@/lib/email-templates/membership-no
 import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templates/item-invoice";
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
-import { resendIdempotencyKey } from "@/lib/email-resend";
+import { idempotencyKeyFor } from "@/lib/email-resend";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
 import { SITE_ORIGIN } from "@/lib/seo";
 import { SITE_NAME } from "@/lib/email-sender";
@@ -137,9 +137,7 @@ export async function sendMembershipPaymentEmail({
         : `Pay ${amount} to activate your ${planName}`,
       html: memberHtml,
       text: memberText,
-      idempotencyKey: resendId
-        ? resendIdempotencyKey(`membership-payment-${membershipId}`, resendId)
-        : `membership-payment-${membershipId}`,
+      idempotencyKey: idempotencyKeyFor(`membership-payment-${membershipId}`, resendId),
       replyTo,
     });
     sent.push(memberEmail);
@@ -249,9 +247,7 @@ export async function sendMembershipPaidEmail({
         : `Payment received for ${planName}`,
       html,
       text,
-      idempotencyKey: resendId
-        ? resendIdempotencyKey(`membership-paid-${membershipId}`, resendId)
-        : `membership-paid-${membershipId}`,
+      idempotencyKey: idempotencyKeyFor(`membership-paid-${membershipId}`, resendId),
       replyTo,
     });
     return { sent: true, skipped: false };
@@ -336,9 +332,7 @@ export async function sendItemInvoiceEmail({
         : `Invoice ${reference}: ${total}`,
       html,
       text,
-      idempotencyKey: resendId
-        ? resendIdempotencyKey(`item-invoice-${invoiceId}`, resendId)
-        : `item-invoice-${invoiceId}`,
+      idempotencyKey: idempotencyKeyFor(`item-invoice-${invoiceId}`, resendId),
       replyTo,
     });
     return { sent: true, skipped: false };
@@ -406,9 +400,7 @@ export async function sendItemInvoicePaidEmail({
         : `Payment received for invoice ${reference}`,
       html,
       text,
-      idempotencyKey: resendId
-        ? resendIdempotencyKey(`item-invoice-paid-${invoiceId}`, resendId)
-        : `item-invoice-paid-${invoiceId}`,
+      idempotencyKey: idempotencyKeyFor(`item-invoice-paid-${invoiceId}`, resendId),
       replyTo,
     });
     return { sent: true, skipped: false };

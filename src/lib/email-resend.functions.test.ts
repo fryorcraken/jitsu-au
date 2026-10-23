@@ -176,9 +176,24 @@ describe("resending an item invoice", () => {
     expect(new Set(sent().map((p) => p.idempotency_key)).size).toBe(1);
   });
 
-  it("gives the slot back when the send fails, so the manager can press again", async () => {
+  it("lets Try again after a failed send through, under the same key", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const { db, settings } = fakeDb(UNPAID);
+    const { db } = fakeDb(UNPAID);
+    const input = { kind: "item_invoice" as const, record_id: INVOICE_ID, resendId: "click-1" };
+    sendLovableEmail.mockRejectedValueOnce(new Error("provider down"));
+    await expect(resendEmail(db, input, "manager-1")).rejects.toBeInstanceOf(ResendNotSentError);
+
+    const retry = await resendEmail(db, input, "manager-1");
+    expect(retry.sent).toBe(true);
+    expect(sent().map((p) => p.idempotency_key)).toEqual([
+      `item-invoice-${INVOICE_ID}:resend:click-1`,
+      `item-invoice-${INVOICE_ID}:resend:click-1`,
+    ]);
+  });
+
+  it("does not free the minute for a different press after a failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { db } = fakeDb(UNPAID);
     sendLovableEmail.mockRejectedValueOnce(new Error("provider down"));
     await expect(
       resendEmail(
@@ -187,14 +202,12 @@ describe("resending an item invoice", () => {
         "manager-1",
       ),
     ).rejects.toBeInstanceOf(ResendNotSentError);
-    expect(settings.size).toBe(0);
-
-    const again = await resendEmail(
+    const other = await resendEmail(
       db,
       { kind: "item_invoice", record_id: INVOICE_ID, resendId: "click-2" },
       "manager-1",
     );
-    expect(again.sent).toBe(true);
+    expect(other).toMatchObject({ sent: false, reason: "rate_limited" });
   });
 
   it("refuses the invoice once it is paid, pointing at the receipt", async () => {
@@ -241,5 +254,61 @@ describe("claimResendSlot", () => {
     expect(await claimResendSlot(db, "item_invoice_receipt", INVOICE_ID, "b", now)).toEqual({
       claimed: true,
     });
+  });
+});
+
+describe("resending the account email", () => {
+  const OLD = "11111111-1111-4111-8111-111111111111";
+  const LIVE = "33333333-3333-4333-8333-333333333333";
+  const waiverRow = (id: string) => ({
+    id,
+    user_id: CHILD_ID,
+    first_name: "Ada",
+    middle_name: null,
+    last_name: "Lovelace",
+    preferred_name: null,
+    guardian_name: null,
+    pdf_path: `${id}.pdf`,
+    approval_status: "approved",
+    signer_meta: {},
+  });
+
+  /** `waivers` holding two approved waivers for one person, the later one live. */
+  function waiversDb() {
+    const rows = [
+      { ...waiverRow(OLD), approved_at: "2025-01-01T00:00:00Z", signed_at: "2025-01-01T00:00:00Z" },
+      {
+        ...waiverRow(LIVE),
+        approved_at: "2026-01-01T00:00:00Z",
+        signed_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+    return {
+      from: (table: string) => {
+        if (table !== "waivers") throw new Error(`unexpected table ${table}`);
+        return {
+          select: () => {
+            const filters: Record<string, string> = {};
+            const chain = {
+              eq: (col: string, value: string) => ((filters[col] = value), chain),
+              maybeSingle: () => Promise.resolve(ok(rows.find((r) => r.id === filters.id) ?? null)),
+              then: (resolve: (r: unknown) => void) =>
+                resolve(ok(rows.filter((r) => r.user_id === filters.user_id))),
+            };
+            return chain;
+          },
+        };
+      },
+    } as unknown as SupabaseClient<Database>;
+  }
+
+  // "Your account is active" from an older waiver, or from a re-sign approved
+  // while the account was already open, would be news to nobody and confusing
+  // to them. The screen only offers it on the live waiver; the API must refuse
+  // the rest on its own.
+  it("refuses any approved waiver but the person's current one", async () => {
+    const preview = await previewResend(waiversDb(), "account_activated", OLD);
+    expect(preview).toMatchObject({ available: false, reason: "not_approved" });
+    expect(preview.available === false && preview.message).toMatch(/not their current/i);
   });
 });

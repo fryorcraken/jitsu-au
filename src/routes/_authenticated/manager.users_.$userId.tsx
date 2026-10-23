@@ -397,7 +397,12 @@ function EmailCard({
             Change email
           </Button>
           {!verified && email ? (
-            <ResendEmailButton kind="email_verification" recordId={userId} />
+            <ResendEmailButton
+              kind="email_verification"
+              recordId={userId}
+              // "Already confirmed" means this card is stale: reload it.
+              onSettled={onChanged}
+            />
           ) : null}
         </div>
       )}

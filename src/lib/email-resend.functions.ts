@@ -29,6 +29,7 @@ import { deliveryRecipientFor, type DeliveryRecipient } from "@/lib/household-em
 import { isDependantUser } from "@/lib/household";
 import { invoiceReference } from "@/lib/item-invoices";
 import {
+  deriveWaiverListStatuses,
   formatCents,
   isPaperWaiver,
   resendEmailSchema,
@@ -123,14 +124,13 @@ async function planMembership(
     toBelongsTo: belongsTo(recipient),
     what:
       kind === "membership_invoice"
-        ? `The invoice for ${planName} (${row.payment_reference}), with the amount owed today and the club's current bank details.`
+        ? `The invoice with reference ${row.payment_reference}, for the amount owed today (anything billed on the same reference included) and with the club's current bank details.`
         : `The receipt for ${planName}, ${formatCents(row.price_cents)}.`,
-    send: async (resendId) => {
-      const outcome = await emailMembershipRecord(admin, row.id, { resendId });
-      return (
-        outcome.sent && outcome.email === (kind === "membership_invoice" ? "invoice" : "receipt")
-      );
-    },
+    // Whatever went out counts as sent. If the invoice was paid between the
+    // preview and the press, the record now asks for the receipt and that is
+    // what goes; reporting "not sent" over an email that went would invite a
+    // retry into a refusal.
+    send: async (resendId) => (await emailMembershipRecord(admin, row.id, { resendId })).sent,
   };
 }
 
@@ -273,6 +273,21 @@ async function planAccountActivated(
       "not_approved",
       "This waiver has not been approved, so there is no open account to tell them about.",
     );
+  // Only the person's live waiver, the same "active" the waivers screen shows.
+  // An older approved one, or a later re-sign approved while the account was
+  // already open, never sent this email, so "your account is active" from it
+  // would read as news.
+  const { data: approvedRows, error: approvedErr } = await admin
+    .from("waivers")
+    .select("id, user_id, approval_status, approved_at, signed_at")
+    .eq("user_id", waiver.user_id)
+    .eq("approval_status", "approved");
+  if (approvedErr) throw new Error(approvedErr.message);
+  if (deriveWaiverListStatuses(approvedRows ?? []).get(waiver.id) !== "active")
+    return refuse(
+      "not_approved",
+      "This is not their current approved waiver. Resend the account email from the one that is.",
+    );
   const { waiverAccountContact, emailAccountActivated } = await import("@/lib/waiver.functions");
   const [contact, recipient] = await Promise.all([
     waiverAccountContact(admin, waiver),
@@ -375,6 +390,8 @@ export async function previewResend(
 
 /**
  * Claim this email's once-a-minute slot for one click, or say how long to wait.
+ * Markers are only ever inserted or overwritten, never deleted, so a marker
+ * that was there a moment ago is still there to read.
  *
  * A compare-and-swap in the database rather than a read then a write, so two
  * presses landing together cannot both win: insert the marker, and if one is
@@ -419,30 +436,6 @@ export async function claimResendSlot(
     claimed: false,
     waitSeconds: Math.max(1, resendWaitSeconds(marker, resendId, now) || RESEND_COOLDOWN_SECONDS),
   };
-}
-
-/**
- * Give the slot back after a send that did not go out, so the manager can press
- * again straight away. Only this click's marker: never one a later press holds.
- */
-async function releaseResendSlot(
-  admin: MembershipClient,
-  kind: ResendKind,
-  recordId: string,
-  resendId: string,
-): Promise<void> {
-  const { data } = await admin
-    .from("club_settings")
-    .select("value")
-    .eq("key", resendMarkerKey(kind, recordId))
-    .maybeSingle();
-  const marker = parseResendMarker(data?.value);
-  if (marker?.resendId !== resendId) return;
-  await admin
-    .from("club_settings")
-    .delete()
-    .eq("key", resendMarkerKey(kind, recordId))
-    .eq("value", data!.value);
 }
 
 /** Thrown when the email was composed but did not go out: worth a retry. */
@@ -495,10 +488,12 @@ export async function resendEmail(
       sent,
     })}`,
   );
-  if (!sent) {
-    await releaseResendSlot(admin, input.kind, input.record_id, input.resendId).catch(() => {});
-    throw new ResendNotSentError();
-  }
+  // The slot is NOT given back on a failure. A retry of this same click passes
+  // the claim anyway (it holds the slot), which is what "Try again" and an
+  // agent's retry with the same id do. Giving it back would let a slow first
+  // attempt that fails AFTER its retry succeeded free the slot for a second,
+  // separate press inside the minute.
+  if (!sent) throw new ResendNotSentError();
   return { sent: true, to: plan.to, toBelongsTo: plan.toBelongsTo };
 }
 

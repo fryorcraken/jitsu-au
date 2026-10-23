@@ -96,8 +96,7 @@ export const WaiverConfirmationEmail = ({
         )}
         {approved ? (
           <Text style={text}>
-            Your waiver has been approved, so you&apos;re cleared to train. Sign in any time to find
-            our knowledge base in your member area.
+            This waiver has been approved, so there is nothing more to do on it before training.
           </Text>
         ) : (
           <Text style={text}>

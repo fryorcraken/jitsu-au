@@ -43,6 +43,15 @@ export function resendIdempotencyKey(originalKey: string, resendId: string): str
 }
 
 /**
+ * The key a send goes out under: the original's, or a resend's when this is
+ * one. Every resendable sender keys through this, so none can forget the
+ * resend half and be silently dropped by the provider as a duplicate.
+ */
+export function idempotencyKeyFor(originalKey: string, resendId?: string | null): string {
+  return resendId ? resendIdempotencyKey(originalKey, resendId) : originalKey;
+}
+
+/**
  * The key a resend marker is stored under, in `club_settings`.
  *
  * Key/value rather than a table of its own so this ships without a migration.

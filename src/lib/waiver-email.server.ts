@@ -20,7 +20,7 @@ import { SITE_ORIGIN } from "@/lib/seo";
 import { SITE_NAME } from "@/lib/email-sender";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
-import { resendIdempotencyKey } from "@/lib/email-resend";
+import { idempotencyKeyFor } from "@/lib/email-resend";
 
 /** Manager dashboard where waivers are reviewed and approved. */
 export const WAIVER_REVIEW_URL = `${SITE_ORIGIN}/manager/waivers`;
@@ -201,9 +201,7 @@ export async function sendWaiverConfirmation({
       subject: `Your ${SITE_NAME} training waiver`,
       html: await render(memberEl),
       text: await render(memberEl, { plainText: true }),
-      idempotencyKey: resendId
-        ? resendIdempotencyKey(`waiver-member-${waiverId}`, resendId)
-        : `waiver-member-${waiverId}`,
+      idempotencyKey: idempotencyKeyFor(`waiver-member-${waiverId}`, resendId),
       replyTo: clubReply,
     });
     return { sent: true, skipped: false, replyTo: clubReply };
@@ -368,9 +366,7 @@ export async function sendAccountActivatedEmail({
       subject: `Your ${SITE_NAME} account is active`,
       html: await render(el),
       text: await render(el, { plainText: true }),
-      idempotencyKey: resendId
-        ? resendIdempotencyKey(`account-activated-${waiverId}`, resendId)
-        : `account-activated-${waiverId}`,
+      idempotencyKey: idempotencyKeyFor(`account-activated-${waiverId}`, resendId),
       // The template links the contact form either way, so only the header.
       replyTo: await clubReplyTo(admin),
     });

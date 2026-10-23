@@ -42,10 +42,17 @@ export function ResendEmailButton({
   kind,
   recordId,
   label = RESEND_LABELS[kind],
+  onSettled,
 }: {
   kind: ResendKind;
   recordId: string;
   label?: string;
+  /**
+   * Called once the server has answered, sent or refused. A refusal can mean
+   * the page is stale (an address confirmed, an invoice paid since it loaded),
+   * so a screen that shows that state passes its reload here.
+   */
+  onSettled?: () => void;
 }) {
   const fetchPreview = useServerFn(getResendPreview);
   const resend = useServerFn(resendClubEmail);
@@ -88,6 +95,7 @@ export function ResendEmailButton({
     });
     if (outcome.ok) {
       setResult(outcome.value);
+      onSettled?.();
       // The next press is a new send, so it needs a new click id. A failure
       // keeps this one, so "Try again" retries the SAME send.
       send.reset();
