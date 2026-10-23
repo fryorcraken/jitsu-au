@@ -43,11 +43,9 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
       deps.authorizationId,
     );
     if (error) throw error;
+    if (!data) return { state: "missing" as const };
     // Already approved before: go straight back to the assistant.
-    if (data && "redirect_url" in data && !("client" in data)) {
-      throw redirect({ href: data.redirect_url });
-    }
-    if (!data || !("client" in data)) return { state: "missing" as const };
+    if (!("authorization_id" in data)) throw redirect({ href: data.redirect_url });
     return {
       state: "ready" as const,
       clientName: data.client.name || "An assistant",
