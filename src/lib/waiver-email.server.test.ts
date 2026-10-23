@@ -3,6 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { getManagerEmails, sendWaiverEmails } from "./waiver-email.server";
 
+const { sendLovableEmail } = vi.hoisted(() => ({ sendLovableEmail: vi.fn() }));
+vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
+
 // Build a minimal fake service-role client good enough for the code paths under
 // test: `.from("user_roles").select().eq()` and `.auth.admin.getUserById()`.
 function fakeAdmin(opts: {
@@ -100,5 +103,32 @@ describe("sendWaiverEmails", () => {
 
     expect(result).toEqual({ sent: [], skipped: true });
     expect(from).not.toHaveBeenCalled();
+  });
+
+  it("sets Reply-To to the signer on the managers' review prompt, and only there", async () => {
+    // A manager with a question about a waiver presses reply; that has to reach
+    // whoever signed it, not the noreply sender.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue({ success: true });
+    const admin = fakeAdmin({
+      roles: [{ user_id: "a" }, { user_id: "b" }],
+      users: { a: "sensei@club.test", b: "assistant@club.test" },
+    });
+
+    await sendWaiverEmails({
+      waiverId: "w2",
+      memberName: "Ada Lovelace",
+      memberGreetingName: "Addy",
+      memberEmail: "ada@example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin,
+    });
+
+    const payloads = sendLovableEmail.mock.calls.map(([p]) => p);
+    const toMember = payloads.find((p) => p.to === "ada@example.com");
+    const toManagers = payloads.filter((p) => p.to !== "ada@example.com");
+    expect(toMember.reply_to).toBeUndefined();
+    expect(toManagers.map((p) => p.to)).toEqual(["sensei@club.test", "assistant@club.test"]);
+    for (const p of toManagers) expect(p.reply_to).toBe("ada@example.com");
   });
 });

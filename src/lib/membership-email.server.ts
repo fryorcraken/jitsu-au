@@ -132,6 +132,8 @@ export async function sendMembershipPaymentEmail({
     console.error(`[membership-email] failed to email member ${memberEmail}:`, e);
   }
 
+  // Replying to the manager copy reaches whoever was sent the invoice: the
+  // member, or the parent of a child on their account.
   for (const to of managers) {
     try {
       await sendEmail({
@@ -142,6 +144,7 @@ export async function sendMembershipPaymentEmail({
         html: managerHtml,
         text: managerText,
         idempotencyKey: `membership-pending-${membershipId}-${to}`,
+        replyTo: memberEmail,
       });
       sent.push(to);
     } catch (e) {

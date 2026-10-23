@@ -134,7 +134,8 @@ export async function sendInterestEmails({
     console.error(`[interest-email] failed to email the applicant:`, e);
   }
 
-  // New-lead notification to each manager.
+  // New-lead notification to each manager, replying to the lead (the same
+  // Reply-To rule as the contact form; interestSchema validated the address).
   for (const to of notifyRecipients) {
     try {
       await sendEmail({
@@ -145,6 +146,7 @@ export async function sendInterestEmails({
         html: managerHtml,
         text: managerText,
         idempotencyKey: `interest-manager-${registrationId}-${to}`,
+        replyTo: email,
       });
       sent.push(to);
     } catch (e) {

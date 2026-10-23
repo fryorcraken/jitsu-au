@@ -7,6 +7,12 @@
 // webhook is the exception: Lovable's `createAuthEmailHandler` sends on its own,
 // and only takes the From address as configuration.
 //
+// Everything goes out from `noreply@`, so a reply goes nowhere unless the send
+// says otherwise. The rule: a manager's copy of an email ABOUT a person (a
+// contact message, a new lead, a signed waiver, a membership awaiting payment)
+// sets `replyTo` to that person's address, because pressing reply is how a
+// manager answers them. An email TO a person sets none.
+//
 // Like the modules that call it, this must never reach the client bundle: it is
 // named `*.server.ts` and is only ever imported by other `*.server.ts` modules.
 import { sendLovableEmail } from "@lovable.dev/email-js";
