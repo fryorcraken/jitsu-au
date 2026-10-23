@@ -2635,6 +2635,10 @@ export const PAID_REFERENCE_MAX = 200;
  * because a payment recorded in the future is money the club does not have.
  * A day BEFORE the invoice was raised is allowed on purpose: backfilling an
  * enrolment that was settled at the time is exactly when the real date matters.
+ * But not more than two years back (`earliestPaidOn`): nothing can correct the
+ * date once recorded, so a mistyped year must be refused rather than stored.
+ * An empty string reads as absent, the same as null, as it does for the
+ * reference: some clients send "" for every field they leave unset.
  *
  * `paid_reference` is the receipt number or transfer reference, never the
  * invoice's own `payment_reference` (what the member quotes). Blank means none.
@@ -2642,14 +2646,16 @@ export const PAID_REFERENCE_MAX = 200;
 export const paymentReceivedFields = {
   // One check reporting one problem: a regex miss in zod does not stop later
   // refines, so chained checks answered "20/10/2026" with two messages.
-  paid_on: z
-    .string()
-    .superRefine((d, ctx) => {
-      const message = paidOnProblem(d);
-      if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
-    })
-    .nullish()
-    .transform((d) => d ?? undefined),
+  paid_on: z.preprocess(
+    (d) => (d === "" || d === null ? undefined : d),
+    z
+      .string()
+      .superRefine((d, ctx) => {
+        const message = paidOnProblem(d);
+        if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+      })
+      .optional(),
+  ),
   paid_reference: z
     .string()
     .trim()
@@ -2667,7 +2673,19 @@ export function paidOnProblem(date: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "Pick the day the money arrived, as YYYY-MM-DD.";
   if (!isCalendarDate(date)) return "That is not a real date.";
   if (date > clubToday()) return "That day has not happened yet. Pick today or earlier.";
+  if (date < earliestPaidOn()) return "That is more than two years ago. Check the year.";
   return null;
+}
+
+/**
+ * The earliest day a payment can be recorded on: two years before today. A
+ * real backfill is a past semester or two. Anything older is a mistyped year,
+ * and a two-digit one ("0026") would otherwise be stored as 1926, because
+ * `Date.UTC` reads years 0-99 as 1900-1999.
+ */
+export function earliestPaidOn(): string {
+  const today = clubToday();
+  return `${Number(today.slice(0, 4)) - 2}${today.slice(4)}`;
 }
 
 /** A YYYY-MM-DD that names a day on the calendar, so 2026-02-31 is refused, not rolled over. */
@@ -2685,7 +2703,7 @@ function isCalendarDate(date: string): boolean {
  * still the previous evening in Perth, so a manager there would read back a day
  * earlier than the one they picked. Noon is the same date across Australia.
  */
-export function paidAtFor(paidOn: string | undefined, now: Date = new Date()): string {
+export function paidAtFor(paidOn?: string, now: Date = new Date()): string {
   if (!paidOn || paidOn === clubToday(now)) return now.toISOString();
   return zonedWallTimeToUtc(paidOn, "12:00", CLUB_TIME_ZONE).toISOString();
 }

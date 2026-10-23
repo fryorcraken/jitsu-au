@@ -160,7 +160,7 @@ export const AGENT_MANIFEST: {
       // neither param records exactly what it always did.
       breaking: false,
       notes: [
-        "mark_invoice_paid and mark_item_invoice_paid take two optional params. paid_on (YYYY-MM-DD) is the day the money actually arrived, for cash taken earlier than it is being recorded; absent means today, a future day is refused with 400 invalid_params, and a day before the invoice was raised is allowed (backfilling a settled enrolment). paid_reference is what the payment was known by, such as a receipt number (up to 200 characters). It is NOT the invoice's payment_reference, which is what the member quotes on a transfer and is never changed by marking paid.",
+        "mark_invoice_paid and mark_item_invoice_paid take two optional params. paid_on (YYYY-MM-DD) is the day the money actually arrived, for cash taken earlier than it is being recorded; absent, an empty string or null means today; a future day, or one more than two years ago (a mistyped year), is refused with 400 invalid_params; and a day before the invoice was raised is allowed (backfilling a settled enrolment). paid_reference is what the payment was known by, such as a receipt number (up to 200 characters). It is NOT the invoice's payment_reference, which is what the member quotes on a transfer and is never changed by marking paid.",
         "Both are written only when the payment is recorded. On an invoice that is already paid the call still records nothing (recorded: false), so neither the date nor the reference of the first payment moves.",
         "list_invoices and list_item_invoices rows carry paid_reference: null unless a payment recorded by hand was given one.",
       ],
@@ -423,7 +423,7 @@ export const AGENT_MANIFEST: {
       name: "list_invoices",
       method: "POST",
       summary:
-        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero).",
+        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries paid_at and paid_reference (what a payment recorded by hand was known by), and sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero).",
       params: [
         {
           name: "status",
@@ -540,7 +540,7 @@ export const AGENT_MANIFEST: {
           name: "paid_on",
           required: false,
           description:
-            "YYYY-MM-DD, the day the money arrived, in the club's timezone. Defaults to today. A future day is refused; an earlier one, even before the invoice was raised, is accepted.",
+            'YYYY-MM-DD, the day the money arrived, in the club\'s timezone. Defaults to today (also when sent as "" or null). A future day is refused, and so is one more than two years ago (a mistyped year); an earlier one, even before the invoice was raised, is accepted.',
         },
         {
           name: "paid_reference",
@@ -1060,7 +1060,7 @@ export const AGENT_MANIFEST: {
           name: "paid_on",
           required: false,
           description:
-            "YYYY-MM-DD, the day the money arrived, in the club's timezone. Defaults to today. A future day is refused; an earlier one, even before the invoice was raised, is accepted.",
+            'YYYY-MM-DD, the day the money arrived, in the club\'s timezone. Defaults to today (also when sent as "" or null). A future day is refused, and so is one more than two years ago (a mistyped year); an earlier one, even before the invoice was raised, is accepted.',
         },
         {
           name: "paid_reference",

@@ -31,7 +31,6 @@ import {
   managerAgentActions,
   membershipDeleteMessage,
   nameWithPreferred,
-  paidAtFor,
   paperWaiverUploadSchema,
   savePlanSchema,
   saveKbArticleSchema,
@@ -794,12 +793,11 @@ async function handleMarkInvoicePaid(params: unknown, actingAs: string) {
     .eq("id", membership.plan_id)
     .maybeSingle();
 
-  const paidAt = paidAtFor(input.paid_on);
   const { recorded } = await recordMembershipPayment(db, {
     membership: membership as MembershipRow,
     plan: (plan ?? undefined) as MembershipPlanRow | undefined,
     method: input.payment_method,
-    at: paidAt,
+    paidOn: input.paid_on,
     reference: input.paid_reference,
   });
 
@@ -816,7 +814,7 @@ async function handleMarkInvoicePaid(params: unknown, actingAs: string) {
       method: input.payment_method,
       // What was ASKED for. On an already-paid invoice (recorded: false) none of
       // it was stored, and the names say so rather than reading as the record.
-      requestedPaidAt: paidAt,
+      requestedPaidOn: input.paid_on ?? null,
       requestedPaidReference: input.paid_reference ?? null,
       recorded,
     }),
@@ -968,14 +966,13 @@ async function handleCreateItemInvoice(params: unknown, actingAs: string) {
 async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
   const input = markItemInvoicePaidSchema.parse(params);
   const db = await adminClient();
-  const paidAt = paidAtFor(input.paid_on);
   let recorded: boolean;
   try {
     const invoice = await readItemInvoice(db, input.id);
     ({ recorded } = await recordItemInvoicePayment(db, {
       invoice,
       method: input.payment_method,
-      at: paidAt,
+      paidOn: input.paid_on,
       reference: input.paid_reference,
     }));
   } catch (e) {
@@ -992,7 +989,7 @@ async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
       method: input.payment_method,
       // What was ASKED for. On an already-paid invoice (recorded: false) none of
       // it was stored, and the names say so rather than reading as the record.
-      requestedPaidAt: paidAt,
+      requestedPaidOn: input.paid_on ?? null,
       requestedPaidReference: input.paid_reference ?? null,
       recorded,
     }),

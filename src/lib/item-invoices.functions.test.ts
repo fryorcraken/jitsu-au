@@ -239,7 +239,7 @@ describe("recordItemInvoicePayment", () => {
     await recordItemInvoicePayment(fake.admin as never, {
       invoice: INVOICE,
       method: "manual",
-      at: "2026-10-01T02:00:00.000Z",
+      paidOn: "2026-10-01",
       reference: "Receipt 42",
     });
     expect(fake.writes.find((w) => w.table === "item_invoices")?.patch).toEqual({

@@ -427,8 +427,9 @@ reconciliation, for cash at the door or anything else that never touches the clu
 account. It writes `paid_at` through `recordMembershipPayment` — the only writer
 of that column — emails a receipt, and is idempotent, so a second press records
 nothing and re-sends nothing. Its confirm asks the day the money arrived (today
-unless changed; a future day is refused, an earlier one is fine, including one
-before the invoice was raised when backfilling) and an optional receipt or
+unless changed; a future day is refused, and so is one more than two years
+back, which is a mistyped year; an earlier one is fine, including one before
+the invoice was raised when backfilling) and an optional receipt or
 reference (`paid_reference`). Both tables print "Paid <date>" and that
 reference under the price. The reference is for managers only: a member's own
 page never shows it. There is no **Activate** button any more, because

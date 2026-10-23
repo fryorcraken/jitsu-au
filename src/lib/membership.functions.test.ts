@@ -1592,7 +1592,7 @@ describe("recordMembershipPayment", () => {
     const result = await recordMembershipPayment(fake.admin as never, {
       membership: UNPAID as never,
       method: "manual",
-      at: "2026-10-01T02:00:00.000Z",
+      paidOn: "2026-10-01",
       reference: "Receipt 42",
     });
     expect(result).toEqual({ recorded: true });
@@ -1623,7 +1623,7 @@ describe("recordMembershipPayment", () => {
     const result = await recordMembershipPayment(fake.admin as never, {
       membership: { ...UNPAID, paid_at: "2026-09-01T00:00:00Z" } as never,
       method: "manual",
-      at: "2026-10-01T02:00:00.000Z",
+      paidOn: "2026-10-01",
       reference: "Receipt 43",
     });
     expect(result).toEqual({ recorded: false });

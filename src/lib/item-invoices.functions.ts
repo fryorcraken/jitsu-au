@@ -435,8 +435,8 @@ export async function recordItemInvoicePayment(
   input: {
     invoice: ItemInvoiceRow;
     method: "bank_transfer" | "manual";
-    /** When the money actually moved, if that is not now (a manager's chosen day). */
-    at?: string;
+    /** The day the money arrived (YYYY-MM-DD), if a manager named one. Absent means now. */
+    paidOn?: string;
     /** What the payment was known by: a receipt number, a transfer reference. */
     reference?: string;
   },
@@ -451,7 +451,7 @@ export async function recordItemInvoicePayment(
   const { data: claimed, error } = await admin
     .from("item_invoices")
     .update({
-      paid_at: input.at ?? new Date().toISOString(),
+      paid_at: paidAtFor(input.paidOn),
       payment_method: input.method,
       // Only when given: the bank match has none, and its write stays as it was.
       ...(input.reference ? { paid_reference: input.reference } : {}),
@@ -577,7 +577,7 @@ export const markItemInvoicePaid = createServerFn({ method: "POST" })
     const { recorded } = await recordItemInvoicePayment(admin, {
       invoice,
       method: data.payment_method,
-      at: paidAtFor(data.paid_on),
+      paidOn: data.paid_on,
       reference: data.paid_reference,
     });
     return { ok: true as const, id: data.id, recorded };

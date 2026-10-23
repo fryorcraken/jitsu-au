@@ -31,6 +31,8 @@ import {
   markMembershipPaidSchema,
   paidAtFor,
   PAID_REFERENCE_MAX,
+  clubToday,
+  earliestPaidOn,
   sanitizeSurname,
   savePlanSchema,
   sameInstant,
@@ -42,6 +44,9 @@ import {
   startMembershipSchema,
   unpaidInvoices,
 } from "./validation";
+
+/** A day a month ago: in the past, and well inside the two-year limit, whenever this runs. */
+const RECENT_DAY = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
 
 describe("computeMembershipPrice", () => {
   const casual = { public_price_cents: 3000, student_price_cents: 2000 };
@@ -798,10 +803,10 @@ describe("markMembershipPaidSchema, the date and reference", () => {
   it("takes a past day and a trimmed reference", () => {
     const parsed = markMembershipPaidSchema.parse({
       id,
-      paid_on: "2026-01-15",
+      paid_on: RECENT_DAY,
       paid_reference: "  Receipt 42 ",
     });
-    expect(parsed.paid_on).toBe("2026-01-15");
+    expect(parsed.paid_on).toBe(RECENT_DAY);
     expect(parsed.paid_reference).toBe("Receipt 42");
   });
 
@@ -811,8 +816,30 @@ describe("markMembershipPaidSchema, the date and reference", () => {
     expect(markMembershipPaidSchema.parse({ id, paid_reference }).paid_reference).toBeUndefined();
   });
 
-  it("reads a null day as today", () => {
-    expect(markMembershipPaidSchema.parse({ id, paid_on: null }).paid_on).toBeUndefined();
+  // Some clients send "" for every field they leave unset. The reference beside
+  // it already read that as none; the day reads it as today, never a 400.
+  it.each([null, ""])("reads a day of %j as today", (paid_on) => {
+    expect(markMembershipPaidSchema.parse({ id, paid_on }).paid_on).toBeUndefined();
+  });
+
+  // Nothing can correct the date once recorded, so a mistyped year is refused.
+  // "0026" matters most: Date.UTC reads years 0-99 as 1900-1999, so it would
+  // otherwise be stored as 1926.
+  it.each(["0026-10-20", "2016-10-20"])("refuses %s as more than two years ago", (paid_on) => {
+    expect(() => markMembershipPaidSchema.parse({ id, paid_on })).toThrow(/two years ago/);
+  });
+
+  it("takes a day just inside two years", () => {
+    const today = clubToday();
+    const earliest = `${Number(today.slice(0, 4)) - 2}${today.slice(4)}`;
+    expect(earliestPaidOn()).toBe(earliest);
+    expect(markMembershipPaidSchema.parse({ id, paid_on: earliest }).paid_on).toBe(earliest);
+  });
+
+  it("reports one problem for one mistake", () => {
+    const result = markMembershipPaidSchema.safeParse({ id, paid_on: "20/10/2026" });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toHaveLength(1);
   });
 
   // Money recorded on a day that has not happened is money the club does not have.

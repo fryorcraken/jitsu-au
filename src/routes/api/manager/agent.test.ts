@@ -991,19 +991,21 @@ describe("manager agent route: item invoices", () => {
     },
   );
 
-  // Cash taken on a Thursday and entered on the Monday keeps its real day, as
-  // noon in Sydney (AEST on 1 October), with the receipt number beside it.
+  // Cash taken last month and entered today keeps its real day, as noon in
+  // Sydney, with the receipt number beside it.
   it("records the day and reference sent with mark_item_invoice_paid", async () => {
+    const { CLUB_TIME_ZONE, zonedWallTimeToUtc } = await import("@/lib/calendar");
+    const day = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
     const fake = fakeItemInvoices({ ...PAID, paid_at: null });
     currentAdmin = fake.db;
     const res = await post({
       action: "mark_item_invoice_paid",
-      params: { id: ITEM_INVOICE_ID, paid_on: "2026-10-01", paid_reference: "Receipt 42" },
+      params: { id: ITEM_INVOICE_ID, paid_on: day, paid_reference: "Receipt 42" },
     });
     expect(res.status).toBe(200);
     expect(fake.patches).toEqual([
       {
-        paid_at: "2026-10-01T02:00:00.000Z",
+        paid_at: zonedWallTimeToUtc(day, "12:00", CLUB_TIME_ZONE).toISOString(),
         payment_method: "manual",
         paid_reference: "Receipt 42",
       },

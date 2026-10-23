@@ -331,7 +331,7 @@ scripts/agent.sh edit_invoice '{"id":"<uuid>","starts_on":"2026-02-01"}'
 `params`: `id` (**required** — the invoice UUID from a list call),
 `payment_method` (optional: `bank_transfer | stripe | manual`, default `manual`),
 `paid_on` (optional `YYYY-MM-DD`: the day the money arrived, default today,
-refused if in the future), `paid_reference` (optional: a receipt number or the
+refused if in the future or more than two years back), `paid_reference` (optional: a receipt number or the
 transfer's own reference, up to 200 characters).
 
 ```bash

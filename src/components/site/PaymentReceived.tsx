@@ -15,7 +15,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDate } from "@/lib/dates";
-import { PAID_REFERENCE_MAX, clubToday } from "@/lib/validation";
+import { PAID_REFERENCE_MAX, clubToday, earliestPaidOn } from "@/lib/validation";
 import { paymentReceivedProblem, type PaymentReceived } from "@/lib/payment-received";
 
 export function PaymentReceivedFields({
@@ -38,18 +38,24 @@ export function PaymentReceivedFields({
         <Input
           id={`${idPrefix}-paid-on`}
           type="date"
+          min={earliestPaidOn()}
           max={clubToday()}
           value={value.paidOn}
           disabled={disabled}
           aria-invalid={problem ? true : undefined}
-          aria-describedby={problem ? `${idPrefix}-paid-on-problem` : undefined}
-          onChange={(e) => onChange({ ...value, paidOn: e.target.value })}
+          aria-describedby={`${idPrefix}-paid-on-problem`}
+          onChange={(e) => onChange({ ...value, paidOn: e.target.value, dateChosen: true })}
         />
-        {problem && (
-          <p id={`${idPrefix}-paid-on-problem`} className="text-sm text-destructive">
-            {problem}
-          </p>
-        )}
+        {/* Always in the DOM, so a screen reader announces the reason the
+            confirm button just went disabled, not only when focus returns here. */}
+        <p
+          id={`${idPrefix}-paid-on-problem`}
+          role="status"
+          aria-live="polite"
+          className="text-sm text-destructive empty:hidden"
+        >
+          {problem}
+        </p>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor={`${idPrefix}-paid-reference`}>Receipt or reference (optional)</Label>

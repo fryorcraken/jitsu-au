@@ -126,8 +126,9 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   comes back `recorded: false` — reconciliation legitimately sees the same
   invoice twice. Refused with `422 nothing_to_pay` on a free membership. Written
   to the server audit log with the actor, even when nothing was recorded.
-  Optional `paid_on` (`YYYY-MM-DD`, default today, never in the future, may
-  precede the invoice for a backfill) and `paid_reference` (a receipt number, up
+  Optional `paid_on` (`YYYY-MM-DD`, default today, also when sent as `""` or
+  null; never in the future or more than two years back, since nothing can
+  correct it afterwards; may precede the invoice for a backfill) and `paid_reference` (a receipt number, up
   to 200 characters) record when the money arrived and what it was known by;
   `mark_item_invoice_paid` takes the same two (`"20"`). `paid_reference` is not
   `payment_reference`, which marking paid never changes. A past day is stored

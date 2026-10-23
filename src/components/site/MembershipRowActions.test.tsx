@@ -27,6 +27,9 @@ vi.mock("@/lib/membership.functions", () => ({
 }));
 
 const { MembershipRowActions } = await import("./MembershipRowActions");
+
+/** A day a month ago: in the past, and well inside the two-year limit, whenever this runs. */
+const RECENT_DAY = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
 type Row = import("./MembershipRowActions").MembershipActionRow;
 
 /** Authorised and unpaid: what every membership looks like once raised. */
@@ -167,7 +170,7 @@ describe("MembershipRowActions", () => {
     await user.click(screen.getByRole("button", { name: /mark as paid/i }));
     const paidOn = screen.getByLabelText(/paid on/i);
     await user.clear(paidOn);
-    await user.type(paidOn, "2026-01-15");
+    await user.type(paidOn, RECENT_DAY);
     await user.type(screen.getByLabelText(/receipt or reference/i), "  Receipt 42 ");
     await user.click(screen.getByRole("button", { name: /^mark as paid$/i }));
 
@@ -176,7 +179,7 @@ describe("MembershipRowActions", () => {
         data: {
           id: "mem-1",
           payment_method: "manual",
-          paid_on: "2026-01-15",
+          paid_on: RECENT_DAY,
           paid_reference: "Receipt 42",
         },
       }),

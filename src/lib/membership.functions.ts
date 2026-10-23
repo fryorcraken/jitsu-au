@@ -417,8 +417,8 @@ export async function recordMembershipPayment(
     membership: MembershipRow;
     plan?: MembershipPlanRow;
     method: MembershipRow["payment_method"];
-    /** When the money actually moved, if that is not now (a manager's chosen day). */
-    at?: string;
+    /** The day the money arrived (YYYY-MM-DD), if a manager named one. Absent means now. */
+    paidOn?: string;
     /** What the payment was known by: a receipt number, a transfer reference. */
     reference?: string;
   },
@@ -426,7 +426,9 @@ export async function recordMembershipPayment(
   const { membership } = input;
   if (membership.paid_at) return { recorded: false };
 
-  const paidAt = input.at ?? new Date().toISOString();
+  // Converted here, in the one writer, so no caller can pass a chosen day
+  // through and forget to turn it into the instant that is stored.
+  const paidAt = paidAtFor(input.paidOn);
   // Compare-and-swap on `paid_at` still being null: two managers marking the
   // same invoice paid, or a manual match racing the reconciler, must record one
   // payment and send one email.
@@ -1779,7 +1781,7 @@ export const markMembershipPaid = createServerFn({ method: "POST" })
       membership,
       plan: plan ?? undefined,
       method: data.payment_method,
-      at: paidAtFor(data.paid_on),
+      paidOn: data.paid_on,
       reference: data.paid_reference,
     });
     return { ok: true as const, id: data.id, recorded };

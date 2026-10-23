@@ -100,7 +100,7 @@ and would not here. The two shapes never collide.
   a transfer already matched, for the same reason.
 - **Mark as paid**, for cash at the door. Asks first: it emails a receipt and
   makes the invoice permanent. The same dialog asks the day the money arrived
-  (today unless changed, never a future day) and an optional receipt or
+  (today unless changed, never a future day or one more than two years back) and an optional receipt or
   reference, which the table then prints under the status as "Paid <date>".
   That reference is the club's note, shown to managers only, and is never the
   invoice's own `INV` reference.
