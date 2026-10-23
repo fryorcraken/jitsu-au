@@ -40,9 +40,9 @@ export const Route = createFileRoute("/code-of-conduct")({
         property: "og:description",
         content: "The rules we train by at UTS Jitsu, and how to report an incident.",
       },
-      { property: "og:url", content: "https://jitsu.au/code-of-conduct" },
+      { property: "og:url", content: "https://utsjitsu.com.au/code-of-conduct" },
     ],
-    links: [{ rel: "canonical", href: "https://jitsu.au/code-of-conduct" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/code-of-conduct" }],
   }),
   component: CodeOfConduct,
 });

@@ -17,7 +17,7 @@ export const Route = createFileRoute("/faq")({
       ogDescription: "Trial classes, gear, experience needed, and more.",
       path: "/faq",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/faq" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/faq" }],
     scripts: [
       {
         type: "application/ld+json",

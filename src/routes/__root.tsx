@@ -115,7 +115,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "UTS Jitsu" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
-      { property: "og:url", content: "https://jitsu.au/" },
+      { property: "og:url", content: "https://utsjitsu.com.au/" },
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       { name: "twitter:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
@@ -142,7 +142,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       // No canonical here. Unlike meta tags, TanStack Router does not replace a
       // parent's <link> when a child declares the same rel: it appends. A
       // site-wide canonical therefore shipped a second, competing
-      // <link rel="canonical" href="https://jitsu.au/"> on every subpage, and a
+      // <link rel="canonical" href="https://utsjitsu.com.au/"> on every subpage, and a
       // page with two canonicals has none as far as a search engine is
       // concerned. Each public page sets its own; noindex pages need none.
       { rel: "stylesheet", href: appCss },

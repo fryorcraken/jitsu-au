@@ -71,7 +71,7 @@ export const Route = createFileRoute("/waiver")({
       }),
       { name: "robots", content: "noindex" },
     ],
-    links: [{ rel: "canonical", href: "https://jitsu.au/waiver" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/waiver" }],
   }),
   component: Waiver,
 });

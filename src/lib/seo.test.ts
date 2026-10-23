@@ -31,11 +31,11 @@ import {
 
 describe("canonicalUrl", () => {
   it("keeps the trailing slash on the home page", () => {
-    expect(canonicalUrl("/")).toBe("https://jitsu.au/");
+    expect(canonicalUrl("/")).toBe("https://utsjitsu.com.au/");
   });
 
   it("appends other paths to the origin without a trailing slash", () => {
-    expect(canonicalUrl("/about")).toBe("https://jitsu.au/about");
+    expect(canonicalUrl("/about")).toBe("https://utsjitsu.com.au/about");
   });
 });
 
@@ -86,7 +86,7 @@ describe("buildPageMeta", () => {
 
   it("builds an absolute og:url from the given path", () => {
     const meta = buildPageMeta({ title: "T", description: "D", path: "/about" });
-    expect(metaContent(meta, "og:url")).toBe("https://jitsu.au/about");
+    expect(metaContent(meta, "og:url")).toBe("https://utsjitsu.com.au/about");
   });
 
   it("sets the <title> tag", () => {
@@ -151,16 +151,16 @@ describe("root + page head merge (regression guard for the Twitter Card bug)", (
 
 describe("isProductionHost", () => {
   it("accepts the apex and www hosts", () => {
-    expect(isProductionHost("jitsu.au")).toBe(true);
-    expect(isProductionHost("www.jitsu.au")).toBe(true);
+    expect(isProductionHost("utsjitsu.com.au")).toBe(true);
+    expect(isProductionHost("www.utsjitsu.com.au")).toBe(true);
   });
 
   // These serve the same site. Missing one here would tell crawlers to drop it
   // from the index entirely, so each is pinned by name.
   it("accepts the club's other domains, apex and www alike", () => {
     for (const host of [
-      "utsjitsu.com.au",
-      "www.utsjitsu.com.au",
+      "jitsu.au",
+      "www.jitsu.au",
       "sydneyjitsu.com.au",
       "www.sydneyjitsu.com.au",
     ]) {
@@ -169,7 +169,7 @@ describe("isProductionHost", () => {
   });
 
   it("serves the real rules, not a blanket disallow, on the other domains", () => {
-    const robots = buildRobotsTxt("utsjitsu.com.au");
+    const robots = buildRobotsTxt("jitsu.au");
     expect(robots).toContain("Allow: /");
     // The sitemap pointer stays absolute so every domain funnels crawlers to
     // the canonical one.
@@ -177,21 +177,21 @@ describe("isProductionHost", () => {
   });
 
   it("ignores case and a port", () => {
-    expect(isProductionHost("JITSU.AU:443")).toBe(true);
+    expect(isProductionHost("UTSJITSU.COM.AU:443")).toBe(true);
   });
 
   it("rejects preview hosts, look-alikes and a missing host", () => {
     expect(isProductionHost("preview--utsjitsu.lovable.app")).toBe(false);
     expect(isProductionHost("localhost:5173")).toBe(false);
     // A suffix match would wrongly accept this one.
-    expect(isProductionHost("jitsu.au.example.com")).toBe(false);
+    expect(isProductionHost("utsjitsu.com.au.example.com")).toBe(false);
     expect(isProductionHost(null)).toBe(false);
     expect(isProductionHost("")).toBe(false);
   });
 });
 
 describe("buildRobotsTxt", () => {
-  const robots = buildRobotsTxt("jitsu.au");
+  const robots = buildRobotsTxt("utsjitsu.com.au");
 
   it("allows crawling and points at the sitemap", () => {
     expect(robots).toContain("User-agent: *");
@@ -265,7 +265,7 @@ describe("buildSitemapXml", () => {
     const xmlWithEntities = buildSitemapXml([
       { path: "/search?q=gi&size=a2", changefreq: "monthly", priority: 0.5 },
     ]);
-    expect(xmlWithEntities).toContain("<loc>https://jitsu.au/search?q=gi&amp;size=a2</loc>");
+    expect(xmlWithEntities).toContain("<loc>https://utsjitsu.com.au/search?q=gi&amp;size=a2</loc>");
     expect(xmlWithEntities).not.toContain("&size");
   });
 });
@@ -575,5 +575,48 @@ describe("sitemap coverage of the route files", () => {
   it("keeps the canonical off the root route, so no page ships two", () => {
     const root = readFileSync(join(routesDir, "__root.tsx"), "utf8");
     expect(root).not.toContain('rel: "canonical"');
+  });
+});
+
+// The site moved from jitsu.au to utsjitsu.com.au in October 2026, and jitsu.au
+// now only redirects. A link to it still lands, but a redirect to another host
+// drops whatever the request carried across (the nightly digest lost its token
+// that way), and a canonical pointing at a redirect tells a search engine the
+// real page is one that does not exist. The origin belongs in SITE_ORIGIN; the
+// addresses that stay on the old domain on purpose (`dependant.jitsu.au`,
+// `notify.jitsu.au`, calendar UIDs `<id>@jitsu.au`) are not links, so neither
+// pattern below matches them.
+describe("the old domain", () => {
+  const OLD_DOMAIN_LINK = [/https?:\/\/(www\.)?jitsu\.au\b/, /(^|[^\w.@-])jitsu\.au\//];
+
+  function sourceFiles(dir: string): string[] {
+    const found: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) found.push(...sourceFiles(path));
+      else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) found.push(path);
+    }
+    return found;
+  }
+
+  it("is never linked from the app's source", () => {
+    const offenders = sourceFiles(join(import.meta.dirname, ".."))
+      .flatMap((file) =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .map((line, i) => ({ file, line: i + 1, text: line }))
+          .filter(({ text }) => OLD_DOMAIN_LINK.some((pattern) => pattern.test(text))),
+      )
+      .map(({ file, line, text }) => `${file}:${line}: ${text.trim()}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it("catches both a full link and a bare one written as copy", () => {
+    const caught = (text: string) => OLD_DOMAIN_LINK.some((pattern) => pattern.test(text));
+    expect(caught('const SITE_URL = "https://jitsu.au";')).toBe(true);
+    expect(caught("Sign in at jitsu.au/account")).toBe(true);
+    expect(caught("https://utsjitsu.com.au/account")).toBe(false);
+    expect(caught("x@dependant.jitsu.au")).toBe(false);
+    expect(caught("noreply@notify.jitsu.au")).toBe(false);
   });
 });

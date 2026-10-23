@@ -30,7 +30,7 @@ export const Route = createFileRoute("/contact")({
       ogDescription: "Phone, WhatsApp, or send us a message.",
       path: "/contact",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/contact" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/contact" }],
   }),
   component: Contact,
 });

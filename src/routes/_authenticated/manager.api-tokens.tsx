@@ -16,6 +16,7 @@ import { CopyButton } from "@/components/site/CopyButton";
 import { formatDateTime } from "@/lib/dates";
 import { createApiToken, listApiTokens, revokeApiToken } from "@/lib/manager-api-tokens.functions";
 import { buildAgentPrompt } from "@/lib/manager-api-tokens";
+import { SITE_ORIGIN } from "@/lib/seo";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/api-tokens")({
@@ -52,7 +53,7 @@ function ApiTokensPage() {
   // The raw token is shown exactly once, right after creation.
   const [freshToken, setFreshToken] = useState<{ label: string; token: string } | null>(null);
 
-  const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://jitsu.au";
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : SITE_ORIGIN;
   const agentPrompt = useMemo(() => buildAgentPrompt({ baseUrl }), [baseUrl]);
   const manifestUrl = `${baseUrl}/api/manager/agent`;
 

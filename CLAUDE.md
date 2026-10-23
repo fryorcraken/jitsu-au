@@ -5,7 +5,8 @@ Guidance for AI assistants working in this repository.
 ## What this is
 
 **UTS Jitsu** — the marketing + member website for a Japanese Jiu-Jitsu club
-that trains at UTS Ultimo, Sydney (public site: `https://jitsu.au`). It handles
+that trains at UTS Ultimo, Sydney (public site: `https://utsjitsu.com.au`; the
+original domain, `jitsu.au`, now redirects to it). It handles
 public marketing pages, interest/contact form submissions, and a member area
 where people sign a training **waiver** (with a generated PDF) and managers
 review submissions.
@@ -711,6 +712,27 @@ missing from the sitemap (or a `noindex` one is listed), so the first list is
 enforced. The second cannot be derived from anything, so a new noindex page has
 to be added there by hand or nothing ever looks at it.
 
+**The site's address is `SITE_ORIGIN` in `src/lib/seo.ts`**, and every link the
+app builds for somebody outside the browser (canonicals, the sitemap, every
+link in every email) reads it. Never spell the host
+again in a new module: import it. A link to a domain that only redirects still
+lands, but it drops anything the request carried across hosts, and a canonical
+pointing at a redirect tells a search engine the real page does not exist.
+`seo.test.ts` fails on any link to `jitsu.au`, the domain the site left in
+October 2026. Moving the site again takes, in the same change: `SITE_ORIGIN`;
+each public route's literal canonical (the same test checks them against
+`canonicalUrl`); a migration for the digest's URL literal
+(`docs/notifications.md`, "The October domain move"); and the new host on
+`PRODUCTION_HOSTS`. The email **sender** (`notify.jitsu.au` today) is not a
+link and moves on its own schedule: it is a domain verified with the mail
+provider in Lovable Cloud, so the code may only switch to a new one after
+Lovable shows it verified, or every email (sign-in links included) fails. Two
+things stay on `jitsu.au` for good: the dependants' reserved
+`dependant.jitsu.au` addresses, and calendar event UIDs (`<id>@jitsu.au`),
+which a subscribed calendar uses to recognise an event it already has. Keep
+`jitsu.au` registered for as long as any of those, or a link already sent,
+still points at it.
+
 Two non-obvious rules:
 
 - **Never put a `rel="canonical"` in `__root.tsx`.** TanStack Router _replaces_
@@ -725,7 +747,7 @@ Two non-obvious rules:
   leave the URL eligible for a bare, contentless listing.
 
 Non-production hosts (Lovable previews, branch deploys) are served a blanket
-`Disallow: /`, so a preview never competes with `jitsu.au` in search results.
+`Disallow: /`, so a preview never competes with the real site in search results.
 
 ## Security headers
 
@@ -762,7 +784,7 @@ attributes and lifetime are in `src/lib/email-settings-session.ts`.
 - CSP, HSTS and `X-Frame-Options` are **not** set here. Lovable owns the
   Cloudflare deploy and the platform already sends `strict-transport-security`
   and `x-content-type-options`; check what is already on the response with
-  `curl -I https://jitsu.au/` before adding anything that could overlap.
+  `curl -I https://utsjitsu.com.au/` before adding anything that could overlap.
 
 ## Environment variables
 
@@ -780,7 +802,7 @@ the server runtime. They are never written to a file in this repo.
 > fails the "Connect Supabase in Lovable Cloud" check while it is missing. It
 > holds only publishable values — the `anon` key, the Lovable Cloud API URL, the
 > project ref, the Google OAuth **client id** — all of which are baked into the
-> browser bundle anyway and readable from `jitsu.au` with devtools.
+> browser bundle anyway and readable from the live site with devtools.
 >
 > **Never add a secret to it.** This repo is going public, so treat a committed
 > credential as public the moment it is pushed: it has to be rotated, not just

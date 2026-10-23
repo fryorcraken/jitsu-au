@@ -21,7 +21,7 @@ export const Route = createFileRoute("/")({
       path: "/",
     }),
     links: [
-      { rel: "canonical", href: "https://jitsu.au/" },
+      { rel: "canonical", href: "https://utsjitsu.com.au/" },
       // Hero image is the page's LCP element but sits well into the body, so the
       // preloader would otherwise only discover it after parsing the head and
       // everything above it in the markup. Preloading it here lets the browser

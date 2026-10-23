@@ -217,7 +217,7 @@ reserved `<uuid>@dependant.jitsu.au` address, unconfirmed and permanently
 banned.
 
 What the gallery shows is **seeded fixture content** — `/blog`, `/pricing` and
-the calendar are the local club, not what is on `jitsu.au` today. That is the
+the calendar are the local club, not what is on `utsjitsu.com.au` today. That is the
 trade for a run that is identical on every branch and every fork.
 
 Walking the site is not read-only — `/notifications` marks the member's unread

@@ -15,7 +15,7 @@ export const Route = createFileRoute("/pricing")({
       ogDescription: "Casual, semester and yearly options. First two sessions free.",
       path: "/pricing",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/pricing" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/pricing" }],
   }),
   component: Pricing,
 });

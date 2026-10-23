@@ -1,7 +1,7 @@
 // The point of the copy button is that a manager can hand out a post's real
 // public address without opening it and reading the browser bar, so what is
 // pinned here is the exact string it puts on the clipboard: the canonical
-// jitsu.au URL, whatever host the manager happens to be signed in on. Drafts
+// utsjitsu.com.au URL, whatever host the manager happens to be signed in on. Drafts
 // have no working URL (the public route filters to published), so they get no
 // button rather than a link that 404s for whoever it is sent to.
 import { render, screen, within } from "@testing-library/react";
@@ -75,7 +75,7 @@ describe("/manager/blog", () => {
 
     await userEvent.click(rowFor("Hello world").getByRole("button", { name: /copy link/i }));
 
-    expect(writeText).toHaveBeenCalledWith("https://jitsu.au/blog/2026-08-01-hello-world");
+    expect(writeText).toHaveBeenCalledWith("https://utsjitsu.com.au/blog/2026-08-01-hello-world");
   });
 
   it("names each button after its own post, so a screen reader can tell them apart", async () => {

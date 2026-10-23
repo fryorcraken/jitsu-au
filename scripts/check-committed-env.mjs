@@ -56,7 +56,7 @@ import { fileURLToPath } from "node:url";
  * Env var names allowed to appear in the committed `.env`.
  *
  * Every one of these is public by design: the `VITE_*` values are baked into
- * the browser bundle at build time and can be read out of jitsu.au with
+ * the browser bundle at build time and can be read out of utsjitsu.com.au with
  * devtools, and their unprefixed twins are the same values for SSR. The
  * publishable key is the Supabase `anon` key, which is safe because RLS and
  * table grants are the boundary, not the key's secrecy.

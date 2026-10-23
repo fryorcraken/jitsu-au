@@ -20,7 +20,7 @@ export const Route = createFileRoute("/classes")({
       ogDescription: `${scheduleDays} classes at ActivateFit Gym, Ultimo.`,
       path: "/classes",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/classes" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/classes" }],
   }),
   component: Classes,
 });

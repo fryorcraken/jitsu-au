@@ -31,7 +31,7 @@ export const Route = createFileRoute("/blog/")({
         "News, tips and updates from UTS Jitsu, Japanese Jiu-Jitsu at UTS Ultimo, Sydney.",
       path: "/blog",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/blog" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/blog" }],
   }),
   component: BlogIndex,
 });

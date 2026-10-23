@@ -27,7 +27,7 @@ export const Route = createFileRoute("/first-class")({
         "A step-by-step walkthrough of your first Japanese Jiu-Jitsu session in Ultimo: what to expect, what to bring and how the free trial works.",
       path: "/first-class",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/first-class" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/first-class" }],
   }),
   component: FirstClass,
 });

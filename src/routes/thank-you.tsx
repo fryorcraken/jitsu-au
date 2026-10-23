@@ -20,7 +20,7 @@ export const Route = createFileRoute("/thank-you")({
       }),
       { name: "robots", content: "noindex" },
     ],
-    links: [{ rel: "canonical", href: "https://jitsu.au/thank-you" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/thank-you" }],
   }),
   component: ThankYou,
 });
