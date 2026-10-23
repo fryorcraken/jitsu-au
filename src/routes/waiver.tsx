@@ -139,6 +139,8 @@ function Waiver() {
     pdfUrl: string | null;
     pdfReady: boolean;
     codeOfConductUrl: string | null;
+    /** Did the confirmation email go out with a reply-to, so replying to it works? */
+    replyToConfirmation: boolean;
   } | null>(null);
   /** True once a draft from this browser session has been put back on screen. */
   const [restored, setRestored] = useState(false);
@@ -581,7 +583,12 @@ function Waiver() {
     checkSubmission({ data: { client_submission_id: pendingCheckId } })
       .then((res) => {
         if (cancelled || !res.found) return;
-        setResult({ pdfUrl: res.pdf_url, pdfReady: Boolean(res.pdf_url), codeOfConductUrl: null });
+        setResult({
+          pdfUrl: res.pdf_url,
+          pdfReady: Boolean(res.pdf_url),
+          codeOfConductUrl: null,
+          replyToConfirmation: false,
+        });
         clearDraft();
       })
       .catch(() => {
@@ -939,6 +946,8 @@ function Waiver() {
           // which answers only "did it land" and carries no token; the original
           // attempt's confirmation email already has the working link.
           code_of_conduct_url: null,
+          // Nothing was sent by this check, so it cannot vouch for a reply-to.
+          reply_to_confirmation: false,
         };
       },
     });
@@ -948,6 +957,7 @@ function Waiver() {
         pdfUrl: outcome.value.pdf_url,
         pdfReady: outcome.value.pdf_ready,
         codeOfConductUrl: outcome.value.code_of_conduct_url,
+        replyToConfirmation: outcome.value.reply_to_confirmation,
       });
       // Signed and recorded: the draft has done its job, and it holds health
       // answers and a signature that should not outlive it.
@@ -1020,7 +1030,21 @@ function Waiver() {
               <p className="mt-3 text-muted-foreground">
                 Thanks, your waiver is signed and saved. We couldn't get your PDF copy ready just
                 now, so there is no download here. You do not need to sign again. We've let the club
-                know, and you can reply to your confirmation email any time if you want a copy.
+                know.{" "}
+                {/* Only claimed when the email really carried a reply-to.
+                    Otherwise a reply reaches nobody, and the contact page is
+                    the honest way to ask. */}
+                {result.replyToConfirmation ? (
+                  "If you want a copy, reply to your confirmation email any time."
+                ) : (
+                  <>
+                    If you want a copy, ask us through the{" "}
+                    <Link to="/contact" className="underline">
+                      contact page
+                    </Link>{" "}
+                    any time.
+                  </>
+                )}
               </p>
               <div className="mt-8 flex flex-wrap justify-center gap-3">
                 <Button asChild size="lg">

@@ -33,6 +33,7 @@ const PROPS = {
   reference: "UTSJ-LOVE-A1B2",
   details: DETAILS,
   membershipUrl: "https://jitsu.au/membership",
+  replyTo: null,
 };
 
 // react-dom/server splits interpolated text with <!-- --> markers, so compare

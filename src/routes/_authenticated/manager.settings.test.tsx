@@ -32,7 +32,7 @@ vi.mock("@tanstack/react-start", () => ({
   useServerFn: (fn: unknown) => fn,
 }));
 
-vi.mock("@/lib/membership.functions", () => ({
+vi.mock("@/lib/club-settings.functions", () => ({
   getClubSettings: (...args: unknown[]) => getClubSettings(...args),
   saveClubSettings: (...args: unknown[]) => saveClubSettings(...args),
 }));
@@ -55,9 +55,11 @@ async function renderLoaded() {
 }
 
 beforeEach(() => {
-  getClubSettings
-    .mockReset()
-    .mockResolvedValue({ details: null, legacy_instructions: "**BSB** 062-000 (old text)" });
+  getClubSettings.mockReset().mockResolvedValue({
+    details: null,
+    email_reply_to: null,
+    legacy_instructions: "**BSB** 062-000 (old text)",
+  });
   saveClubSettings.mockReset().mockResolvedValue({ ok: true });
   toastError.mockReset();
 });
@@ -80,7 +82,8 @@ describe("/manager/settings", () => {
     render(<SettingsPage />);
     await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
 
-    expect(screen.getByText(/could not load the club's payment settings/i)).toBeVisible();
+    expect(screen.getByText(/could not load the club's settings/i)).toBeVisible();
+    expect(screen.queryByLabelText("Reply-to address")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
     // Nothing to type into means nothing to overwrite.
     expect(screen.queryByLabelText("Account name")).not.toBeInTheDocument();
@@ -91,20 +94,61 @@ describe("/manager/settings", () => {
   });
 
   it("drops the warning and the old text once an account exists", async () => {
-    getClubSettings.mockResolvedValue({ details: ACCOUNT, legacy_instructions: "old text" });
+    getClubSettings.mockResolvedValue({
+      details: ACCOUNT,
+      email_reply_to: null,
+      legacy_instructions: "old text",
+    });
     await renderLoaded();
     expect(screen.queryByText(/members cannot see how to pay yet/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/your previous instructions/i)).not.toBeInTheDocument();
   });
 
   it("shows a stored BSB hyphenated, and saves it back as bare digits", async () => {
-    getClubSettings.mockResolvedValue({ details: ACCOUNT, legacy_instructions: "" });
+    getClubSettings.mockResolvedValue({
+      details: ACCOUNT,
+      email_reply_to: null,
+      legacy_instructions: "",
+    });
     await renderLoaded();
     expect(screen.getByLabelText("BSB")).toHaveValue("062-000");
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(saveClubSettings).toHaveBeenCalled());
-    expect(saveClubSettings.mock.calls[0][0].data.bsb).toBe("062000");
+    expect(saveClubSettings.mock.calls[0][0].data.key).toBe("invoice_payment_details");
+    expect(saveClubSettings.mock.calls[0][0].data.value.bsb).toBe("062000");
+  });
+
+  it("keeps a failed save of the account on screen, not just in a toast", async () => {
+    getClubSettings.mockResolvedValue({
+      details: ACCOUNT,
+      email_reply_to: null,
+      legacy_instructions: "",
+    });
+    saveClubSettings.mockRejectedValueOnce(new Error("Could not save."));
+    await renderLoaded();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/this account was not saved/i)).toBeVisible();
+    expect(screen.getByText(/members still see the details that were there before/i)).toBeVisible();
+    expect(screen.getByLabelText("BSB")).toHaveValue("062-000");
+
+    // Editing the form retires the panel: it was about the values that failed.
+    await userEvent.type(screen.getByLabelText("Bank"), " ");
+    expect(screen.queryByText(/this account was not saved/i)).not.toBeInTheDocument();
+  });
+
+  it("does not claim members still see old details when none were ever published", async () => {
+    saveClubSettings.mockRejectedValueOnce(new Error("That was not saved. Nothing has changed."));
+    await renderLoaded();
+    await userEvent.type(screen.getByLabelText("Account name"), "UTS Jitsu Club Inc");
+    await userEvent.type(screen.getByLabelText("BSB"), "062000");
+    await userEvent.type(screen.getByLabelText("Account number"), "12345678");
+    await userEvent.type(screen.getByLabelText("Bank"), "Commonwealth Bank of Australia");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/members still cannot see how to pay/i)).toBeVisible();
+    expect(screen.queryByText(/details that were there before/i)).not.toBeInTheDocument();
   });
 
   it("refuses to save a half-filled account and says which box is wrong", async () => {
@@ -159,5 +203,115 @@ describe("/manager/settings", () => {
 
     expect(within(preview).getByText("062-000")).toBeVisible();
     expect(within(preview).getByRole("button", { name: /copy account number/i })).toBeVisible();
+  });
+});
+
+// Every member email carries this address as its Reply-To, and the "reply to
+// this email" lines only appear while it is set, so what is pinned here is that
+// a manager always knows which state the club is in, can only save one real
+// address, can clear it, and never loses a failed save to a toast.
+describe("replies to club emails", () => {
+  const box = () => screen.getByLabelText("Reply-to address");
+  const saveAddress = () => screen.getByRole("button", { name: "Save address" });
+  const confirmAddress = async () =>
+    userEvent.click(await screen.findByRole("button", { name: "Use this address" }));
+
+  it("says plainly that replies reach nobody while it is unset", async () => {
+    await renderLoaded();
+    expect(screen.getByText(/replies to club emails reach nobody/i)).toBeVisible();
+    expect(box()).toHaveValue("");
+  });
+
+  it("shows where replies go once it is set", async () => {
+    getClubSettings.mockResolvedValue({
+      details: ACCOUNT,
+      email_reply_to: "hello@example.com",
+      legacy_instructions: "",
+    });
+    await renderLoaded();
+    expect(screen.getByText("hello@example.com")).toBeVisible();
+    expect(box()).toHaveValue("hello@example.com");
+  });
+
+  it("saves one address, trimmed and lowercased, under its own key", async () => {
+    await renderLoaded();
+    await userEvent.type(box(), "  Hello@Example.com ");
+    await userEvent.click(saveAddress());
+    await confirmAddress();
+
+    await waitFor(() => expect(saveClubSettings).toHaveBeenCalled());
+    expect(saveClubSettings.mock.calls[0][0].data).toEqual({
+      key: "email_reply_to",
+      value: "hello@example.com",
+    });
+    await waitFor(() => expect(screen.getByText(/replies go to/i)).toBeVisible());
+  });
+
+  it("refuses something that is not one address, and says why", async () => {
+    await renderLoaded();
+    await userEvent.type(box(), "hello@example.com, other@example.com");
+    await userEvent.click(saveAddress());
+
+    expect(saveClubSettings).not.toHaveBeenCalled();
+    expect(screen.getByText(/enter one email address/i)).toBeVisible();
+    expect(box()).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("clears it when the box is emptied and saved", async () => {
+    getClubSettings.mockResolvedValue({
+      details: ACCOUNT,
+      email_reply_to: "hello@example.com",
+      legacy_instructions: "",
+    });
+    await renderLoaded();
+    await userEvent.clear(box());
+    await userEvent.click(saveAddress());
+
+    await waitFor(() => expect(saveClubSettings).toHaveBeenCalled());
+    expect(saveClubSettings.mock.calls[0][0].data).toEqual({ key: "email_reply_to", value: "" });
+    await waitFor(() =>
+      expect(screen.getByText(/replies to club emails reach nobody/i)).toBeVisible(),
+    );
+  });
+
+  it("keeps a failed save on screen, with the address still in the box", async () => {
+    saveClubSettings.mockRejectedValue(new Error("That address was not saved. Try again."));
+    await renderLoaded();
+    await userEvent.type(box(), "hello@example.com");
+    await userEvent.click(saveAddress());
+    await confirmAddress();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /try again/i })).toBeVisible(), {
+      timeout: 5000,
+    });
+    expect(box()).toHaveValue("hello@example.com");
+    // Still unset: the panel must not claim a save that did not happen.
+    expect(screen.getByText(/replies to club emails reach nobody/i)).toBeVisible();
+  });
+
+  // Every member who presses Reply from then on writes to this address, so a
+  // typo is caught before it goes live, with the address spelled out.
+  it("asks before replies start going to a new address, and saves nothing if told no", async () => {
+    await renderLoaded();
+    await userEvent.type(box(), "helo@example.com");
+    await userEvent.click(saveAddress());
+
+    expect(await screen.findByText("Send replies to helo@example.com?")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(saveClubSettings).not.toHaveBeenCalled();
+    expect(box()).toHaveValue("helo@example.com");
+  });
+
+  it("clears without asking, since that only brings back the contact-page line", async () => {
+    getClubSettings.mockResolvedValue({
+      details: ACCOUNT,
+      email_reply_to: "hello@example.com",
+      legacy_instructions: "",
+    });
+    await renderLoaded();
+    await userEvent.clear(box());
+    await userEvent.click(saveAddress());
+    await waitFor(() => expect(saveClubSettings).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Use this address" })).not.toBeInTheDocument();
   });
 });
