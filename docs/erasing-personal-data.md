@@ -52,6 +52,25 @@ Three rules hold that path together, and all of them are load-bearing:
 Everything else about a person is untouched, on purpose. There is no way to
 delete a member, a waiver, a PDF or a login, by design rather than by omission.
 
+## Archiving is not erasure
+
+A manager can mark a person as having **left the club**
+(`profiles.archived_at`). It is a reversible bookkeeping mark, and it is the
+answer to "everyone who ever signed stays on the books" that needs neither of the
+questions below settled, because it destroys nothing:
+
+- Every record, waiver, PDF, membership and check-in stays exactly as it is.
+- The person can still sign in, see their account and pay what they owe. It is
+  not a ban.
+- What changes is who the club **contacts**: an archived person gets no
+  club-initiated mass email. Mail that answers something they did or owe still
+  reaches them.
+
+So archiving is never a step towards deleting anybody, and nothing should treat
+it as consent to delete, or as the start of a retention clock. If the club
+later answers the questions below, an archived person is exactly as much in
+scope as anyone else, no more.
+
 ## Why the rest is not built
 
 Erasure for anyone who has signed something needs two answers the club has not
@@ -157,7 +176,7 @@ guardian>' AND role = 'member'` -- unless that person still holds, or still
 `calendar_series.created_by`, `calendar_events.created_by`,
 `waiver_templates.created_by`,
 `club_settings.updated_by`, `bank_transactions.matched_by`,
-`profiles.media_consent_updated_by`, `blog_comments.hidden_by`,
+`profiles.media_consent_updated_by`, `profiles.archived_by`, `blog_comments.hidden_by`,
 `blog_blocked_commenters.blocked_by`, `manager_api_tokens.created_by`,
 `notifications.actor_id`. So deleting a **manager** quietly erases who approved
 what. Whatever gets built should refuse a manager outright, or make the club
