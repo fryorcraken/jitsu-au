@@ -497,7 +497,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("22");
+    expect(AGENT_MANIFEST.version).toBe("23");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -541,6 +541,21 @@ describe("AGENT_MANIFEST", () => {
     // The trap worth naming, because a caller that falls into it reports a
     // parent as having no children rather than failing.
     expect(notes).toMatch(/status/);
+  });
+
+  // Announcing a plan emails the whole club, so the manifest has to tell a
+  // client both halves: that the params exist, and that a retry must carry the
+  // same id or it emails everyone twice.
+  it("announces save_membership_plan's announce params and how to retry them", () => {
+    const save = AGENT_MANIFEST.actions.find((a) => a.name === "save_membership_plan")!;
+    expect(save.params.map((p) => p.name)).toEqual(
+      expect.arrayContaining(["announce", "announcement_id"]),
+    );
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "23")!.notes.join(" ");
+    expect(notes).toMatch(/announce: true/);
+    expect(notes).toMatch(/same announcement_id/);
+    expect(notes).toMatch(/announcement_failed/);
+    expect(notes).toMatch(/last_announcement/);
   });
 
   it("documents the confirmation flags the schemas actually accept", () => {

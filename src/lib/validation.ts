@@ -2372,6 +2372,27 @@ export const announcePlanSchema = z.object({
 });
 export type AnnouncePlanInput = z.infer<typeof announcePlanSchema>;
 
+/**
+ * The two `save_membership_plan` params that announce the plan once it is
+ * saved, parsed beside `savePlanSchema` rather than merged into it, because the
+ * manager screen saves and announces in two separate calls.
+ *
+ * `announcement_id` is REQUIRED with `announce: true`, and that is the point of
+ * it: an agent that retries a timed-out call must not email the whole club a
+ * second time. The same id again finishes the same announcement; a new id is a
+ * new one. Checked before anything is saved.
+ */
+export const agentPlanAnnounceSchema = z
+  .object({
+    announce: z.boolean().optional(),
+    announcement_id: z.string().uuid().optional(),
+  })
+  .refine((d) => !d.announce || Boolean(d.announcement_id), {
+    message:
+      "Pass announcement_id (a UUID you mint) with announce: true, and reuse it to retry, so a retry cannot email everyone twice.",
+    path: ["announcement_id"],
+  });
+
 // ---- Manager: what kind of plan this is, and what that implies ----
 
 /**

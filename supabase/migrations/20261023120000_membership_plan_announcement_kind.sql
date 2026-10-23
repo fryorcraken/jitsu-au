@@ -4,7 +4,7 @@
 -- when they save a plan on /manager/membership-plans (or pass `announce: true`
 -- to the manager agent API's `save_membership_plan`). Each announcement writes
 -- one `notifications` row per inbox it reaches and emails it straight away
--- (`docs/notifications.md`, "A plan goes on sale"). Storing it as rows, rather
+-- (`docs/notifications.md`, "A plan is announced"). Storing it as rows, rather
 -- than sending and forgetting, is what makes a retried save safe (the unique
 -- index on `(user_id, kind, subject_id)` absorbs the repeat), gives the member
 -- an in-app record, and lets the next digest pick up anything the immediate

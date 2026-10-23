@@ -26,6 +26,7 @@ import {
   nameWithPreferred,
   paperWaiverUploadSchema,
   savePlanSchema,
+  agentPlanAnnounceSchema,
   saveKbArticleSchema,
   saveKbSectionSchema,
   createItemInvoiceSchema,
@@ -885,21 +886,64 @@ async function handleDeleteInvoice(params: unknown, actingAs: string) {
 // ---- action: list_membership_plans ----
 async function handleListMembershipPlans() {
   const db = await adminClient();
-  const plans = await listMembershipPlanRows(db);
-  return { count: plans.length, plans: plans.map(projectAgentMembershipPlan) };
+  const { loadAnnouncementSummaries } = await import("@/lib/plan-announcement.server");
+  const [plans, announcements] = await Promise.all([
+    listMembershipPlanRows(db),
+    loadAnnouncementSummaries(db),
+  ]);
+  return {
+    count: plans.length,
+    plans: plans.map((p) => ({
+      ...projectAgentMembershipPlan(p),
+      // The same "Announced on..." the plan's card shows, or null if never.
+      last_announcement: announcements.get(p.id) ?? null,
+    })),
+  };
 }
 
 // ---- action: save_membership_plan ----
-async function handleSaveMembershipPlan(params: unknown) {
+//
+// With `announce: true` this is the screen's "Email all members about this
+// plan" box: save first, then announce through the same
+// `announceMembershipPlan` the screen's server function calls. The two can
+// fail separately, and a failed announcement says the plan IS saved, so the
+// agent retries the announcement (same `announcement_id`) rather than the
+// whole save, exactly like the screen's retry button.
+async function handleSaveMembershipPlan(params: unknown, actingAs: string) {
   const input = savePlanSchema.parse(params);
+  const { announce, announcement_id } = agentPlanAnnounceSchema.parse(params);
   const db = await adminClient();
+  let saved: { ok: true; id: string };
   try {
-    return await saveMembershipPlanRow(db, input);
+    saved = await saveMembershipPlanRow(db, input);
   } catch (e) {
     throw new AgentError(
       422,
       "save_membership_plan_failed",
       e instanceof Error ? e.message : "Could not save the membership plan.",
+    );
+  }
+  if (!announce || !announcement_id) return { ...saved, announcement: null };
+
+  const { announceMembershipPlan, PlanAnnouncementError } =
+    await import("@/lib/plan-announcement.server");
+  try {
+    const announcement = await announceMembershipPlan(db, {
+      planId: saved.id,
+      announcementId: announcement_id,
+      actorId: actingAs,
+    });
+    return { ...saved, announcement };
+  } catch (e) {
+    if (e instanceof PlanAnnouncementError && e.code === "submission_conflict")
+      throw new AgentError(409, "submission_conflict", e.message, { id: saved.id });
+    throw new AgentError(
+      502,
+      "announcement_failed",
+      `The plan was saved, but the email to members did not go out (${
+        e instanceof Error ? e.message : "unknown error"
+      }). Call again with the same announcement_id to finish it: nobody is emailed twice.`,
+      { id: saved.id, announcement_id },
     );
   }
 }
@@ -1493,7 +1537,7 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
     case "list_membership_plans":
       return handleListMembershipPlans();
     case "save_membership_plan":
-      return handleSaveMembershipPlan(params);
+      return handleSaveMembershipPlan(params, actingAs);
     case "list_kb_sections":
       return handleListKbSections();
     case "save_kb_section":
