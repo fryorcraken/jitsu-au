@@ -12,7 +12,7 @@ import { composeFullName } from "@/lib/validation";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { submitInterest } from "@/lib/submissions.functions";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { beginnerDaysShort } from "@/lib/schedule";
 
 export const Route = createFileRoute("/register-interest")({
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/register-interest")({
       ogDescription: "Tell us who you are and we'll get you on the mat. First two classes free.",
       path: "/register-interest",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/register-interest" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/register-interest") }],
   }),
   component: RegisterInterest,
 });

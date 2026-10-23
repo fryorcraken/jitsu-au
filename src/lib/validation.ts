@@ -2622,9 +2622,96 @@ export type SetMembershipStartInput = z.infer<typeof setMembershipStartSchema>;
 // of HOW somebody paid is the thread back to the money when the books and the
 // bank disagree.
 
+/** The longest a payment's own reference may be. The database CHECK says the same. */
+export const PAID_REFERENCE_MAX = 200;
+
+/**
+ * When a payment recorded by hand actually arrived, and what it was known by.
+ * Shared by both kinds of invoice and every surface that marks one paid, so a
+ * manager's form and an agent's call accept exactly the same thing.
+ *
+ * `paid_on` is a day, not an instant: "they paid cash on Tuesday" is what a
+ * manager knows. Absent means today. A day that has not happened yet is refused,
+ * because a payment recorded in the future is money the club does not have.
+ * A day BEFORE the invoice was raised is allowed on purpose: backfilling an
+ * enrolment that was settled at the time is exactly when the real date matters.
+ * But not more than two years back (`earliestPaidOn`): nothing can correct the
+ * date once recorded, so a mistyped year must be refused rather than stored.
+ * An empty string reads as absent, the same as null, as it does for the
+ * reference: some clients send "" for every field they leave unset.
+ *
+ * `paid_reference` is the receipt number or transfer reference, never the
+ * invoice's own `payment_reference` (what the member quotes). Blank means none.
+ */
+export const paymentReceivedFields = {
+  // One check reporting one problem: a regex miss in zod does not stop later
+  // refines, so chained checks answered "20/10/2026" with two messages.
+  paid_on: z.preprocess(
+    (d) => (d === "" || d === null ? undefined : d),
+    z
+      .string()
+      .superRefine((d, ctx) => {
+        const message = paidOnProblem(d);
+        if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+      })
+      .optional(),
+  ),
+  paid_reference: z
+    .string()
+    .trim()
+    .max(PAID_REFERENCE_MAX, `Keep the reference to ${PAID_REFERENCE_MAX} characters.`)
+    .nullish()
+    .transform((r) => r || undefined),
+};
+
+/**
+ * Why `date` is not a day a payment can be recorded on, or null when it is.
+ * The screen asks this too, so the reason shown under the date field is the
+ * same one the server would give.
+ */
+export function paidOnProblem(date: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "Pick the day the money arrived, as YYYY-MM-DD.";
+  if (!isCalendarDate(date)) return "That is not a real date.";
+  if (date > clubToday()) return "That day has not happened yet. Pick today or earlier.";
+  if (date < earliestPaidOn()) return "That is more than two years ago. Check the year.";
+  return null;
+}
+
+/**
+ * The earliest day a payment can be recorded on: two years before today. A
+ * real backfill is a past semester or two. Anything older is a mistyped year,
+ * and a two-digit one ("0026") would otherwise be stored as 1926, because
+ * `Date.UTC` reads years 0-99 as 1900-1999.
+ */
+export function earliestPaidOn(): string {
+  const today = clubToday();
+  return `${Number(today.slice(0, 4)) - 2}${today.slice(4)}`;
+}
+
+/** A YYYY-MM-DD that names a day on the calendar, so 2026-02-31 is refused, not rolled over. */
+function isCalendarDate(date: string): boolean {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+/**
+ * The instant stored as `paid_at` for a payment received on `paidOn`.
+ *
+ * Today, or no day at all, is the present moment, which is what marking paid
+ * always wrote. An earlier day is noon where the club is rather than midnight:
+ * screens print `paid_at` in the reader's own timezone, and midnight in Sydney is
+ * still the previous evening in Perth, so a manager there would read back a day
+ * earlier than the one they picked. Noon is the same date across Australia.
+ */
+export function paidAtFor(paidOn?: string, now: Date = new Date()): string {
+  if (!paidOn || paidOn === clubToday(now)) return now.toISOString();
+  return zonedWallTimeToUtc(paidOn, "12:00", CLUB_TIME_ZONE).toISOString();
+}
+
 export const markMembershipPaidSchema = z.object({
   id: z.string().uuid(),
   payment_method: z.enum(["bank_transfer", "stripe", "manual"]).default("manual"),
+  ...paymentReceivedFields,
 });
 export type MarkMembershipPaidInput = z.infer<typeof markMembershipPaidSchema>;
 
@@ -3858,6 +3945,7 @@ export const markItemInvoicePaidSchema = z
   .object({
     id: z.string().uuid(),
     payment_method: z.enum(["bank_transfer", "manual"]).optional().default("manual"),
+    ...paymentReceivedFields,
   })
   .strict();
 export type MarkItemInvoicePaidInput = z.infer<typeof markItemInvoicePaidSchema>;

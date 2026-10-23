@@ -102,10 +102,16 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
   await row.getByRole("button", { name: "Mark as paid" }).click();
   const payDialog = page.getByRole("alertdialog");
   await expect(payDialog).toContainText(`Record payment for ${periodPlan.name}?`);
+  // The day defaults to today; the receipt number is the manager's to add.
+  await expect(payDialog.getByLabel("Paid on")).not.toHaveValue("");
+  await payDialog.getByLabel("Receipt or reference (optional)").fill("Receipt 42");
   await payDialog.getByRole("button", { name: "Mark as paid" }).click();
 
   // Paid, so the button that recorded it is gone...
   await expect(row.getByRole("button", { name: "Mark as paid" })).toHaveCount(0);
+  // ...the row says when, and what the payment was known by...
+  await expect(row).toContainText("Paid ");
+  await expect(row).toContainText("Ref: Receipt 42");
   // ...and the record is now permanent: only Cancel can close it from here.
   const deleteButton = row.getByRole("button", { name: "Delete" });
   await expect(deleteButton).toBeDisabled();

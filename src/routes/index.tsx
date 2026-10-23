@@ -5,7 +5,7 @@ import { Testimonials } from "@/components/site/Testimonials";
 import { CommonQuestions } from "@/components/site/CommonQuestions";
 import { YouTubeEmbed } from "@/components/site/YouTubeEmbed";
 import { Button } from "@/components/ui/button";
-import { buildClubJsonLd, buildPageMeta } from "@/lib/seo";
+import { buildClubJsonLd, buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { beginnerDaysShort, weeklySchedule } from "@/lib/schedule";
 import { VENUE_ADDRESS_SHORT, VENUE_BUILDING, VENUE_NAME } from "@/lib/venue";
 import heroAsset from "@/assets/training1.jpg.asset.json";
@@ -21,7 +21,7 @@ export const Route = createFileRoute("/")({
       path: "/",
     }),
     links: [
-      { rel: "canonical", href: "https://jitsu.au/" },
+      { rel: "canonical", href: canonicalUrl("/") },
       // Hero image is the page's LCP element but sits well into the body, so the
       // preloader would otherwise only discover it after parsing the head and
       // everything above it in the markup. Preloading it here lets the browser

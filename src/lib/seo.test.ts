@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  SITE_HOST,
   SITE_ORIGIN,
   PUBLIC_PAGES,
   CRAWLER_DISALLOW,
@@ -31,11 +32,15 @@ import {
 
 describe("canonicalUrl", () => {
   it("keeps the trailing slash on the home page", () => {
-    expect(canonicalUrl("/")).toBe("https://jitsu.au/");
+    expect(canonicalUrl("/")).toBe("https://utsjitsu.com.au/");
   });
 
   it("appends other paths to the origin without a trailing slash", () => {
-    expect(canonicalUrl("/about")).toBe("https://jitsu.au/about");
+    expect(canonicalUrl("/about")).toBe("https://utsjitsu.com.au/about");
+  });
+
+  it("names the host on its own for copy, with no scheme", () => {
+    expect(SITE_HOST).toBe("utsjitsu.com.au");
   });
 });
 
@@ -86,7 +91,7 @@ describe("buildPageMeta", () => {
 
   it("builds an absolute og:url from the given path", () => {
     const meta = buildPageMeta({ title: "T", description: "D", path: "/about" });
-    expect(metaContent(meta, "og:url")).toBe("https://jitsu.au/about");
+    expect(metaContent(meta, "og:url")).toBe("https://utsjitsu.com.au/about");
   });
 
   it("sets the <title> tag", () => {
@@ -265,7 +270,7 @@ describe("buildSitemapXml", () => {
     const xmlWithEntities = buildSitemapXml([
       { path: "/search?q=gi&size=a2", changefreq: "monthly", priority: 0.5 },
     ]);
-    expect(xmlWithEntities).toContain("<loc>https://jitsu.au/search?q=gi&amp;size=a2</loc>");
+    expect(xmlWithEntities).toContain("<loc>https://utsjitsu.com.au/search?q=gi&amp;size=a2</loc>");
     expect(xmlWithEntities).not.toContain("&size");
   });
 });
@@ -547,7 +552,7 @@ describe("sitemap coverage of the route files", () => {
     for (const page of PUBLIC_PAGES) {
       const file = routeFiles.find((r) => r.path === page.path);
       expect(file, `no route file serves ${page.path}`).toBeDefined();
-      expect(file!.source).toContain(`rel: "canonical", href: "${canonicalUrl(page.path)}"`);
+      expect(file!.source).toContain(`rel: "canonical", href: canonicalUrl("${page.path}")`);
     }
   });
 

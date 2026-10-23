@@ -3,34 +3,46 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { buildWaiverUrl, sendInterestEmails } from "./interest-email.server";
 
+const { sendLovableEmail, getManagerEmails } = vi.hoisted(() => ({
+  sendLovableEmail: vi.fn(),
+  getManagerEmails: vi.fn(),
+}));
+vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
+vi.mock("@/lib/waiver-email.server", () => ({ getManagerEmails }));
+vi.mock("@/lib/email-verification.server", () => ({
+  mintVerificationToken: () => Promise.resolve("utsj_test"),
+}));
+
 describe("buildWaiverUrl", () => {
   it("carries name, email and phone as prefill search params", () => {
     expect(
       buildWaiverUrl({ name: "Ada Lovelace", email: "ada@example.com", phone: "0400000000" }),
-    ).toBe("https://jitsu.au/waiver?name=Ada+Lovelace&email=ada%40example.com&phone=0400000000");
+    ).toBe(
+      "https://utsjitsu.com.au/waiver?name=Ada+Lovelace&email=ada%40example.com&phone=0400000000",
+    );
   });
 
   it("omits an absent phone", () => {
     expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", phone: null })).toBe(
-      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com",
+      "https://utsjitsu.com.au/waiver?name=Ada&email=ada%40example.com",
     );
   });
 
   it("falls back to the bare waiver path when nothing is provided", () => {
-    expect(buildWaiverUrl({ name: "", email: "" })).toBe("https://jitsu.au/waiver");
+    expect(buildWaiverUrl({ name: "", email: "" })).toBe("https://utsjitsu.com.au/waiver");
   });
 
   it("carries the verification token when one was minted", () => {
     // This is what makes the EMAILED link different from the in-app one: the
     // name/email params prove nothing, an unguessable token does.
     expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", token: "utsj_abc123" })).toBe(
-      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com&vt=utsj_abc123",
+      "https://utsjitsu.com.au/waiver?name=Ada&email=ada%40example.com&vt=utsj_abc123",
     );
   });
 
   it("omits the token when minting failed, leaving a working prefill link", () => {
     expect(buildWaiverUrl({ name: "Ada", email: "ada@example.com", token: null })).toBe(
-      "https://jitsu.au/waiver?name=Ada&email=ada%40example.com",
+      "https://utsjitsu.com.au/waiver?name=Ada&email=ada%40example.com",
     );
   });
 });
@@ -39,6 +51,9 @@ describe("sendInterestEmails", () => {
   const original = process.env.LOVABLE_API_KEY;
 
   beforeEach(() => {
+    // restoreAllMocks only undoes spies; the hoisted module mocks keep their
+    // calls and resolved values unless cleared here.
+    vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
   afterEach(() => {
@@ -63,5 +78,33 @@ describe("sendInterestEmails", () => {
 
     expect(result).toEqual({ sent: [], skipped: true });
     expect(from).not.toHaveBeenCalled();
+    // getManagerEmails is mocked, so `from` alone can no longer catch a lookup
+    // moved above the key check.
+    expect(getManagerEmails).not.toHaveBeenCalled();
+    expect(sendLovableEmail).not.toHaveBeenCalled();
+  });
+
+  it("sets Reply-To to the lead on the managers' copy, and only there", async () => {
+    // Pressing reply on a new-lead email has to reach the lead, not the
+    // noreply sender. Their own confirmation goes TO them, so it carries none.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockResolvedValue({ success: true });
+    getManagerEmails.mockResolvedValue(["manager-a@example.com", "manager-b@example.com"]);
+
+    await sendInterestEmails({
+      registrationId: "r2",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      phone: "0400000000",
+      message: null,
+      admin: {} as SupabaseClient<Database>,
+    });
+
+    const payloads = sendLovableEmail.mock.calls.map(([p]) => p);
+    const toLead = payloads.find((p) => p.to === "ada@example.com");
+    const toManagers = payloads.filter((p) => p.to !== "ada@example.com");
+    expect(toLead.reply_to).toBeUndefined();
+    expect(toManagers).toHaveLength(2);
+    for (const p of toManagers) expect(p.reply_to).toBe("ada@example.com");
   });
 });

@@ -39,6 +39,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
 import { SaveFailure } from "@/components/site/SaveFailure";
+import { SITE_HOST } from "@/lib/seo";
 
 /** File -> base64, same chunked approach as the paper-waiver scan upload
  * (`manager.waivers_.upload.tsx`), which avoids a giant intermediate string
@@ -366,7 +367,9 @@ export function BlogPostEditor({
           placeholder="Leave blank to generate one from the title"
           className="mt-1.5"
         />
-        <p className="mt-1 text-xs text-muted-foreground">jitsu.au/blog/{previewSlug}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {SITE_HOST}/blog/{previewSlug}
+        </p>
       </div>
       <div>
         <Label htmlFor="post-excerpt">Excerpt (shown on the blog list)</Label>

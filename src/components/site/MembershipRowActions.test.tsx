@@ -27,6 +27,9 @@ vi.mock("@/lib/membership.functions", () => ({
 }));
 
 const { MembershipRowActions } = await import("./MembershipRowActions");
+
+/** A day a month ago: in the past, and well inside the two-year limit, whenever this runs. */
+const RECENT_DAY = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
 type Row = import("./MembershipRowActions").MembershipActionRow;
 
 /** Authorised and unpaid: what every membership looks like once raised. */
@@ -150,10 +153,70 @@ describe("MembershipRowActions", () => {
     await user.click(screen.getByRole("button", { name: /^mark as paid$/i }));
     await waitFor(() =>
       expect(markMembershipPaid).toHaveBeenCalledWith({
+        // An untouched day is left to the server, which records the moment of
+        // the click: what marking paid always recorded.
         data: { id: "mem-1", payment_method: "manual" },
       }),
     );
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  // Cash taken last week, entered today, keeps its real day and its receipt.
+  it("sends the day the money arrived and its reference", async () => {
+    const user = userEvent.setup();
+    markMembershipPaid.mockReset().mockResolvedValueOnce({ ok: true });
+    renderRow();
+
+    await user.click(screen.getByRole("button", { name: /mark as paid/i }));
+    const paidOn = screen.getByLabelText(/paid on/i);
+    await user.clear(paidOn);
+    await user.type(paidOn, RECENT_DAY);
+    await user.type(screen.getByLabelText(/receipt or reference/i), "  Receipt 42 ");
+    await user.click(screen.getByRole("button", { name: /^mark as paid$/i }));
+
+    await waitFor(() =>
+      expect(markMembershipPaid).toHaveBeenCalledWith({
+        data: {
+          id: "mem-1",
+          payment_method: "manual",
+          paid_on: RECENT_DAY,
+          paid_reference: "Receipt 42",
+        },
+      }),
+    );
+  });
+
+  // A button that does nothing when the date is cleared is a dead end. It is
+  // held back with the reason on screen instead.
+  it("holds the confirm back, and says why, while no day is picked", async () => {
+    const user = userEvent.setup();
+    markMembershipPaid.mockReset();
+    renderRow();
+
+    await user.click(screen.getByRole("button", { name: /mark as paid/i }));
+    await user.clear(screen.getByLabelText(/paid on/i));
+    expect(screen.getByText(/pick the day the money arrived/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^mark as paid$/i })).toBeDisabled();
+  });
+
+  // "Try again" has to send what was typed, not a blank form.
+  it("keeps the reference after a failed attempt", async () => {
+    const user = userEvent.setup();
+    markMembershipPaid
+      .mockReset()
+      .mockRejectedValueOnce(new Error("We could not reach the server."))
+      .mockResolvedValueOnce({ ok: true });
+    renderRow();
+
+    await user.click(screen.getByRole("button", { name: /mark as paid/i }));
+    await user.type(screen.getByLabelText(/receipt or reference/i), "Receipt 42");
+    await user.click(screen.getByRole("button", { name: /^mark as paid$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not reach/i);
+    expect(screen.getByLabelText(/receipt or reference/i)).toHaveValue("Receipt 42");
+
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await waitFor(() => expect(markMembershipPaid).toHaveBeenCalledTimes(2));
+    expect(markMembershipPaid.mock.calls[1][0].data.paid_reference).toBe("Receipt 42");
   });
 
   it("says what cancelling will do before it happens", async () => {
