@@ -97,7 +97,7 @@ function versionStore(
     let insert: Row | null = null;
     const source = () =>
       table === "code_of_conduct_acceptances" ? (opts.acceptances ?? []) : rows;
-    const matching = () => source().filter((r) => filters.every(([c, v]) => r[c] === v));
+    const matching = () => source().filter((r) => filters.every(([c, v]) => (r[c] ?? null) === v));
     const run = () => {
       reads.push({ table, ...(range ? { range } : {}) });
       if (table === "code_of_conduct_acceptances" && opts.failAcceptances)
@@ -126,6 +126,7 @@ function versionStore(
       insert: (r: Row) => ((insert = r), b),
       update: (p: Row) => ((patch = p), b),
       eq: (c: string, v: unknown) => (filters.push([c, v]), b),
+      is: (c: string, v: unknown) => (filters.push([c, v]), b),
       order: (col: string, o: { ascending: boolean }) => ((order = { col, asc: o.ascending }), b),
       limit: (n: number) => ((limit = n), b),
       range: (a: number, z: number) => ((range = [a, z]), b),
@@ -204,9 +205,11 @@ describe("saveCodeOfConductVersion", () => {
     expect(store.rows).toHaveLength(2);
   });
 
-  // The first attempt wrote the version and lost the promotion; the retry is
-  // the caller asking for that save, so it finishes it.
-  it("makes a replayed version live when the first attempt did not", async () => {
+  // The replayed version is not live: its first attempt lost the promotion, or
+  // somebody has published or rolled back since. Making it live now could
+  // silently replace another manager's version, so the retry says what it
+  // found, with the number to publish, and changes nothing.
+  it("reports a replayed version that is not live, rather than making it live", async () => {
     const id = "11111111-1111-4111-8111-111111111111";
     const store = versionStore([
       V1,
@@ -220,13 +223,20 @@ describe("saveCodeOfConductVersion", () => {
         client_submission_id: id,
       },
     ]);
-    const again = await saveCodeOfConductVersion(
-      store.admin,
-      { ...input, client_submission_id: id },
-      null,
-    );
-    expect(again).toEqual({ id: "id-2", version: 2, is_current: true, already_saved: true });
-    expect(store.rows.filter((r) => r.is_current).map((r) => r.version)).toEqual([2]);
+    await expect(
+      saveCodeOfConductVersion(store.admin, { ...input, client_submission_id: id }, null),
+    ).rejects.toMatchObject({ reason: "not_published", version: 2 });
+    expect(store.rows.filter((r) => r.is_current).map((r) => r.version)).toEqual([1]);
+    expect(store.rows).toHaveLength(2);
+  });
+
+  it("inherits the newest version's requirement for a correction when nothing is live", async () => {
+    const store = versionStore([
+      { ...V1, is_current: false },
+      { ...V1, id: "id-2", version: 2, required_version: 2, is_current: false },
+    ]);
+    await saveCodeOfConductVersion(store.admin, input, null);
+    expect(store.rows.find((r) => r.version === 3)).toMatchObject({ required_version: 2 });
   });
 
   // A save whose reply was lost, retried with the same id, must come back as
@@ -265,6 +275,19 @@ describe("promoteCodeOfConductVersion", () => {
     ]);
     await expect(promoteCodeOfConductVersion(store.admin, "id-1")).resolves.toEqual({ version: 1 });
     expect(store.rows.filter((r) => r.is_current).map((r) => r.version)).toEqual([1]);
+  });
+
+  it("stamps when a version first went live, and never moves it afterwards", async () => {
+    const store = versionStore([
+      { ...V1, first_published_at: "2026-01-01T00:00:00Z" },
+      { ...V1, id: "id-2", version: 2, is_current: false, first_published_at: null },
+    ]);
+    await promoteCodeOfConductVersion(store.admin, "id-2");
+    expect(store.rows.find((r) => r.version === 2)?.first_published_at).toEqual(expect.any(String));
+    await promoteCodeOfConductVersion(store.admin, "id-1");
+    expect(store.rows.find((r) => r.version === 1)?.first_published_at).toBe(
+      "2026-01-01T00:00:00Z",
+    );
   });
 
   it("names the code of conduct when the version has gone", async () => {

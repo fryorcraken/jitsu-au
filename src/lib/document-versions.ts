@@ -50,15 +50,22 @@ export class DocumentVersionError extends Error {
  * "Draft" is only honest for a version that has never been live. One that WAS
  * live is a superseded document, possibly with signatures against it, and
  * calling it a draft on the screen where a manager picks what the club stands
- * behind invites treating a rollback as publishing something unfinished. We
- * cannot tell from the row itself, so age against the live version stands in:
- * anything older than what is live has had its turn.
+ * behind invites treating a rollback as publishing something unfinished.
+ *
+ * `wasLive` is the answer when the document records it (the code of conduct
+ * stamps `first_published_at`): a version rolled away from is newer than the
+ * live one and was still live once. Where it is not recorded (the waiver, the
+ * knowledge base), age against the live version stands in: anything older than
+ * what is live has had its turn, and a rolled-back newer version reads "Draft".
  */
 export function versionLabel(
   version: { version: number; is_current: boolean },
   liveVersion: number | null,
+  wasLive?: boolean,
 ): "Live" | "Previous" | "Draft" {
   if (version.is_current) return "Live";
-  if (liveVersion !== null && version.version < liveVersion) return "Previous";
+  if (wasLive) return "Previous";
+  if (wasLive === undefined && liveVersion !== null && version.version < liveVersion)
+    return "Previous";
   return "Draft";
 }

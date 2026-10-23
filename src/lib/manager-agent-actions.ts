@@ -86,7 +86,7 @@ import {
 import {
   highestAcceptedVersions,
   listCodeOfConductVersionFlags,
-  listCodeOfConductVersionRows,
+  listCodeOfConductVersionSummaries,
   loadCodeOfConductStandard,
   loadCodeOfConductVersion,
   promoteCodeOfConductVersion,
@@ -1331,7 +1331,7 @@ const NO_LIVE_CODE_OF_CONDUCT =
 /** Every stored version, which one is live, and what the club asks of people. */
 async function handleListCodeOfConductVersions() {
   const db = await adminClient();
-  const versions = await listCodeOfConductVersionRows(db);
+  const versions = await listCodeOfConductVersionSummaries(db);
   const standard = codeOfConductStandard(versions);
   return {
     count: versions.length,
@@ -1391,23 +1391,24 @@ async function handleSaveCodeOfConduct(params: unknown, actingAs: string) {
   }
 
   // Counted BEFORE the save, against the versions as they stand, so the reply
-  // can say how many people this put out of date. A failed count fails the call
-  // before anything is written rather than reporting a number it did not check.
-  let reprompted = 0;
-  if (input.asks_reagreement) {
-    try {
-      const [versions, highest] = await Promise.all([
-        listCodeOfConductVersionFlags(db),
-        highestAcceptedVersions(db),
-      ]);
-      reprompted = countReprompted(
-        highest,
-        codeOfConductStandard(versions),
-        standardAfterSaving(versions, true),
-      );
-    } catch (e) {
-      throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
-    }
+  // can say how many people this put out of date. Counted on every save, not
+  // only one that asks: a save made while nothing is live inherits the newest
+  // version's requirement and can re-prompt people without asking anything. A
+  // failed count fails the call before anything is written rather than
+  // reporting a number nobody checked.
+  let reprompted: number;
+  try {
+    const [versions, highest] = await Promise.all([
+      listCodeOfConductVersionFlags(db),
+      highestAcceptedVersions(db),
+    ]);
+    reprompted = countReprompted(
+      highest,
+      codeOfConductStandard(versions),
+      standardAfterSaving(versions, input.asks_reagreement),
+    );
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
   }
 
   try {

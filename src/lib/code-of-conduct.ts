@@ -198,17 +198,29 @@ export function codeOfConductStandard(
 }
 
 /**
- * What a version about to be saved as `version` will require: itself when it
- * asks everybody to agree again, otherwise whatever is required now. With
- * nothing live there is nothing to inherit, so it is the baseline: itself.
+ * What a version about to be saved as `version` will require.
+ *
+ * Itself when it asks everybody to agree again. Otherwise it changes nothing
+ * about who is up to date, so it inherits what is required now: the live
+ * version's requirement, or, when nothing is live (a promotion that failed and
+ * left the club without one), the newest stored version's. Only with nothing
+ * stored at all is there nothing to inherit, and then it is the baseline.
+ * Inheriting from "nothing live" as if it were "nothing ever asked" would put
+ * every member out of date on a save that was meant to ask nobody anything.
  */
 export function requiredVersionForSave(
   version: number,
   asksReagreement: boolean,
-  now: CodeOfConductStandard,
+  versions: readonly CodeOfConductVersionFlags[],
 ): number {
-  if (asksReagreement || now.required_version === null) return version;
-  return now.required_version;
+  if (asksReagreement) return version;
+  const live = versions.find((v) => v.is_current);
+  if (live) return live.required_version;
+  const newest = versions.reduce<CodeOfConductVersionFlags | null>(
+    (best, v) => (!best || v.version > best.version ? v : best),
+    null,
+  );
+  return newest ? newest.required_version : version;
 }
 
 /**
@@ -313,11 +325,7 @@ export function standardAfterSaving(
   const next = versions.reduce((n, v) => Math.max(n, v.version), 0) + 1;
   return {
     current_version: next,
-    required_version: requiredVersionForSave(
-      next,
-      asksReagreement,
-      codeOfConductStandard(versions),
-    ),
+    required_version: requiredVersionForSave(next, asksReagreement, versions),
   };
 }
 

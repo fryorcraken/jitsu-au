@@ -487,11 +487,17 @@ export type CodeOfConductVersion = {
   asks_reagreement: boolean;
   required_version: number;
   is_current: boolean;
+  /** When it first went live; null for a version that never has been. */
+  first_published_at: string | null;
   created_at: string;
 };
 
-const VERSION_COLUMNS =
-  "id, version, title, body_md, asks_reagreement, required_version, is_current, created_at";
+/** A version without its text, for listings that only need to name it. */
+export type CodeOfConductVersionSummary = Omit<CodeOfConductVersion, "body_md">;
+
+const SUMMARY_COLUMNS =
+  "id, version, title, asks_reagreement, required_version, is_current, first_published_at, created_at";
+const VERSION_COLUMNS = `${SUMMARY_COLUMNS}, body_md`;
 
 /** Every stored version, newest first. */
 export async function listCodeOfConductVersionRows(
@@ -500,6 +506,22 @@ export async function listCodeOfConductVersionRows(
   const { data, error } = await admin
     .from("code_of_conduct_versions")
     .select(VERSION_COLUMNS)
+    .order("version", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/**
+ * Every stored version without its text, newest first: what a listing needs,
+ * without moving every version's body (up to 50000 characters each, and one
+ * more per save) to answer "which ones are there".
+ */
+export async function listCodeOfConductVersionSummaries(
+  admin: AdminClient,
+): Promise<CodeOfConductVersionSummary[]> {
+  const { data, error } = await admin
+    .from("code_of_conduct_versions")
+    .select(SUMMARY_COLUMNS)
     .order("version", { ascending: false });
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -548,12 +570,27 @@ export async function highestAcceptedVersions(admin: AdminClient): Promise<numbe
   return [...highest.values()];
 }
 
-/** Make one stored version the live one. There is no content rule to check. */
+/**
+ * Make one stored version the live one. There is no content rule to check.
+ *
+ * Also stamps `first_published_at` the first time a version goes live, which is
+ * what lets the version list keep calling a rolled-back version "Previous". The
+ * stamp is only ever a label, so a failure to write it is logged rather than
+ * reported as a failed publish: the publish itself happened.
+ */
 export async function promoteCodeOfConductVersion(
   admin: AdminClient,
   id: string,
 ): Promise<{ version: number }> {
-  return promoteDocumentVersion(admin, CODE_OF_CONDUCT_DOCUMENT, id);
+  const promoted = await promoteDocumentVersion(admin, CODE_OF_CONDUCT_DOCUMENT, id);
+  const { error } = await admin
+    .from("code_of_conduct_versions")
+    .update({ first_published_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("first_published_at", null);
+  if (error)
+    console.error("[promoteCodeOfConductVersion] could not stamp first_published_at:", error);
+  return promoted;
 }
 
 /**
@@ -579,10 +616,16 @@ export async function saveCodeOfConductVersion(
   // What an earlier attempt of this same save already wrote, if anything.
   //
   // Refused when the id comes back with different words: reusing an id for a
-  // different save would otherwise drop the new text and report success. And
-  // finished when it never went live: the first attempt wrote the version and
-  // then lost the promotion (`not_published`), and this retry is the caller
-  // asking for that save, so it is promoted now rather than reported as done.
+  // different save would otherwise drop the new text and report success.
+  //
+  // And NOT promoted when it is not live. The first attempt wrote the version
+  // and then lost the promotion, or it went live and has since been replaced,
+  // and from here the two look alike. The commonest cause of the first is
+  // another manager publishing at the same moment, so making the replayed
+  // version live now would silently replace their version, or undo a rollback
+  // somebody chose on purpose. Say instead that it was written and is not live,
+  // with its number, which is the `not_published` contract: publishing that
+  // version finishes the job, if that is still what is wanted.
   const replay = async () => {
     if (!input.client_submission_id) return null;
     const { data, error } = await admin
@@ -603,7 +646,13 @@ export async function saveCodeOfConductVersion(
         data.version,
       );
     }
-    if (!data.is_current) await promoteCodeOfConductVersion(admin, data.id);
+    if (!data.is_current) {
+      throw new DocumentVersionError(
+        `Version ${data.version} was saved, but it is not the live code of conduct: someone may have changed the live version since. If it should be live, make version ${data.version} live from the version list.`,
+        "not_published",
+        data.version,
+      );
+    }
     return { id: data.id, version: data.version, is_current: true, already_saved: true };
   };
   const earlier = await replay();
@@ -611,9 +660,9 @@ export async function saveCodeOfConductVersion(
 
   // What the new version will require is fixed now, from what the live one
   // requires: an ask that a rollback undid must stay undone.
-  let now: CodeOfConductStandard;
+  let now: CodeOfConductVersionFlags[];
   try {
-    now = await loadCodeOfConductStandard(admin);
+    now = await listCodeOfConductVersionFlags(admin);
   } catch (e) {
     throw new DocumentVersionError(e instanceof Error ? e.message : String(e), "not_published");
   }

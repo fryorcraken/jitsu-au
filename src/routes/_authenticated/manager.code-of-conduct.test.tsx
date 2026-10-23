@@ -41,6 +41,7 @@ const v1 = {
   asks_reagreement: true,
   required_version: 1,
   is_current: true,
+  first_published_at: "2026-08-01T00:00:00.000Z",
   created_at: "2026-08-01T00:00:00.000Z",
 };
 
@@ -174,5 +175,35 @@ describe("manager code of conduct editor", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("no live code of conduct");
     expect(within(alert).getByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it("calls a version that was rolled away from Previous, not Draft", async () => {
+    const v2 = { ...v1, id: "v2", version: 2, is_current: false, required_version: 2 };
+    listCodeOfConductVersions.mockResolvedValue({ versions: [v2, v1], highest_accepted: [] });
+    render(<EditorPage />);
+    const row = await screen.findByRole("button", { name: /version 2/i });
+    expect(row).toHaveTextContent("Previous");
+    expect(row).not.toHaveTextContent("Draft");
+  });
+
+  // Nothing live: a correction inherits the newest version's requirement and
+  // can put people out of date. The screen must say so and ask, not promise
+  // that everybody stays up to date.
+  it("warns, and asks first, when a correction would re-prompt people", async () => {
+    const asked = { ...v1, id: "v2", version: 2, required_version: 2, is_current: false };
+    listCodeOfConductVersions.mockResolvedValue({
+      versions: [asked, { ...v1, is_current: false }],
+      highest_accepted: [1, 1],
+    });
+    render(<EditorPage />);
+    const title = await screen.findByDisplayValue("UTS Jitsu Code of Conduct");
+    await userEvent.type(title, "!");
+
+    expect(
+      screen.getByText("2 people who agreed to an earlier version will be asked to agree again."),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /save and publish/i }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("asks 2 people");
+    expect(saveCodeOfConduct).not.toHaveBeenCalled();
   });
 });

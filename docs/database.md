@@ -1216,7 +1216,10 @@ the insert run through the service role.
 
 `id` PK, `version` (unique, > 0), `title`, `body_md` (a small markdown subset,
 `CODE_OF_CONDUCT_SYNTAX`), `asks_reagreement` (boolean, default false),
-`required_version`, `is_current`, `client_submission_id` (partial unique, for retry-safe saves),
+`required_version`, `is_current`, `first_published_at` (stamped on a version's
+first promotion and never cleared, so a list can call a rolled-back version
+"Previous" rather than "Draft"), `client_submission_id` (partial unique, for
+retry-safe saves),
 `created_by → auth.users(id) ON DELETE SET NULL`, `created_at`. A partial
 unique index on `is_current` allows exactly one live version, as on
 `waiver_templates`. Title and body carry the same length CHECKs as the editor
@@ -1231,8 +1234,8 @@ so an acceptance's `version` always names the text that person read.
 `asks_reagreement` is what keeps a typo fix from re-prompting the club.
 `required_version` (NOT NULL, between 1 and `version`, and equal to `version`
 whenever `asks_reagreement`) is fixed when the version is written: itself if it
-asked, otherwise what the live version required at the time
-(`requiredVersionForSave`). Only an acceptance below the LIVE version's
+asked, otherwise what the live version required at the time, or with nothing
+live the newest version's requirement (`requiredVersionForSave`). Only an acceptance below the LIVE version's
 `required_version` is out of date (`codeOfConductStandard`). Stored rather than
 derived from the history so that a rollback below an ask stays undone when a
 correction is saved afterwards. Version 1 is seeded by its migration with the

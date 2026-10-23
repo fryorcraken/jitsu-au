@@ -280,7 +280,9 @@ export type _CodeOfConductVersionsColumns = RequireColumns<
   | "title"
   | "body_md"
   | "asks_reagreement"
+  | "required_version"
   | "is_current"
+  | "first_published_at"
   | "client_submission_id"
   | "created_by"
   | "created_at"
@@ -294,6 +296,16 @@ export type _CodeOfConductVersionsColumns = RequireColumns<
  */
 export type _CodeOfConductAsksReagreementIsBoolean = Expect<
   Equals<Tables["code_of_conduct_versions"]["Row"]["asks_reagreement"], boolean>
+>;
+
+/**
+ * Exactly `number`, never null. Every "is this person out of date?" answer is
+ * `accepted_version < required_version` on the live row (`codeOfConductStandard`),
+ * so a version without one would leave the club with no rule at all, and a
+ * nullable widening would mean the NOT NULL never reached production.
+ */
+export type _CodeOfConductRequiredVersionIsNumber = Expect<
+  Equals<Tables["code_of_conduct_versions"]["Row"]["required_version"], number>
 >;
 
 /**
