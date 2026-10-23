@@ -56,7 +56,7 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
     </SiteLayout>
   ),
   errorComponent: () => (
-    <ConsentShell title="This link has expired">
+    <ConsentShell title="This link has expired" pageState="error">
       <p className="text-sm text-muted-foreground">
         Connection requests only last a few minutes. Go back to your assistant and start connecting
         again.
@@ -66,10 +66,19 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
   component: Consent,
 });
 
-function ConsentShell({ title, children }: { title: string; children: React.ReactNode }) {
+function ConsentShell({
+  title,
+  pageState,
+  children,
+}: {
+  title: string;
+  /** `data-page-state="error"` tells the e2e tour this is a failure boundary. */
+  pageState?: "error";
+  children: React.ReactNode;
+}) {
   return (
     <SiteLayout>
-      <section className="mx-auto max-w-md px-4 py-16">
+      <section className="mx-auto max-w-md px-4 py-16" data-page-state={pageState}>
         <Card>
           <CardHeader>
             <CardTitle>{title}</CardTitle>
