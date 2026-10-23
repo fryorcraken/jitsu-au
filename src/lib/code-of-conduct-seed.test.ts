@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CODE_OF_CONDUCT_BODY_MD, CODE_OF_CONDUCT_TITLE } from "./code-of-conduct";
+import { VERSION_1_BODY_MD, VERSION_1_TITLE } from "./code-of-conduct-version-1.fixture";
 
 const MIGRATION = resolve(
   __dirname,
@@ -26,11 +26,11 @@ function seededVersionOne(): { title: string; body: string } {
 
 describe("the seeded version 1", () => {
   it("is the title members agreed to", () => {
-    expect(seededVersionOne().title).toBe(CODE_OF_CONDUCT_TITLE);
+    expect(seededVersionOne().title).toBe(VERSION_1_TITLE);
   });
 
   it("is the body members agreed to, byte for byte", () => {
-    expect(seededVersionOne().body).toBe(CODE_OF_CONDUCT_BODY_MD);
+    expect(seededVersionOne().body).toBe(VERSION_1_BODY_MD);
   });
 
   it("is seeded as version 1, live, and the baseline everyone agrees to", () => {

@@ -18,7 +18,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { DocumentVersionError } from "@/lib/document-versions";
 
 /** The tables that hold a document in numbered versions with one live. */
-export type VersionedTable = "waiver_templates";
+export type VersionedTable = "waiver_templates" | "code_of_conduct_versions";
 
 /** Which document, and how to talk about it when promoting it goes wrong. */
 export type VersionedDocument = {

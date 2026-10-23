@@ -39,7 +39,6 @@ import { fileURLToPath } from "node:url";
 
 import { createClient } from "@supabase/supabase-js";
 
-import { CODE_OF_CONDUCT_VERSION } from "../src/lib/code-of-conduct.ts";
 import { splitBlocks } from "../src/lib/kb.ts";
 import { isLocalSupabase } from "./local-supabase.ts";
 
@@ -569,12 +568,26 @@ for (const waiverId of Object.values(waivers)) {
 }
 console.log(`[seed] waiver PDFs: ${Object.keys(waivers).length}`);
 
+// The code of conduct's version 1 is seeded by its migration
+// (20261023000000_code_of_conduct_versions.sql), with the text members agreed
+// to, so /code-of-conduct renders in the local stack and the acceptance below
+// names a version that exists. Checked rather than assumed: without it the
+// public page shows "not available" and every screenshot of it is of that.
+await attempt("checking the code of conduct's version 1", async () => {
+  const live = await select("code_of_conduct_versions", "version", (q) => q.eq("is_current", true));
+  if (live.length !== 1 || live[0].version !== 1) {
+    throw new Error(
+      "expected version 1 of the code of conduct to be live; was every migration applied?",
+    );
+  }
+});
+
 await insert("code_of_conduct_acceptances", {
   user_id: users.member,
   email: PERSONAS.member.email,
   full_name: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
   signature_name: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
-  version: CODE_OF_CONDUCT_VERSION,
+  version: 1,
   accepted_at: at(-59),
 });
 

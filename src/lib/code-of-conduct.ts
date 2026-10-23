@@ -1,20 +1,17 @@
 /**
- * The club's code of conduct: the document itself, and the pure rules around it.
+ * The club's code of conduct: the pure rules around it.
  *
- * Unlike the waiver, this document does NOT live in the database. That is a
- * deliberate difference, not an oversight:
+ * The document itself lives in the database (`code_of_conduct_versions`), in
+ * numbered versions with exactly one live, and managers edit it at
+ * `/manager/code-of-conduct` or through the manager agent API, the same way
+ * they edit the waiver. It used to live here, bumped by hand in a pull request;
+ * version 1 in the database is that text, byte for byte, because every
+ * acceptance taken before the move says `version = 1`.
  *
- *   * The waiver is a legal release whose exact wording a manager needs to be
- *     able to change without a deploy, and every signature is filed against the
- *     version it was signed under, with the full text frozen into a PDF.
- *   * The code of conduct is house rules. It changes when the committee agrees
- *     to change it, review matters more than speed, and the text belongs in
- *     version control where a diff shows what actually changed and when.
- *
- * So the body lives here and `CODE_OF_CONDUCT_VERSION` is bumped by hand when
- * the wording changes in a way members should re-read. Acceptances record the
- * version they agreed to, which is what makes "you agreed to an older version"
- * a state the site can see and show.
+ * What is still here is what is not house rules: the undertaking a signer gives
+ * (it names the person bound by it, which is a signing mechanism rather than
+ * wording a committee edits), the small markdown subset the document is written
+ * in, and the rule that decides whether somebody has agreed to it.
  *
  * Keep this module side-effect-free and free of server imports (no supabase
  * clients, no `process.env`) so it stays unit-testable, mirroring `validation.ts`
@@ -22,122 +19,25 @@
  */
 
 /**
- * Bump this when the wording changes materially.
- *
- * A bump asks everyone who already signed to read and accept the new version:
- * their acceptance shows as out of date until they do. So bump for a rule
- * change, not for a typo fix, and never edit an old version's text in place
- * without one — an acceptance records a number, and that number has to keep
- * meaning the text people actually read.
+ * What somebody signing for themselves undertakes, printed above the signature.
+ * Typing their name is the agreement: there is no separate tick box.
  */
-export const CODE_OF_CONDUCT_VERSION = 1;
-
-export const CODE_OF_CONDUCT_TITLE = "UTS Jitsu Code of Conduct";
-
-/** The single tick box on the signing form, for somebody signing for themselves. */
 export const CODE_OF_CONDUCT_ACKNOWLEDGEMENT =
   "I have read the UTS Jitsu Code of Conduct and the ActivateUTS Clubs Code of Conduct, and I agree to follow both.";
 
 /**
- * The same tick box, for a parent agreeing on behalf of a child.
+ * The same undertaking, for a parent agreeing on behalf of a child.
  *
  * The undertaking has to name the person it binds. A parent signing for their
  * nine-year-old was ticking "I agree to follow both" on a form filed against
  * the CHILD: the wrong promise from the wrong person, on the one document in
- * this flow whose whole purpose is to record a promise. `name` is a greeting
+ * this flow whose whole purpose is to record a promise. (The tick box itself is
+ * gone; the sentence it carried is what the signature now agrees to.) `name` is a greeting
  * name, so it reads the way the rest of the page addresses them.
  */
 export function codeOfConductAcknowledgementFor(name: string): string {
   return `I have read the UTS Jitsu Code of Conduct and the ActivateUTS Clubs Code of Conduct, and I agree that ${name} will follow both.`;
 }
-
-/** The ActivateUTS code this one sits on top of. Linked from the body as well. */
-export const ACTIVATE_UTS_CODE_URL =
-  "https://www.activateuts.com.au/terms-conditions/club-code-of-conduct/";
-
-/**
- * The document. Markdown-ish, in the small subset `parseCodeOfConductBlocks`
- * understands: `#` and `##` headings, `- ` bullets, `**bold**`, bare URLs, and
- * paragraphs separated by a blank line.
- */
-export const CODE_OF_CONDUCT_BODY_MD = `# ${CODE_OF_CONDUCT_TITLE}
-
-Welcome to UTS Jitsu.
-
-We strive to create an environment where we both learn, and help others learn. Cooperation is essential to martial art training. This code of conduct is written with that in mind.
-
-By training with us you agree to this Code and to the ActivateUTS Clubs Code of Conduct: ${ACTIVATE_UTS_CODE_URL}
-
-## Health and hygiene
-
-- **Sick? Stay home.** Do not train with a fever, an infection, or a contagious condition. If you need to cough during training, cough into your gi lapel.
-- **Injuries.** Tell the Coach in Charge about any existing injury before training, and report any new injury immediately.
-- **Bleeding.** Stop training immediately. Resume only once the wound is covered with a bandage or tape and the mat has been cleaned with alcohol wipes.
-- **Skin conditions.** Do not train with an open, weeping or contagious skin condition until it is medically cleared.
-- **Nails.** Keep fingernails and toenails short and cut flat, not to a point. Check before every session.
-- **Gi (uniform).** Wash your gi before every session. Replace or repair it if it has holes, tears or loose thread. Soak your belt in soapy water regularly.
-
-## Jewellery and piercings
-
-- Remove all jewellery before training: rings, necklaces, earrings, wristbands, watches.
-- Piercings that cannot be removed must be fully covered with medical tape or a band-aid.
-
-## Mat etiquette
-
-- **Rei (bow).** Bow when stepping onto and off the mat. Wait for the Coach in Charge to acknowledge you before you step on.
-- **Footwear.** Never walk barefoot outside the mat area. Wear flip-flops or sandals off the mat, and never walk on the mat in shoes.
-- **Bring to every session:** flip-flops, towel, water bottle and mouthguard.
-- **Leaving early.** Always tell the Coach in Charge if you need to leave a session early.
-
-## Protective equipment
-
-- **Mouthguard.** Mandatory for all sparring and resistance training. The club can help you source one.
-- Some sessions may need boxing or MMA gloves, shin guards and/or a helmet. You will be told in advance. The club will try to lend equipment but cannot promise enough for everyone, and can help you source your own.
-
-## Grading and uniform
-
-Regular sessions:
-
-- Get a gi through the club. Speak to the club committee.
-- Until you have one, sports clothes are fine. Long pants are preferred and a top is required.
-- Other standard martial arts uniforms are permitted at the coach's discretion.
-- A short-sleeve rash guard under the gi is recommended. The club can help you source one.
-
-Gradings:
-
-- A blue or white judo gi with the Jitsu badge is required.
-- Your belt must be your current Sydney Jitsu rank colour, correctly tied.
-
-## Respect, inclusion and training safety
-
-- Treat everyone with dignity and respect: training partners, coaches and guests.
-- Bullying, harassment, discrimination, objectification and vilification of any kind will not be tolerated.
-- All physical contact must be appropriate for the technique being practised. Stop immediately on a tap or at any sign of discomfort.
-- No member is ever required to train, spar or partner with someone against their will, whatever that person's rank or seniority. You can talk to your coach, sit out, or change partner.
-- Changing facilities must be used appropriately and respectfully.
-- Headbutts, knee strikes and elbow strikes to the head are allowed only when the coach has explicitly permitted them and the person receiving them is wearing extra protective gear (mouthguard and helmet).
-- "Staking" an opponent on their neck during ground work is allowed only when both people are Jitsu light blue grades or above, and the coach has explicitly said this is a sparring or resistance exercise.
-- Biting, scratching and spitting are always prohibited.
-
-## Reporting incidents
-
-- Report any and all incidents to the Coach in Charge.
-- The Coach in Charge will report to ActivateFit as required by ActivateUTS policy.
-- You may report directly to ActivateUTS if you are not comfortable approaching the coach.
-- No retaliation against anyone who raises a concern in good faith will be tolerated.
-
-## Coaching standards
-
-- All coaches hold a current First Aid certification. This is mandatory and renewed regularly.
-- All coaches hold a valid NSW Working with Children Check (WWCC).
-- Certificates and registration numbers can be provided on request.
-
-## Breaches of this Code
-
-- Breaches are handled under the ActivateUTS Clubs Code of Conduct disciplinary process.
-- Outcomes range from a formal warning to suspension or expulsion, depending on how serious the breach is.
-- Matters involving criminal conduct or child safety are referred to the relevant authorities.
-`;
 
 // ---- Rendering ----
 
@@ -146,6 +46,15 @@ export type CodeOfConductBlock =
   | { kind: "h2"; text: string }
   | { kind: "p"; text: string }
   | { kind: "ul"; items: string[] };
+
+/**
+ * The markdown the document is written in. Deliberately a small subset, stated
+ * on the editor screen so a manager knows what will render: `#` and `##`
+ * headings, `- ` bullets, `**bold**`, bare `https://` links, and paragraphs
+ * separated by a blank line. Anything else shows as the literal text typed.
+ */
+export const CODE_OF_CONDUCT_SYNTAX =
+  "# Heading, ## Section, - bullet, **bold**, bare https:// links, and a blank line between paragraphs.";
 
 /**
  * Parse the document body into blocks for rendering.
@@ -240,18 +149,76 @@ export function parseCodeOfConductSpans(line: string): CodeOfConductSpan[] {
  * Whether someone has agreed to the code, and to which version.
  *
  * `outdated` is a real state, not a rounding of "signed": the club changed the
- * rules and this person has not read the change. It is still not a blocker
- * (nothing about the code of conduct blocks training), so screens show it as a
- * prompt rather than a warning.
+ * rules, asked everybody to agree again, and this person has not. It is still
+ * not a blocker (nothing about the code of conduct blocks training), so screens
+ * show it as a prompt rather than a warning.
  */
 export type CodeOfConductState = "unsigned" | "signed" | "outdated";
 
+/** What the state is measured against: one fact per stored version. */
+export type CodeOfConductVersionFlags = {
+  version: number;
+  asks_reagreement: boolean;
+  is_current: boolean;
+};
+
+/**
+ * What the club currently asks of everybody.
+ *
+ * `current_version` is the live one: what the public page shows and what a
+ * signature today agrees to. `required_version` is the newest version, at or
+ * below the live one, whose publishing asked everybody to agree again. Anyone
+ * whose highest agreement is at least that is up to date, whatever has been
+ * published since: a typo fix (published without asking) moves the live
+ * version and leaves everybody exactly where they were.
+ *
+ * "At or below the live one", so a rollback undoes the ask along with the
+ * text. Rolling back from a rewritten version 5 that asked, to version 4, must
+ * not leave the club asking people to agree to rules it no longer has.
+ */
+export type CodeOfConductStandard = {
+  current_version: number | null;
+  required_version: number | null;
+};
+
+export function codeOfConductStandard(
+  versions: readonly CodeOfConductVersionFlags[],
+): CodeOfConductStandard {
+  const current = versions.find((v) => v.is_current)?.version ?? null;
+  if (current === null) return { current_version: null, required_version: null };
+  const asking = versions.filter((v) => v.asks_reagreement && v.version <= current);
+  return {
+    current_version: current,
+    required_version: asking.length ? Math.max(...asking.map((v) => v.version)) : null,
+  };
+}
+
+/**
+ * The state for one person, from the highest version they have agreed to.
+ *
+ * With nothing ever asked (`requiredVersion` null) any agreement counts. A
+ * version ahead of the required one is signed: it happens after a rollback, and
+ * telling somebody who agreed to newer text that they are behind is nonsense.
+ */
 export function codeOfConductState(
   acceptedVersion: number | null | undefined,
-  currentVersion: number = CODE_OF_CONDUCT_VERSION,
+  requiredVersion: number | null,
 ): CodeOfConductState {
   if (acceptedVersion == null) return "unsigned";
-  return acceptedVersion >= currentVersion ? "signed" : "outdated";
+  if (requiredVersion === null) return "signed";
+  return acceptedVersion >= requiredVersion ? "signed" : "outdated";
+}
+
+/**
+ * Whether a signature may be filed against the version a person was shown.
+ *
+ * Only the live one. The page sends the number of the text it rendered, so a
+ * manager publishing while somebody reads makes their form stale, and filing
+ * it anyway would record agreement to words that are no longer the club's, or
+ * (were it filed against the new live number instead) to words they never saw.
+ */
+export function isSignableVersion(shown: number, standard: CodeOfConductStandard): boolean {
+  return standard.current_version !== null && shown === standard.current_version;
 }
 
 /** The latest version any of these acceptances covers, or null for none. */
@@ -263,23 +230,23 @@ export function latestAcceptedVersion(
 }
 
 /**
- * Where one person stands, as a manager reads it: the state, and the acceptance
- * that decides it.
+ * Where one person stands: the state, and the acceptance that decides it.
  *
  * The acceptance is the one with the highest VERSION, not the most recent row:
  * re-signing an older version after a newer one is not a downgrade (rule 6 in
  * `docs/code-of-conduct.md`). On a tie the first row given wins, so pass them
  * newest first to report the latest signing of that version.
  *
- * One function because two surfaces report this, the manager person page and
- * the manager agent API, and they must not disagree about it.
+ * One function because three surfaces report this, the member's own screens,
+ * the manager person page and the manager agent API, and they must not
+ * disagree about it.
  */
 export function codeOfConductSummary(
   acceptances:
     | { version: number; accepted_at: string; signature_name: string }[]
     | null
     | undefined,
-  currentVersion: number = CODE_OF_CONDUCT_VERSION,
+  standard: CodeOfConductStandard,
 ) {
   const top = (acceptances ?? []).reduce<{
     version: number;
@@ -287,12 +254,58 @@ export function codeOfConductSummary(
     signature_name: string;
   } | null>((best, a) => (!best || a.version > best.version ? a : best), null);
   return {
-    state: codeOfConductState(top?.version ?? null, currentVersion),
-    current_version: currentVersion,
+    state: codeOfConductState(top?.version ?? null, standard.required_version),
+    current_version: standard.current_version,
+    required_version: standard.required_version,
     accepted_version: top?.version ?? null,
     accepted_at: top?.accepted_at ?? null,
     signature_name: top?.signature_name ?? null,
   };
+}
+
+/**
+ * How many people a change to what is live would move from up to date to out
+ * of date: the number a manager is told before publishing.
+ *
+ * `highestAccepted` is each person's highest agreed version, one entry per
+ * person. Only people who are `signed` before and `outdated` after count:
+ * somebody already out of date was already being asked, and somebody who never
+ * agreed is asked either way.
+ */
+export function countReprompted(
+  highestAccepted: readonly number[],
+  before: CodeOfConductStandard,
+  after: CodeOfConductStandard,
+): number {
+  return highestAccepted.filter(
+    (v) =>
+      codeOfConductState(v, before.required_version) === "signed" &&
+      codeOfConductState(v, after.required_version) === "outdated",
+  ).length;
+}
+
+/**
+ * The standard if a new version were saved now and made live. It gets the next
+ * number, so if it asks it becomes the required version, and if it does not the
+ * required version stays where it is.
+ */
+export function standardAfterSaving(
+  versions: readonly CodeOfConductVersionFlags[],
+  asksReagreement: boolean,
+): CodeOfConductStandard {
+  const next = versions.reduce((n, v) => Math.max(n, v.version), 0) + 1;
+  return codeOfConductStandard([
+    ...versions.map((v) => ({ ...v, is_current: false })),
+    { version: next, asks_reagreement: asksReagreement, is_current: true },
+  ]);
+}
+
+/** The standard if an existing version were made live instead. */
+export function standardAfterPublishing(
+  versions: readonly CodeOfConductVersionFlags[],
+  version: number,
+): CodeOfConductStandard {
+  return codeOfConductStandard(versions.map((v) => ({ ...v, is_current: v.version === version })));
 }
 
 /**

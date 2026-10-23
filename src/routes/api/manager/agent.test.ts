@@ -1114,6 +1114,7 @@ describe("manager agent route: reading people", () => {
     code_of_conduct_acceptances: [
       { user_id: PERSON, version: 1, accepted_at: "2026-03-01T00:00:00Z", signature_name: "Ada L" },
     ],
+    code_of_conduct_versions: [{ version: 1, asks_reagreement: true, is_current: true }],
     ...over,
   });
 
