@@ -3,6 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { rememberSession } from "@/lib/auth-persistence";
+import { oauthReturnPath } from "@/lib/oauth-return-path";
 import { PasswordInput } from "@/components/site/PasswordInput";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -66,7 +67,14 @@ export function SignInForms({ redirect }: { redirect?: string }) {
     );
   }
 
-  return <MagicLinkSignIn email={email} onEmailChange={setEmail} onSent={() => setSent(true)} />;
+  return (
+    <MagicLinkSignIn
+      email={email}
+      redirect={redirect}
+      onEmailChange={setEmail}
+      onSent={() => setSent(true)}
+    />
+  );
 }
 
 function PasswordSignIn({ redirect, email }: { redirect?: string; email: string }) {
@@ -97,7 +105,9 @@ function PasswordSignIn({ redirect, email }: { redirect?: string; email: string 
         return;
       }
     }
-    navigate({ to: redirect ?? "/account" });
+    // `href`, not `to`: a redirect can carry a query (the assistant consent page
+    // needs its authorization_id back), and `to` would treat it as a path.
+    navigate({ href: oauthReturnPath(redirect, "/account") });
   }
 
   return (
@@ -139,10 +149,12 @@ function PasswordSignIn({ redirect, email }: { redirect?: string; email: string 
 
 function MagicLinkSignIn({
   email,
+  redirect,
   onEmailChange,
   onSent,
 }: {
   email: string;
+  redirect?: string;
   onEmailChange: (value: string) => void;
   onSent: () => void;
 }) {
@@ -155,7 +167,10 @@ function MagicLinkSignIn({
       await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/account`,
+          emailRedirectTo: new URL(
+            oauthReturnPath(redirect, "/account"),
+            window.location.origin,
+          ).href,
           shouldCreateUser: false,
         },
       });

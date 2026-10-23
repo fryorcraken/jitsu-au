@@ -56,7 +56,7 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
   },
   pendingComponent: () => (
     <SiteLayout>
-      <Loading className="p-8" label="Loading the connection request" />
+      <Loading className="p-8" label="Loading the connection request..." />
     </SiteLayout>
   ),
   errorComponent: () => (

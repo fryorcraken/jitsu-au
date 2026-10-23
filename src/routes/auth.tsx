@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-r
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
+import { oauthReturnPath } from "@/lib/oauth-return-path";
 import { AuthPending } from "@/components/site/AuthPending";
 import { SignInForms } from "@/components/site/SignInForms";
 import { SiteLayout } from "@/components/site/SiteLayout";
@@ -35,7 +36,7 @@ function AuthPage() {
     let cancelled = false;
     supabase.auth.getSession().then(({ data }) => {
       if (cancelled) return;
-      if (data.session) navigate({ to: redirect ?? "/account" });
+      if (data.session) navigate({ href: oauthReturnPath(redirect, "/account") });
       else setReady(true);
     });
     return () => {

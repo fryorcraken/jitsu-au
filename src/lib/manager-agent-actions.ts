@@ -139,7 +139,11 @@ async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUs
   }));
 }
 
-export function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
+export function json(
+  body: unknown,
+  status = 200,
+  extraHeaders: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
