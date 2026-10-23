@@ -297,8 +297,12 @@ export type ImmediateEmail = {
  *
  * - a failed send, so a retry or the next morning's summary picks it up rather
  *   than it being lost;
- * - a row `compose` has nothing to say about, for the same reason;
+ * - a row with no address resolved, which the digest also leaves pending (a
+ *   null there is a failed lookup, not a person with no mailbox);
  * - everything past `IMMEDIATE_SENDS_PER_REQUEST`.
+ *
+ * A row `compose` answers null for is stamped instead: the caller has decided
+ * it should not go, and leaving it pending would hand it to the digest.
  *
  * Safe to call twice at once. Two calls can pick up the same pending row, and
  * the idempotency key `compose` gives it is what stops the second send.
@@ -308,7 +312,7 @@ export async function sendPendingNotifications(
   opts: {
     kind: NotificationKind;
     subjectId: string;
-    /** The email for one row and the address resolved for it, or null to leave it pending. */
+    /** The email for one row and the address resolved for it, or null to not send it at all. */
     compose: (
       row: { id: string; user_id: string; href: string },
       to: string,
@@ -350,7 +354,9 @@ export async function sendPendingNotifications(
         const to = contacts.deliveryEmail(row.user_id);
         if (!to) return "skipped";
         const email = await opts.compose(row, to);
-        if (!email) return "skipped";
+        // The caller decided this row should not be emailed at all: dealt
+        // with, so stamped, or the digest would send it tomorrow anyway.
+        if (!email) return "declined";
         await sendEmail({ apiKey, sendUrl: process.env.LOVABLE_SEND_URL, ...email });
         return "sent";
       }),

@@ -313,6 +313,26 @@ describe("announceMembershipPlan", () => {
     expect(result).toMatchObject({ recipients: 2, emailed: 0, pending: 2 });
   });
 
+  // Somebody who has left the audience since their row was written is not
+  // emailed now, and their row is stamped so the morning digest (which knows
+  // nothing about audiences) does not email them either.
+  it("stamps, rather than leaves for the digest, a row whose person has left the audience", async () => {
+    const { db, tables } = club();
+    tables.notifications.push({
+      id: "left",
+      user_id: APPLICANT,
+      kind: "membership_plan_open",
+      subject_type: "membership_plan_announcement",
+      subject_id: ANNOUNCEMENT,
+      href: `/membership#plan-${PLAN_ID}`,
+      emailed_at: null,
+      created_at: "2026-11-01T00:00:00.000Z",
+    });
+    await announce(db);
+    expect(sent().map((e) => e.to)).not.toContain("sam@example.com");
+    expect(tables.notifications.find((r) => r.id === "left")?.emailed_at).toBeTruthy();
+  });
+
   it("refuses an id already used for another plan", async () => {
     const { db, tables } = club();
     tables.notifications.push({

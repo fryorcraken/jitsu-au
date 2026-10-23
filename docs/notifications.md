@@ -638,9 +638,9 @@ agent API does the same through `save_membership_plan` with `announce: true`
   emails.
 - **What it says.** The plan's name, its dates (or how it runs), its price with
   both rates where there is a student price, a line on yearly insurance naming
-  whoever in that inbox has no current cover (only when an insurance plan is on
-  sale and the plan is not the trial or the insurance itself), and a link to the
-  plan on `/membership`. Template: `email-templates/membership-plan-open.tsx`.
+  whoever in that inbox has no current cover (only when the club has an active
+  insurance plan, picked the way checkout picks it, and the plan is not the
+  trial or the insurance itself), and a link to the plan on `/membership`. Template: `email-templates/membership-plan-open.tsx`.
 - **No switch.** `membership_plan_open` is the one kind in
   `UNSWITCHABLE_NOTIFICATION_KINDS`: it is a membership email, like an invoice,
   so `notification_preferences` is never even read for it, and it does not ride
@@ -656,7 +656,10 @@ agent API does the same through `save_membership_plan` with `announce: true`
   still pending, so the screen says how many went and offers "Send the rest
   now", and otherwise the next morning's digest sends them under a
   "Membership" heading. A stalled one shows up as the stalled-digest attention
-  item like any other pending row.
+  item like any other pending row. A row for somebody who has left the audience
+  since it was written is stamped rather than sent, so the digest does not mail
+  them either. The email's link opens the plan's own card on `/membership`; the
+  page scrolls to it once the plans have loaded.
 - **A club of 500.** About 250 to 400 inboxes once families fold. The first
   request sends 150 and reports the rest pending; the manager presses "Send the
   rest now" once or twice (or an agent repeats the call with the same id), or

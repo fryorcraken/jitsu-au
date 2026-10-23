@@ -43,7 +43,7 @@ import {
   type AnnouncementSummary,
   type AudiencePerson,
 } from "@/lib/plan-announcement";
-import { formatCents, greetingName, sellablePlans } from "@/lib/validation";
+import { formatCents, greetingName } from "@/lib/validation";
 import type { MembershipPlanRow } from "@/lib/membership-types";
 
 type AdminClient = SupabaseClient<Database>;
@@ -137,7 +137,12 @@ async function loadInsurance(
     .eq("kind", "insurance");
   if (error) throw new Error(error.message);
   const now = new Date().toISOString();
-  const onSale = sellablePlans(insPlans ?? [], now).sort((a, b) => a.sort_order - b.sort_order)[0];
+  // Picked exactly as `resolveInsuranceCover` picks it (active, lowest sort
+  // order), so the email and the checkout always agree on which plan, and
+  // whether there is one at all.
+  const onSale = (insPlans ?? [])
+    .filter((p) => p.is_active)
+    .sort((a, b) => a.sort_order - b.sort_order)[0];
   if (!onSale) return null;
 
   const covers = await readAll<{ user_id: string | null; ends_at: string | null }>((from, to) =>
@@ -243,7 +248,8 @@ export async function announceMembershipPlan(
     subjectId: input.announcementId,
     compose: async (row, to) => {
       // Somebody who has left the audience since the row was written (a retry
-      // a day later) is left pending for the digest rather than guessed at.
+      // a day later) is not emailed, and null stamps their row so the morning
+      // digest does not email them either.
       const inbox = byInbox.get(row.user_id.toLowerCase());
       if (!inbox) return null;
       const reader = people.get(inbox.contactUserId);
