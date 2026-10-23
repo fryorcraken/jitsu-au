@@ -14,7 +14,7 @@ import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirma
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager screen listing every message the contact form has received. */

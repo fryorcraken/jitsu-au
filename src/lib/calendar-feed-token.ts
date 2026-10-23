@@ -10,7 +10,7 @@
 // on the site, and minting a fresh one is the only lever a member has if theirs
 // ends up somewhere it should not be. See docs/calendar.md.
 
-import { SITE_HOST } from "@/lib/seo";
+import { SITE_HOST } from "@/lib/site-origin";
 
 /** All the verdict reads off the row the feed route looked up by hash. */
 export type FeedTokenRow = { revoked_at: string | null };

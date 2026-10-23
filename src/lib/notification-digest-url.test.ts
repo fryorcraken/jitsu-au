@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SITE_ORIGIN } from "./seo";
+import { SITE_ORIGIN } from "./site-origin";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "..", "supabase", "migrations");
 
