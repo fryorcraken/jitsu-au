@@ -46,9 +46,10 @@ interface AccountActivatedEmailProps {
    *
    * This email is sent from `noreply@` with no reply-to header (only a
    * manager's copy of an email about someone carries one, see
-   * `send-email.server.ts`), so a reply goes nowhere. That is a small thing to get wrong in most emails and
-   * a large one here: this is the email a person reads when they cannot get
-   * in, and the reply we invited would be their attempt to say so.
+   * `send-email.server.ts`), so a reply goes nowhere. That is a small thing to
+   * get wrong in most emails and a large one here: this is the email a person
+   * reads when they cannot get in, and the reply we invited would be their
+   * attempt to say so.
    */
   contactUrl: string;
 }
