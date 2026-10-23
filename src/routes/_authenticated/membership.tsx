@@ -648,6 +648,18 @@ function MembershipPage() {
     setScrollToPay(false);
   }, [scrollToPay]);
 
+  // A plan announcement's email links to `#plan-<id>` (`planAnnouncementHref`).
+  // The browser looks for that anchor once, on arrival, before this page has
+  // loaded its plans, so it finds nothing. Look again once the cards exist.
+  const hashScrolled = useRef(false);
+  useEffect(() => {
+    if (hashScrolled.current || plans.length === 0) return;
+    const hash = window.location.hash;
+    if (!hash.startsWith("#plan-")) return;
+    hashScrolled.current = true;
+    document.getElementById(hash.slice(1))?.scrollIntoView?.({ block: "start" });
+  }, [plans]);
+
   async function choose(plan: Plan) {
     // ⚠️ Only when buying for somebody else, and that narrowness is the point.
     // Confirming every purchase would train people to click through, which is

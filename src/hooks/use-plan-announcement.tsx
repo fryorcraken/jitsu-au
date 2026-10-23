@@ -9,12 +9,12 @@
 // again. That matters most for a new plan: a retried create would be a second
 // copy of the plan.
 //
-// The retry is safe because `useResilientSubmit` keeps one submission id for
-// the whole announcement, and the server uses that id as the announcement's
-// own: the same id again writes no new rows and emails only whoever is still
-// owed. A finished announcement resets the id, so the next tick is a genuinely
-// new announcement, which is how a plan is announced a second time on purpose.
-import { useState, type ReactNode } from "react";
+// The retry is safe because one announcement keeps one id, and the server uses
+// that id as the announcement's own: the same id again writes no new rows and
+// emails only whoever is still owed. Every fresh send mints a new id, so the
+// next tick is a genuinely new announcement, which is how a plan is announced a
+// second time on purpose.
+import { useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
@@ -23,7 +23,7 @@ import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { describeLoadError } from "@/lib/load-error";
 import { announcePlan, countPlanAnnouncementAudience } from "@/lib/membership.functions";
 import { announceConfirmTitle } from "@/lib/plan-announcement";
-import { ANNOUNCE_SUBMIT } from "@/lib/submit-resilience";
+import { ANNOUNCE_SUBMIT, newSubmissionId } from "@/lib/submit-resilience";
 
 export type AnnounceResult = Awaited<ReturnType<typeof announcePlan>>;
 
@@ -48,14 +48,17 @@ export function usePlanAnnouncement(onAnnounced: (result: AnnounceResult) => voi
   const [target, setTarget] = useState<{ id: string; name: string } | null>(null);
   const [countError, setCountError] = useState<string | null>(null);
   const [partial, setPartial] = useState<AnnounceResult | null>(null);
+  const announcementId = useRef(newSubmissionId());
   const count = useServerFn(countPlanAnnouncementAudience);
   const announce = useServerFn(announcePlan);
   const submit = useResilientSubmit<AnnounceResult>(ANNOUNCE_SUBMIT);
   const { confirm, confirmDialog } = useConfirm();
 
   async function confirmBeforeSave(planName: string): Promise<boolean> {
-    if (!ticked) return true;
+    // Cleared first, so a count that failed on an earlier Save never sits next
+    // to a save that has since worked.
     setCountError(null);
+    if (!ticked) return true;
     let inboxes: number;
     try {
       inboxes = (await count()).inboxes;
@@ -76,18 +79,30 @@ export function usePlanAnnouncement(onAnnounced: (result: AnnounceResult) => voi
     });
   }
 
+  /** A new announcement: a fresh id, whatever the last one left behind. */
   async function send(plan: { id: string; name: string }) {
     // The box has done its job once the plan is saved. Anything from here is a
     // retry of THIS announcement, which the panel offers; leaving the box
     // ticked would make the next Save look like a fresh announcement.
     setTicked(false);
+    // Minted here rather than taken from `useResilientSubmit`, whose id only
+    // changes on a re-render after `reset()`. An announcement that failed or
+    // left emails pending never resets, so a later one from the same form (the
+    // next new plan, or this plan again on purpose) would otherwise go out
+    // under the old id: refused as another plan's, or absorbed as a repeat.
+    announcementId.current = newSubmissionId();
+    await deliver(plan);
+  }
+
+  /** The same announcement again: the retry, and "Send the rest now". */
+  async function deliver(plan: { id: string; name: string }) {
     setTarget(plan);
     setPartial(null);
     const outcome = await submit.submit({
-      run: async (signal, submissionId) => {
+      run: async (signal) => {
         const res = await announce({
           signal,
-          data: { plan_id: plan.id, client_submission_id: submissionId },
+          data: { plan_id: plan.id, client_submission_id: announcementId.current },
         });
         if (!res?.announcement_id) throw new Error("The email to members did not go out.");
         return res;
@@ -127,14 +142,14 @@ export function usePlanAnnouncement(onAnnounced: (result: AnnounceResult) => voi
         attempts={submit.attempts}
         error={submit.error}
         failureKind={submit.failureKind}
-        onRetry={() => target && void send(target)}
+        onRetry={() => target && void deliver(target)}
       />
       {partial && target && !submit.busy && (
         <div role="status" className="rounded-md border p-3 text-sm">
           Emailed {partial.emailed} of {partial.recipients} so far. The rest go out with the next
           morning&apos;s summary, or you can send them now.
           <div className="mt-2">
-            <Button size="sm" variant="outline" onClick={() => void send(target)}>
+            <Button size="sm" variant="outline" onClick={() => void deliver(target)}>
               Send the rest now
             </Button>
           </div>

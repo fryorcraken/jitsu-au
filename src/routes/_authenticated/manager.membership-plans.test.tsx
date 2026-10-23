@@ -427,6 +427,36 @@ describe("/manager/membership-plans", () => {
       expect(await plan.findByText("Announced on 3 Nov to 2 people.")).toBeInTheDocument();
     });
 
+    // A failed announcement never finishes, so its id is never reset by the
+    // send itself. A fresh tick is a NEW announcement, and has to go out under
+    // a new id: under the old one the server would treat it as a repeat and
+    // email nobody.
+    it("sends a fresh announcement under a new id after one that failed", async () => {
+      const user = userEvent.setup();
+      announcePlan.mockReset();
+      announcePlan.mockRejectedValueOnce(new Error("The email service refused it."));
+      announcePlan.mockImplementation(
+        async ({ data }: { data: { client_submission_id: string } }) =>
+          announced({ announcement_id: data.client_submission_id }),
+      );
+      render(<PlansPage />);
+      const plan = await card();
+
+      const box = plan.getByLabelText("Email all members about this plan");
+      await user.click(box);
+      await user.click(plan.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Save and email" }));
+      await plan.findByText("Semester 2 2026 is saved, but the email to members has not gone out.");
+
+      await user.click(box);
+      await user.click(plan.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Save and email" }));
+      await waitFor(() => expect(announcePlan).toHaveBeenCalledTimes(2));
+      expect(announcePlan.mock.calls[1][0].data.client_submission_id).not.toBe(
+        announcePlan.mock.calls[0][0].data.client_submission_id,
+      );
+    });
+
     it("shows when a plan was last announced", async () => {
       listPlanAnnouncements.mockResolvedValueOnce({
         "plan-1": {
