@@ -1241,20 +1241,20 @@ clear by being fixed.
 
 ### `notifications`
 
-| Column         | Type          | Null | Notes                                                                              |
-| -------------- | ------------- | ---- | ---------------------------------------------------------------------------------- |
-| `id`           | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                       |
-| `user_id`      | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The recipient.                   |
-| `kind`         | `text`        | no   | `reply\|thread_activity\|new_blog_post\|blog_comment\|kb_comment`.                 |
-| `subject_type` | `text`        | no   | `blog_comment\|kb_annotation\|blog_post`.                                          |
-| `subject_id`   | `uuid`        | no   | What happened. **No FK**: it points at three tables, and must outlive its subject. |
-| `actor_id`     | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who did it.                        |
-| `title`        | `text`        | no   | 1–200 chars. Frozen at write time.                                                 |
-| `body`         | `text`        | yes  | ≤ 500 chars. A preview of the comment (`commentPreview`).                          |
-| `href`         | `text`        | no   | Site-relative (`CHECK href LIKE '/%'`); the sender prefixes the origin.            |
-| `read_at`      | `timestamptz` | yes  | NULL = unread. Drives the badge.                                                   |
-| `emailed_at`   | `timestamptz` | yes  | NULL = not yet considered for email.                                               |
-| `created_at`   | `timestamptz` | no   | Default `now()`.                                                                   |
+| Column         | Type          | Null | Notes                                                                                                      |
+| -------------- | ------------- | ---- | ---------------------------------------------------------------------------------------------------------- |
+| `id`           | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                               |
+| `user_id`      | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The recipient.                                           |
+| `kind`         | `text`        | no   | `reply\|thread_activity\|new_blog_post\|blog_comment\|kb_comment\|insurance_ending_soon\|insurance_ended`. |
+| `subject_type` | `text`        | no   | `blog_comment\|kb_annotation\|blog_post\|membership`.                                                      |
+| `subject_id`   | `uuid`        | no   | What happened. **No FK**: it points at four tables, and must outlive its subject.                          |
+| `actor_id`     | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who did it.                                                |
+| `title`        | `text`        | no   | 1–200 chars. Frozen at write time.                                                                         |
+| `body`         | `text`        | yes  | ≤ 500 chars. A preview of the comment (`commentPreview`).                                                  |
+| `href`         | `text`        | no   | Site-relative (`CHECK href LIKE '/%'`); the sender prefixes the origin.                                    |
+| `read_at`      | `timestamptz` | yes  | NULL = unread. Drives the badge.                                                                           |
+| `emailed_at`   | `timestamptz` | yes  | NULL = not yet considered for email.                                                                       |
+| `created_at`   | `timestamptz` | no   | Default `now()`.                                                                                           |
 
 `UNIQUE (user_id, kind, subject_id)`, plus indexes on `(user_id, created_at
 DESC)`, a partial `(user_id) WHERE read_at IS NULL` for the badge, and a partial
@@ -1264,6 +1264,15 @@ DESC)`, a partial `(user_id) WHERE read_at IS NULL` for the badge, and a partial
 no `announced_at` column: a post unpublished and republished cannot produce a
 second announcement, because the second insert collides. `published_at` could
 not have carried that, since it is deliberately never cleared.
+
+**The two insurance kinds** (`20261024000000_notification_insurance_reminders.sql`)
+have `subject_type = 'membership'` and `subject_id` = the yearly insurance
+membership. Their `user_id` is the person covered, a child included, and the
+email goes to whoever reads that person's mail. They have no switch in
+`notification_preferences` and the digest never reads them: the daily job sends
+them on their own. A row exists only while the reminder is or was owed, so
+`emailed_at` on one of these always means the email went out. See
+`docs/memberships.md`, "When yearly insurance ends".
 
 **Titles are frozen, not joined.** A notification is a record of a moment, the
 same call `waivers` makes about its person fields. Rendering from a live join
