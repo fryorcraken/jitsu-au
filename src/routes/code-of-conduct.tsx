@@ -13,7 +13,6 @@ import { CodeOfConductDocument } from "@/components/site/CodeOfConductDocument";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDate } from "@/lib/dates";
 import {
@@ -69,7 +68,6 @@ function CodeOfConduct() {
   const fetchSigner = useServerFn(getCodeOfConductSigner);
   const accept = useServerFn(acceptCodeOfConduct);
 
-  const [agreed, setAgreed] = useState(false);
   const [signatureName, setSignatureName] = useState("");
   const [saving, setSaving] = useState(false);
   // Held, not toasted. A toast fades in four seconds and leaves a form that
@@ -118,10 +116,6 @@ function CodeOfConduct() {
     e.preventDefault();
     // The form only renders under a document, so this is for the compiler.
     if (!published) return;
-    if (!agreed) {
-      toast.error("Please tick the box to say you agree.");
-      return;
-    }
     if (!signatureName.trim()) {
       toast.error("Please type your name to sign.");
       return;
@@ -134,7 +128,6 @@ function CodeOfConduct() {
           token: token ?? "",
           // WHOSE agreement. Absent means the caller's own.
           userId: subjectId,
-          agree: true,
           signature_name: signatureName,
           // The version whose text is on this screen, which is what they are
           // agreeing to. The server refuses it if it is no longer live.
@@ -287,25 +280,20 @@ function CodeOfConduct() {
                     )}
                   </div>
 
-                  <label className="flex items-start gap-3 text-sm">
-                    <Checkbox
-                      checked={agreed}
-                      onCheckedChange={(v) => {
-                        setAgreed(v === true);
-                        setSaveError(null);
-                      }}
-                      className="mt-0.5"
-                    />
-                    {/* ⚠️ The undertaking has to match who is bound by it. A parent
-                    signing for their nine-year-old was ticking a box saying
-                    THEY would follow the rules, on a form filed against the
-                    child. This is the most load-bearing string in the flow. */}
-                    <span>
-                      {subjectName
-                        ? codeOfConductAcknowledgementFor(subjectName)
-                        : CODE_OF_CONDUCT_ACKNOWLEDGEMENT}
-                    </span>
-                  </label>
+                  {/* ⚠️ The undertaking has to match who is bound by it. A parent
+                  signing for their nine-year-old was once ticking a box saying
+                  THEY would follow the rules, on a form filed against the child.
+                  There is no tick box now: typing a name below is the agreement,
+                  so this sentence is what the signature agrees to, and it is
+                  still the most load-bearing string in the flow. */}
+                  <p
+                    id="code-of-conduct-undertaking"
+                    className="rounded-md border bg-muted/40 px-3 py-2 text-sm"
+                  >
+                    {subjectName
+                      ? codeOfConductAcknowledgementFor(subjectName)
+                      : CODE_OF_CONDUCT_ACKNOWLEDGEMENT}
+                  </p>
 
                   <div>
                     <Label htmlFor="signature_name">Type your name to sign</Label>
@@ -321,10 +309,15 @@ function CodeOfConduct() {
                         setSaveError(null);
                       }}
                       placeholder="Your full name"
+                      aria-describedby="code-of-conduct-undertaking code-of-conduct-signature-note"
                       className="mt-1.5"
                     />
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      By submitting this form you agree it counts as an electronic signature dated{" "}
+                    <p
+                      id="code-of-conduct-signature-note"
+                      className="mt-1.5 text-xs text-muted-foreground"
+                    >
+                      Typing your name and pressing the button below is your agreement to the
+                      statement above. It counts as an electronic signature dated{" "}
                       {new Date().toLocaleDateString("en-AU")}.
                     </p>
                   </div>
