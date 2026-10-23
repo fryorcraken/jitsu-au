@@ -814,8 +814,10 @@ async function handleMarkInvoicePaid(params: unknown, actingAs: string) {
       actor: actingAs,
       at: new Date().toISOString(),
       method: input.payment_method,
-      paidAt,
-      paidReference: input.paid_reference ?? null,
+      // What was ASKED for. On an already-paid invoice (recorded: false) none of
+      // it was stored, and the names say so rather than reading as the record.
+      requestedPaidAt: paidAt,
+      requestedPaidReference: input.paid_reference ?? null,
       recorded,
     }),
   );
@@ -988,8 +990,10 @@ async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
       actor: actingAs,
       at: new Date().toISOString(),
       method: input.payment_method,
-      paidAt,
-      paidReference: input.paid_reference ?? null,
+      // What was ASKED for. On an already-paid invoice (recorded: false) none of
+      // it was stored, and the names say so rather than reading as the record.
+      requestedPaidAt: paidAt,
+      requestedPaidReference: input.paid_reference ?? null,
       recorded,
     }),
   );

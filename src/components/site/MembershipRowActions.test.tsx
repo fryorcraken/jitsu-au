@@ -27,7 +27,6 @@ vi.mock("@/lib/membership.functions", () => ({
 }));
 
 const { MembershipRowActions } = await import("./MembershipRowActions");
-const { clubToday } = await import("@/lib/validation");
 type Row = import("./MembershipRowActions").MembershipActionRow;
 
 /** Authorised and unpaid: what every membership looks like once raised. */
@@ -151,8 +150,9 @@ describe("MembershipRowActions", () => {
     await user.click(screen.getByRole("button", { name: /^mark as paid$/i }));
     await waitFor(() =>
       expect(markMembershipPaid).toHaveBeenCalledWith({
-        // Today unless a manager says otherwise: what marking paid always recorded.
-        data: { id: "mem-1", payment_method: "manual", paid_on: clubToday() },
+        // An untouched day is left to the server, which records the moment of
+        // the click: what marking paid always recorded.
+        data: { id: "mem-1", payment_method: "manual" },
       }),
     );
     expect(onChanged).toHaveBeenCalled();

@@ -2640,14 +2640,14 @@ export const PAID_REFERENCE_MAX = 200;
  * invoice's own `payment_reference` (what the member quotes). Blank means none.
  */
 export const paymentReceivedFields = {
+  // One check reporting one problem: a regex miss in zod does not stop later
+  // refines, so chained checks answered "20/10/2026" with two messages.
   paid_on: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.")
-    .refine(isCalendarDate, "That is not a real date.")
-    .refine(
-      (d) => d <= clubToday(),
-      "A payment cannot be recorded on a day that has not happened yet.",
-    )
+    .superRefine((d, ctx) => {
+      const message = paidOnProblem(d);
+      if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    })
     .nullish()
     .transform((d) => d ?? undefined),
   paid_reference: z
@@ -2657,6 +2657,18 @@ export const paymentReceivedFields = {
     .nullish()
     .transform((r) => r || undefined),
 };
+
+/**
+ * Why `date` is not a day a payment can be recorded on, or null when it is.
+ * The screen asks this too, so the reason shown under the date field is the
+ * same one the server would give.
+ */
+export function paidOnProblem(date: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "Pick the day the money arrived, as YYYY-MM-DD.";
+  if (!isCalendarDate(date)) return "That is not a real date.";
+  if (date > clubToday()) return "That day has not happened yet. Pick today or earlier.";
+  return null;
+}
 
 /** A YYYY-MM-DD that names a day on the calendar, so 2026-02-31 is refused, not rolled over. */
 function isCalendarDate(date: string): boolean {
