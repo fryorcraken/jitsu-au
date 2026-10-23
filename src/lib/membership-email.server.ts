@@ -8,7 +8,6 @@
 // and only ever lazy-imported from inside server-function handlers.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment";
@@ -16,45 +15,20 @@ import { MembershipPaidEmail } from "@/lib/email-templates/membership-paid";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
 import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templates/item-invoice";
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
-import { getManagerEmails } from "@/lib/waiver-email.server";
+import {
+  SITE_NAME,
+  SITE_URL,
+  emailConfigured,
+  getManagerEmails,
+  sendClubEmail,
+} from "@/lib/email-send.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
-
-const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */
 export const MEMBERSHIP_REVIEW_URL = `${SITE_URL}/manager/memberships`;
 const ACCOUNT_URL = `${SITE_URL}/membership`;
 
 type AdminClient = SupabaseClient<Database>;
-
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
-}
 
 export interface MembershipPaymentEmailParams {
   membershipId: string;
@@ -94,12 +68,10 @@ export async function sendMembershipPaymentEmail({
   reference,
   admin,
 }: MembershipPaymentEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) {
+  if (!emailConfigured()) {
     console.warn("[membership-email] LOVABLE_API_KEY not set — skipping payment email");
     return { sent: [], skipped: true };
   }
-  const sendUrl = process.env.LOVABLE_SEND_URL;
   // Null covers both "never published" and "could not read": either way the
   // email cannot name an account, and it says so rather than inventing one.
   const { details } = await readClubPaymentDetails(admin);
@@ -141,9 +113,7 @@ export async function sendMembershipPaymentEmail({
 
   const sent: string[] = [];
   try {
-    await sendOne({
-      apiKey,
-      sendUrl,
+    await sendClubEmail({
       to: memberEmail,
       // The plan named as the READER's or as the child's, because a parent
       // with three children gets three of these and an inbox full of "your
@@ -162,9 +132,7 @@ export async function sendMembershipPaymentEmail({
 
   for (const to of managers) {
     try {
-      await sendOne({
-        apiKey,
-        sendUrl,
+      await sendClubEmail({
         to,
         subject: `New membership pending payment: ${memberName || memberEmail}`,
         html: managerHtml,
@@ -217,12 +185,10 @@ export async function sendMembershipPaidEmail({
   validity,
   amount,
 }: MembershipPaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) {
+  if (!emailConfigured()) {
     console.warn("[membership-email] LOVABLE_API_KEY not set — skipping payment email");
     return { sent: false, skipped: true };
   }
-  const sendUrl = process.env.LOVABLE_SEND_URL;
 
   const el = React.createElement(MembershipPaidEmail, {
     siteName: SITE_NAME,
@@ -236,9 +202,7 @@ export async function sendMembershipPaidEmail({
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
-    await sendOne({
-      apiKey,
-      sendUrl,
+    await sendClubEmail({
       to: memberEmail,
       subject: forName
         ? `Payment received for ${forName}'s ${planName}`
@@ -288,8 +252,7 @@ export async function sendItemInvoiceEmail({
   reference,
   admin,
 }: ItemInvoiceEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) {
+  if (!emailConfigured()) {
     console.warn("[item-invoice-email] LOVABLE_API_KEY not set — skipping invoice email");
     return { sent: false, skipped: true };
   }
@@ -307,9 +270,7 @@ export async function sendItemInvoiceEmail({
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
-    await sendOne({
-      apiKey,
-      sendUrl: process.env.LOVABLE_SEND_URL,
+    await sendClubEmail({
       to: memberEmail,
       // Named for the child when it is theirs, for the same reason as the
       // membership invoice: a parent's inbox holds several of these.
@@ -347,8 +308,7 @@ export async function sendItemInvoicePaidEmail({
   summary,
   amount,
 }: ItemInvoicePaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) {
+  if (!emailConfigured()) {
     console.warn("[item-invoice-email] LOVABLE_API_KEY not set — skipping receipt");
     return { sent: false, skipped: true };
   }
@@ -364,9 +324,7 @@ export async function sendItemInvoicePaidEmail({
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
-    await sendOne({
-      apiKey,
-      sendUrl: process.env.LOVABLE_SEND_URL,
+    await sendClubEmail({
       to: memberEmail,
       subject: forName
         ? `Payment received for ${forName}'s invoice ${reference}`

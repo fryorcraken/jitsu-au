@@ -8,19 +8,42 @@ be put back together later from the database alone.
 > flow's own doc (`docs/waivers.md`, `docs/notifications.md`,
 > `docs/item-invoices.md`, ...); this file is only the map.
 
-## How they are sent today
+## One way to send
 
-Every email goes out through `sendLovableEmail` (`@lovable.dev/email-js`) from
-`UTS Jitsu <noreply@notify.jitsu.au>`, as `transactional` mail.
-`notify.jitsu.au` is the sending domain (Mailgun, via Lovable), and the `From`
-address has to sit on it so DKIM and SPF align under DMARC. Each sender module
-below carries its own copy of that configuration and its own private `sendOne`;
-the auth emails go through Lovable's `createAuthEmailHandler` instead.
+Every email goes out through **`sendClubEmail`** in
+`src/lib/email-send.server.ts`. That module owns the sender identity and the
+transport, and nothing else:
+
+- **From:** `UTS Jitsu <noreply@notify.jitsu.au>`. `notify.jitsu.au` is the
+  sending domain (Mailgun, via Lovable), and the `From` address has to sit on it
+  so DKIM and SPF align under DMARC. It does not move to another domain the club
+  owns unless the sending setup moves with it.
+- **Purpose:** always `transactional`. Nothing the club sends is marketing.
+- **API key:** `LOVABLE_API_KEY` (and `LOVABLE_SEND_URL`). Without it every
+  sender skips cleanly before doing any work; `emailConfigured()` is the check.
+- **Manager recipients:** `getManagerEmails`, every holder of the `manager`
+  role at their login address. Shared by the four flows that tell managers
+  something.
+
+What an email says, who it is about and its idempotency key stay in the
+email's own module, next to the flow that sends it. One transport, not one
+giant file.
+
+`scripts/email-conventions.test.ts` fails if any module under `src/` calls
+`sendLovableEmail` directly, or spells the sending domain anywhere but the
+shared module. So a new email cannot quietly skip whatever the shared sender
+does for every other one.
+
+**The auth emails are the one exception to `sendClubEmail`.** Supabase Auth
+calls `/lovable/email/auth/webhook`, and Lovable's `createAuthEmailHandler`
+sends from inside its own code. That route still takes its `From` and sending
+domain from the shared module, so the identity is shared even where the call is
+not. The handler offers no `reply_to` option.
 
 **Best-effort, everywhere.** Every send is wrapped by its caller and a failure
 is logged, never thrown into the flow that triggered it: a waiver is saved, a
 payment is recorded, a membership is raised whether or not the email about it
-lands.
+lands. Each section of the code says why for its own flow.
 
 ## Who an email is addressed to
 
@@ -65,7 +88,7 @@ design, never proves the mailbox (`mailboxProvingPurposes` in
 
 ### Manager notifications
 
-Each goes to every manager (`getManagerEmails` in `waiver-email.server.ts`), one send per manager.
+Each goes to every manager (`getManagerEmails`), one send per manager.
 
 | Email                  | Template                      | Sender function              | Trigger                        | `idempotency_key`                  | Rebuildable                 |
 | ---------------------- | ----------------------------- | ---------------------------- | ------------------------------ | ---------------------------------- | --------------------------- |

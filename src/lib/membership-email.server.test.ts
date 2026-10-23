@@ -6,7 +6,10 @@ const sendLovableEmail = vi.fn();
 vi.mock("@lovable.dev/email-js", () => ({
   sendLovableEmail: (...args: unknown[]) => sendLovableEmail(...args),
 }));
-vi.mock("@/lib/waiver-email.server", () => ({ getManagerEmails: () => Promise.resolve([]) }));
+vi.mock("@/lib/email-send.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/email-send.server")>()),
+  getManagerEmails: () => Promise.resolve([]),
+}));
 vi.mock("@/lib/club-settings.server", () => ({
   readClubPaymentDetails: () => Promise.resolve({ ok: true, details: null }),
 }));
@@ -130,7 +133,7 @@ describe("who the subject line is about", () => {
   it("captions the address on the manager's copy", async () => {
     // The manager copy names the CHILD and carries the PARENT's address. Bare,
     // that is a mailbox a manager writes to and nobody reads.
-    const managers = await import("@/lib/waiver-email.server");
+    const managers = await import("@/lib/email-send.server");
     vi.spyOn(managers, "getManagerEmails").mockResolvedValue(["manager@example.com"]);
 
     await sendMembershipPaymentEmail({

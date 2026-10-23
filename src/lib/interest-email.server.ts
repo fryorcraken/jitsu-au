@@ -7,20 +7,17 @@
 // the `submitInterest` server-function handler.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confirmation";
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
-import { getManagerEmails } from "@/lib/waiver-email.server";
-
-// Sender configuration mirrors the auth-email webhook and the waiver emails.
-const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
+import {
+  SITE_NAME,
+  SITE_URL,
+  emailConfigured,
+  getManagerEmails,
+  sendClubEmail,
+} from "@/lib/email-send.server";
 
 /** Manager dashboard where the lead/member funnel is reviewed. */
 export const MANAGER_DASHBOARD_URL = `${SITE_URL}/manager/users`;
@@ -53,30 +50,6 @@ export function buildWaiverUrl(params: {
   return qs ? `${SITE_URL}/waiver?${qs}` : `${SITE_URL}/waiver`;
 }
 
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
-}
-
 export interface InterestEmailParams {
   /** Unique per-submission id used to key idempotent sends. */
   registrationId: string;
@@ -102,12 +75,10 @@ export async function sendInterestEmails({
   message,
   admin,
 }: InterestEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) {
+  if (!emailConfigured()) {
     console.warn("[interest-email] LOVABLE_API_KEY not set — skipping interest emails");
     return { sent: [], skipped: true };
   }
-  const sendUrl = process.env.LOVABLE_SEND_URL;
 
   // Mint the proof-of-click token that rides on the applicant's waiver link.
   // Best-effort: if minting fails they still get a working (unverified) prefill
@@ -149,9 +120,7 @@ export async function sendInterestEmails({
 
   // Confirmation to the applicant.
   try {
-    await sendOne({
-      apiKey,
-      sendUrl,
+    await sendClubEmail({
       to: email,
       subject: `You're on the list at ${SITE_NAME}. Sign your waiver next`,
       html: applicantHtml,
@@ -166,9 +135,7 @@ export async function sendInterestEmails({
   // New-lead notification to each manager.
   for (const to of notifyRecipients) {
     try {
-      await sendOne({
-        apiKey,
-        sendUrl,
+      await sendClubEmail({
         to,
         subject: `New free-trial lead: ${name || email}`,
         html: managerHtml,

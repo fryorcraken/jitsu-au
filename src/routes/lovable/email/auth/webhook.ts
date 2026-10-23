@@ -8,24 +8,22 @@ import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
 
-// Configuration
-const SITE_NAME = "UTS Jitsu";
-const SENDER_DOMAIN = "notify.jitsu.au";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
-
 // The SDK handler owns verification, dispatch, and retry semantics; this file
 // owns only the email decisions: subjects, templates, and per-type props.
 // Built lazily: process.env is only populated at request time, so creating the
 // handler at module scope throws "Missing Lovable API key" during route load.
+//
+// The sender identity comes from `email-send.server.ts`, like every other email
+// the club sends (docs/emails.md). It is imported inside the handler rather than
+// at the top of the file because route files are bundled to the client.
 let cachedHandler: ReturnType<typeof createAuthEmailHandler> | undefined;
 
-function getHandler() {
+async function getHandler() {
   if (cachedHandler) return cachedHandler;
+  const { FROM, SENDER_DOMAIN, SITE_NAME, SITE_URL } = await import("@/lib/email-send.server");
   cachedHandler = createAuthEmailHandler({
     apiKey: process.env.LOVABLE_API_KEY!,
-    from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
+    from: FROM,
     senderDomain: SENDER_DOMAIN,
     sendUrl: process.env.LOVABLE_SEND_URL,
     emails: {
@@ -87,7 +85,7 @@ function getHandler() {
 export const Route = createFileRoute("/lovable/email/auth/webhook")({
   server: {
     handlers: {
-      POST: ({ request }) => getHandler()(request),
+      POST: async ({ request }) => (await getHandler())(request),
     },
   },
 });
