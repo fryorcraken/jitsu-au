@@ -25,6 +25,11 @@
 // receipt and makes the row permanent, deleting cannot be undone. A failure
 // stays in the dialog with the button still there rather than becoming a toast
 // that auto-dismisses on a phone.
+//
+// Marking paid also asks when the money arrived and what it was known by
+// (`PaymentReceivedFields`). It asks inside the confirm rather than before it,
+// because the date is part of what is being confirmed, and a failed attempt
+// keeps what was typed so "Try again" sends the same thing.
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { CalendarDays, Check, Loader2, RotateCcw, Trash2, Undo2 } from "lucide-react";
@@ -66,6 +71,13 @@ import {
 } from "@/lib/validation";
 import type { PlanWindow } from "@/lib/validation";
 import { formatDateOnly } from "@/lib/dates";
+import { PaymentReceivedFields } from "@/components/site/PaymentReceived";
+import {
+  newPaymentReceived,
+  paymentReceivedParams,
+  paymentReceivedProblem,
+  type PaymentReceived,
+} from "@/lib/payment-received";
 
 /** The fields both screens' membership rows carry, and all the guard needs. */
 export type MembershipActionRow = {
@@ -116,6 +128,7 @@ export function MembershipRowActions({
   const setStart = useServerFn(setMembershipStart);
   const [pending, setPending] = useState<Pending | null>(null);
   const [dating, setDating] = useState<Dating | null>(null);
+  const [payment, setPayment] = useState<PaymentReceived>(newPaymentReceived);
 
   // Computed here from the same pure rule the server enforces, so the button and
   // the refusal can never disagree about why. The server still re-checks: this
@@ -162,7 +175,9 @@ export function MembershipRowActions({
     try {
       if (kind === "delete") await remove({ data: { id: membership.id } });
       else if (kind === "pay")
-        await markPaid({ data: { id: membership.id, payment_method: "manual" } });
+        await markPaid({
+          data: { id: membership.id, payment_method: "manual", ...paymentReceivedParams(payment) },
+        });
       else
         await setStatus({
           data: { id: membership.id, status: kind === "reopen" ? "active" : "cancelled" },
@@ -216,7 +231,13 @@ export function MembershipRowActions({
     <>
       <div className="flex flex-wrap justify-end gap-2">
         {owesMoney && (
-          <Button size="sm" onClick={() => setPending({ kind: "pay", error: null, busy: false })}>
+          <Button
+            size="sm"
+            onClick={() => {
+              setPayment(newPaymentReceived());
+              setPending({ kind: "pay", error: null, busy: false });
+            }}
+          >
             <Check className="mr-1 h-3 w-3" /> Mark as paid
           </Button>
         )}
@@ -350,6 +371,17 @@ export function MembershipRowActions({
             <AlertDialogTitle>{copy.title}</AlertDialogTitle>
             <AlertDialogDescription>{copy.body}</AlertDialogDescription>
           </AlertDialogHeader>
+          {pending?.kind === "pay" && (
+            <PaymentReceivedFields
+              idPrefix={`pay-${membership.id}`}
+              value={payment}
+              onChange={(next) => {
+                setPayment(next);
+                setPending((p) => (p ? { ...p, error: null } : p));
+              }}
+              disabled={pending.busy}
+            />
+          )}
           {pending?.error && (
             <p
               role="alert"
@@ -366,7 +398,10 @@ export function MembershipRowActions({
                   ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   : undefined
               }
-              disabled={pending?.busy}
+              disabled={
+                pending?.busy ||
+                (pending?.kind === "pay" && paymentReceivedProblem(payment) !== null)
+              }
               // Not the default form-submitting close: the dialog has to stay
               // open to show a failure.
               onClick={(e) => {
