@@ -60,6 +60,9 @@ test("a manager can raise a membership, mark it paid, and then can't delete it",
     .from("membership_plans")
     .select("id, code, name")
     .eq("kind", "period")
+    // The CURRENT semester: the seed also carries next semester's plan, which
+    // has not started, so it would cover no class today.
+    .order("starts_on", { ascending: true })
     .limit(1)
     .single();
   if (!periodPlan) throw new Error("no seeded period plan");
