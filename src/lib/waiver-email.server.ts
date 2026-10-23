@@ -128,43 +128,41 @@ async function verificationLinkFor(
   }
 }
 
+/** What the member's confirmation needs: everything but the managers' half. */
+export type WaiverConfirmationParams = Omit<
+  WaiverEmailParams,
+  "memberName" | "guardianEmail" | "signedByName"
+>;
+
 /**
- * Notify both the member (a confirmation) and every manager (a review prompt)
- * that a new waiver was signed. Best-effort: a missing API key or a failed send
- * is logged and swallowed so it never fails the waiver submission itself.
- * Returns a small summary useful for logging/tests.
+ * The confirmation to the person who signed (or, for a child, the guardian).
+ *
+ * The member's half of `sendWaiverEmails`, on its own so a manager's Resend
+ * goes through exactly the function the original send does. Never throws.
+ * `replyTo` is the club reply-to the email went out with, or null when it
+ * carried none or did not go out at all.
  */
-export async function sendWaiverEmails({
+export async function sendWaiverConfirmation({
   waiverId,
-  memberName,
   memberGreetingName,
   memberEmail,
   pdfUrl,
   admin,
   userId,
   codeOfConductToken,
-  guardianEmail,
-  signedByName,
-}: WaiverEmailParams): Promise<{
-  sent: string[];
+}: WaiverConfirmationParams): Promise<{
+  sent: boolean;
   skipped: boolean;
-  /**
-   * The club reply-to the member's confirmation went out with: null when it
-   * carried none, or did not go out at all. The signing page reads this to
-   * decide whether "reply to your confirmation email" would be true.
-   */
-  memberReplyTo: string | null;
+  replyTo: string | null;
 }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
-    console.warn("[waiver-email] LOVABLE_API_KEY not set — skipping waiver emails");
-    return { sent: [], skipped: true, memberReplyTo: null };
+    console.warn("[waiver-email] LOVABLE_API_KEY not set — skipping waiver confirmation");
+    return { sent: false, skipped: true, replyTo: null };
   }
-  const sendUrl = process.env.LOVABLE_SEND_URL;
 
-  const [verifyUrl, notifyRecipients, clubReply] = await Promise.all([
+  const [verifyUrl, clubReply] = await Promise.all([
     verificationLinkFor(admin, userId, memberEmail),
-    getManagerEmails(admin),
     clubReplyTo(admin),
   ]);
 
@@ -182,8 +180,58 @@ export async function sendWaiverEmails({
       : null,
     replyTo: clubReply,
   });
-  const memberHtml = await render(memberEl);
-  const memberText = await render(memberEl, { plainText: true });
+
+  try {
+    await sendEmail({
+      apiKey,
+      sendUrl: process.env.LOVABLE_SEND_URL,
+      to: memberEmail,
+      subject: `Your ${SITE_NAME} training waiver`,
+      html: await render(memberEl),
+      text: await render(memberEl, { plainText: true }),
+      idempotencyKey: `waiver-member-${waiverId}`,
+      replyTo: clubReply,
+    });
+    return { sent: true, skipped: false, replyTo: clubReply };
+  } catch (e) {
+    console.error(`[waiver-email] failed to email the member:`, e);
+    return { sent: false, skipped: false, replyTo: null };
+  }
+}
+
+/**
+ * Notify both the member (a confirmation) and every manager (a review prompt)
+ * that a new waiver was signed. Best-effort: a missing API key or a failed send
+ * is logged and swallowed so it never fails the waiver submission itself.
+ * Returns a small summary useful for logging/tests.
+ */
+export async function sendWaiverEmails({
+  memberName,
+  guardianEmail,
+  signedByName,
+  ...member
+}: WaiverEmailParams): Promise<{
+  sent: string[];
+  skipped: boolean;
+  /**
+   * The club reply-to the member's confirmation went out with: null when it
+   * carried none, or did not go out at all. The signing page reads this to
+   * decide whether "reply to your confirmation email" would be true.
+   */
+  memberReplyTo: string | null;
+}> {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
+    console.warn("[waiver-email] LOVABLE_API_KEY not set — skipping waiver emails");
+    return { sent: [], skipped: true, memberReplyTo: null };
+  }
+  const sendUrl = process.env.LOVABLE_SEND_URL;
+  const { waiverId, memberEmail, pdfUrl, admin } = member;
+
+  const [confirmation, notifyRecipients] = await Promise.all([
+    sendWaiverConfirmation(member),
+    getManagerEmails(admin),
+  ]);
 
   const managerEl = React.createElement(WaiverNotificationEmail, {
     siteName: SITE_NAME,
@@ -196,26 +244,7 @@ export async function sendWaiverEmails({
   const managerHtml = await render(managerEl);
   const managerText = await render(managerEl, { plainText: true });
 
-  const sent: string[] = [];
-  let memberReplyTo: string | null = null;
-
-  // Confirmation to the member.
-  try {
-    await sendEmail({
-      apiKey,
-      sendUrl,
-      to: memberEmail,
-      subject: `Your ${SITE_NAME} training waiver`,
-      html: memberHtml,
-      text: memberText,
-      idempotencyKey: `waiver-member-${waiverId}`,
-      replyTo: clubReply,
-    });
-    sent.push(memberEmail);
-    memberReplyTo = clubReply;
-  } catch (e) {
-    console.error(`[waiver-email] failed to email the member:`, e);
-  }
+  const sent: string[] = confirmation.sent ? [memberEmail] : [];
 
   // Review prompt to each manager, replying to the address the member's copy
   // went to, plus the guardian's on a minor's own waiver. On a waiver signed
@@ -246,7 +275,7 @@ export async function sendWaiverEmails({
     }
   }
 
-  return { sent, skipped: false, memberReplyTo };
+  return { sent, skipped: false, memberReplyTo: confirmation.replyTo };
 }
 
 export interface AccountActivatedEmailParams {

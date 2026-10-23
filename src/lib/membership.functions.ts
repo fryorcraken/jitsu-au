@@ -449,24 +449,9 @@ export async function recordMembershipPayment(
   // report a recorded payment as a failure and invite a retry.
   if (membership.user_id) {
     try {
-      // The greeting and the address have to come from the SAME person, and
-      // that person is whoever reads the mail. Reading the subject's profile
-      // for a greeting while sending to their guardian produced "Hi Bea, we
-      // have received $90" into Bea's mother's inbox.
-      const recipient = await deliveryRecipientFor(admin, membership.user_id);
-      if (recipient.email) {
-        const { sendMembershipPaidEmail } = await import("./membership-email.server");
-        await sendMembershipPaidEmail({
-          membershipId: membership.id,
-          memberGreetingName: recipient.greetingName,
-          memberEmail: recipient.email,
-          forName: recipient.forName,
-          planName: input.plan?.name ?? "your membership",
-          validity: input.plan ? validityLabel(input.plan) : "",
-          amount: formatCents(membership.price_cents),
-          admin,
-        });
-      }
+      // Rebuilt from the row just written, so `paid_at` is set and this is the
+      // receipt. The same function a manager's Resend goes through.
+      await emailMembershipRecord(admin, membership.id);
     } catch (e) {
       console.error("[recordMembershipPayment] failed to send the payment email:", e);
     }
@@ -512,105 +497,144 @@ export async function ensureCasualInvoiceEmailed(
   membershipId: string,
 ): Promise<void> {
   try {
-    const { data: membership, error } = await admin
-      .from("memberships")
-      .select("id, user_id, plan_id, price_cents, payment_reference, paid_at")
-      .eq("id", membershipId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!membership || !membership.user_id) return;
+    await emailMembershipRecord(admin, membershipId);
+  } catch (e) {
+    console.error(`[ensureCasualInvoiceEmailed] failed for membership ${membershipId}:`, e);
+  }
+}
 
-    const [{ data: plan }, { data: profile }, recipient] = await Promise.all([
-      admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
-      admin
-        .from("profiles")
-        .select("first_name, middle_name, last_name, preferred_name")
-        .eq("user_id", membership.user_id)
-        .maybeSingle(),
-      // Same rule as above: greet whoever reads it, name whoever it is about.
-      deliveryRecipientFor(admin, membership.user_id),
-    ]);
-    const email = recipient.email;
-    if (!email) return;
+/** What `emailMembershipRecord` did. */
+export type MembershipEmailOutcome =
+  | { sent: true; email: "invoice" | "receipt"; to: string }
+  | {
+      sent: false;
+      /**
+       * `not_found`: no such membership, or nobody it belongs to.
+       * `no_address`: nobody on file to send it to.
+       * `nothing_owed`: unpaid but free, so there is no invoice to send.
+       * `not_sent`: the email was composed and the send failed or was skipped.
+       */
+      reason: "not_found" | "no_address" | "nothing_owed" | "not_sent";
+    };
 
-    if (membership.paid_at) {
-      // Not folding in a bundled sibling here, on purpose: a receipt is
-      // already never combined across a bundle anywhere in this app —
-      // `recordMembershipPayment` sends one per row, because a bundle can be
-      // reconciled or marked paid one invoice at a time. This matches that.
-      const { sendMembershipPaidEmail } = await import("./membership-email.server");
-      await sendMembershipPaidEmail({
-        membershipId: membership.id,
-        memberGreetingName: recipient.greetingName,
-        memberEmail: email,
-        forName: recipient.forName,
-        planName: plan?.name ?? "your casual class",
-        validity: plan ? validityLabel(plan) : "",
-        amount: formatCents(membership.price_cents),
-        admin,
-      });
-      return;
-    }
+/**
+ * Email a membership's invoice or receipt, built from the database alone.
+ *
+ * The one place either email is composed from a membership row, so the email
+ * a member gets when they enrol, when a payment is recorded, when a casual
+ * credit is spent at the door, and when a manager presses Resend is the same
+ * email. Which one follows `paid_at`: unpaid still needs the "pay this"
+ * invoice, paid needs the receipt, and either is the wrong email for the other
+ * state.
+ *
+ * Throws when a read fails; every caller decides what a failure means to it.
+ */
+export async function emailMembershipRecord(
+  admin: MembershipClient,
+  membershipId: string,
+): Promise<MembershipEmailOutcome> {
+  const { data: membership, error } = await admin
+    .from("memberships")
+    .select("id, user_id, plan_id, price_cents, payment_reference, paid_at")
+    .eq("id", membershipId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!membership || !membership.user_id) return { sent: false, reason: "not_found" };
 
-    if (!membership.payment_reference) return;
+  const [{ data: plan }, { data: profile }, recipient] = await Promise.all([
+    admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
+    admin
+      .from("profiles")
+      .select("first_name, middle_name, last_name, preferred_name")
+      .eq("user_id", membership.user_id)
+      .maybeSingle(),
+    // The greeting and the address have to come from the SAME person, and that
+    // person is whoever reads the mail. Reading the subject's profile for a
+    // greeting while sending to their guardian produced "Hi Bea, we have
+    // received $90" into Bea's mother's inbox.
+    deliveryRecipientFor(admin, membership.user_id),
+  ]);
+  const email = recipient.email;
+  if (!email) return { sent: false, reason: "no_address" };
 
-    // A mandatory insurance invoice can ride on this SAME reference
-    // (`resolveInsuranceCover` + `enrolMember`'s bundling), combined into ONE
-    // invoice email under this membership's id. If that combined send never
-    // went out (the `send_email: false` backfill this guarantee exists for),
-    // sending only this row's amount would under-bill the member for what they
-    // actually owe — so an unpaid sibling on the same reference is folded in
-    // exactly as `enrolMember` combines it.
-    //
-    // A CANCELLED sibling is excluded, the same rule `isUnpaid` and
-    // `reconcileUnmatched` already use: a manager closed that invoice on
-    // purpose, so it is owed nothing, and folding it back in here would bill
-    // the member for a charge that was deliberately withdrawn.
-    const { data: bundled } = await admin
-      .from("memberships")
-      .select("price_cents, plan_id")
-      .eq("payment_reference", membership.payment_reference)
-      .neq("id", membership.id)
-      .neq("status", "cancelled")
-      .is("paid_at", null);
-    let totalCents = membership.price_cents;
-    let planName = plan?.name ?? "your casual class";
-    if (bundled?.length) {
-      const { data: siblingPlans } = await admin
-        .from("membership_plans")
-        .select("id, name")
-        .in(
-          "id",
-          bundled.map((b) => b.plan_id),
-        );
-      const nameById = new Map((siblingPlans ?? []).map((p) => [p.id, p.name]));
-      for (const row of bundled) {
-        totalCents += row.price_cents;
-        const siblingName = nameById.get(row.plan_id);
-        if (siblingName) planName = `${planName} + ${siblingName}`;
-      }
-    }
-    // Nothing is owed, on this row or anything bundled with it.
-    if (totalCents === 0) return;
-
-    const { sendMembershipPaymentEmail } = await import("./membership-email.server");
-    await sendMembershipPaymentEmail({
-      // `memberName` is the MANAGER copy's "who is this", so it stays the
-      // subject's legal name. Only the greeting and the address move to the
-      // person who actually reads the member copy.
-      memberName: profile ? profileFullName(profile) : "",
+  if (membership.paid_at) {
+    // Not folding in a bundled sibling here, on purpose: a receipt is never
+    // combined across a bundle anywhere in this app, because a bundle can be
+    // reconciled or marked paid one invoice at a time.
+    const { sendMembershipPaidEmail } = await import("./membership-email.server");
+    const result = await sendMembershipPaidEmail({
       membershipId: membership.id,
       memberGreetingName: recipient.greetingName,
       memberEmail: email,
       forName: recipient.forName,
-      planName,
-      amount: formatCents(totalCents),
-      reference: membership.payment_reference,
+      planName: plan?.name ?? "your membership",
+      validity: plan ? validityLabel(plan) : "",
+      amount: formatCents(membership.price_cents),
       admin,
     });
-  } catch (e) {
-    console.error(`[ensureCasualInvoiceEmailed] failed for membership ${membershipId}:`, e);
+    return result.sent
+      ? { sent: true, email: "receipt", to: email }
+      : { sent: false, reason: "not_sent" };
   }
+
+  if (!membership.payment_reference) return { sent: false, reason: "nothing_owed" };
+
+  // A mandatory insurance invoice can ride on this SAME reference
+  // (`resolveInsuranceCover` + `enrolMember`'s bundling), combined into ONE
+  // invoice email under this membership's id. Sending only this row's amount
+  // would under-bill the member for what they actually owe, so an unpaid
+  // sibling on the same reference is folded in, which is exactly the bundle
+  // `enrolMember` raises.
+  //
+  // A CANCELLED sibling is excluded, the same rule `isUnpaid` and
+  // `reconcileUnmatched` already use: a manager closed that invoice on
+  // purpose, so it is owed nothing, and folding it back in here would bill the
+  // member for a charge that was deliberately withdrawn.
+  const { data: bundled } = await admin
+    .from("memberships")
+    .select("price_cents, plan_id")
+    .eq("payment_reference", membership.payment_reference)
+    .neq("id", membership.id)
+    .neq("status", "cancelled")
+    .is("paid_at", null);
+  let totalCents = membership.price_cents;
+  let planName = plan?.name ?? "your membership";
+  if (bundled?.length) {
+    const { data: siblingPlans } = await admin
+      .from("membership_plans")
+      .select("id, name")
+      .in(
+        "id",
+        bundled.map((b) => b.plan_id),
+      );
+    const nameById = new Map((siblingPlans ?? []).map((p) => [p.id, p.name]));
+    for (const row of bundled) {
+      totalCents += row.price_cents;
+      const siblingName = nameById.get(row.plan_id);
+      if (siblingName) planName = `${planName} + ${siblingName}`;
+    }
+  }
+  // Nothing is owed, on this row or anything bundled with it.
+  if (totalCents === 0) return { sent: false, reason: "nothing_owed" };
+
+  const { sendMembershipPaymentEmail } = await import("./membership-email.server");
+  const result = await sendMembershipPaymentEmail({
+    // `memberName` is the MANAGER copy's "who is this", so it stays the
+    // subject's legal name. Only the greeting and the address move to the
+    // person who actually reads the member copy.
+    memberName: profile ? profileFullName(profile) : "",
+    membershipId: membership.id,
+    memberGreetingName: recipient.greetingName,
+    memberEmail: email,
+    forName: recipient.forName,
+    planName,
+    amount: formatCents(totalCents),
+    reference: membership.payment_reference,
+    admin,
+  });
+  return result.sent.includes(email)
+    ? { sent: true, email: "invoice", to: email }
+    : { sent: false, reason: "not_sent" };
 }
 
 /**
@@ -1146,25 +1170,10 @@ export async function enrolMember(
   // member does not care that it lands as two invoices on our side.
   if (input.sendEmail !== false) {
     try {
-      const recipient = await deliveryRecipientFor(admin, userId);
-      if (recipient.email) {
-        const totalCents = price + (insuranceInvoice?.price_cents ?? 0);
-        const planName = insuranceInvoice ? `${plan.name} + ${insurancePlan!.name}` : plan.name;
-        const { sendMembershipPaymentEmail } = await import("./membership-email.server");
-        await sendMembershipPaymentEmail({
-          membershipId: inserted.id,
-          // The manager copy still identifies the SUBJECT by their legal name;
-          // only the member copy's greeting and address follow the household.
-          memberName: who ? profileFullName(who) : "",
-          memberGreetingName: recipient.greetingName,
-          memberEmail: recipient.email,
-          forName: recipient.forName,
-          planName,
-          amount: formatCents(totalCents),
-          reference: inserted.payment_reference,
-          admin,
-        });
-      }
+      // Rebuilt from the rows just written: the bundled insurance invoice
+      // shares this reference, so it is folded in as one email with the
+      // combined amount and both plan names.
+      await emailMembershipRecord(admin, inserted.id);
     } catch (e) {
       console.error("[enrolMember] failed to send payment email:", e);
     }

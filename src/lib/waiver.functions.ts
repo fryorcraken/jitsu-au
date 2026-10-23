@@ -2394,6 +2394,97 @@ export const uploadPaperWaiver = createServerFn({ method: "POST" })
 // they're emailed to say their account is active (applicant -> visitor).
 // Revoking approval only reverts the waiver's status; the profile and login are left
 // as they are.
+/** The waiver fields the account-activated email is written from. */
+export type WaiverForActivation = {
+  id: string;
+  user_id: string;
+  first_name: string;
+  middle_name?: string | null;
+  last_name?: string | null;
+  preferred_name?: string | null;
+  guardian_name?: string | null;
+};
+
+/** Whose login approving this waiver opens, and where that login stands. */
+export type WaiverAccountContact = {
+  userId: string;
+  /** True when that login is a guardian's, because the waiver is a child's. */
+  forDependant: boolean;
+  /** The login's address, which is where the club writes to them. */
+  email: string | null;
+  /** Still banned: never approved, so the account is not open yet. */
+  locked: boolean;
+};
+
+/**
+ * Resolve the login a waiver's approval opens.
+ *
+ * Usually the signer's own. For a child's waiver it is the GUARDIAN's: the
+ * child has no login and never will (#105), so unlocking theirs would open an
+ * account nobody can reach, keyed on a reserved address nothing delivers to.
+ * `contactUserIdFor` is the one place that rule is written down.
+ *
+ * Throws when a read fails.
+ */
+export async function waiverAccountContact(
+  admin: SupabaseClient<Database>,
+  waiver: Pick<WaiverForActivation, "user_id">,
+): Promise<WaiverAccountContact> {
+  const { data: participant, error: participantErr } = await admin
+    .from("profiles")
+    .select("user_id, guardian_user_id")
+    .eq("user_id", waiver.user_id)
+    .maybeSingle();
+  if (participantErr) throw participantErr;
+  // A waiver whose person has no profile row should not exist -- every path
+  // that files one creates the profile first. If it happens, the person
+  // themselves is the only honest answer, which is what this did before there
+  // were dependants at all.
+  const userId = participant ? contactUserIdFor(participant) : waiver.user_id;
+  const { data: got, error: getErr } = await admin.auth.admin.getUserById(userId);
+  if (getErr) throw getErr;
+  const bannedUntil = (got.user as { banned_until?: string | null } | null)?.banned_until;
+  return {
+    userId,
+    forDependant: userId !== waiver.user_id,
+    // The canonical email lives on the auth user.
+    email: got.user?.email ?? null,
+    locked: Boolean(bannedUntil && new Date(bannedUntil) > new Date()),
+  };
+}
+
+/**
+ * Tell somebody their account is open, built from the approved waiver and the
+ * login it opened. The same email on first approval and on a manager's Resend.
+ *
+ * Best-effort: never throws for a failed send, and reports whether one went.
+ */
+export async function emailAccountActivated(
+  admin: SupabaseClient<Database>,
+  waiver: WaiverForActivation,
+  contact: WaiverAccountContact,
+): Promise<{ sent: boolean }> {
+  if (!contact.email) return { sent: false };
+  // The parent's own name, from the guardian block on the approved waiver --
+  // not `greetingName(waiver)`, which is the child's. The email is going to the
+  // parent and is about their account.
+  const guardianFirstName = splitFullName(waiver.guardian_name || "").first;
+  const { sendAccountActivatedEmail } = await import("./waiver-email.server");
+  const { sent } = await sendAccountActivatedEmail({
+    waiverId: waiver.id,
+    memberGreetingName: contact.forDependant
+      ? guardianFirstName || waiver.guardian_name || ""
+      : greetingName(waiver),
+    memberEmail: contact.email,
+    // Names the child, so a parent who never trains can tell what this account
+    // is for. Absent means "this is your own waiver", and the email reads
+    // exactly as it always has.
+    dependantName: contact.forDependant ? greetingName(waiver) : null,
+    admin,
+  });
+  return { sent };
+}
+
 export const setWaiverApproval = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => waiverApprovalSchema.parse(d))
@@ -2503,50 +2594,13 @@ export const setWaiverApproval = createServerFn({ method: "POST" })
       // still locked out of the club they just joined. `contactUserIdFor` is
       // the one place that rule is written down.
       try {
-        const { data: participant, error: participantErr } = await admin
-          .from("profiles")
-          .select("user_id, guardian_user_id")
-          .eq("user_id", waiver.user_id)
-          .maybeSingle();
-        if (participantErr) throw participantErr;
-        // A waiver whose person has no profile row should not exist -- every
-        // path that files one creates the profile first. If it happens, the
-        // person themselves is the only honest answer, which is what this did
-        // before there were dependants at all.
-        const contactUserId = participant ? contactUserIdFor(participant) : waiver.user_id;
-        const forDependant = contactUserId !== waiver.user_id;
-
-        const { data: got, error: getErr } = await admin.auth.admin.getUserById(contactUserId);
-        if (getErr) throw getErr;
-        const bannedUntil = (got.user as { banned_until?: string | null } | null)?.banned_until;
-        const isLocked = Boolean(bannedUntil && new Date(bannedUntil) > new Date());
-        if (isLocked) {
-          const { error: unbanErr } = await admin.auth.admin.updateUserById(contactUserId, {
+        const contact = await waiverAccountContact(admin, waiver);
+        if (contact.locked) {
+          const { error: unbanErr } = await admin.auth.admin.updateUserById(contact.userId, {
             ban_duration: "none",
           });
           if (unbanErr) throw unbanErr;
-          // The canonical email lives on the auth user.
-          const authEmail = got.user?.email;
-          if (authEmail) {
-            // The parent's own name, from the guardian block on the waiver
-            // that was just approved -- not `greetingName(waiver)`, which is
-            // the child's. The email is going to the parent and is about
-            // their account.
-            const guardianFirstName = splitFullName(waiver.guardian_name || "").first;
-            const { sendAccountActivatedEmail } = await import("./waiver-email.server");
-            await sendAccountActivatedEmail({
-              waiverId: waiver.id,
-              memberGreetingName: forDependant
-                ? guardianFirstName || waiver.guardian_name || ""
-                : greetingName(waiver),
-              memberEmail: authEmail,
-              // Names the child, so a parent who never trains can tell what
-              // this account is for. Absent means "this is your own waiver",
-              // and the email reads exactly as it always has.
-              dependantName: forDependant ? greetingName(waiver) : null,
-              admin,
-            });
-          }
+          await emailAccountActivated(admin, waiver, { ...contact, locked: false });
         }
       } catch (e) {
         console.error("[setWaiverApproval] access provisioning failed:", e);
