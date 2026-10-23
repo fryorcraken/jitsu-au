@@ -1,4 +1,6 @@
-# Table privileges `anon` and `authenticated` are allowed to hold in `public`.
+# Privileges `anon` and `authenticated` are allowed to hold on tables in
+# `public`, on a whole table or on single columns of one. A grant to PUBLIC is
+# never allowed and cannot be listed.
 #
 # One `table:grantee:privilege` per line; a column grant is
 # `table(column):grantee:privilege`. check-client-grants.py FAILS on

@@ -61,12 +61,12 @@ It is a reversible bookkeeping mark, and it is the answer to "everyone who ever
 signed stays on the books" that needs neither of the questions below settled,
 because it destroys nothing:
 
-- Every record, waiver, PDF, membership and check-in stays exactly as it is.
-- The person can still sign in, see their account and pay what they owe. It is
-  not a ban.
-- What changes is who the club **contacts**: an archived person gets no
-  club-initiated mass email. Mail that answers something they did or owe still
-  reaches them.
+- Every record, waiver, PDF, membership and check-in will stay exactly as it is.
+- The person will still be able to sign in, see their account and pay what they
+  owe. It is not a ban.
+- What it will change is who the club **contacts**: an archived person is to get
+  no club-initiated mass email, while mail that answers something they did or
+  owe still reaches them. Until the next change lands, nothing excludes anybody.
 
 So archiving is never a step towards deleting anybody, and nothing should treat
 it as consent to delete, or as the start of a retention clock. If the club

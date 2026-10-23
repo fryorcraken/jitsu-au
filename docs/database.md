@@ -331,10 +331,14 @@ inside the waiver PDF), and no `full_name`.
 phase: `deriveLifecycleStatus` does not read it, so nothing that filters on phase
 changes meaning. The constraint holds one direction only, because an archive
 date whose archiver has since been deleted is exactly what `SET NULL` produces.
-No client role can write either column: `profiles` holds no privilege for
-`anon` or `authenticated` at all, and `check-client-grants.py` reads column ACLs
-as well as table ones, so a later `GRANT UPDATE (archived_at)` would fail CI
-rather than hand a member their own restore button
+No client role can write either column, and two locks say so. The grants:
+`profiles` holds no table privilege for `anon` or `authenticated` (verified live
+on 2026-09-01; its column ACLs are checked by the CI replay but have not yet
+been read live), and `check-client-grants.py` reads column and `PUBLIC` grants
+as well as table ones, so a later `GRANT UPDATE (archived_at)` fails CI. And the
+`profiles_guard_archive` trigger, which refuses any change to either column made
+as `anon` or `authenticated` whatever the grants say, for the grant made by hand
+in the Lovable UI that no pull request ever shows
 (`20261023100000_profile_archive.sql`). Why archiving is not erasure:
 `docs/erasing-personal-data.md`.
 
