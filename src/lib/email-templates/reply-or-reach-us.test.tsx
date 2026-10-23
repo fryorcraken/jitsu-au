@@ -135,3 +135,28 @@ describe("contact form acknowledgement", () => {
     expect(unset).toMatch(/replies to this address are not read/i);
   });
 });
+
+// A resend after approval must not promise a review that already happened.
+describe("waiver confirmation, resent after approval", () => {
+  const confirmation = (approved: boolean) =>
+    render(
+      React.createElement(WaiverConfirmationEmail, {
+        ...SITE,
+        memberName: "Ada",
+        pdfUrl: "https://example.com/waiver.pdf",
+        replyTo: null,
+        approved,
+      }),
+    );
+
+  it("says the review is still to come before approval", async () => {
+    expect(visibleText(await confirmation(false))).toMatch(/a manager will review/i);
+  });
+
+  it("says it has been approved, and drops the review and account lines, after", async () => {
+    const text = visibleText(await confirmation(true));
+    expect(text).toMatch(/has been approved/i);
+    expect(text).not.toMatch(/a manager will review/i);
+    expect(text).not.toMatch(/once you're approved/i);
+  });
+});

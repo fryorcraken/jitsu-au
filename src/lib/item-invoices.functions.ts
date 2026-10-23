@@ -299,6 +299,8 @@ export type ItemInvoiceEmailOutcome =
 export async function emailItemInvoiceRecord(
   admin: MembershipClient,
   invoice: ItemInvoiceRow,
+  /** A manager's resend: sent under a key of its own. */
+  opts: { resendId?: string } = {},
 ): Promise<ItemInvoiceEmailOutcome> {
   if (!invoice.user_id) return { sent: false, reason: "not_found" };
   // A dependant has no mailbox: this greets the guardian and names the child.
@@ -318,6 +320,7 @@ export async function emailItemInvoiceRecord(
         summary: itemInvoiceSummary(lines),
         amount: formatCents(invoice.total_cents),
         admin,
+        resendId: opts.resendId,
       })
     : await sendItemInvoiceEmail({
         invoiceId: invoice.id,
@@ -331,6 +334,7 @@ export async function emailItemInvoiceRecord(
         total: formatCents(invoice.total_cents),
         reference,
         admin,
+        resendId: opts.resendId,
       });
   if (!result.sent) return { sent: false, reason: "not_sent" };
   return { sent: true, email: invoice.paid_at ? "receipt" : "invoice", to: recipient.email };

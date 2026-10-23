@@ -18,6 +18,7 @@ import { MembershipNotificationEmail } from "@/lib/email-templates/membership-no
 import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templates/item-invoice";
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
+import { resendIdempotencyKey } from "@/lib/email-resend";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
 import { SITE_ORIGIN } from "@/lib/seo";
 import { SITE_NAME } from "@/lib/email-sender";
@@ -47,6 +48,12 @@ export interface MembershipPaymentEmailParams {
   amount: string;
   reference: string;
   admin: AdminClient;
+  /**
+   * Set when a manager resends this email: the member copy goes out under
+   * `resendIdempotencyKey(<original key>, resendId)`, so the provider does not
+   * swallow it as a duplicate of the first send, and no manager copy goes out.
+   */
+  resendId?: string | null;
 }
 
 /**
@@ -65,6 +72,7 @@ export async function sendMembershipPaymentEmail({
   amount,
   reference,
   admin,
+  resendId,
 }: MembershipPaymentEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -129,7 +137,9 @@ export async function sendMembershipPaymentEmail({
         : `Pay ${amount} to activate your ${planName}`,
       html: memberHtml,
       text: memberText,
-      idempotencyKey: `membership-payment-${membershipId}`,
+      idempotencyKey: resendId
+        ? resendIdempotencyKey(`membership-payment-${membershipId}`, resendId)
+        : `membership-payment-${membershipId}`,
       replyTo,
     });
     sent.push(memberEmail);
@@ -138,8 +148,10 @@ export async function sendMembershipPaymentEmail({
   }
 
   // Replying to the manager copy reaches whoever was sent the invoice: the
-  // member, or the parent of a child on their account.
-  for (const to of managers) {
+  // member, or the parent of a child on their account. A resend is the
+  // member's copy again: managers were told when it was raised, and the
+  // manager pressing Resend already knows.
+  for (const to of resendId ? [] : managers) {
     try {
       await sendEmail({
         apiKey,
@@ -180,6 +192,12 @@ export interface MembershipPaidEmailParams {
   amount: string;
   /** Service-role client, used to read the club's reply-to address. */
   admin: AdminClient;
+  /**
+   * Set when a manager resends this email: the member copy goes out under
+   * `resendIdempotencyKey(<original key>, resendId)`, so the provider does not
+   * swallow it as a duplicate of the first send, and no manager copy goes out.
+   */
+  resendId?: string | null;
 }
 
 /**
@@ -199,6 +217,7 @@ export async function sendMembershipPaidEmail({
   validity,
   amount,
   admin,
+  resendId,
 }: MembershipPaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -230,7 +249,9 @@ export async function sendMembershipPaidEmail({
         : `Payment received for ${planName}`,
       html,
       text,
-      idempotencyKey: `membership-paid-${membershipId}`,
+      idempotencyKey: resendId
+        ? resendIdempotencyKey(`membership-paid-${membershipId}`, resendId)
+        : `membership-paid-${membershipId}`,
       replyTo,
     });
     return { sent: true, skipped: false };
@@ -252,6 +273,12 @@ export interface ItemInvoiceEmailParams {
   total: string;
   reference: string;
   admin: AdminClient;
+  /**
+   * Set when a manager resends this email: the member copy goes out under
+   * `resendIdempotencyKey(<original key>, resendId)`, so the provider does not
+   * swallow it as a duplicate of the first send, and no manager copy goes out.
+   */
+  resendId?: string | null;
 }
 
 /**
@@ -273,6 +300,7 @@ export async function sendItemInvoiceEmail({
   total,
   reference,
   admin,
+  resendId,
 }: ItemInvoiceEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -308,7 +336,9 @@ export async function sendItemInvoiceEmail({
         : `Invoice ${reference}: ${total}`,
       html,
       text,
-      idempotencyKey: `item-invoice-${invoiceId}`,
+      idempotencyKey: resendId
+        ? resendIdempotencyKey(`item-invoice-${invoiceId}`, resendId)
+        : `item-invoice-${invoiceId}`,
       replyTo,
     });
     return { sent: true, skipped: false };
@@ -328,6 +358,12 @@ export interface ItemInvoicePaidEmailParams {
   amount: string;
   /** Service-role client, used to read the club's reply-to address. */
   admin: AdminClient;
+  /**
+   * Set when a manager resends this email: the member copy goes out under
+   * `resendIdempotencyKey(<original key>, resendId)`, so the provider does not
+   * swallow it as a duplicate of the first send, and no manager copy goes out.
+   */
+  resendId?: string | null;
 }
 
 /** The receipt for an item invoice. Best-effort; keyed to the invoice, so sent once. */
@@ -340,6 +376,7 @@ export async function sendItemInvoicePaidEmail({
   summary,
   amount,
   admin,
+  resendId,
 }: ItemInvoicePaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -369,7 +406,9 @@ export async function sendItemInvoicePaidEmail({
         : `Payment received for invoice ${reference}`,
       html,
       text,
-      idempotencyKey: `item-invoice-paid-${invoiceId}`,
+      idempotencyKey: resendId
+        ? resendIdempotencyKey(`item-invoice-paid-${invoiceId}`, resendId)
+        : `item-invoice-paid-${invoiceId}`,
       replyTo,
     });
     return { sent: true, skipped: false };

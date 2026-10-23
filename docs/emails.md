@@ -98,6 +98,73 @@ on the sending domain. A dependant's reserved address is refused.
 | Daily digest                             | Club's     | No                                            |
 | Comment reply                            | None       | No                                            |
 
+## Resending
+
+A manager can send some emails again, from a **Resend** button beside the record
+the email was about, or with the agent API's `resend_email`. Both go through
+`resendEmail` in `src/lib/email-resend.functions.ts`; the rules are in
+`src/lib/email-resend.ts`.
+
+| Kind                   | Button where                                                        | Record           |
+| ---------------------- | ------------------------------------------------------------------- | ---------------- |
+| `membership_invoice`   | an unpaid membership, on `/manager/memberships` and the person page | the membership   |
+| `membership_receipt`   | a paid membership, same places                                      | the membership   |
+| `item_invoice`         | an unpaid item invoice, on `/manager/items` and the person page     | the item invoice |
+| `item_invoice_receipt` | a paid item invoice, same places                                    | the item invoice |
+| `waiver_confirmation`  | a waiver signed on the site, on `/manager/waivers`                  | the waiver       |
+| `account_activated`    | the person's live (approved) waiver, on `/manager/waivers`          | the waiver       |
+| `email_verification`   | the email card on the person page, while unconfirmed                | the person       |
+
+How it behaves, and why:
+
+- **Rebuilt, never replayed.** Each resend composes the email again from today's
+  rows through the same function the original send used
+  (`emailMembershipRecord`, `emailItemInvoiceRecord`, `sendWaiverConfirmation`,
+  `emailAccountActivated`, `sendVerificationEmail`). So a resent invoice carries
+  the **amount owed now and the club's current bank details**, not the ones it
+  first went out with; a waiver confirmation a fresh seven-day PDF link (and,
+  once approved, says so instead of "a manager will review"); the verification
+  and code-of-conduct links freshly minted tokens. A raw token is never stored
+  or logged to make resending easier.
+- **To the household contact, as it is today.** The guardian, for a child, and
+  the address on file now, which may be a corrected one rather than the one
+  the first email went to. The button's panel names the address before
+  anything is sent.
+- **Only the member's copy.** Manager notifications are not resent: the
+  manager pressing the button already knows.
+- **A key of its own.** The original key plus `:resend:` plus the id of the
+  click (`useResilientSubmit`'s `client_submission_id`). Under the original key
+  the provider would silently drop it as a duplicate; per click, an automatic
+  retry of one press still cannot deliver two copies.
+- **Once a minute per email per record.** A second press inside the minute is
+  refused and told how long to wait; a retry of the same press is let through.
+  The marker lives in `club_settings` under `email_resend:<kind>:<record>` (no
+  migration), claimed by compare-and-swap so two presses landing together
+  cannot both win, and given back if the send fails.
+- **Refused, with a reason, when it cannot be rebuilt or would be untrue:** no
+  address on file (or a child whose guardian has none), a waiver filed from
+  paper (no confirmation was ever sent), an invoice since paid or cancelled
+  (resend the receipt instead), a receipt with no payment, a free membership,
+  an account email for a waiver not approved or a login still locked, a
+  verification for an address already confirmed or for a dependant.
+- **Logged.** `[email-resend] audit` with the kind, record, manager and whether
+  it went. No address and no token in the log.
+
+The **code of conduct** link has no email of its own to resend. It rides in the
+waiver confirmation, so resending that (for an adult's waiver) sends a fresh
+link. For a child, the guardian agrees from the member area.
+
+**Not resendable, deliberately:** emails a person triggers and can simply ask
+for again (the contact acknowledgement, the interest confirmation, password
+reset and magic link), the daily digest, comment replies, and every manager
+notification.
+
+**Proposed, not built:** a "last sent" line on invoices, so a manager can see
+an invoice went out (and when) before chasing. That needs somewhere durable to
+record every send, original and resend, which is a table and a migration
+(`docs/database-changes.md`); the resend markers above are a rate limit, not a
+history, and only cover resends.
+
 ## Who an email is addressed to
 
 A dependant (somebody on another person's account, usually a child) has no

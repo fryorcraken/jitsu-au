@@ -1,4 +1,4 @@
-// Item invoices as a manager sees them, with Mark as paid / Cancel / Delete on
+// Item invoices as a manager sees them, with Mark as paid / Resend / Cancel / Delete on
 // each row. Shared by the two screens that list them, the club-wide unpaid list
 // on /manager/items and one person's page at /manager/users/<id>, because these
 // buttons record money and destroy records: two copies would be two places for
@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Pill } from "@/components/site/StatusPill";
 import { UserLink } from "@/components/site/UserLink";
+import { ResendEmailButton } from "@/components/site/ResendEmailButton";
 import {
   cancelItemInvoice,
   deleteItemInvoice,
@@ -68,8 +69,14 @@ function ItemInvoiceRowActions({
   const [pending, setPending] = useState<Pending | null>(null);
   const [payment, setPayment] = useState<PaymentReceived>(newPaymentReceived);
 
-  // Paid is finished: nothing to do on it from here.
-  if (whyItemInvoiceIsSettled(invoice)) return null;
+  // Paid is finished: nothing to change on it from here, but the receipt can
+  // still be sent again.
+  if (whyItemInvoiceIsSettled(invoice))
+    return invoice.state === "paid" ? (
+      <div className="flex flex-wrap justify-end gap-2">
+        <ResendEmailButton kind="item_invoice_receipt" recordId={invoice.id} />
+      </div>
+    ) : null;
 
   async function run(kind: Action) {
     setPending({ kind, error: null, busy: true });
@@ -129,6 +136,7 @@ function ItemInvoiceRowActions({
             <Button size="sm" onClick={() => open("pay")}>
               <Check className="mr-1 h-3 w-3" /> Mark as paid
             </Button>
+            <ResendEmailButton kind="item_invoice" recordId={invoice.id} />
             <Button size="sm" variant="outline" onClick={() => open("cancel")}>
               <Undo2 className="mr-1 h-3 w-3" /> Cancel
             </Button>

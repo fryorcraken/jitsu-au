@@ -242,3 +242,43 @@ describe("where a reply to an invoice goes", () => {
     expect(sent().html).toContain(`${SITE_ORIGIN}/contact`);
   });
 });
+
+// A resend is the member's copy again, under a key the provider has not seen.
+// Managers were told when the invoice was raised, so they are not told again.
+describe("a manager's resend of an invoice", () => {
+  const original = process.env.LOVABLE_API_KEY;
+  const admin = { from: vi.fn() } as unknown as SupabaseClient<Database>;
+
+  beforeEach(() => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.LOVABLE_API_KEY;
+    else process.env.LOVABLE_API_KEY = original;
+    vi.restoreAllMocks();
+  });
+
+  it("sends only the member copy, under the resend key", async () => {
+    const managers = await import("@/lib/manager-recipients.server");
+    vi.spyOn(managers, "getManagerEmails").mockResolvedValue(["manager@example.com"]);
+
+    const result = await sendMembershipPaymentEmail({
+      membershipId: "m1",
+      memberName: "Ada Lovelace",
+      memberGreetingName: "Ada",
+      memberEmail: "ada@example.com",
+      planName: "One semester",
+      amount: "$245",
+      reference: "UTSJ-ABC234",
+      admin,
+      resendId: "click-1",
+    });
+
+    expect(result.sent).toEqual(["ada@example.com"]);
+    expect(sendLovableEmail).toHaveBeenCalledTimes(1);
+    const [payload] = sendLovableEmail.mock.calls[0] as [{ to: string; idempotency_key: string }];
+    expect(payload.to).toBe("ada@example.com");
+    expect(payload.idempotency_key).toBe("membership-payment-m1:resend:click-1");
+  });
+});

@@ -41,6 +41,12 @@ interface WaiverConfirmationEmailProps {
    * signer to get back to us. See `reply-or-reach-us.tsx`.
    */
   replyTo: string | null;
+  /**
+   * The waiver has already been approved. Only a manager's resend can be in
+   * this state, and it must not tell the reader a review is still to come or
+   * that an "account is open" email is on its way: that email has been sent.
+   */
+  approved?: boolean;
 }
 
 /** Sent to the person who just signed a waiver, with a link to their PDF copy. */
@@ -52,6 +58,7 @@ export const WaiverConfirmationEmail = ({
   verifyUrl,
   codeOfConductUrl,
   replyTo,
+  approved = false,
 }: WaiverConfirmationEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -87,21 +94,30 @@ export const WaiverConfirmationEmail = ({
             Download your waiver (PDF)
           </Button>
         )}
-        <Text style={text}>
-          A manager will review your submission. You&apos;ll be cleared to train once it&apos;s
-          approved.
-        </Text>
+        {approved ? (
+          <Text style={text}>
+            Your waiver has been approved, so you&apos;re cleared to train. Sign in any time to find
+            our knowledge base in your member area.
+          </Text>
+        ) : (
+          <Text style={text}>
+            A manager will review your submission. You&apos;ll be cleared to train once it&apos;s
+            approved.
+          </Text>
+        )}
         {/* Told about, deliberately NOT linked. The knowledge base is signed-in
             only, and nobody reading this email can sign in yet: their account is
             created locked, and a manager approving the waiver is what opens it.
             A link here would land a brand-new person on a sign-in screen they
             have no account for, which reads as the club being broken on their
             first click. */}
-        <Text style={text}>
-          Once you&apos;re approved we&apos;ll email you to say your account is open, and your
-          member area has our knowledge base in it: what happens in your first session, how our
-          belts and grading work, and how the club runs.
-        </Text>
+        {!approved && (
+          <Text style={text}>
+            Once you&apos;re approved we&apos;ll email you to say your account is open, and your
+            member area has our knowledge base in it: what happens in your first session, how our
+            belts and grading work, and how the club runs.
+          </Text>
+        )}
         {codeOfConductUrl ? (
           <>
             <Text style={text}>

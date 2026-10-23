@@ -20,6 +20,7 @@ import { SITE_ORIGIN } from "@/lib/seo";
 import { SITE_NAME } from "@/lib/email-sender";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
+import { resendIdempotencyKey } from "@/lib/email-resend";
 
 /** Manager dashboard where waivers are reviewed and approved. */
 export const WAIVER_REVIEW_URL = `${SITE_ORIGIN}/manager/waivers`;
@@ -132,7 +133,15 @@ async function verificationLinkFor(
 export type WaiverConfirmationParams = Omit<
   WaiverEmailParams,
   "memberName" | "guardianEmail" | "signedByName"
->;
+> & {
+  /** A manager's resend: see `resendId` in `membership-email.server.ts`. */
+  resendId?: string | null;
+  /**
+   * The waiver has already been approved, so the email must not say a manager
+   * is still to review it. Only a resend can be in this state.
+   */
+  approved?: boolean;
+};
 
 /**
  * The confirmation to the person who signed (or, for a child, the guardian).
@@ -150,6 +159,8 @@ export async function sendWaiverConfirmation({
   admin,
   userId,
   codeOfConductToken,
+  resendId,
+  approved,
 }: WaiverConfirmationParams): Promise<{
   sent: boolean;
   skipped: boolean;
@@ -179,6 +190,7 @@ export async function sendWaiverConfirmation({
       ? buildCodeOfConductUrl({ siteUrl: SITE_ORIGIN, token: codeOfConductToken })
       : null,
     replyTo: clubReply,
+    approved: approved ?? false,
   });
 
   try {
@@ -189,7 +201,9 @@ export async function sendWaiverConfirmation({
       subject: `Your ${SITE_NAME} training waiver`,
       html: await render(memberEl),
       text: await render(memberEl, { plainText: true }),
-      idempotencyKey: `waiver-member-${waiverId}`,
+      idempotencyKey: resendId
+        ? resendIdempotencyKey(`waiver-member-${waiverId}`, resendId)
+        : `waiver-member-${waiverId}`,
       replyTo: clubReply,
     });
     return { sent: true, skipped: false, replyTo: clubReply };
@@ -297,6 +311,8 @@ export interface AccountActivatedEmailParams {
   dependantName?: string | null;
   /** Service-role client, used to read the club's reply-to address. */
   admin: AdminClient;
+  /** A manager's resend: see `resendId` in `membership-email.server.ts`. */
+  resendId?: string | null;
 }
 
 /**
@@ -327,6 +343,7 @@ export async function sendAccountActivatedEmail({
   memberEmail,
   dependantName,
   admin,
+  resendId,
 }: AccountActivatedEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -351,7 +368,9 @@ export async function sendAccountActivatedEmail({
       subject: `Your ${SITE_NAME} account is active`,
       html: await render(el),
       text: await render(el, { plainText: true }),
-      idempotencyKey: `account-activated-${waiverId}`,
+      idempotencyKey: resendId
+        ? resendIdempotencyKey(`account-activated-${waiverId}`, resendId)
+        : `account-activated-${waiverId}`,
       // The template links the contact form either way, so only the header.
       replyTo: await clubReplyTo(admin),
     });

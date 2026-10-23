@@ -532,6 +532,8 @@ export type MembershipEmailOutcome =
 export async function emailMembershipRecord(
   admin: MembershipClient,
   membershipId: string,
+  /** A manager's resend: the member copy only, under a key of its own. */
+  opts: { resendId?: string } = {},
 ): Promise<MembershipEmailOutcome> {
   const { data: membership, error } = await admin
     .from("memberships")
@@ -571,6 +573,7 @@ export async function emailMembershipRecord(
       validity: plan ? validityLabel(plan) : "",
       amount: formatCents(membership.price_cents),
       admin,
+      resendId: opts.resendId,
     });
     return result.sent
       ? { sent: true, email: "receipt", to: email }
@@ -631,6 +634,7 @@ export async function emailMembershipRecord(
     amount: formatCents(totalCents),
     reference: membership.payment_reference,
     admin,
+    resendId: opts.resendId,
   });
   return result.sent.includes(email)
     ? { sent: true, email: "invoice", to: email }

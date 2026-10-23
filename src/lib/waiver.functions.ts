@@ -2463,6 +2463,8 @@ export async function emailAccountActivated(
   admin: SupabaseClient<Database>,
   waiver: WaiverForActivation,
   contact: WaiverAccountContact,
+  /** A manager's resend: sent under a key of its own. */
+  opts: { resendId?: string } = {},
 ): Promise<{ sent: boolean }> {
   if (!contact.email) return { sent: false };
   // The parent's own name, from the guardian block on the approved waiver --
@@ -2481,6 +2483,7 @@ export async function emailAccountActivated(
     // exactly as it always has.
     dependantName: contact.forDependant ? greetingName(waiver) : null,
     admin,
+    resendId: opts.resendId,
   });
   return { sent };
 }
