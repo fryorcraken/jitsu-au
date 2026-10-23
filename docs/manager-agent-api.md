@@ -43,8 +43,8 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 - `list_users` — members and their lifecycle status, roles, and invoices, plus
   the cheap headline fields the person page leads with: `phone`,
   `email_confirmed_at` (null means not verified) and `code_of_conduct` (the same
-  object `get_user` reports). The acceptances are read once for everybody, not
-  once per person.
+  object `get_user` reports). The acceptances are read once, for the people on
+  the returned page, not once per person.
 - `get_user` — one person, as `/manager/users/<id>` shows them. It is that
   page's own read: `loadClubUser` in `src/lib/club-user.functions.ts`, which
   `getClubUser` also calls, projected by `projectAgentUser` in
@@ -58,11 +58,12 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
     workflow needs). A test fails if the read gains a field that is neither
     reported nor listed.
   - **It refuses a half-read.** The page shows a failed address lookup as no
-    address and a failed code-of-conduct read as "not signed yet", so a manager
-    can still approve somebody. The read reports both in `degraded`, and
-    `get_user` turns a non-empty one into `500 db_error`: an agent cannot see
-    the server log, and would act on the guess. An id with no person record (a
-    lead) is `404 not_found`.
+    address, a failed code-of-conduct read as "not signed yet", and a failed
+    guardian, class or approver lookup as an unknown name, so a manager can
+    still approve somebody. The read lists each of those in `degraded` (which
+    the page itself never receives), and `get_user` turns a non-empty list into
+    `500 db_error`: an agent cannot see the server log, and would act on the
+    guess. An id with no person record (a lead) is `404 not_found`.
 
   Its `memberships` are the page's shape, not `list_users`' `invoices`: they
   carry `kind`, `plan_window` and `checkin_count` (the delete blocker), and leave

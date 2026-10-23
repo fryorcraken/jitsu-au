@@ -295,10 +295,10 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
 
   // Everything whose keys only exist once the first round came back, in one
   // second round rather than one round each.
-  const [{ data: events }, approverProfiles, approverEmails] = await Promise.all([
+  const [{ data: events, error: eventsErr }, approverProfiles, approverEmails] = await Promise.all([
     eventIds.length
       ? admin.from("calendar_events").select("id, title, starts_at").in("id", eventIds)
-      : { data: [] },
+      : { data: [], error: null },
     approverIds.length
       ? admin
           .from("profiles")
@@ -309,6 +309,8 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
     // and cannot approve anything. Left as a direct lookup on purpose.
     approverIds.length ? userEmails(admin, approverIds) : { data: [], error: null },
   ]);
+  // Non-fatal on the page: a check-in with no class name is still a check-in.
+  if (eventsErr) console.error("[getClubUser] class lookup failed:", eventsErr);
   const eventById = new Map((events ?? []).map((e) => [e.id, e]));
   // Non-fatal, like the person's own email lookup above: an unresolved
   // approver shows as "—" next to a real approval date, which is the honest
@@ -338,18 +340,23 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
 
   return {
     /**
-     * The sections this read could not fill, and filled with a guess instead.
+     * The lookups this read could not make, and filled with a guess instead.
      *
-     * The page tolerates both, on purpose: the address shows as missing and the
-     * code of conduct as "not signed yet", with a line in the server log, so a
-     * manager can still make the approval they came to make. A machine caller
-     * cannot read that log, and "no email" or "unsigned" is a confident wrong
-     * answer it would act on, so the API's `get_user` refuses a read with
-     * anything listed here as a `500 db_error` instead. Empty on a clean read.
+     * The page tolerates every one of them, on purpose: the address shows as
+     * missing, the code of conduct as "not signed yet", a class or a name as
+     * unknown, each with a line in the server log, so a manager can still make
+     * the approval they came to make. A machine caller cannot read that log,
+     * and would act on the guess, so the API's `get_user` refuses a read with
+     * anything listed here as a `500 db_error`. Empty on a clean read.
+     *
+     * The page itself does not receive this (`getClubUser` strips it).
      */
     degraded: [
       ...(emailErr ? (["email"] as const) : []),
       ...(cocErr ? (["code_of_conduct"] as const) : []),
+      ...(guardianProfile.error ? (["guardian"] as const) : []),
+      ...(eventsErr ? (["checkin_classes"] as const) : []),
+      ...(approverProfiles.error || approverEmails.error ? (["waiver_approvers"] as const) : []),
     ],
     // Only the derived headline fields, not the whole aggregate. Its
     // `uts_student_number` in particular falls back to a number captured on a
@@ -547,7 +554,10 @@ export const getClubUser = createServerFn({ method: "POST" })
     await requireManager(context as { supabase: MembershipClient; userId: string });
 
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
-    return loadClubUser(admin, data.userId);
+    // The page degrades every lookup in `degraded` on its own terms and never
+    // reads the list, so it is not shipped to the browser.
+    const { degraded: _degraded, ...page } = await loadClubUser(admin, data.userId);
+    return page;
   });
 
 // ---- Manager: correct a person's email address ----
