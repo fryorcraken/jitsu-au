@@ -19,11 +19,50 @@ export const notificationKinds = [
   "new_blog_post",
   "blog_comment",
   "kb_comment",
+  "insurance_ending_soon",
+  "insurance_ended",
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
+/**
+ * The kinds the email switches do NOT govern: messages about somebody's
+ * membership rather than about a conversation, the same way an invoice is.
+ * Nobody can turn them off, and they are sent the moment they are written
+ * rather than folded into the morning summary, so the digest never reads them.
+ *
+ * A closed list on purpose. Adding a kind here takes away a choice people have
+ * today, so it is a product decision each time, made in this one place, and
+ * `notifications.test.ts` pins the list so it cannot grow by accident.
+ * Everything not listed keeps its switch.
+ */
+export const unswitchableNotificationKinds = [
+  // Yearly insurance ending: docs/memberships.md, "When yearly insurance ends".
+  "insurance_ending_soon",
+  "insurance_ended",
+] as const satisfies readonly NotificationKind[];
+export type UnswitchableNotificationKind = (typeof unswitchableNotificationKinds)[number];
+export type SwitchableNotificationKind = Exclude<NotificationKind, UnswitchableNotificationKind>;
+
+/** Whether a kind ignores the email switches. */
+export function isUnswitchable(kind: NotificationKind): kind is UnswitchableNotificationKind {
+  return (unswitchableNotificationKinds as readonly NotificationKind[]).includes(kind);
+}
+
+/**
+ * The kinds the daily summary sweeps: everything with a switch. An unswitchable
+ * row has its own sender, and the digest has no section for it, so reading one
+ * here would stamp it as "nothing they wanted" and it would never go out.
+ */
+export const digestNotificationKinds: readonly SwitchableNotificationKind[] =
+  notificationKinds.filter((k): k is SwitchableNotificationKind => !isUnswitchable(k));
+
 /** The things a notification can be about. Matches the `subject_type` CHECK. */
-export const notificationSubjectTypes = ["blog_comment", "kb_annotation", "blog_post"] as const;
+export const notificationSubjectTypes = [
+  "blog_comment",
+  "kb_annotation",
+  "blog_post",
+  "membership",
+] as const;
 export type NotificationSubjectType = (typeof notificationSubjectTypes)[number];
 
 /**
@@ -41,7 +80,7 @@ export const emailPreferenceKeys = [
 export type EmailPreferenceKey = (typeof emailPreferenceKeys)[number];
 
 /** The switch that governs whether a given kind is emailed. */
-export const preferenceForKind: Record<NotificationKind, EmailPreferenceKey> = {
+export const preferenceForKind: Record<SwitchableNotificationKind, EmailPreferenceKey> = {
   reply: "reply_to_me",
   thread_activity: "thread_activity",
   new_blog_post: "new_blog_post",
@@ -108,6 +147,9 @@ export function shouldEmail(
   kind: NotificationKind,
   opts: { isManager?: boolean } = {},
 ): boolean {
+  // No switch to consult: these are about somebody's membership, and the club
+  // sends them whatever the preferences say.
+  if (isUnswitchable(kind)) return true;
   const key = preferenceForKind[kind];
   // A manager alert reaching somebody who is no longer a manager is a leak of
   // moderation traffic, so the role is re-checked at send time rather than

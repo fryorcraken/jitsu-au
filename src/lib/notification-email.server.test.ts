@@ -82,7 +82,15 @@ function fakeDb(pending: PendingRow[], fails: { emails?: boolean; prefs?: boolea
         return {
           select: () => ({
             is: () => ({
-              order: () => ({ limit: () => Promise.resolve({ data: pending, error: null }) }),
+              in: (_c: string, kinds: string[]) => ({
+                order: () => ({
+                  limit: () =>
+                    Promise.resolve({
+                      data: pending.filter((r) => kinds.includes(r.kind)),
+                      error: null,
+                    }),
+                }),
+              }),
             }),
           }),
           update: () => ({
@@ -192,6 +200,24 @@ describe("sendDailyDigests, for a household", () => {
     // Every row stamped, including the three the merge folded away. Leaving
     // those pending would mail the same post again tomorrow.
     expect(stamped.flat().sort()).toEqual(["n1", "n2", "n3", "n4"]);
+  });
+
+  it("leaves the insurance reminders alone: they are sent on their own, not in the summary", async () => {
+    const { sendDailyDigests } = await import("./notification-email.server");
+    // The digest has no section for these, so reading one would stamp it as
+    // "nothing they wanted" and the reminder would never go out.
+    const reminder: PendingRow = {
+      ...post("n9", CHILD_A, "membership-1"),
+      kind: "insurance_ending_soon",
+      title: "Bea's club insurance ends on 12 March",
+      href: "/membership?for=child-a",
+    };
+    const { db, stamped } = fakeDb([post("n1", PARENT), reminder]);
+
+    const result = await sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"));
+
+    expect(result.considered).toBe(1);
+    expect(stamped.flat()).toEqual(["n1"]);
   });
 
   it("still sends a separate email to an unrelated household", async () => {

@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "19",
+  version: "20",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,14 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "20",
+      // One new response field; nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "list_invoices rows, and each invoice inside list_users, carry insurance_reminder. It is null on every plan except yearly insurance (a plan whose kind is insurance). On those it is { ends_within_14_days, owed, last_sent }: ends_within_14_days is true while the member is owed the 'ending soon' reminder (their cover ends in the next 14 club days, they have not renewed, and it is not cancelled); owed is the reminder owed today (insurance_ending_soon, insurance_ended, or null), sent or not; and last_sent is { kind, sent_at } for the latest reminder actually emailed, where kind is insurance_ending_soon or insurance_ended, or null if none has gone out. The site sends both reminders itself every morning; there is no action to send or suppress one, and members cannot switch them off.",
+      ],
+    },
     {
       version: "19",
       // Two new response fields; nothing that worked before changes.
@@ -394,7 +402,7 @@ export const AGENT_MANIFEST: {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining.",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining. A yearly insurance invoice also carries insurance_reminder (see list_invoices).",
       params: [
         {
           name: "status",
@@ -412,7 +420,7 @@ export const AGENT_MANIFEST: {
       name: "list_invoices",
       method: "POST",
       summary:
-        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero).",
+        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero). Each also carries insurance_reminder: null unless the plan is yearly insurance, otherwise { ends_within_14_days, owed, last_sent } — whether the member is owed the 'insurance ends soon' reminder today, which reminder is owed today, and the latest reminder emailed ({ kind: insurance_ending_soon | insurance_ended, sent_at }) or null. The same thing the memberships screen shows as '14-day reminder sent 26 Feb'.",
       params: [
         {
           name: "status",

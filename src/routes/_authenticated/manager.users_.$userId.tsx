@@ -15,6 +15,7 @@ import { UserLink } from "@/components/site/UserLink";
 import { AddMembershipCard } from "@/components/site/AddMembershipCard";
 import { PersonCharges } from "@/components/site/PersonCharges";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
+import { InsuranceReminderNote } from "@/components/site/InsuranceReminderNote";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
 import {
@@ -1019,7 +1020,10 @@ function ManagerUserPage() {
                     <td className="px-3 py-2">{formatCents(m.price_cents)}</td>
                     <td className="px-3 py-2">{m.payment_reference ?? "—"}</td>
                     <td className="px-3 py-2">{formatDate(m.starts_at)}</td>
-                    <td className="px-3 py-2">{formatDate(m.ends_at)}</td>
+                    <td className="px-3 py-2">
+                      {formatDate(m.ends_at)}
+                      <InsuranceReminderNote state={m.insurance_reminder} />
+                    </td>
                     <td className="px-3 py-2">{m.sessions_remaining ?? "—"}</td>
                     <td className="px-3 py-2">
                       <MembershipRowActions membership={m} onChanged={() => load(false)} />

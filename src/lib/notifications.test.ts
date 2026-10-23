@@ -13,8 +13,10 @@ import {
   hasDigestContent,
   kbAnnotationHref,
   mergeHouseholdItems,
+  digestNotificationKinds,
   notificationKinds,
   preferenceForKind,
+  unswitchableNotificationKinds,
   resolveNotificationPreference,
   resolveNotificationPreferences,
   shouldEmail,
@@ -47,8 +49,8 @@ function item(over: Partial<NotificationItem> = {}): NotificationItem {
 }
 
 describe("preferenceForKind", () => {
-  it("maps every kind to a switch", () => {
-    for (const kind of notificationKinds) {
+  it("maps every switchable kind to a switch", () => {
+    for (const kind of digestNotificationKinds) {
       expect(emailPreferenceKeys).toContain(preferenceForKind[kind]);
     }
   });
@@ -59,6 +61,26 @@ describe("preferenceForKind", () => {
   it("puts both moderation kinds behind the same switch", () => {
     expect(preferenceForKind.blog_comment).toBe("manager_comment_alerts");
     expect(preferenceForKind.kb_comment).toBe("manager_comment_alerts");
+  });
+});
+
+describe("unswitchable kinds", () => {
+  // Pinned, because adding a kind here takes a choice away from people. Every
+  // change to this list should have to change this line on purpose.
+  it("is a closed list", () => {
+    expect([...unswitchableNotificationKinds]).toEqual([
+      "insurance_ending_soon",
+      "insurance_ended",
+    ]);
+  });
+
+  it("leaves every other kind to the digest", () => {
+    expect([...digestNotificationKinds, ...unswitchableNotificationKinds].sort()).toEqual(
+      [...notificationKinds].sort(),
+    );
+    for (const kind of unswitchableNotificationKinds) {
+      expect(digestNotificationKinds).not.toContain(kind);
+    }
   });
 });
 
@@ -139,6 +161,25 @@ describe("shouldEmail", () => {
   it("keeps announcements off for somebody who never opted in", () => {
     expect(shouldEmail(null, "new_blog_post")).toBe(false);
     expect(shouldEmail({ new_blog_post: true }, "new_blog_post")).toBe(true);
+  });
+
+  // The insurance reminders are about somebody's membership, like an invoice.
+  // Nobody can turn them off, so every switch off must not stop them, while the
+  // same switches still stop every kind that has one.
+  it("sends an unswitchable kind with every switch off, and still obeys the switches", () => {
+    const allOff = {
+      reply_to_me: false,
+      thread_activity: false,
+      new_blog_post: false,
+      manager_comment_alerts: false,
+    };
+    for (const kind of unswitchableNotificationKinds) {
+      expect(shouldEmail(allOff, kind)).toBe(true);
+      expect(shouldEmail(null, kind)).toBe(true);
+    }
+    for (const kind of digestNotificationKinds) {
+      expect(shouldEmail(allOff, kind, { isManager: true })).toBe(false);
+    }
   });
 });
 

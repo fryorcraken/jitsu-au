@@ -24,6 +24,7 @@ import {
   listContactMessagesSchema,
   deleteContactMessageSchema,
   deleteLeadSchema,
+  insuranceEndingNotifications,
   interestRegistrationNotifications,
   sellableWindowNotifications,
   unreadSince,
@@ -1305,11 +1306,13 @@ describe("composeManagerNotifications", () => {
   const leads = interestRegistrationNotifications({ unread: 1, latestName: "Kim" });
   const windows = sellableWindowNotifications([], "2026-08-03T10:00:00.000Z");
   const digest = digestStalledNotifications({ stalled: 3, oldestAt: "2026-08-01T22:00:00.000Z" });
+  const insurance = insuranceEndingNotifications(3);
   const quiet = {
     waiverApprovals: [],
     contactMessages: [],
     digestStalled: [],
     interestRegistrations: [],
+    insuranceEnding: [],
     membershipWindows: [],
   };
 
@@ -1324,6 +1327,7 @@ describe("composeManagerNotifications", () => {
       contactMessages: contact,
       digestStalled: digest,
       interestRegistrations: leads,
+      insuranceEnding: insurance,
       membershipWindows: windows,
     });
     expect(all.map((n) => n.type)).toEqual([
@@ -1331,6 +1335,7 @@ describe("composeManagerNotifications", () => {
       "unread_contact_messages",
       "notification_digest_stalled",
       "new_interest_registrations",
+      "insurance_ending_soon",
       "define_membership_window",
     ]);
   });
@@ -1351,7 +1356,28 @@ describe("composeManagerNotifications", () => {
     expect(
       composeManagerNotifications({ ...quiet, digestStalled: digest }).map((n) => n.type),
     ).toEqual(["notification_digest_stalled"]);
+    expect(
+      composeManagerNotifications({ ...quiet, insuranceEnding: insurance }).map((n) => n.type),
+    ).toEqual(["insurance_ending_soon"]);
     expect(composeManagerNotifications(quiet)).toEqual([]);
+  });
+});
+
+describe("insuranceEndingNotifications", () => {
+  it("says nothing while nobody's insurance is ending", () => {
+    expect(insuranceEndingNotifications(0)).toEqual([]);
+  });
+
+  it("counts people, in the singular and the plural", () => {
+    expect(insuranceEndingNotifications(1)[0].title).toBe(
+      "1 person's insurance ends in the next 14 days",
+    );
+    const [three] = insuranceEndingNotifications(3);
+    expect(three.title).toBe("3 people's insurance ends in the next 14 days");
+    // Points at the list that shows who, with a reading verb: this is news for
+    // the door, not a fix.
+    expect(three.href).toBe("/manager/memberships");
+    expect(three.actionLabel).toBe("See who");
   });
 });
 

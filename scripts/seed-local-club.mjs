@@ -101,6 +101,8 @@ const BLOG = { welcome: id(21), grading: id(22), draft: id(23) };
 const KB_ARTICLE = { welcome: id(41), etiquette: id(42) };
 const SERIES = id(51);
 const IMPORT_BATCH = id(71);
+/** The manager's own year of cover, ending inside the 14-day reminder window. */
+const ENDING_INSURANCE = id(81);
 
 /** Named so the annotation below can be anchored to one of its blocks. */
 const ETIQUETTE_BODY = [
@@ -603,6 +605,24 @@ await insert("memberships", [
     starts_at: at(-58),
     ends_at: at(307),
   },
+  // Yearly insurance ending in 10 days, so the gallery photographs the reminder
+  // state ("14-day reminder sent") on the manager screens and the "insurance
+  // ends in the next 14 days" attention item. On the MANAGER, deliberately:
+  // the member's own cover drives the insurance tick on /membership that the
+  // purchase specs walk, and the household spec deletes whatever the children
+  // hold. See docs/memberships.md, "When yearly insurance ends".
+  {
+    id: ENDING_INSURANCE,
+    user_id: users.manager,
+    plan_id: INSURANCE_PLAN.id,
+    status: "active",
+    price_cents: priceOf(INSURANCE_PLAN, false),
+    payment_method: "bank_transfer",
+    payment_reference: "JITSU-000104",
+    paid_at: at(-355),
+    starts_at: at(-355),
+    ends_at: at(10),
+  },
   {
     user_id: users.applicant,
     plan_id: TRIAL_PLAN.id,
@@ -874,6 +894,22 @@ await insert("notifications", [
     href: "/kb/mat-etiquette",
     created_at: at(-5),
     emailed_at: at(-4),
+  },
+  // The 14-day reminder for the cover above, already sent by the morning job.
+  {
+    user_id: users.manager,
+    kind: "insurance_ending_soon",
+    subject_type: "membership",
+    subject_id: ENDING_INSURANCE,
+    // The title the morning job writes (`insuranceReminderTitle`).
+    title: `Your club insurance ends on ${new Date(at(10)).toLocaleDateString("en-AU", {
+      day: "numeric",
+      month: "long",
+      timeZone: "Australia/Sydney",
+    })}`,
+    href: "/membership",
+    created_at: at(-4, 22),
+    emailed_at: at(-4, 22),
   },
 ]);
 

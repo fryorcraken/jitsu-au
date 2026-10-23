@@ -29,11 +29,13 @@ import {
   contactMessageNotifications,
   digestStalledNotifications,
   DIGEST_STALL_HOURS,
+  insuranceEndingNotifications,
   interestRegistrationNotifications,
   sellableWindowNotifications,
   waiverApprovalNotifications,
 } from "@/lib/validation";
 import type { ManagerNotification } from "@/lib/validation";
+import { digestNotificationKinds } from "@/lib/notifications";
 import type { MembershipClient, MembershipPlanRow } from "@/lib/membership-types";
 import { listMembershipPlanRows } from "@/lib/membership.functions";
 import { countUnreadContactMessages } from "@/lib/contact-messages.functions";
@@ -111,9 +113,16 @@ export async function digestBacklogNotifications(
   // window. Every row a run considers is stamped, including the ones a
   // preference suppressed, so a single working run leaves evidence here even if
   // it sent no mail. No evidence plus an ageing backlog is the real thing.
+  //
+  // Only kinds the SUMMARY sends count as that evidence. The insurance
+  // reminders are stamped by the same morning request just before the summary
+  // runs, so counting them would let a reminder going out hide a summary that
+  // failed straight after it. Their unsent rows still count in the backlog
+  // above, so a reminder stuck unsent raises this item too.
   const { count: emailedRecently, error: recentError } = await admin
     .from("notifications")
     .select("id", { count: "exact", head: true })
+    .in("kind", [...digestNotificationKinds])
     .gte("emailed_at", cutoff);
   if (recentError) {
     console.error("[notifications] could not check for recent digest sends:", recentError);
@@ -137,30 +146,43 @@ export async function digestBacklogNotifications(
   return digestStalledNotifications({ stalled, oldestAt: first?.created_at ?? null });
 }
 
+/**
+ * "3 people's insurance ends in the next 14 days." Lazy-imported: the server
+ * module carries the email sender, and this file is reachable from a
+ * `*.functions.ts` that ships to the client bundle.
+ */
+async function insuranceEndingCount(admin: MembershipClient): Promise<number> {
+  const { countPeopleWithInsuranceEnding } = await import("@/lib/insurance-reminders.server");
+  return countPeopleWithInsuranceEnding(admin, new Date());
+}
+
 export async function managerAttentionItems(
   admin: MembershipClient,
 ): Promise<ManagerNotification[]> {
   // Sources are independent, so fetch them together rather than in sequence.
   //
-  // The three counts and the digest backlog degrade to "nothing to report" on
+  // The counts and the digest backlog degrade to "nothing to report" on
   // their own failed reads, so one bad query cannot empty the queue around it.
   // The membership windows are the exception and still throw, which
   // `Promise.all` turns into a failed notifications payload: the page then says
   // it could not load and offers a retry, which is honest, rather than
   // reporting all quiet.
-  const [windows, unreadContact, waitingWaivers, newLeads, digestStalled] = await Promise.all([
-    membershipWindowNotifications(admin),
-    countUnreadContactMessages(admin),
-    countWaiversAwaitingApproval(admin),
-    countNewInterestRegistrations(admin),
-    digestBacklogNotifications(admin, new Date()),
-  ]);
+  const [windows, unreadContact, waitingWaivers, newLeads, digestStalled, insuranceEnding] =
+    await Promise.all([
+      membershipWindowNotifications(admin),
+      countUnreadContactMessages(admin),
+      countWaiversAwaitingApproval(admin),
+      countNewInterestRegistrations(admin),
+      digestBacklogNotifications(admin, new Date()),
+      insuranceEndingCount(admin),
+    ]);
 
   return composeManagerNotifications({
     waiverApprovals: waiverApprovalNotifications(waitingWaivers),
     contactMessages: contactMessageNotifications(unreadContact),
     digestStalled,
     interestRegistrations: interestRegistrationNotifications(newLeads),
+    insuranceEnding: insuranceEndingNotifications(insuranceEnding),
     membershipWindows: windows,
   });
 }
