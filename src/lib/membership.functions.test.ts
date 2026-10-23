@@ -1082,6 +1082,69 @@ describe("enrolMember on a free plan", () => {
   });
 });
 
+// ---- Re-raising an unpaid invoice at a different rate ----
+//
+// Re-raising a plan whose invoice is still unpaid resolves back to that
+// invoice and does NOT reprice it: a re-raise sent only to move a start date,
+// or a member pressing Choose again, must not undo a rate a manager chose, and
+// the payment email already quoted the old amount. What it does instead is say
+// so, so the manager's panel can tell them the price stayed where it was.
+
+const SEMESTER_PLAN = {
+  ...FREE_PLAN,
+  id: "plan-semester",
+  code: "2026-s2",
+  name: "Semester 2 2026",
+  public_price_cents: 44500,
+  student_price_cents: 24500,
+};
+
+const UNPAID_PUBLIC = {
+  id: "mem-1",
+  user_id: "user-1",
+  status: "active",
+  paid_at: null,
+  price_cents: 44500,
+  is_student: false,
+  uts_student_number: null,
+};
+
+async function enrolAs(fake: ReturnType<typeof fakeEnrolAdmin>, utsStudentNumber: string | null) {
+  const { enrolMember } = await import("./membership.functions");
+  return enrolMember(fake.admin as never, {
+    userId: "user-1",
+    plan: SEMESTER_PLAN as never,
+    utsStudentNumber,
+    insurancePlan: null,
+    sendEmail: false,
+  });
+}
+
+describe("enrolMember re-raising an unpaid invoice", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("leaves its price alone and says it reused the invoice", async () => {
+    const fake = fakeEnrolAdmin(ok(UNPAID_PUBLIC));
+    await expect(enrolAs(fake, "12345678")).resolves.toMatchObject({
+      reused: true,
+      price_cents: 44500,
+    });
+    expect(fake.inserts).toEqual([]);
+    expect(fake.updates.filter((u) => "price_cents" in (u as object))).toEqual([]);
+  });
+
+  it("says it did not reuse anything when it raised a new invoice", async () => {
+    const fake = fakeEnrolAdmin(ok(null));
+    await expect(enrolAs(fake, null)).resolves.toMatchObject({ reused: false });
+    expect(fake.inserts).toHaveLength(1);
+  });
+});
+
 // ---- Setting the day a membership starts ----
 //
 // The yearly insurance is the one plan whose start is a real choice: it runs a

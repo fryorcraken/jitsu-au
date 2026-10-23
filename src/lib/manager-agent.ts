@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "18",
+  version: "19",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,14 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "19",
+      // Two new response fields; nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "create_membership now also returns `reused` and `price_cents`. `reused` is true when the person already had an unpaid invoice for that plan and it came back instead of a new one. That invoice keeps its price: a different uts_student_number does not reprice it. When `price_cents` is not the rate you meant, cancel or delete that invoice and raise the plan again, or correct the price with edit_invoice.",
+      ],
+    },
     {
       version: "18",
       // Purely additive: eight new actions. Nothing that worked before changes.

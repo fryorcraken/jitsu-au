@@ -16,6 +16,9 @@ export default tseslint.config(
       ".vinxi",
       "src/components/ui/**",
       "src/integrations/supabase/types.ts",
+      // Lovable writes this one ("automatically generated. Do not edit it
+      // directly.") and rewrites it on sync, so a hand fix would not survive.
+      "src/integrations/supabase/previewAuthStorage.ts",
       "src/routeTree.gen.ts",
     ],
   },

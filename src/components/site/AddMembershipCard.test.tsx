@@ -58,7 +58,13 @@ async function openWithPlan(code: string) {
   const user = userEvent.setup();
   listAllMembershipPlans.mockResolvedValue([PERIOD, YEARLY]);
   createMembership.mockResolvedValue({ ok: true, reference: "LEE1234" });
-  render(<AddMembershipCard userId="user-1" onAdded={vi.fn().mockResolvedValue(1)} />);
+  render(
+    <AddMembershipCard
+      userId="user-1"
+      studentNumberOnFile={null}
+      onAdded={vi.fn().mockResolvedValue(1)}
+    />,
+  );
   await user.click(screen.getByRole("button", { name: /add a membership/i }));
   const plan = await screen.findByLabelText(/^plan$/i);
   await user.selectOptions(plan, code);
@@ -149,5 +155,172 @@ describe("AddMembershipCard start date", () => {
     await user.click(screen.getByRole("button", { name: /^add membership$/i }));
     await waitFor(() => expect(createMembership).toHaveBeenCalled());
     expect(createMembership.mock.calls[0][0].data.starts_on).toBeNull();
+  });
+});
+
+// The rate used to be a side effect of a free-text box: a number there made the
+// invoice come out at the student rate while every price on screen still said
+// the public one, and a box that started empty invoiced a UTS student the public
+// rate. These pin the rate as a visible choice, priced on each side, defaulting
+// to the person's record, and that what is ticked is what the server is sent.
+describe("AddMembershipCard rate", () => {
+  const SEMESTER = { ...PERIOD, public_price_cents: 44500, student_price_cents: 24500 };
+
+  beforeEach(() => {
+    createMembership.mockClear();
+    listAllMembershipPlans.mockReset();
+    listAllMembershipPlans.mockResolvedValue([SEMESTER, YEARLY]);
+    createMembership.mockResolvedValue({ ok: true, reference: "LEE1234" });
+  });
+
+  async function openOn(onFile: string | null, code = "2026-s2") {
+    const user = userEvent.setup();
+    render(
+      <AddMembershipCard
+        userId="user-1"
+        studentNumberOnFile={onFile}
+        onAdded={vi.fn().mockResolvedValue(1)}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /add a membership/i }));
+    await user.selectOptions(await screen.findByLabelText(/^plan$/i), code);
+    return user;
+  }
+
+  async function sent(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /^add membership$/i }));
+    await waitFor(() => expect(createMembership).toHaveBeenCalled());
+    return createMembership.mock.calls[0][0].data.uts_student_number;
+  }
+
+  it("lists both prices before anything is chosen", async () => {
+    await openOn(null);
+    expect(
+      screen.getByRole("option", { name: "Semester 2 2026 ($445, students $245)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("picks the student rate, with their number, when their record has one", async () => {
+    const user = await openOn("12345678");
+    expect(screen.getByRole("radio", { name: /student rate, \$245/i })).toBeChecked();
+    expect(screen.getByLabelText(/uts student number/i)).toHaveValue("12345678");
+    expect(await sent(user)).toBe("12345678");
+  });
+
+  it("picks the public rate and sends no number when their record has none", async () => {
+    const user = await openOn(null);
+    expect(screen.getByRole("radio", { name: /public rate, \$445/i })).toBeChecked();
+    expect(screen.queryByLabelText(/uts student number/i)).not.toBeInTheDocument();
+    expect(await sent(user)).toBeNull();
+  });
+
+  // The number on file must not ride along once the manager has said public,
+  // or the server would charge the student rate behind the ticked radio.
+  it("sends no number when the manager switches a student to the public rate", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    expect(await sent(user)).toBeNull();
+  });
+
+  it("will not raise at the student rate without a number", async () => {
+    const user = await openOn(null);
+    await user.click(screen.getByRole("radio", { name: /student rate/i }));
+    expect(screen.getByRole("button", { name: /^add membership$/i })).toBeDisabled();
+    await user.type(screen.getByLabelText(/uts student number/i), "999");
+    expect(screen.getByText(/for this invoice only/i)).toBeInTheDocument();
+    expect(await sent(user)).toBe("999");
+  });
+
+  it("asks nothing about rates on a plan with one price", async () => {
+    await openOn(null, "insurance_yearly");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  });
+
+  // The panel stays open after a raise so the next one is quick, which is
+  // exactly when a rate picked for the last invoice would ride on this one.
+  it("starts the next invoice from the record after a raise", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    expect(await sent(user)).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText(/^plan$/i)).toHaveValue(""));
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "2026-s2");
+    expect(screen.getByRole("radio", { name: /student rate/i })).toBeChecked();
+  });
+
+  it("starts from the record again when the plan changes", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "insurance_yearly");
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "2026-s2");
+    expect(screen.getByRole("radio", { name: /student rate/i })).toBeChecked();
+  });
+
+  // No radio on screen, so nothing hidden may decide what is sent: the number
+  // is its own optional field, prefilled from the record and editable.
+  it("offers the number as an optional field on a plan with one price", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    await user.selectOptions(screen.getByLabelText(/^plan$/i), "insurance_yearly");
+    const box = screen.getByLabelText(/uts student number/i);
+    expect(box).toHaveValue("12345678");
+    expect(screen.getByText(/one price for everyone/i)).toBeInTheDocument();
+    await user.clear(box);
+    expect(await sent(user)).toBeNull();
+  });
+
+  // The server returns an unpaid invoice they already had rather than raising a
+  // second, and leaves its price alone. Reporting a plain success there would
+  // tell a manager correcting the rate that it worked.
+  it("says so when an existing invoice came back at a different price", async () => {
+    createMembership.mockResolvedValue({
+      ok: true,
+      reference: "LEE1234",
+      reused: true,
+      price_cents: 44500,
+    });
+    const user = await openOn("12345678");
+    await sent(user);
+    expect(
+      await screen.findByText(/already had an unpaid invoice for semester 2 2026/i),
+    ).toHaveTextContent(/still says \$445, not \$245/);
+  });
+
+  it("says nothing extra when the invoice it came back with is at the price picked", async () => {
+    createMembership.mockResolvedValue({
+      ok: true,
+      reference: "LEE1234",
+      reused: true,
+      price_cents: 24500,
+    });
+    const user = await openOn("12345678");
+    await sent(user);
+    await waitFor(() => expect(screen.getByLabelText(/^plan$/i)).toHaveValue(""));
+    expect(screen.queryByText(/already had an unpaid invoice/i)).not.toBeInTheDocument();
+  });
+
+  // The server caps the number at 32 characters; a longer paste would fail
+  // there with a validation dump rather than at the field.
+  it("caps the number at the length the server accepts", async () => {
+    await openOn("12345678");
+    expect(screen.getByLabelText(/uts student number/i)).toHaveAttribute("maxLength", "32");
+  });
+
+  it("reads a free student price as free, not as a price called Free", async () => {
+    listAllMembershipPlans.mockResolvedValue([{ ...SEMESTER, student_price_cents: 0 }]);
+    await openOn("12345678");
+    expect(
+      screen.getByRole("option", { name: "Semester 2 2026 ($445, free for students)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /student rate, free/i })).toBeInTheDocument();
+  });
+
+  // An edit is for one invoice. Reopening starts from the record again.
+  it("goes back to the record each time the panel opens", async () => {
+    const user = await openOn("12345678");
+    await user.click(screen.getByRole("radio", { name: /public rate/i }));
+    await user.click(screen.getByRole("button", { name: /^close$/i }));
+    await user.click(screen.getByRole("button", { name: /add a membership/i }));
+    await user.selectOptions(await screen.findByLabelText(/^plan$/i), "2026-s2");
+    expect(screen.getByRole("radio", { name: /student rate/i })).toBeChecked();
   });
 });

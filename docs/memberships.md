@@ -497,6 +497,38 @@ often writing down an enrolment that already happened rather than selling one:
   now, because that is when they are buying it; a manager can say when it
   actually began. See "Setting the day yearly cover starts".
 
+**The rate is picked on screen, not implied by a text box.** The pricing rule
+is the same one a member's purchase follows (a UTS student number means the
+student rate, `isUtsStudent`), but on the manager's panel it used to show up
+only as a free-text box below the plan list, so typing a number changed the
+invoice while every price on screen still read as the public one, and a box
+that started empty invoiced a UTS student at the public rate. Now:
+
+- the plan list shows both prices (`Semester 2 2026 ($445, students $245)`);
+- a plan with a student price asks **Rate**, with the price on each option,
+  preselected to the student rate when the person's profile holds a number;
+- the number sits inside the student option, prefilled from the profile and
+  required to submit it. Choosing public sends no number, so the server cannot
+  charge the student rate behind a ticked "Public rate". A number typed or
+  cleared here is for that invoice only and never changes the profile. Every
+  invoice starts from the profile again: on opening the panel, on choosing a
+  plan, and after each raise, since the panel stays open for the next one;
+- a plan with one price asks no rate. The number is an optional field of its
+  own there, prefilled from the profile, and only goes on the invoice as a
+  record;
+- **re-raising a plan whose invoice is still unpaid does not reprice it.** The
+  reuse path in `enrolMember` hands back that invoice unchanged apart from a
+  start date, and says so (`reused`, `price_cents`). When that price is not the
+  one picked, the panel says the invoice still holds the old price and to cancel
+  or delete it and raise the plan again. Repricing on reuse was tried and taken
+  out: a re-raise sent only to move a start date, or a member pressing Choose
+  again, would quietly undo a rate a manager had chosen, and the payment email
+  already sent would quote an amount the bank-statement match no longer
+  accepts.
+
+The agent's `create_membership` takes `uts_student_number` as before and does
+not read the profile: an agent states the rate it means.
+
 `send_email: false` records the invoice without telling anyone about it, so
 backfilling last semester does not invoice the whole club for it. The free trial
 is still once per person ever, however it is raised.

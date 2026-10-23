@@ -1030,7 +1030,11 @@ function ManagerUserPage() {
             </table>
           </div>
         )}
-        <AddMembershipCard userId={userId} onAdded={() => load(false)} />
+        <AddMembershipCard
+          userId={userId}
+          studentNumberOnFile={profile.uts_student_number}
+          onAdded={() => load(false)}
+        />
       </div>
 
       {/* Charges for things that are not a membership (docs/item-invoices.md).
