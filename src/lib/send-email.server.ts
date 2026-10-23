@@ -18,6 +18,16 @@
 import { sendLovableEmail } from "@lovable.dev/email-js";
 import { FROM, SENDER_DOMAIN } from "@/lib/email-sender";
 
+/**
+ * Whether the email service looked at the request and refused it, as opposed
+ * to failing to answer. Duck-typed on `EmailAPIError.status` so that tests
+ * mocking the SDK module do not have to re-export its error class.
+ */
+function refusedByService(e: unknown): boolean {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 429;
+}
+
 export async function sendEmail(opts: {
   apiKey: string;
   sendUrl?: string;
@@ -27,23 +37,42 @@ export async function sendEmail(opts: {
   text: string;
   idempotencyKey: string;
   /**
-   * Where a reply goes instead of the noreply sender. A bare address only,
-   * already validated by the caller: it ends up in a mail header.
+   * Where a reply goes instead of the noreply sender: one address, or several
+   * when a reply should reach more than one person. Bare addresses only,
+   * already validated by the caller: they end up in a mail header. The first
+   * is the one kept if the service will not take several (below).
    */
-  replyTo?: string;
+  replyTo?: string | string[];
 }) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-      reply_to: opts.replyTo,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
+  const replyTo = typeof opts.replyTo === "string" ? [opts.replyTo] : (opts.replyTo ?? []);
+  const send = (reply: string[], idempotencyKey: string) =>
+    sendLovableEmail(
+      {
+        to: opts.to,
+        from: FROM,
+        sender_domain: SENDER_DOMAIN,
+        subject: opts.subject,
+        html: opts.html,
+        text: opts.text,
+        purpose: "transactional",
+        idempotency_key: idempotencyKey,
+        reply_to: reply.length ? reply.join(", ") : undefined,
+      },
+      { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
+    );
+
+  try {
+    await send(replyTo, opts.idempotencyKey);
+  } catch (e) {
+    // A Reply-To listing several addresses is ordinary email, but nothing
+    // documents whether Lovable's send API accepts one. If it refuses, every
+    // caller swallows the error, so the email would simply never arrive: a
+    // manager would not hear about a waiver at all. Losing the second address
+    // is far cheaper, so send once more with only the first. Only on a refusal:
+    // after a timeout the first attempt may have gone out, and the retry's new
+    // idempotency key would then deliver it twice.
+    if (replyTo.length < 2 || !refusedByService(e)) throw e;
+    console.warn("[send-email] several Reply-To addresses were refused; sending with one", e);
+    await send(replyTo.slice(0, 1), `${opts.idempotencyKey}-single-reply-to`);
+  }
 }
