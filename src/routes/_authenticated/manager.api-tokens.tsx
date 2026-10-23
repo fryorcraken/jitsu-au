@@ -52,7 +52,8 @@ function ApiTokensPage() {
   // The raw token is shown exactly once, right after creation.
   const [freshToken, setFreshToken] = useState<{ label: string; token: string } | null>(null);
 
-  const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://jitsu.au";
+  const baseUrl =
+    typeof window !== "undefined" ? window.location.origin : "https://utsjitsu.com.au";
   const agentPrompt = useMemo(() => buildAgentPrompt({ baseUrl }), [baseUrl]);
   const manifestUrl = `${baseUrl}/api/manager/agent`;
 

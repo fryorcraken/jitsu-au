@@ -24,7 +24,7 @@ import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
 /** Canonical origin. Every `rel="canonical"` on the site points here. */
-export const SITE_ORIGIN = "https://jitsu.au";
+export const SITE_ORIGIN = "https://utsjitsu.com.au";
 
 /**
  * Hosts that serve the real site. Anything else (a Lovable preview, a
@@ -33,8 +33,8 @@ export const SITE_ORIGIN = "https://jitsu.au";
  * engines penalise. Those hosts get a "stay out" robots.txt instead.
  *
  * The club's other domains are listed here on purpose, and are NOT blocked.
- * They serve the same site, and every page canonicals to jitsu.au, so letting
- * crawlers in is what consolidates the ranking signal onto jitsu.au. Blocking
+ * They serve the same site, and every page canonicals to utsjitsu.com.au, so
+ * letting crawlers in is what consolidates the ranking signal there. Blocking
  * them would stop a crawler ever reading that canonical and leave bare,
  * contentless URLs eligible for the index instead.
  *
@@ -116,7 +116,7 @@ export const CRAWLER_DISALLOW = [
   "/membership",
 ] as const;
 
-/** Absolute URL for a root-relative path, e.g. "/about" -> "https://jitsu.au/about". */
+/** Absolute URL for a root-relative path, e.g. "/about" -> "https://utsjitsu.com.au/about". */
 export function canonicalUrl(path: string): string {
   return path === "/" ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${path}`;
 }
@@ -181,14 +181,14 @@ export function isProductionHost(host: string | null | undefined): boolean {
  * robots.txt body for the host the request came in on.
  *
  * Production gets the real rules plus the sitemap pointer. Every other host
- * gets a blanket disallow, so preview deploys never compete with jitsu.au in
+ * gets a blanket disallow, so preview deploys never compete with the real site in
  * search results.
  */
 export function buildRobotsTxt(host: string | null | undefined): string {
   if (!isProductionHost(host)) {
     return [
       "# Not the canonical UTS Jitsu site (preview or branch deploy).",
-      "# The real site is https://jitsu.au",
+      `# The real site is ${SITE_ORIGIN}`,
       "User-agent: *",
       "Disallow: /",
       "",
@@ -196,7 +196,7 @@ export function buildRobotsTxt(host: string | null | undefined): string {
   }
 
   return [
-    "# UTS Jitsu (https://jitsu.au)",
+    `# UTS Jitsu (${SITE_ORIGIN})`,
     "User-agent: *",
     "Allow: /",
     ...CRAWLER_DISALLOW.map((path) => `Disallow: ${path}`),
@@ -226,7 +226,7 @@ function postalAddress(): Record<string, string> {
 /**
  * Structured data describing the club, emitted once on the home page.
  *
- * This is what lets a search engine understand that jitsu.au is a martial arts
+ * This is what lets a search engine understand that this site is a martial arts
  * club that trains at a specific Sydney address, rather than a page that
  * happens to mention Ultimo. It carries only facts the site already states in
  * its own copy: name, address, phone and social profiles.

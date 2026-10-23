@@ -115,7 +115,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "UTS Jitsu" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
-      { property: "og:url", content: "https://jitsu.au/" },
+      { property: "og:url", content: "https://utsjitsu.com.au/" },
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       { name: "twitter:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },

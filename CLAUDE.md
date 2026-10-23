@@ -5,7 +5,8 @@ Guidance for AI assistants working in this repository.
 ## What this is
 
 **UTS Jitsu** — the marketing + member website for a Japanese Jiu-Jitsu club
-that trains at UTS Ultimo, Sydney (public site: `https://jitsu.au`). It handles
+that trains at UTS Ultimo, Sydney (public site: `https://utsjitsu.com.au`; the
+old `jitsu.au` redirects there, see "The site's address" below). It handles
 public marketing pages, interest/contact form submissions, and a member area
 where people sign a training **waiver** (with a generated PDF) and managers
 review submissions.
@@ -725,7 +726,29 @@ Two non-obvious rules:
   leave the URL eligible for a bare, contentless listing.
 
 Non-production hosts (Lovable previews, branch deploys) are served a blanket
-`Disallow: /`, so a preview never competes with `jitsu.au` in search results.
+`Disallow: /`, so a preview never competes with the real site in search results.
+
+### The site's address
+
+The site is served from **`https://utsjitsu.com.au`**, and that is `SITE_ORIGIN`
+in `src/lib/seo.ts`: every canonical, the sitemap, and every link in every email
+and calendar feed come from it. `jitsu.au` (the address until October 2026) now
+redirects there. Three rules follow, and the first one has already cost the club
+its nightly email once:
+
+- **Never send a credential to a host that redirects.** A redirect to another
+  host drops the `Authorization` header, so a bearer-token caller pointed at
+  `jitsu.au` gets a 401 with a perfectly valid token. That is what stopped the
+  notification digest and broke the manager agent API for on-device agents
+  (`docs/notifications.md`, "The October domain move").
+- **The digest's URL is a literal in SQL**, not `SITE_ORIGIN`, because pg_cron
+  cannot read the app's config. `src/lib/notification-digest-url.test.ts` fails
+  if the two disagree, so moving the domain again takes a migration too.
+- **Not everything that says `jitsu.au` is the address.** `notify.jitsu.au` is
+  the verified email sender domain, the calendar feed's event UIDs end in
+  `@jitsu.au` (changing them would duplicate every event in every subscriber's
+  calendar), and `dependant.jitsu.au` is the reserved address domain for
+  dependants. All three stay as they are.
 
 ## Security headers
 
@@ -762,7 +785,7 @@ attributes and lifetime are in `src/lib/email-settings-session.ts`.
 - CSP, HSTS and `X-Frame-Options` are **not** set here. Lovable owns the
   Cloudflare deploy and the platform already sends `strict-transport-security`
   and `x-content-type-options`; check what is already on the response with
-  `curl -I https://jitsu.au/` before adding anything that could overlap.
+  `curl -I https://utsjitsu.com.au/` before adding anything that could overlap.
 
 ## Environment variables
 
@@ -780,7 +803,7 @@ the server runtime. They are never written to a file in this repo.
 > fails the "Connect Supabase in Lovable Cloud" check while it is missing. It
 > holds only publishable values — the `anon` key, the Lovable Cloud API URL, the
 > project ref, the Google OAuth **client id** — all of which are baked into the
-> browser bundle anyway and readable from `jitsu.au` with devtools.
+> browser bundle anyway and readable from the live site with devtools.
 >
 > **Never add a secret to it.** This repo is going public, so treat a committed
 > credential as public the moment it is pushed: it has to be rotated, not just

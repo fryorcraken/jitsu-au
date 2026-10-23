@@ -51,7 +51,7 @@ export const Route = createFileRoute("/email-settings/")({
       }),
       { name: "robots", content: "noindex, nofollow" },
     ],
-    links: [{ rel: "canonical", href: "https://jitsu.au/email-settings" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/email-settings" }],
   }),
   // No SSR. Nothing about one person's settings should travel through a server
   // render into HTML that might be held anywhere along the way. The `head()`

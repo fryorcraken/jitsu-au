@@ -24,7 +24,7 @@ export type FeedTokenVerdict<T> =
  * does the manager they ask about it.
  */
 export const REPLACED_LINK_MESSAGE =
-  "This calendar link was replaced, so it has stopped updating. Sign in at jitsu.au/account, copy your new calendar link, and add that one to your calendar app.";
+  "This calendar link was replaced, so it has stopped updating. Sign in at utsjitsu.com.au/account, copy your new calendar link, and add that one to your calendar app.";
 
 /** Deliberately the same words for "never existed" and "mistyped". */
 export const UNKNOWN_LINK_MESSAGE = "Calendar not found.";

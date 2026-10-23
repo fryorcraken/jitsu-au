@@ -37,6 +37,6 @@ describe("sendContactEmails", () => {
   });
 
   it("points managers at the inbox screen that can actually show the message", () => {
-    expect(MANAGER_CONTACT_URL).toBe("https://jitsu.au/manager/contact-messages");
+    expect(MANAGER_CONTACT_URL).toBe("https://utsjitsu.com.au/manager/contact-messages");
   });
 });

@@ -366,7 +366,7 @@ export function BlogPostEditor({
           placeholder="Leave blank to generate one from the title"
           className="mt-1.5"
         />
-        <p className="mt-1 text-xs text-muted-foreground">jitsu.au/blog/{previewSlug}</p>
+        <p className="mt-1 text-xs text-muted-foreground">utsjitsu.com.au/blog/{previewSlug}</p>
       </div>
       <div>
         <Label htmlFor="post-excerpt">Excerpt (shown on the blog list)</Label>

@@ -21,7 +21,7 @@ export const Route = createFileRoute("/calendar")({
       ogDescription: "Upcoming UTS Jitsu training sessions and club events.",
       path: "/calendar",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/calendar" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/calendar" }],
   }),
   component: CalendarPage,
 });

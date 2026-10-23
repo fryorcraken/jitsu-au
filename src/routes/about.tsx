@@ -15,7 +15,7 @@ export const Route = createFileRoute("/about")({
         "Practical Japanese Jiu-Jitsu, inclusive community, and 25+ years of martial arts experience.",
       path: "/about",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/about" }],
+    links: [{ rel: "canonical", href: "https://utsjitsu.com.au/about" }],
   }),
   component: About,
 });
