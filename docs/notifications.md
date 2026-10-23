@@ -546,12 +546,17 @@ SELECT id, status_code, content, error_msg, created
 ```
 
 `status_code` 200 with a body like `{"ok":true,"considered":N,...}` is the
-answer you want. **401 here means the endpoint's cached copy is stale** — it
-reads Vault once and holds the value in memory for the life of the server
-process, so a secret minted after the last deploy needs a redeploy (Publish →
-Update) before the endpoint will see it; a fresh `jitsu.au` build reads Vault
-again on its first request. 503 means the secret genuinely is not in Vault. A
-row with `error_msg` and no status is a network or TLS failure.
+answer you want. **A 401 has two causes, and the same row tells them apart.**
+Look at its `headers` first: a `location` header means the request was
+redirected to another host, which drops the `Authorization` header, so the URL
+literal in the function is pointing at a domain that no longer serves the site
+(the October domain move above). A redeploy cannot fix that. With no
+`location`, the endpoint's cached copy is stale: it reads Vault once and holds
+the value in memory for the life of the server process, so a secret minted
+after the last deploy needs a redeploy (Publish → Update) before the endpoint
+will see it; a fresh build reads Vault again on its first request. 503 means
+the secret genuinely is not in Vault. A row with `error_msg` and no status is a
+network or TLS failure.
 
 **4. Confirm the next scheduled run.** The morning after:
 

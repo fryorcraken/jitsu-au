@@ -80,3 +80,17 @@ $$;
 -- read on its own. Nobody but the scheduler needs to be able to make the site
 -- email everybody.
 REVOKE ALL ON FUNCTION private.run_notification_digest() FROM PUBLIC;
+
+-- Prove the apply. The drift check compares ledger identities, not content, and
+-- a hand-applied digest body has been re-emitted by Lovable under its own
+-- filename twice before, so the apply itself has to show the new body is live.
+DO $$
+BEGIN
+  IF (SELECT prosrc FROM pg_proc
+       WHERE oid = 'private.run_notification_digest()'::regprocedure)
+     NOT LIKE '%''https://utsjitsu.com.au/api/notifications/digest''%' THEN
+    RAISE EXCEPTION
+      'private.run_notification_digest() does not post to https://utsjitsu.com.au/api/notifications/digest after this migration.';
+  END IF;
+END;
+$$;
