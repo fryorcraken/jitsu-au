@@ -157,9 +157,14 @@ function EditorPage() {
     [versions],
   );
   const standardNow = useMemo(() => codeOfConductStandard(flags), [flags]);
+  // Counted for the save as it stands, box ticked or not. Leaving it off
+  // normally re-prompts nobody, but not always: with nothing live, the new
+  // version inherits the newest one's requirement, and that can put people out
+  // of date. The screen has to say so rather than promise nobody is affected.
   const repromptedBySave = useMemo(
-    () => countReprompted(highestAccepted, standardNow, standardAfterSaving(flags, true)),
-    [highestAccepted, standardNow, flags],
+    () =>
+      countReprompted(highestAccepted, standardNow, standardAfterSaving(flags, asksReagreement)),
+    [highestAccepted, standardNow, flags, asksReagreement],
   );
 
   // On-device safety net, the same one the waiver template editor uses: a
@@ -208,9 +213,11 @@ function EditorPage() {
 
   async function onSave() {
     if (!canSave) return;
-    if (asksReagreement) {
+    // A save that asks anybody to agree again gets the hard stop; one that asks
+    // nobody anything just happens, because a rollback undoes it.
+    if (asksReagreement || repromptedBySave > 0) {
       const ok = await confirm({
-        title: "Ask everyone to agree again?",
+        title: asksReagreement ? "Ask everyone to agree again?" : "Ask people to agree again?",
         description:
           repromptedBySave === 0
             ? "This publishes the new version and asks everybody to agree to it. Nobody is up to date right now, so nobody new is asked."
@@ -238,11 +245,9 @@ function EditorPage() {
     });
     if (!outcome.ok) return;
     const saved = outcome.value;
-    toast.success(
-      saved.is_current
-        ? `Saved version ${saved.version}, now live`
-        : `Saved version ${saved.version}. It is not live: make it live from the list.`,
-    );
+    // Always live by now: a version written but not made live comes back as a
+    // refusal in SubmitStatus, with its number, never as a success.
+    toast.success(`Saved version ${saved.version}, now live`);
     draft.clear();
     try {
       apply(await fetchVersions(), saved.version);
@@ -384,11 +389,11 @@ function EditorPage() {
                 className="text-sm text-muted-foreground"
                 aria-live="polite"
               >
-                {asksReagreement
-                  ? repromptedBySave === 0
+                {repromptedBySave > 0
+                  ? `${people(repromptedBySave)} who agreed to an earlier version will be asked to agree again.`
+                  : asksReagreement
                     ? "Nobody is up to date right now, so nobody new will be asked."
-                    : `${people(repromptedBySave)} who agreed to an earlier version will be asked to agree again.`
-                  : "Leave this off for a correction or a small change: everybody who has agreed stays up to date. Turn it on when the rules themselves change."}
+                    : "Leave this off for a correction or a small change: everybody who has agreed stays up to date. Turn it on when the rules themselves change."}
               </p>
             </div>
 
@@ -438,7 +443,9 @@ function EditorPage() {
                       {v.is_current ? (
                         <Badge>Live</Badge>
                       ) : (
-                        <Badge variant="outline">{versionLabel(v, liveVersion)}</Badge>
+                        <Badge variant="outline">
+                          {versionLabel(v, liveVersion, v.first_published_at !== null)}
+                        </Badge>
                       )}
                     </span>
                     <span className="text-xs text-muted-foreground">

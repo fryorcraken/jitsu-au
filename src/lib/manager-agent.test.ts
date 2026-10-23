@@ -795,23 +795,36 @@ describe("projectAgentWaiverTemplate", () => {
 
 describe("projectAgentCodeOfConductVersion", () => {
   const version = {
-    version: 3,
+    version: 5,
     title: "UTS Jitsu Code of Conduct",
-    body_md: "# Rules",
     asks_reagreement: true,
+    required_version: 5,
     is_current: false,
+    first_published_at: "2026-10-02T00:00:00.000Z",
     created_at: "2026-10-01T00:00:00.000Z",
   };
 
   it("reports a version without its text, with the editor's own label", () => {
-    expect(projectAgentCodeOfConductVersion(version, 4)).toEqual({
+    expect(projectAgentCodeOfConductVersion({ ...version, version: 3 }, 4)).toEqual({
       version: 3,
       title: "UTS Jitsu Code of Conduct",
       is_current: false,
       status: "Previous",
       asks_reagreement: true,
-      body_chars: 7,
+      required_version: 5,
+      first_published_at: "2026-10-02T00:00:00.000Z",
       created_at: "2026-10-01T00:00:00.000Z",
     });
+  });
+
+  // Rolled back from 5 to 4: version 5 was live, and people agreed to it.
+  it("calls a version rolled away from Previous, not Draft", () => {
+    expect(projectAgentCodeOfConductVersion(version, 4).status).toBe("Previous");
+  });
+
+  it("calls a version that never went live a Draft", () => {
+    expect(
+      projectAgentCodeOfConductVersion({ ...version, first_published_at: null }, 4).status,
+    ).toBe("Draft");
   });
 });

@@ -22,6 +22,20 @@ describe("versionLabel", () => {
   });
 });
 
+describe("versionLabel, when the document records whether a version was live", () => {
+  it("calls a version rolled away from Previous even though it is newer", () => {
+    expect(versionLabel({ version: 5, is_current: false }, 4, true)).toBe("Previous");
+  });
+
+  it("calls an older version that never went live a Draft", () => {
+    expect(versionLabel({ version: 3, is_current: false }, 4, false)).toBe("Draft");
+  });
+
+  it("still says Live for the live one", () => {
+    expect(versionLabel({ version: 4, is_current: true }, 4, true)).toBe("Live");
+  });
+});
+
 describe("DocumentVersionError", () => {
   it("carries the reason and, when one was written, the version that is not live", () => {
     const e = new DocumentVersionError("not live", "not_published", 4);

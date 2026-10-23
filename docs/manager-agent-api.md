@@ -311,13 +311,22 @@ waiver_template_not_published` with a `Retry-After`, and it carries
   `error.details.version`). Two things are the code of conduct's own:
   - **`asks_reagreement`** (default false) is stored on the version and decides
     who is out of date (`docs/code-of-conduct.md`, rule 3). The save's reply
-    carries `reprompted`, the number of people it put out of date, counted
-    before the write so a failed count refuses the call rather than reporting a
-    number nobody checked. A call with no new text is refused unless it asks,
+    carries `reprompted`, the number of people it put out of date, counted on
+    every save (a correction made while nothing is live inherits the newest
+    version's requirement and can re-prompt people) and before the write, so a
+    failed count refuses the call rather than reporting a number nobody checked. A call with no new text is refused unless it asks,
     which is how a rewrite published without asking gets its ask afterwards.
   - **`client_submission_id`** makes a save safe to retry, as on
     `create_item_invoice`: the same id comes back as the version it already
-    wrote, with `already_saved: true` and `reprompted: 0`.
+    wrote, with `already_saved: true` and `reprompted: 0`. If that version is
+    not live (its first attempt lost the promotion, or somebody published or
+    rolled back since), the replay is refused as `503
+code_of_conduct_not_published` with its `version`, and nothing is made
+    live: promoting it on a retry could silently replace another manager's
+    version or undo a deliberate rollback.
+  - **`list_code_of_conduct_versions` reads no text.** It reports
+    `first_published_at`, which the `Previous` label uses so a version rolled
+    away from never reads as `Draft`.
 
 ### `file_waiver`: the parts that have bitten us
 

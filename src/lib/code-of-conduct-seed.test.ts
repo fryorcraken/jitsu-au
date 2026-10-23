@@ -37,10 +37,10 @@ describe("the seeded version 1", () => {
     const sql = readFileSync(MIGRATION, "utf8");
     const insert = sql.slice(sql.indexOf("INSERT INTO public.code_of_conduct_versions"));
     expect(insert).toMatch(
-      /^INSERT INTO public\.code_of_conduct_versions \(version, title, body_md, asks_reagreement, required_version, is_current\)\s+VALUES \(\s+1,/,
+      /^INSERT INTO public\.code_of_conduct_versions \(\s+version, title, body_md, asks_reagreement, required_version, is_current, first_published_at\s+\)\s+VALUES \(\s+1,/,
     );
     expect(insert).toMatch(
-      /\$coc\$,\s+true,\s+1,\s+true\s+\)\s+ON CONFLICT \(version\) DO NOTHING;/,
+      /\$coc\$,\s+true,\s+1,\s+true,\s+now\(\)\s+\)\s+ON CONFLICT \(version\) DO NOTHING;/,
     );
   });
 });

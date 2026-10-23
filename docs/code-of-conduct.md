@@ -33,7 +33,8 @@ and nothing is blocked by its absence.
    Publishing carries a choice, "Ask everyone to agree again", **off by
    default** and stored on the version (`asks_reagreement`). Each version also
    records, when it is written, its **required version**: itself if it asked,
-   otherwise whatever the live version required at the time. Anyone whose
+   otherwise whatever the live version required at the time (or, if a failed
+   publish left nothing live, the newest version's). Anyone whose
    highest agreement is older than the live version's required version shows as
    out of date, which is a prompt on their account page and a line on their manager
    page, never a warning and never a block. So:
@@ -165,11 +166,16 @@ than the knowledge base's, so version 1 renders exactly as members read it.
 Saving writes a new version and makes it live. The "Ask everyone to agree
 again" choice sits right above the button and says in words what it will do
 ("3 people who agreed to an earlier version will be asked to agree again", or
-that everybody stays up to date when it is off). A save that asks goes through
-a confirm saying the same; a save that does not just happens, because it asks
-nobody anything and can be rolled back. The versions list shows which asked,
-and any version can be made live again, with a confirm saying who that
-re-prompts. Unsaved work is kept on the device, and a save is safe to retry.
+that everybody stays up to date when it is off). The count is for the save as
+it stands, box ticked or not: with nothing live, even a correction can
+re-prompt people (rule 3), and the screen says so rather than promising
+otherwise. Any save that re-prompts somebody goes through a confirm saying the
+same; one that re-prompts nobody just happens, because it can be rolled back.
+The versions list shows which asked, and any version can be made live again,
+with a confirm saying who that re-prompts. A version that has been live is
+labelled "Previous" from then on, even when a rollback leaves it newer than the
+live one. Unsaved work is kept on the device, and a save is safe to retry: a
+retry never makes a version live behind somebody else's back.
 
 ### What a manager sees
 

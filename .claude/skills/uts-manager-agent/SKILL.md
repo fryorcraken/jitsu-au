@@ -823,7 +823,10 @@ refusals with `code_of_conduct_not_published` as the 503), with one addition.
 
 `live_version`, `required_version` (anybody whose highest agreement is below it
 is out of date), and each version without its text: `version`, `title`,
-`status` (`Live | Previous | Draft`), `asks_reagreement`, `body_chars`.
+`status` (`Live | Previous | Draft`; `Previous` means it has been live, so a
+version rolled away from stays `Previous`), `asks_reagreement`,
+`required_version`, `first_published_at`. Read a version's text with
+`get_code_of_conduct`.
 
 ### `get_code_of_conduct` — read one version's text
 
@@ -848,6 +851,18 @@ and a save that already landed comes back `already_saved: true` instead of
 writing a second version). Sending only `asks_reagreement: true` republishes the
 current text as a new version that asks everybody to agree to it, for when a
 rewrite went out without asking.
+
+> **Read `reprompted` even when you did not ask.** A correction normally puts
+> nobody out of date, but if nothing was live (a publish failed and left the
+> club without one) the new version inherits the newest version's requirement,
+> and that can. Tell the manager the number either way.
+>
+> **A retry can come back `503 code_of_conduct_not_published` with
+> `error.details.version`.** That version was written but is not live: its first
+> attempt lost the race to publish, or somebody has changed the live version
+> since. It is never made live behind your back. Check with
+> `list_code_of_conduct_versions`, then `publish_code_of_conduct` it only if it
+> should replace what is live now.
 
 ### `publish_code_of_conduct` — roll back to an earlier version
 

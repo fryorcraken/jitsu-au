@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS public.code_of_conduct_versions (
   -- when it asked; otherwise inherited from the version live when it was saved.
   required_version INTEGER NOT NULL,
   is_current BOOLEAN NOT NULL DEFAULT false,
+  -- When this version first went live, stamped on its first promotion and never
+  -- cleared. It is what lets a list call a superseded version "Previous" rather
+  -- than "Draft" after a rollback: a version's NUMBER cannot say whether it was
+  -- ever live once the club has gone back to an older one, and calling a
+  -- version people agreed to a draft invites treating it as unfinished.
+  first_published_at TIMESTAMPTZ,
   -- One per editor save, resent unchanged on every retry, so a save whose reply
   -- was lost finds the version it already wrote instead of writing a second.
   -- Nullable: an agent may omit it.
@@ -92,7 +98,9 @@ COMMENT ON TABLE public.code_of_conduct_versions IS
 -- It asks for agreement, and so requires itself, because it is the first:
 -- there is nothing older.
 
-INSERT INTO public.code_of_conduct_versions (version, title, body_md, asks_reagreement, required_version, is_current)
+INSERT INTO public.code_of_conduct_versions (
+  version, title, body_md, asks_reagreement, required_version, is_current, first_published_at
+)
 VALUES (
   1,
   $coc$UTS Jitsu Code of Conduct$coc$,
@@ -176,7 +184,8 @@ Gradings:
 $coc$,
   true,
   1,
-  true
+  true,
+  now()
 )
 ON CONFLICT (version) DO NOTHING;
 

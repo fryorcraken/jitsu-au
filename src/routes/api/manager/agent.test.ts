@@ -188,6 +188,7 @@ vi.mock("@/lib/waiver.functions", () => ({
 // the real module, so list_users still measures against the real standard.
 const listCodeOfConductVersionRowsMock = vi.fn();
 const listCodeOfConductVersionFlagsMock = vi.fn();
+const listCodeOfConductVersionSummariesMock = vi.fn();
 const loadCodeOfConductVersionMock = vi.fn();
 const saveCodeOfConductVersionMock = vi.fn();
 const promoteCodeOfConductVersionMock = vi.fn();
@@ -196,6 +197,8 @@ vi.mock("@/lib/code-of-conduct.functions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/code-of-conduct.functions")>()),
   listCodeOfConductVersionRows: (...args: unknown[]) => listCodeOfConductVersionRowsMock(...args),
   listCodeOfConductVersionFlags: (...args: unknown[]) => listCodeOfConductVersionFlagsMock(...args),
+  listCodeOfConductVersionSummaries: (...args: unknown[]) =>
+    listCodeOfConductVersionSummariesMock(...args),
   loadCodeOfConductVersion: (...args: unknown[]) => loadCodeOfConductVersionMock(...args),
   saveCodeOfConductVersion: (...args: unknown[]) => saveCodeOfConductVersionMock(...args),
   promoteCodeOfConductVersion: (...args: unknown[]) => promoteCodeOfConductVersionMock(...args),
@@ -1273,6 +1276,7 @@ describe("manager agent route: the code of conduct", () => {
     asks_reagreement: false,
     required_version: 1,
     is_current: false,
+    first_published_at: "2026-10-01T00:00:00.000Z",
     created_at: "2026-10-01T00:00:00.000Z",
     ...over,
   });
@@ -1284,6 +1288,7 @@ describe("manager agent route: the code of conduct", () => {
     for (const m of [
       listCodeOfConductVersionRowsMock,
       listCodeOfConductVersionFlagsMock,
+      listCodeOfConductVersionSummariesMock,
       loadCodeOfConductVersionMock,
       saveCodeOfConductVersionMock,
       promoteCodeOfConductVersionMock,
@@ -1302,18 +1307,26 @@ describe("manager agent route: the code of conduct", () => {
   }
 
   it("lists versions without their text, with what the club asks of people", async () => {
-    listCodeOfConductVersionRowsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
+    // Version 3 was rolled away from: newer than the live one, but it was live.
+    listCodeOfConductVersionSummariesMock.mockResolvedValue([
+      v(3, { asks_reagreement: true, required_version: 3 }),
+      LIVE,
+      v(1, { asks_reagreement: true }),
+    ]);
     const res = await post({ action: "list_code_of_conduct_versions", params: {} });
     expect(res.status).toBe(200);
     const { result } = await res.json();
-    expect(result).toMatchObject({ count: 2, live_version: 2, required_version: 1 });
-    expect(result.versions[0]).toMatchObject({
+    expect(result).toMatchObject({ count: 3, live_version: 2, required_version: 1 });
+    expect(result.versions[0]).toMatchObject({ version: 3, status: "Previous" });
+    expect(result.versions[1]).toMatchObject({
       version: 2,
       status: "Live",
       asks_reagreement: false,
     });
-    expect(result.versions[1]).toMatchObject({ status: "Previous", asks_reagreement: true });
-    expect(result.versions[0]).not.toHaveProperty("body_md");
+    expect(result.versions[2]).toMatchObject({ status: "Previous", asks_reagreement: true });
+    expect(result.versions[1]).not.toHaveProperty("body_md");
+    // The listing never reads any version's text.
+    expect(listCodeOfConductVersionRowsMock).not.toHaveBeenCalled();
   });
 
   it("says nobody can read it when nothing is live", async () => {
@@ -1353,6 +1366,8 @@ describe("manager agent route: the code of conduct", () => {
   // A correction must not ask anybody anything, and must not spend a read on
   // counting people it cannot affect.
   it("re-prompts nobody for a correction", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 2]);
     saveCodeOfConductVersionMock.mockResolvedValue({
       id: "id-3",
       version: 3,
@@ -1365,7 +1380,28 @@ describe("manager agent route: the code of conduct", () => {
     });
     const { result } = await res.json();
     expect(result).toMatchObject({ asks_reagreement: false, reprompted: 0, based_on: null });
-    expect(highestAcceptedVersionsMock).not.toHaveBeenCalled();
+  });
+
+  // With nothing live, a correction inherits the newest version's requirement,
+  // which can put people out of date without anybody asking. The reply has to
+  // say so rather than report the 0 a correction normally means.
+  it("counts who a correction re-prompts when nothing was live", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([
+      v(2, { asks_reagreement: true, required_version: 2 }),
+      v(1, { asks_reagreement: true }),
+    ]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 1, 2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: false,
+    });
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: { title: "Code", body_md: "# Fixed" },
+    });
+    expect((await res.json()).result).toMatchObject({ asks_reagreement: false, reprompted: 2 });
   });
 
   it("refuses a save that changes nothing", async () => {
@@ -1395,6 +1431,8 @@ describe("manager agent route: the code of conduct", () => {
   });
 
   it("reports a version written but not made live as a retryable 503", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE]);
+    highestAcceptedVersionsMock.mockResolvedValue([]);
     saveCodeOfConductVersionMock.mockRejectedValue(
       await refusal("Someone else changed it.", "not_published", 3),
     );

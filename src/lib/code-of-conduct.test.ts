@@ -178,20 +178,29 @@ describe("codeOfConductStandard", () => {
 });
 
 describe("requiredVersionForSave", () => {
-  const now = { current_version: 4, required_version: 2 };
+  const live4 = [
+    { version: 2, asks_reagreement: true, required_version: 2, is_current: false },
+    { version: 4, asks_reagreement: false, required_version: 2, is_current: true },
+  ];
 
   it("requires itself when it asks", () => {
-    expect(requiredVersionForSave(5, true, now)).toBe(5);
+    expect(requiredVersionForSave(5, true, live4)).toBe(5);
   });
 
-  it("keeps what is required now when it does not", () => {
-    expect(requiredVersionForSave(5, false, now)).toBe(2);
+  it("keeps what the live version requires when it does not", () => {
+    expect(requiredVersionForSave(5, false, live4)).toBe(2);
   });
 
-  it("is the baseline when nothing is live to inherit from", () => {
-    expect(
-      requiredVersionForSave(1, false, { current_version: null, required_version: null }),
-    ).toBe(1);
+  // A failed promotion can leave the club with nothing live. A correction saved
+  // to fix that must not put every member out of date, which inheriting from
+  // "nothing" as if nothing had ever been asked would do.
+  it("inherits the newest version's requirement when nothing is live", () => {
+    const nothingLive = live4.map((v) => ({ ...v, is_current: false }));
+    expect(requiredVersionForSave(5, false, nothingLive)).toBe(2);
+  });
+
+  it("is the baseline when nothing is stored at all", () => {
+    expect(requiredVersionForSave(1, false, [])).toBe(1);
   });
 });
 
