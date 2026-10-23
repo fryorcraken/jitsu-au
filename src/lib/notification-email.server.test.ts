@@ -82,7 +82,15 @@ function fakeDb(pending: PendingRow[], fails: { emails?: boolean; prefs?: boolea
         return {
           select: () => ({
             is: () => ({
-              order: () => ({ limit: () => Promise.resolve({ data: pending, error: null }) }),
+              in: (_c: string, kinds: string[]) => ({
+                order: () => ({
+                  limit: () =>
+                    Promise.resolve({
+                      data: pending.filter((r) => kinds.includes(r.kind)),
+                      error: null,
+                    }),
+                }),
+              }),
             }),
           }),
           update: () => ({

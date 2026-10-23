@@ -22,6 +22,7 @@ import {
 import { CLUB_TIME_ZONE, clubLocalDate } from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
 import {
+  digestNotificationKinds,
   digestSections,
   digestSubject,
   hasDigestContent,
@@ -267,6 +268,9 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
     .from("notifications")
     .select("id, user_id, kind, subject_id, title, body, href, read_at, created_at")
     .is("emailed_at", null)
+    // Only kinds with a switch. The unswitchable ones are sent on their own,
+    // outside the summary, by the flow that writes them.
+    .in("kind", [...digestNotificationKinds])
     .order("created_at", { ascending: true })
     .limit(5000);
   if (error) throw new Error(error.message);

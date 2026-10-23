@@ -13,8 +13,10 @@ import {
   hasDigestContent,
   kbAnnotationHref,
   mergeHouseholdItems,
+  digestNotificationKinds,
   notificationKinds,
   preferenceForKind,
+  unswitchableNotificationKinds,
   resolveNotificationPreference,
   resolveNotificationPreferences,
   shouldEmail,
@@ -47,8 +49,8 @@ function item(over: Partial<NotificationItem> = {}): NotificationItem {
 }
 
 describe("preferenceForKind", () => {
-  it("maps every kind to a switch", () => {
-    for (const kind of notificationKinds) {
+  it("maps every switchable kind to a switch", () => {
+    for (const kind of digestNotificationKinds) {
       expect(emailPreferenceKeys).toContain(preferenceForKind[kind]);
     }
   });
@@ -59,6 +61,23 @@ describe("preferenceForKind", () => {
   it("puts both moderation kinds behind the same switch", () => {
     expect(preferenceForKind.blog_comment).toBe("manager_comment_alerts");
     expect(preferenceForKind.kb_comment).toBe("manager_comment_alerts");
+  });
+});
+
+describe("unswitchable kinds", () => {
+  // Pinned, because adding a kind here takes a choice away from people. Every
+  // change to this list should have to change this line on purpose.
+  it("is a closed list", () => {
+    expect([...unswitchableNotificationKinds]).toEqual([]);
+  });
+
+  it("leaves every other kind to the digest", () => {
+    expect([...digestNotificationKinds, ...unswitchableNotificationKinds].sort()).toEqual(
+      [...notificationKinds].sort(),
+    );
+    for (const kind of unswitchableNotificationKinds) {
+      expect(digestNotificationKinds).not.toContain(kind);
+    }
   });
 });
 
