@@ -14,6 +14,9 @@ describe("sendContactEmails", () => {
   const original = process.env.LOVABLE_API_KEY;
 
   beforeEach(() => {
+    // restoreAllMocks only undoes spies; the hoisted module mocks keep their
+    // calls and resolved values unless cleared here.
+    vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
   afterEach(() => {
@@ -41,6 +44,10 @@ describe("sendContactEmails", () => {
 
     expect(result).toEqual({ sent: [], skipped: true });
     expect(from).not.toHaveBeenCalled();
+    // getManagerEmails is mocked, so `from` alone can no longer catch a lookup
+    // moved above the key check.
+    expect(getManagerEmails).not.toHaveBeenCalled();
+    expect(sendLovableEmail).not.toHaveBeenCalled();
   });
 
   it("sets Reply-To to the sender on the managers' copy, and only there", async () => {
