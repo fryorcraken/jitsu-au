@@ -753,7 +753,11 @@ its nightly email once:
   the verified email sender domain, the calendar feed's event UIDs end in
   `@jitsu.au` (changing them would duplicate every event in every subscriber's
   calendar), and `dependant.jitsu.au` is the reserved address domain for
-  dependants. All three stay as they are.
+  dependants. All three stay as they are. Anything else is a mistake:
+  `src/lib/seo.test.ts` ("the old domain") fails on any other mention of
+  `jitsu.au` in code under `src/`, `public/`, `scripts/`, `e2e/` and
+  `.claude/skills/`, whether a URL or copy. It skips comments and tests, and it
+  does not read `docs/`, where the old name is history.
 
 ## Security headers
 

@@ -143,7 +143,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       // No canonical here. Unlike meta tags, TanStack Router does not replace a
       // parent's <link> when a child declares the same rel: it appends. A
       // site-wide canonical therefore shipped a second, competing
-      // <link rel="canonical" href="https://utsjitsu.com.au/"> on every subpage, and a
+      // <link rel="canonical" href="https://jitsu.au/"> on every subpage, and a
       // page with two canonicals has none as far as a search engine is
       // concerned. Each public page sets its own; noindex pages need none.
       { rel: "stylesheet", href: appCss },
