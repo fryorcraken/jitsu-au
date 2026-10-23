@@ -4,7 +4,6 @@ import {
   isDirty,
   meaningfulAcks,
   parseAcksJson,
-  versionLabel,
 } from "./waiver-template-editor";
 import type { AcknowledgementDef } from "./validation";
 import { MEDIA_ACK_ID } from "./waiver-acknowledgements";
@@ -94,27 +93,6 @@ describe("hasMediaAcknowledgement", () => {
   it("trips when the media item is missing entirely (a pre-media version)", () => {
     expect(hasMediaAcknowledgement([ack()])).toBe(false);
     expect(hasMediaAcknowledgement([])).toBe(false);
-  });
-});
-
-describe("versionLabel", () => {
-  it("marks the live version", () => {
-    expect(versionLabel({ version: 2, is_current: true }, 2)).toBe("Live");
-  });
-
-  it("calls an older version Previous, not Draft", () => {
-    // It may have signatures against it. Labelling a superseded legal document
-    // "Draft" on the screen where a manager picks what the club stands behind
-    // makes a rollback read like publishing something unfinished.
-    expect(versionLabel({ version: 1, is_current: false }, 2)).toBe("Previous");
-  });
-
-  it("calls a never-promoted newer version Draft", () => {
-    expect(versionLabel({ version: 3, is_current: false }, 2)).toBe("Draft");
-  });
-
-  it("calls everything a draft when nothing is live", () => {
-    expect(versionLabel({ version: 1, is_current: false }, null)).toBe("Draft");
   });
 });
 

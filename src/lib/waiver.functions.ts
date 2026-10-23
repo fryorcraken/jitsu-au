@@ -47,7 +47,20 @@ import {
   toDuplicateRefs,
 } from "@/lib/waiver-duplicates";
 import { supersedesMediaConsent } from "@/lib/waiver-approval";
-import { hasMediaAcknowledgement, WaiverTemplateError } from "@/lib/waiver-template-editor";
+import { hasMediaAcknowledgement } from "@/lib/waiver-template-editor";
+import { DocumentVersionError } from "@/lib/document-versions";
+import {
+  nextDocumentVersion,
+  promoteDocumentVersion,
+  type VersionedDocument,
+} from "@/lib/document-version-store";
+
+/** The waiver, as the shared version store talks about it. */
+const WAIVER_DOCUMENT: VersionedDocument = {
+  table: "waiver_templates",
+  noun: "waiver",
+  withoutOne: "nobody can sign",
+};
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 import { resolveWaiverContacts } from "@/lib/waiver-contacts";
@@ -1538,104 +1551,29 @@ export const listWaiverTemplates = createServerFn({ method: "GET" })
 // ---- Manager: promote an existing version to the live one ----
 
 /**
- * Make one template row the live one, and report honestly when it cannot.
+ * Make one waiver version the live one, and report honestly when it cannot.
  *
- * Exported and taking its client as a parameter so the failure paths are
- * unit-testable, following `applyCoverage` / `undoCheckInRow` in
- * `checkin.functions.ts` — a `createServerFn` handler cannot run in the test
- * runner, and the sequence below is the part worth pinning.
- *
- * The partial unique index allows exactly one `is_current = true`, so this is
- * necessarily two writes with a gap: clear, then set. Nothing can close that gap
- * from here — PostgREST gives each statement its own transaction — so the job is
- * to make the gap as short as possible, never widen it needlessly, and be loud
- * when the club is left in it. An unnoticed gap means `/waiver` throws
- * "No active waiver template" for every prospective member who submits.
+ * The sequence (and why it is shaped the way it is) is shared with every other
+ * versioned document: `promoteDocumentVersion` in `document-version-store.ts`.
+ * What is the waiver's own is the media-consent rule below. Exported and taking
+ * its client as a parameter so the editor screen and the manager agent API both
+ * promote through here, and so the failure paths stay unit-testable.
  */
 export async function promoteWaiverTemplate(
   admin: SupabaseClient<Database>,
   id: string,
 ): Promise<{ version: number }> {
-  const { data: target, error: tErr } = await admin
-    .from("waiver_templates")
-    .select("id, version, is_current, acknowledgements")
-    .eq("id", id)
-    .maybeSingle();
-  if (tErr) throw new WaiverTemplateError(tErr.message, "not_published");
-  // Both checks happen BEFORE anything is cleared: a bad id or an already-live
-  // target must never cost the club its live waiver.
-  if (!target) throw new WaiverTemplateError("That waiver version no longer exists.", "not_found");
-  if (target.is_current) return { version: target.version };
   // A template can only go live carrying the media-consent acknowledgement.
   // This is the one place every promotion passes through -- `saveWaiverTemplate`
   // ends by calling this on the version it just inserted -- so it also catches
   // a manager loading and re-saving a version from before the feature existed,
   // not just a direct promote of an old stored one. See
   // `hasMediaAcknowledgement` for what counts as still carrying it.
-  if (!hasMediaAcknowledgement(parseTemplateAcks(target.acknowledgements))) {
-    throw new WaiverTemplateError(
-      "This version has no media consent acknowledgement (or its wording is blank), so making it live would stop the club recording who agreed to photos. Add it back before making this version live.",
-      "invalid",
-      target.version,
-    );
-  }
-
-  const { data: previous, error: pErr } = await admin
-    .from("waiver_templates")
-    .select("id")
-    .eq("is_current", true)
-    .maybeSingle();
-  if (pErr) throw new WaiverTemplateError(pErr.message, "not_published", target.version);
-
-  const { error: clearErr } = await admin
-    .from("waiver_templates")
-    .update({ is_current: false })
-    .eq("is_current", true);
-  if (clearErr) throw new WaiverTemplateError(clearErr.message, "not_published", target.version);
-
-  const { error: setErr } = await admin
-    .from("waiver_templates")
-    .update({ is_current: true })
-    .eq("id", target.id);
-  if (!setErr) return { version: target.version };
-
-  // From here the club has no live waiver until something sets one.
-  //
-  // The likeliest cause is another manager promoting concurrently: they cleared
-  // and set while we were between our own two writes, so our set hit the unique
-  // index. That is not a broken database, it is a race with a winner — say so
-  // in words a manager can act on rather than surfacing a constraint name.
-  const { data: nowCurrent } = await admin
-    .from("waiver_templates")
-    .select("id")
-    .eq("is_current", true)
-    .maybeSingle();
-  if (nowCurrent) {
-    throw new WaiverTemplateError(
-      "Someone else changed the live waiver a moment ago, so this change was not applied. Reload the page to see the current version.",
-      "not_published",
-      target.version,
-    );
-  }
-
-  if (previous) {
-    const { error: restoreErr } = await admin
-      .from("waiver_templates")
-      .update({ is_current: true })
-      .eq("id", previous.id);
-    if (restoreErr) {
-      // Both writes failed and nothing is live. This is the outage case, so it
-      // gets a server-side log AND a message that tells the manager the signing
-      // page is down rather than a generic failure they would shrug at.
-      console.error("[promoteWaiverTemplate] could not restore the live template:", restoreErr);
-      throw new WaiverTemplateError(
-        "The waiver version could not be changed, and the club is now left with no live waiver, so nobody can sign. Try again now to fix it.",
-        "not_published",
-        target.version,
-      );
-    }
-  }
-  throw new WaiverTemplateError(setErr.message, "not_published", target.version);
+  return promoteDocumentVersion(admin, WAIVER_DOCUMENT, id, (row) =>
+    hasMediaAcknowledgement(parseTemplateAcks(row.acknowledgements))
+      ? null
+      : "This version has no media consent acknowledgement (or its wording is blank), so making it live would stop the club recording who agreed to photos. Add it back before making this version live.",
+  );
 }
 
 export const setCurrentWaiverTemplate = createServerFn({ method: "POST" })
@@ -1674,23 +1612,13 @@ export async function saveWaiverTemplateVersion(
   createdBy: string | null,
 ): Promise<{ id: string; version: number }> {
   if (!hasMediaAcknowledgement(input.acknowledgements)) {
-    throw new WaiverTemplateError(
+    throw new DocumentVersionError(
       "This version has no media consent acknowledgement (or its wording is blank), so saving it would stop the club recording who agreed to photos. Add it back before saving.",
       "invalid",
     );
   }
 
-  // A failed read here would number the new template 1 and collide with the
-  // existing version 1, so the manager's save would fail on a duplicate-key
-  // message that says nothing about what actually went wrong.
-  const { data: maxRow, error: maxErr } = await admin
-    .from("waiver_templates")
-    .select("version")
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (maxErr) throw new WaiverTemplateError(maxErr.message, "not_published");
-  const nextVersion = (maxRow?.version ?? 0) + 1;
+  const nextVersion = await nextDocumentVersion(admin, WAIVER_DOCUMENT.table);
 
   // Write the new version as a draft, THEN promote it.
   //
@@ -1712,7 +1640,7 @@ export async function saveWaiverTemplateVersion(
     })
     .select("id, version")
     .single();
-  if (error) throw new WaiverTemplateError(error.message, "not_published");
+  if (error) throw new DocumentVersionError(error.message, "not_published");
 
   // The version now exists. Whatever the promotion does from here, the caller
   // has to hear about THAT rather than about a save it should repeat: saving

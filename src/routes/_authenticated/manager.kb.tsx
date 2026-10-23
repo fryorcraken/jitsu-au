@@ -89,7 +89,7 @@ import {
   wideningVisibility,
 } from "@/lib/kb-editor";
 import type { Placement } from "@/lib/kb-editor";
-import { versionLabel } from "@/lib/waiver-template-editor";
+import { versionLabel } from "@/lib/document-versions";
 import { formatDate } from "@/lib/dates";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";

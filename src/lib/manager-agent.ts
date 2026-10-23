@@ -10,7 +10,7 @@
 import { formatCents, isPaperWaiver, sameInstant } from "@/lib/validation";
 import type { EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
-import { versionLabel } from "@/lib/waiver-template-editor";
+import { versionLabel } from "@/lib/document-versions";
 
 /** The columns `list_kb_articles` projects from. */
 export type AgentKbArticle = {
