@@ -325,7 +325,10 @@ sweep, so an ended year sat `active` and silent. Now the club sends two
 reminders per insurance membership:
 
 - **14 days before** it ends: "Your club insurance ends on 12 March".
-- **On the day it ends**, in Sydney: "Your club insurance ended today".
+- **On the day it ends**, in Sydney: "Your club insurance ended today". A year
+  bought at the counter ends at the time of day it was bought, often the
+  evening, and the job runs at 8 or 9am, so until the cover has actually run out
+  it says "Your club insurance ends today" and to renew today.
 
 Both say how to renew, and that works: the yearly insurance is on sale on its
 own on `/membership` (the "Also available" card), and it is also offered with a
@@ -372,13 +375,14 @@ their own rather than in the morning summary. See `docs/notifications.md`.
 **How it runs.** On the same morning job as the summary (`docs/notifications.md`,
 "The daily summary"), before it, and never stopping it:
 
-1. Write the rows owed today, one `notifications` row per person per reminder
-   (`subject_type = 'membership'`, `subject_id` the membership). A child's row
-   is the child's, which is how the reminder knows who it is about.
+1. Write the rows owed today, one `notifications` row per membership per
+   reminder (`subject_type = 'membership'`, `subject_id` the membership). The
+   row belongs to whoever reads the mail, so a child's reminder sits on the
+   parent's `/notifications` and its title names the child.
 2. Withdraw pending rows nobody is owed any more (they renewed, a manager
    cancelled, the window passed). Deleted rather than stamped, so `emailed_at`
    on one of these rows only ever means the email went out.
-3. Send what is pending, at most 50 emails a run, stamping `emailed_at` only on
+3. Send what is pending, at most 20 emails a run, stamping `emailed_at` only on
    a successful send. A failure stays pending and goes on the next run, and
    rows that sit unsent are what the stalled-email attention item watches.
 
@@ -392,7 +396,8 @@ database refuses these kinds, so the writes are logged and nothing is sent.
 - On `/manager/memberships`: those people first, under "Insurance ending in the
   next 14 days". Every yearly insurance row also says when it ends and which
   reminder went out: "14-day reminder sent 26 Feb", "Ended reminder sent 12
-  Mar", or "Reminder not sent yet" while one is owed.
+  Mar", or "Reminder not sent yet" / "Ended reminder not sent yet" while one is
+  owed and has not gone out.
 - The same line on a person's page, under the end date.
 - The agent API reports the same thing on every invoice in `list_invoices` and
   `list_users`, as `insurance_reminder`. There is no action to send or stop one.

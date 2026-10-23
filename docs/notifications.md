@@ -428,8 +428,10 @@ Two further gaps it has, both worth knowing before trusting it:
 - **A reply email masks it.** It stays quiet if ANY row was stamped in the last
   36 hours, and `sendReplyNotification` stamps the instant reply emails, which
   do not go through the digest at all. One comment reply in the window hides a
-  dead digest. An insurance reminder does the same, though it at least proves
-  the morning job reached the site that day.
+  dead digest. The insurance reminders do NOT mask it: they are stamped by
+  the same morning request just before the summary, so only kinds the summary
+  sends count as evidence here. Their unsent rows do count toward the backlog,
+  so a reminder stuck unsent raises the item too.
 - **It is shown, not sent.** It is an attention item on a page, so it reaches
   only a manager who signs in to the site and looks. A manager who works
   through the agent API never sees it.

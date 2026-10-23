@@ -181,15 +181,18 @@ describe("sendInsuranceReminders", () => {
     expect(bea.text).toContain("Hi Ada");
     expect(bea.text).toContain("/membership");
 
+    // Each row belongs to whoever reads the mail, so the parent sees the
+    // children's reminders on their own /notifications. The covered person is
+    // the subject, and the title names them.
     const rows = tables.notifications;
     expect(rows.map((r) => [r.user_id, r.kind, r.subject_id]).sort()).toEqual([
-      ["bea", "insurance_ending_soon", "m-bea"],
-      ["cy", "insurance_ending_soon", "m-cy"],
-      ["di", "insurance_ending_soon", "m-di"],
+      ["ada", "insurance_ending_soon", "m-bea"],
+      ["ada", "insurance_ending_soon", "m-cy"],
+      ["ada", "insurance_ending_soon", "m-di"],
       ["eve", "insurance_ending_soon", "m-eve"],
     ]);
     expect(rows.every((r) => r.emailed_at)).toBe(true);
-    expect(rows.find((r) => r.user_id === "di")).toMatchObject({
+    expect(rows.find((r) => r.subject_id === "m-di")).toMatchObject({
       subject_type: "membership",
       title: "Di's club insurance ends on 14 March",
       href: "/membership?for=di",
@@ -253,6 +256,20 @@ describe("sendInsuranceReminders", () => {
     expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).not.toContain("eve@example.com");
   });
 
+  it("says 'ends today' while a year bought at the counter still runs", async () => {
+    const { sendInsuranceReminders } = await import("./insurance-reminders.server");
+    const tables = club();
+    // Bought at 7pm, so it ends at 7pm (08:00 UTC) on 10 March.
+    tables.memberships = [
+      { ...tables.memberships.find((m) => m.id === "m-eve")!, ends_at: "2027-03-10T08:00:00.000Z" },
+    ];
+    await sendInsuranceReminders(fakeDb(tables, EMAILS), new Date("2027-03-09T22:00:00.000Z"));
+    expect(sendLovableEmail.mock.calls.map(([p]) => p.subject)).toEqual([
+      "Your club insurance ends today",
+    ]);
+    expect(tables.notifications[0].title).toBe("Your club insurance ends on 10 March");
+  });
+
   it("sends the 'ended' reminder on the day, and never the stale 'ending soon'", async () => {
     const { sendInsuranceReminders } = await import("./insurance-reminders.server");
     const tables = club();
@@ -283,9 +300,16 @@ describe("loadInsuranceReminderStates", () => {
     expect(states.has("m-sem")).toBe(false);
     expect(states.get("m-eve")).toMatchObject({
       ends_within_14_days: true,
+      owed: "insurance_ending_soon",
       last_sent: { kind: "insurance_ending_soon" },
     });
-    expect(states.get("m-old")).toEqual({ ends_within_14_days: false, last_sent: null });
+    // A child's state, though the row itself belongs to the parent.
+    expect(states.get("m-bea")).toMatchObject({ last_sent: { kind: "insurance_ending_soon" } });
+    expect(states.get("m-old")).toEqual({
+      ends_within_14_days: false,
+      owed: null,
+      last_sent: null,
+    });
   });
 });
 

@@ -160,11 +160,13 @@ status — see the note under `list_users`.
 
 Every invoice (here and inside `list_users`) also carries `insurance_reminder`.
 It is `null` unless the plan is yearly insurance. On those it is
-`{ "ends_within_14_days", "last_sent" }`:
+`{ "ends_within_14_days", "owed", "last_sent" }`:
 
 - `ends_within_14_days` is true while the member is owed the "your insurance
   ends soon" email: their cover ends in the next 14 days (Sydney), they have not
   renewed, and it is not cancelled. Paid or unpaid makes no difference.
+- `owed` is the reminder owed today (`insurance_ending_soon` or
+  `insurance_ended`), whether or not it has gone out yet, or `null`.
 - `last_sent` is `{ "kind", "sent_at" }` for the latest reminder actually
   emailed (`insurance_ending_soon` 14 days before, `insurance_ended` on the
   day), or `null` if none has gone out.

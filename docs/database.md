@@ -1274,8 +1274,10 @@ not have carried that, since it is deliberately never cleared.
 
 **The two insurance kinds** (`20261024000000_notification_insurance_reminders.sql`)
 have `subject_type = 'membership'` and `subject_id` = the yearly insurance
-membership. Their `user_id` is the person covered, a child included, and the
-email goes to whoever reads that person's mail. They have no switch in
+membership. Their `user_id` is whoever READS the covered person's mail (the
+parent, for a child), unlike every other kind, where it is the person the row
+is about. A child has no login, so a row of theirs could never be seen in the
+app; the title names them instead. They have no switch in
 `notification_preferences` and the digest never reads them: the daily job sends
 them on their own. A row exists only while the reminder is or was owed, so
 `emailed_at` on one of these always means the email went out. See

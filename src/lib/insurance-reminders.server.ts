@@ -36,6 +36,7 @@ import {
   insuranceReminderTitle,
   insuranceRemindersDue,
   insuranceRenewHref,
+  reminderNameFor,
   type DueInsuranceReminder,
   type InsuranceCover,
   type InsuranceReminderKind,
@@ -54,10 +55,10 @@ type AdminClient = SupabaseClient<Database>;
 /**
  * How many emails one run sends at most. The club sends a handful a month; the
  * bound is there so a backlog (the migration applied late, a week of failed
- * sends) drains over a few mornings rather than in one request that times out
- * halfway and leaves nothing stamped.
+ * sends) drains over a few mornings, and never holds up the summary that runs
+ * after it in the same request.
  */
-const SEND_BATCH = 50;
+const SEND_BATCH = 20;
 
 /** PostgREST renders `.in()` into the URL; same chunk size as household-email.ts. */
 const ID_CHUNK = 100;
@@ -144,7 +145,19 @@ export async function sendInsuranceReminders(
     due.map((d) => d.userId),
   );
 
+  // Who reads each person's mail: the parent, for a child.
+  const readerOf = (userId: string) => {
+    const person = people.get(userId);
+    return person ? contactUserIdFor(person) : userId;
+  };
+
   // ---- 1. write ----
+  // The row belongs to the READER, not to the person covered, because the row
+  // is also the in-app notification and a child has no login to read it: a
+  // parent's `/notifications` lists their own rows only. The covered person is
+  // the subject (their membership), and the title names them. The unique index
+  // still holds one per membership, since each child's membership is its own.
+  //
   // Only for people with a club record: `notifications.user_id` references
   // `profiles`, and one row that fails the reference fails the whole batch.
   const written = await writeNotifications(
@@ -155,11 +168,16 @@ export async function sendInsuranceReminders(
         const person = people.get(d.userId)!;
         const child = person.guardian_user_id ? d.userId : null;
         return {
-          userId: d.userId,
+          userId: readerOf(d.userId),
           kind: d.kind,
           subjectType: "membership" as const,
           subjectId: d.membershipId,
-          title: insuranceReminderTitle(d.kind, d.endDay, child ? greetingName(person) : null),
+          title: insuranceReminderTitle(
+            d.kind,
+            d.endDay,
+            child ? reminderNameFor(greetingName(person)) : null,
+            d.hasEnded,
+          ),
           href: insuranceRenewHref(child),
         };
       }),
@@ -178,9 +196,10 @@ export async function sendInsuranceReminders(
   const stale: string[] = [];
   for (const r of pendingRows ?? []) {
     const d = dueByKey.get(`${r.kind}:${r.subject_id}`);
-    if (d && d.userId === r.user_id) owed.push({ id: r.id, due: d });
+    if (d && readerOf(d.userId) === r.user_id) owed.push({ id: r.id, due: d });
     else stale.push(r.id);
   }
+  let withdrawn = 0;
   for (const slice of chunks(stale)) {
     // `emailed_at IS NULL` again, so a row a concurrent run just sent is never
     // deleted out from under its "Reminder sent" line.
@@ -190,12 +209,13 @@ export async function sendInsuranceReminders(
       .in("id", slice)
       .is("emailed_at", null);
     if (error) console.error("[insurance] could not withdraw reminders:", error.message);
+    else withdrawn += slice.length;
   }
 
   const result: InsuranceReminderRun = {
     due: due.length,
     written: written.length,
-    withdrawn: stale.length,
+    withdrawn,
     sent: 0,
   };
   if (owed.length === 0) return result;
@@ -217,8 +237,7 @@ export async function sendInsuranceReminders(
     { contactId: string; kind: InsuranceReminderKind; endDay: string; rows: typeof owed }
   >();
   for (const o of owed) {
-    const person = people.get(o.due.userId);
-    const contactId = person ? contactUserIdFor(person) : o.due.userId;
+    const contactId = readerOf(o.due.userId);
     const key = `${contactId}|${o.due.kind}|${o.due.endDay}`;
     const g = groups.get(key) ?? { contactId, kind: o.due.kind, endDay: o.due.endDay, rows: [] };
     g.rows.push(o);
@@ -246,10 +265,13 @@ export async function sendInsuranceReminders(
         kind: g.kind,
         endDay: g.endDay,
         today,
+        hasEnded: g.rows.every((r) => r.due.hasEnded),
         people: g.rows.map((r) => ({
           userId: r.due.userId,
           name:
-            r.due.userId === g.contactId ? null : greetingName(nameOf(r.due.userId) ?? {}) || null,
+            r.due.userId === g.contactId
+              ? null
+              : reminderNameFor(greetingName(nameOf(r.due.userId) ?? {})),
         })),
       });
       const el = React.createElement(InsuranceReminderEmail, {
@@ -316,10 +338,8 @@ export async function loadInsuranceReminderStates(
     if (error) throw new Error(error.message);
     covers.push(...(data ?? []));
   }
-  const endingSoon = new Set(
-    insuranceRemindersDue(covers, now)
-      .filter((d) => d.kind === "insurance_ending_soon")
-      .map((d) => d.membershipId),
+  const owed = new Map(
+    insuranceRemindersDue(covers, now).map((d) => [d.membershipId, d.kind] as const),
   );
 
   const lastSent = new Map<string, { kind: InsuranceReminderKind; sent_at: string }>();
@@ -345,7 +365,8 @@ export async function loadInsuranceReminderStates(
 
   for (const r of insurance) {
     states.set(r.id, {
-      ends_within_14_days: endingSoon.has(r.id),
+      ends_within_14_days: owed.get(r.id) === "insurance_ending_soon",
+      owed: owed.get(r.id) ?? null,
       last_sent: lastSent.get(r.id) ?? null,
     });
   }
