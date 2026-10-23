@@ -66,9 +66,25 @@ const MALFORMED_PLAN = {
   is_active: true,
 };
 
+/** What the server answers once a plan has been announced. */
+const announced = (over: Record<string, unknown> = {}) => ({
+  plan_id: "plan-1",
+  announcement_id: "x",
+  recipients: 2,
+  emailed: 2,
+  pending: 0,
+  announced_at: "2026-11-03T01:00:00.000Z",
+  ...over,
+});
+const announcePlan = vi.fn();
+const listPlanAnnouncements = vi.fn().mockResolvedValue({});
+
 vi.mock("@/lib/membership.functions", () => ({
   listAllMembershipPlans: vi.fn().mockResolvedValue([PLAN, ENDED_PLAN, MALFORMED_PLAN]),
   saveMembershipPlan: (...args: unknown[]) => saveMembershipPlan(...args),
+  listPlanAnnouncements: () => listPlanAnnouncements(),
+  countPlanAnnouncementAudience: vi.fn().mockResolvedValue({ inboxes: 2 }),
+  announcePlan: (...args: unknown[]) => announcePlan(...args),
 }));
 
 const toastError = vi.fn();
@@ -318,6 +334,112 @@ describe("/manager/membership-plans", () => {
       // Typing back to the stored value is not a change, so Save greys out.
       await user.keyboard("{Backspace}");
       expect(saveButton).toBeDisabled();
+    });
+  });
+
+  // Emailing every member is irreversible and outward-facing, so it gets the
+  // app's own hard stop with the real number in it, and the save and the send
+  // are two steps the card reports separately.
+  describe("Email all members about this plan", () => {
+    const card = async () => {
+      await screen.findByLabelText("Name", { selector: "#plan-plan-1-name" });
+      return within(document.querySelector('[data-plan="plan-1"]') as HTMLElement);
+    };
+
+    it("asks first, saying how many people, then saves and sends", async () => {
+      const user = userEvent.setup();
+      saveMembershipPlan.mockClear();
+      announcePlan.mockReset();
+      announcePlan.mockImplementation(
+        async ({ data }: { data: { client_submission_id: string } }) =>
+          announced({ announcement_id: data.client_submission_id }),
+      );
+      render(<PlansPage />);
+      const plan = await card();
+
+      // Ticking the box is reason enough to press Save on an unedited plan.
+      const save = plan.getByRole("button", { name: "Save" });
+      expect(save).toBeDisabled();
+      await user.click(plan.getByLabelText("Email all members about this plan"));
+      expect(save).toBeEnabled();
+      await user.click(save);
+
+      expect(
+        await screen.findByText("Save and email 2 people about Semester 2 2026?"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("This can't be undone.")).toBeInTheDocument();
+      expect(saveMembershipPlan).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Save and email" }));
+      await waitFor(() => expect(announcePlan).toHaveBeenCalledTimes(1));
+      expect(saveMembershipPlan).toHaveBeenCalledTimes(1);
+      expect(announcePlan.mock.calls[0][0].data.plan_id).toBe("plan-1");
+      expect(await plan.findByText("Announced on 3 Nov to 2 people.")).toBeInTheDocument();
+      // Done, so the box is clear again: the next tick is a new announcement.
+      expect(plan.getByLabelText("Email all members about this plan")).not.toBeChecked();
+    });
+
+    it("saves and sends nothing when the manager cancels", async () => {
+      const user = userEvent.setup();
+      saveMembershipPlan.mockClear();
+      announcePlan.mockReset();
+      render(<PlansPage />);
+      const plan = await card();
+
+      await user.click(plan.getByLabelText("Email all members about this plan"));
+      await user.click(plan.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+      expect(saveMembershipPlan).not.toHaveBeenCalled();
+      expect(announcePlan).not.toHaveBeenCalled();
+    });
+
+    it("says the plan saved but the email did not, and retries the email alone", async () => {
+      const user = userEvent.setup();
+      saveMembershipPlan.mockClear();
+      announcePlan.mockReset();
+      announcePlan.mockRejectedValueOnce(new Error("The email service refused it."));
+      announcePlan.mockImplementation(
+        async ({ data }: { data: { client_submission_id: string } }) =>
+          announced({ announcement_id: data.client_submission_id }),
+      );
+      render(<PlansPage />);
+      const plan = await card();
+
+      await user.click(plan.getByLabelText("Email all members about this plan"));
+      await user.click(plan.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Save and email" }));
+
+      expect(
+        await plan.findByText(
+          "Semester 2 2026 is saved, but the email to members has not gone out.",
+        ),
+      ).toBeInTheDocument();
+      await user.click(plan.getByRole("button", { name: /try again/i }));
+
+      await waitFor(() => expect(announcePlan).toHaveBeenCalledTimes(2));
+      // The retry is the SAME announcement, so nobody is emailed twice, and it
+      // never saves the plan again.
+      expect(announcePlan.mock.calls[1][0].data.client_submission_id).toBe(
+        announcePlan.mock.calls[0][0].data.client_submission_id,
+      );
+      expect(saveMembershipPlan).toHaveBeenCalledTimes(1);
+      expect(await plan.findByText("Announced on 3 Nov to 2 people.")).toBeInTheDocument();
+    });
+
+    it("shows when a plan was last announced", async () => {
+      listPlanAnnouncements.mockResolvedValueOnce({
+        "plan-1": {
+          announcement_id: "x",
+          announced_at: "2026-11-03T01:00:00.000Z",
+          recipients: 84,
+          emailed: 84,
+          times: 1,
+        },
+      });
+      render(<PlansPage />);
+      const plan = await card();
+      expect(plan.getByText("Announced on 3 Nov to 84 people.")).toBeInTheDocument();
     });
   });
 });
