@@ -39,6 +39,7 @@ import { Route as EmailSettingsIndexRouteImport } from './routes/email-settings/
 import { Route as EmailSettingsTokenRouteImport } from './routes/email-settings/$token'
 import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as KbSlugRouteImport } from './routes/kb/$slug'
+import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as AuthenticatedAccountUserIdRouteImport } from './routes/_authenticated/account_.$userId'
 import { Route as AuthenticatedManagerIndexRouteImport } from './routes/_authenticated/manager.index'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
@@ -216,6 +217,11 @@ const KbSlugRoute = KbSlugRouteImport.update({
   id: '/$slug',
   path: '/$slug',
   getParentRoute: () => KbRouteRoute,
+} as any)
+const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
+  id: '/.lovable/oauth/consent',
+  path: '/.lovable/oauth/consent',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedAccountUserIdRoute =
   AuthenticatedAccountUserIdRouteImport.update({
@@ -403,6 +409,7 @@ export interface FileRoutesByFullPath {
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
+  '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/account/$userId': typeof AuthenticatedAccountUserIdRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -460,6 +467,7 @@ export interface FileRoutesByTo {
   '/blog': typeof BlogIndexRoute
   '/email-settings': typeof EmailSettingsIndexRoute
   '/kb': typeof KbIndexRoute
+  '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/account/$userId': typeof AuthenticatedAccountUserIdRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -520,6 +528,7 @@ export interface FileRoutesById {
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
+  '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/_authenticated/account_/$userId': typeof AuthenticatedAccountUserIdRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -580,6 +589,7 @@ export interface FileRouteTypes {
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
+    | '/.lovable/oauth/consent'
     | '/account/$userId'
     | '/manager/api-tokens'
     | '/manager/blog'
@@ -637,6 +647,7 @@ export interface FileRouteTypes {
     | '/blog'
     | '/email-settings'
     | '/kb'
+    | '/.lovable/oauth/consent'
     | '/account/$userId'
     | '/manager/api-tokens'
     | '/manager/blog'
@@ -696,6 +707,7 @@ export interface FileRouteTypes {
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
+    | '/.lovable/oauth/consent'
     | '/_authenticated/account_/$userId'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/blog'
@@ -751,6 +763,7 @@ export interface RootRouteChildren {
   EmailSettingsTokenRoute: typeof EmailSettingsTokenRoute
   BlogIndexRoute: typeof BlogIndexRoute
   EmailSettingsIndexRoute: typeof EmailSettingsIndexRoute
+  DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
   ApiNotificationsDigestRoute: typeof ApiNotificationsDigestRoute
@@ -970,6 +983,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/kb/$slug'
       preLoaderRoute: typeof KbSlugRouteImport
       parentRoute: typeof KbRouteRoute
+    }
+    '/.lovable/oauth/consent': {
+      id: '/.lovable/oauth/consent'
+      path: '/.lovable/oauth/consent'
+      fullPath: '/.lovable/oauth/consent'
+      preLoaderRoute: typeof DotlovableOauthConsentRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/account_/$userId': {
       id: '/_authenticated/account_/$userId'
@@ -1264,6 +1284,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmailSettingsTokenRoute: EmailSettingsTokenRoute,
   BlogIndexRoute: BlogIndexRoute,
   EmailSettingsIndexRoute: EmailSettingsIndexRoute,
+  DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,
   ApiNotificationsDigestRoute: ApiNotificationsDigestRoute,
