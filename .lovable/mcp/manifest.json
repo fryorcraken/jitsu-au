@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "sdk_version": "3.3.0",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://lgmacvxejzpvghgbjrjd.supabase.co/auth/v1",
+    "require_oauth_client_claim": true,
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "jitsu-club-management",
+      "version": "0.1.0",
+      "title": "Jitsu Club Management"
+    },
+    "tools": [
+      {
+        "name": "club_manifest",
+        "title": "List club manager actions",
+        "description": "Read the full list of club manager actions, what each one does and the params it takes. Call this first, then use club_read or club_change.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "club_read",
+        "title": "Look something up",
+        "description": "Run a read-only club manager action, such as list_users or list_invoices. Nothing is changed and nobody is emailed. See club_manifest for each action's params.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "list_users",
+                "list_invoices",
+                "list_waiver_templates",
+                "get_waiver_template",
+                "list_membership_plans",
+                "list_kb_sections",
+                "list_kb_articles",
+                "get_kb_article",
+                "list_kb_comments",
+                "list_items",
+                "list_item_invoices",
+                "get_club_settings"
+              ],
+              "description": "The read-only action to run."
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": {},
+              "description": "The action's params, exactly as club_manifest lists them."
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "club_change",
+        "title": "Change club records",
+        "description": "Run a club manager action that changes something, such as create_membership or mark_invoice_paid. Many of these email a member, and some cannot be undone, so confirm the person and the amount with the manager first. See club_manifest for each action's params.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "create_membership",
+                "edit_invoice",
+                "mark_invoice_paid",
+                "delete_invoice",
+                "file_waiver",
+                "save_waiver_template",
+                "publish_waiver_template",
+                "save_membership_plan",
+                "save_kb_section",
+                "delete_kb_section",
+                "save_kb_article",
+                "save_item",
+                "delete_item",
+                "create_item_invoice",
+                "mark_item_invoice_paid",
+                "cancel_item_invoice",
+                "delete_item_invoice",
+                "resend_email"
+              ],
+              "description": "The action to run."
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": {},
+              "description": "The action's params, exactly as club_manifest lists them."
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}

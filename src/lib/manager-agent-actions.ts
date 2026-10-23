@@ -1,0 +1,1531 @@
+// The manager agent's actions: authentication, dispatch and error shaping,
+// shared by the HTTP endpoint (src/routes/api/manager/agent.ts) and the MCP
+// server (src/lib/mcp/). Moved here verbatim from the route file so both
+// front doors run exactly the same code; see docs/manager-agent-api.md.
+//
+// All DB access uses the service-role admin client, lazy-imported inside the
+// handlers. Callers MUST establish that the caller is a manager first:
+// `authenticate` does it for a minted token, and the MCP tools do it for an
+// OAuth sign-in.
+import { ZodError } from "zod";
+import {
+  createInvoiceSchema,
+  deleteInvoiceSchema,
+  markInvoicePaidSchema,
+  editInvoiceSchema,
+  agentGetWaiverTemplateSchema,
+  agentPublishWaiverTemplateSchema,
+  agentSaveWaiverTemplateSchema,
+  deleteKbSectionSchema,
+  getKbArticleSchema,
+  listAgentInvoicesSchema,
+  listAgentUsersSchema,
+  listKbCommentsSchema,
+  managerAgentActions,
+  membershipDeleteMessage,
+  nameWithPreferred,
+  paperWaiverUploadSchema,
+  savePlanSchema,
+  saveKbArticleSchema,
+  saveKbSectionSchema,
+  createItemInvoiceSchema,
+  listItemInvoicesSchema,
+  markItemInvoicePaidSchema,
+  recordIdSchema,
+  saveChargeItemSchema,
+  agentResendEmailSchema,
+} from "@/lib/validation";
+import type { ManagerAgentAction } from "@/lib/validation";
+import {
+  AGENT_MANIFEST,
+  AgentError,
+  bearerToken,
+  buildInvoicePatch,
+  classifyAction,
+  diffInvoicePatch,
+  invoiceEditAudit,
+  projectAgentKbArticle,
+  projectAgentWaiverTemplate,
+  projectInvoice,
+  reconciledEditBlockers,
+  reconciledEditMessage,
+} from "@/lib/manager-agent";
+import {
+  DuplicateCheckFailedError,
+  DuplicateWaiverError,
+  SubmissionIdConflictError,
+  WaiverFilingIncompleteError,
+} from "@/lib/waiver-duplicates";
+import {
+  aggregateClubUsers,
+  contactUserIds,
+  profileUserIds,
+  CHECKINS_LIMIT,
+  LEADS_LIMIT,
+} from "@/lib/club-users";
+import type {
+  ClubUserEmail,
+  ClubUserLead,
+  ClubUserProfile,
+  ClubUserWaiver,
+} from "@/lib/club-users";
+import { hashToken } from "@/lib/manager-api-tokens";
+import {
+  deleteKbSection,
+  listKbSections,
+  listSharedAnnotations,
+  loadKbArticle,
+  projectAnnotation,
+  projectArticle,
+  saveKbArticle,
+  saveKbSection,
+} from "@/lib/kb-admin";
+import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
+import { WaiverTemplateError } from "@/lib/waiver-template-editor";
+import {
+  filePaperWaiver,
+  listWaiverTemplateRows,
+  loadWaiverTemplateVersion,
+  promoteWaiverTemplate,
+  saveWaiverTemplateVersion,
+} from "@/lib/waiver.functions";
+import {
+  createMembershipForUser,
+  deleteMembershipRow,
+  MembershipStartNotChoosableError,
+  recordMembershipPayment,
+  listMembershipPlanRows,
+  resolveMembershipStartPatch,
+  saveMembershipPlanRow,
+  syncMemberRole,
+} from "@/lib/membership.functions";
+import type { MembershipClient, MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
+import {
+  cancelItemInvoiceRow,
+  createItemInvoiceForUser,
+  deleteChargeItemRow,
+  deleteItemInvoiceRow,
+  ItemInvoiceConflictError,
+  ItemInvoiceSettledError,
+  ItemRecordNotFoundError,
+  listChargeItemRows,
+  listItemInvoiceRows,
+  readItemInvoice,
+  recordItemInvoicePayment,
+  saveChargeItemRow,
+} from "@/lib/item-invoices.functions";
+import { ItemNoLongerListedError } from "@/lib/item-invoices";
+import type { AppClient } from "@/lib/profile-types";
+import { userEmails } from "@/lib/supabase-rpc";
+import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
+import { loadClubSettings } from "@/lib/club-settings.functions";
+import { ResendNotSentError, resendEmail } from "@/lib/email-resend.functions";
+import type { ResendRefusal } from "@/lib/email-resend";
+
+/**
+ * Resolve auth emails (the one email store) for a set of user ids via the
+ * service-role `user_emails` RPC; empty list on failure. Degraded mode: persons
+ * render with a null email and leads aren't deduped against them (a person
+ * could transiently appear twice) — rare and non-destructive.
+ *
+ * Keeps the whole row, including `email_confirmed_at`, so an agent listing
+ * members sees the same verified state a manager sees on screen.
+ */
+async function emailsByUserId(pdb: AppClient, userIds: string[]): Promise<ClubUserEmail[]> {
+  if (!userIds.length) return [];
+  const { data, error } = await userEmails(pdb, userIds);
+  if (error || !data) return [];
+  return data.map((e) => ({
+    user_id: e.user_id,
+    email: e.email,
+    email_confirmed_at: e.email_confirmed_at ?? null,
+  }));
+}
+
+export function json(
+  body: unknown,
+  status = 200,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      ...extraHeaders,
+    },
+  });
+}
+
+/**
+ * Only GET (manifest) and POST (dispatch) carry behaviour. Every other method
+ * used to fall through to the site's normal SSR router (no matching handler
+ * on this route), returning the marketing homepage HTML with a 200 — harmless
+ * but confusing, and a trap if a future handler ever dispatches on method.
+ * Reject explicitly instead.
+ */
+export function methodNotAllowed(): Response {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      error: { code: "method_not_allowed", message: "Method not allowed." },
+    }),
+    {
+      status: 405,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        allow: "GET, POST",
+      },
+    },
+  );
+}
+
+/** Load the service-role client. */
+async function adminClient(): Promise<MembershipClient> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin;
+}
+
+/**
+ * Authenticate the request. A manager-issued token is the only credential this
+ * endpoint accepts: looked up by SHA-256 hash in manager_api_tokens, unrevoked,
+ * and owned by somebody who still holds the manager role. Throws AgentError on
+ * any failure. On success, best-effort stamps last_used_at.
+ *
+ * Returns who is acting — always the token owner's user id, so every row this
+ * API writes on somebody's behalf names a real auth user. `file_waiver` records
+ * it as the waiver's `uploaded_by`, which is why that matters: a waiver is legal
+ * evidence, and one filed by nobody is weaker evidence.
+ */
+export async function authenticate(request: Request): Promise<string> {
+  const token = bearerToken(request.headers.get("authorization"));
+  if (!token) throw new AgentError(401, "unauthorized", "Missing bearer token.");
+
+  const db = await adminClient();
+  const tokenHash = await hashToken(token);
+  const { data: row, error } = await db
+    .from("manager_api_tokens")
+    .select("*")
+    .eq("token_hash", tokenHash)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (!row) throw new AgentError(401, "unauthorized", "Invalid or revoked API token.");
+
+  // Defense in depth: the token is only as privileged as its owner is today.
+  if (!row.created_by) {
+    throw new AgentError(403, "forbidden", "Token has no owner.");
+  }
+  // Still fail-closed if the check errors, but say which it was: a failed RPC
+  // reported as "no longer a manager" sends whoever is debugging it to revoke
+  // and re-mint a token that was never the problem.
+  const { data: isMgr, error: roleErr } = await db.rpc("has_role", {
+    _user_id: row.created_by,
+    _role: "manager",
+  });
+  if (roleErr) throw new AgentError(500, "db_error", roleErr.message);
+  if (!isMgr) throw new AgentError(403, "forbidden", "Token owner is no longer a manager.");
+
+  // Best-effort usage stamp — never fail the request on this.
+  void db
+    .from("manager_api_tokens")
+    .update({ last_used_at: new Date().toISOString() })
+    .eq("id", row.id)
+    .then(
+      () => {},
+      () => {},
+    );
+
+  return row.created_by;
+}
+
+/** Shape any thrown value into a stable JSON error response. */
+export function errorResponse(e: unknown): Response {
+  if (e instanceof AgentError) {
+    // A database failure's own text names tables, columns and constraints. It
+    // stays in the server log; the caller gets a plain retryable message.
+    const message =
+      e.code === "db_error"
+        ? "The club database could not answer just now. Try again shortly."
+        : e.message;
+    if (e.code === "db_error") console.error("[agent] db_error:", e.message);
+    // `details` is NESTED, not spread. Flat-merging shared one namespace with
+    // the envelope: ordering code/message last resolved the collision by
+    // silently discarding a detail that happened to be named either, and it
+    // would have blocked the envelope from ever growing a reserved key. Under
+    // `error.details` the two can never argue, and `details.blocked` reads as
+    // belonging to `code: "reconciled_invoice"` in a way bare `error.blocked`
+    // does not.
+    return json(
+      {
+        ok: false,
+        version: AGENT_MANIFEST.version,
+        error: { code: e.code, message, ...(e.details && { details: e.details }) },
+      },
+      e.httpStatus,
+      // A retry policy reads headers, not prose. Without this, "safe to retry"
+      // is a sentence only a human acts on, and the usual client default is an
+      // immediate retry — the least useful timing for a read that just failed.
+      e.retryAfterSeconds ? { "retry-after": String(e.retryAfterSeconds) } : {},
+    );
+  }
+  if (e instanceof ZodError) {
+    return json(
+      {
+        ok: false,
+        version: AGENT_MANIFEST.version,
+        error: {
+          code: "invalid_params",
+          message: "Invalid parameters.",
+          issues: e.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+        },
+      },
+      400,
+    );
+  }
+  // Don't leak internal detail; log server-side for debugging.
+  console.error("[manager-agent] unexpected error:", e);
+  return json(
+    {
+      ok: false,
+      version: AGENT_MANIFEST.version,
+      error: { code: "internal_error", message: "Internal error." },
+    },
+    500,
+  );
+}
+
+// ---- action: list_users ----
+async function handleListUsers(params: unknown) {
+  const { status, limit } = listAgentUsersSchema.parse(params ?? {});
+  const db = await adminClient();
+  const pdb = db;
+
+  const [
+    { data: profiles, error: pErr },
+    { data: rows, error },
+    { data: plans, error: plErr },
+    { data: waivers, error: wErr },
+    { data: checkins, error: cErr },
+    { data: leadRows, error: lErr },
+  ] = await Promise.all([
+    pdb
+      .from("profiles")
+      .select(
+        "user_id, first_name, middle_name, last_name, preferred_name, phone, uts_student_number, gi_size, belt_size, created_at, guardian_user_id",
+      )
+      .limit(5000),
+    db.from("memberships").select("*").order("created_at", { ascending: false }).limit(2000),
+    db.from("membership_plans").select("*"),
+    // ALL waivers: approved => visitor+, pending-only => applicant.
+    pdb.from("waivers").select("user_id, signed_at, approval_status").limit(5000),
+    // Attendance, counted per person: "who has been coming" is squarely this
+    // API's use case, and it costs one read on the shared aggregation path.
+    db.from("session_checkins").select("user_id").limit(CHECKINS_LIMIT),
+    // Interest registrations are the LEAD phase of the funnel; the
+    // aggregation drops any whose email already belongs to a person.
+    db
+      .from("interest_registrations")
+      .select("email, name, phone, created_at")
+      .order("created_at", { ascending: false })
+      .limit(LEADS_LIMIT),
+  ]);
+  // A db_error is the only honest answer to a failed read. An agent cannot see
+  // that a query fell over, so degrading to `[]` would hand it a confident
+  // answer — every applicant reported as a lead, nobody needing approval — and
+  // it would act on that.
+  if (pErr) throw new AgentError(500, "db_error", pErr.message);
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (plErr) throw new AgentError(500, "db_error", plErr.message);
+  if (wErr) throw new AgentError(500, "db_error", wErr.message);
+  if (cErr) throw new AgentError(500, "db_error", cErr.message);
+  if (lErr) throw new AgentError(500, "db_error", lErr.message);
+
+  const leads = (leadRows ?? []) as ClubUserLead[];
+  if ((checkins ?? []).length >= CHECKINS_LIMIT) {
+    console.warn(
+      `[agent.list_users] session_checkins capped at ${CHECKINS_LIMIT}; counts truncated`,
+    );
+  }
+  if (leads.length >= LEADS_LIMIT) {
+    console.warn(
+      `[agent.list_users] interest_registrations capped at ${LEADS_LIMIT}; leads truncated`,
+    );
+  }
+
+  const memberships = (rows ?? []) as MembershipRow[];
+  const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
+  const profileRows = (profiles ?? []) as ClubUserProfile[];
+  const waiverRows = (waivers ?? []) as ClubUserWaiver[];
+
+  // Roles + emails are scoped to the club's known people.
+  const userIds = profileUserIds(profileRows);
+  let rolesRows: { user_id: string; role: string }[] = [];
+  let emails: ClubUserEmail[] = [];
+  if (userIds.length) {
+    // The email RPC is the one deliberate degradation (see emailsByUserId).
+    const [{ data: roles, error: rErr }, resolved] = await Promise.all([
+      db.from("user_roles").select("user_id, role").in("user_id", userIds),
+      // The CONTACT ids, not `userIds`: a dependant's own would fetch the
+      // reserved string `household-email.ts` promises is never looked up.
+      emailsByUserId(pdb, contactUserIds(profileRows)),
+    ]);
+    if (rErr) throw new AgentError(500, "db_error", rErr.message);
+    rolesRows = (roles ?? []) as { user_id: string; role: string }[];
+    emails = resolved;
+  }
+
+  // Shared aggregation: one row per person with name/roles/lifecycle resolved.
+  const aggregated = aggregateClubUsers({
+    // A manager surface: the phase agrees with the members-only gate.
+    countHouseholdMemberships: true,
+    profiles: profileRows,
+    emails,
+    waivers: waiverRows,
+    leads,
+    memberships: memberships.map((m) => ({
+      user_id: m.user_id,
+      plan_id: m.plan_id,
+      status: m.status,
+      price_cents: m.price_cents,
+      is_student: m.is_student,
+      uts_student_number: m.uts_student_number,
+      sessions_remaining: m.sessions_remaining,
+      created_at: m.created_at,
+    })),
+    plans: (plans ?? []).map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
+    roles: rolesRows,
+    checkins: checkins ?? [],
+  });
+
+  // The agent surface also returns each person's invoices, projected from their
+  // raw membership rows (newest first, matching the memberships query order).
+  const membershipsByUser = new Map<string, MembershipRow[]>();
+  for (const m of memberships) {
+    if (!m.user_id) continue;
+    const list = membershipsByUser.get(m.user_id) ?? [];
+    list.push(m);
+    membershipsByUser.set(m.user_id, list);
+  }
+
+  // Who is on whose account, built from the rows already aggregated rather than
+  // a second read: this action lists everybody, so every dependant is already
+  // here. Names only, plus the id, because everything else about one of these
+  // people is their own row in the same response.
+  const dependantsByGuardian = new Map<string, { user_id: string; name: string | null }[]>();
+  for (const u of aggregated) {
+    if (!u.user_id || !u.guardian_user_id) continue;
+    const list = dependantsByGuardian.get(u.guardian_user_id) ?? [];
+    list.push({ user_id: u.user_id, name: u.name });
+    dependantsByGuardian.set(u.guardian_user_id, list);
+  }
+
+  let users = aggregated.map((u) => ({
+    user_id: u.user_id,
+    name: u.name,
+    email: u.email,
+    // Whose address that is, when it is not this person's own. A dependant has
+    // no mailbox, so `email` is their guardian's, and a bare address under a
+    // nine-year-old's name reads to an agent exactly as it reads to a manager:
+    // as somebody it can write to. `list_invoices` says the same thing in
+    // `member_email_belongs_to`, and the two surfaces must not disagree about
+    // whether they say it at all.
+    email_belongs_to: u.email_belongs_to,
+    // Whose account this person is on. `email_belongs_to` NAMES that person for
+    // a caption; this identifies them, so an agent can fetch or act on the
+    // guardian rather than only mention them. Null for almost everybody.
+    guardian_user_id: u.guardian_user_id,
+    // The people on THIS person's account. Always present, empty for almost
+    // everybody, and empty for a dependant too: a household is one level deep,
+    // so a dependant can never have any (#102).
+    //
+    // Present rather than left to be reconstructed from `guardian_user_id`
+    // across the whole listing, because a `status` filter can drop the children
+    // out of the response while leaving the parent in it, and an agent that
+    // rebuilt the household from what came back would then confidently report a
+    // parent as having none.
+    dependants: u.user_id ? (dependantsByGuardian.get(u.user_id) ?? []) : [],
+    roles: u.roles,
+    lifecycle_status: u.lifecycle_status,
+    sessions_attended: u.sessions_attended,
+    invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) =>
+      projectInvoice(m, planById.get(m.plan_id)),
+    ),
+  }));
+
+  if (status) users = users.filter((u) => u.lifecycle_status === status);
+  const capped = users.slice(0, limit ?? 200);
+  return { count: capped.length, total: users.length, users: capped };
+}
+
+// ---- action: list_invoices ----
+async function handleListInvoices(params: unknown) {
+  const { status, limit } = listAgentInvoicesSchema.parse(params ?? {});
+  const db = await adminClient();
+
+  let query = db.from("memberships").select("*").order("created_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  // Separate exact-count read (matching the same filter, no limit) so a capped
+  // page still reports how many rows exist in total — list_users already does
+  // this for the same reason: without it a caller can't tell a full page from
+  // a truncated one, and there's no offset/cursor to page past the cap.
+  let countQuery = db.from("memberships").select("*", { count: "exact", head: true });
+  if (status) countQuery = countQuery.eq("status", status);
+  const [{ data: rows, error }, { data: plans, error: plErr }, { count, error: countErr }] =
+    await Promise.all([
+      query.limit(limit ?? 200),
+      db.from("membership_plans").select("*"),
+      countQuery,
+    ]);
+  if (error) throw new AgentError(500, "db_error", error.message);
+  // Without this, a failed plans read returns invoices whose plan name, kind and
+  // price basis are all null — an agent asked to correct one has no way to tell
+  // that from an invoice genuinely missing its plan.
+  if (plErr) throw new AgentError(500, "db_error", plErr.message);
+  if (countErr) throw new AgentError(500, "db_error", countErr.message);
+
+  const planById = new Map((plans ?? []).map((p) => [p.id, p as MembershipPlanRow]));
+
+  // Resolve each member's display name from their profile and email from the
+  // auth user (the one email store).
+  const userIds = [
+    ...new Set(((rows ?? []) as MembershipRow[]).map((r) => r.user_id).filter(Boolean)),
+  ] as string[];
+  const nameByUser = new Map<string, string>();
+  // DISPLAY: an agent reading this listing is being told who to contact about
+  // an invoice, and for a child's invoice that is the parent. Shown with whose
+  // address it is, so the agent cannot report it as the child's own.
+  let contactByUser = new Map<string, ContactEmail>();
+  if (userIds.length) {
+    const pdb = db;
+    const [{ data: profiles, error: prErr }, contacts] = await Promise.all([
+      pdb
+        .from("profiles")
+        .select("user_id, first_name, middle_name, last_name, preferred_name")
+        .in("user_id", userIds),
+      loadHouseholdContacts(pdb, userIds),
+    ]);
+    if (prErr) throw new AgentError(500, "db_error", prErr.message);
+    // The invoice listing only needs the address, not its verified state.
+    contactByUser = new Map(userIds.map((id) => [id, contacts.displayEmail(id)]));
+    for (const p of profiles ?? []) {
+      nameByUser.set(p.user_id, nameWithPreferred(p));
+    }
+  }
+
+  const invoices = ((rows ?? []) as MembershipRow[]).map((r) => ({
+    ...projectInvoice(r, planById.get(r.plan_id)),
+    member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
+    member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
+    // Present whenever the address is somebody else's, named or not: keyed on
+    // the NAME this fails open, and an uncaptioned address under a child's
+    // name is what the field exists to prevent.
+    member_email_belongs_to: r.user_id
+      ? contactByUser.get(r.user_id)?.onBehalfOf
+        ? (contactByUser.get(r.user_id)!.onBehalfOf!.name ?? "the account holder")
+        : null
+      : null,
+  }));
+  return { count: invoices.length, total: count ?? invoices.length, invoices };
+}
+
+// ---- action: edit_invoice ----
+async function handleEditInvoice(params: unknown, actingAs: string) {
+  const input = editInvoiceSchema.parse(params);
+  const db = await adminClient();
+
+  const { data: existing, error: findErr } = await db
+    .from("memberships")
+    .select("*")
+    .eq("id", input.id)
+    .maybeSingle();
+  if (findErr) throw new AgentError(500, "db_error", findErr.message);
+  if (!existing) throw new AgentError(404, "not_found", "Invoice not found.");
+
+  // Resolved before the patch is built, so a plan with no start date to set
+  // refuses the WHOLE edit rather than writing its other fields first. The plan
+  // is what decides, and reading it is also what stops a caller hand-building a
+  // window: they name a day, the plan's own rule places it.
+  let window: { starts_at: string; ends_at: string | null } | undefined;
+  if (input.starts_on !== undefined) {
+    try {
+      window = await resolveMembershipStartPatch(db, existing as MembershipRow, input.starts_on);
+    } catch (e) {
+      if (e instanceof MembershipStartNotChoosableError)
+        throw new AgentError(422, "start_date_not_choosable", e.message, {
+          plan_kind: e.plan.kind,
+        });
+      throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const patch = buildInvoicePatch(input, window);
+  // What this edit would actually move, measured against the row as it stands.
+  // Submitting a field with the value it already has is not an edit: it neither
+  // trips the guard below nor gets recorded as a change that happened.
+  const diff = diffInvoicePatch(existing, patch);
+  const blocked = reconciledEditBlockers(existing, diff.changed, input.confirm_paid_edit);
+  if (blocked.length) {
+    // `previous` is scoped to the blocked fields, not every field the call would
+    // have changed. The whole update is refused atomically, but echoing an
+    // unguarded field's old value here reads as "this was blocked too" — a
+    // caller pairing `previous` with `blocked` would draw the wrong conclusion.
+    const blockedPrevious = Object.fromEntries(blocked.map((f) => [f, diff.previous[f] ?? null]));
+    throw new AgentError(
+      409,
+      "reconciled_invoice",
+      reconciledEditMessage(blocked, existing.paid_at!),
+      { blocked, paid_at: existing.paid_at, previous: blockedPrevious },
+    );
+  }
+
+  // Compare-and-swap on everything this edit read, not just `paid_at`.
+  //
+  // Pinning `paid_at` alone stops a reconciliation slipping a guarded edit
+  // through, but leaves the audit trail wrong: `previous` and the log's `from`
+  // both come from the row read above, and nothing held the columns actually
+  // being written. Two overlapping edits — B sets notes to "cheque", A then
+  // writes "card" — would have A record `"cash" -> "card"`, a transition that
+  // never happened, with B's edit gone from the record entirely. In the club's
+  // only invoice edit history, a stale `from` is worse than no entry: it reads
+  // as evidence.
+  //
+  // `.is` is only for NULL/TRUE/FALSE in PostgREST, so a null before-value
+  // matches on IS NULL and anything else on equality.
+  let update = db.from("memberships").update(patch).eq("id", input.id);
+  update = existing.paid_at ? update.eq("paid_at", existing.paid_at) : update.is("paid_at", null);
+  for (const field of diff.changed) {
+    // Every editable column is a string, a number, or null (price_cents is the
+    // only non-string), so this narrowing is total rather than convenient.
+    const before = (diff.previous[field] ?? null) as string | number | null;
+    update = before === null ? update.is(field, null) : update.eq(field, before);
+  }
+  const { data: updated, error: updErr } = await update.select("*").maybeSingle();
+  if (updErr) throw new AgentError(500, "db_error", updErr.message);
+  if (!updated) {
+    // One code for both "somebody wrote first" and "the row is gone": each means
+    // the caller's copy is stale and re-reading is the next step either way, and
+    // the re-read tells them which (a deleted invoice 404s). Guessing here would
+    // cost a query and could still be wrong.
+    throw new AgentError(
+      409,
+      "invoice_changed",
+      "This invoice changed under the edit (another edit, or a payment being reconciled), so nothing was written. Read it again and re-send if the edit still applies.",
+    );
+  }
+
+  // Closing an invoice can be the moment somebody stops being a member, so the
+  // `member` label has to catch up here exactly as it does on the manager
+  // screen's cancel. Access itself is gated live by `has_active_paid_membership`
+  // and has already closed; this is the label, which used to be granted and
+  // never taken back. Failures are logged inside, never thrown: the edit has
+  // committed, and a throw would invite a retry of a write that already landed.
+  if (diff.changed.includes("status")) await syncMemberRole(db, updated.user_id);
+
+  // This read must NOT throw: the update above has already committed, so
+  // failing now would report a successful edit as an error and invite the
+  // agent to retry it. It only decorates the echoed invoice, so log and
+  // return what did happen.
+  const { data: plan, error: planErr } = await db
+    .from("membership_plans")
+    .select("*")
+    .eq("id", updated.plan_id)
+    .maybeSingle();
+  if (planErr) console.error("[agent.edit_invoice] plan lookup failed after update:", planErr);
+
+  // The audit trail. There is no audit table, so the server log is where an
+  // invoice's edit history lives: without it, a disagreement between the books
+  // and the bank cannot be traced back to who changed what. console.info, not
+  // console.error — this is a normal event, and it must be findable as one.
+  if (diff.changed.length) {
+    console.info(
+      "[agent.edit_invoice] audit",
+      JSON.stringify(
+        invoiceEditAudit({
+          invoiceId: input.id,
+          actor: actingAs,
+          paidAt: existing.paid_at,
+          confirmed: input.confirm_paid_edit,
+          diff,
+          patch,
+          at: new Date().toISOString(),
+        }),
+      ),
+    );
+  }
+
+  return {
+    invoice: projectInvoice(
+      updated as MembershipRow,
+      (plan ?? undefined) as MembershipPlanRow | undefined,
+    ),
+    // What moved, and what it held before. An edit that changed nothing comes
+    // back with an empty `changed`, so a caller can tell a real correction from
+    // a no-op instead of reading a 200 as proof something happened.
+    changed: diff.changed,
+    previous: diff.previous,
+  };
+}
+
+// ---- action: file_waiver ----
+async function handleFileWaiver(params: unknown, actingAs: string) {
+  const input = paperWaiverUploadSchema.parse(params);
+  const db = await adminClient();
+  try {
+    const { id, user_id, created } = await filePaperWaiver(db, input, actingAs);
+    // `created: false` means this call resolved to a waiver an earlier attempt
+    // had already filed. A bulk importer that silently replayed half its calls
+    // would otherwise look identical to a clean run, which makes reconciling
+    // against a stack of paper impossible.
+    return { id, user_id, created };
+  } catch (e) {
+    // A likely duplicate is a distinct, actionable outcome, not a generic
+    // failure: it comes back as a 409 with the waivers it collided with, so the
+    // caller can look at them and either stop or re-send with confirm_duplicate.
+    if (e instanceof DuplicateWaiverError) {
+      throw new AgentError(409, "duplicate_waiver", e.message, {
+        existing: e.existing,
+        truncated: e.truncated,
+      });
+    }
+    // The probe failed, which is not a verdict on the waiver. 503, so a retry
+    // policy reads "try this again" rather than the "fix your input" that a 4xx
+    // implies — nothing was filed either way.
+    if (e instanceof DuplicateCheckFailedError) {
+      throw new AgentError(503, "duplicate_check_failed", e.message, undefined, 5);
+    }
+    // 5xx, not the generic 422: the row is half-filed and ONLY a retry with the
+    // same id completes it. Landing this in a 4xx told a caller obeying the
+    // documented "4xx means change the request" rule to change the one thing it
+    // could — the id — which files a second waiver against the same paper and
+    // abandons the first, the exact failure this feature exists to prevent.
+    if (e instanceof WaiverFilingIncompleteError) {
+      throw new AgentError(503, "waiver_filing_incomplete", e.message, undefined, 5);
+    }
+    // The opposite: permanent, and no retry of this request will ever succeed.
+    // It must not share a code with the transient ones above.
+    if (e instanceof SubmissionIdConflictError) {
+      throw new AgentError(409, "submission_id_conflict", e.message);
+    }
+    // filePaperWaiver throws plain Errors with member-facing text (the manager
+    // web form renders `.message` directly); wrap so the agent gets the same
+    // message inside the endpoint's stable error envelope instead of a bare 500.
+    throw new AgentError(
+      422,
+      "file_waiver_failed",
+      e instanceof Error ? e.message : "Could not file the waiver.",
+    );
+  }
+}
+
+/** Project a plan row the way `list_membership_plans` returns it. */
+function projectAgentMembershipPlan(p: MembershipPlanRow) {
+  return {
+    id: p.id,
+    code: p.code,
+    name: p.name,
+    description: p.description,
+    kind: p.kind,
+    public_price_cents: p.public_price_cents,
+    student_price_cents: p.student_price_cents,
+    duration_days: p.duration_days,
+    session_credits: p.session_credits,
+    is_active: p.is_active,
+    sort_order: p.sort_order,
+    starts_on: p.starts_on,
+    ends_on: p.ends_on,
+  };
+}
+
+// ---- action: create_membership ----
+//
+// The whole action is `createMembershipForUser`, which is also what the manager
+// screen posts to, so an agent and a manager raise an invoice through the exact
+// same write and get the same refusals.
+async function handleCreateMembership(params: unknown) {
+  const input = createInvoiceSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await createMembershipForUser(db, input);
+  } catch (e) {
+    // A start date on a plan that has none is the caller's mistake and is worth
+    // naming: the alternative reading, that we backdated the enrolment and said
+    // nothing, is the one that would go unnoticed.
+    if (e instanceof MembershipStartNotChoosableError)
+      throw new AgentError(422, "start_date_not_choosable", e.message, { plan_kind: e.plan.kind });
+    // The two refusals a caller can act on — an unknown plan code, and the free
+    // trial already being used — are the caller's mistakes, not server faults,
+    // and a 500 would tell them to retry something that can never succeed.
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.startsWith("No plan with the code"))
+      throw new AgentError(404, "plan_not_found", message);
+    if (message.includes("free trial")) throw new AgentError(409, "trial_already_used", message);
+    throw e;
+  }
+}
+
+// ---- action: mark_invoice_paid ----
+//
+// The manual counterpart to bank reconciliation, sharing its writer so a payment
+// recorded by an agent and one matched off a statement are the same event.
+async function handleMarkInvoicePaid(params: unknown, actingAs: string) {
+  const input = markInvoicePaidSchema.parse(params);
+  const db = await adminClient();
+
+  const { data: membership, error } = await db
+    .from("memberships")
+    .select("*")
+    .eq("id", input.id)
+    .maybeSingle();
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (!membership) throw new AgentError(404, "not_found", "Invoice not found.");
+  if (membership.price_cents === 0)
+    throw new AgentError(
+      422,
+      "nothing_to_pay",
+      "That membership is free, so there is no payment to record against it.",
+    );
+
+  // Decorates the receipt only, so a failed read must not refuse the payment.
+  const { data: plan } = await db
+    .from("membership_plans")
+    .select("*")
+    .eq("id", membership.plan_id)
+    .maybeSingle();
+
+  const { recorded } = await recordMembershipPayment(db, {
+    membership: membership as MembershipRow,
+    plan: (plan ?? undefined) as MembershipPlanRow | undefined,
+    method: input.payment_method,
+    paidOn: input.paid_on,
+    reference: input.paid_reference,
+  });
+
+  // Money moving is the one thing the club most needs to be able to reconstruct,
+  // and there is no audit table — the server log is the whole history. Logged
+  // even when nothing was recorded, because "an agent tried to mark this paid a
+  // second time" is itself worth being able to find.
+  console.info(
+    "[agent.mark_invoice_paid] audit",
+    JSON.stringify({
+      invoiceId: input.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      method: input.payment_method,
+      // What was ASKED for. On an already-paid invoice (recorded: false) none of
+      // it was stored, and the names say so rather than reading as the record.
+      requestedPaidOn: input.paid_on ?? null,
+      requestedPaidReference: input.paid_reference ?? null,
+      recorded,
+    }),
+  );
+
+  return { paid: true as const, id: input.id, recorded };
+}
+
+// ---- action: delete_invoice ----
+async function handleDeleteInvoice(params: unknown, actingAs: string) {
+  const input = deleteInvoiceSchema.parse(params);
+  const db = await adminClient();
+
+  // Read it BEFORE deleting: this is the only irreversible invoice action in
+  // the API, and once the row is gone there is nothing left to say what it was.
+  // `edit_invoice` audits every reversible field change, so a delete going
+  // unrecorded would be the one hole in the club's only invoice history.
+  const { data: before, error: beforeErr } = await db
+    .from("memberships")
+    .select("id, user_id, plan_id, status, price_cents, payment_reference, paid_at")
+    .eq("id", input.id)
+    .maybeSingle();
+  // Not fatal — refusing an otherwise-valid delete because the audit read
+  // blipped would be the wrong trade — but never silent either. A `deleted:
+  // null` in the log below has to be distinguishable from "we read it and it
+  // was empty", or the one hole this read exists to close reopens without a
+  // trace.
+  if (beforeErr)
+    console.error("[agent.delete_invoice] could not read the invoice before deleting:", beforeErr);
+
+  let result: Awaited<ReturnType<typeof deleteMembershipRow>>;
+  try {
+    result = await deleteMembershipRow(db, input.id);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message === "Membership not found.")
+      throw new AgentError(404, "not_found", "Invoice not found.");
+    throw e;
+  }
+
+  if (!result.ok) {
+    // Every blocker, not the first: an agent that fixes one and retries into the
+    // next has burned two calls to learn what one could have told it. `paid` is
+    // in here precisely so a caller can tell "do something else first" from
+    // "this will never be deletable".
+    throw new AgentError(409, "invoice_not_deletable", membershipDeleteMessage(result.blockers), {
+      blockers: result.blockers,
+    });
+  }
+
+  // console.info, not console.error — a manager tidying up is a normal event,
+  // and it has to be findable as one.
+  console.info(
+    "[agent.delete_invoice] audit",
+    JSON.stringify({
+      invoiceId: result.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      // Identifiers only: the member, amount and payment details stay in the
+      // database, not the log stream.
+      deleted: before ? { id: before.id } : null,
+    }),
+  );
+  return { deleted: true as const, id: result.id };
+}
+
+// ---- action: list_membership_plans ----
+async function handleListMembershipPlans() {
+  const db = await adminClient();
+  const plans = await listMembershipPlanRows(db);
+  return { count: plans.length, plans: plans.map(projectAgentMembershipPlan) };
+}
+
+// ---- action: save_membership_plan ----
+async function handleSaveMembershipPlan(params: unknown) {
+  const input = savePlanSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await saveMembershipPlanRow(db, input);
+  } catch (e) {
+    throw new AgentError(
+      422,
+      "save_membership_plan_failed",
+      e instanceof Error ? e.message : "Could not save the membership plan.",
+    );
+  }
+}
+
+// ---- item invoices (docs/item-invoices.md) ----
+//
+// Every one of these is the same shared function the manager screens call, so
+// an agent and a manager get the same writes, the same emails and the same
+// refusals. This block only turns the refusals a caller can act on into the
+// endpoint's envelope rather than a 500.
+function itemAgentError(e: unknown): unknown {
+  if (e instanceof ItemRecordNotFoundError) return new AgentError(404, "not_found", e.message);
+  if (e instanceof ItemInvoiceSettledError)
+    return new AgentError(409, "item_invoice_settled", e.message);
+  if (e instanceof ItemNoLongerListedError)
+    return new AgentError(422, "item_not_listed", e.message);
+  if (e instanceof ItemInvoiceConflictError)
+    return new AgentError(409, "submission_conflict", e.message);
+  return e;
+}
+
+async function handleListItems() {
+  const items = await listChargeItemRows(await adminClient());
+  return {
+    count: items.length,
+    items: items.map((i) => ({ id: i.id, name: i.name, price_cents: i.price_cents })),
+  };
+}
+
+async function handleSaveItem(params: unknown) {
+  const input = saveChargeItemSchema.parse(params);
+  try {
+    const item = await saveChargeItemRow(await adminClient(), input);
+    return { id: item.id, name: item.name, price_cents: item.price_cents, created: !input.id };
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+}
+
+async function handleDeleteItem(params: unknown) {
+  const input = recordIdSchema.parse(params);
+  try {
+    await deleteChargeItemRow(await adminClient(), input.id);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  return { deleted: true as const, id: input.id };
+}
+
+async function handleListItemInvoices(params: unknown) {
+  const input = listItemInvoicesSchema.parse(params);
+  const invoices = await listItemInvoiceRows(await adminClient(), input);
+  return { count: invoices.length, invoices };
+}
+
+async function handleCreateItemInvoice(params: unknown, actingAs: string) {
+  const input = createItemInvoiceSchema.parse(params);
+  try {
+    return await createItemInvoiceForUser(await adminClient(), input, actingAs);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+}
+
+async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
+  const input = markItemInvoicePaidSchema.parse(params);
+  const db = await adminClient();
+  let recorded: boolean;
+  try {
+    const invoice = await readItemInvoice(db, input.id);
+    ({ recorded } = await recordItemInvoicePayment(db, {
+      invoice,
+      method: input.payment_method,
+      paidOn: input.paid_on,
+      reference: input.paid_reference,
+    }));
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  // Same reason as mark_invoice_paid: money moving is what the club most needs
+  // to reconstruct, and the server log is the whole history of who did it.
+  console.info(
+    "[agent.mark_item_invoice_paid] audit",
+    JSON.stringify({
+      invoiceId: input.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      method: input.payment_method,
+      // What was ASKED for. On an already-paid invoice (recorded: false) none of
+      // it was stored, and the names say so rather than reading as the record.
+      requestedPaidOn: input.paid_on ?? null,
+      requestedPaidReference: input.paid_reference ?? null,
+      recorded,
+    }),
+  );
+  return { paid: true as const, id: input.id, recorded };
+}
+
+async function handleCancelItemInvoice(params: unknown, actingAs: string) {
+  const input = recordIdSchema.parse(params);
+  try {
+    await cancelItemInvoiceRow(await adminClient(), input.id);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  console.info(
+    "[agent.cancel_item_invoice] audit",
+    JSON.stringify({ invoiceId: input.id, actor: actingAs, at: new Date().toISOString() }),
+  );
+  return { cancelled: true as const, id: input.id };
+}
+
+async function handleDeleteItemInvoice(params: unknown, actingAs: string) {
+  const input = recordIdSchema.parse(params);
+  const db = await adminClient();
+  // Read before deleting, for the audit line: once the row is gone nothing
+  // says what it was. Not fatal, the same trade delete_invoice makes.
+  const { data: before } = await db
+    .from("item_invoices")
+    .select("id, user_id, payment_reference, total_cents, lines, paid_at, cancelled_at")
+    .eq("id", input.id)
+    .maybeSingle();
+  try {
+    await deleteItemInvoiceRow(db, input.id);
+  } catch (e) {
+    throw itemAgentError(e);
+  }
+  console.info(
+    "[agent.delete_item_invoice] audit",
+    JSON.stringify({
+      invoiceId: input.id,
+      actor: actingAs,
+      at: new Date().toISOString(),
+      deleted: before ?? null,
+    }),
+  );
+  return { deleted: true as const, id: input.id };
+}
+
+// ---- action: list_waiver_templates ----
+async function handleListWaiverTemplates() {
+  const db = await adminClient();
+  const templates = await listWaiverTemplateRows(db);
+  const live = templates.find((t) => t.is_current)?.version ?? null;
+  return {
+    count: templates.length,
+    // Null here is not a tidy empty state: it means nobody can sign right now,
+    // and it is the first thing a caller should look at.
+    live_version: live,
+    templates: templates.map((t) => projectAgentWaiverTemplate(t, live)),
+  };
+}
+
+/**
+ * How long to wait before repeating a template call that could not publish.
+ * Short: the likeliest cause is another manager promoting at the same moment,
+ * and until one of them lands the club may have no live waiver at all.
+ */
+const TEMPLATE_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * Turn a refused template change into the right status code.
+ *
+ * The distinction that matters is retryable vs not. SKILL.md tells agents that a
+ * 4xx means the request itself has to change, so reporting "nobody can sign
+ * right now, try again" as a 422 is how `/waiver` stays down: the agent stops.
+ * `not_published` is therefore a 503 with a Retry-After, and it carries the
+ * version when one was written — repeating the save would file a second draft,
+ * where publishing that version finishes the job.
+ */
+function templateFailure(e: unknown, refusedCode: string): AgentError {
+  if (e instanceof WaiverTemplateError) {
+    if (e.reason === "not_found") return new AgentError(404, "not_found", e.message);
+    if (e.reason === "invalid") return new AgentError(422, refusedCode, e.message);
+    return new AgentError(
+      503,
+      "waiver_template_not_published",
+      e.message,
+      e.version === undefined ? undefined : { version: e.version, published: false },
+      TEMPLATE_RETRY_AFTER_SECONDS,
+    );
+  }
+  return new AgentError(500, "db_error", e instanceof Error ? e.message : "Could not reach it.");
+}
+
+/** The "there is nothing live" outage, in words a manager can act on. */
+const NO_LIVE_TEMPLATE =
+  "There is no live waiver template, so nobody can sign. Make one live with publish_waiver_template.";
+
+// ---- action: get_waiver_template ----
+async function handleGetWaiverTemplate(params: unknown) {
+  const input = agentGetWaiverTemplateSchema.parse(params);
+  const db = await adminClient();
+  const template = await loadWaiverTemplateVersion(db, input.version);
+  if (!template) {
+    throw new AgentError(
+      404,
+      "not_found",
+      input.version === undefined ? NO_LIVE_TEMPLATE : `No waiver version ${input.version}.`,
+    );
+  }
+  return {
+    template: {
+      version: template.version,
+      title: template.title,
+      body_md: template.body_md,
+      acknowledgements: template.acknowledgements,
+      is_current: template.is_current,
+      created_at: template.created_at,
+    },
+  };
+}
+
+// ---- action: save_waiver_template ----
+async function handleSaveWaiverTemplate(params: unknown, actingAs: string) {
+  const input = agentSaveWaiverTemplateSchema.parse(params);
+  const db = await adminClient();
+
+  // The base is read only when it is actually needed: a caller that sends the
+  // title, the body AND the acknowledgements has described a whole version, and
+  // refusing that for want of a live one to copy from would leave a club with no
+  // live template unable to publish its way out through this API.
+  const needsBase =
+    input.title === undefined ||
+    input.body_md === undefined ||
+    input.acknowledgements === undefined;
+  let base: Awaited<ReturnType<typeof loadWaiverTemplateVersion>> = null;
+  if (needsBase || input.base_version !== undefined) {
+    base = await loadWaiverTemplateVersion(db, input.base_version);
+    if (!base) {
+      throw new AgentError(
+        404,
+        "not_found",
+        input.base_version === undefined
+          ? `${NO_LIVE_TEMPLATE} To write one from scratch instead, send title, body_md and acknowledgements together.`
+          : `No waiver version ${input.base_version}.`,
+      );
+    }
+  }
+
+  try {
+    const saved = await saveWaiverTemplateVersion(
+      db,
+      {
+        title: input.title ?? base!.title,
+        body_md: input.body_md ?? base!.body_md,
+        acknowledgements: input.acknowledgements ?? base!.acknowledgements,
+      },
+      actingAs,
+    );
+    // `based_on` is what makes a carry-over auditable: it names the version the
+    // fields this call did not send actually came from.
+    return {
+      version: saved.version,
+      based_on: base?.version ?? null,
+      is_current: true as const,
+      url: "/waiver",
+    };
+  } catch (e) {
+    // The wording comes from `saveWaiverTemplateVersion`, which speaks to
+    // managers; what is added here is the status code, and it is not one code.
+    // A version that was written but could not be made live is a retry, not a
+    // bad request — see `templateFailure`.
+    throw templateFailure(e, "save_waiver_template_failed");
+  }
+}
+
+// ---- action: publish_waiver_template ----
+async function handlePublishWaiverTemplate(params: unknown) {
+  const input = agentPublishWaiverTemplateSchema.parse(params);
+  const db = await adminClient();
+  const target = await loadWaiverTemplateVersion(db, input.version);
+  if (!target) throw new AgentError(404, "not_found", `No waiver version ${input.version}.`);
+  // Read before promoting so the reply can say whether this call changed
+  // anything: `promoteWaiverTemplate` is idempotent and returns the same success
+  // either way, and a retry reporting "published" for a no-op reads as a second
+  // change to the club's legal document.
+  if (target.is_current) return { version: target.version, published: false as const };
+  try {
+    const { version } = await promoteWaiverTemplate(db, target.id);
+    return { version, published: true as const };
+  } catch (e) {
+    throw templateFailure(e, "publish_waiver_template_failed");
+  }
+}
+
+/**
+ * Cap on articles returned by `list_kb_articles`. Generous: a club with more
+ * pages than this has outgrown a flat list, and the handler warns rather than
+ * truncating in silence.
+ */
+const ARTICLES_LIMIT = 500;
+
+// ---- action: list_kb_sections ----
+async function handleListKbSections() {
+  const db = await adminClient();
+  const sections = await listKbSections(db);
+  return {
+    count: sections.length,
+    sections: sections.map((s) => ({ slug: s.slug, title: s.title, position: s.position })),
+  };
+}
+
+// ---- action: save_kb_section ----
+async function handleSaveKbSection(params: unknown) {
+  const input = saveKbSectionSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await saveKbSection(db, input);
+  } catch (e) {
+    throw new AgentError(
+      422,
+      "save_kb_section_failed",
+      e instanceof Error ? e.message : "Could not save the section.",
+    );
+  }
+}
+
+// ---- action: delete_kb_section ----
+async function handleDeleteKbSection(params: unknown) {
+  const input = deleteKbSectionSchema.parse(params);
+  const db = await adminClient();
+  try {
+    return await deleteKbSection(db, input.slug);
+  } catch (e) {
+    throw new AgentError(
+      422,
+      "delete_kb_section_failed",
+      e instanceof Error ? e.message : "Could not delete the section.",
+    );
+  }
+}
+
+// ---- action: list_kb_articles ----
+async function handleListKbArticles() {
+  const db = await adminClient();
+
+  // Only the LIVE version of each article, not every version ever saved.
+  //
+  // Reading the whole `kb_article_versions` table to pick out the current rows
+  // grows without bound (every save adds one) and would eventually be truncated
+  // by the server-side row cap — silently, and in the worst possible way: a
+  // article whose `is_current` row fell outside the window would be reported
+  // with `title: null, version: null`, a confident wrong answer of exactly the
+  // kind the comment in `handleListUsers` exists to prevent. `is_current` is a
+  // partial unique index, so this is one row per article by construction.
+  //
+  // The live version is the one flagged `is_current`, NOT the highest-numbered
+  // one. Those differ whenever a manager has rolled back to an earlier version,
+  // and reporting the newest as live would have an agent read version 9, edit
+  // it, and publish it over the version 4 the club deliberately went back to.
+  const [{ data: docs, error }, { data: versions, error: vErr }, sections] = await Promise.all([
+    db.from("kb_articles").select("*").order("slug").limit(ARTICLES_LIMIT),
+    db
+      .from("kb_article_versions")
+      .select("article_id, title, version, created_at, change_note")
+      .eq("is_current", true)
+      .limit(ARTICLES_LIMIT),
+    listKbSections(db),
+  ]);
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (vErr) throw new AgentError(500, "db_error", vErr.message);
+
+  // Articles report their section by SLUG, never by id: the slug is what
+  // `save_kb_article` takes back, so an agent can move an article using exactly
+  // what it just read.
+  const sectionSlugById = new Map(sections.map((s) => [s.id, s.slug]));
+  if ((docs ?? []).length >= ARTICLES_LIMIT) {
+    console.warn(`[agent.list_kb_articles] articles capped at ${ARTICLES_LIMIT}; list truncated`);
+  }
+
+  const liveByDoc = new Map((versions ?? []).map((v) => [v.article_id, v]));
+
+  // How many versions each article has, counted in the database rather than by
+  // reading the rows: "this page has been rewritten nine times" is context a
+  // manager wants before editing it, and it must not cost an unbounded read.
+  const countByDoc = new Map<string, number>();
+  await Promise.all(
+    ((docs ?? []) as KbArticleRow[]).map(async (d) => {
+      const { count, error: cErr } = await db
+        .from("kb_article_versions")
+        .select("*", { count: "exact", head: true })
+        .eq("article_id", d.id);
+      if (cErr) throw new AgentError(500, "db_error", cErr.message);
+      countByDoc.set(d.id, count ?? 0);
+    }),
+  );
+
+  const articles = ((docs ?? []) as KbArticleRow[]).map((d) =>
+    projectAgentKbArticle(
+      d,
+      liveByDoc.get(d.id),
+      d.section_id ? (sectionSlugById.get(d.section_id) ?? null) : null,
+      countByDoc.get(d.id) ?? 0,
+    ),
+  );
+  return { count: articles.length, articles };
+}
+
+// ---- action: get_kb_article ----
+async function handleGetKbArticle(params: unknown) {
+  const input = getKbArticleSchema.parse(params);
+  const db = await adminClient();
+  const loaded = await loadKbArticle(db, input.slug, input.version);
+  // A manager token sees every article, drafts included, so there is no
+  // visibility check here — unlike the public reader, which hides a missing
+  // article and a forbidden one behind the same words.
+  if (!loaded) throw new AgentError(404, "not_found", "No such article, or no such version.");
+  return { article: projectArticle(loaded) };
+}
+
+// ---- action: save_kb_article ----
+async function handleSaveKbArticle(params: unknown, actingAs: string) {
+  const input = saveKbArticleSchema.parse(params);
+  const db = await adminClient();
+  try {
+    const result = await saveKbArticle(db, input, actingAs);
+    return {
+      slug: result.slug,
+      version: result.version,
+      created: result.created,
+      url: `/kb/${result.slug}`,
+    };
+  } catch (e) {
+    // saveKbArticle throws plain Errors with manager-facing text (a promotion
+    // race, a failed insert). Wrap so the agent gets that message inside the
+    // endpoint's stable error envelope rather than a bare 500.
+    throw new AgentError(
+      422,
+      "save_kb_article_failed",
+      e instanceof Error ? e.message : "Could not save the article.",
+    );
+  }
+}
+
+// ---- action: list_kb_comments ----
+async function handleListKbComments(params: unknown) {
+  const input = listKbCommentsSchema.parse(params);
+  const db = await adminClient();
+
+  const { data: doc, error: docErr } = await db
+    .from("kb_articles")
+    .select("id, slug")
+    .eq("slug", input.slug)
+    .maybeSingle();
+  if (docErr) throw new AgentError(500, "db_error", docErr.message);
+  if (!doc) throw new AgentError(404, "not_found", "No such article.");
+
+  // Through `listSharedAnnotations`, not a second query of its own. The
+  // `visibility = 'shared'` filter is the single line keeping members' private
+  // notes away from the club, and a copy of it here is a copy that can be
+  // edited without the test noticing.
+  let annotations: KbAnnotationRow[];
+  try {
+    annotations = await listSharedAnnotations(db, doc.id, {
+      includeResolved: input.include_resolved,
+      version: input.version,
+      limit: input.limit ?? 200,
+    });
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : "Could not read them.");
+  }
+  const userIds = [...new Set(annotations.map((a) => a.user_id))];
+  const nameByUser = new Map<string, string>();
+  if (userIds.length) {
+    const { data: profiles, error: pErr } = await db
+      .from("profiles")
+      .select("user_id, first_name, middle_name, last_name, preferred_name")
+      .in("user_id", userIds);
+    if (pErr) throw new AgentError(500, "db_error", pErr.message);
+    for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
+  }
+
+  const projected = annotations.map((a) => projectAnnotation(a, nameByUser.get(a.user_id) ?? null));
+  return { count: projected.length, slug: doc.slug, annotations: projected };
+}
+
+// ---- action: get_club_settings ----
+//
+// Through `loadClubSettings`, the read `/manager/settings` makes, so an agent
+// and a manager see the same values.
+//
+// Read-only on purpose: there is no save_club_settings. Both settings decide
+// where members' money and replies go (the bank account they transfer to, the
+// inbox a "just reply to this email" reaches), so a leaked or misused token
+// that could change either could redirect members to somebody else. A manager
+// changes them on the screen, signed in, after a confirm.
+async function handleGetClubSettings() {
+  try {
+    const { details, email_reply_to } = await loadClubSettings(await adminClient());
+    return { email_reply_to, payment_details: details };
+  } catch (e) {
+    // The screen refuses to show an empty form over a failed read; the API
+    // refuses to answer "nothing is set" for the same reason.
+    throw new AgentError(
+      503,
+      "settings_unreadable",
+      e instanceof Error ? e.message : "Could not read the club settings.",
+      undefined,
+      30,
+    );
+  }
+}
+
+// ---- action: resend_email ----
+//
+// Through `resendEmail`, the function the screens' Resend buttons post to, so
+// the same email is rebuilt the same way and refused for the same reasons.
+
+/** HTTP status for each refusal: gone, a state that has moved on, or not possible. */
+const RESEND_REFUSAL_STATUS: Record<ResendRefusal, number> = {
+  not_found: 404,
+  rate_limited: 429,
+  paid: 409,
+  unpaid: 409,
+  cancelled: 409,
+  not_approved: 409,
+  locked: 409,
+  already_verified: 409,
+  paper: 422,
+  no_address: 422,
+  dependant: 422,
+  free: 422,
+};
+
+async function handleResendEmail(params: unknown, actingAs: string) {
+  const input = agentResendEmailSchema.parse(params);
+  let result;
+  try {
+    result = await resendEmail(
+      await adminClient(),
+      {
+        kind: input.kind,
+        record_id: input.record_id,
+        // No click id from the caller: every call is its own send, still held
+        // to once a minute per email per record.
+        resendId: input.client_submission_id ?? crypto.randomUUID(),
+      },
+      actingAs,
+    );
+  } catch (e) {
+    if (e instanceof ResendNotSentError) {
+      // Nothing went out. Retrying with the same client_submission_id is safe.
+      throw new AgentError(503, "email_not_sent", e.message, undefined, 30);
+    }
+    throw e;
+  }
+  if (!result.sent) {
+    throw new AgentError(
+      RESEND_REFUSAL_STATUS[result.reason],
+      result.reason,
+      result.message,
+      undefined,
+      result.retryAfterSeconds,
+    );
+  }
+  return {
+    sent: true as const,
+    kind: input.kind,
+    record_id: input.record_id,
+    to: result.to,
+    to_belongs_to: result.toBelongsTo,
+  };
+}
+
+export async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
+  switch (action) {
+    case "list_users":
+      return handleListUsers(params);
+    case "list_invoices":
+      return handleListInvoices(params);
+    case "create_membership":
+      return handleCreateMembership(params);
+    case "edit_invoice":
+      return handleEditInvoice(params, actingAs);
+    case "mark_invoice_paid":
+      return handleMarkInvoicePaid(params, actingAs);
+    case "delete_invoice":
+      return handleDeleteInvoice(params, actingAs);
+    case "file_waiver":
+      return handleFileWaiver(params, actingAs);
+    case "list_waiver_templates":
+      return handleListWaiverTemplates();
+    case "get_waiver_template":
+      return handleGetWaiverTemplate(params);
+    case "save_waiver_template":
+      return handleSaveWaiverTemplate(params, actingAs);
+    case "publish_waiver_template":
+      return handlePublishWaiverTemplate(params);
+    case "list_membership_plans":
+      return handleListMembershipPlans();
+    case "save_membership_plan":
+      return handleSaveMembershipPlan(params);
+    case "list_kb_sections":
+      return handleListKbSections();
+    case "save_kb_section":
+      return handleSaveKbSection(params);
+    case "delete_kb_section":
+      return handleDeleteKbSection(params);
+    case "list_kb_articles":
+      return handleListKbArticles();
+    case "get_kb_article":
+      return handleGetKbArticle(params);
+    case "save_kb_article":
+      return handleSaveKbArticle(params, actingAs);
+    case "list_kb_comments":
+      return handleListKbComments(params);
+    case "list_items":
+      return handleListItems();
+    case "save_item":
+      return handleSaveItem(params);
+    case "delete_item":
+      return handleDeleteItem(params);
+    case "list_item_invoices":
+      return handleListItemInvoices(params);
+    case "create_item_invoice":
+      return handleCreateItemInvoice(params, actingAs);
+    case "mark_item_invoice_paid":
+      return handleMarkItemInvoicePaid(params, actingAs);
+    case "cancel_item_invoice":
+      return handleCancelItemInvoice(params, actingAs);
+    case "delete_item_invoice":
+      return handleDeleteItemInvoice(params, actingAs);
+    case "get_club_settings":
+      return handleGetClubSettings();
+    case "resend_email":
+      return handleResendEmail(params, actingAs);
+  }
+}
