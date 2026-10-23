@@ -339,7 +339,7 @@ as well as table ones, so a later `GRANT UPDATE (archived_at)` fails CI. And the
 `profiles_guard_archive` trigger, which refuses any change to either column made
 as `anon` or `authenticated` whatever the grants say, for the grant made by hand
 in the Lovable UI that no pull request ever shows
-(`20261023100000_profile_archive.sql`). Why archiving is not erasure:
+(`20261023120000_profile_archive.sql`). Why archiving is not erasure:
 `docs/erasing-personal-data.md`.
 
 **Households.** `guardian_user_id` is the ONLY thing that marks a dependant, and
