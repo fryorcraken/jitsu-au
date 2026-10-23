@@ -1331,7 +1331,11 @@ coding agents.
 **`private.run_notification_digest() → void`** — `SECURITY DEFINER`,
 `SET search_path = ''`, `REVOKE ALL ... FROM PUBLIC`. The job names only this
 function, never the token. The function reads the bearer token from Supabase
-Vault and `net.http_post`s it to a literal `https://jitsu.au/...` URL.
+Vault and `net.http_post`s it to a literal URL on the site's own host:
+`https://utsjitsu.com.au/...` since `20261023000000`, `https://jitsu.au/...`
+before it. It must be the host that serves the site, never one that redirects to
+it: a cross-host redirect drops the `Authorization` header and the endpoint
+answers 401 (`docs/notifications.md`, "The October domain move").
 
 Keeping the token out of `cron.job.command` is defence in depth rather than a
 plugged hole: pg_cron 1.4+ puts RLS on `cron.job` with `USING (username =
@@ -1351,16 +1355,18 @@ One thing that failed silently every morning rather than loudly once: read
 **`vault.decrypted_secrets.decrypted_secret`**, never `vault.secrets.secret` —
 the latter is ciphertext, and sending it as a bearer token earns a 401.
 
-**Third body, as of `20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql`,
-and the one live today.** Two earlier defects are gone by construction rather
-than by a runbook step someone has to remember:
+**Third body, as of `20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql`.**
+The fourth (`20261023000000_notification_digest_new_domain.sql`) is the same
+body with only the URL literal changed, for the domain move. Two earlier
+defects are gone by construction rather than by a runbook step someone has to
+remember:
 
 - **Only one Vault secret, `notification_digest_key`.** There used to be a
   second, `notification_digest_url`, holding the destination the function
   `net.http_post`s to — which meant it was possible to set it to the published
-  `*.lovable.app` host by mistake, which 302s to `jitsu.au` and which pg_net
-  does not follow. The URL is now a literal inside the function body, so that
-  mistake can no longer happen.
+  `*.lovable.app` host by mistake, which redirects to the real site, and a
+  cross-host redirect drops the bearer token. The URL is now a literal inside
+  the function body, so that mistake can no longer happen.
 - **The secret is minted by the migration itself**, with
   `vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'),
 'notification_digest_key')`, guarded so it only runs once (an existing secret

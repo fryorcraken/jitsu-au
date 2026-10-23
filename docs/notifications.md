@@ -181,7 +181,8 @@ saved, and must never fail because telling somebody about it did.
 
 A **pg_cron job in the database** POSTs to `/api/notifications/digest` once a
 day. `private.run_notification_digest()` reads a bearer token out of Supabase
-Vault and calls out with pg_net to a literal `jitsu.au` URL; the schedule itself
+Vault and calls out with pg_net to a literal `utsjitsu.com.au` URL (it was
+`jitsu.au` until the site moved; see "The October domain move" below); the schedule itself
 never holds the token, since anyone who can read `cron.job` can read a command
 string. The endpoint reads the SAME token back out of Vault, through a
 service-role RPC, and compares it against whatever the request sent. The
@@ -269,8 +270,10 @@ server env var for this any more; see "Arming the digest" below for what setup
 now actually takes. The destination URL is a literal in the function body for
 the same reason: it used to be a second Vault secret
 (`notification_digest_url`), which meant it was possible to set it to the
-published `*.lovable.app` host by mistake — that one 302s to `jitsu.au`, and
-pg_net does not follow redirects. That mistake can no longer happen.
+published `*.lovable.app` host by mistake, which redirects to the real site.
+That mistake can no longer happen. A literal does not protect against the
+club's OWN domain changing, though, which is exactly what happened in October:
+see "The October domain move" below.
 
 One trap that still fails silently every morning rather than loudly once: read
 `vault.decrypted_secrets.decrypted_secret`, never `vault.secrets.secret`. The
@@ -379,6 +382,56 @@ Three things about that item are deliberate and will look like bugs otherwise:
   state the club was in until 2026-08-22. That is not a false positive: the rows
   are owed and nobody has had them. It is not the state today — the digest is
   armed and sending.
+
+#### The October domain move: 401 every night, and nothing said so
+
+Found 2026-10-23, read-only. The site moved from `jitsu.au` to
+`utsjitsu.com.au`, and `jitsu.au` now redirects every path to the new host. The
+function still POSTed to `https://jitsu.au/...`. pg_net (0.20.4 on the live
+project) does follow the redirect, but libcurl will not carry an
+`Authorization` header across to a different host, so the request reached the
+endpoint with no token and got `401 {"error":"Unauthorized."}`. Any client that
+sends a bearer token to the old domain fails the same way, which is how the
+manager agent API broke for on-device agents too.
+
+The evidence, and the query for each:
+
+- `net._http_response`, newest row: `status_code` 401 for the 2026-10-22 22:00
+  run, and its `headers` carry `location: https://utsjitsu.com.au/api/notifications/digest`
+  from `jitsu.au`'s Cloudflare edge. That `location` header is the whole
+  diagnosis, and the table forgets it after six hours.
+- `cron.job_run_details` for the job: every run since 2026-09-01 `succeeded`,
+  this one included. As designed, and useless as a health signal.
+- `SELECT max(emailed_at) FROM public.notifications`: 2026-10-08 22:00:07, the
+  last digest that landed. The break is somewhere between then and 2026-10-22.
+- `vault.secrets` (`created_at` = `updated_at` = 2026-08-22) and
+  `pg_proc.prosrc` for the function: neither had changed, which ruled out the
+  key and the job.
+
+No member missed an email over it: no notification had been written since
+2026-10-08, so on 2026-10-23 nothing was owed. The fix is the URL literal,
+`20261023000000_notification_digest_new_domain.sql`. **If the primary domain
+changes again, that literal changes with it, the same week.** Nothing else will
+tell you, for the reasons below.
+
+**Why the stalled-digest item did not and could not catch it.** It watches the
+backlog, and there was no backlog: it is blind whenever nothing is owed, which
+for a club this size can be weeks at a time. Had a post gone out, it would have
+needed 36 hours and then a manager opening `/notifications` while signed in.
+Two further gaps it has, both worth knowing before trusting it:
+
+- **A reply email masks it.** It stays quiet if ANY row was stamped in the last
+  36 hours, and `sendReplyNotification` stamps the instant reply emails, which
+  do not go through the digest at all. One comment reply in the window hides a
+  dead digest.
+- **It is shown, not sent.** It is an attention item on a page, so it reaches
+  only a manager who signs in to the site and looks. A manager who works
+  through the agent API never sees it.
+
+So the honest description of today's monitoring is: a dead digest is noticed
+when somebody notices missing email. The cheapest check that would have caught
+this one on its first night is the by-hand query in "Knowing whether it actually
+ran" above, read within six hours of the 22:00 UTC run (by 2pm Sydney in winter, 3pm in summer).
 
 Still not built: a second job that reads `net._http_response` back and raises on
 a non-2xx, so an ARMED failure lands in `cron.job_run_details` the same night
@@ -493,12 +546,17 @@ SELECT id, status_code, content, error_msg, created
 ```
 
 `status_code` 200 with a body like `{"ok":true,"considered":N,...}` is the
-answer you want. **401 here means the endpoint's cached copy is stale** — it
-reads Vault once and holds the value in memory for the life of the server
-process, so a secret minted after the last deploy needs a redeploy (Publish →
-Update) before the endpoint will see it; a fresh `jitsu.au` build reads Vault
-again on its first request. 503 means the secret genuinely is not in Vault. A
-row with `error_msg` and no status is a network or TLS failure.
+answer you want. **A 401 has two causes, and the same row tells them apart.**
+Look at its `headers` first: a `location` header means the request was
+redirected to another host, which drops the `Authorization` header, so the URL
+literal in the function is pointing at a domain that no longer serves the site
+(the October domain move above). A redeploy cannot fix that. With no
+`location`, the endpoint's cached copy is stale: it reads Vault once and holds
+the value in memory for the life of the server process, so a secret minted
+after the last deploy needs a redeploy (Publish → Update) before the endpoint
+will see it; a fresh build reads Vault again on its first request. 503 means
+the secret genuinely is not in Vault. A row with `error_msg` and no status is a
+network or TLS failure.
 
 **4. Confirm the next scheduled run.** The morning after:
 
