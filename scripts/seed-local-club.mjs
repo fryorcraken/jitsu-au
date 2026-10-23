@@ -569,7 +569,7 @@ for (const waiverId of Object.values(waivers)) {
 console.log(`[seed] waiver PDFs: ${Object.keys(waivers).length}`);
 
 // The code of conduct's version 1 is seeded by its migration
-// (20261023000000_code_of_conduct_versions.sql), with the text members agreed
+// (20261023200000_code_of_conduct_versions.sql), with the text members agreed
 // to, so /code-of-conduct renders in the local stack and the acceptance below
 // names a version that exists. Checked rather than assumed: without it the
 // public page shows "not available" and every screenshot of it is of that.

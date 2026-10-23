@@ -12,7 +12,7 @@ import { VERSION_1_BODY_MD, VERSION_1_TITLE } from "./code-of-conduct-version-1.
 
 const MIGRATION = resolve(
   __dirname,
-  "../../supabase/migrations/20261023000000_code_of_conduct_versions.sql",
+  "../../supabase/migrations/20261023200000_code_of_conduct_versions.sql",
 );
 
 /** The dollar-quoted strings of the seed INSERT, in order: title, then body. */
