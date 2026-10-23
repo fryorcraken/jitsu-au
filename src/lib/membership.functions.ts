@@ -24,6 +24,7 @@ import {
   sameInstant,
   saveClubSettingsSchema,
   savePlanSchema,
+  announcePlanSchema,
   sellablePlans,
   setMembershipStartSchema,
   setMembershipStatusSchema,
@@ -703,6 +704,9 @@ export const listMembershipPlans = createServerFn({ method: "GET" })
       .order("sort_order", { ascending: true });
     if (error) throw new Error(error.message);
     return (data ?? []).map((p) => ({
+      // Only for the card's anchor, which a plan announcement links to
+      // (`planAnnouncementHref`). Purchases still name a plan by `code`.
+      id: p.id,
       code: p.code,
       name: p.name,
       description: p.description,
@@ -1295,6 +1299,46 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
     await requireManager(context);
     const admin = await adminClient();
     return saveMembershipPlanRow(admin, data);
+  });
+
+// ---- Manager: announce a plan to every member ----
+//
+// Two calls, not one with the save, so the screen can report them separately:
+// a plan that saved and an announcement that failed are different facts, and
+// retrying the announcement must never save (or create) the plan a second
+// time. Everything here is the same code the manager agent API runs
+// (`plan-announcement.server.ts`).
+
+/** How many emails announcing a plan would send right now, for the confirm. */
+export const countPlanAnnouncementAudience = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { countAnnouncementAudience } = await import("@/lib/plan-announcement.server");
+    return { inboxes: await countAnnouncementAudience(await adminClient()) };
+  });
+
+/** Announce one saved plan. Safe to retry with the same `client_submission_id`. */
+export const announcePlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => announcePlanSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { announceMembershipPlan } = await import("@/lib/plan-announcement.server");
+    return announceMembershipPlan(await adminClient(), {
+      planId: data.plan_id,
+      announcementId: data.client_submission_id,
+      actorId: context.userId,
+    });
+  });
+
+/** Each plan's latest announcement, keyed by plan id, for the plans screen. */
+export const listPlanAnnouncements = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { loadAnnouncementSummaries } = await import("@/lib/plan-announcement.server");
+    return Object.fromEntries(await loadAnnouncementSummaries(await adminClient()));
   });
 
 /**

@@ -2358,6 +2358,19 @@ export const savePlanSchema = z
   });
 export type SavePlanInput = z.infer<typeof savePlanSchema>;
 
+/**
+ * Announce a saved plan to every member (`plan-announcement.ts`).
+ *
+ * `client_submission_id` is the announcement's own id and is required, unlike
+ * on the public forms: it is the only thing that makes a retried announcement
+ * the same announcement rather than a second email to the whole club.
+ */
+export const announcePlanSchema = z.object({
+  plan_id: z.string().uuid(),
+  client_submission_id: z.string().uuid(),
+});
+export type AnnouncePlanInput = z.infer<typeof announcePlanSchema>;
+
 // ---- Manager: what kind of plan this is, and what that implies ----
 
 /**
