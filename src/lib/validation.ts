@@ -2823,7 +2823,6 @@ export const managerAgentActions = [
   "cancel_item_invoice",
   "delete_item_invoice",
   "get_club_settings",
-  "save_club_settings",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -3008,6 +3007,9 @@ export const clubPaymentDetailsSchema = z.object({
 });
 export type ClubPaymentDetails = z.infer<typeof clubPaymentDetailsSchema>;
 
+/** One address, built once rather than on every keystroke the settings screen checks. */
+const ONE_EMAIL = z.string().email();
+
 /** Longest address SMTP allows (RFC 5321 path limit). */
 export const CLUB_REPLY_TO_MAX = 254;
 
@@ -3025,7 +3027,7 @@ export const clubReplyToSchema = z
   .trim()
   .toLowerCase()
   .max(CLUB_REPLY_TO_MAX, "That address is too long.")
-  .refine((v) => v === "" || z.string().email().safeParse(v).success, {
+  .refine((v) => v === "" || ONE_EMAIL.safeParse(v).success, {
     message: "Enter one email address, like hello@example.com.",
   })
   .refine((v) => v === "" || !isReservedDependantEmail(v), {
@@ -3055,21 +3057,6 @@ export const saveClubSettingsSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("email_reply_to"), value: clubReplyToSchema }),
 ]);
 export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
-
-/**
- * The settings an agent may WRITE, which is deliberately fewer than it may read.
- *
- * The bank account is read-only over the agent API. It is money: a wrong BSB
- * sends members' transfers somewhere the club cannot get them back from, and
- * the manager screen is where a person types it with the member's own panel
- * previewing every keystroke. An agent has no such preview and no reason to
- * change bank details unprompted, so `save_club_settings` refuses that key by
- * name (`403 setting_read_only`) rather than letting it fail validation, so the
- * caller learns where to go instead.
- */
-export const agentSaveClubSettingsSchema = z
-  .object({ key: z.literal("email_reply_to"), value: clubReplyToSchema })
-  .strict();
 
 /**
  * The account rows, in the order a member reads them, shared by the membership

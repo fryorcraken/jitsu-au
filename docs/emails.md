@@ -61,8 +61,8 @@ every call site decides, and the rule is stated at the top of
   minor), the membership awaiting payment. Listed in the manager table below.
 - **An email to a member or visitor** carries the club's **reply-to address**:
   `email_reply_to` in `club_settings`, set by a manager in the "Replies to club
-  emails" card on `/manager/settings` or with the agent API's
-  `save_club_settings`. The sender reads it once with `clubReplyTo(admin)`,
+  emails" card on `/manager/settings` (the agent API can read it but not change
+  it). The sender reads it once with `clubReplyTo(admin)`,
   **before** rendering, and hands the same value to the template. Every line
   that says "reply to this email" is rendered through `ReplyOrReachUs`
   (`src/lib/email-templates/reply-or-reach-us.tsx`): with an address it prints

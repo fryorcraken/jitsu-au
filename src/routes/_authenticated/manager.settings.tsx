@@ -26,6 +26,7 @@ import {
 } from "@/lib/validation";
 import type { ClubPaymentDetails } from "@/lib/validation";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { useConfirm } from "@/hooks/use-confirm";
 
 export const Route = createFileRoute("/_authenticated/manager/settings")({
   head: () => ({
@@ -299,7 +300,11 @@ function SettingsPage() {
             {saveError && (
               <SaveFailure
                 what="account"
-                message={`${saveError} Members still see the details that were there before.`}
+                message={
+                  published
+                    ? `${saveError} Members still see the details that were there before.`
+                    : `${saveError} Members still cannot see how to pay.`
+                }
                 onRetry={() => void onSave()}
                 retrying={saving}
                 keptOnDevice={false}
@@ -360,6 +365,7 @@ function SettingsPage() {
  */
 function ReplyToCard({ initial }: { initial: string | null }) {
   const save = useServerFn(saveClubSettings);
+  const { confirm, confirmDialog } = useConfirm();
   const send = useResilientSubmit<{ ok: true }>(INTAKE_SUBMIT);
   const [value, setValue] = useState(initial ?? "");
   const [saved, setSaved] = useState<string | null>(initial);
@@ -381,6 +387,26 @@ function ReplyToCard({ initial }: { initial: string | null }) {
     setTouched(true);
     if (!parsed.success) return;
     const address = parsed.data;
+    // Outward-facing: from the next email on, every member who presses Reply
+    // writes to this address. A typo sends their replies (often about money) to
+    // a stranger, so it is asked once, with the address spelled out. Clearing
+    // needs no confirm: it only puts the contact-page fallback back.
+    if (
+      address &&
+      !(await confirm({
+        title: `Send replies to ${address}?`,
+        description:
+          "Every email the club sends to members and visitors from now on carries this address, and says to reply to it.",
+        details: [
+          'Invoices, receipts and waiver emails start saying "reply to this email".',
+          "Emails already sent are not changed.",
+        ],
+        footnote:
+          "Check the spelling. A mistake sends members' replies, often about payments, to a stranger.",
+        confirmLabel: "Use this address",
+      }))
+    )
+      return;
     const outcome = await send.submit({
       run: (signal) => save({ signal, data: { key: "email_reply_to", value: address } }),
     });
@@ -462,6 +488,7 @@ function ReplyToCard({ initial }: { initial: string | null }) {
             onRetry={() => void submit()}
           />
         </form>
+        {confirmDialog}
       </CardContent>
     </Card>
   );

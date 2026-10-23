@@ -42,12 +42,7 @@ interface ItemInvoiceEmailProps {
   details: ClubPaymentDetails | null;
   /** Where the member can read the same invoice, with copy buttons. */
   membershipUrl: string;
-  /**
-   * Where a reply to this email goes, or null when it reaches nobody. Decides
-   * whether the email offers "reply to this email" or the contact page (see
-   * `reply-or-reach-us.tsx`). Always the same value the sender set as the
-   * message's `Reply-To`.
-   */
+  /** See `ReplyOrReachUsProps["replyTo"]` in `reply-or-reach-us.tsx`. */
   replyTo: string | null;
 }
 

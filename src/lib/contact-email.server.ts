@@ -55,9 +55,12 @@ export async function sendContactEmails({
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
-  // Resolved once, before rendering, so the footer's promise and the header
-  // agree (see `clubReplyTo`).
-  const replyTo = await clubReplyTo(admin);
+  // The reply-to is resolved once, before rendering, so the footer's promise
+  // and the header agree (see `clubReplyTo`).
+  const [replyTo, notifyRecipients] = await Promise.all([
+    clubReplyTo(admin),
+    getManagerEmails(admin),
+  ]);
   const senderEl = React.createElement(ContactConfirmationEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_ORIGIN,
@@ -69,10 +72,7 @@ export async function sendContactEmails({
     whatsappUrl: WHATSAPP_URL,
     replyTo,
   });
-  const [senderHtml, notifyRecipients] = await Promise.all([
-    render(senderEl),
-    getManagerEmails(admin),
-  ]);
+  const senderHtml = await render(senderEl);
   const senderText = await render(senderEl, { plainText: true });
 
   const managerEl = React.createElement(ContactNotificationEmail, {

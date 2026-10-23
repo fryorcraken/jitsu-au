@@ -138,6 +138,19 @@ describe("/manager/settings", () => {
     expect(screen.queryByText(/this account was not saved/i)).not.toBeInTheDocument();
   });
 
+  it("does not claim members still see old details when none were ever published", async () => {
+    saveClubSettings.mockRejectedValueOnce(new Error("That was not saved. Nothing has changed."));
+    await renderLoaded();
+    await userEvent.type(screen.getByLabelText("Account name"), "UTS Jitsu Club Inc");
+    await userEvent.type(screen.getByLabelText("BSB"), "062000");
+    await userEvent.type(screen.getByLabelText("Account number"), "12345678");
+    await userEvent.type(screen.getByLabelText("Bank"), "Commonwealth Bank of Australia");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/members still cannot see how to pay/i)).toBeVisible();
+    expect(screen.queryByText(/details that were there before/i)).not.toBeInTheDocument();
+  });
+
   it("refuses to save a half-filled account and says which box is wrong", async () => {
     await renderLoaded();
     await userEvent.type(screen.getByLabelText("Account name"), "UTS Jitsu Club Inc");
@@ -200,6 +213,8 @@ describe("/manager/settings", () => {
 describe("replies to club emails", () => {
   const box = () => screen.getByLabelText("Reply-to address");
   const saveAddress = () => screen.getByRole("button", { name: "Save address" });
+  const confirmAddress = async () =>
+    userEvent.click(await screen.findByRole("button", { name: "Use this address" }));
 
   it("says plainly that replies reach nobody while it is unset", async () => {
     await renderLoaded();
@@ -222,6 +237,7 @@ describe("replies to club emails", () => {
     await renderLoaded();
     await userEvent.type(box(), "  Hello@Example.com ");
     await userEvent.click(saveAddress());
+    await confirmAddress();
 
     await waitFor(() => expect(saveClubSettings).toHaveBeenCalled());
     expect(saveClubSettings.mock.calls[0][0].data).toEqual({
@@ -263,6 +279,7 @@ describe("replies to club emails", () => {
     await renderLoaded();
     await userEvent.type(box(), "hello@example.com");
     await userEvent.click(saveAddress());
+    await confirmAddress();
 
     await waitFor(() => expect(screen.getByRole("button", { name: /try again/i })).toBeVisible(), {
       timeout: 5000,
@@ -270,5 +287,31 @@ describe("replies to club emails", () => {
     expect(box()).toHaveValue("hello@example.com");
     // Still unset: the panel must not claim a save that did not happen.
     expect(screen.getByText(/replies to club emails reach nobody/i)).toBeVisible();
+  });
+
+  // Every member who presses Reply from then on writes to this address, so a
+  // typo is caught before it goes live, with the address spelled out.
+  it("asks before replies start going to a new address, and saves nothing if told no", async () => {
+    await renderLoaded();
+    await userEvent.type(box(), "helo@example.com");
+    await userEvent.click(saveAddress());
+
+    expect(await screen.findByText("Send replies to helo@example.com?")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(saveClubSettings).not.toHaveBeenCalled();
+    expect(box()).toHaveValue("helo@example.com");
+  });
+
+  it("clears without asking, since that only brings back the contact-page line", async () => {
+    getClubSettings.mockResolvedValue({
+      details: ACCOUNT,
+      email_reply_to: "hello@example.com",
+      legacy_instructions: "",
+    });
+    await renderLoaded();
+    await userEvent.clear(box());
+    await userEvent.click(saveAddress());
+    await waitFor(() => expect(saveClubSettings).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Use this address" })).not.toBeInTheDocument();
   });
 });

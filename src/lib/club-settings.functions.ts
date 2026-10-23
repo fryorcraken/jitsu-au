@@ -75,7 +75,12 @@ export async function writeClubSetting(
     },
     { onConflict: "key" },
   );
-  if (error) throw new Error(error.message);
+  if (error) {
+    // The database's own words help nobody at a settings screen. Log them, and
+    // tell the manager the one thing they can do.
+    console.error(`[club-settings] could not save ${input.key}:`, error.message);
+    throw new Error("That was not saved. Nothing has changed.");
+  }
   return { ok: true as const };
 }
 

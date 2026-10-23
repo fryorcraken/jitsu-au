@@ -18,7 +18,12 @@ import { Link } from "@react-email/components";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 
 export interface ReplyOrReachUsProps {
-  /** The address replies go to, or null when replies reach nobody. */
+  /**
+   * Where a reply to this email goes, or null when it reaches nobody. Always the
+   * same value the sender put on the message as `Reply-To` (`clubReplyTo`,
+   * resolved once before rendering), so the copy and the header agree. Every
+   * template with a reply line takes it under this name.
+   */
   replyTo: string | null;
   /** The site's origin, for the contact page link. */
   siteUrl: string;

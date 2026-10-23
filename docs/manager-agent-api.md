@@ -176,18 +176,17 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   is the only source of price). Refusals: `404 not_found`,
   `409 item_invoice_settled` (cancel or delete of a paid invoice),
   `422 item_not_listed`. Product rules: `docs/item-invoices.md`.
-- `get_club_settings` / `save_club_settings` (`"21"`) — the club-wide settings
-  `/manager/settings` edits, through `loadClubSettings` / `writeClubSetting` in
-  `src/lib/club-settings.functions.ts`, the same functions the screen calls.
-  `get_club_settings` returns `email_reply_to` and `payment_details`, or `503
-settings_unreadable` (with a `Retry-After`) when they cannot be read, never an
-  answer of "nothing set". `save_club_settings` writes **only**
-  `email_reply_to` (`""` clears it); the bank account is refused by name with
-  `403 setting_read_only`. That is deliberate: a wrong BSB sends members' money
-  somewhere the club cannot recover it from, the screen previews the member's
-  own panel as a manager types, and an agent has neither that preview nor a
-  reason to change bank details. Writes log an audit line
-  (`[agent.save_club_settings] audit`). What the reply-to does: `docs/emails.md`.
+- `get_club_settings` (`"21"`) — the club-wide settings `/manager/settings`
+  edits, read through `loadClubSettings` in
+  `src/lib/club-settings.functions.ts`, the same read the screen makes. Returns
+  `email_reply_to` and `payment_details`, or `503 settings_unreadable` (with a
+  `Retry-After`) when they cannot be read, never an answer of "nothing set".
+  **There is deliberately no action that writes them.** The bank account says
+  where members' money goes and the reply-to where their replies to invoices
+  and receipts go, so a leaked or misused token that could change either could
+  redirect members to somebody else, and nothing on screen would show it. A
+  manager changes them on the screen, signed in, after a confirm. What the
+  reply-to does: `docs/emails.md`.
 - `delete_invoice` — delete an invoice outright, for tidying up one that should
   never have existed. Dispatches to `deleteMembershipRow`, which the manager
   screens' Delete button also calls, so both refuse for the same reasons in the

@@ -1104,57 +1104,14 @@ describe("manager agent route: club settings", () => {
     expect((await res.json()).error.code).toBe("settings_unreadable");
   });
 
-  it("saves the reply-to address through the same write the screen uses", async () => {
-    const fake = fakeSettings({});
-    currentAdmin = fake.db;
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    const res = await post({
-      action: "save_club_settings",
-      params: { key: "email_reply_to", value: " Hello@Example.com " },
-    });
-    expect(res.status).toBe(200);
-    expect((await res.json()).result).toEqual({
-      key: "email_reply_to",
-      value: "hello@example.com",
-      saved: true,
-    });
-    expect(fake.upserts).toEqual([
-      expect.objectContaining({ key: "email_reply_to", value: "hello@example.com" }),
-    ]);
-  });
-
-  it("clears it with an empty value", async () => {
-    const fake = fakeSettings({ email_reply_to: "hello@example.com" });
-    currentAdmin = fake.db;
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    const res = await post({
-      action: "save_club_settings",
-      params: { key: "email_reply_to", value: "" },
-    });
-    expect((await res.json()).result).toMatchObject({ value: null });
-    expect(fake.upserts[0]).toMatchObject({ key: "email_reply_to", value: "" });
-  });
-
-  // The bank account is money. An agent can read it but never write it, and
-  // is told where a person goes to change it.
-  it("refuses the bank account by name, writing nothing", async () => {
+  // Both settings decide where members' replies and money go, so no token can
+  // change them: the action does not exist, and nothing is written.
+  it("has no way to change a club setting", async () => {
     const fake = fakeSettings({});
     currentAdmin = fake.db;
     const res = await post({
       action: "save_club_settings",
-      params: { key: "invoice_payment_details", value: { bsb: "062000" } },
-    });
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("setting_read_only");
-    expect(fake.upserts).toEqual([]);
-  });
-
-  it("refuses something that is not one address", async () => {
-    const fake = fakeSettings({});
-    currentAdmin = fake.db;
-    const res = await post({
-      action: "save_club_settings",
-      params: { key: "email_reply_to", value: "a@example.com, b@example.com" },
+      params: { key: "email_reply_to", value: "someone@example.com" },
     });
     expect(res.status).toBe(400);
     expect(fake.upserts).toEqual([]);
