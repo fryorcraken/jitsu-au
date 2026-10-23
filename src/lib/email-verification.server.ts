@@ -26,8 +26,7 @@ import { VerifyEmail } from "@/lib/email-templates/verify-email";
 import { sendEmail } from "@/lib/send-email.server";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 import { SITE_ORIGIN } from "@/lib/seo";
-
-const SITE_NAME = "UTS Jitsu";
+import { SITE_NAME } from "@/lib/email-sender";
 
 type AdminClient = SupabaseClient<Database>;
 

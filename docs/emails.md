@@ -19,22 +19,26 @@ and every email is signed by the identity in `src/lib/email-sender.ts`:
   so DKIM and SPF align under DMARC. It stays on `jitsu.au` even though the site
   itself moved to `utsjitsu.com.au`: it moves only if the sending setup moves
   with it.
-- **Name:** "UTS Jitsu", used in subjects and greetings, currently spelled as a
-  local `SITE_NAME` in each sender module.
+- **Name:** `SITE_NAME` ("UTS Jitsu"), used in subjects and greetings.
 - **Links:** built on `SITE_ORIGIN` from `src/lib/seo.ts`, the site's one
   canonical origin.
 - **Purpose:** always `transactional`. Nothing the club sends is marketing.
-- **Manager recipients:** `getManagerEmails` (in `waiver-email.server.ts`),
-  every holder of the `manager` role at their login address, shared by the four
-  flows that tell managers something.
+- **Manager recipients:** `getManagerEmails` (`manager-recipients.server.ts`), every holder of the `manager`
+  role at their login address, shared by the four flows that tell managers
+  something.
 
 What an email says, who it is about and its idempotency key stay in the email's
 own module, next to the flow that sends it. One transport, not one giant file.
 
+`scripts/email-conventions.test.ts` holds that line: nothing under `src/` but
+`send-email.server.ts` may load `@lovable.dev/email-js` (the auth webhook may
+load `createAuthEmailHandler` and nothing else), and the sending domain and the
+club's email name are each spelled once, in `email-sender.ts`.
+
 **The auth emails are the one exception to `sendEmail`.** Supabase Auth calls
 `/lovable/email/auth/webhook`, and Lovable's `createAuthEmailHandler` sends from
-inside its own code. That route still takes its `From` and sending domain from
-`email-sender.ts`. The handler offers no Reply-To option.
+inside its own code. That route still takes its `From`, sending domain and name
+from `email-sender.ts`. The handler offers no Reply-To option.
 
 **Best-effort, everywhere.** A failed send is caught by its caller and logged,
 never thrown into the flow that triggered it: a waiver is saved, a payment is

@@ -8,6 +8,7 @@ import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
 import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_NAME } from "@/lib/email-sender";
 
 // Templates have heterogeneous prop shapes; a shared prop type doesn't fit cleanly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,9 +20,6 @@ const EMAIL_TEMPLATES: Record<string, React.ComponentType<any>> = {
   email_change: EmailChangeEmail,
   reauthentication: ReauthenticationEmail,
 };
-
-// Configuration
-const SITE_NAME = "UTS Jitsu";
 
 // Sample data for preview mode ONLY (not used in actual email sending).
 // URLs are baked in at scaffold time from the project's real data.

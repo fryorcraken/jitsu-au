@@ -6,4 +6,7 @@
 // The From domain must match the sender domain so DKIM/SPF align under DMARC
 // (Gmail flags misaligned From-domains as spam).
 export const SENDER_DOMAIN = "notify.jitsu.au";
-export const FROM = `UTS Jitsu <noreply@${SENDER_DOMAIN}>`;
+/** The name every email is signed with, and that subjects and greetings use. */
+export const SITE_NAME = "UTS Jitsu";
+
+export const FROM = `${SITE_NAME} <noreply@${SENDER_DOMAIN}>`;
