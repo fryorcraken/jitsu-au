@@ -22,6 +22,7 @@ import { Route as FaqRouteImport } from './routes/faq'
 import { Route as FirstClassRouteImport } from './routes/first-class'
 import { Route as InstructorsRouteImport } from './routes/instructors'
 import { Route as KbRouteRouteImport } from './routes/kb/route'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as RegisterInterestRouteImport } from './routes/register-interest'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
@@ -30,6 +31,7 @@ import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ThankYouRouteImport } from './routes/thank-you'
 import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as WaiverRouteImport } from './routes/waiver'
+import { Route as Char91DotwellKnownChar93OauthProtectedResourceRouteImport } from './routes/[.well-known]/oauth-protected-resource'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AuthenticatedMembershipRouteImport } from './routes/_authenticated/membership'
 import { Route as AuthenticatedNotificationsRouteImport } from './routes/_authenticated/notifications'
@@ -39,6 +41,7 @@ import { Route as EmailSettingsIndexRouteImport } from './routes/email-settings/
 import { Route as EmailSettingsTokenRouteImport } from './routes/email-settings/$token'
 import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as KbSlugRouteImport } from './routes/kb/$slug'
+import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as AuthenticatedAccountUserIdRouteImport } from './routes/_authenticated/account_.$userId'
 import { Route as AuthenticatedManagerIndexRouteImport } from './routes/_authenticated/manager.index'
 import { Route as AuthenticatedManagerApiTokensRouteImport } from './routes/_authenticated/manager.api-tokens'
@@ -131,6 +134,11 @@ const KbRouteRoute = KbRouteRouteImport.update({
   path: '/kb',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PricingRoute = PricingRouteImport.update({
   id: '/pricing',
   path: '/pricing',
@@ -171,6 +179,12 @@ const WaiverRoute = WaiverRouteImport.update({
   path: '/waiver',
   getParentRoute: () => rootRouteImport,
 } as any)
+const Char91DotwellKnownChar93OauthProtectedResourceRoute =
+  Char91DotwellKnownChar93OauthProtectedResourceRouteImport.update({
+    id: '/.well-known/oauth-protected-resource',
+    path: '/.well-known/oauth-protected-resource',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
   id: '/account',
   path: '/account',
@@ -216,6 +230,11 @@ const KbSlugRoute = KbSlugRouteImport.update({
   id: '/$slug',
   path: '/$slug',
   getParentRoute: () => KbRouteRoute,
+} as any)
+const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
+  id: '/.lovable/oauth/consent',
+  path: '/.lovable/oauth/consent',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedAccountUserIdRoute =
   AuthenticatedAccountUserIdRouteImport.update({
@@ -386,6 +405,7 @@ export interface FileRoutesByFullPath {
   '/faq': typeof FaqRoute
   '/first-class': typeof FirstClassRoute
   '/instructors': typeof InstructorsRoute
+  '/mcp': typeof McpRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -394,6 +414,7 @@ export interface FileRoutesByFullPath {
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
+  '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/notifications': typeof AuthenticatedNotificationsRoute
@@ -403,6 +424,7 @@ export interface FileRoutesByFullPath {
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
+  '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/account/$userId': typeof AuthenticatedAccountUserIdRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -443,6 +465,7 @@ export interface FileRoutesByTo {
   '/faq': typeof FaqRoute
   '/first-class': typeof FirstClassRoute
   '/instructors': typeof InstructorsRoute
+  '/mcp': typeof McpRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -451,6 +474,7 @@ export interface FileRoutesByTo {
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
+  '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/account': typeof AuthenticatedAccountRoute
   '/membership': typeof AuthenticatedMembershipRoute
   '/notifications': typeof AuthenticatedNotificationsRoute
@@ -460,6 +484,7 @@ export interface FileRoutesByTo {
   '/blog': typeof BlogIndexRoute
   '/email-settings': typeof EmailSettingsIndexRoute
   '/kb': typeof KbIndexRoute
+  '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/account/$userId': typeof AuthenticatedAccountUserIdRoute
   '/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -503,6 +528,7 @@ export interface FileRoutesById {
   '/faq': typeof FaqRoute
   '/first-class': typeof FirstClassRoute
   '/instructors': typeof InstructorsRoute
+  '/mcp': typeof McpRoute
   '/pricing': typeof PricingRoute
   '/register-interest': typeof RegisterInterestRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -511,6 +537,7 @@ export interface FileRoutesById {
   '/thank-you': typeof ThankYouRoute
   '/update-password': typeof UpdatePasswordRoute
   '/waiver': typeof WaiverRoute
+  '/.well-known/oauth-protected-resource': typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/_authenticated/membership': typeof AuthenticatedMembershipRoute
   '/_authenticated/notifications': typeof AuthenticatedNotificationsRoute
@@ -520,6 +547,7 @@ export interface FileRoutesById {
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
+  '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/_authenticated/account_/$userId': typeof AuthenticatedAccountUserIdRoute
   '/_authenticated/manager/api-tokens': typeof AuthenticatedManagerApiTokensRoute
   '/_authenticated/manager/blog': typeof AuthenticatedManagerBlogRoute
@@ -563,6 +591,7 @@ export interface FileRouteTypes {
     | '/faq'
     | '/first-class'
     | '/instructors'
+    | '/mcp'
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
@@ -571,6 +600,7 @@ export interface FileRouteTypes {
     | '/thank-you'
     | '/update-password'
     | '/waiver'
+    | '/.well-known/oauth-protected-resource'
     | '/account'
     | '/membership'
     | '/notifications'
@@ -580,6 +610,7 @@ export interface FileRouteTypes {
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
+    | '/.lovable/oauth/consent'
     | '/account/$userId'
     | '/manager/api-tokens'
     | '/manager/blog'
@@ -620,6 +651,7 @@ export interface FileRouteTypes {
     | '/faq'
     | '/first-class'
     | '/instructors'
+    | '/mcp'
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
@@ -628,6 +660,7 @@ export interface FileRouteTypes {
     | '/thank-you'
     | '/update-password'
     | '/waiver'
+    | '/.well-known/oauth-protected-resource'
     | '/account'
     | '/membership'
     | '/notifications'
@@ -637,6 +670,7 @@ export interface FileRouteTypes {
     | '/blog'
     | '/email-settings'
     | '/kb'
+    | '/.lovable/oauth/consent'
     | '/account/$userId'
     | '/manager/api-tokens'
     | '/manager/blog'
@@ -679,6 +713,7 @@ export interface FileRouteTypes {
     | '/faq'
     | '/first-class'
     | '/instructors'
+    | '/mcp'
     | '/pricing'
     | '/register-interest'
     | '/reset-password'
@@ -687,6 +722,7 @@ export interface FileRouteTypes {
     | '/thank-you'
     | '/update-password'
     | '/waiver'
+    | '/.well-known/oauth-protected-resource'
     | '/_authenticated/account'
     | '/_authenticated/membership'
     | '/_authenticated/notifications'
@@ -696,6 +732,7 @@ export interface FileRouteTypes {
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
+    | '/.lovable/oauth/consent'
     | '/_authenticated/account_/$userId'
     | '/_authenticated/manager/api-tokens'
     | '/_authenticated/manager/blog'
@@ -739,6 +776,7 @@ export interface RootRouteChildren {
   FaqRoute: typeof FaqRoute
   FirstClassRoute: typeof FirstClassRoute
   InstructorsRoute: typeof InstructorsRoute
+  McpRoute: typeof McpRoute
   PricingRoute: typeof PricingRoute
   RegisterInterestRoute: typeof RegisterInterestRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
@@ -747,10 +785,12 @@ export interface RootRouteChildren {
   ThankYouRoute: typeof ThankYouRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   WaiverRoute: typeof WaiverRoute
+  Char91DotwellKnownChar93OauthProtectedResourceRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRoute
   BlogSlugRoute: typeof BlogSlugRoute
   EmailSettingsTokenRoute: typeof EmailSettingsTokenRoute
   BlogIndexRoute: typeof BlogIndexRoute
   EmailSettingsIndexRoute: typeof EmailSettingsIndexRoute
+  DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
   ApiNotificationsDigestRoute: typeof ApiNotificationsDigestRoute
@@ -852,6 +892,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KbRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pricing': {
       id: '/pricing'
       path: '/pricing'
@@ -906,6 +953,13 @@ declare module '@tanstack/react-router' {
       path: '/waiver'
       fullPath: '/waiver'
       preLoaderRoute: typeof WaiverRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/oauth-protected-resource': {
+      id: '/.well-known/oauth-protected-resource'
+      path: '/.well-known/oauth-protected-resource'
+      fullPath: '/.well-known/oauth-protected-resource'
+      preLoaderRoute: typeof Char91DotwellKnownChar93OauthProtectedResourceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/account': {
@@ -970,6 +1024,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/kb/$slug'
       preLoaderRoute: typeof KbSlugRouteImport
       parentRoute: typeof KbRouteRoute
+    }
+    '/.lovable/oauth/consent': {
+      id: '/.lovable/oauth/consent'
+      path: '/.lovable/oauth/consent'
+      fullPath: '/.lovable/oauth/consent'
+      preLoaderRoute: typeof DotlovableOauthConsentRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/account_/$userId': {
       id: '/_authenticated/account_/$userId'
@@ -1252,6 +1313,7 @@ const rootRouteChildren: RootRouteChildren = {
   FaqRoute: FaqRoute,
   FirstClassRoute: FirstClassRoute,
   InstructorsRoute: InstructorsRoute,
+  McpRoute: McpRoute,
   PricingRoute: PricingRoute,
   RegisterInterestRoute: RegisterInterestRoute,
   ResetPasswordRoute: ResetPasswordRoute,
@@ -1260,10 +1322,13 @@ const rootRouteChildren: RootRouteChildren = {
   ThankYouRoute: ThankYouRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
   WaiverRoute: WaiverRoute,
+  Char91DotwellKnownChar93OauthProtectedResourceRoute:
+    Char91DotwellKnownChar93OauthProtectedResourceRoute,
   BlogSlugRoute: BlogSlugRoute,
   EmailSettingsTokenRoute: EmailSettingsTokenRoute,
   BlogIndexRoute: BlogIndexRoute,
   EmailSettingsIndexRoute: EmailSettingsIndexRoute,
+  DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,
   ApiNotificationsDigestRoute: ApiNotificationsDigestRoute,

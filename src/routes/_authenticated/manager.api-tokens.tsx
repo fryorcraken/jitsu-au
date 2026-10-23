@@ -56,6 +56,8 @@ function ApiTokensPage() {
   const baseUrl = typeof window !== "undefined" ? window.location.origin : SITE_ORIGIN;
   const agentPrompt = useMemo(() => buildAgentPrompt({ baseUrl }), [baseUrl]);
   const manifestUrl = `${baseUrl}/api/manager/agent`;
+  const mcpUrl = `${baseUrl}/mcp`;
+  const claudeCodeCommand = `claude mcp add --transport http uts-jitsu ${mcpUrl}`;
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -229,6 +231,41 @@ function ApiTokensPage() {
                 ))}
               </ul>
             )}
+          </CardContent>
+        </Card>
+
+        {/* MCP: the same actions, connected by signing in rather than with a token. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Connect without a token</CardTitle>
+            <CardDescription>
+              Assistants that support MCP (Claude Code, Claude, Cursor) can connect by signing in
+              with your club login instead. They get the same actions as a token.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Server address</Label>
+                <CopyButton text={mcpUrl} label="Copy address" />
+              </div>
+              <code className="block break-all rounded bg-muted px-3 py-2 font-mono text-sm">
+                {mcpUrl}
+              </code>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Claude Code</Label>
+                <CopyButton text={claudeCodeCommand} label="Copy command" />
+              </div>
+              <code className="block break-all rounded bg-muted px-3 py-2 font-mono text-sm">
+                {claudeCodeCommand}
+              </code>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Your assistant opens this site in a browser, you sign in and approve it, and you're
+              done. Only manager accounts can use it.
+            </p>
           </CardContent>
         </Card>
 
