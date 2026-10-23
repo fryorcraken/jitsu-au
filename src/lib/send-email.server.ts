@@ -8,17 +8,26 @@
 // and takes the same sender from `email-sender.ts`.
 //
 // Everything goes out from `noreply@`, so a reply goes nowhere unless the send
-// says otherwise. The rule: a manager's copy of an email ABOUT a person (a
-// contact message, a new lead, a signed waiver, a membership awaiting payment)
-// sets `replyTo` to that person's address, because pressing reply is how a
-// manager answers them. Several addresses when the reply should reach more than
-// one person (a minor's waiver: their guardian and the minor), most important
-// first, because the first is the only one kept if the service refuses several.
-// An email TO a person sets none.
+// says otherwise, and `replyTo` is required so that every send says. The rule:
+//
+// - A manager's copy of an email ABOUT a person (a contact message, a new lead,
+//   a signed waiver, a membership awaiting payment) carries that person's
+//   address, because pressing reply is how a manager answers them. Several
+//   addresses when the reply should reach more than one person (a minor's
+//   waiver: their guardian and the minor), most important first, because the
+//   first is the only one kept if the service refuses several.
+// - An email TO a member or visitor carries the club's reply-to address,
+//   `clubReplyTo(admin)`, read once before the email is rendered and handed to
+//   the template too, so its "reply to this email" lines appear exactly when a
+//   reply reaches somebody. Null while a manager has not set one.
+// - The comment-reply email carries none (`notification-email.server.ts` says
+//   why).
 //
 // Like the modules that call it, this must never reach the client bundle: it is
 // named `*.server.ts` and is only ever imported by other `*.server.ts` modules.
 import { sendLovableEmail } from "@lovable.dev/email-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { FROM, SENDER_DOMAIN } from "@/lib/email-sender";
 
 /**
@@ -46,9 +55,11 @@ export async function sendEmail(opts: {
    * Where a reply goes instead of the noreply sender: one address, or several
    * when a reply should reach more than one person. Bare addresses only,
    * already validated by the caller: they end up in a mail header. The first
-   * is the one kept if the service will not take several (below).
+   * is the one kept if the service will not take several (below). Null for no
+   * Reply-To. Required, not optional, so every call site decides (the rule at
+   * the top of this file).
    */
-  replyTo?: string | string[];
+  replyTo: string | string[] | null;
 }) {
   const replyTo = typeof opts.replyTo === "string" ? [opts.replyTo] : (opts.replyTo ?? []);
   const send = (reply: string[], idempotencyKey: string) =>
@@ -89,5 +100,27 @@ export async function sendEmail(opts: {
       console.error("[send-email] retry with one Reply-To also failed", retryError);
       throw rejectedAsInvalid(retryError) ? e : retryError;
     }
+  }
+}
+
+/**
+ * The club's reply-to address (`email_reply_to` in `club_settings`), or null.
+ *
+ * Read once per send by every member-facing sender, BEFORE it renders, and the
+ * one value goes both to the template (which only promises a reply when there
+ * is somewhere for it to go) and to `sendEmail`. Never throws: a failed read
+ * sends the email without a reply-to, and the template falls back to pointing
+ * at the contact page, which is what an unset address does too. An email that
+ * goes out with a fallback line beats one that does not go out.
+ */
+export async function clubReplyTo(admin: SupabaseClient<Database>): Promise<string | null> {
+  try {
+    const { readClubReplyTo } = await import("@/lib/club-settings.server");
+    const { ok, address } = await readClubReplyTo(admin);
+    if (!ok) console.error("[send-email] could not read the reply-to address; sending without one");
+    return address;
+  } catch (e) {
+    console.error("[send-email] could not read the reply-to address; sending without one", e);
+    return null;
   }
 }

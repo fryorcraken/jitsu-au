@@ -498,7 +498,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("22");
+    expect(AGENT_MANIFEST.version).toBe("23");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -545,9 +545,9 @@ describe("AGENT_MANIFEST", () => {
   });
 
   // Fields a caching client is told to read have to be announced, the lesson of
-  // #112 pinned above. These are the ones "21" added.
+  // #112 pinned above. These are the ones "22" added.
   it("announces get_user and the headline fields list_users now carries", () => {
-    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "21")!.notes.join(" ");
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "22")!.notes.join(" ");
     expect(notes).toMatch(/get_user/);
     expect(notes).toMatch(/phone/);
     expect(notes).toMatch(/email_confirmed_at/);
@@ -559,7 +559,7 @@ describe("AGENT_MANIFEST", () => {
   });
 
   it("announces the code of conduct actions, and the change in what outdated means", () => {
-    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "22")!.notes.join(" ");
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "23")!.notes.join(" ");
     for (const action of [
       "list_code_of_conduct_versions",
       "get_code_of_conduct",

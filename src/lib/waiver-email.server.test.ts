@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { getManagerEmails, sendWaiverEmails } from "./waiver-email.server";
+import { sendWaiverEmails } from "./waiver-email.server";
 
 const { sendLovableEmail } = vi.hoisted(() => ({ sendLovableEmail: vi.fn() }));
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
@@ -38,43 +38,6 @@ function fakeAdmin(opts: {
   } as unknown as SupabaseClient<Database>;
 }
 
-describe("getManagerEmails", () => {
-  it("resolves the email of each manager role holder", async () => {
-    const admin = fakeAdmin({
-      roles: [{ user_id: "a" }, { user_id: "b" }],
-      users: { a: "sensei@club.test", b: "assistant@club.test" },
-    });
-    await expect(getManagerEmails(admin)).resolves.toEqual([
-      "sensei@club.test",
-      "assistant@club.test",
-    ]);
-  });
-
-  it("de-duplicates repeated emails", async () => {
-    const admin = fakeAdmin({
-      roles: [{ user_id: "a" }, { user_id: "b" }],
-      users: { a: "sensei@club.test", b: "sensei@club.test" },
-    });
-    await expect(getManagerEmails(admin)).resolves.toEqual(["sensei@club.test"]);
-  });
-
-  it("skips role holders with no resolvable email", async () => {
-    const admin = fakeAdmin({
-      roles: [{ user_id: "a" }, { user_id: "ghost" }],
-      users: { a: "sensei@club.test" },
-    });
-    await expect(getManagerEmails(admin)).resolves.toEqual(["sensei@club.test"]);
-  });
-
-  it("returns [] when the role lookup errors", async () => {
-    await expect(getManagerEmails(fakeAdmin({ rolesError: true }))).resolves.toEqual([]);
-  });
-
-  it("returns [] when there are no managers", async () => {
-    await expect(getManagerEmails(fakeAdmin({ roles: [] }))).resolves.toEqual([]);
-  });
-});
-
 describe("sendWaiverEmails", () => {
   const original = process.env.LOVABLE_API_KEY;
 
@@ -101,7 +64,7 @@ describe("sendWaiverEmails", () => {
       admin,
     });
 
-    expect(result).toEqual({ sent: [], skipped: true });
+    expect(result).toEqual({ sent: [], skipped: true, memberReplyTo: null });
     expect(from).not.toHaveBeenCalled();
   });
 

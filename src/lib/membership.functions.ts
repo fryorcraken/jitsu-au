@@ -22,7 +22,6 @@ import {
   profileFullName,
   rescheduleMembershipStart,
   sameInstant,
-  saveClubSettingsSchema,
   savePlanSchema,
   sellablePlans,
   setMembershipStartSchema,
@@ -465,6 +464,7 @@ export async function recordMembershipPayment(
           planName: input.plan?.name ?? "your membership",
           validity: input.plan ? validityLabel(input.plan) : "",
           amount: formatCents(membership.price_cents),
+          admin,
         });
       }
     } catch (e) {
@@ -547,6 +547,7 @@ export async function ensureCasualInvoiceEmailed(
         planName: plan?.name ?? "your casual class",
         validity: plan ? validityLabel(plan) : "",
         amount: formatCents(membership.price_cents),
+        admin,
       });
       return;
     }
@@ -1341,50 +1342,6 @@ export const getPaymentInstructions = createServerFn({ method: "GET" })
     const admin = await adminClient();
     const { readClubPaymentDetails } = await import("@/lib/club-settings.server");
     return await readClubPaymentDetails(admin);
-  });
-
-// ---- Manager: club settings (the club's bank account) ----
-/**
- * The form's current values, plus whatever free text is left in the old
- * `invoice_payment_instructions` row. That legacy string is shown read-only
- * beside an empty form so a manager can copy the account details across; nothing
- * member-facing renders it any more.
- */
-export const getClubSettings = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context);
-    const admin = await adminClient();
-    const { readClubPaymentDetails, getInvoiceInstructions } =
-      await import("@/lib/club-settings.server");
-    const [{ ok, details }, legacyInstructions] = await Promise.all([
-      readClubPaymentDetails(admin),
-      getInvoiceInstructions(admin),
-    ]);
-    // A manager editing the club's account must not be shown an empty form when
-    // the truth is "we could not read it": saving would then overwrite real
-    // details with blanks.
-    if (!ok) throw new Error("Could not read the club settings. Try again.");
-    return { details, legacy_instructions: legacyInstructions };
-  });
-
-export const saveClubSettings = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => saveClubSettingsSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context);
-    const admin = await adminClient();
-    const { error } = await admin.from("club_settings").upsert(
-      {
-        key: "invoice_payment_details",
-        value: JSON.stringify(data),
-        updated_at: new Date().toISOString(),
-        updated_by: context.userId,
-      },
-      { onConflict: "key" },
-    );
-    if (error) throw new Error(error.message);
-    return { ok: true as const };
   });
 
 // ---- Manager: list all plans (incl. inactive) ----

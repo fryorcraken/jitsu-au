@@ -44,12 +44,10 @@ interface AccountActivatedEmailProps {
   /**
    * The contact form, offered instead of "reply to this email".
    *
-   * This email is sent from `noreply@` with no reply-to header (only a
-   * manager's copy of an email about someone carries one, see
-   * `send-email.server.ts`), so a reply goes nowhere. That is a small thing to
-   * get wrong in most emails and a large one here: this is the email a person
-   * reads when they cannot get in, and the reply we invited would be their
-   * attempt to say so.
+   * Kept even once the club sets a reply-to address (`docs/emails.md`), when a
+   * reply to this email does reach somebody: this is the email a person reads when they
+   * cannot get in, and a form that always works is the safer thing to point
+   * them at than an inbox setting a manager can clear.
    */
   contactUrl: string;
 }

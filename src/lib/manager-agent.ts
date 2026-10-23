@@ -222,7 +222,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "22",
+  version: "23",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -236,7 +236,7 @@ export const AGENT_MANIFEST: {
   // new response field — which is what these notes name.
   changes: [
     {
-      version: "22",
+      version: "23",
       // Four new actions and one new field. Nothing that worked before changes,
       // though what "outdated" means did move, which a caller acting on it
       // should read.
@@ -248,7 +248,7 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
-      version: "21",
+      version: "22",
       // A new read-only action and three new list_users fields. Nothing that
       // worked before changes.
       breaking: false,
@@ -256,6 +256,15 @@ export const AGENT_MANIFEST: {
         "New action get_user { user_id }: everything the manager person page shows about one person, read by the same function the page uses. user (name, email with email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, the newest membership's kind and status), profile (contact details, date of birth, address, emergency contact, medical notes, the guardian block, kit sizes, photo consent), household, memberships, checkins (attendance, newest first), code_of_conduct, and waivers (approval status, template_version, signed_at, has_pdf, approver). A waiver's signer_ip and signer_meta are deliberately left out.",
         "get_user reports a person, not a lead: an id with no person record is 404 not_found. A read it could only half answer (the address, the code of conduct, the guardian's name, a class name or a waiver approver's name could not be read) is 500 db_error, never a null email, an `unsigned` or an unknown name it did not actually check.",
         "list_users rows carry phone, email_confirmed_at (null means the address is not verified; for a dependant it is the state of the guardian's address, like email itself) and code_of_conduct: { state: unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name }. The same object get_user and the person page report.",
+      ],
+    },
+    {
+      version: "21",
+      // Purely additive: one new action. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "New action get_club_settings: the club's reply-to address (email_reply_to, or null) and its bank account (payment_details, or null when not published). The same values the manager's Club settings screen shows. 503 settings_unreadable when they cannot be read, rather than an answer of nothing set.",
+        'Read-only: there is deliberately no action that changes either. They decide where members\' replies and money go, so a manager changes them on the Club settings screen. Once email_reply_to is set, every email the club sends to a member carries it as Reply-To and says "reply to this email"; while it is null, those emails point at the contact page instead.',
       ],
     },
     {
@@ -1265,6 +1274,13 @@ export const AGENT_MANIFEST: {
       summary:
         "Remove an unpaid (or cancelled) item invoice outright, for one raised by mistake. Cannot be undone, and nothing tells the member, who may already have the email. 409 item_invoice_settled when it has been paid: a paid invoice is the club's record of money and is never deleted.",
       params: [{ name: "id", required: true, description: "The item invoice's UUID." }],
+    },
+    {
+      name: "get_club_settings",
+      method: "POST",
+      summary:
+        "Read the club-wide settings: email_reply_to (where a reply to any club email goes, or null when unset) and payment_details (the bank account members pay into, or null when not published). 503 settings_unreadable when they could not be read: that is not the same as nothing being set, so retry rather than treating it as empty.",
+      params: [],
     },
   ],
 };

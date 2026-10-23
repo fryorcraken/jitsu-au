@@ -131,6 +131,7 @@ you are working in their area, not before.
 | The data model, every table            | `docs/database.md`          |
 | Changing the schema — **read first**   | `docs/database-changes.md`  |
 | Manager agent HTTP API                 | `docs/manager-agent-api.md` |
+| Every email: who, why, and the sender  | `docs/emails.md`            |
 | End-to-end tests (the browser suite)   | `docs/e2e-tests.md`         |
 | Routing conventions                    | `src/routes/README.md`      |
 | Product flows, one file per flow       | the rest of `docs/`         |

@@ -329,6 +329,9 @@ describe("/membership: how to pay", () => {
     expect(within(card).getByText("$245")).toBeVisible();
     expect(within(card).getByText(PLAN_REF)).toBeVisible();
     expect(within(card).getByText(/has not published its account details yet/i)).toBeVisible();
+    // Not "reply to your invoice email", which reaches nobody unless the club
+    // has set a reply-to address.
+    expect(within(card).queryByText(/reply to your invoice email/i)).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /copy BSB/i })).not.toBeInTheDocument();
   });
 });
