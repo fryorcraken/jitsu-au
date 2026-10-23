@@ -1218,9 +1218,10 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         const { sendWaiverEmails } = await import("./waiver-email.server");
         await sendWaiverEmails({
           waiverId: inserted.id,
-          // The participant, for the managers' "new waiver signed by" line.
-          // Still the child on a child's waiver: they are who signed up, and a
-          // reviewer is about to look at their record.
+          // The participant: who the managers' email says the waiver is for.
+          // Still the child on a child's waiver, since they are who signed up
+          // and a reviewer is about to look at their record; the parent is
+          // named as the signer through `signedByName` below.
           memberName: full_name,
           // ...but the person READING the confirmation is the account holder,
           // so greet them. On a child's waiver that is the parent, taken from
@@ -1251,6 +1252,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           // close this tab without doing it now, and this is the only way back
           // in until a manager approves them.
           codeOfConductToken,
+          // So a manager's reply about a minor's waiver reaches the guardian
+          // too. Blank for an adult; on a child's waiver it is the address
+          // `email` already holds (see resolveWaiverContacts).
+          guardianEmail: contacts.guardianEmail,
+          // On a child's waiver the managers' copy names the parent as the
+          // signer, because the address it carries is the parent's.
+          signedByName: signingForDependant ? contacts.guardianName || null : null,
         });
       } catch (e) {
         console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);

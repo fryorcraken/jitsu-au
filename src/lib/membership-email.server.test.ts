@@ -152,3 +152,43 @@ describe("who the subject line is about", () => {
     expect((managerCopy![0] as { html: string }).html).toContain("Ada&#x27;s address");
   });
 });
+
+describe("who a reply reaches", () => {
+  const original = process.env.LOVABLE_API_KEY;
+
+  beforeEach(() => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.LOVABLE_API_KEY;
+    else process.env.LOVABLE_API_KEY = original;
+    vi.restoreAllMocks();
+  });
+
+  it("sets Reply-To on the manager's copy to whoever was invoiced, and only there", async () => {
+    // A manager answering a pending-payment email presses reply. On a child's
+    // invoice that has to reach the parent, the address the invoice went to.
+    const managers = await import("@/lib/waiver-email.server");
+    vi.spyOn(managers, "getManagerEmails").mockResolvedValue(["manager@example.com"]);
+
+    await sendMembershipPaymentEmail({
+      membershipId: "m1",
+      memberName: "Bea Lovelace",
+      memberGreetingName: "Ada",
+      memberEmail: "ada@example.com",
+      forName: "Bea",
+      planName: "One semester",
+      amount: "$245",
+      reference: "UTSJ-ABC234",
+      admin: { from: vi.fn() } as unknown as SupabaseClient<Database>,
+    });
+
+    const byRecipient = (to: string) =>
+      sendLovableEmail.mock.calls.find((c) => (c[0] as { to: string }).to === to)?.[0] as
+        | { reply_to?: string }
+        | undefined;
+    expect(byRecipient("ada@example.com")?.reply_to).toBeUndefined();
+    expect(byRecipient("manager@example.com")?.reply_to).toBe("ada@example.com");
+  });
+});

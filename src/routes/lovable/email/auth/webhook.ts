@@ -8,12 +8,11 @@ import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
 import { SITE_ORIGIN } from "@/lib/seo";
+import { FROM, SENDER_DOMAIN } from "@/lib/email-sender";
 
-// Configuration
+// Configuration. The sender comes from `email-sender.ts`, shared with every
+// other email the app sends.
 const SITE_NAME = "UTS Jitsu";
-const SENDER_DOMAIN = "notify.jitsu.au";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
 
 // The SDK handler owns verification, dispatch, and retry semantics; this file
 // owns only the email decisions: subjects, templates, and per-type props.
@@ -25,7 +24,7 @@ function getHandler() {
   if (cachedHandler) return cachedHandler;
   cachedHandler = createAuthEmailHandler({
     apiKey: process.env.LOVABLE_API_KEY!,
-    from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
+    from: FROM,
     senderDomain: SENDER_DOMAIN,
     sendUrl: process.env.LOVABLE_SEND_URL,
     emails: {

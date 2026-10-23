@@ -255,7 +255,8 @@ The "Start your free trial" page (`/register-interest`) is step 1: name, email
 lead row (`interest_registrations`) and nothing else happens — a lead is not a
 person yet. They then continue to the waiver (step 2) with name/email/phone
 carried over. Leads appear in the manager directory (merged in by email) until
-they sign the waiver.
+they sign the waiver. The lead is emailed their waiver link and every manager is
+told, by an email whose Reply-To is the lead.
 
 ### Applicant signs the waiver
 
@@ -309,10 +310,17 @@ person, not one person by definition**. A tick above the emergency contact
 default and hides those three fields, so the common case is asked for once,
 exactly as it was before the split; unticking it asks for the other person.
 The guardian signs at the end. On submit the signer immediately gets the signed PDF and a copy
-by email; managers are notified. Behind the scenes, for a new email: a locked
-login record is created (their email, no way to sign in) and their profile is
-seeded with name + phone. An existing person is left untouched. Either way the
-waiver row stores the full submission, and the person is now an applicant.
+by email; managers are notified, by an email whose Reply-To is the address the
+copy went to, so pressing reply answers whoever received it: the signer, or the
+parent on a waiver signed for a child on their account (whom that email names as
+the signer, with the child as who it is for, since the address shown beside
+them is theirs). A minor signing for
+themselves is replied to at both their own address and their guardian's (or,
+should the email service ever refuse two addresses, at the guardian's alone,
+and the server logs it). Behind the scenes, for a new email: a locked login
+record is created (their email, no way to sign in) and their profile is seeded
+with name + phone. An existing person is left untouched. Either way the waiver
+row stores the full submission, and the person is now an applicant.
 
 **For a child's waiver that happens twice over.** The address resolves to the
 guardian, creating their locked person record if this is their first child, and
