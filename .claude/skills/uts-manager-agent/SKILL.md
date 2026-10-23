@@ -5,7 +5,7 @@ description: >-
   everything the manager person page shows about one person, raise a
   membership for someone, cancel or delete an invoice, edit an invoice's
   details, file a scanned paper waiver, edit and publish the waiver template
-  people sign, manage the club's membership dates, publish and reorder the
+  people sign and the code of conduct members agree to, manage the club's membership dates, publish and reorder the
   club's knowledge base and read members' comments on it) against the live site
   via its manager agent HTTP API. Use when a club
   manager asks an agent to look up members/invoices, check one person's state
@@ -16,7 +16,8 @@ description: >-
   resend an invoice, receipt or waiver email,
   migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
-  version of it (or roll back to an earlier one), add or edit a membership
+  version of it (or roll back to an earlier one), edit and publish the club's
+  code of conduct (and choose whether members must agree to it again), add or edit a membership
   window's start/end dates, or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them. Requires the UTS_MANAGER_API_URL and
@@ -152,9 +153,12 @@ Each row also carries three headline fields, the ones the person page leads with
 - `email_confirmed_at`: when the address was verified, `null` when it is not.
   For a child it is the state of the guardian's address, because `email` is
   the guardian's.
-- `code_of_conduct`: `{ state, current_version, accepted_version, accepted_at,
-signature_name }`, where `state` is `unsigned | signed | outdated`. It never
-  blocks anything: an unsigned member can still train.
+- `code_of_conduct`: `{ state, current_version, required_version,
+accepted_version, accepted_at, signature_name }`, where `state` is
+  `unsigned | signed | outdated`. `outdated` means `accepted_version` is below
+  `required_version`, the last version that asked everybody to agree again; a
+  newer live version that did not ask (a correction) puts nobody out of date.
+  It never blocks anything: an unsigned member can still train.
 
 For anything more about one person, call `get_user`.
 
@@ -860,6 +864,64 @@ created; on the version that is already live it does nothing and reports
 
 ```bash
 scripts/agent.sh publish_waiver_template '{"version": 4}'
+```
+
+### The code of conduct
+
+The club's house rules, at `/code-of-conduct`. Members agree to them by typing
+their name; it is never a condition of training. Like the waiver, the text is
+kept in numbered versions with one live, and these four actions are the
+agent's equivalent of the manager's editor at `/manager/code-of-conduct`.
+They work the same way as the waiver template actions above (version-keyed,
+saving publishes, omitted text carried over from `base_version`, the same
+refusals with `code_of_conduct_not_published` as the 503), with one addition.
+
+> **`asks_reagreement` decides who is out of date.** Every save is a new
+> version, but only a save with `asks_reagreement: true` asks everybody who
+> agreed to an earlier version to agree again. Leave it off for a correction
+> (a typo, a broken link, clearer wording): everybody stays up to date. Turn it
+> on when the rules themselves change, and tell the manager the reply's
+> `reprompted` count, which is how many people it put out of date. Nobody is
+> emailed either way; they see a prompt on their account page.
+
+### `list_code_of_conduct_versions` — every version, and which is live
+
+`live_version`, `required_version` (anybody whose highest agreement is below it
+is out of date), and each version without its text: `version`, `title`,
+`status` (`Live | Previous | Draft`), `asks_reagreement`, `body_chars`.
+
+### `get_code_of_conduct` — read one version's text
+
+`params`: `version` (optional, default the live one). The text is a small
+markdown subset: `# Heading`, `## Section`, `- bullet`, `**bold**`, bare
+`https://` links, and a blank line between paragraphs. Anything else shows as
+typed.
+
+### `save_code_of_conduct` — publish new wording
+
+```bash
+# A correction: nobody is asked to agree again.
+scripts/agent.sh save_code_of_conduct '{"title":"UTS Jitsu Code of Conduct","body_md":"# UTS Jitsu Code of Conduct\n\n..."}'
+# The rules changed: ask everybody to agree to the new text.
+scripts/agent.sh save_code_of_conduct '{"title":"...","body_md":"...","asks_reagreement":true}'
+```
+
+`params` (all optional, but there must be something to save): `title` and
+`body_md` (together, or neither), `asks_reagreement` (default `false`),
+`base_version`, `client_submission_id` (a UUID you choose; resend it on a retry
+and a save that already landed comes back `already_saved: true` instead of
+writing a second version). Sending only `asks_reagreement: true` republishes the
+current text as a new version that asks everybody to agree to it, for when a
+rewrite went out without asking.
+
+### `publish_code_of_conduct` — roll back to an earlier version
+
+`params`: `version` (**required**). The reply's `required_version` says who is
+out of date afterwards: rolling back below a version that asked undoes that
+ask.
+
+```bash
+scripts/agent.sh publish_code_of_conduct '{"version": 3}'
 ```
 
 ### The knowledge base
