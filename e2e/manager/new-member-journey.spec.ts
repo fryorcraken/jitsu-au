@@ -263,6 +263,9 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     .from("membership_plans")
     .select("id, code, name")
     .eq("kind", "period")
+    // The CURRENT semester: the seed also carries next semester's plan, which
+    // has not started, so it would cover no class today.
+    .order("starts_on", { ascending: true })
     .limit(1)
     .single();
   if (!periodPlan) throw new Error("no seeded period plan");

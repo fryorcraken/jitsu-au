@@ -388,7 +388,7 @@ const TEMPLATE_VERSION = currentTemplate.version;
 
 const plans = await select(
   "membership_plans",
-  "id, kind, name, public_price_cents, student_price_cents",
+  "id, code, kind, name, public_price_cents, student_price_cents",
 );
 /**
  * The plan of a given kind a manager would reach for, creating one when the
@@ -428,6 +428,26 @@ const PERIOD_PLAN = await planOf("period", {
   ends_on: on(120),
   sort_order: 2,
 });
+/**
+ * Next semester, set up and on sale but never announced: the plan the
+ * manager's "Email all members about this plan" flow is photographed on
+ * (e2e/manager/plan-announcement.spec.ts). Looked up by code rather than kind,
+ * because the semester above is the period plan every other spec reaches for.
+ */
+const NEXT_PLAN_CODE = "screenshot-next-semester";
+if (!plans.some((candidate) => candidate.code === NEXT_PLAN_CODE)) {
+  await insert("membership_plans", {
+    code: NEXT_PLAN_CODE,
+    name: "Next semester",
+    description: "Unlimited classes for the whole semester. Grading fee included.",
+    kind: "period",
+    public_price_cents: 46000,
+    student_price_cents: 25500,
+    starts_on: on(130),
+    ends_on: on(250),
+    sort_order: 3,
+  });
+}
 const INSURANCE_PLAN = await planOf("insurance");
 const TRIAL_PLAN = await planOf("trial");
 /** What this person actually paid, so the invoice on screen adds up. */
