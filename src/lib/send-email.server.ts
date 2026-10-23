@@ -12,8 +12,9 @@
 // contact message, a new lead, a signed waiver, a membership awaiting payment)
 // sets `replyTo` to that person's address, because pressing reply is how a
 // manager answers them. Several addresses when the reply should reach more than
-// one person (a minor's waiver: the minor and their guardian). An email TO a
-// person sets none.
+// one person (a minor's waiver: their guardian and the minor), most important
+// first, because the first is the only one kept if the service refuses several.
+// An email TO a person sets none.
 //
 // Like the modules that call it, this must never reach the client bundle: it is
 // named `*.server.ts` and is only ever imported by other `*.server.ts` modules.
@@ -74,9 +75,9 @@ export async function sendEmail(opts: {
     // caller swallows the error, so the email would simply never arrive: a
     // manager would not hear about a waiver at all. Losing the later addresses
     // is far cheaper, so send once more with only the first (callers list the
-    // one that matters most first). Only when the
-    // request was rejected as invalid: after a timeout the first attempt may
-    // have gone out, and the retry's new idempotency key would deliver it twice.
+    // one that matters most first). Only when the request was rejected as
+    // invalid: after a timeout the first attempt may have gone out, and the
+    // retry's new idempotency key would deliver it twice.
     if (replyTo.length < 2 || !rejectedAsInvalid(e)) throw e;
     console.warn("[send-email] rejected with several Reply-To addresses; retrying with one", e);
     try {

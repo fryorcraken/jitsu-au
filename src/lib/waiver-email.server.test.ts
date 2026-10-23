@@ -155,6 +155,38 @@ describe("sendWaiverEmails", () => {
     expect(toManager.reply_to).toBe("ada@example.com, sam@example.com");
   });
 
+  it("still reaches the guardian if the service will not take two Reply-To addresses", async () => {
+    // The fallback keeps only the first address, so the order is what decides
+    // who a manager's reply about a minor reaches. It has to be the adult.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail
+      .mockReset()
+      .mockImplementation(async (p: { to: string; reply_to?: string }) => {
+        if (p.to === "manager-a@example.com" && p.reply_to?.includes(",")) {
+          throw Object.assign(new Error("invalid reply_to"), { status: 422 });
+        }
+        return { success: true };
+      });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await sendWaiverEmails({
+      waiverId: "w5",
+      memberName: "Sam Lovelace",
+      memberGreetingName: "Sam",
+      memberEmail: "sam@example.com",
+      guardianEmail: "ada@example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin: fakeAdmin({ roles: [{ user_id: "a" }], users: { a: "manager-a@example.com" } }),
+    });
+
+    expect(result.sent).toContain("manager-a@example.com");
+    const delivered = sendLovableEmail.mock.calls
+      .map(([p]) => p)
+      .filter((p) => p.to === "manager-a@example.com")
+      .at(-1);
+    expect(delivered.reply_to).toBe("ada@example.com");
+  });
+
   it("lists one address once when the guardian's is the member's own", async () => {
     // A waiver signed for a child on someone's account, or a guardian block
     // left blank, resolves both to the same mailbox; it is listed once, case
