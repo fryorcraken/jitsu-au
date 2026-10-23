@@ -44,23 +44,35 @@ Usage
     check-client-grants.py GRANTS_CSV [--expected FILE]
     check-client-grants.py --selftest
 
-GRANTS_CSV is a headerless three-column CSV of `table,grantee,privilege` from:
+GRANTS_CSV is a three-column CSV of `table,grantee,privilege` from:
 
-    psql "$DB_URL" --csv --tuples-only -c \
-      "SELECT c.relname, r.rolname, a.privilege_type \
-         FROM pg_class c \
-         JOIN pg_namespace n ON n.oid = c.relnamespace \
-         CROSS JOIN LATERAL aclexplode(c.relacl) a \
-         JOIN pg_roles r ON r.oid = a.grantee \
-        WHERE n.nspname = 'public' AND c.relkind = 'r' \
-          AND r.rolname IN ('anon','authenticated')"
+    psql "$DB_URL" --csv --tuples-only -f supabase/lint/client-grants.sql
 
-Read `pg_class.relacl`, NOT `information_schema.role_table_grants`, for two
+(`supabase/lint/client-grants.sql`, the one copy of the query; README.md and
+supabase-lint.yml both run that file.)
+
+A COLUMN grant comes back with the column in brackets after the table,
+`profiles(archived_at)`, and is matched against the expected file the same way
+(`profiles(archived_at):authenticated:UPDATE`). Table ACLs alone could not see
+one: `GRANT UPDATE (col) ON t TO authenticated` writes `pg_attribute.attacl` and
+leaves `pg_class.relacl` empty, so a table this check reported as fully closed
+could hand a member the one column that matters. `profiles.archived_at` is the
+case that made it worth closing: a member able to write it could restore
+themselves, or archive somebody else, through an owner-update RLS policy that
+exists today but is unreachable only because no grant reaches it.
+
+Read `pg_class.relacl` and `pg_attribute.attacl`, NOT
+`information_schema.role_table_grants`, for two
 reasons. The information_schema views only show grants where the current user is
 the grantor, the grantee, or a member of the grantee role, so the least-privilege
 reader role in README.md sees an empty set there — the check would pass while the
 schema was wide open. And they omit MAINTAIN entirely, under-reporting by one
-privilege on Postgres 17+. `pg_class` and `pg_roles` are world-readable.
+privilege on Postgres 17+. `pg_class`, `pg_attribute` and `pg_roles` are
+world-readable.
+
+A header row (`relname,rolname,privilege_type`, which an SQL console's CSV
+export adds and `psql --tuples-only` does not) is skipped rather than read as a
+grant.
 
 `service_role` is deliberately out of scope: it bypasses RLS by design and every
 server function depends on it holding full privileges.
@@ -77,12 +89,20 @@ DEFAULT_EXPECTED = Path(__file__).resolve().parent / "client-grants-expected.txt
 
 CLIENT_ROLES = ("anon", "authenticated")
 
+# client-grants.sql's column names, which an SQL console's CSV export writes as
+# its first row, sometimes behind a UTF-8 byte-order mark.
+HEADER = ["relname", "rolname", "privilege_type"]
+
+
+def is_header(row):
+    return [cell.strip().lstrip("\ufeff").lower() for cell in row[:3]] == HEADER
+
 
 def parse_grants(text):
     """{(table, grantee, privilege)} as held by the live database."""
     out = set()
     for row in csv.reader(io.StringIO(text)):
-        if len(row) < 3:
+        if len(row) < 3 or is_header(row):
             continue
         table, grantee, privilege = (row[0].strip(), row[1].strip(), row[2].strip().upper())
         if table and grantee and privilege:
@@ -135,17 +155,22 @@ def expected_display(path):
 
 def selftest():
     live = parse_grants(
+        "\ufeffrelname,rolname,privilege_type\n"
         "user_roles,authenticated,SELECT\n"
         "user_roles,authenticated,INSERT\n"
         "calendar_events,anon,SELECT\n"
         ",,\n"
         "profiles,anon,DELETE\n"
+        "profiles(archived_at),authenticated,UPDATE\n"
+        "profiles,PUBLIC,SELECT\n"
     )
     assert live == {
         ("user_roles", "authenticated", "SELECT"),
         ("user_roles", "authenticated", "INSERT"),
         ("calendar_events", "anon", "SELECT"),
         ("profiles", "anon", "DELETE"),
+        ("profiles(archived_at)", "authenticated", "UPDATE"),
+        ("profiles", "PUBLIC", "SELECT"),
     }, live
 
     expected = parse_expected(
@@ -160,10 +185,25 @@ def selftest():
     # user_roles is the real defect this guards: the migration granted SELECT
     # only, but Supabase's default INSERT survived and the table's manager RLS
     # policy made it a usable privilege-escalation path.
+    #
+    # The column grant is the other half: a table whose relacl is empty can
+    # still hand a client role one column, and that must fail like any other.
+    # A grant to PUBLIC reaches both client roles and can never be expected
+    # (parse_expected refuses the grantee), so it always fails.
     assert unexpected(live, expected) == [
+        ("profiles", "PUBLIC", "SELECT"),
         ("profiles", "anon", "DELETE"),
+        ("profiles(archived_at)", "authenticated", "UPDATE"),
         ("user_roles", "authenticated", "INSERT"),
     ], unexpected(live, expected)
+
+    # A deliberate column grant is listed the way it is reported, and then
+    # passes: held and listed is clean, listed and not held is a note.
+    column = parse_expected("profiles(phone):authenticated:update\n")
+    assert column == {("profiles(phone)", "authenticated", "UPDATE")}, column
+    held = parse_grants("profiles(phone),authenticated,UPDATE\n")
+    assert unexpected(held, column) == []
+    assert absent(set(), column) == [("profiles(phone)", "authenticated", "UPDATE")]
 
     # A clean database has nothing unexpected.
     assert unexpected(expected, expected) == []
@@ -175,7 +215,13 @@ def selftest():
     # Lowercase privileges from a hand-written file still match the live CSV.
     assert parse_expected("waivers:anon:select\n") == {("waivers", "anon", "SELECT")}
 
-    for bad in ("user_roles:authenticated", "a:b:c:d", "user_roles:postgres:SELECT", "a::SELECT"):
+    for bad in (
+        "user_roles:authenticated",
+        "a:b:c:d",
+        "user_roles:postgres:SELECT",
+        "user_roles:PUBLIC:SELECT",
+        "a::SELECT",
+    ):
         try:
             parse_expected(bad)
         except ValueError:
@@ -214,11 +260,12 @@ def main():
     # cannot see the ACL than a schema with no client grants at all — and it
     # would pass, silently, forever. `information_schema.role_table_grants` is
     # filtered to grants involving the current user, so a least-privilege reader
-    # sees nothing there; read pg_class.relacl instead (the query is in README.md).
+    # sees nothing there; read pg_class.relacl instead (client-grants.sql).
     if not live and expected:
         print(
             "The grant query came back empty while grants are expected — check the\n"
-            "connection, and that the query reads pg_class.relacl rather than\n"
+            "connection, and that you ran supabase/lint/client-grants.sql, which reads\n"
+            "pg_class.relacl and pg_attribute.attacl rather than\n"
             "information_schema, which hides grants the connecting role is not party to.",
             file=sys.stderr,
         )
@@ -249,7 +296,10 @@ def main():
         "\n"
         "    REVOKE ALL ON public.<table> FROM anon, authenticated;\n"
         "\n"
-        "followed by only the privileges the browser client genuinely uses. If a grant\n"
+        "followed by only the privileges the browser client genuinely uses. A line\n"
+        "naming `table(column)` is a COLUMN grant, which REVOKE ALL on the table also\n"
+        "removes; `REVOKE <privilege> (<column>) ON public.<table> FROM <role>;` is the\n"
+        "narrow form. If a grant\n"
         "listed above is deliberate, add it to\n"
         f"{expected_display(expected_path)} with a note saying which client code needs it.\n"
         "See docs/database-changes.md.",

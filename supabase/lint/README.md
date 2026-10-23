@@ -18,13 +18,13 @@ builds, it needs no credential at all, so that half of it does run in CI — see
 
 ## What runs
 
-| Check                      | Tool                                                            | Catches                                                                                                                                                                                                          |
-| -------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Advisors**               | `splinter.sql` via `psql` → `check-advisors.py`                 | The Security/Performance lints from the dashboard's **Database > Advisors**, e.g. `function_search_path_mutable` (a `SECURITY DEFINER` function without a fixed `search_path`).                                  |
-| **plpgsql_check**          | `supabase db lint --schema public --fail-on warning`            | Errors in `public` PL/pgSQL function bodies (unused variables, bad SQL, etc.).                                                                                                                                   |
-| **Client grants (replay)** | `check-client-grants.py` against the replayed `pg_class.relacl` | A table the migrations leave open to `anon`/`authenticated`. Supabase grants ALL on every new table and `GRANT` cannot narrow that, so a missing `REVOKE` replays fully open. Runs in CI — no credential needed. |
-| **Migration drift**        | `check-migration-drift.py` against the live ledger              | A migration file that has never been applied to the live database. Committing a migration does not apply it — see `docs/database-changes.md`. **Run by hand**, not in CI.                                        |
-| **Client grants (live)**   | `check-client-grants.py` against the live ACLs                  | A privilege `anon` or `authenticated` holds that `client-grants-expected.txt` does not list, or one it lists that is missing. **Run by hand**, not in CI.                                                        |
+| Check                      | Tool                                                                | Catches                                                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Advisors**               | `splinter.sql` via `psql` → `check-advisors.py`                     | The Security/Performance lints from the dashboard's **Database > Advisors**, e.g. `function_search_path_mutable` (a `SECURITY DEFINER` function without a fixed `search_path`).                                                       |
+| **plpgsql_check**          | `supabase db lint --schema public --fail-on warning`                | Errors in `public` PL/pgSQL function bodies (unused variables, bad SQL, etc.).                                                                                                                                                        |
+| **Client grants (replay)** | `check-client-grants.py` against the replayed table and column ACLs | A table (or a single column) the migrations leave open to `anon`/`authenticated`. Supabase grants ALL on every new table and `GRANT` cannot narrow that, so a missing `REVOKE` replays fully open. Runs in CI — no credential needed. |
+| **Migration drift**        | `check-migration-drift.py` against the live ledger                  | A migration file that has never been applied to the live database. Committing a migration does not apply it — see `docs/database-changes.md`. **Run by hand**, not in CI.                                                             |
+| **Client grants (live)**   | `check-client-grants.py` against the live ACLs                      | A privilege `anon` or `authenticated` holds that `client-grants-expected.txt` does not list, or one it lists that is missing. **Run by hand**, not in CI.                                                                             |
 
 `supabase db lint` is scoped to `public` on purpose: Supabase-managed schemas
 (`storage`, `auth`, …) ship functions that emit warnings we don't control.
@@ -120,23 +120,26 @@ SELECT version, coalesce(name, '')
 python3 supabase/lint/check-migration-drift.py applied.csv
 ```
 
-Client grants — this reads `pg_class.relacl`, **not**
+Client grants — run **`client-grants.sql`** (in this directory; paste it whole
+into Lovable's SQL access and save the result as `grants.csv`). It reads
+`pg_class.relacl` and `pg_attribute.attacl`, **not**
 `information_schema.role_table_grants`. The information_schema views only show
 grants where the current user is the grantor, the grantee, or a member of the
 grantee role, so a restricted reader sees nothing there and the check would come
-back empty and pass while the schema was wide open. `pg_class` and `pg_roles`
-are world-readable, so `aclexplode()` gives the true ACL whatever role connects.
+back empty and pass while the schema was wide open. The catalogs are
+world-readable, so `aclexplode()` gives the true ACL whatever role connects.
 
-```sql
-SELECT c.relname, r.rolname, a.privilege_type
-  FROM pg_class c
-  JOIN pg_namespace n ON n.oid = c.relnamespace
-  CROSS JOIN LATERAL aclexplode(c.relacl) a
-  JOIN pg_roles r ON r.oid = a.grantee
- WHERE n.nspname = 'public' AND c.relkind = 'r'
-   AND r.rolname IN ('anon', 'authenticated')
- ORDER BY 1, 2, 3;
-```
+The column half exists because a `GRANT UPDATE (col) ON t` writes only the
+column's ACL: a table-only query reports that table as closed while one column
+of it is writable. A column grant is reported, and listed in
+`client-grants-expected.txt`, as `table(column)`. It was added on 2026-10-23 with
+`profiles.archived_at`, which a member must never be able to write, and **has not
+yet been run against the live database**: the 2026-09-01 figures below are
+table grants only. Nothing in the migrations makes a column or PUBLIC grant,
+so a `table(column)` or `PUBLIC` row from the first live run is a finding to
+investigate (a grant made by hand in the Lovable UI, most likely), not an
+artefact of the new query. The same query also reports any grant to `PUBLIC`,
+which both client roles inherit and a join on `pg_roles` used to drop.
 
 ```sh
 python3 supabase/lint/check-client-grants.py grants.csv

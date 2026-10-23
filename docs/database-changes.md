@@ -66,7 +66,9 @@ new table that forgets its `REVOKE` fails the PR that adds it. Checking the
 **live** ACL is the same script run by hand, because CI cannot reach that
 database at all — see `supabase/lint/README.md`. When you add a table or a
 grant, update that file in the same change, and run the live check by hand after
-the migration goes live. Read the ACL from **`pg_class.relacl`**, never
+the migration goes live. Read the ACL from **`pg_class.relacl`** and, for
+column grants, **`pg_attribute.attacl`** (`supabase/lint/client-grants.sql` does
+both), never
 `information_schema.role_table_grants`: the information_schema views only show
 grants the connecting role is party to (a least-privilege reader sees an empty
 set) and they omit `MAINTAIN` entirely.
