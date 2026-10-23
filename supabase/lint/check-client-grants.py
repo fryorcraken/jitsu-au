@@ -46,7 +46,7 @@ Usage
 
 GRANTS_CSV is a headerless three-column CSV of `table,grantee,privilege` from:
 
-    psql "$DB_URL" --csv --tuples-only -f client-grants.sql
+    psql "$DB_URL" --csv --tuples-only -f supabase/lint/client-grants.sql
 
 (`supabase/lint/client-grants.sql`, the one copy of the query; README.md and
 supabase-lint.yml both run that file.)
@@ -67,7 +67,12 @@ reasons. The information_schema views only show grants where the current user is
 the grantor, the grantee, or a member of the grantee role, so the least-privilege
 reader role in README.md sees an empty set there — the check would pass while the
 schema was wide open. And they omit MAINTAIN entirely, under-reporting by one
-privilege on Postgres 17+. `pg_class` and `pg_roles` are world-readable.
+privilege on Postgres 17+. `pg_class`, `pg_attribute` and `pg_roles` are
+world-readable.
+
+A header row (`relname,rolname,privilege_type`, which an SQL console's CSV
+export adds and `psql --tuples-only` does not) is skipped rather than read as a
+grant.
 
 `service_role` is deliberately out of scope: it bypasses RLS by design and every
 server function depends on it holding full privileges.
@@ -84,6 +89,9 @@ DEFAULT_EXPECTED = Path(__file__).resolve().parent / "client-grants-expected.txt
 
 CLIENT_ROLES = ("anon", "authenticated")
 
+# client-grants.sql's column names, as a console export writes them.
+HEADER = ("relname", "rolname", "PRIVILEGE_TYPE")
+
 
 def parse_grants(text):
     """{(table, grantee, privilege)} as held by the live database."""
@@ -92,6 +100,8 @@ def parse_grants(text):
         if len(row) < 3:
             continue
         table, grantee, privilege = (row[0].strip(), row[1].strip(), row[2].strip().upper())
+        if (table, grantee, privilege) == HEADER:
+            continue
         if table and grantee and privilege:
             out.add((table, grantee, privilege))
     return out
@@ -142,6 +152,7 @@ def expected_display(path):
 
 def selftest():
     live = parse_grants(
+        "relname,rolname,privilege_type\n"
         "user_roles,authenticated,SELECT\n"
         "user_roles,authenticated,INSERT\n"
         "calendar_events,anon,SELECT\n"
@@ -236,7 +247,8 @@ def main():
     if not live and expected:
         print(
             "The grant query came back empty while grants are expected — check the\n"
-            "connection, and that the query reads pg_class.relacl rather than\n"
+            "connection, and that you ran supabase/lint/client-grants.sql, which reads\n"
+            "pg_class.relacl and pg_attribute.attacl rather than\n"
             "information_schema, which hides grants the connecting role is not party to.",
             file=sys.stderr,
         )

@@ -1,4 +1,5 @@
--- Every privilege `anon` and `authenticated` hold in `public`, as
+-- Every privilege `anon` and `authenticated` hold on a table in `public`
+-- (relkind 'r'; views and partitioned tables are not read), as
 -- `table,grantee,privilege`, for check-client-grants.py. The one copy of this
 -- query: supabase-lint.yml runs it against the migration replay, and README.md
 -- has it run by hand against the live database, so the two results compare.

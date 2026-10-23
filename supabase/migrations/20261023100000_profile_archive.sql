@@ -1,15 +1,18 @@
 -- Archiving: a manager marks somebody as having left the club.
 --
--- A reversible bookkeeping mark, NOT a deletion and not a ban. It changes who
--- the club contacts with mass email and what managers see by default; every
--- record, waiver, PDF, membership and check-in stays exactly as it is, and the
--- person can still sign in. docs/erasing-personal-data.md ("Archiving is not
--- erasure") says why this is the answer that needs neither of the club's open
--- legal questions settled.
+-- A reversible bookkeeping mark, NOT a deletion and not a ban. It is meant to
+-- change who the club contacts with mass email and what managers see by
+-- default; every record, waiver, PDF, membership and check-in stays exactly as
+-- it is, and the person can still sign in. This migration only adds the
+-- columns: nothing reads or writes them until the code change that follows
+-- it, which is where those behaviours live. docs/erasing-personal-data.md
+-- ("Archiving is not erasure") says why this is the answer that needs neither
+-- of the club's open legal questions settled.
 --
---   archived_at  NULL = not archived. Set when a manager archives the person,
---                cleared when they are restored (by hand, or automatically when
---                they come back to train, take a membership or sign a waiver).
+--   archived_at  NULL = not archived. To be set when a manager archives the
+--                person and cleared when they are restored (by hand, or, in the
+--                code that follows, when they come back to train, take a
+--                membership or sign a waiver).
 --   archived_by  The manager who archived them. ON DELETE SET NULL like every
 --                other audit column on this schema, so deleting that manager's
 --                login blanks it silently (listed in erasing-personal-data.md).
@@ -45,7 +48,7 @@ ALTER TABLE public.profiles
     CHECK (archived_by IS NULL OR archived_at IS NOT NULL);
 
 COMMENT ON COLUMN public.profiles.archived_at IS
-  'When a manager marked this person as having left the club. NULL = not archived. Reversible; deletes nothing. Archived people get no club-initiated mass email. Written only by service-role server functions.';
+  'When a manager marked this person as having left the club. NULL = not archived. Reversible; deletes nothing and blocks no sign-in. No client role may write it.';
 
 COMMENT ON COLUMN public.profiles.archived_by IS
   'The manager who archived this person. NULL when not archived, or when that manager''s login has since been deleted (ON DELETE SET NULL).';

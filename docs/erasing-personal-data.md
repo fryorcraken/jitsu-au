@@ -54,10 +54,12 @@ delete a member, a waiver, a PDF or a login, by design rather than by omission.
 
 ## Archiving is not erasure
 
-A manager can mark a person as having **left the club**
-(`profiles.archived_at`). It is a reversible bookkeeping mark, and it is the
-answer to "everyone who ever signed stays on the books" that needs neither of the
-questions below settled, because it destroys nothing:
+A manager will be able to mark a person as having **left the club**
+(`profiles.archived_at`). Today only the columns exist and nothing reads or
+writes them; the screens, the API and the email exclusions are the next change.
+It is a reversible bookkeeping mark, and it is the answer to "everyone who ever
+signed stays on the books" that needs neither of the questions below settled,
+because it destroys nothing:
 
 - Every record, waiver, PDF, membership and check-in stays exactly as it is.
 - The person can still sign in, see their account and pay what they owe. It is
