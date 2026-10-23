@@ -295,6 +295,24 @@ function errorResponse(e: unknown): Response {
   );
 }
 
+/**
+ * Reminder state for the yearly insurance rows in a listing, the same
+ * projection the manager screens read (`loadInsuranceReminderStates`). Lazy,
+ * because route files ship to the client bundle and that module carries the
+ * email sender.
+ */
+async function loadReminderStates(
+  db: Awaited<ReturnType<typeof adminClient>>,
+  rows: MembershipRow[],
+) {
+  const { loadInsuranceReminderStates } = await import("@/lib/insurance-reminders.server");
+  try {
+    return await loadInsuranceReminderStates(db, rows);
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+}
+
 // ---- action: list_users ----
 async function handleListUsers(params: unknown) {
   const { status, limit } = listAgentUsersSchema.parse(params ?? {});
@@ -420,6 +438,7 @@ async function handleListUsers(params: unknown) {
     dependantsByGuardian.set(u.guardian_user_id, list);
   }
 
+  const insuranceReminders = await loadReminderStates(db, (rows ?? []) as MembershipRow[]);
   let users = aggregated.map((u) => ({
     user_id: u.user_id,
     name: u.name,
@@ -448,9 +467,10 @@ async function handleListUsers(params: unknown) {
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,
-    invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) =>
-      projectInvoice(m, planById.get(m.plan_id)),
-    ),
+    invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) => ({
+      ...projectInvoice(m, planById.get(m.plan_id)),
+      insurance_reminder: insuranceReminders.get(m.id) ?? null,
+    })),
   }));
 
   if (status) users = users.filter((u) => u.lifecycle_status === status);
@@ -513,8 +533,13 @@ async function handleListInvoices(params: unknown) {
     }
   }
 
+  const insuranceReminders = await loadReminderStates(db, (rows ?? []) as MembershipRow[]);
   const invoices = ((rows ?? []) as MembershipRow[]).map((r) => ({
     ...projectInvoice(r, planById.get(r.plan_id)),
+    // Yearly insurance only, null on every other plan: whether its "ending
+    // soon" reminder is owed, and the last reminder actually emailed. The same
+    // projection `/manager/memberships` shows as "14-day reminder sent 26 Feb".
+    insurance_reminder: insuranceReminders.get(r.id) ?? null,
     member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
     member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
     // Present whenever the address is somebody else's, named or not: keyed on

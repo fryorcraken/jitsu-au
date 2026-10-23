@@ -39,6 +39,7 @@ import {
   type DueInsuranceReminder,
   type InsuranceCover,
   type InsuranceReminderKind,
+  type InsuranceReminderState,
 } from "@/lib/insurance-reminders";
 import {
   addCalendarDays,
@@ -282,14 +283,6 @@ export async function sendInsuranceReminders(
   }
   return result;
 }
-
-/** What a manager screen and the agent API say about one insurance membership. */
-export type InsuranceReminderState = {
-  /** True while its "ending soon" reminder is owed: inside 14 days, not renewed. */
-  ends_within_14_days: boolean;
-  /** The latest reminder actually emailed about it, if any. */
-  last_sent: { kind: InsuranceReminderKind; sent_at: string } | null;
-};
 
 /**
  * Reminder state for the insurance memberships among `rows`, keyed by

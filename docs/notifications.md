@@ -27,7 +27,8 @@ read state, and nothing can dismiss it. An **activity item** is something that
 happened, stored as a row in `notifications`, unread until somebody looks at it.
 They share one badge, and nothing else. The **email switches**
 (`notification_preferences`) govern the inbox only: every activity item is
-written whether or not the person wants it emailed.
+written whether or not the person wants it emailed. A short, closed list of
+kinds has **no switch at all** (see "Emails with no switch" below).
 
 ## Rules
 
@@ -57,7 +58,8 @@ written whether or not the person wants it emailed.
 8. **A reply is instant; everything else is a daily summary.** You said
    something and somebody answered, which is worth an interruption. Thread
    activity, announcements and moderation alerts batch, so a busy thread cannot
-   produce ten emails in an afternoon.
+   produce ten emails in an afternoon. The kinds with no switch are the
+   exception: they are sent on their own, never folded into the summary.
 9. **Announcements are off until somebody opts in.** They are the only kind that
    would reach a person who did nothing to ask for it. Everything else is on by
    default. A NULL column means "never chose", which is why the preference
@@ -423,7 +425,8 @@ Two further gaps it has, both worth knowing before trusting it:
 - **A reply email masks it.** It stays quiet if ANY row was stamped in the last
   36 hours, and `sendReplyNotification` stamps the instant reply emails, which
   do not go through the digest at all. One comment reply in the window hides a
-  dead digest.
+  dead digest. An insurance reminder does the same, though it at least proves
+  the morning job reached the site that day.
 - **It is shown, not sent.** It is an attention item on a page, so it reaches
   only a manager who signs in to the site and looks. A manager who works
   through the agent API never sees it.
@@ -598,6 +601,34 @@ nothing else — no read access to member data, no write path. Small blast
 radius, but the docs should not imply the old key stops working the instant you
 publish, because it does not.
 
+### Emails with no switch
+
+`unswitchableNotificationKinds` in `src/lib/notifications.ts` is a closed list
+of kinds the switches do not govern: messages about somebody's **membership**,
+the same way an invoice is, rather than about a conversation. Today it holds the
+two yearly insurance reminders, `insurance_ending_soon` and `insurance_ended`
+(`docs/memberships.md`, "When yearly insurance ends").
+
+- **Nobody can turn them off.** `shouldEmail` answers yes for them without
+  reading preferences, and the switches page offers nothing for them. Every kind
+  with a switch still obeys it.
+- **They are sent on their own, never in the summary.** The digest reads only
+  `digestNotificationKinds` (every kind with a switch). It has no section for
+  these, so reading one would stamp it as "nothing they wanted" and the email
+  would never go out.
+- **Their emails carry no settings link**, because a link to a page of switches
+  would promise a choice that page does not offer.
+- **Adding a kind to the list takes a choice away from people**, so it is a
+  product decision each time, made in that one list, which a test pins.
+
+The insurance reminders are written and sent by the **same morning job**, just
+before the summary: `/api/notifications/digest` calls
+`sendInsuranceReminders` first, logs what it did, and carries on to the summary
+whatever happened. There is still one scheduler. The endpoint's response
+carries an `insurance` block beside the summary's counts. A reminder that fails
+to send stays unstamped, so it is retried the next morning and counts toward the
+stalled-email attention item like any other unsent row.
+
 ### A post goes live
 
 `createBlogPost` and `updateBlogPost` announce on the transition **into**
@@ -694,9 +725,10 @@ way back means we genuinely do not know.
 - **No per-thread mute.** The switches are per kind. If one thread turns noisy,
   the answer today is to turn thread activity off.
 - **No in-app bell or toast.** The sidebar badge is the only in-app signal.
-- **The attention list has five checks**: waivers waiting for approval, unanswered
-  contact messages, a stalled daily digest, new interest registrations, and the
-  club's training dates running out. Unmatched bank transactions and unpaid
+- **The attention list has six checks**: waivers waiting for approval, unanswered
+  contact messages, a stalled daily digest, new interest registrations, people
+  whose yearly insurance ends in the next 14 days, and the club's training dates
+  running out. Unmatched bank transactions and unpaid
   invoices are the obvious next entries and the shape supports them, but widening
   the manager queue further is separate work.
 - **Signing up notifies managers by email at the moment it happens** (a new-lead
@@ -759,3 +791,5 @@ Two consequences worth knowing:
 | The key's typed RPC wrapper                      | `notificationDigestKey` in `src/lib/supabase-rpc.ts`                          |
 | The stalled-digest item                          | `digestStalledNotifications` in `src/lib/validation.ts`                       |
 | Email templates                                  | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx`        |
+| Kinds with no switch                             | `unswitchableNotificationKinds` in `src/lib/notifications.ts`                 |
+| Insurance reminders: rules / sending             | `src/lib/insurance-reminders.ts` / `insurance-reminders.server.ts`            |
