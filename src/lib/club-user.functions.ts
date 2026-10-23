@@ -329,6 +329,10 @@ export const getClubUser = createServerFn({ method: "POST" })
       admin,
       membershipRows.map((m) => m.id),
     );
+    // "14-day reminder sent 26 Feb" on a yearly insurance row: the same
+    // projection the memberships list and the agent API report.
+    const { loadInsuranceReminderStates } = await import("@/lib/insurance-reminders.server");
+    const insuranceReminders = await loadInsuranceReminderStates(admin, membershipRows);
 
     return {
       // Only the derived headline fields, not the whole aggregate. Its
@@ -455,6 +459,7 @@ export const getClubUser = createServerFn({ method: "POST" })
         paid_at: m.paid_at,
         paid_reference: m.paid_reference,
         checkin_count: checkinCounts.get(m.id) ?? 0,
+        insurance_reminder: insuranceReminders.get(m.id) ?? null,
       })),
       // Their attendance, newest first. `membership_id` with no cover is what
       // the needs-attention flow fixes, and it can be fixed from here too;

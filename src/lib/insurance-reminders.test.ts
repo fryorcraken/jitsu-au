@@ -5,6 +5,7 @@ import {
   INSURANCE_ENDING_SOON_DAYS,
   coverEndDay,
   insuranceReminderCopy,
+  insuranceReminderLabel,
   insuranceReminderTitle,
   insuranceRemindersDue,
   insuranceRenewHref,
@@ -214,5 +215,31 @@ describe("insuranceReminderCopy", () => {
       ],
     });
     expect(withParent.subject).toBe("Club insurance for you, Bea and Cy ended today");
+  });
+});
+
+describe("insuranceReminderLabel", () => {
+  it("says which reminder went out and when, in Sydney", () => {
+    expect(
+      insuranceReminderLabel({
+        ends_within_14_days: true,
+        // 26 Feb, 9am in Sydney; still 25 Feb in UTC.
+        last_sent: { kind: "insurance_ending_soon", sent_at: "2027-02-25T22:00:06Z" },
+      }),
+    ).toBe("14-day reminder sent 26 Feb");
+    expect(
+      insuranceReminderLabel({
+        ends_within_14_days: false,
+        last_sent: { kind: "insurance_ended", sent_at: "2027-03-11T22:00:06Z" },
+      }),
+    ).toBe("Ended reminder sent 12 Mar");
+  });
+
+  it("says a reminder is owed but not sent, and nothing otherwise", () => {
+    expect(insuranceReminderLabel({ ends_within_14_days: true, last_sent: null })).toBe(
+      "Reminder not sent yet",
+    );
+    expect(insuranceReminderLabel({ ends_within_14_days: false, last_sent: null })).toBeNull();
+    expect(insuranceReminderLabel(null)).toBeNull();
   });
 });

@@ -161,7 +161,9 @@ function NotificationsPage() {
               <Bell className="h-5 w-5" />
               Activity
             </CardTitle>
-            <CardDescription>Replies, threads you are in, and new posts.</CardDescription>
+            <CardDescription>
+              Replies, threads you are in, new posts, and reminders about your membership.
+            </CardDescription>
           </div>
           {data && data.items.some((i) => i.read_at === null) && (
             <Button size="sm" variant="ghost" onClick={markAll}>

@@ -1438,6 +1438,11 @@ export const listMemberships = createServerFn({ method: "GET" })
       admin,
       (rows ?? []).map((r) => r.id),
     );
+    // Reminders about yearly insurance ending: the same projection the agent
+    // API's list_invoices reports. Lazy, because the module carries the email
+    // sender and this file ships to the client bundle.
+    const { loadInsuranceReminderStates } = await import("@/lib/insurance-reminders.server");
+    const reminders = await loadInsuranceReminderStates(admin, rows ?? []);
 
     return (rows ?? []).map((r) => ({
       ...projectMembership(r, planById.get(r.plan_id)),
@@ -1447,6 +1452,7 @@ export const listMemberships = createServerFn({ method: "GET" })
       // a member's own page reads too: it is the club's note about the money.
       paid_reference: r.paid_reference,
       checkin_count: checkinCounts.get(r.id) ?? 0,
+      insurance_reminder: reminders.get(r.id) ?? null,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
       member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
       // Null for the overwhelming majority: an account holder's address is

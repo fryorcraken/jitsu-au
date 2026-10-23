@@ -220,3 +220,31 @@ export function insuranceReminderCopy(input: {
     renewHref,
   };
 }
+
+/** What a manager screen and the agent API say about one insurance membership. */
+export type InsuranceReminderState = {
+  /** True while its "ending soon" reminder is owed: inside 14 days, not renewed. */
+  ends_within_14_days: boolean;
+  /** The latest reminder actually emailed about it, if any. */
+  last_sent: { kind: InsuranceReminderKind; sent_at: string } | null;
+};
+
+/**
+ * The line a manager reads on an insurance membership's row, or null when
+ * there is nothing to say. "Sent" is only ever said about an email that went
+ * out: a reminder that stopped being owed is withdrawn, never stamped.
+ */
+export function insuranceReminderLabel(state: InsuranceReminderState | null): string | null {
+  if (!state) return null;
+  if (state.last_sent) {
+    const when = new Date(state.last_sent.sent_at).toLocaleDateString("en-AU", {
+      day: "numeric",
+      month: "short",
+      timeZone: CLUB_TIME_ZONE,
+    });
+    return state.last_sent.kind === "insurance_ending_soon"
+      ? `14-day reminder sent ${when}`
+      : `Ended reminder sent ${when}`;
+  }
+  return state.ends_within_14_days ? "Reminder not sent yet" : null;
+}
