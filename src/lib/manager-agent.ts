@@ -118,6 +118,43 @@ export function projectAgentWaiverTemplate(
   };
 }
 
+/**
+ * What the person page reads that `get_user` does NOT report, each with why.
+ *
+ * Everything else passes through. That is the point of the shape: `get_user`
+ * is the person page's own read (`loadClubUser`), so a field added to that page
+ * reaches the API in the same change without anybody remembering to project it,
+ * and leaving one out has to be written down here, where a test checks the list
+ * against the read.
+ */
+export const GET_USER_LEFT_OUT = {
+  /** The read's own bookkeeping: the endpoint turns a non-empty list into a 500. */
+  top: ["degraded"],
+  /**
+   * The signer's IP address and browser context, kept on a waiver as forensic
+   * evidence. No agent workflow needs them, and an agent's transcript is a far
+   * less careful place to keep somebody's IP address than the database.
+   */
+  waiver: ["signer_ip", "signer_meta"],
+} as const;
+
+/**
+ * `get_user`'s result: the person page's read, less what `GET_USER_LEFT_OUT`
+ * names. Generic rather than typed against `loadClubUser`, because this module
+ * is pure and server-import-free (see the header); the test pins it against the
+ * real read.
+ */
+export function projectAgentUser<
+  W extends { signer_ip: unknown; signer_meta: unknown },
+  R extends { degraded: unknown; waivers: W[] },
+>(read: R) {
+  const { degraded: _degraded, waivers, ...rest } = read;
+  return {
+    ...rest,
+    waivers: waivers.map(({ signer_ip: _ip, signer_meta: _meta, ...waiver }) => waiver),
+  };
+}
+
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
 export type AgentActionSpec = {
   name: string;
@@ -141,7 +178,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "22",
+  version: "23",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +191,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "23",
+      // A new read-only action and three new list_users fields. Nothing that
+      // worked before changes.
+      breaking: false,
+      notes: [
+        "New action get_user { user_id }: everything the manager person page shows about one person, read by the same function the page uses. user (name, email with email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, the newest membership's kind and status), profile (contact details, date of birth, address, emergency contact, medical notes, the guardian block, kit sizes, photo consent), household, memberships, checkins (attendance, newest first), code_of_conduct, and waivers (approval status, template_version, signed_at, has_pdf, approver). A waiver's signer_ip and signer_meta are deliberately left out.",
+        "get_user reports a person, not a lead: an id with no person record is 404 not_found. A read it could only half answer (the address or the code of conduct could not be read) is 500 db_error, never a null email or an `unsigned` it did not actually check.",
+        "list_users rows carry phone, email_confirmed_at (null means the address is not verified; for a dependant it is the state of the guardian's address, like email itself) and code_of_conduct: { state: unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name }. The same object get_user and the person page report.",
+      ],
+    },
     {
       version: "22",
       // Purely additive: one new action. Nothing that worked before changes.
@@ -424,7 +472,7 @@ export const AGENT_MANIFEST: {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining.",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining. Each row also carries phone, email_confirmed_at (null = not verified) and code_of_conduct (the same object get_user reports). For anything more about one person (profile, waivers, attendance), call get_user.",
       params: [
         {
           name: "status",
@@ -435,6 +483,19 @@ export const AGENT_MANIFEST: {
           name: "limit",
           required: false,
           description: "Max users to return (1-500, default 200).",
+        },
+      ],
+    },
+    {
+      name: "get_user",
+      method: "POST",
+      summary:
+        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at and checkin_count; list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at and approver). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill the address or the code of conduct is 500 db_error rather than a guess.",
+      params: [
+        {
+          name: "user_id",
+          required: true,
+          description: "The person's user UUID, from list_users.",
         },
       ],
     },

@@ -13,6 +13,7 @@ import {
   deleteInvoiceSchema,
   markInvoicePaidSchema,
   editInvoiceSchema,
+  getAgentUserSchema,
   agentGetWaiverTemplateSchema,
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
@@ -45,6 +46,7 @@ import {
   diffInvoicePatch,
   invoiceEditAudit,
   projectAgentKbArticle,
+  projectAgentUser,
   projectAgentWaiverTemplate,
   projectInvoice,
   reconciledEditBlockers,
@@ -70,6 +72,8 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { ClubUserNotFoundError, loadClubUser } from "@/lib/club-user.functions";
+import { codeOfConductSummary } from "@/lib/code-of-conduct";
 import {
   deleteKbSection,
   listKbSections,
@@ -296,6 +300,14 @@ export function errorResponse(e: unknown): Response {
   );
 }
 
+/**
+ * Acceptances `list_users` reads in one go. Generous for a club this size: a
+ * person signs once per version, and truncation drops the OLDEST rows, which
+ * could make somebody whose only signing is ancient read as unsigned, so it is
+ * logged when reached.
+ */
+const ACCEPTANCES_LIMIT = 5000;
+
 // ---- action: list_users ----
 async function handleListUsers(params: unknown) {
   const { status, limit } = listAgentUsersSchema.parse(params ?? {});
@@ -309,6 +321,7 @@ async function handleListUsers(params: unknown) {
     { data: waivers, error: wErr },
     { data: checkins, error: cErr },
     { data: leadRows, error: lErr },
+    { data: acceptances, error: cocErr },
   ] = await Promise.all([
     pdb
       .from("profiles")
@@ -330,6 +343,14 @@ async function handleListUsers(params: unknown) {
       .select("email, name, phone, created_at")
       .order("created_at", { ascending: false })
       .limit(LEADS_LIMIT),
+    // Everybody's code-of-conduct acceptances in one read, newest first, so the
+    // summary below is the person page's rule (`codeOfConductSummary`) applied
+    // per person rather than one query per person.
+    db
+      .from("code_of_conduct_acceptances")
+      .select("user_id, version, accepted_at, signature_name")
+      .order("accepted_at", { ascending: false })
+      .limit(ACCEPTANCES_LIMIT),
   ]);
   // A db_error is the only honest answer to a failed read. An agent cannot see
   // that a query fell over, so degrading to `[]` would hand it a confident
@@ -341,6 +362,21 @@ async function handleListUsers(params: unknown) {
   if (wErr) throw new AgentError(500, "db_error", wErr.message);
   if (cErr) throw new AgentError(500, "db_error", cErr.message);
   if (lErr) throw new AgentError(500, "db_error", lErr.message);
+  // Not degraded to "unsigned" the way the person page degrades it: that page
+  // has a manager reading it and a server log behind it, and an agent has
+  // neither. `unsigned` for a person who signed is a confident wrong answer.
+  if (cocErr) throw new AgentError(500, "db_error", cocErr.message);
+  if ((acceptances ?? []).length >= ACCEPTANCES_LIMIT) {
+    console.warn(
+      `[agent.list_users] code_of_conduct_acceptances capped at ${ACCEPTANCES_LIMIT}; oldest dropped`,
+    );
+  }
+  const acceptancesByUser = new Map<string, NonNullable<typeof acceptances>>();
+  for (const a of acceptances ?? []) {
+    const list = acceptancesByUser.get(a.user_id) ?? [];
+    list.push(a);
+    acceptancesByUser.set(a.user_id, list);
+  }
 
   const leads = (leadRows ?? []) as ClubUserLead[];
   if ((checkins ?? []).length >= CHECKINS_LIMIT) {
@@ -446,6 +482,17 @@ async function handleListUsers(params: unknown) {
     // rebuilt the household from what came back would then confidently report a
     // parent as having none.
     dependants: u.user_id ? (dependantsByGuardian.get(u.user_id) ?? []) : [],
+    // The cheap headline fields the person page leads with. Anything more about
+    // one person (their profile, waivers, attendance) is `get_user`, which is
+    // that page's own read: this listing covers everybody at once, and is no
+    // place for 200 people's medical notes and addresses.
+    phone: u.phone,
+    // Null means not verified. For a dependant this is the state of the
+    // guardian's address, because `email` is the guardian's address.
+    email_confirmed_at: u.email_confirmed_at,
+    // A lead has no person record and cannot sign, so it reads as unsigned,
+    // which is true.
+    code_of_conduct: codeOfConductSummary(u.user_id ? acceptancesByUser.get(u.user_id) : null),
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,
@@ -457,6 +504,37 @@ async function handleListUsers(params: unknown) {
   if (status) users = users.filter((u) => u.lifecycle_status === status);
   const capped = users.slice(0, limit ?? 200);
   return { count: capped.length, total: users.length, users: capped };
+}
+
+// ---- action: get_user ----
+/**
+ * One person, as the manager person page shows them: that page's own read
+ * (`loadClubUser`), projected by `projectAgentUser`. No query of its own, on
+ * purpose. The page and this action used to be built separately and drifted.
+ */
+async function handleGetUser(params: unknown) {
+  const { user_id } = getAgentUserSchema.parse(params ?? {});
+  const db = await adminClient();
+  let read: Awaited<ReturnType<typeof loadClubUser>>;
+  try {
+    read = await loadClubUser(db, user_id);
+  } catch (e) {
+    if (e instanceof ClubUserNotFoundError) {
+      throw new AgentError(
+        404,
+        "not_found",
+        "No person has that user_id. A lead (registered interest only) has no person record: list_users reports one with user_id null.",
+      );
+    }
+    // Every other throw from the read is a failed query.
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+  // The page degrades these two to "no email" and "not signed yet" so a manager
+  // can still approve somebody. An agent would act on the guess instead.
+  if (read.degraded.length) {
+    throw new AgentError(500, "db_error", `get_user could not read: ${read.degraded.join(", ")}`);
+  }
+  return projectAgentUser(read);
 }
 
 // ---- action: list_invoices ----
@@ -1470,6 +1548,8 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
   switch (action) {
     case "list_users":
       return handleListUsers(params);
+    case "get_user":
+      return handleGetUser(params);
     case "list_invoices":
       return handleListInvoices(params);
     case "create_membership":

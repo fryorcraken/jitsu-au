@@ -72,7 +72,36 @@ the same code, not a second implementation.
 
 An "invoice" is a `memberships` row — its price/reference/status _are_ the invoice.
 
-- `list_users` — members and their lifecycle status, roles, and invoices.
+- `list_users` — members and their lifecycle status, roles, and invoices, plus
+  the cheap headline fields the person page leads with: `phone`,
+  `email_confirmed_at` (null means not verified) and `code_of_conduct` (the same
+  object `get_user` reports). The acceptances are read once for everybody, not
+  once per person.
+- `get_user` — one person, as `/manager/users/<id>` shows them. It is that
+  page's own read: `loadClubUser` in `src/lib/club-user.functions.ts`, which
+  `getClubUser` also calls, projected by `projectAgentUser` in
+  `src/lib/manager-agent.ts`. It has no query of its own, and must never grow
+  one (see "Keep these in sync"). Profile, household, memberships, attendance,
+  code of conduct and every waiver with its approval state. Two things differ
+  from the page, both on purpose:
+  - **What it leaves out is listed, not implied.** `GET_USER_LEFT_OUT` names
+    each field of the read the API does not report, with its reason; today that
+    is a waiver's `signer_ip` and `signer_meta` (forensic evidence no agent
+    workflow needs). A test fails if the read gains a field that is neither
+    reported nor listed.
+  - **It refuses a half-read.** The page shows a failed address lookup as no
+    address and a failed code-of-conduct read as "not signed yet", so a manager
+    can still approve somebody. The read reports both in `degraded`, and
+    `get_user` turns a non-empty one into `500 db_error`: an agent cannot see
+    the server log, and would act on the guess. An id with no person record (a
+    lead) is `404 not_found`.
+
+  Its `memberships` are the page's shape, not `list_users`' `invoices`: they
+  carry `kind`, `plan_window` and `checkin_count` (the delete blocker), and leave
+  the money detail (`payment_method`, `notes`, `plan_code`, `is_student`) to
+  `invoices`. A person's item invoices, shown on the same page, are
+  `list_item_invoices {"user_id"}`.
+
 - `list_invoices` — invoices with member name/email (to find an id to edit).
 
 > [!IMPORTANT]
@@ -388,6 +417,38 @@ per manifest action, forwarding to this endpoint.
 
 ## Keep these in sync
 
+### The screens and the API report the same thing
+
+A manager screen and this API answer the same questions about the same data,
+so they must give the same answer. `get_user` exists because they did not:
+the person page and `list_users` were built separately, and the API could not
+see a person's code of conduct, verification, profile or waivers while the page
+showed all of it. The rule, in both directions:
+
+- **A manager read shown on a manager screen is reported by the API from the
+  same function.** Pull the screen's read out of its `createServerFn` handler
+  into a plain function taking the client (`loadClubUser`, `kb-admin.ts`), call
+  it from both, and project its result. Never write a second query set in
+  `manager-agent-actions.ts`. A field the API deliberately does not report is
+  listed with its reason (`GET_USER_LEFT_OUT`), not silently dropped.
+- **A manager write is either exposed or listed below as screen-only, with the
+  reason.** Adding a write to a manager screen means adding it here too, one way
+  or the other.
+
+**Screen-only writes, deliberately.** These are on `/manager/users/<id>` and
+have no action:
+
+| Write                                               | Why not on the API                                                                                                                                                                                                            |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setWaiverApproval` (approve a waiver)              | Outward-facing and hard to undo: it emails the person, unlocks the login of whoever the club writes to about them and assigns the free trial (`docs/waivers.md`, rule 6). Needs a product decision before an agent may do it. |
+| `setClubUserEmail` (change a login email)           | Moves the person's identity, drops their verified badge and emails the new address. Needs a product decision.                                                                                                                 |
+| `setClubUserKitSizes`                               | Reversible and sends nothing, so safe to expose. Not built because no agent workflow has asked for it yet; add it when one does.                                                                                              |
+| `getWaiverPdfUrl`                                   | A read, but of a signed legal document with health answers in it, handed out as a bearer link. `has_pdf` says whether there is one. Expose only for a caller that needs the document itself.                                  |
+| `attachCheckInCoverage` / `transferCheckInCoverage` | This API has no check-in actions at all, on purpose (see `delete_invoice` above).                                                                                                                                             |
+| `setMembershipStatus` to `active` (reopen)          | Recomputes dates and credits; `edit_invoice` refuses `active` for that reason.                                                                                                                                                |
+
+### The four sync points
+
 The action contract lives in **four** places — change all of them together, or
 the agent glue drifts from the deployed API:
 
@@ -405,7 +466,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"22"`.
+test so the bump is a deliberate edit, and the current value is `"23"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

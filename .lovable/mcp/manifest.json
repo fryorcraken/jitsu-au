@@ -50,6 +50,7 @@
               "type": "string",
               "enum": [
                 "list_users",
+                "get_user",
                 "list_invoices",
                 "list_waiver_templates",
                 "get_waiver_template",

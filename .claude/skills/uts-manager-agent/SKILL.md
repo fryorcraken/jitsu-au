@@ -1,13 +1,15 @@
 ---
 name: uts-manager-agent
 description: >-
-  Perform UTS Jitsu manager actions (list members and their status, raise a
+  Perform UTS Jitsu manager actions (list members and their status, look up
+  everything the manager person page shows about one person, raise a
   membership for someone, cancel or delete an invoice, edit an invoice's
   details, file a scanned paper waiver, edit and publish the waiver template
   people sign, manage the club's membership dates, publish and reorder the
   club's knowledge base and read members' comments on it) against the live site
   via its manager agent HTTP API. Use when a club
-  manager asks an agent to look up members/invoices, put a member on a plan or
+  manager asks an agent to look up members/invoices, check one person's state
+  (verification, code of conduct, waivers, attendance, profile), put a member on a plan or
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), keep the club's item price
   list and charge somebody for items, see where replies to club emails go,
@@ -143,6 +145,69 @@ curl -s "$UTS_MANAGER_API_URL/api/manager/agent" \
 ```
 
 `params` (all optional): `status` (lifecycle filter), `limit` (1–500, default 200).
+
+Each row also carries three headline fields, the ones the person page leads with:
+
+- `phone`.
+- `email_confirmed_at`: when the address was verified, `null` when it is not.
+  For a child it is the state of the guardian's address, because `email` is
+  the guardian's.
+- `code_of_conduct`: `{ state, current_version, accepted_version, accepted_at,
+signature_name }`, where `state` is `unsigned | signed | outdated`. It never
+  blocks anything: an unsigned member can still train.
+
+For anything more about one person, call `get_user`.
+
+### `get_user` — everything the person page shows about one person
+
+The answer a manager reads on `/manager/users/<id>`, from the same read the
+page makes. Use it to answer "what is the state of this person?" rather than
+piecing it together from `list_users`.
+
+```bash
+scripts/agent.sh get_user '{"user_id":"<uuid>"}'
+```
+
+`params`: `user_id` (**required**, from `list_users`). The result:
+
+- `user`: name, `email` + `email_belongs_to`, `email_confirmed_at`, `phone`,
+  `roles`, `lifecycle_status`, `sessions_attended` (exact, lifetime),
+  `latest_plan_kind` / `latest_membership_status` /
+  `latest_sessions_remaining`, `first_seen_at`.
+- `profile`: the club's live record. Preferred name, date of birth, address,
+  UTS student number, emergency contact, `medical_notes`, `is_minor` and the
+  guardian block, SMS/WhatsApp consent, `gi_size` / `belt_size`, and
+  `media_consent` (`null` means never asked, not "no") with who last set it.
+- `household`: `guardian` and `dependants`, by `user_id` and `name`.
+- `memberships`: each with `plan_name`, `kind`, `status`, `price_cents`,
+  `payment_reference`, dates, `sessions_remaining`, `paid_at` and
+  `checkin_count` (a membership with check-ins cannot be deleted). The money
+  detail (`payment_method`, `notes`, `plan_code`) is on `list_users`' `invoices`.
+- `checkins`: attendance, newest first, capped at 100. `user.sessions_attended`
+  is the real total.
+- `code_of_conduct`: the same object `list_users` carries.
+- `waivers`: every waiver they submitted, as submitted, with `status`
+  (`pending | active | superseded`), `template_version`, `signed_at`,
+  `has_pdf`, `approved_at` and the approver. The signer's IP address and
+  browser context are deliberately not reported.
+
+> **This is sensitive.** Medical notes, addresses and dates of birth are here
+> because a manager needs them on the page. Read them when the question needs
+> them; do not repeat them into a summary nobody asked for.
+
+> **The same address rule as `list_users`.** A child's `email` is their
+> guardian's, and `email_belongs_to` says so. Report the two together or
+> neither.
+
+A person, not a lead: an id with no person record is `404 not_found`. A read
+that could not fill the address or the code of conduct is `500 db_error`
+rather than a `null` email or an `unsigned` the server never actually checked,
+so retry it.
+
+Some things a manager does from the person page are deliberately **not**
+actions: approving a waiver, changing somebody's login email, resending the
+verification email, correcting kit sizes, opening the waiver PDF, and moving
+check-in coverage. Tell the manager to do those on the page.
 
 ### `list_invoices` — find an invoice to edit
 

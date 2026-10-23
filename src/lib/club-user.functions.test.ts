@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { changeClubUserEmail, ClubUserNotFoundError, loadClubUser } from "./club-user.functions";
+import { GET_USER_LEFT_OUT, projectAgentUser } from "./manager-agent";
 import { managerEmailChangeSchema } from "./validation";
 
 type AuthUser = { id: string; email: string | null; email_confirmed_at: string | null };
@@ -569,4 +570,98 @@ describe("loadClubUser", () => {
       expect(err).not.toBeInstanceOf(ClubUserNotFoundError);
     },
   );
+
+  it("says which sections it could only guess at, and nothing when the read is clean", async () => {
+    const clean = await loadClubUser(
+      fakeReadAdmin(baseTables(), { emails: [ADA_EMAIL] }).admin as never,
+      PERSON,
+    );
+    expect(clean.degraded).toEqual([]);
+
+    const guessed = await loadClubUser(
+      fakeReadAdmin(baseTables(), {
+        emailsFail: "rpc down",
+        fail: { code_of_conduct_acceptances: "boom" },
+      }).admin as never,
+      PERSON,
+    );
+    // The page still renders, exactly as before: no address, "not signed yet".
+    expect(guessed.user.email).toBeNull();
+    expect(guessed.code_of_conduct.state).toBe("unsigned");
+    // ...and says so, which is what lets get_user refuse instead of guessing.
+    expect(guessed.degraded).toEqual(["email", "code_of_conduct"]);
+  });
+});
+
+// ---- get_user reports what the person page shows ----
+//
+// The manager agent API's `get_user` is this read, projected. The rule
+// (`docs/manager-agent-api.md`, "Keep these in sync") is that a manager read
+// shown on a screen is reported by the API from the same function, and that
+// anything left out is written down with its reason. These pin that rule
+// against the REAL read, so a field added to the person page either reaches
+// the API or fails here until somebody lists it in `GET_USER_LEFT_OUT`.
+describe("projectAgentUser over the person page's read", () => {
+  async function readAndProject(
+    tables = baseTables(),
+    emails: { user_id: string; email: string; email_confirmed_at: string | null }[] = [ADA_EMAIL],
+  ) {
+    const read = await loadClubUser(fakeReadAdmin(tables, { emails }).admin as never, PERSON);
+    return { read, projected: projectAgentUser(read) };
+  }
+
+  it("reports every top-level section of the read, or names it as left out", async () => {
+    const { read, projected } = await readAndProject();
+    const leftOut: readonly string[] = GET_USER_LEFT_OUT.top;
+    expect(Object.keys(projected).sort()).toEqual(
+      Object.keys(read)
+        .filter((k) => !leftOut.includes(k))
+        .sort(),
+    );
+    // A left-out name that is no longer in the read is a stale list.
+    for (const k of leftOut) expect(Object.keys(read)).toContain(k);
+  });
+
+  it("passes every reported section through unchanged", async () => {
+    const { read, projected } = await readAndProject();
+    for (const [key, value] of Object.entries(projected)) {
+      if (key === "waivers") continue;
+      expect(value, key).toEqual(read[key as keyof typeof read]);
+    }
+  });
+
+  it("reports every waiver field the page reads except the signer's IP and browser context", async () => {
+    const { read, projected } = await readAndProject();
+    const leftOut: readonly string[] = GET_USER_LEFT_OUT.waiver;
+    expect(projected.waivers).toHaveLength(read.waivers.length);
+    const [readWaiver] = read.waivers;
+    const [agentWaiver] = projected.waivers;
+    expect(Object.keys(agentWaiver).sort()).toEqual(
+      Object.keys(readWaiver)
+        .filter((k) => !leftOut.includes(k))
+        .sort(),
+    );
+    for (const k of leftOut) {
+      expect(Object.keys(readWaiver)).toContain(k);
+      expect(agentWaiver).not.toHaveProperty(k);
+    }
+  });
+
+  it("keeps the caption on a dependant's address, so it is never reported bare", async () => {
+    const { projected } = await readAndProject(
+      baseTables({
+        profiles: [
+          profileRow({ first_name: "Bea", guardian_user_id: GUARDIAN, is_minor: true }),
+          profileRow({ user_id: GUARDIAN, first_name: "Ada" }),
+        ],
+        waivers: [],
+      }),
+      [{ user_id: GUARDIAN, email: "ada@example.com", email_confirmed_at: null }],
+    );
+    expect(projected.user).toMatchObject({
+      email: "ada@example.com",
+      email_belongs_to: "Ada Lovelace",
+    });
+    expect(projected.household.guardian).toEqual({ user_id: GUARDIAN, name: "Ada Lovelace" });
+  });
 });
