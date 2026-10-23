@@ -35,7 +35,10 @@ of truth for the current action set.
 
 ## Configuration
 
-- `UTS_MANAGER_API_URL` — the site's base URL, e.g. `https://jitsu.au`
+- `UTS_MANAGER_API_URL` — the site's base URL, `https://utsjitsu.com.au`. Use the
+  host the site is served from, never `jitsu.au`: that domain now redirects, and
+  a redirect to another host drops the `Authorization` header, so every call
+  fails 401 with a token that is perfectly valid.
 - `UTS_MANAGER_API_KEY` — a manager agent token. A manager mints one at
   **`/manager/api-tokens`** on the site (it's shown once — copy it then). That is
   the only kind of token the endpoint accepts: there is no server-side
@@ -397,11 +400,19 @@ scripts/agent.sh edit_invoice '{"id":"<uuid>","starts_on":"2026-02-01"}'
 ### `mark_invoice_paid` — record money that arrived
 
 `params`: `id` (**required** — the invoice UUID from a list call),
-`payment_method` (optional: `bank_transfer | stripe | manual`, default `manual`).
+`payment_method` (optional: `bank_transfer | stripe | manual`, default `manual`),
+`paid_on` (optional `YYYY-MM-DD`: the day the money arrived, default today,
+refused if in the future or more than two years back), `paid_reference` (optional: a receipt number or the
+transfer's own reference, up to 200 characters).
 
 ```bash
 scripts/agent.sh mark_invoice_paid '{"id":"<uuid>"}'
+scripts/agent.sh mark_invoice_paid '{"id":"<uuid>","paid_on":"2026-10-20","paid_reference":"Receipt 42"}'
 ```
+
+`paid_reference` is **not** the invoice's `payment_reference` (what the member
+quotes on a transfer); marking paid never changes that. When a manager tells you
+when the cash was taken, pass that day rather than letting it default to today.
 
 Bank reconciliation records payments on its own when a statement line matches, so
 reach for this only when it cannot: cash at the door, or a transfer settled some
@@ -565,12 +576,15 @@ scripts/agent.sh create_item_invoice '{
 scripts/agent.sh list_item_invoices '{"state":"unpaid"}'
 scripts/agent.sh list_item_invoices '{"user_id":"<uuid>"}'
 scripts/agent.sh mark_item_invoice_paid '{"id":"<uuid>"}'
+scripts/agent.sh mark_item_invoice_paid '{"id":"<uuid>","paid_on":"2026-10-20","paid_reference":"Receipt 42"}'
 scripts/agent.sh cancel_item_invoice '{"id":"<uuid>"}'
 scripts/agent.sh delete_item_invoice '{"id":"<uuid>"}'
 ```
 
 Each row carries `payment_reference`, `lines`, `summary`, `total_cents`,
-`state` (`unpaid | paid | cancelled`), and who it is for. Same rule as the
+`state` (`unpaid | paid | cancelled`), `paid_at`, `paid_reference`, and who it
+is for. `mark_item_invoice_paid` takes the same optional `paid_on` and
+`paid_reference` as `mark_invoice_paid`. Same rule as the
 membership listings: for a child, `member_email` is the guardian's and
 `member_email_belongs_to` names them, so **print the two together or not at
 all**.

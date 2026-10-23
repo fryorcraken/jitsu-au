@@ -48,7 +48,7 @@ export function tokenPreview(raw: string): string {
  * opencode, Cursor, …). It teaches the agent to read the live manifest first,
  * so it never hard-codes an action list, and it deliberately keeps the token in
  * an env var rather than inline. `baseUrl` is the site origin, e.g.
- * "https://jitsu.au".
+ * "https://utsjitsu.com.au".
  */
 export function buildAgentPrompt(opts: { baseUrl: string }): string {
   const base = opts.baseUrl.replace(/\/+$/, "");

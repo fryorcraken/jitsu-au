@@ -7,7 +7,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { faqItems } from "@/lib/faq";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 
 export const Route = createFileRoute("/faq")({
   head: () => ({
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/faq")({
       ogDescription: "Trial classes, gear, experience needed, and more.",
       path: "/faq",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/faq" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/faq") }],
     scripts: [
       {
         type: "application/ld+json",

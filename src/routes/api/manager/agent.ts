@@ -908,6 +908,8 @@ async function handleMarkInvoicePaid(params: unknown, actingAs: string) {
     membership: membership as MembershipRow,
     plan: (plan ?? undefined) as MembershipPlanRow | undefined,
     method: input.payment_method,
+    paidOn: input.paid_on,
+    reference: input.paid_reference,
   });
 
   // Money moving is the one thing the club most needs to be able to reconstruct,
@@ -921,6 +923,10 @@ async function handleMarkInvoicePaid(params: unknown, actingAs: string) {
       actor: actingAs,
       at: new Date().toISOString(),
       method: input.payment_method,
+      // What was ASKED for. On an already-paid invoice (recorded: false) none of
+      // it was stored, and the names say so rather than reading as the record.
+      requestedPaidOn: input.paid_on ?? null,
+      requestedPaidReference: input.paid_reference ?? null,
       recorded,
     }),
   );
@@ -1077,6 +1083,8 @@ async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
     ({ recorded } = await recordItemInvoicePayment(db, {
       invoice,
       method: input.payment_method,
+      paidOn: input.paid_on,
+      reference: input.paid_reference,
     }));
   } catch (e) {
     throw itemAgentError(e);
@@ -1090,6 +1098,10 @@ async function handleMarkItemInvoicePaid(params: unknown, actingAs: string) {
       actor: actingAs,
       at: new Date().toISOString(),
       method: input.payment_method,
+      // What was ASKED for. On an already-paid invoice (recorded: false) none of
+      // it was stored, and the names say so rather than reading as the record.
+      requestedPaidOn: input.paid_on ?? null,
+      requestedPaidReference: input.paid_reference ?? null,
       recorded,
     }),
   );

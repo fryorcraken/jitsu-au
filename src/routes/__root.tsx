@@ -19,6 +19,7 @@ import { reportsIdentity, resolveAuthRefresh } from "../lib/auth-events";
 import { clearCacheFor } from "../lib/local-cache";
 import { writeLastVisit } from "../lib/last-visit";
 import { isResumablePath } from "../lib/pwa";
+import { canonicalUrl } from "@/lib/seo";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
@@ -115,7 +116,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "UTS Jitsu" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
-      { property: "og:url", content: "https://jitsu.au/" },
+      { property: "og:url", content: canonicalUrl("/") },
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       { name: "twitter:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },

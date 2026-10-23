@@ -126,7 +126,7 @@ describe("AccountActivatedEmail", () => {
     expect(text).not.toMatch(/The knowledge base\./);
   });
 
-  // Every email here goes out from noreply@ with no reply-to header, so the
+  // This email goes out from noreply@ with no reply-to header, so the
   // "just reply" sign-off other templates use would swallow the one message
   // that matters most: a new member saying they cannot get in.
   it("offers a route back that actually reaches the club", async () => {

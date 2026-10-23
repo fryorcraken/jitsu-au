@@ -4,7 +4,7 @@ import { MembershipCta } from "@/components/site/MembershipCta";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Testimonials } from "@/components/site/Testimonials";
 import { Button } from "@/components/ui/button";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 
 export const Route = createFileRoute("/pricing")({
   head: () => ({
@@ -15,7 +15,7 @@ export const Route = createFileRoute("/pricing")({
       ogDescription: "Casual, semester and yearly options. First two sessions free.",
       path: "/pricing",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/pricing" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/pricing") }],
   }),
   component: Pricing,
 });

@@ -222,7 +222,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "21",
+  version: "22",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -236,7 +236,7 @@ export const AGENT_MANIFEST: {
   // new response field — which is what these notes name.
   changes: [
     {
-      version: "21",
+      version: "22",
       // Four new actions and one new field. Nothing that worked before changes,
       // though what "outdated" means did move, which a caller acting on it
       // should read.
@@ -248,7 +248,7 @@ export const AGENT_MANIFEST: {
       ],
     },
     {
-      version: "20",
+      version: "21",
       // A new read-only action and three new list_users fields. Nothing that
       // worked before changes.
       breaking: false,
@@ -256,6 +256,17 @@ export const AGENT_MANIFEST: {
         "New action get_user { user_id }: everything the manager person page shows about one person, read by the same function the page uses. user (name, email with email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, the newest membership's kind and status), profile (contact details, date of birth, address, emergency contact, medical notes, the guardian block, kit sizes, photo consent), household, memberships, checkins (attendance, newest first), code_of_conduct, and waivers (approval status, template_version, signed_at, has_pdf, approver). A waiver's signer_ip and signer_meta are deliberately left out.",
         "get_user reports a person, not a lead: an id with no person record is 404 not_found. A read it could only half answer (the address, the code of conduct, the guardian's name, a class name or a waiver approver's name could not be read) is 500 db_error, never a null email, an `unsigned` or an unknown name it did not actually check.",
         "list_users rows carry phone, email_confirmed_at (null means the address is not verified; for a dependant it is the state of the guardian's address, like email itself) and code_of_conduct: { state: unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name }. The same object get_user and the person page report.",
+      ],
+    },
+    {
+      version: "20",
+      // Two new optional params and one new response field. A call that sends
+      // neither param records exactly what it always did.
+      breaking: false,
+      notes: [
+        "mark_invoice_paid and mark_item_invoice_paid take two optional params. paid_on (YYYY-MM-DD) is the day the money actually arrived, for cash taken earlier than it is being recorded; absent, an empty string or null means today; a future day, or one more than two years ago (a mistyped year), is refused with 400 invalid_params; and a day before the invoice was raised is allowed (backfilling a settled enrolment). paid_reference is what the payment was known by, such as a receipt number (up to 200 characters). It is NOT the invoice's payment_reference, which is what the member quotes on a transfer and is never changed by marking paid.",
+        "Both are written only when the payment is recorded. On an invoice that is already paid the call still records nothing (recorded: false), so neither the date nor the reference of the first payment moves.",
+        "list_invoices and list_item_invoices rows carry paid_reference: null unless a payment recorded by hand was given one.",
       ],
     },
     {
@@ -529,7 +540,7 @@ export const AGENT_MANIFEST: {
       name: "list_invoices",
       method: "POST",
       summary:
-        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero).",
+        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries paid_at and paid_reference (what a payment recorded by hand was known by), and sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero).",
       params: [
         {
           name: "status",
@@ -633,7 +644,7 @@ export const AGENT_MANIFEST: {
       name: "mark_invoice_paid",
       method: "POST",
       summary:
-        "Record a payment against an invoice, for money that never touches the club account — cash at the door, or a transfer settled some other way. Bank reconciliation does this automatically when a statement line matches, so reach for this only when it cannot. It emails the member a receipt, and it is what makes the invoice permanently undeletable, so record it only once the money has actually arrived. Idempotent: a second call on an already-paid invoice records nothing, moves no date and sends no second receipt, and comes back with `recorded: false`. Refused on a free membership, which has nothing to pay.",
+        "Record a payment against an invoice, for money that never touches the club account — cash at the door, or a transfer settled some other way. Bank reconciliation does this automatically when a statement line matches, so reach for this only when it cannot. It emails the member a receipt, and it is what makes the invoice permanently undeletable, so record it only once the money has actually arrived. Idempotent: a second call on an already-paid invoice records nothing, moves no date and sends no second receipt, and comes back with `recorded: false`. Refused on a free membership, which has nothing to pay. paid_on and paid_reference record when the money arrived and what it was known by.",
       params: [
         { name: "id", required: true, description: "Invoice (membership) UUID." },
         {
@@ -641,6 +652,18 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "bank_transfer | stripe | manual. Defaults to manual, which is what an invoice the reconciler could not see almost always is — say bank_transfer only when a real transfer landed and you are recording it by hand.",
+        },
+        {
+          name: "paid_on",
+          required: false,
+          description:
+            'YYYY-MM-DD, the day the money arrived, in the club\'s timezone. Defaults to today (also when sent as "" or null). A future day is refused, and so is one more than two years ago (a mistyped year); an earlier one, even before the invoice was raised, is accepted.',
+        },
+        {
+          name: "paid_reference",
+          required: false,
+          description:
+            "What the payment was known by, such as a receipt number or the transfer's own reference (up to 200 characters). Not the invoice's payment_reference, which this never changes.",
         },
       ],
     },
@@ -1175,7 +1198,7 @@ export const AGENT_MANIFEST: {
       name: "list_item_invoices",
       method: "POST",
       summary:
-        "List item invoices, newest first (at most 500): everyone's or one person's, optionally in one state. Each carries its reference (INV0007), lines (name, unit_price_cents, quantity), summary, total_cents, state (unpaid | paid | cancelled), and who it is for (member_name, member_email). For a child, member_email is the guardian's and member_email_belongs_to names them: print the two together or not at all.",
+        "List item invoices, newest first (at most 500): everyone's or one person's, optionally in one state. Each carries its reference (INV0007), lines (name, unit_price_cents, quantity), summary, total_cents, state (unpaid | paid | cancelled), paid_at and paid_reference (what a payment recorded by hand was known by), and who it is for (member_name, member_email). For a child, member_email is the guardian's and member_email_belongs_to names them: print the two together or not at all.",
       params: [
         { name: "user_id", required: false, description: "Only this person's invoices." },
         { name: "state", required: false, description: "unpaid | paid | cancelled." },
@@ -1206,7 +1229,7 @@ export const AGENT_MANIFEST: {
       name: "mark_item_invoice_paid",
       method: "POST",
       summary:
-        "Record a payment against an item invoice, for money that never touches the club account (cash at the door). Bank reconciliation does this itself when a statement line carries the reference and the exact total, so reach for this only when it cannot. Emails a receipt, and makes the invoice permanent: a paid invoice can never be cancelled or deleted. Idempotent: a second call records nothing and sends nothing (recorded: false). 409 item_invoice_settled on a cancelled invoice.",
+        "Record a payment against an item invoice, for money that never touches the club account (cash at the door). Bank reconciliation does this itself when a statement line carries the reference and the exact total, so reach for this only when it cannot. Emails a receipt, and makes the invoice permanent: a paid invoice can never be cancelled or deleted. Idempotent: a second call records nothing and sends nothing (recorded: false). 409 item_invoice_settled on a cancelled invoice. paid_on and paid_reference record when the money arrived and what it was known by.",
       params: [
         { name: "id", required: true, description: "The item invoice's UUID." },
         {
@@ -1214,6 +1237,18 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "bank_transfer | manual. Defaults to manual; say bank_transfer only for a real transfer you are recording by hand.",
+        },
+        {
+          name: "paid_on",
+          required: false,
+          description:
+            'YYYY-MM-DD, the day the money arrived, in the club\'s timezone. Defaults to today (also when sent as "" or null). A future day is refused, and so is one more than two years ago (a mistyped year); an earlier one, even before the invoice was raised, is accepted.',
+        },
+        {
+          name: "paid_reference",
+          required: false,
+          description:
+            "What the payment was known by, such as a receipt number or the transfer's own reference (up to 200 characters). Not the invoice's payment_reference, which this never changes.",
         },
       ],
     },
@@ -1502,6 +1537,7 @@ export function projectInvoice(m: MembershipRow, plan?: MembershipPlanRow) {
     payment_method: m.payment_method,
     is_student: m.is_student,
     paid_at: m.paid_at,
+    paid_reference: m.paid_reference,
     starts_at: m.starts_at,
     ends_at: m.ends_at,
     // The plan's session allowance and this invoice's own remaining balance —

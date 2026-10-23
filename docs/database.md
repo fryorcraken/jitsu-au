@@ -664,7 +664,9 @@ dated plan is on sale at once.
 `plan_id → membership_plans(id)`, `status`
 (`pending|active|expired|cancelled`), `is_student`, `uts_student_number`,
 `price_cents`, `payment_reference` (indexed; per-member, not unique),
-`payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
+`payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `paid_reference`
+(what a hand-recorded payment was known by, such as a receipt number; null
+until paid, 1-200 chars, never the same thing as `payment_reference`), `starts_at`,
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
 `status` is about PERMISSION TO TRAIN, never money: `active` means authorised,
 and a membership is authorised the moment it is raised. `paid_at` is the money,
@@ -735,13 +737,16 @@ needs, so removing an item is a plain `DELETE`.
 `lines` (jsonb array of `{ name, unit_price_cents, quantity }`, 1 to 20 entries:
 a frozen copy, never a reference to `charge_items`), `total_cents` (> 0, the lines
 added up, stored so the bank match reads one number), `paid_at`,
-`payment_method` (`bank_transfer|manual`, null until paid), `cancelled_at`,
+`payment_method` (`bank_transfer|manual`, null until paid), `paid_reference`
+(as on `memberships`: a hand-recorded payment's receipt or reference, null until
+paid), `cancelled_at`,
 `created_by → auth.users(id)`, `client_submission_id` (nullable uuid, partial
 unique index; a retried raise finds the invoice it already made, as in
 "`client_submission_id`" below), `created_at`. CHECK: never both paid and
 cancelled. Unpaid means `paid_at IS NULL AND cancelled_at IS NULL`, and a partial
 index covers exactly that. `paid_at` is written only by
-`recordItemInvoicePayment`, guarded on the row still being unpaid.
+`recordItemInvoicePayment`, guarded on the row still being unpaid, and so is
+`paid_reference` (`20261023100000_paid_reference.sql`).
 
 ---
 
@@ -1368,7 +1373,11 @@ coding agents.
 **`private.run_notification_digest() → void`** — `SECURITY DEFINER`,
 `SET search_path = ''`, `REVOKE ALL ... FROM PUBLIC`. The job names only this
 function, never the token. The function reads the bearer token from Supabase
-Vault and `net.http_post`s it to a literal `https://jitsu.au/...` URL.
+Vault and `net.http_post`s it to a literal URL on the site's own host:
+`https://utsjitsu.com.au/...` since `20261023000000`, `https://jitsu.au/...`
+before it. It must be the host that serves the site, never one that redirects to
+it: a cross-host redirect drops the `Authorization` header and the endpoint
+answers 401 (`docs/notifications.md`, "The October domain move").
 
 Keeping the token out of `cron.job.command` is defence in depth rather than a
 plugged hole: pg_cron 1.4+ puts RLS on `cron.job` with `USING (username =
@@ -1388,16 +1397,18 @@ One thing that failed silently every morning rather than loudly once: read
 **`vault.decrypted_secrets.decrypted_secret`**, never `vault.secrets.secret` —
 the latter is ciphertext, and sending it as a bearer token earns a 401.
 
-**Third body, as of `20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql`,
-and the one live today.** Two earlier defects are gone by construction rather
-than by a runbook step someone has to remember:
+**Third body, as of `20260822120041_68ab3908-faf6-49d1-8037-aaa3e39639aa.sql`.**
+The fourth (`20261023000000_notification_digest_new_domain.sql`) is the same
+body with only the URL literal changed, for the domain move. Two earlier
+defects are gone by construction rather than by a runbook step someone has to
+remember:
 
 - **Only one Vault secret, `notification_digest_key`.** There used to be a
   second, `notification_digest_url`, holding the destination the function
   `net.http_post`s to — which meant it was possible to set it to the published
-  `*.lovable.app` host by mistake, which 302s to `jitsu.au` and which pg_net
-  does not follow. The URL is now a literal inside the function body, so that
-  mistake can no longer happen.
+  `*.lovable.app` host by mistake, which redirects to the real site, and a
+  cross-host redirect drops the bearer token. The URL is now a literal inside
+  the function body, so that mistake can no longer happen.
 - **The secret is minted by the migration itself**, with
   `vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'),
 'notification_digest_key')`, guarded so it only runs once (an existing secret
@@ -1641,9 +1652,10 @@ elsewhere in the product, so a manager confirms what goes before it goes (see
 
 Submitting also emails the sender an acknowledgement and every manager the
 message itself (`src/lib/contact-email.server.ts`, best-effort: a send failure
-is logged and never fails the submission). Before that existed nothing sent an
-email and nothing on the site read this table, so a message reached nobody at
-all.
+is logged and never fails the submission). The managers' copy carries the
+sender's address as its Reply-To, so pressing reply answers the sender. Before
+that existed nothing sent an email and nothing on the site read this table, so
+a message reached nobody at all.
 
 Which messages are "unread" is a single club-wide marker, not a column here:
 `club_settings.contact_messages_seen_at`, stamped when a manager opens the

@@ -47,6 +47,10 @@
 # third body has. Corroborated by: SELECT name FROM vault.secrets WHERE name
 # LIKE 'notification_digest%' -> notification_digest_key alone.
 #
+# Once 20261023000000 (the fourth body) is applied, the literal reads
+# 'https://utsjitsu.com.au/api/notifications/digest' instead. Either inlined
+# URL means "not body 2": only body 2 reads 'notification_digest_url'.
+#
 # ⚠️ DO NOT APPLY THIS FILE. It would replace the live function body with the
 # SECOND one, which reads a `notification_digest_url` Vault secret that
 # 20260822120041 deliberately retired in favour of an inlined jitsu.au URL.

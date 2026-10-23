@@ -9,6 +9,7 @@ import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
+import { PaidNote } from "@/components/site/PaymentReceived";
 import { membershipClass } from "@/lib/status-colours";
 import { membershipStatusLabel } from "@/lib/status-labels";
 import { formatCents } from "@/lib/validation";
@@ -148,7 +149,10 @@ function ManagerMembershipsPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2">{r.plan_name ?? "—"}</td>
-                    <td className="px-3 py-2">{formatCents(r.price_cents)}</td>
+                    <td className="px-3 py-2">
+                      {formatCents(r.price_cents)}
+                      <PaidNote paidAt={r.paid_at} reference={r.paid_reference} />
+                    </td>
                     <td className="px-3 py-2">{r.uts_student_number ?? "—"}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.payment_reference}</td>
                     <td className="px-3 py-2">

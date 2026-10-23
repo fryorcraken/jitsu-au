@@ -117,7 +117,7 @@ writes (see `honeypot` in `src/lib/validation.ts`).
 `/manager/blog` lists every post regardless of status; "New post" opens the
 composer (`/manager/blog/new`), an existing one opens for editing
 (`/manager/blog/:id`). A published post carries a **Copy link** button next to
-its title, which puts the post's canonical `https://jitsu.au/blog/<slug>`
+its title, which puts the post's canonical `https://utsjitsu.com.au/blog/<slug>`
 address on the clipboard (`canonicalUrl`, so it is the public address whatever
 host the manager is signed in on) ready to paste into a message or a social
 post. It sits with the title rather than with View/Delete because those are off

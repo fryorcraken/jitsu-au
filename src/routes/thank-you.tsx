@@ -3,7 +3,7 @@ import { CheckCircle2 } from "lucide-react";
 import { z } from "zod";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 
 const searchSchema = z.object({
   kind: z.enum(["interest", "waiver", "contact"]).catch("interest"),
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/thank-you")({
       }),
       { name: "robots", content: "noindex" },
     ],
-    links: [{ rel: "canonical", href: "https://jitsu.au/thank-you" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/thank-you") }],
   }),
   component: ThankYou,
 });

@@ -171,10 +171,17 @@ describe("markInvoicePaidSchema", () => {
     expect(() => markInvoicePaidSchema.parse({ id, payment_method: "cash" })).toThrow();
   });
 
-  // The date is the server's to write. Letting a caller backdate a payment would
-  // let it land before the invoice it settles.
+  // The day goes in as `paid_on`, a date. A caller reaching for the column name
+  // `paid_at` must hear that it was not used, not have its date silently dropped
+  // and today's recorded in its place.
   it("names an unknown param rather than dropping it", () => {
     expect(() => markInvoicePaidSchema.parse({ id, paid_at: "2026-08-01" })).toThrow(/paid_at/);
+  });
+
+  it("takes the day the money arrived and what it was known by", () => {
+    expect(
+      markInvoicePaidSchema.parse({ id, paid_on: "2026-08-01", paid_reference: "Receipt 42" }),
+    ).toMatchObject({ paid_on: "2026-08-01", paid_reference: "Receipt 42" });
   });
 });
 
@@ -404,6 +411,7 @@ describe("projectInvoice", () => {
     payment_reference: "MEMNGUYEN7Q",
     payment_method: "bank_transfer",
     paid_at: null,
+    paid_reference: null,
     starts_at: null,
     ends_at: null,
     sessions_remaining: null,
@@ -422,6 +430,17 @@ describe("projectInvoice", () => {
     expect(p.price).toBe("$245");
     expect(p.plan_code).toBe("semester_2_2026");
     expect(p.id).toBe("abc");
+  });
+
+  // What a payment recorded by hand was known by, so an agent reconciling the
+  // books can find the receipt behind a manual payment.
+  it("carries the payment's own reference beside the one the member quotes", () => {
+    const p = projectInvoice(
+      { ...membership, paid_at: "2026-10-01T02:00:00Z", paid_reference: "Receipt 42" },
+      plan,
+    );
+    expect(p.paid_reference).toBe("Receipt 42");
+    expect(p.payment_reference).toBe("MEMNGUYEN7Q");
   });
 
   it("tolerates a missing plan", () => {
@@ -479,7 +498,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("21");
+    expect(AGENT_MANIFEST.version).toBe("22");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -526,9 +545,9 @@ describe("AGENT_MANIFEST", () => {
   });
 
   // Fields a caching client is told to read have to be announced, the lesson of
-  // #112 pinned above. These are the ones "20" added.
+  // #112 pinned above. These are the ones "21" added.
   it("announces get_user and the headline fields list_users now carries", () => {
-    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "20")!.notes.join(" ");
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "21")!.notes.join(" ");
     expect(notes).toMatch(/get_user/);
     expect(notes).toMatch(/phone/);
     expect(notes).toMatch(/email_confirmed_at/);
@@ -540,7 +559,7 @@ describe("AGENT_MANIFEST", () => {
   });
 
   it("announces the code of conduct actions, and the change in what outdated means", () => {
-    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "21")!.notes.join(" ");
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "22")!.notes.join(" ");
     for (const action of [
       "list_code_of_conduct_versions",
       "get_code_of_conduct",
