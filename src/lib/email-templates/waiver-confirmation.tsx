@@ -11,6 +11,7 @@ import {
   Preview,
   Text,
 } from "@react-email/components";
+import { ReplyOrReachUs } from "./reply-or-reach-us";
 
 interface WaiverConfirmationEmailProps {
   siteName: string;
@@ -34,6 +35,12 @@ interface WaiverConfirmationEmailProps {
    * blocks nothing, so the email is worth sending without the button.
    */
   codeOfConductUrl?: string | null;
+  /**
+   * Where a reply to this email goes, or null when it reaches nobody. Only
+   * matters when the PDF failed: that is the one case this email asks the
+   * signer to get back to us. See `reply-or-reach-us.tsx`.
+   */
+  replyTo: string | null;
 }
 
 /** Sent to the person who just signed a waiver, with a link to their PDF copy. */
@@ -44,6 +51,7 @@ export const WaiverConfirmationEmail = ({
   pdfUrl,
   verifyUrl,
   codeOfConductUrl,
+  replyTo,
 }: WaiverConfirmationEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -57,9 +65,22 @@ export const WaiverConfirmationEmail = ({
             <strong>{siteName}</strong>
           </Link>
           .
-          {pdfUrl
-            ? " A copy is attached as a PDF via the secure link below."
-            : " We had trouble preparing your PDF copy, so there is no download link here. Your waiver is signed and saved, and there is no need to sign again. Reply to this email if you would like a copy and we will sort it out."}
+          {pdfUrl ? (
+            " A copy is attached as a PDF via the secure link below."
+          ) : (
+            <>
+              {" "}
+              We had trouble preparing your PDF copy, so there is no download link here. Your waiver
+              is signed and saved, and there is no need to sign again.{" "}
+              <ReplyOrReachUs
+                replyTo={replyTo}
+                siteUrl={siteUrl}
+                reply="Reply to this email if you would like a copy and we will sort it out."
+                lead="If you would like a copy, get in touch"
+                tail=" and we will sort it out."
+              />
+            </>
+          )}
         </Text>
         {pdfUrl && (
           <Button style={button} href={pdfUrl}>

@@ -11,6 +11,7 @@ import {
   Preview,
   Text,
 } from "@react-email/components";
+import { ReplyOrReachUs } from "./reply-or-reach-us";
 
 interface ItemInvoicePaidEmailProps {
   siteName: string;
@@ -23,6 +24,8 @@ interface ItemInvoicePaidEmailProps {
   summary: string;
   amount: string;
   membershipUrl: string;
+  /** See `ReplyOrReachUsProps["replyTo"]` in `reply-or-reach-us.tsx`. */
+  replyTo: string | null;
 }
 
 /**
@@ -38,6 +41,7 @@ export const ItemInvoicePaidEmail = ({
   summary,
   amount,
   membershipUrl,
+  replyTo,
 }: ItemInvoicePaidEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -56,7 +60,14 @@ export const ItemInvoicePaidEmail = ({
         <Button style={button} href={membershipUrl}>
           View your invoices
         </Button>
-        <Text style={footer}>Reply to this email if anything looks off.</Text>
+        <Text style={footer}>
+          <ReplyOrReachUs
+            replyTo={replyTo}
+            siteUrl={siteUrl}
+            reply="Reply to this email if anything looks off."
+            lead="If anything looks off, get in touch"
+          />
+        </Text>
       </Container>
     </Body>
   </Html>

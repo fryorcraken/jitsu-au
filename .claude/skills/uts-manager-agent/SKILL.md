@@ -10,7 +10,8 @@ description: >-
   manager asks an agent to look up members/invoices, put a member on a plan or
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), keep the club's item price
-  list and charge somebody for items, migrate/bulk-file waivers
+  list and charge somebody for items, see where replies to club emails go,
+  migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
   version of it (or roll back to an earlier one), add or edit a membership
   window's start/end dates, or edit a
@@ -528,6 +529,25 @@ all**.
 > `409 item_invoice_settled`, and there is no refund flow. Cancel keeps the
 > record and stops it showing as owed; delete removes it as though it was never
 > raised. Neither emails anybody, and neither can be undone.
+
+### `get_club_settings` — where replies to club emails go, and the bank account
+
+```bash
+scripts/agent.sh get_club_settings '{}'
+```
+
+Returns `email_reply_to` (or null) and `payment_details` (the bank account, or
+null when not published). A `503 settings_unreadable` means the read failed,
+**not** that nothing is set: retry, never treat it as empty.
+
+Once `email_reply_to` is set, every email the club sends to a member or visitor
+carries it as `Reply-To` and says "reply to this email"; while it is null those
+emails point at the contact page, phone and WhatsApp instead.
+
+> **Both settings are read-only here, on purpose.** They decide where members'
+> replies and money go, so there is no action that changes either. If a manager
+> wants one changed, tell them it is on the Club settings screen
+> (`/manager/settings`). Do not try to work around this.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 

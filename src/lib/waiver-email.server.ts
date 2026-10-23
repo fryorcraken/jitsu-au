@@ -10,16 +10,16 @@ import * as React from "react";
 import { render } from "@react-email/render";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { sendEmail } from "@/lib/send-email.server";
+import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { buildCodeOfConductUrl } from "@/lib/code-of-conduct";
 import { normalizeEmail } from "@/lib/validation";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
 import { SITE_ORIGIN } from "@/lib/site-origin";
+import { SITE_NAME } from "@/lib/email-sender";
+import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
-
-const SITE_NAME = "UTS Jitsu";
 
 /** Manager dashboard where waivers are reviewed and approved. */
 export const WAIVER_REVIEW_URL = `${SITE_ORIGIN}/manager/waivers`;
@@ -50,33 +50,6 @@ const ACTIVATION_LINKS = {
 } as const;
 
 type AdminClient = SupabaseClient<Database>;
-
-/**
- * Resolve the email addresses of every manager (users holding the `manager`
- * role). Uses the service-role client to read `user_roles` and look up each
- * user's email via the auth admin API. Never throws — returns whatever it could
- * resolve so a lookup hiccup can't block the confirmation email to the member.
- */
-export async function getManagerEmails(admin: AdminClient): Promise<string[]> {
-  try {
-    const { data: roles, error } = await admin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "manager");
-    if (error || !roles) return [];
-
-    const emails: string[] = [];
-    for (const { user_id } of roles as { user_id: string }[]) {
-      const { data, error: uErr } = await admin.auth.admin.getUserById(user_id);
-      const email = data?.user?.email;
-      if (!uErr && email) emails.push(email);
-    }
-    // De-duplicate in case a user somehow holds the role twice.
-    return [...new Set(emails)];
-  } catch {
-    return [];
-  }
-}
 
 export interface WaiverEmailParams {
   waiverId: string;
@@ -172,17 +145,27 @@ export async function sendWaiverEmails({
   codeOfConductToken,
   guardianEmail,
   signedByName,
-}: WaiverEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
+}: WaiverEmailParams): Promise<{
+  sent: string[];
+  skipped: boolean;
+  /**
+   * The club reply-to the member's confirmation went out with: null when it
+   * carried none, or did not go out at all. The signing page reads this to
+   * decide whether "reply to your confirmation email" would be true.
+   */
+  memberReplyTo: string | null;
+}> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
     console.warn("[waiver-email] LOVABLE_API_KEY not set — skipping waiver emails");
-    return { sent: [], skipped: true };
+    return { sent: [], skipped: true, memberReplyTo: null };
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
-  const [verifyUrl, notifyRecipients] = await Promise.all([
+  const [verifyUrl, notifyRecipients, clubReply] = await Promise.all([
     verificationLinkFor(admin, userId, memberEmail),
     getManagerEmails(admin),
+    clubReplyTo(admin),
   ]);
 
   const memberEl = React.createElement(WaiverConfirmationEmail, {
@@ -197,6 +180,7 @@ export async function sendWaiverEmails({
     codeOfConductUrl: codeOfConductToken
       ? buildCodeOfConductUrl({ siteUrl: SITE_ORIGIN, token: codeOfConductToken })
       : null,
+    replyTo: clubReply,
   });
   const memberHtml = await render(memberEl);
   const memberText = await render(memberEl, { plainText: true });
@@ -213,6 +197,7 @@ export async function sendWaiverEmails({
   const managerText = await render(managerEl, { plainText: true });
 
   const sent: string[] = [];
+  let memberReplyTo: string | null = null;
 
   // Confirmation to the member.
   try {
@@ -224,8 +209,10 @@ export async function sendWaiverEmails({
       html: memberHtml,
       text: memberText,
       idempotencyKey: `waiver-member-${waiverId}`,
+      replyTo: clubReply,
     });
     sent.push(memberEmail);
+    memberReplyTo = clubReply;
   } catch (e) {
     console.error(`[waiver-email] failed to email the member:`, e);
   }
@@ -259,7 +246,7 @@ export async function sendWaiverEmails({
     }
   }
 
-  return { sent, skipped: false };
+  return { sent, skipped: false, memberReplyTo };
 }
 
 export interface AccountActivatedEmailParams {
@@ -279,6 +266,8 @@ export interface AccountActivatedEmailParams {
    * as a mistake. Null on every waiver signed for oneself.
    */
   dependantName?: string | null;
+  /** Service-role client, used to read the club's reply-to address. */
+  admin: AdminClient;
 }
 
 /**
@@ -308,6 +297,7 @@ export async function sendAccountActivatedEmail({
   memberGreetingName,
   memberEmail,
   dependantName,
+  admin,
 }: AccountActivatedEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -333,6 +323,8 @@ export async function sendAccountActivatedEmail({
       html: await render(el),
       text: await render(el, { plainText: true }),
       idempotencyKey: `account-activated-${waiverId}`,
+      // The template links the contact form either way, so only the header.
+      replyTo: await clubReplyTo(admin),
     });
     return { sent: true, skipped: false };
   } catch (e) {

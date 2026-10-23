@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 
 const sendLovableEmail = vi.fn();
 vi.mock("@lovable.dev/email-js", () => ({
   sendLovableEmail: (...args: unknown[]) => sendLovableEmail(...args),
 }));
-vi.mock("@/lib/waiver-email.server", () => ({ getManagerEmails: () => Promise.resolve([]) }));
+vi.mock("@/lib/manager-recipients.server", () => ({ getManagerEmails: () => Promise.resolve([]) }));
+const readClubReplyTo = vi.hoisted(() =>
+  vi.fn(() => Promise.resolve({ ok: true, address: null as string | null })),
+);
 vi.mock("@/lib/club-settings.server", () => ({
   readClubPaymentDetails: () => Promise.resolve({ ok: true, details: null }),
+  readClubReplyTo,
 }));
 
 const { sendMembershipPaidEmail, sendMembershipPaymentEmail } =
@@ -55,6 +60,7 @@ describe("membership emails without an API key", () => {
       planName: "One semester",
       validity: "Valid for 182 days.",
       amount: "$245",
+      admin: {} as SupabaseClient<Database>,
     });
     expect(result).toEqual({ sent: false, skipped: true });
   });
@@ -122,6 +128,7 @@ describe("who the subject line is about", () => {
       planName: "One semester",
       validity: "Valid for 182 days.",
       amount: "$245",
+      admin: {} as SupabaseClient<Database>,
     });
 
     expect(subjectOf()).toBe("Payment received for Bea's One semester");
@@ -130,7 +137,7 @@ describe("who the subject line is about", () => {
   it("captions the address on the manager's copy", async () => {
     // The manager copy names the CHILD and carries the PARENT's address. Bare,
     // that is a mailbox a manager writes to and nobody reads.
-    const managers = await import("@/lib/waiver-email.server");
+    const managers = await import("@/lib/manager-recipients.server");
     vi.spyOn(managers, "getManagerEmails").mockResolvedValue(["manager@example.com"]);
 
     await sendMembershipPaymentEmail({
@@ -169,7 +176,7 @@ describe("who a reply reaches", () => {
   it("sets Reply-To on the manager's copy to whoever was invoiced, and only there", async () => {
     // A manager answering a pending-payment email presses reply. On a child's
     // invoice that has to reach the parent, the address the invoice went to.
-    const managers = await import("@/lib/waiver-email.server");
+    const managers = await import("@/lib/manager-recipients.server");
     vi.spyOn(managers, "getManagerEmails").mockResolvedValue(["manager@example.com"]);
 
     await sendMembershipPaymentEmail({
@@ -190,5 +197,48 @@ describe("who a reply reaches", () => {
         | undefined;
     expect(byRecipient("ada@example.com")?.reply_to).toBeUndefined();
     expect(byRecipient("manager@example.com")?.reply_to).toBe("ada@example.com");
+  });
+});
+
+// The header and the copy are decided by ONE read of the setting, so the email
+// can never say "just reply" while carrying no Reply-To, or the reverse.
+describe("where a reply to an invoice goes", () => {
+  const original = process.env.LOVABLE_API_KEY;
+  const admin = { from: vi.fn() } as unknown as SupabaseClient<Database>;
+  const invoice = {
+    membershipId: "m1",
+    memberName: "Ada Lovelace",
+    memberGreetingName: "Ada",
+    memberEmail: "ada@example.com",
+    planName: "One semester",
+    amount: "$245",
+    reference: "UTSJ-ABC234",
+    admin,
+  };
+  const sent = () =>
+    sendLovableEmail.mock.calls[0][0] as { reply_to?: string; html: string; text: string };
+
+  beforeEach(() => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.LOVABLE_API_KEY;
+    else process.env.LOVABLE_API_KEY = original;
+    readClubReplyTo.mockReset().mockResolvedValue({ ok: true, address: null });
+  });
+
+  it("carries the club's address and offers a reply once one is set", async () => {
+    readClubReplyTo.mockResolvedValue({ ok: true, address: "hello@example.com" });
+    await sendMembershipPaymentEmail(invoice);
+    expect(sent().reply_to).toBe("hello@example.com");
+    expect(sent().text).toMatch(/reply to this email/i);
+  });
+
+  it("carries no Reply-To and points at the contact page while none is set", async () => {
+    await sendMembershipPaymentEmail(invoice);
+    expect(sent().reply_to).toBeUndefined();
+    expect(sent().text).not.toMatch(/reply to this email/i);
+    expect(sent().html).toContain(`${SITE_ORIGIN}/contact`);
   });
 });

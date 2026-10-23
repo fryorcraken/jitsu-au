@@ -1,7 +1,8 @@
 // Server-only helpers for the transactional emails that ask for or confirm
 // money: membership invoices and receipts, and item invoices and receipts
-// (docs/item-invoices.md). They share a sender, a site URL and a bank-details
-// block, which is why they share a file.
+// (docs/item-invoices.md). They share the club's bank-details block, which is
+// why they share a file. The sender and the site URL are every email's, from
+// `email-sender.ts` and `seo.ts` (docs/emails.md).
 //
 // Pulls in server-only dependencies (the Lovable send API, the React-email
 // renderer) so it must never reach the client bundle — it is named `*.server.ts`
@@ -10,17 +11,16 @@ import * as React from "react";
 import { render } from "@react-email/render";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { sendEmail } from "@/lib/send-email.server";
+import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { MembershipPaymentEmail } from "@/lib/email-templates/membership-payment";
 import { MembershipPaidEmail } from "@/lib/email-templates/membership-paid";
 import { MembershipNotificationEmail } from "@/lib/email-templates/membership-notification";
 import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templates/item-invoice";
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
-import { getManagerEmails } from "@/lib/waiver-email.server";
+import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
 import { SITE_ORIGIN } from "@/lib/site-origin";
-
-const SITE_NAME = "UTS Jitsu";
+import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */
 export const MEMBERSHIP_REVIEW_URL = `${SITE_ORIGIN}/manager/memberships`;
@@ -74,7 +74,10 @@ export async function sendMembershipPaymentEmail({
   const sendUrl = process.env.LOVABLE_SEND_URL;
   // Null covers both "never published" and "could not read": either way the
   // email cannot name an account, and it says so rather than inventing one.
-  const { details } = await readClubPaymentDetails(admin);
+  const [{ details }, replyTo] = await Promise.all([
+    readClubPaymentDetails(admin),
+    clubReplyTo(admin),
+  ]);
 
   const memberEl = React.createElement(MembershipPaymentEmail, {
     siteName: SITE_NAME,
@@ -87,6 +90,7 @@ export async function sendMembershipPaymentEmail({
     reference,
     details,
     membershipUrl: ACCOUNT_URL,
+    replyTo,
   });
   const [memberHtml, memberText, managers] = await Promise.all([
     render(memberEl),
@@ -126,6 +130,7 @@ export async function sendMembershipPaymentEmail({
       html: memberHtml,
       text: memberText,
       idempotencyKey: `membership-payment-${membershipId}`,
+      replyTo,
     });
     sent.push(memberEmail);
   } catch (e) {
@@ -173,6 +178,8 @@ export interface MembershipPaidEmailParams {
   validity: string;
   /** What they paid, already formatted. */
   amount: string;
+  /** Service-role client, used to read the club's reply-to address. */
+  admin: AdminClient;
 }
 
 /**
@@ -191,6 +198,7 @@ export async function sendMembershipPaidEmail({
   planName,
   validity,
   amount,
+  admin,
 }: MembershipPaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -199,6 +207,7 @@ export async function sendMembershipPaidEmail({
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
+  const replyTo = await clubReplyTo(admin);
   const el = React.createElement(MembershipPaidEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_ORIGIN,
@@ -208,6 +217,7 @@ export async function sendMembershipPaidEmail({
     validity,
     amount,
     accountUrl: ACCOUNT_URL,
+    replyTo,
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
@@ -221,6 +231,7 @@ export async function sendMembershipPaidEmail({
       html,
       text,
       idempotencyKey: `membership-paid-${membershipId}`,
+      replyTo,
     });
     return { sent: true, skipped: false };
   } catch (e) {
@@ -268,7 +279,10 @@ export async function sendItemInvoiceEmail({
     console.warn("[item-invoice-email] LOVABLE_API_KEY not set — skipping invoice email");
     return { sent: false, skipped: true };
   }
-  const { details } = await readClubPaymentDetails(admin);
+  const [{ details }, replyTo] = await Promise.all([
+    readClubPaymentDetails(admin),
+    clubReplyTo(admin),
+  ]);
   const el = React.createElement(ItemInvoiceEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_ORIGIN,
@@ -279,6 +293,7 @@ export async function sendItemInvoiceEmail({
     reference,
     details,
     membershipUrl: ACCOUNT_URL,
+    replyTo,
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
@@ -294,6 +309,7 @@ export async function sendItemInvoiceEmail({
       html,
       text,
       idempotencyKey: `item-invoice-${invoiceId}`,
+      replyTo,
     });
     return { sent: true, skipped: false };
   } catch (e) {
@@ -310,6 +326,8 @@ export interface ItemInvoicePaidEmailParams {
   reference: string;
   summary: string;
   amount: string;
+  /** Service-role client, used to read the club's reply-to address. */
+  admin: AdminClient;
 }
 
 /** The receipt for an item invoice. Best-effort; keyed to the invoice, so sent once. */
@@ -321,12 +339,14 @@ export async function sendItemInvoicePaidEmail({
   reference,
   summary,
   amount,
+  admin,
 }: ItemInvoicePaidEmailParams): Promise<{ sent: boolean; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
     console.warn("[item-invoice-email] LOVABLE_API_KEY not set — skipping receipt");
     return { sent: false, skipped: true };
   }
+  const replyTo = await clubReplyTo(admin);
   const el = React.createElement(ItemInvoicePaidEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_ORIGIN,
@@ -336,6 +356,7 @@ export async function sendItemInvoicePaidEmail({
     summary,
     amount,
     membershipUrl: ACCOUNT_URL,
+    replyTo,
   });
   try {
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
@@ -349,6 +370,7 @@ export async function sendItemInvoicePaidEmail({
       html,
       text,
       idempotencyKey: `item-invoice-paid-${invoiceId}`,
+      replyTo,
     });
     return { sent: true, skipped: false };
   } catch (e) {

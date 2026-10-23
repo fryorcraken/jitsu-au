@@ -8,7 +8,7 @@ const { sendLovableEmail, getManagerEmails } = vi.hoisted(() => ({
   getManagerEmails: vi.fn(),
 }));
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
-vi.mock("@/lib/waiver-email.server", () => ({ getManagerEmails }));
+vi.mock("@/lib/manager-recipients.server", () => ({ getManagerEmails }));
 
 describe("sendContactEmails", () => {
   const original = process.env.LOVABLE_API_KEY;

@@ -14,6 +14,11 @@ interface ContactConfirmationEmailProps {
   /** `tel:` href for the same number. */
   phoneTel: string;
   whatsappUrl: string;
+  /**
+   * Where a reply to this email goes, or null when it reaches nobody. The
+   * footer only implies a reply is read when one would be.
+   */
+  replyTo: string | null;
 }
 
 /**
@@ -31,6 +36,7 @@ export const ContactConfirmationEmail = ({
   phoneDisplay,
   phoneTel,
   whatsappUrl,
+  replyTo,
 }: ContactConfirmationEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
@@ -67,7 +73,10 @@ export const ContactConfirmationEmail = ({
         </Text>
         <Text style={footer}>
           You&apos;re receiving this because you sent a message through the contact form at{" "}
-          {siteName}. No need to reply to this address if you were just after a copy.
+          {siteName}.{" "}
+          {replyTo
+            ? "No need to reply to this address if you were just after a copy."
+            : "Replies to this address are not read, so to add anything, send us another message."}
         </Text>
       </Container>
     </Body>

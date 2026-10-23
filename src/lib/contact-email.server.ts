@@ -9,14 +9,13 @@ import * as React from "react";
 import { render } from "@react-email/render";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { sendEmail } from "@/lib/send-email.server";
+import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirmation";
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
-import { getManagerEmails } from "@/lib/waiver-email.server";
+import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 import { SITE_ORIGIN } from "@/lib/site-origin";
-
-const SITE_NAME = "UTS Jitsu";
+import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager screen listing every message the contact form has received. */
 export const MANAGER_CONTACT_URL = `${SITE_ORIGIN}/manager/contact-messages`;
@@ -56,6 +55,12 @@ export async function sendContactEmails({
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
+  // The reply-to is resolved once, before rendering, so the footer's promise
+  // and the header agree (see `clubReplyTo`).
+  const [replyTo, notifyRecipients] = await Promise.all([
+    clubReplyTo(admin),
+    getManagerEmails(admin),
+  ]);
   const senderEl = React.createElement(ContactConfirmationEmail, {
     siteName: SITE_NAME,
     siteUrl: SITE_ORIGIN,
@@ -65,11 +70,9 @@ export async function sendContactEmails({
     phoneDisplay: VENUE_PHONE_DISPLAY,
     phoneTel: VENUE_PHONE_TEL,
     whatsappUrl: WHATSAPP_URL,
+    replyTo,
   });
-  const [senderHtml, notifyRecipients] = await Promise.all([
-    render(senderEl),
-    getManagerEmails(admin),
-  ]);
+  const senderHtml = await render(senderEl);
   const senderText = await render(senderEl, { plainText: true });
 
   const managerEl = React.createElement(ContactNotificationEmail, {
@@ -98,6 +101,7 @@ export async function sendContactEmails({
       html: senderHtml,
       text: senderText,
       idempotencyKey: `contact-sender-${messageId}`,
+      replyTo,
     });
     sent.push(email);
   } catch (e) {

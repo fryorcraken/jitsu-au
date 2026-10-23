@@ -66,13 +66,16 @@ export interface ClubAccountDetailsProps {
  * rather than an approximation of it.
  */
 export function ClubAccountDetails({ details, unreadable = false }: ClubAccountDetailsProps) {
+  // Never "reply to your invoice email": a reply reaches somebody only once a
+  // manager has set the club's reply-to address (docs/emails.md), and this
+  // screen cannot vouch for that. The contact page always works.
   if (!details) {
     return (
       <p className="flex items-start gap-2 text-sm text-muted-foreground">
         <Mail className="mt-0.5 h-4 w-4 shrink-0" />
         {unreadable
-          ? "We could not load the club's account details just now. Reload the page to try again, or reply to your invoice email and we'll send them over."
-          : "The club has not published its account details yet. Reply to your invoice email or use the contact page and we'll send them over."}
+          ? "We could not load the club's account details just now. Reload the page to try again, or ask us through the contact page and we'll send them over."
+          : "The club has not published its account details yet. Ask us through the contact page and we'll send them over."}
       </p>
     );
   }

@@ -8,11 +8,9 @@ import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
 import { SITE_ORIGIN } from "@/lib/site-origin";
-import { FROM, SENDER_DOMAIN } from "@/lib/email-sender";
-
-// Configuration. The sender comes from `email-sender.ts`, shared with every
-// other email the app sends.
-const SITE_NAME = "UTS Jitsu";
+// The sender and the name come from `email-sender.ts`, shared with every other
+// email the app sends (docs/emails.md).
+import { FROM, SENDER_DOMAIN, SITE_NAME } from "@/lib/email-sender";
 
 // The SDK handler owns verification, dispatch, and retry semantics; this file
 // owns only the email decisions: subjects, templates, and per-type props.

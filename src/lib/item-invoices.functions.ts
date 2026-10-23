@@ -478,6 +478,7 @@ export async function recordItemInvoicePayment(
           reference: invoiceReference(invoice),
           summary: itemInvoiceSummary(parseItemInvoiceLines(invoice.lines)),
           amount: formatCents(invoice.total_cents),
+          admin,
         });
       }
     } catch (e) {

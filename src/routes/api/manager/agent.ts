@@ -124,6 +124,7 @@ import { ItemNoLongerListedError } from "@/lib/item-invoices";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
+import { loadClubSettings } from "@/lib/club-settings.functions";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -1376,6 +1377,33 @@ async function handleListKbComments(params: unknown) {
   return { count: projected.length, slug: doc.slug, annotations: projected };
 }
 
+// ---- action: get_club_settings ----
+//
+// Through `loadClubSettings`, the read `/manager/settings` makes, so an agent
+// and a manager see the same values.
+//
+// Read-only on purpose: there is no save_club_settings. Both settings decide
+// where members' money and replies go (the bank account they transfer to, the
+// inbox a "just reply to this email" reaches), so a leaked or misused token
+// that could change either could redirect members to somebody else. A manager
+// changes them on the screen, signed in, after a confirm.
+async function handleGetClubSettings() {
+  try {
+    const { details, email_reply_to } = await loadClubSettings(await adminClient());
+    return { email_reply_to, payment_details: details };
+  } catch (e) {
+    // The screen refuses to show an empty form over a failed read; the API
+    // refuses to answer "nothing is set" for the same reason.
+    throw new AgentError(
+      503,
+      "settings_unreadable",
+      e instanceof Error ? e.message : "Could not read the club settings.",
+      undefined,
+      30,
+    );
+  }
+}
+
 async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
@@ -1434,6 +1462,8 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleCancelItemInvoice(params, actingAs);
     case "delete_item_invoice":
       return handleDeleteItemInvoice(params, actingAs);
+    case "get_club_settings":
+      return handleGetClubSettings();
   }
 }
 
