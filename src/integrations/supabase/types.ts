@@ -653,6 +653,7 @@ export type Database = {
           invoice_number: number
           lines: Json
           paid_at: string | null
+          paid_reference: string | null
           payment_method: string | null
           payment_reference: string | null
           total_cents: number
@@ -667,6 +668,7 @@ export type Database = {
           invoice_number?: never
           lines: Json
           paid_at?: string | null
+          paid_reference?: string | null
           payment_method?: string | null
           payment_reference?: string | null
           total_cents: number
@@ -681,6 +683,7 @@ export type Database = {
           invoice_number?: never
           lines?: Json
           paid_at?: string | null
+          paid_reference?: string | null
           payment_method?: string | null
           payment_reference?: string | null
           total_cents?: number
@@ -1007,6 +1010,7 @@ export type Database = {
           is_student: boolean
           notes: string | null
           paid_at: string | null
+          paid_reference: string | null
           payment_method: string
           payment_reference: string
           plan_id: string
@@ -1025,6 +1029,7 @@ export type Database = {
           is_student?: boolean
           notes?: string | null
           paid_at?: string | null
+          paid_reference?: string | null
           payment_method?: string
           payment_reference: string
           plan_id: string
@@ -1043,6 +1048,7 @@ export type Database = {
           is_student?: boolean
           notes?: string | null
           paid_at?: string | null
+          paid_reference?: string | null
           payment_method?: string
           payment_reference?: string
           plan_id?: string
