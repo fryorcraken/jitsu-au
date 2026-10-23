@@ -937,6 +937,7 @@ describe("manager agent route: item invoices", () => {
   /** A fake whose item_invoices table holds one row (or none) and records writes. */
   function fakeItemInvoices(row: Record<string, unknown> | null) {
     const writes: string[] = [];
+    const patches: unknown[] = [];
     const chain = (op: string): Record<string, unknown> => {
       const c: Record<string, unknown> = {};
       for (const m of ["eq", "is", "select"]) c[m] = () => c;
@@ -949,12 +950,16 @@ describe("manager agent route: item invoices", () => {
     };
     return {
       writes,
+      patches,
       db: {
         from: (table: string) => {
           if (table !== "item_invoices") throw new Error(`unexpected table ${table}`);
           return {
             select: () => chain("select"),
-            update: () => chain("update"),
+            update: (patch: unknown) => {
+              patches.push(patch);
+              return chain("update");
+            },
             delete: () => chain("delete"),
           };
         },
@@ -985,6 +990,37 @@ describe("manager agent route: item invoices", () => {
       expect(fake.writes).toEqual([]);
     },
   );
+
+  // Cash taken on a Thursday and entered on the Monday keeps its real day, as
+  // noon in Sydney (AEST on 1 October), with the receipt number beside it.
+  it("records the day and reference sent with mark_item_invoice_paid", async () => {
+    const fake = fakeItemInvoices({ ...PAID, paid_at: null });
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "mark_item_invoice_paid",
+      params: { id: ITEM_INVOICE_ID, paid_on: "2026-10-01", paid_reference: "Receipt 42" },
+    });
+    expect(res.status).toBe(200);
+    expect(fake.patches).toEqual([
+      {
+        paid_at: "2026-10-01T02:00:00.000Z",
+        payment_method: "manual",
+        paid_reference: "Receipt 42",
+      },
+    ]);
+  });
+
+  it("refuses a paid_on that has not happened yet, writing nothing", async () => {
+    const fake = fakeItemInvoices({ ...PAID, paid_at: null });
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "mark_item_invoice_paid",
+      params: { id: ITEM_INVOICE_ID, paid_on: "2999-01-01" },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_params");
+    expect(fake.writes).toEqual([]);
+  });
 
   it("reports an unknown item invoice as not_found", async () => {
     currentAdmin = fakeItemInvoices(null).db;

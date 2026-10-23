@@ -15,6 +15,7 @@ import { UserLink } from "@/components/site/UserLink";
 import { AddMembershipCard } from "@/components/site/AddMembershipCard";
 import { PersonCharges } from "@/components/site/PersonCharges";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
+import { PaidNote } from "@/components/site/PaymentReceived";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
 import {
@@ -1016,7 +1017,10 @@ function ManagerUserPage() {
                         className={membershipClass(m.status)}
                       />
                     </td>
-                    <td className="px-3 py-2">{formatCents(m.price_cents)}</td>
+                    <td className="px-3 py-2">
+                      {formatCents(m.price_cents)}
+                      <PaidNote paidAt={m.paid_at} reference={m.paid_reference} />
+                    </td>
                     <td className="px-3 py-2">{m.payment_reference ?? "—"}</td>
                     <td className="px-3 py-2">{formatDate(m.starts_at)}</td>
                     <td className="px-3 py-2">{formatDate(m.ends_at)}</td>

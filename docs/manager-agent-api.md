@@ -126,6 +126,13 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   comes back `recorded: false` — reconciliation legitimately sees the same
   invoice twice. Refused with `422 nothing_to_pay` on a free membership. Written
   to the server audit log with the actor, even when nothing was recorded.
+  Optional `paid_on` (`YYYY-MM-DD`, default today, never in the future, may
+  precede the invoice for a backfill) and `paid_reference` (a receipt number, up
+  to 200 characters) record when the money arrived and what it was known by;
+  `mark_item_invoice_paid` takes the same two (`"20"`). `paid_reference` is not
+  `payment_reference`, which marking paid never changes. A past day is stored
+  as noon Sydney time, so it reads back as the same date anywhere in
+  Australia. Both list actions return `paid_reference`.
 - `edit_invoice` — correct an invoice's detail fields. Cannot set `status` to
   `active`: reopening a closed membership recomputes its dates and credits, which
   is `setMembershipStatus`'s job, not a raw field edit's. Returns `changed` + `previous`
@@ -340,7 +347,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"19"`.
+test so the bump is a deliberate edit, and the current value is `"20"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

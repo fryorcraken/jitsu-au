@@ -99,7 +99,11 @@ and would not here. The two shapes never collide.
   invoice by hand from the same screen; that refuses an invoice already paid and
   a transfer already matched, for the same reason.
 - **Mark as paid**, for cash at the door. Asks first: it emails a receipt and
-  makes the invoice permanent.
+  makes the invoice permanent. The same dialog asks the day the money arrived
+  (today unless changed, never a future day) and an optional receipt or
+  reference, which the table then prints under the status as "Paid <date>".
+  That reference is the club's note, shown to managers only, and is never the
+  invoice's own `INV` reference.
 
 Both bank paths **claim the statement line first** (a guarded update, only while
 it is still unmatched) and only then record the payment; if the payment does not

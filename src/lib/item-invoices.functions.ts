@@ -22,6 +22,7 @@ import {
   markItemInvoicePaidSchema,
   matchTransactionToItemInvoiceSchema,
   nameWithPreferred,
+  paidAtFor,
   recordIdSchema,
   saveChargeItemSchema,
 } from "@/lib/validation";
@@ -214,6 +215,12 @@ export type ManagerItemInvoiceView = ItemInvoiceView & {
    * would read as the child's own mailbox.
    */
   member_email_belongs_to: string | null;
+  /**
+   * What a payment recorded by hand was known by (a receipt number). Manager
+   * only: it is the club's note about the money, typed by whoever took it, and
+   * not something written for the member to read.
+   */
+  paid_reference: string | null;
 };
 
 /**
@@ -256,6 +263,7 @@ export async function listItemInvoiceRows(
       member_name: (row.user_id ? nameByUser.get(row.user_id) : null) || null,
       member_email: contact?.email ?? null,
       member_email_belongs_to: contact?.onBehalfOf?.name ?? null,
+      paid_reference: row.paid_reference,
     };
   });
 }
@@ -424,7 +432,14 @@ export async function createItemInvoiceForUser(
  */
 export async function recordItemInvoicePayment(
   admin: MembershipClient,
-  input: { invoice: ItemInvoiceRow; method: "bank_transfer" | "manual" },
+  input: {
+    invoice: ItemInvoiceRow;
+    method: "bank_transfer" | "manual";
+    /** When the money actually moved, if that is not now (a manager's chosen day). */
+    at?: string;
+    /** What the payment was known by: a receipt number, a transfer reference. */
+    reference?: string;
+  },
 ): Promise<{ recorded: boolean }> {
   const { invoice } = input;
   if (invoice.paid_at) return { recorded: false };
@@ -435,7 +450,12 @@ export async function recordItemInvoicePayment(
 
   const { data: claimed, error } = await admin
     .from("item_invoices")
-    .update({ paid_at: new Date().toISOString(), payment_method: input.method })
+    .update({
+      paid_at: input.at ?? new Date().toISOString(),
+      payment_method: input.method,
+      // Only when given: the bank match has none, and its write stays as it was.
+      ...(input.reference ? { paid_reference: input.reference } : {}),
+    })
     .eq("id", invoice.id)
     .is("paid_at", null)
     .is("cancelled_at", null)
@@ -557,6 +577,8 @@ export const markItemInvoicePaid = createServerFn({ method: "POST" })
     const { recorded } = await recordItemInvoicePayment(admin, {
       invoice,
       method: data.payment_method,
+      at: paidAtFor(data.paid_on),
+      reference: data.paid_reference,
     });
     return { ok: true as const, id: data.id, recorded };
   });

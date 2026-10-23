@@ -28,6 +28,9 @@ import {
   planMembershipWindow,
   planStartIsChoosable,
   rescheduleMembershipStart,
+  markMembershipPaidSchema,
+  paidAtFor,
+  PAID_REFERENCE_MAX,
   sanitizeSurname,
   savePlanSchema,
   sameInstant,
@@ -758,6 +761,82 @@ describe("planStartIsChoosable", () => {
 
   it("says no to a duration of zero days, which is not a plan that runs", () => {
     expect(planStartIsChoosable({ starts_on: null, ends_on: null, duration_days: 0 })).toBe(false);
+  });
+});
+
+describe("paidAtFor", () => {
+  const now = new Date("2026-10-23T03:15:00.000Z"); // 2:15pm, 23 Oct in Sydney (AEDT)
+
+  // What marking paid always wrote, and still writes when nobody picks a day.
+  it("is the present moment when no day is given, or the day is today", () => {
+    expect(paidAtFor(undefined, now)).toBe(now.toISOString());
+    expect(paidAtFor("2026-10-23", now)).toBe(now.toISOString());
+  });
+
+  // Noon, not midnight: screens print paid_at in the reader's timezone, and
+  // midnight in Sydney is the previous evening in Perth.
+  it("is noon in the club's timezone on an earlier day", () => {
+    expect(paidAtFor("2026-10-20", now)).toBe("2026-10-20T01:00:00.000Z"); // AEDT, +11
+    expect(paidAtFor("2026-07-01", now)).toBe("2026-07-01T02:00:00.000Z"); // AEST, +10
+    expect(
+      new Date(paidAtFor("2026-10-20", now)).toLocaleDateString("en-AU", {
+        timeZone: "Australia/Perth",
+      }),
+    ).toBe("20/10/2026");
+  });
+});
+
+describe("markMembershipPaidSchema, the date and reference", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+
+  it("takes neither, as before", () => {
+    const parsed = markMembershipPaidSchema.parse({ id });
+    expect(parsed.paid_on).toBeUndefined();
+    expect(parsed.paid_reference).toBeUndefined();
+  });
+
+  it("takes a past day and a trimmed reference", () => {
+    const parsed = markMembershipPaidSchema.parse({
+      id,
+      paid_on: "2026-01-15",
+      paid_reference: "  Receipt 42 ",
+    });
+    expect(parsed.paid_on).toBe("2026-01-15");
+    expect(parsed.paid_reference).toBe("Receipt 42");
+  });
+
+  // An empty form field, or an agent sending null, is "no reference", never a
+  // blank one stored as if it meant something.
+  it.each(["", "   ", null])("reads a reference of %j as none", (paid_reference) => {
+    expect(markMembershipPaidSchema.parse({ id, paid_reference }).paid_reference).toBeUndefined();
+  });
+
+  it("reads a null day as today", () => {
+    expect(markMembershipPaidSchema.parse({ id, paid_on: null }).paid_on).toBeUndefined();
+  });
+
+  // Money recorded on a day that has not happened is money the club does not have.
+  it("refuses a day that has not happened yet", () => {
+    const tomorrow = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+    expect(() => markMembershipPaidSchema.parse({ id, paid_on: tomorrow })).toThrow(
+      /has not happened yet/,
+    );
+  });
+
+  it("refuses a date that is not on the calendar rather than rolling it over", () => {
+    expect(() => markMembershipPaidSchema.parse({ id, paid_on: "2026-02-31" })).toThrow(
+      /not a real date/,
+    );
+    expect(() => markMembershipPaidSchema.parse({ id, paid_on: "15/01/2026" })).toThrow();
+  });
+
+  it("refuses a reference longer than the database will hold", () => {
+    const long = "x".repeat(PAID_REFERENCE_MAX + 1);
+    expect(() => markMembershipPaidSchema.parse({ id, paid_reference: long })).toThrow();
+    expect(
+      markMembershipPaidSchema.parse({ id, paid_reference: "x".repeat(PAID_REFERENCE_MAX) })
+        .paid_reference,
+    ).toHaveLength(PAID_REFERENCE_MAX);
   });
 });
 

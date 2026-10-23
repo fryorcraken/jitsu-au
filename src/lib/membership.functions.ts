@@ -16,6 +16,7 @@ import {
   membershipDeleteMessage,
   normalizeRef,
   nameWithPreferred,
+  paidAtFor,
   planMembershipWindow,
   planStartIsChoosable,
   profileFullName,
@@ -416,8 +417,10 @@ export async function recordMembershipPayment(
     membership: MembershipRow;
     plan?: MembershipPlanRow;
     method: MembershipRow["payment_method"];
-    /** When the money actually moved, if that is not now (a bank posting date). */
+    /** When the money actually moved, if that is not now (a manager's chosen day). */
     at?: string;
+    /** What the payment was known by: a receipt number, a transfer reference. */
+    reference?: string;
   },
 ): Promise<{ recorded: boolean }> {
   const { membership } = input;
@@ -429,7 +432,12 @@ export async function recordMembershipPayment(
   // payment and send one email.
   const { data: claimed, error } = await admin
     .from("memberships")
-    .update({ paid_at: paidAt, payment_method: input.method })
+    .update({
+      paid_at: paidAt,
+      payment_method: input.method,
+      // Only when given: the bank match has none, and its write stays as it was.
+      ...(input.reference ? { paid_reference: input.reference } : {}),
+    })
     .eq("id", membership.id)
     .is("paid_at", null)
     .select("id");
@@ -1438,6 +1446,9 @@ export const listMemberships = createServerFn({ method: "GET" })
       ...projectMembership(r, planById.get(r.plan_id)),
       user_id: r.user_id,
       uts_student_number: r.uts_student_number,
+      // Manager only, so it rides here rather than in `projectMembership`, which
+      // a member's own page reads too: it is the club's note about the money.
+      paid_reference: r.paid_reference,
       checkin_count: checkinCounts.get(r.id) ?? 0,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
       member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
@@ -1768,6 +1779,8 @@ export const markMembershipPaid = createServerFn({ method: "POST" })
       membership,
       plan: plan ?? undefined,
       method: data.payment_method,
+      at: paidAtFor(data.paid_on),
+      reference: data.paid_reference,
     });
     return { ok: true as const, id: data.id, recorded };
   });
