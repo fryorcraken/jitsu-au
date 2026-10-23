@@ -5,6 +5,7 @@ import {
   CODE_OF_CONDUCT_VERSION,
   buildCodeOfConductUrl,
   codeOfConductState,
+  codeOfConductSummary,
   latestAcceptedVersion,
   parseCodeOfConductBlocks,
   parseCodeOfConductSpans,
@@ -140,6 +141,54 @@ describe("latestAcceptedVersion", () => {
    */
   it("takes the highest version, not the last one recorded", () => {
     expect(latestAcceptedVersion([{ version: 3 }, { version: 1 }, { version: 2 }])).toBe(3);
+  });
+});
+
+describe("codeOfConductSummary", () => {
+  const row = (version: number, accepted_at: string, signature_name = "Ada Lovelace") => ({
+    version,
+    accepted_at,
+    signature_name,
+  });
+
+  it("reports nobody who has never agreed as unsigned, with nothing else to say", () => {
+    expect(codeOfConductSummary([], 2)).toEqual({
+      state: "unsigned",
+      current_version: 2,
+      accepted_version: null,
+      accepted_at: null,
+      signature_name: null,
+    });
+    expect(codeOfConductSummary(null, 2).state).toBe("unsigned");
+  });
+
+  it("is decided by the highest version, not the latest row", () => {
+    const summary = codeOfConductSummary(
+      [row(1, "2026-03-01T00:00:00Z", "Ada L"), row(2, "2026-02-01T00:00:00Z")],
+      2,
+    );
+    expect(summary).toMatchObject({
+      state: "signed",
+      accepted_version: 2,
+      accepted_at: "2026-02-01T00:00:00Z",
+      signature_name: "Ada Lovelace",
+    });
+  });
+
+  it("keeps the first row given on a tie, which is the newest when read newest first", () => {
+    const summary = codeOfConductSummary(
+      [row(1, "2026-03-01T00:00:00Z", "Second"), row(1, "2026-01-01T00:00:00Z", "First")],
+      1,
+    );
+    expect(summary.signature_name).toBe("Second");
+  });
+
+  it("says outdated when the highest version agreed to is behind", () => {
+    expect(codeOfConductSummary([row(1, "2026-01-01T00:00:00Z")], 2).state).toBe("outdated");
+  });
+
+  it("measures against the version in code when none is given", () => {
+    expect(codeOfConductSummary([]).current_version).toBe(CODE_OF_CONDUCT_VERSION);
   });
 });
 

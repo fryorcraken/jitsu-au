@@ -263,6 +263,39 @@ export function latestAcceptedVersion(
 }
 
 /**
+ * Where one person stands, as a manager reads it: the state, and the acceptance
+ * that decides it.
+ *
+ * The acceptance is the one with the highest VERSION, not the most recent row:
+ * re-signing an older version after a newer one is not a downgrade (rule 6 in
+ * `docs/code-of-conduct.md`). On a tie the first row given wins, so pass them
+ * newest first to report the latest signing of that version.
+ *
+ * One function because two surfaces report this, the manager person page and
+ * the manager agent API, and they must not disagree about it.
+ */
+export function codeOfConductSummary(
+  acceptances:
+    | { version: number; accepted_at: string; signature_name: string }[]
+    | null
+    | undefined,
+  currentVersion: number = CODE_OF_CONDUCT_VERSION,
+) {
+  const top = (acceptances ?? []).reduce<{
+    version: number;
+    accepted_at: string;
+    signature_name: string;
+  } | null>((best, a) => (!best || a.version > best.version ? a : best), null);
+  return {
+    state: codeOfConductState(top?.version ?? null, currentVersion),
+    current_version: currentVersion,
+    accepted_version: top?.version ?? null,
+    accepted_at: top?.accepted_at ?? null,
+    signature_name: top?.signature_name ?? null,
+  };
+}
+
+/**
  * The link that takes a person straight to the signing form.
  *
  * Omit `siteUrl` for a root-relative link (what the site itself uses); pass it
