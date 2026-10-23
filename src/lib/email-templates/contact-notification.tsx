@@ -13,9 +13,10 @@ interface ContactNotificationEmailProps {
 }
 
 /**
- * Sent to managers when someone uses the contact form. The sender's address is a
- * mailto link because replying from your own inbox is the whole workflow: the
- * site has no reply-from-the-dashboard screen and does not need one.
+ * Sent to managers when someone uses the contact form. Replying from your own
+ * inbox is the whole workflow (the site has no reply-from-the-dashboard screen
+ * and does not need one), so the email goes out with Reply-To set to the
+ * sender and their address is also a mailto link for clients that ignore it.
  */
 export const ContactNotificationEmail = ({
   siteName,
@@ -51,7 +52,7 @@ export const ContactNotificationEmail = ({
           <Text style={quoteBody}>{message}</Text>
         </Container>
         <Text style={text}>
-          Reply straight to{" "}
+          Press reply to answer {name || "them"} at{" "}
           <Link href={`mailto:${email}`} style={link}>
             {email}
           </Link>

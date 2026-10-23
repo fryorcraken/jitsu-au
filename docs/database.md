@@ -1610,9 +1610,10 @@ elsewhere in the product, so a manager confirms what goes before it goes (see
 
 Submitting also emails the sender an acknowledgement and every manager the
 message itself (`src/lib/contact-email.server.ts`, best-effort: a send failure
-is logged and never fails the submission). Before that existed nothing sent an
-email and nothing on the site read this table, so a message reached nobody at
-all.
+is logged and never fails the submission). The managers' copy carries the
+sender's address as its Reply-To, so pressing reply answers the sender. Before
+that existed nothing sent an email and nothing on the site read this table, so
+a message reached nobody at all.
 
 Which messages are "unread" is a single club-wide marker, not a column here:
 `club_settings.contact_messages_seen_at`, stamped when a manager opens the

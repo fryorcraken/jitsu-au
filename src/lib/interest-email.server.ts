@@ -7,20 +7,15 @@
 // the `submitInterest` server-function handler.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { sendEmail } from "@/lib/send-email.server";
 import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confirmation";
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 
-// Sender configuration mirrors the auth-email webhook and the waiver emails.
 const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
 const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where the lead/member funnel is reviewed. */
 export const MANAGER_DASHBOARD_URL = `${SITE_URL}/manager/users`;
@@ -51,30 +46,6 @@ export function buildWaiverUrl(params: {
   if (params.token) search.set("vt", params.token);
   const qs = search.toString();
   return qs ? `${SITE_URL}/waiver?${qs}` : `${SITE_URL}/waiver`;
-}
-
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
 }
 
 export interface InterestEmailParams {
@@ -149,7 +120,7 @@ export async function sendInterestEmails({
 
   // Confirmation to the applicant.
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl,
       to: email,
@@ -163,10 +134,11 @@ export async function sendInterestEmails({
     console.error(`[interest-email] failed to email the applicant:`, e);
   }
 
-  // New-lead notification to each manager.
+  // New-lead notification to each manager, replying to the lead (the same
+  // Reply-To rule as the contact form; interestSchema validated the address).
   for (const to of notifyRecipients) {
     try {
-      await sendOne({
+      await sendEmail({
         apiKey,
         sendUrl,
         to,
@@ -174,6 +146,7 @@ export async function sendInterestEmails({
         html: managerHtml,
         text: managerText,
         idempotencyKey: `interest-manager-${registrationId}-${to}`,
+        replyTo: email,
       });
       sent.push(to);
     } catch (e) {

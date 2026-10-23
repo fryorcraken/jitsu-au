@@ -8,22 +8,18 @@
 // lazy-imported from inside server-function handlers.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { sendEmail } from "@/lib/send-email.server";
 import { buildCodeOfConductUrl } from "@/lib/code-of-conduct";
+import { normalizeEmail } from "@/lib/validation";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
+import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
 
-// Mirror the sender configuration used by the auth-email webhook.
 const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC (Gmail flags
-// misaligned From-domains as spam).
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
 const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where waivers are reviewed and approved. */
 export const WAIVER_REVIEW_URL = `${SITE_URL}/manager/waivers`;
@@ -82,30 +78,6 @@ export async function getManagerEmails(admin: AdminClient): Promise<string[]> {
   }
 }
 
-async function sendOne(opts: {
-  apiKey: string;
-  sendUrl?: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  idempotencyKey: string;
-}) {
-  await sendLovableEmail(
-    {
-      to: opts.to,
-      from: FROM,
-      sender_domain: SENDER_DOMAIN,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-      purpose: "transactional",
-      idempotency_key: opts.idempotencyKey,
-    },
-    { apiKey: opts.apiKey, sendUrl: opts.sendUrl },
-  );
-}
-
 export interface WaiverEmailParams {
   waiverId: string;
   /** The signer's legal full name — how managers identify them. */
@@ -135,6 +107,21 @@ export interface WaiverEmailParams {
    * waiver confirmation over.
    */
   codeOfConductToken?: string | null;
+  /**
+   * The guardian named on the waiver, when there is one. On a minor's own
+   * waiver the managers' replies go to them as well as to the minor: the
+   * club writing to a fifteen-year-old about their health answers should not
+   * leave out the adult who co-signed them. Harmless when it is the same
+   * address as `memberEmail` (a waiver signed for a child on someone's account,
+   * or a guardian block left blank), which is deduplicated.
+   */
+  guardianEmail?: string | null;
+  /**
+   * The parent who signed, on a waiver signed for a child on their account.
+   * The managers' copy names them as the signer and `memberName` as who it is
+   * for, since `memberEmail` is theirs (see WaiverNotificationEmail).
+   */
+  signedByName?: string | null;
 }
 
 /**
@@ -183,6 +170,8 @@ export async function sendWaiverEmails({
   admin,
   userId,
   codeOfConductToken,
+  guardianEmail,
+  signedByName,
 }: WaiverEmailParams): Promise<{ sent: string[]; skipped: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -216,6 +205,7 @@ export async function sendWaiverEmails({
     siteName: SITE_NAME,
     memberName,
     memberEmail,
+    signedByName,
     pdfUrl,
     reviewUrl: WAIVER_REVIEW_URL,
   });
@@ -226,7 +216,7 @@ export async function sendWaiverEmails({
 
   // Confirmation to the member.
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl,
       to: memberEmail,
@@ -240,17 +230,28 @@ export async function sendWaiverEmails({
     console.error(`[waiver-email] failed to email the member:`, e);
   }
 
-  // Review prompt to each manager.
+  // Review prompt to each manager, replying to the address the member's copy
+  // went to, plus the guardian's on a minor's own waiver. On a waiver signed
+  // for a child on someone's account the copy went to the parent, never to the
+  // child's reserved address, so a reply reaches somebody. The guardian comes
+  // first: if the email service will only take one address, that is the one
+  // sendEmail keeps, and on a minor's waiver it is the adult's.
+  const replyTo = [
+    ...new Set(
+      [guardianEmail, memberEmail].filter((e): e is string => Boolean(e)).map(normalizeEmail),
+    ),
+  ];
   for (const to of notifyRecipients) {
     try {
-      await sendOne({
+      await sendEmail({
         apiKey,
         sendUrl,
         to,
-        subject: `New waiver signed by ${memberName || memberEmail}`,
+        subject: waiverNotificationSubject({ memberName, memberEmail, signedByName }),
         html: managerHtml,
         text: managerText,
         idempotencyKey: `waiver-manager-${waiverId}-${to}`,
+        replyTo,
       });
       sent.push(to);
     } catch (e) {
@@ -324,7 +325,7 @@ export async function sendAccountActivatedEmail({
   });
 
   try {
-    await sendOne({
+    await sendEmail({
       apiKey,
       sendUrl: process.env.LOVABLE_SEND_URL,
       to: memberEmail,

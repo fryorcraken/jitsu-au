@@ -10,7 +10,6 @@
 // the plumbing around them.
 import * as React from "react";
 import { render } from "@react-email/render";
-import { sendLovableEmail } from "@lovable.dev/email-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
@@ -24,15 +23,11 @@ import {
   type VerificationPurpose,
 } from "@/lib/email-verification";
 import { VerifyEmail } from "@/lib/email-templates/verify-email";
+import { sendEmail } from "@/lib/send-email.server";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 
-// Mirror the sender configuration used by the other transactional senders.
 const SITE_NAME = "UTS Jitsu";
-// Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
-const FROM_DOMAIN = "notify.jitsu.au";
-const SENDER_DOMAIN = "notify.jitsu.au";
 export const SITE_URL = "https://jitsu.au";
-const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -243,21 +238,17 @@ export async function sendVerificationEmail(opts: {
     });
     const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
 
-    await sendLovableEmail(
-      {
-        to: opts.to,
-        from: FROM,
-        sender_domain: SENDER_DOMAIN,
-        subject: "Confirm your email address",
-        html,
-        text,
-        purpose: "transactional",
-        // Distinct per send: a resend must not be swallowed as a duplicate of
-        // the one the member says never arrived.
-        idempotency_key: `verify-${await hashToken(token)}`,
-      },
-      { apiKey, sendUrl: process.env.LOVABLE_SEND_URL },
-    );
+    await sendEmail({
+      apiKey,
+      sendUrl: process.env.LOVABLE_SEND_URL,
+      to: opts.to,
+      subject: "Confirm your email address",
+      html,
+      text,
+      // Distinct per send: a resend must not be swallowed as a duplicate of
+      // the one the member says never arrived.
+      idempotencyKey: `verify-${await hashToken(token)}`,
+    });
     return { sent: true };
   } catch (e) {
     console.error(`[email-verification] failed to send a verification email:`, e);
