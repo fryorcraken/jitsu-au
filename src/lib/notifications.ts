@@ -19,11 +19,17 @@ export const notificationKinds = [
   "new_blog_post",
   "blog_comment",
   "kb_comment",
+  "membership_plan_open",
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
 /** The things a notification can be about. Matches the `subject_type` CHECK. */
-export const notificationSubjectTypes = ["blog_comment", "kb_annotation", "blog_post"] as const;
+export const notificationSubjectTypes = [
+  "blog_comment",
+  "kb_annotation",
+  "blog_post",
+  "membership_plan_announcement",
+] as const;
 export type NotificationSubjectType = (typeof notificationSubjectTypes)[number];
 
 /**
@@ -58,10 +64,17 @@ export const preferenceForKind: Record<NotificationKind, EmailPreferenceKey | nu
   new_blog_post: "new_blog_post",
   blog_comment: "manager_comment_alerts",
   kb_comment: "manager_comment_alerts",
+  // A plan a manager announced to every member (`plan-announcement.ts`). It is
+  // about the person's own membership, like an invoice, so it is not the
+  // `new_blog_post` announcement switch, which is off by default and would
+  // stop it reaching almost anybody.
+  membership_plan_open: null,
 };
 
 /** The closed list of kinds no switch governs. See `preferenceForKind`. */
-export const UNSWITCHABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = [];
+export const UNSWITCHABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = [
+  "membership_plan_open",
+];
 
 /** Whether a person's switches have any say over emailing this kind. */
 export function isSwitchableKind(kind: NotificationKind): boolean {
@@ -165,6 +178,7 @@ export function badgeCount(
 
 /** A digest email, grouped so each section can have its own heading. */
 export type DigestSections = {
+  membership: NotificationItem[];
   replies: NotificationItem[];
   threads: NotificationItem[];
   posts: NotificationItem[];
@@ -187,6 +201,9 @@ export function digestSections(
 ): DigestSections {
   const allowed = rows.filter((r) => shouldEmail(prefs, r.kind, opts));
   return {
+    // First, because it is about the person's own membership. It reaches the
+    // digest only when the immediate email did not go (`plan-announcement.server.ts`).
+    membership: allowed.filter((r) => r.kind === "membership_plan_open"),
     replies: allowed.filter((r) => r.kind === "reply"),
     threads: allowed.filter((r) => r.kind === "thread_activity"),
     posts: allowed.filter((r) => r.kind === "new_blog_post"),
@@ -248,6 +265,7 @@ export function mergeHouseholdItems(rows: DigestCandidate[]): NotificationItem[]
 /** Whether a digest has anything in it. An empty one is not sent. */
 export function hasDigestContent(sections: DigestSections): boolean {
   return (
+    sections.membership.length > 0 ||
     sections.replies.length > 0 ||
     sections.threads.length > 0 ||
     sections.posts.length > 0 ||
@@ -258,6 +276,7 @@ export function hasDigestContent(sections: DigestSections): boolean {
 /** How many items a digest covers, for the subject line and the logs. */
 export function digestItemCount(sections: DigestSections): number {
   return (
+    sections.membership.length +
     sections.replies.length +
     sections.threads.length +
     sections.posts.length +

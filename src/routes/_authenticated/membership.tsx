@@ -1021,7 +1021,13 @@ function MembershipPage() {
               const hasStarted =
                 plan.kind !== "period" || !plan.starts_on || plan.starts_on <= today;
               return (
-                <div key={plan.code} className="flex flex-col rounded-2xl border bg-card p-6">
+                <div
+                  key={plan.code}
+                  // The target of a plan announcement's link
+                  // (`planAnnouncementHref`), so the email lands on this card.
+                  id={`plan-${plan.id}`}
+                  className="flex scroll-mt-24 flex-col rounded-2xl border bg-card p-6"
+                >
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-lg font-semibold">{plan.name}</h3>
                     {plan.kind === "period" && plan.starts_on && (
@@ -1120,7 +1126,11 @@ function MembershipPage() {
                 {otherPlans.map((plan) => {
                   const price = computeMembershipPrice(plan, isStudent);
                   return (
-                    <div key={plan.code} className="flex flex-col rounded-2xl border bg-card p-6">
+                    <div
+                      key={plan.code}
+                      id={`plan-${plan.id}`}
+                      className="flex scroll-mt-24 flex-col rounded-2xl border bg-card p-6"
+                    >
                       <h4 className="text-base font-semibold">{plan.name}</h4>
                       {plan.description && (
                         <p className="mt-1 text-sm text-muted-foreground">{plan.description}</p>

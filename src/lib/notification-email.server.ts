@@ -117,6 +117,16 @@ export type NotificationDraft = {
 export async function writeNotifications(
   db: AdminClient,
   drafts: NotificationDraft[],
+  opts: {
+    /**
+     * Throw on a failed write instead of logging it. For a caller whose whole
+     * job is the notification (a manager announcing a plan), where "nothing was
+     * written" must reach the screen as a failure rather than as zero
+     * recipients. The comment and post paths keep the default: a notification
+     * must never fail the comment somebody just posted.
+     */
+    throwOnError?: boolean;
+  } = {},
 ): Promise<{ id: string; user_id: string; kind: NotificationKind }[]> {
   if (drafts.length === 0) return [];
   const { data, error } = await db
@@ -136,6 +146,7 @@ export async function writeNotifications(
     )
     .select("id, user_id, kind");
   if (error) {
+    if (opts.throwOnError) throw new Error(error.message);
     // Never allowed to fail the comment somebody just posted.
     console.error("[notifications] could not write notifications:", error.message);
     return [];
@@ -254,6 +265,122 @@ export async function sendReplyNotification(
   }
 }
 
+/**
+ * How many emails one request sends at once, and how many it sends at most.
+ *
+ * The deploy target is Cloudflare, where work not awaited before the response
+ * may never run, so a send to every member is awaited in full rather than
+ * fired and forgotten. Ten at a time keeps one slow send from stalling the
+ * rest without opening a hundred connections at once. The per-request ceiling
+ * keeps one request inside the platform's limits on outbound calls; whatever
+ * it leaves is still pending, so the caller can send the rest and the next
+ * morning's summary picks up anything nobody did.
+ */
+export const IMMEDIATE_SEND_BATCH = 10;
+export const IMMEDIATE_SENDS_PER_REQUEST = 150;
+
+export type ImmediateSendResult = { sent: number; failed: number; skipped: number };
+
+/** One composed email, before the sender adds the API key. */
+export type ImmediateEmail = {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  /** The send provider discards a second send under the same key. */
+  idempotencyKey: string;
+  /** Where a reply goes; the rule is at the top of `send-email.server.ts`. */
+  replyTo: string | string[] | null;
+};
+
+/**
+ * Email the rows one event wrote, straight away, in bounded batches.
+ *
+ * The bulk half of what `sendReplyNotification` does for one row: find what is
+ * still unsent for this `(kind, subject_id)`, ask the person's switches (only
+ * for a kind that has one, see `wantsEmail`), send, and stamp `emailed_at` on
+ * exactly the rows that went. Anything else stays pending:
+ *
+ * - a failed send, so a retry or the next morning's summary picks it up rather
+ *   than it being lost;
+ * - a row `compose` has nothing to say about, for the same reason;
+ * - everything past `IMMEDIATE_SENDS_PER_REQUEST`.
+ *
+ * Safe to call twice at once. Two calls can pick up the same pending row, and
+ * the idempotency key `compose` gives it is what stops the second send.
+ */
+export async function sendPendingNotifications(
+  db: AdminClient,
+  opts: {
+    kind: NotificationKind;
+    subjectId: string;
+    /** The email for one row and the address resolved for it, or null to leave it pending. */
+    compose: (
+      row: { id: string; user_id: string; href: string },
+      to: string,
+    ) => Promise<ImmediateEmail | null>;
+  },
+): Promise<ImmediateSendResult> {
+  const result: ImmediateSendResult = { sent: 0, failed: 0, skipped: 0 };
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
+    // Not stamped: still owed, exactly as the digest treats a missing key.
+    console.warn("[notifications] LOVABLE_API_KEY not set — leaving the rows for the digest");
+    return result;
+  }
+
+  const { data: rows, error } = await db
+    .from("notifications")
+    .select("id, user_id, href")
+    .eq("kind", opts.kind)
+    .eq("subject_id", opts.subjectId)
+    .is("emailed_at", null)
+    .order("created_at", { ascending: true })
+    .limit(IMMEDIATE_SENDS_PER_REQUEST);
+  if (error) throw new Error(error.message);
+  const pending = rows ?? [];
+  if (pending.length === 0) return result;
+
+  // One pass for every address, through the household rule: a row on a
+  // dependant would resolve to their guardian, never to the reserved address.
+  const contacts = await loadHouseholdContacts(
+    db,
+    pending.map((r) => r.user_id),
+  );
+
+  for (let i = 0; i < pending.length; i += IMMEDIATE_SEND_BATCH) {
+    const batch = pending.slice(i, i + IMMEDIATE_SEND_BATCH);
+    const outcomes = await Promise.allSettled(
+      batch.map(async (row): Promise<"sent" | "declined" | "skipped"> => {
+        if (!(await wantsEmail(db, row.user_id, opts.kind))) return "declined";
+        const to = contacts.deliveryEmail(row.user_id);
+        if (!to) return "skipped";
+        const email = await opts.compose(row, to);
+        if (!email) return "skipped";
+        await sendEmail({ apiKey, sendUrl: process.env.LOVABLE_SEND_URL, ...email });
+        return "sent";
+      }),
+    );
+
+    const done: string[] = [];
+    outcomes.forEach((o, n) => {
+      if (o.status === "rejected") {
+        result.failed += 1;
+        console.error("[notifications] immediate send failed for a recipient:", o.reason);
+      } else if (o.value === "skipped") {
+        result.skipped += 1;
+      } else {
+        // Sent, or switched off. Both are dealt with, the same way the reply
+        // path stamps a declined row so the digest does not pick it up later.
+        if (o.value === "sent") result.sent += 1;
+        done.push(batch[n].id);
+      }
+    });
+    await stampEmailed(db, done);
+  }
+  return result;
+}
+
 /** Mark rows as dealt with, so the digest does not consider them again. */
 async function stampEmailed(db: AdminClient, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
@@ -265,6 +392,7 @@ async function stampEmailed(db: AdminClient, ids: string[]): Promise<void> {
 }
 
 const SECTION_HEADINGS = {
+  membership: "Membership",
   replies: "Replies to you",
   threads: "Threads you are in",
   posts: "New on the blog",
@@ -448,7 +576,9 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
         continue;
       }
 
-      const blocks: DigestBlock[] = (["replies", "threads", "posts", "moderation"] as const)
+      const blocks: DigestBlock[] = (
+        ["membership", "replies", "threads", "posts", "moderation"] as const
+      )
         .filter((key) => sections[key].length > 0)
         .map((key) => ({
           heading: SECTION_HEADINGS[key],
