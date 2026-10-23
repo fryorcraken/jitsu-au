@@ -23,7 +23,13 @@ import {
 import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
-/** Canonical origin. Every `rel="canonical"` on the site points here. */
+/**
+ * Canonical origin. Every `rel="canonical"` on the site points here, and so
+ * does every link in an email, which is why the email modules import it rather
+ * than spelling the host themselves: a link to a host that only redirects drops
+ * whatever the request carried across hosts (see "The October domain move" in
+ * `docs/notifications.md`).
+ */
 export const SITE_ORIGIN = "https://jitsu.au";
 
 /**

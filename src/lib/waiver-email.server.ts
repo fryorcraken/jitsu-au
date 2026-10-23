@@ -15,6 +15,7 @@ import { buildCodeOfConductUrl } from "@/lib/code-of-conduct";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 // Mirror the sender configuration used by the auth-email webhook.
 const SITE_NAME = "UTS Jitsu";
@@ -22,7 +23,7 @@ const SITE_NAME = "UTS Jitsu";
 // misaligned From-domains as spam).
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
+const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where waivers are reviewed and approved. */

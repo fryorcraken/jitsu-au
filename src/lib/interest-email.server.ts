@@ -13,13 +13,14 @@ import type { Database } from "@/integrations/supabase/types";
 import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confirmation";
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 // Sender configuration mirrors the auth-email webhook and the waiver emails.
 const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
+const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where the lead/member funnel is reviewed. */

@@ -14,13 +14,14 @@ import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirma
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 // Sender configuration mirrors the auth-email webhook and the interest emails.
 const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
+const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager screen listing every message the contact form has received. */

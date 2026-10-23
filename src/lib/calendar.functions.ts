@@ -29,8 +29,9 @@ import type {
 } from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
+import { SITE_ORIGIN } from "@/lib/seo";
 
-const SITE_URL = "https://jitsu.au";
+const SITE_URL = SITE_ORIGIN;
 /**
  * How far ahead a repeating entry's dates are kept on the calendar. The manager
  * never asks for this: any calendar read tops the horizon back up, so a weekly
