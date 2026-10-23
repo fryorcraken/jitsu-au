@@ -14,7 +14,7 @@ import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirma
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 
 const SITE_NAME = "UTS Jitsu";
 

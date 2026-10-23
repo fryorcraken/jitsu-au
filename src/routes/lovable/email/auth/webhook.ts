@@ -7,7 +7,7 @@ import { MagicLinkEmail } from "@/lib/email-templates/magic-link";
 import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { FROM, SENDER_DOMAIN } from "@/lib/email-sender";
 
 // Configuration. The sender comes from `email-sender.ts`, shared with every

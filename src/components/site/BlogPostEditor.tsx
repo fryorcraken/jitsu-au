@@ -39,7 +39,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
 import { SaveFailure } from "@/components/site/SaveFailure";
-import { SITE_HOST } from "@/lib/seo";
+import { SITE_HOST } from "@/lib/site-origin";
 
 /** File -> base64, same chunked approach as the paper-waiver scan upload
  * (`manager.waivers_.upload.tsx`), which avoids a giant intermediate string

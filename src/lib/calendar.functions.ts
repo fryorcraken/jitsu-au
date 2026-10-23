@@ -29,7 +29,7 @@ import type {
 } from "@/lib/calendar-types";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 
 /**
  * How far ahead a repeating entry's dates are kept on the calendar. The manager

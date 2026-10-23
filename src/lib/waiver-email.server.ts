@@ -16,7 +16,7 @@ import { normalizeEmail } from "@/lib/validation";
 import { AccountActivatedEmail } from "@/lib/email-templates/account-activated";
 import { WaiverConfirmationEmail } from "@/lib/email-templates/waiver-confirmation";
 import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notification";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
 
 const SITE_NAME = "UTS Jitsu";

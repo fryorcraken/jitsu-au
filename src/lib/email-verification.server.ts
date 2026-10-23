@@ -25,7 +25,7 @@ import {
 import { VerifyEmail } from "@/lib/email-templates/verify-email";
 import { sendEmail } from "@/lib/send-email.server";
 import { userIdByEmail } from "@/lib/supabase-rpc";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 
 const SITE_NAME = "UTS Jitsu";
 

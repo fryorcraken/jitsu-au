@@ -18,7 +18,7 @@ import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templat
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 
 const SITE_NAME = "UTS Jitsu";
 
