@@ -9,6 +9,7 @@ import {
   insuranceReminderTitle,
   insuranceRemindersDue,
   insuranceRenewHref,
+  reminderNameFor,
   type InsuranceCover,
 } from "./insurance-reminders";
 import { clubDayStart } from "./validation";
@@ -154,67 +155,93 @@ describe("insuranceRenewHref", () => {
 
 describe("insuranceReminderCopy", () => {
   const today = "2027-02-26";
+  const base = { endDay: "2027-03-12", today, hasEnded: false };
 
   it("speaks to the member about their own cover", () => {
     const copy = insuranceReminderCopy({
+      ...base,
       kind: "insurance_ending_soon",
-      endDay: "2027-03-12",
-      today,
       people: [{ userId: "ada", name: null }],
     });
     expect(copy.subject).toBe("Your club insurance ends on 12 March");
-    expect(copy.body).toContain("You need it to train with us");
+    expect(copy.body).toContain("You need it to train with us, so renew before then.");
     expect(copy.body).toContain("choose Yearly insurance");
     expect(copy.renewHref).toBe("/membership");
   });
 
-  it("says 'today' only on the day it ends", () => {
+  it("says 'ended today' only on the day it ends, and only once it has", () => {
     const people = [{ userId: "ada", name: null }];
+    const onTheDay = { kind: "insurance_ended" as const, endDay: today, today, people };
+    expect(insuranceReminderCopy({ ...onTheDay, hasEnded: true }).subject).toBe(
+      "Your club insurance ended today",
+    );
+    // A year bought at 7pm still runs when the 9am job sends this.
+    const stillRunning = insuranceReminderCopy({ ...onTheDay, hasEnded: false });
+    expect(stillRunning.subject).toBe("Your club insurance ends today");
+    expect(stillRunning.body).toContain("so renew today.");
     expect(
-      insuranceReminderCopy({ kind: "insurance_ended", endDay: today, today, people }).subject,
-    ).toBe("Your club insurance ended today");
-    expect(
-      insuranceReminderCopy({ kind: "insurance_ended", endDay: "2027-02-24", today, people })
-        .subject,
+      insuranceReminderCopy({ ...onTheDay, endDay: "2027-02-24", hasEnded: true }).subject,
     ).toBe("Your club insurance ended on 24 February");
   });
 
   it("names a child, and opens the page on them", () => {
     const copy = insuranceReminderCopy({
+      ...base,
       kind: "insurance_ending_soon",
-      endDay: "2027-03-12",
-      today,
       people: [{ userId: "bea", name: "Bea" }],
     });
     expect(copy.subject).toBe("Bea's club insurance ends on 12 March");
+    expect(copy.body).toContain("It is needed to train with us");
     expect(copy.renewHref).toBe("/membership?for=bea");
   });
 
-  it("names everybody in one email when several end the same day", () => {
-    const two = insuranceReminderCopy({
+  it("never words a nameless child's cover as the reader's own", () => {
+    const copy = insuranceReminderCopy({
+      ...base,
       kind: "insurance_ending_soon",
-      endDay: "2027-03-12",
-      today,
+      people: [{ userId: "bea", name: reminderNameFor("  ") }],
+    });
+    expect(copy.subject).toBe("Your family member's club insurance ends on 12 March");
+    expect(copy.renewHref).toBe("/membership?for=bea");
+  });
+
+  it("names everybody in one email when several end the same day, the reader first", () => {
+    const two = insuranceReminderCopy({
+      ...base,
+      kind: "insurance_ending_soon",
       people: [
-        { userId: "bea", name: "Bea" },
         { userId: "cy", name: "Cy" },
+        { userId: "bea", name: "Bea" },
       ],
     });
     expect(two.subject).toBe("Club insurance for Bea and Cy ends on 12 March");
-    // Several people, so the page's own picker decides who.
-    expect(two.renewHref).toBe("/membership");
+    // Opens on the first child named; the page's own picker reaches the other.
+    expect(two.renewHref).toBe("/membership?for=bea");
 
     const withParent = insuranceReminderCopy({
       kind: "insurance_ended",
       endDay: today,
       today,
+      hasEnded: true,
       people: [
-        { userId: "ada", name: null },
         { userId: "bea", name: "Bea" },
+        { userId: "ada", name: null },
         { userId: "cy", name: "Cy" },
       ],
     });
     expect(withParent.subject).toBe("Club insurance for you, Bea and Cy ended today");
+    expect(withParent.renewHref).toBe("/membership");
+  });
+});
+
+describe("insuranceReminderTitle on the end day", () => {
+  it("says 'ends' on the end day until the cover has actually run out", () => {
+    expect(insuranceReminderTitle("insurance_ended", "2027-03-12", null, false)).toBe(
+      "Your club insurance ends on 12 March",
+    );
+    expect(insuranceReminderTitle("insurance_ended", "2027-03-12", null, true)).toBe(
+      "Your club insurance ended on 12 March",
+    );
   });
 });
 
@@ -223,6 +250,7 @@ describe("insuranceReminderLabel", () => {
     expect(
       insuranceReminderLabel({
         ends_within_14_days: true,
+        owed: "insurance_ending_soon",
         // 26 Feb, 9am in Sydney; still 25 Feb in UTC.
         last_sent: { kind: "insurance_ending_soon", sent_at: "2027-02-25T22:00:06Z" },
       }),
@@ -230,16 +258,33 @@ describe("insuranceReminderLabel", () => {
     expect(
       insuranceReminderLabel({
         ends_within_14_days: false,
+        owed: "insurance_ended",
         last_sent: { kind: "insurance_ended", sent_at: "2027-03-11T22:00:06Z" },
       }),
     ).toBe("Ended reminder sent 12 Mar");
   });
 
-  it("says a reminder is owed but not sent, and nothing otherwise", () => {
-    expect(insuranceReminderLabel({ ends_within_14_days: true, last_sent: null })).toBe(
-      "Reminder not sent yet",
-    );
-    expect(insuranceReminderLabel({ ends_within_14_days: false, last_sent: null })).toBeNull();
+  it("says a reminder is owed but not sent, even after the other one went out", () => {
+    expect(
+      insuranceReminderLabel({
+        ends_within_14_days: true,
+        owed: "insurance_ending_soon",
+        last_sent: null,
+      }),
+    ).toBe("Reminder not sent yet");
+    expect(
+      insuranceReminderLabel({
+        ends_within_14_days: false,
+        owed: "insurance_ended",
+        last_sent: { kind: "insurance_ending_soon", sent_at: "2027-02-25T22:00:06Z" },
+      }),
+    ).toBe("Ended reminder not sent yet");
+  });
+
+  it("says nothing when nothing is owed or sent", () => {
+    expect(
+      insuranceReminderLabel({ ends_within_14_days: false, owed: null, last_sent: null }),
+    ).toBeNull();
     expect(insuranceReminderLabel(null)).toBeNull();
   });
 });

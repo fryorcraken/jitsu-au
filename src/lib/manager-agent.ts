@@ -159,7 +159,7 @@ export const AGENT_MANIFEST: {
       // One new response field; nothing that worked before changes.
       breaking: false,
       notes: [
-        "list_invoices rows, and each invoice inside list_users, carry insurance_reminder. It is null on every plan except yearly insurance (a plan whose kind is insurance). On those it is { ends_within_14_days, last_sent }: ends_within_14_days is true while the member is owed the 'ending soon' reminder (their cover ends in the next 14 club days, they have not renewed, and it is not cancelled), and last_sent is { kind, sent_at } for the latest reminder actually emailed, where kind is insurance_ending_soon or insurance_ended, or null if none has gone out. The site sends both reminders itself every morning; there is no action to send or suppress one, and members cannot switch them off.",
+        "list_invoices rows, and each invoice inside list_users, carry insurance_reminder. It is null on every plan except yearly insurance (a plan whose kind is insurance). On those it is { ends_within_14_days, owed, last_sent }: ends_within_14_days is true while the member is owed the 'ending soon' reminder (their cover ends in the next 14 club days, they have not renewed, and it is not cancelled); owed is the reminder owed today (insurance_ending_soon, insurance_ended, or null), sent or not; and last_sent is { kind, sent_at } for the latest reminder actually emailed, where kind is insurance_ending_soon or insurance_ended, or null if none has gone out. The site sends both reminders itself every morning; there is no action to send or suppress one, and members cannot switch them off.",
       ],
     },
     {
@@ -420,7 +420,7 @@ export const AGENT_MANIFEST: {
       name: "list_invoices",
       method: "POST",
       summary:
-        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero). Each also carries insurance_reminder: null unless the plan is yearly insurance, otherwise { ends_within_14_days, last_sent } — whether the member is owed the 'insurance ends soon' reminder today, and the latest reminder emailed ({ kind: insurance_ending_soon | insurance_ended, sent_at }) or null. The same thing the memberships screen shows as '14-day reminder sent 26 Feb'.",
+        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero). Each also carries insurance_reminder: null unless the plan is yearly insurance, otherwise { ends_within_14_days, owed, last_sent } — whether the member is owed the 'insurance ends soon' reminder today, which reminder is owed today, and the latest reminder emailed ({ kind: insurance_ending_soon | insurance_ended, sent_at }) or null. The same thing the memberships screen shows as '14-day reminder sent 26 Feb'.",
       params: [
         {
           name: "status",

@@ -58,6 +58,12 @@ export type DueInsuranceReminder = {
   endDay: string;
   /** Club days from today to `endDay`: 14 down to 1 ending soon, 0 to -3 ended. */
   daysLeft: number;
+  /**
+   * Whether the cover has actually run out yet. On the end day it may not have:
+   * a year bought at the counter ends at the time of day it was bought, often
+   * the evening, while the morning job runs at 8 or 9am.
+   */
+  hasEnded: boolean;
 };
 
 /** The club date a membership's cover ends on, the date the screens print. */
@@ -122,7 +128,14 @@ export function insuranceRemindersDue(
           : null;
     if (!kind) continue;
     if (alreadyRenewed(c, byUser.get(c.user_id) ?? [])) continue;
-    due.push({ membershipId: c.id, userId: c.user_id, kind, endDay, daysLeft });
+    due.push({
+      membershipId: c.id,
+      userId: c.user_id,
+      kind,
+      endDay,
+      daysLeft,
+      hasEnded: new Date(c.ends_at).getTime() <= now.getTime(),
+    });
   }
   return due;
 }
@@ -137,25 +150,46 @@ export function reminderDate(day: string): string {
   });
 }
 
-/** "ends on 12 March", "ended today", "ended on 12 March". */
-function endPhrase(kind: InsuranceReminderKind, endDay: string, today: string): string {
+/**
+ * "ends on 12 March", "ends today", "ended today", "ended on 12 March". On the
+ * end day it says "ended" only once the cover really has, so a year that runs
+ * until 7pm is not announced as over at 9am.
+ */
+function endPhrase(
+  kind: InsuranceReminderKind,
+  endDay: string,
+  today: string,
+  hasEnded: boolean,
+): string {
   if (kind === "insurance_ending_soon") return `ends on ${reminderDate(endDay)}`;
-  return endDay === today ? "ended today" : `ended on ${reminderDate(endDay)}`;
+  if (endDay === today) return hasEnded ? "ended today" : "ends today";
+  return `ended on ${reminderDate(endDay)}`;
 }
 
 /**
- * The title frozen onto one person's notification row. Dated rather than
- * "today", because a row is read later than it is written.
+ * The name a reminder uses for somebody on the reader's account. Falls back to
+ * a description rather than to nothing, because no name is how the copy marks
+ * the reader themselves, and a nameless child must never read as the parent.
+ */
+export function reminderNameFor(name: string | null | undefined): string {
+  return (name ?? "").trim() || "Your family member";
+}
+
+/**
+ * The title frozen onto a notification row. Dated rather than "today", because
+ * a row is read later than it is written.
  *
- * `name` is the person's first or preferred name when the row is about
- * somebody other than the account holder (a child), or null for their own.
+ * The row belongs to whoever reads the mail, so `name` is the covered person's
+ * name when that is somebody else on their account (a child, from
+ * `reminderNameFor`), or null when the cover is the reader's own.
  */
 export function insuranceReminderTitle(
   kind: InsuranceReminderKind,
   endDay: string,
   name: string | null,
+  hasEnded = true,
 ): string {
-  const verb = kind === "insurance_ending_soon" ? "ends" : "ended";
+  const verb = kind === "insurance_ended" && hasEnded ? "ended" : "ends";
   return `${subjectVoice(name).Whose} club insurance ${verb} on ${reminderDate(endDay)}`;
 }
 
@@ -164,10 +198,13 @@ export function insuranceRenewHref(childUserId: string | null): string {
   return childUserId ? `/membership?for=${encodeURIComponent(childUserId)}` : "/membership";
 }
 
-/** One person an email is about. `name` is null for the person reading it. */
+/**
+ * One person an email is about. `name` is null for the person reading it, and
+ * set (through `reminderNameFor`) for anybody else on their account.
+ */
 export type ReminderPerson = { userId: string; name: string | null };
 
-/** "you", "Bea", "you and Bea", "Bea, Cy and Di". */
+/** "you", "Bea", "you and Bea", "Bea, Cy and Di". The reader always comes first. */
 function whoList(people: readonly ReminderPerson[]): string {
   const names = people.map((p) => subjectVoice(p.name).who);
   if (names.length <= 1) return names[0] ?? "you";
@@ -192,26 +229,38 @@ export function insuranceReminderCopy(input: {
   kind: InsuranceReminderKind;
   endDay: string;
   today: string;
+  /** Whether every cover in this email has actually run out. */
+  hasEnded: boolean;
   people: readonly ReminderPerson[];
 }): InsuranceReminderCopy {
-  const { kind, endDay, today, people } = input;
-  const phrase = endPhrase(kind, endDay, today);
+  const { kind, endDay, today, hasEnded } = input;
+  // The reader first, then everybody else in a stable order, so the subject
+  // never reads "for Bea and you" and the same people always read the same.
+  const people = [...input.people].sort((a, b) =>
+    a.name === null ? -1 : b.name === null ? 1 : a.name.localeCompare(b.name),
+  );
+  const phrase = endPhrase(kind, endDay, today, hasEnded);
   const subject =
     people.length === 1
       ? `${subjectVoice(people[0].name).Whose} club insurance ${phrase}`
       : `Club insurance for ${whoList(people)} ${phrase}`;
   const others = people.filter((p) => p.name !== null);
   const onlySelf = others.length === 0;
-  const need =
+  const when =
     kind === "insurance_ending_soon"
-      ? onlySelf
-        ? "You need it to train with us, so renew before then."
-        : "It is needed to train with us, so renew before then."
-      : onlySelf
-        ? "You need it to train with us, so renew before your next class."
-        : "It is needed to train with us, so renew before the next class.";
+      ? "before then"
+      : phrase === "ends today"
+        ? "today"
+        : onlySelf
+          ? "before your next class"
+          : "before the next class";
+  const need = onlySelf
+    ? `You need it to train with us, so renew ${when}.`
+    : `It is needed to train with us, so renew ${when}.`;
+  // The reader's own page when their cover is in it, otherwise the page opened
+  // on the first child named: one tap on the page's own picker reaches the rest.
   const renewHref = insuranceRenewHref(
-    people.length === 1 && people[0].name !== null ? people[0].userId : null,
+    onlySelf || people[0].name === null ? null : people[0].userId,
   );
   return {
     subject,
@@ -225,6 +274,8 @@ export function insuranceReminderCopy(input: {
 export type InsuranceReminderState = {
   /** True while its "ending soon" reminder is owed: inside 14 days, not renewed. */
   ends_within_14_days: boolean;
+  /** The reminder owed today, sent or not, or null when none is. */
+  owed: InsuranceReminderKind | null;
   /** The latest reminder actually emailed about it, if any. */
   last_sent: { kind: InsuranceReminderKind; sent_at: string } | null;
 };
@@ -236,6 +287,13 @@ export type InsuranceReminderState = {
  */
 export function insuranceReminderLabel(state: InsuranceReminderState | null): string | null {
   if (!state) return null;
+  // An owed reminder that has not gone out outranks an older one that has: the
+  // 14-day email being sent says nothing about the end-day one.
+  if (state.owed && state.last_sent?.kind !== state.owed) {
+    return state.owed === "insurance_ending_soon"
+      ? "Reminder not sent yet"
+      : "Ended reminder not sent yet";
+  }
   if (state.last_sent) {
     const when = new Date(state.last_sent.sent_at).toLocaleDateString("en-AU", {
       day: "numeric",
@@ -246,5 +304,5 @@ export function insuranceReminderLabel(state: InsuranceReminderState | null): st
       ? `14-day reminder sent ${when}`
       : `Ended reminder sent ${when}`;
   }
-  return state.ends_within_14_days ? "Reminder not sent yet" : null;
+  return null;
 }
