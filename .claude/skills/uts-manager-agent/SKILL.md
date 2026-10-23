@@ -184,6 +184,13 @@ scripts/agent.sh create_membership '{"user_id":"<uuid>","plan_code":"insurance_y
 > a transfer; `authorised` is always true. With `send_email: false` no invoice
 > email goes out.
 >
+> **Raising a plan they already owe for does not raise a second invoice, and does
+> not reprice the first.** `reused: true` in the result means their existing
+> unpaid invoice came back, and `price_cents` is what it really says. Sending a
+> different `uts_student_number` does not change that price. If it is not the
+> rate you meant, fix it with `edit_invoice`, or cancel or delete the invoice and
+> raise the plan again.
+>
 > **Two things you can do here that a member cannot**, both for the same case —
 > writing down an enrolment that already happened rather than selling one:
 >

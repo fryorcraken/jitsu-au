@@ -872,16 +872,24 @@ export async function resolveInsuranceCover(
   return { insurancePlan, coverEndsAt };
 }
 
-/** Whether an existing invoice was raised at the rate this request asks for. */
-function sameRate(
-  row: { is_student?: boolean | null; uts_student_number?: string | null },
-  isStudent: boolean,
-  utsStudentNumber: string | null,
-): boolean {
-  return (
-    Boolean(row.is_student) === isStudent && (row.uts_student_number ?? null) === utsStudentNumber
-  );
-}
+/**
+ * What raising a plan did. `reused` is true when the person already had an
+ * unpaid invoice for this plan and that one came back instead of a new one,
+ * unchanged apart from a start date: its price is NOT recomputed from the
+ * request. That is deliberate. Repricing it would let a re-raise sent only to
+ * move a start date (or a member pressing Choose again) quietly undo a rate a
+ * manager chose or corrected, and the payment email that already went out
+ * would then quote an amount reconciliation no longer matches. So a caller that
+ * asked for a different rate is told, via `price_cents`, what the invoice
+ * really says, and the manager's panel shows it.
+ */
+export type EnrolResult = {
+  ok: true;
+  authorised: true;
+  reference: string | null;
+  reused: boolean;
+  price_cents: number;
+};
 
 /**
  * Raise somebody's invoice for a plan and, if asked, bundle yearly insurance
@@ -917,7 +925,7 @@ export async function enrolMember(
     /** False records the invoice without telling them about it. */
     sendEmail?: boolean;
   },
-): Promise<{ ok: true; authorised: true; reference: string | null }> {
+): Promise<EnrolResult> {
   const { userId, plan, insurancePlan } = input;
 
   // Resolved before anything is written: a refusal has to land before the
@@ -1013,27 +1021,15 @@ export async function enrolMember(
     // `+00:00` and `rescheduleMembershipStart` writes `Z`, so a string compare
     // would never match and every re-raise would write the window it already had.
     const wanted = effectiveFrom ? rescheduleMembershipStart(inserted, startsOn!) : null;
-    const move = wanted && !sameInstant(wanted.starts_at, inserted.starts_at) ? wanted : null;
-    // Nor may it swallow a change of rate. A manager who raised a semester at
-    // the public rate and re-raises it with the student rate ticked is
-    // correcting the invoice, and the panel shows them the price they picked;
-    // returning the old row unchanged would report success over the old price.
-    // Repriced only when the rate inputs differ, so a plain repeat (a double
-    // press, a retry) leaves a price a manager corrected by hand alone. Same
-    // rule as the bundled insurance below: an unpaid row holds no payment to
-    // keep consistent with.
-    const repriced = sameRate(inserted, isStudent, utsStudentNumber)
-      ? null
-      : { is_student: isStudent, uts_student_number: utsStudentNumber, price_cents: price };
-    if (move || repriced) {
-      const { data: updated, error: upErr } = await admin
+    if (wanted && !sameInstant(wanted.starts_at, inserted.starts_at)) {
+      const { data: moved, error: mvErr } = await admin
         .from("memberships")
-        .update({ ...move, ...repriced })
+        .update(wanted)
         .eq("id", inserted.id)
         .select("*")
         .single();
-      if (upErr || !updated) throw new Error(upErr?.message || "Could not update the invoice.");
-      inserted = updated;
+      if (mvErr || !moved) throw new Error(mvErr?.message || "Could not set the start date.");
+      inserted = moved;
     }
   } else {
     const insert = {
@@ -1125,7 +1121,13 @@ export async function enrolMember(
   // A free plan has no invoice, so there is nothing to send and nothing to owe.
   // It is already authorised by the insert above.
   if (price === 0 && !insuranceInvoice) {
-    return { ok: true as const, authorised: true as const, reference: null as string | null };
+    return {
+      ok: true as const,
+      authorised: true as const,
+      reference: null as string | null,
+      reused: Boolean(existingUnpaid),
+      price_cents: inserted.price_cents,
+    };
   }
 
   // Email the member their bank-transfer instructions + notify managers. A
@@ -1164,6 +1166,8 @@ export async function enrolMember(
     ok: true as const,
     authorised: true as const,
     reference: inserted.payment_reference,
+    reused: Boolean(existingUnpaid),
+    price_cents: inserted.price_cents,
   };
 }
 
@@ -1800,7 +1804,7 @@ export const deleteMembership = createServerFn({ method: "POST" })
 export async function createMembershipForUser(
   admin: MembershipClient,
   input: CreateMembershipInput,
-): Promise<{ ok: true; authorised: true; reference: string | null }> {
+): Promise<EnrolResult> {
   const { data: plan, error: planErr } = await admin
     .from("membership_plans")
     .select("*")

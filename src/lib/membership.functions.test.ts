@@ -1084,11 +1084,11 @@ describe("enrolMember on a free plan", () => {
 
 // ---- Re-raising an unpaid invoice at a different rate ----
 //
-// The manager's Add a membership panel shows the rate as a choice, priced on
-// each side. Re-raising a plan whose invoice is still unpaid resolves back to
-// that invoice, so without a reprice a manager correcting a UTS student from
-// the public rate to the student rate would be told it worked while the
-// invoice still said the public price.
+// Re-raising a plan whose invoice is still unpaid resolves back to that
+// invoice and does NOT reprice it: a re-raise sent only to move a start date,
+// or a member pressing Choose again, must not undo a rate a manager chose, and
+// the payment email already quoted the old amount. What it does instead is say
+// so, so the manager's panel can tell them the price stayed where it was.
 
 const SEMESTER_PLAN = {
   ...FREE_PLAN,
@@ -1128,24 +1128,20 @@ describe("enrolMember re-raising an unpaid invoice", () => {
     vi.restoreAllMocks();
   });
 
-  it("reprices it when the rate asked for differs", async () => {
+  it("leaves its price alone and says it reused the invoice", async () => {
     const fake = fakeEnrolAdmin(ok(UNPAID_PUBLIC));
-    await enrolAs(fake, "12345678");
-    expect(fake.inserts).toEqual([]);
-    expect(fake.updates[0]).toEqual({
-      is_student: true,
-      uts_student_number: "12345678",
-      price_cents: 24500,
+    await expect(enrolAs(fake, "12345678")).resolves.toMatchObject({
+      reused: true,
+      price_cents: 44500,
     });
-  });
-
-  // A repeat at the same rate is a double press or a retry, and must not undo
-  // a price a manager corrected on the invoice by hand.
-  it("leaves the price alone on a repeat at the same rate", async () => {
-    const fake = fakeEnrolAdmin(ok({ ...UNPAID_PUBLIC, price_cents: 40000 }));
-    await enrolAs(fake, null);
     expect(fake.inserts).toEqual([]);
     expect(fake.updates.filter((u) => "price_cents" in (u as object))).toEqual([]);
+  });
+
+  it("says it did not reuse anything when it raised a new invoice", async () => {
+    const fake = fakeEnrolAdmin(ok(null));
+    await expect(enrolAs(fake, null)).resolves.toMatchObject({ reused: false });
+    expect(fake.inserts).toHaveLength(1);
   });
 });
 

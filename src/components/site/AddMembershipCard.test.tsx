@@ -256,13 +256,46 @@ describe("AddMembershipCard rate", () => {
   });
 
   // No radio on screen, so nothing hidden may decide what is sent: the number
-  // on their record goes on the invoice, and the panel says so.
-  it("sends and shows the number on record for a plan with one price", async () => {
+  // is its own optional field, prefilled from the record and editable.
+  it("offers the number as an optional field on a plan with one price", async () => {
     const user = await openOn("12345678");
     await user.click(screen.getByRole("radio", { name: /public rate/i }));
     await user.selectOptions(screen.getByLabelText(/^plan$/i), "insurance_yearly");
-    expect(screen.getByText(/one price for everyone/i)).toHaveTextContent("12345678");
-    expect(await sent(user)).toBe("12345678");
+    const box = screen.getByLabelText(/uts student number/i);
+    expect(box).toHaveValue("12345678");
+    expect(screen.getByText(/one price for everyone/i)).toBeInTheDocument();
+    await user.clear(box);
+    expect(await sent(user)).toBeNull();
+  });
+
+  // The server returns an unpaid invoice they already had rather than raising a
+  // second, and leaves its price alone. Reporting a plain success there would
+  // tell a manager correcting the rate that it worked.
+  it("says so when an existing invoice came back at a different price", async () => {
+    createMembership.mockResolvedValue({
+      ok: true,
+      reference: "LEE1234",
+      reused: true,
+      price_cents: 44500,
+    });
+    const user = await openOn("12345678");
+    await sent(user);
+    expect(
+      await screen.findByText(/already had an unpaid invoice for semester 2 2026/i),
+    ).toHaveTextContent(/still says \$445, not \$245/);
+  });
+
+  it("says nothing extra when the invoice it came back with is at the price picked", async () => {
+    createMembership.mockResolvedValue({
+      ok: true,
+      reference: "LEE1234",
+      reused: true,
+      price_cents: 24500,
+    });
+    const user = await openOn("12345678");
+    await sent(user);
+    await waitFor(() => expect(screen.getByLabelText(/^plan$/i)).toHaveValue(""));
+    expect(screen.queryByText(/already had an unpaid invoice/i)).not.toBeInTheDocument();
   });
 
   // The server caps the number at 32 characters; a longer paste would fail

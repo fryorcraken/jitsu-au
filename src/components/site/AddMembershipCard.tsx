@@ -81,7 +81,21 @@ export function AddMembershipCard({
 }) {
   const fetchPlans = useServerFn(listAllMembershipPlans);
   const create = useServerFn(createMembership);
-  const send = useResilientSubmit<{ ok: true; reference: string | null }>(INTAKE_SUBMIT);
+  const send = useResilientSubmit<{
+    ok: true;
+    reference: string | null;
+    reused: boolean;
+    price_cents: number;
+  }>(INTAKE_SUBMIT);
+  // Set when the last raise resolved to an invoice they already had, at a price
+  // other than the one picked here. The server deliberately leaves that
+  // invoice's price alone (see `EnrolResult`), so the panel has to say so, or
+  // a manager correcting a rate would be told it worked over the old price.
+  const [unchanged, setUnchanged] = useState<{
+    planName: string;
+    priceCents: number;
+    askedCents: number;
+  } | null>(null);
 
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [plansError, setPlansError] = useState<string | null>(null);
@@ -138,20 +152,23 @@ export function AddMembershipCard({
   const onFile = studentNumberOnFile?.trim() || "";
   // Null when the chosen plan has one price, and that is the whole rule for
   // whether the panel asks which rate. On a one-price plan the number changes
-  // nothing about the price: the one on their record is sent, and said so on
-  // screen, so the invoice records what a member's own purchase would. It never
-  // falls to a rate radio left over from another plan, which is not on screen.
+  // nothing about the price, so it is an optional field of its own, prefilled
+  // from their record like everywhere else, and never decided by a rate radio
+  // left over from another plan, which is not on screen.
   const studentPrice = chosen?.student_price_cents ?? null;
   const sentNumber =
-    studentPrice == null
-      ? onFile || null
-      : rate === "student"
-        ? studentNumber.trim() || null
-        : null;
+    studentPrice == null || rate === "student" ? studentNumber.trim() || null : null;
+  const askedCents = chosen
+    ? studentPrice != null && rate === "student"
+      ? studentPrice
+      : chosen.public_price_cents
+    : 0;
   const missingNumber = studentPrice != null && rate === "student" && !isUtsStudent(studentNumber);
 
   async function submit() {
-    if (!planCode || missingNumber) return;
+    if (!chosen || missingNumber) return;
+    const asked = { planName: chosen.name, askedCents };
+    setUnchanged(null);
     const outcome = await send.submit({
       run: async (signal) => {
         const res = await create({
@@ -174,6 +191,10 @@ export function AddMembershipCard({
       },
     });
     if (outcome.ok) {
+      const { reused, price_cents } = outcome.value;
+      setUnchanged(
+        reused && price_cents !== asked.askedCents ? { ...asked, priceCents: price_cents } : null,
+      );
       // Keep the panel open on the fresh list: raising two invoices in a row
       // (a training period and a casual class) is a normal afternoon.
       setPlanCode("");
@@ -195,6 +216,7 @@ export function AddMembershipCard({
 
   function openPanel() {
     startRateFromRecord();
+    setUnchanged(null);
     setOpen(true);
   }
 
@@ -262,6 +284,7 @@ export function AddMembershipCard({
                 setPlanCode(e.target.value);
                 forgetStartDate();
                 startRateFromRecord();
+                setUnchanged(null);
               }}
             >
               <option value="">Choose a plan...</option>
@@ -286,11 +309,23 @@ export function AddMembershipCard({
             </select>
           </div>
 
-          {chosen && studentPrice == null && onFile && (
-            <p className="text-sm text-muted-foreground sm:col-span-2">
-              One price for everyone. Their UTS student number from their profile, {onFile}, is
-              recorded on the invoice.
-            </p>
+          {chosen && studentPrice == null && (
+            <div className="space-y-2">
+              <Label htmlFor="add-student-number">
+                UTS student number <span className="text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="add-student-number"
+                value={studentNumber}
+                onChange={(e) => setStudentNumber(e.target.value)}
+                maxLength={32}
+                aria-describedby="add-student-number-hint"
+              />
+              <p id="add-student-number-hint" className="text-xs text-muted-foreground">
+                One price for everyone, so this only goes on the invoice as a record.
+                {onFile ? " Filled in from their profile." : ""}
+              </p>
+            </div>
           )}
 
           {chosen && studentPrice != null && (
@@ -432,6 +467,14 @@ export function AddMembershipCard({
               failureKind={send.failureKind}
               onRetry={() => void submit()}
             />
+            {unchanged && (
+              <p className="rounded-md border p-3 text-sm" role="status">
+                They already had an unpaid invoice for {unchanged.planName}, so no new one was
+                raised and it still says {formatCents(unchanged.priceCents)}, not{" "}
+                {formatCents(unchanged.askedCents)}. To charge {formatCents(unchanged.askedCents)},
+                cancel or delete that invoice in the list above and add the plan again.
+              </p>
+            )}
           </div>
         </div>
       )}

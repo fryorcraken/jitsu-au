@@ -513,16 +513,18 @@ that started empty invoiced a UTS student at the public rate. Now:
   cleared here is for that invoice only and never changes the profile. Every
   invoice starts from the profile again: on opening the panel, on choosing a
   plan, and after each raise, since the panel stays open for the next one;
-- a plan with one price asks nothing, sends the number on the profile, and
-  says so on screen, so nothing hidden decides what the invoice records;
-- **re-raising a plan whose invoice is still unpaid reprices that invoice** when
-  the rate differs from the one it was raised at (`enrolMember`'s reuse path).
-  Without that, correcting a student from the public rate would resolve back to
-  the old invoice and report success over the old price. A repeat at the same
-  rate changes nothing, so a price a manager corrected by hand survives a double
-  press. The payment email is keyed on the membership, so the corrected amount
-  is not emailed again; the member sees it on `/membership`. This applies to a
-  member re-choosing a plan too, for the same reason.
+- a plan with one price asks no rate. The number is an optional field of its
+  own there, prefilled from the profile, and only goes on the invoice as a
+  record;
+- **re-raising a plan whose invoice is still unpaid does not reprice it.** The
+  reuse path in `enrolMember` hands back that invoice unchanged apart from a
+  start date, and says so (`reused`, `price_cents`). When that price is not the
+  one picked, the panel says the invoice still holds the old price and to cancel
+  or delete it and raise the plan again. Repricing on reuse was tried and taken
+  out: a re-raise sent only to move a start date, or a member pressing Choose
+  again, would quietly undo a rate a manager had chosen, and the payment email
+  already sent would quote an amount the bank-statement match no longer
+  accepts.
 
 The agent's `create_membership` takes `uts_student_number` as before and does
 not read the profile: an agent states the rate it means.
