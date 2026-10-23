@@ -457,6 +457,11 @@ function baseTables(over: Record<string, Row[]> = {}): Record<string, Row[]> {
     ],
     calendar_events: [{ id: "e1", title: "Tuesday class", starts_at: "2026-02-04T00:00:00+00:00" }],
     code_of_conduct_acceptances: [],
+    // Version 1 asked everybody (it is the first); version 2 is a typo fix.
+    code_of_conduct_versions: [
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+      { version: 2, asks_reagreement: false, required_version: 1, is_current: true },
+    ],
     ...over,
   };
 }
@@ -548,6 +553,50 @@ describe("loadClubUser", () => {
       accepted_version: 2,
       accepted_at: "2026-02-01T00:00:00Z",
       signature_name: "Ada Lovelace",
+    });
+  });
+
+  describe("the code of conduct, measured against what the club asked", () => {
+    const signedV1 = [
+      { user_id: PERSON, version: 1, accepted_at: "2026-03-01T00:00:00Z", signature_name: "Ada" },
+    ];
+
+    it("does not put somebody out of date over a version published without asking", async () => {
+      const { admin } = fakeReadAdmin(baseTables({ code_of_conduct_acceptances: signedV1 }), {
+        emails: [ADA_EMAIL],
+      });
+      const read = await loadClubUser(admin as never, PERSON);
+      expect(read.code_of_conduct).toMatchObject({
+        state: "signed",
+        current_version: 2,
+        required_version: 1,
+        accepted_version: 1,
+      });
+    });
+
+    it("puts them out of date once a version that asked is live", async () => {
+      const { admin } = fakeReadAdmin(
+        baseTables({
+          code_of_conduct_acceptances: signedV1,
+          code_of_conduct_versions: [
+            { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+            { version: 2, asks_reagreement: false, required_version: 1, is_current: false },
+            { version: 3, asks_reagreement: true, required_version: 3, is_current: true },
+          ],
+        }),
+        { emails: [ADA_EMAIL] },
+      );
+      const read = await loadClubUser(admin as never, PERSON);
+      expect(read.code_of_conduct).toMatchObject({ state: "outdated", required_version: 3 });
+    });
+
+    it("counts a failed read of the versions as a guess, like a failed read of the acceptances", async () => {
+      const { admin } = fakeReadAdmin(baseTables({ code_of_conduct_acceptances: signedV1 }), {
+        emails: [ADA_EMAIL],
+        fail: { code_of_conduct_versions: "boom" },
+      });
+      const read = await loadClubUser(admin as never, PERSON);
+      expect(read.degraded).toEqual(["code_of_conduct"]);
     });
   });
 

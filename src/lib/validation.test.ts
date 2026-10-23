@@ -1963,7 +1963,7 @@ describe("managerEmailChangeSchema", () => {
 });
 
 describe("codeOfConductAcceptSchema", () => {
-  const valid = { agree: true as const, signature_name: "Ada Lovelace", version: 1, hp: "" };
+  const valid = { signature_name: "Ada Lovelace", version: 1, hp: "" };
 
   it("accepts an agreement signed with a typed name", () => {
     const r = codeOfConductAcceptSchema.safeParse({ ...valid, token: " tok " });
@@ -1975,14 +1975,12 @@ describe("codeOfConductAcceptSchema", () => {
     expect(codeOfConductAcceptSchema.safeParse(valid).success).toBe(true);
   });
 
-  it("refuses an unticked box", () => {
-    // `agree` is a literal, not a boolean, so an unticked box cannot reach the
-    // handler at all. An agreement from somebody who did not agree is not
-    // evidence of anything.
-    expect(codeOfConductAcceptSchema.safeParse({ ...valid, agree: false }).success).toBe(false);
-    expect(
-      codeOfConductAcceptSchema.safeParse({ signature_name: "Ada", version: 1, hp: "" }).success,
-    ).toBe(false);
+  // The tick box is gone: typing a name is the agreement. A tab opened before
+  // it went still sends `agree`, and that must keep working rather than fail.
+  it("needs no tick, and still takes a submission from a tab that sends one", () => {
+    expect(codeOfConductAcceptSchema.safeParse(valid).success).toBe(true);
+    const r = codeOfConductAcceptSchema.safeParse({ ...valid, agree: true });
+    expect(r.success && "agree" in r.data).toBe(false);
   });
 
   it("requires a signature", () => {
@@ -1992,9 +1990,9 @@ describe("codeOfConductAcceptSchema", () => {
   });
 
   it("requires the version that was read", () => {
-    expect(
-      codeOfConductAcceptSchema.safeParse({ agree: true, signature_name: "Ada", hp: "" }).success,
-    ).toBe(false);
+    expect(codeOfConductAcceptSchema.safeParse({ signature_name: "Ada", hp: "" }).success).toBe(
+      false,
+    );
     expect(codeOfConductAcceptSchema.safeParse({ ...valid, version: 0 }).success).toBe(false);
   });
 
@@ -2007,12 +2005,7 @@ describe("codeOfConductAcceptSchema", () => {
       email: "someone@example.com",
       user_id: "11111111-1111-1111-1111-111111111111",
     });
-    expect(r.success && Object.keys(r.data).sort()).toEqual([
-      "agree",
-      "hp",
-      "signature_name",
-      "version",
-    ]);
+    expect(r.success && Object.keys(r.data).sort()).toEqual(["hp", "signature_name", "version"]);
   });
 
   it("drops a submission with the honeypot filled", () => {

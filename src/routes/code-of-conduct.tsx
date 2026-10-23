@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
@@ -13,15 +13,17 @@ import { CodeOfConductDocument } from "@/components/site/CodeOfConductDocument";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDate } from "@/lib/dates";
 import {
   CODE_OF_CONDUCT_ACKNOWLEDGEMENT,
-  CODE_OF_CONDUCT_VERSION,
   codeOfConductAcknowledgementFor,
 } from "@/lib/code-of-conduct";
-import { acceptCodeOfConduct, getCodeOfConductSigner } from "@/lib/code-of-conduct.functions";
+import {
+  acceptCodeOfConduct,
+  getCodeOfConductSigner,
+  getPublishedCodeOfConduct,
+} from "@/lib/code-of-conduct.functions";
 import { codeOfConductSearchSchema } from "@/lib/validation";
 import { canonicalUrl } from "@/lib/seo";
 
@@ -45,16 +47,28 @@ export const Route = createFileRoute("/code-of-conduct")({
     ],
     links: [{ rel: "canonical", href: canonicalUrl("/code-of-conduct") }],
   }),
+  // The live version, read during server rendering so the page a crawler or a
+  // phone on bad reception receives already carries the rules. A failed read
+  // is returned as a value rather than thrown, so the page can say so in place
+  // with a retry instead of falling over into the site's error screen.
+  loader: async () => {
+    try {
+      return { published: await getPublishedCodeOfConduct(), error: null };
+    } catch (e) {
+      return { published: null, error: describeLoadError(e, "Could not load the code of conduct") };
+    }
+  },
   component: CodeOfConduct,
 });
 
 function CodeOfConduct() {
   const { t: token, for: subjectId } = Route.useSearch();
+  const { published, error: publishedError } = Route.useLoaderData();
+  const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const fetchSigner = useServerFn(getCodeOfConductSigner);
   const accept = useServerFn(acceptCodeOfConduct);
 
-  const [agreed, setAgreed] = useState(false);
   const [signatureName, setSignatureName] = useState("");
   const [saving, setSaving] = useState(false);
   // Held, not toasted. A toast fades in four seconds and leaves a form that
@@ -101,10 +115,8 @@ function CodeOfConduct() {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!agreed) {
-      toast.error("Please tick the box to say you agree.");
-      return;
-    }
+    // The form only renders under a document, so this is for the compiler.
+    if (!published) return;
     if (!signatureName.trim()) {
       toast.error("Please type your name to sign.");
       return;
@@ -117,9 +129,10 @@ function CodeOfConduct() {
           token: token ?? "",
           // WHOSE agreement. Absent means the caller's own.
           userId: subjectId,
-          agree: true,
           signature_name: signatureName,
-          version: CODE_OF_CONDUCT_VERSION,
+          // The version whose text is on this screen, which is what they are
+          // agreeing to. The server refuses it if it is no longer live.
+          version: published.version,
           client_meta: {
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "",
             screen: `${window.screen.width}x${window.screen.height}`,
@@ -160,162 +173,182 @@ function CodeOfConduct() {
           time you join as a paying member.
         </p>
 
-        <div className="mt-10 rounded-2xl border bg-card p-6 md:p-8">
-          <CodeOfConductDocument />
-          <p className="mt-8 border-t pt-4 text-xs text-muted-foreground">
-            Version {CODE_OF_CONDUCT_VERSION}
-          </p>
-        </div>
+        {!published ? (
+          // Nothing to read means nothing to agree to: no signing form under a
+          // document that is not on the page.
+          <div className="mt-10">
+            <LoadFailure
+              what="The code of conduct"
+              message={publishedError ?? "The code of conduct is not available just now."}
+              hint="If you have already agreed to it, that still stands."
+              onRetry={() => void router.invalidate()}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="mt-10 rounded-2xl border bg-card p-6 md:p-8">
+              <CodeOfConductDocument body={published.body_md} />
+              <p className="mt-8 border-t pt-4 text-xs text-muted-foreground">
+                Version {published.version}
+              </p>
+            </div>
 
-        <div className="mt-8">
-          {signerQ.isPending ? (
-            <Loading />
-          ) : signerQ.isError ? (
-            // ⚠️ Without this branch a thrown read fell through to
-            // `NotIdentifiedPanel`, which tells the reader to go and sign a
-            // training waiver first. Two different people got that: somebody on
-            // a dropped connection who has signed everything, and a parent
-            // whose `?for=` the household gate refused. Neither is "we have
-            // never heard of you", and neither had a retry button anywhere.
-            refusedSubject ? (
-              <div className="rounded-2xl border bg-card p-6 md:p-8">
-                <h2 className="text-xl font-bold">We can&apos;t show you this page</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  You can only see or change your own account and the people on it. If this should
-                  be one of them, ask us and we will sort it out.
-                </p>
-                <Button asChild variant="outline" className="mt-6">
-                  <Link to="/account">Back to your account</Link>
-                </Button>
-              </div>
-            ) : (
-              <LoadFailure
-                what="Whether you have agreed to this"
-                message={describeLoadError(signerQ.error, "Could not check where you stand")}
-                hint="If you have already agreed, that still stands."
-                onRetry={() => void signerQ.refetch()}
-              />
-            )
-          ) : justSigned ? (
-            <SignedPanel
-              name={signer?.name ?? ""}
-              acceptedAt={justSigned}
-              version={CODE_OF_CONDUCT_VERSION}
-              signedIn={Boolean(user)}
-              forName={subjectName}
-            />
-          ) : !signer ? (
-            <NotIdentifiedPanel signedIn={Boolean(user)} />
-          ) : status?.state === "signed" ? (
-            <SignedPanel
-              name={signer.name}
-              acceptedAt={status.accepted_at ?? ""}
-              version={status.accepted_version ?? CODE_OF_CONDUCT_VERSION}
-              signedIn={Boolean(user)}
-              forName={subjectName}
-            />
-          ) : (
-            <form onSubmit={onSubmit} className="space-y-5 rounded-2xl border bg-card p-6 md:p-8">
-              <input
-                type="text"
-                name="hp"
-                tabIndex={-1}
-                autoComplete="off"
-                className="hidden"
-                value={hp}
-                onChange={(e) => setHp(e.target.value)}
-              />
-              <div>
-                <h2 className="text-xl font-bold">Agree to the code</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {subjectName ? (
-                    <>
-                      You are agreeing for <strong>{subject?.name ?? subjectName}</strong>, signing
-                      as <strong>{signer.full_name}</strong>.
-                    </>
-                  ) : (
-                    <>
-                      Signing as <strong>{signer.full_name}</strong> ({signer.email}).
-                      {signer.signed_in
-                        ? " To sign for someone else, log out first."
-                        : " Not you? Use the link from your own email."}
-                    </>
-                  )}
-                </p>
-                {status?.state === "outdated" && (
-                  <p className="mt-3 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
-                    You agreed to version {status.accepted_version}
-                    {subjectName ? ` for ${subjectName}` : ""} on{" "}
-                    {formatDate(status.accepted_at ?? "")}. We have updated it since, so please read
-                    it again and agree to version {CODE_OF_CONDUCT_VERSION}.
+            <div className="mt-8">
+              {signerQ.isPending ? (
+                <Loading />
+              ) : signerQ.isError ? (
+                // ⚠️ Without this branch a thrown read fell through to
+                // `NotIdentifiedPanel`, which tells the reader to go and sign a
+                // training waiver first. Two different people got that: somebody on
+                // a dropped connection who has signed everything, and a parent
+                // whose `?for=` the household gate refused. Neither is "we have
+                // never heard of you", and neither had a retry button anywhere.
+                refusedSubject ? (
+                  <div className="rounded-2xl border bg-card p-6 md:p-8">
+                    <h2 className="text-xl font-bold">We can&apos;t show you this page</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      You can only see or change your own account and the people on it. If this
+                      should be one of them, ask us and we will sort it out.
+                    </p>
+                    <Button asChild variant="outline" className="mt-6">
+                      <Link to="/account">Back to your account</Link>
+                    </Button>
+                  </div>
+                ) : (
+                  <LoadFailure
+                    what="Whether you have agreed to this"
+                    message={describeLoadError(signerQ.error, "Could not check where you stand")}
+                    hint="If you have already agreed, that still stands."
+                    onRetry={() => void signerQ.refetch()}
+                  />
+                )
+              ) : justSigned ? (
+                <SignedPanel
+                  name={signer?.name ?? ""}
+                  acceptedAt={justSigned}
+                  version={published.version}
+                  signedIn={Boolean(user)}
+                  forName={subjectName}
+                />
+              ) : !signer ? (
+                <NotIdentifiedPanel signedIn={Boolean(user)} />
+              ) : status?.state === "signed" ? (
+                <SignedPanel
+                  name={signer.name}
+                  acceptedAt={status.accepted_at ?? ""}
+                  version={status.accepted_version ?? published.version}
+                  signedIn={Boolean(user)}
+                  forName={subjectName}
+                />
+              ) : (
+                <form
+                  onSubmit={onSubmit}
+                  className="space-y-5 rounded-2xl border bg-card p-6 md:p-8"
+                >
+                  <input
+                    type="text"
+                    name="hp"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    className="hidden"
+                    value={hp}
+                    onChange={(e) => setHp(e.target.value)}
+                  />
+                  <div>
+                    <h2 className="text-xl font-bold">Agree to the code</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {subjectName ? (
+                        <>
+                          You are agreeing for <strong>{subject?.name ?? subjectName}</strong>,
+                          signing as <strong>{signer.full_name}</strong>.
+                        </>
+                      ) : (
+                        <>
+                          Signing as <strong>{signer.full_name}</strong> ({signer.email}).
+                          {signer.signed_in
+                            ? " To sign for someone else, log out first."
+                            : " Not you? Use the link from your own email."}
+                        </>
+                      )}
+                    </p>
+                    {status?.state === "outdated" && (
+                      <p className="mt-3 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
+                        You agreed to version {status.accepted_version}
+                        {subjectName ? ` for ${subjectName}` : ""} on{" "}
+                        {formatDate(status.accepted_at ?? "")}. We have updated it since, so please
+                        read it again and agree to version {published.version}.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* ⚠️ The undertaking has to match who is bound by it. A parent
+                  signing for their nine-year-old was once ticking a box saying
+                  THEY would follow the rules, on a form filed against the child.
+                  There is no tick box now: typing a name below is the agreement,
+                  so this sentence is what the signature agrees to, and it is
+                  still the most load-bearing string in the flow. */}
+                  <p
+                    id="code-of-conduct-undertaking"
+                    className="rounded-md border bg-muted/40 px-3 py-2 text-sm"
+                  >
+                    {subjectName
+                      ? codeOfConductAcknowledgementFor(subjectName)
+                      : CODE_OF_CONDUCT_ACKNOWLEDGEMENT}
                   </p>
-                )}
-              </div>
 
-              <label className="flex items-start gap-3 text-sm">
-                <Checkbox
-                  checked={agreed}
-                  onCheckedChange={(v) => {
-                    setAgreed(v === true);
-                    setSaveError(null);
-                  }}
-                  className="mt-0.5"
-                />
-                {/* ⚠️ The undertaking has to match who is bound by it. A parent
-                    signing for their nine-year-old was ticking a box saying
-                    THEY would follow the rules, on a form filed against the
-                    child. This is the most load-bearing string in the flow. */}
-                <span>
-                  {subjectName
-                    ? codeOfConductAcknowledgementFor(subjectName)
-                    : CODE_OF_CONDUCT_ACKNOWLEDGEMENT}
-                </span>
-              </label>
+                  <div>
+                    <Label htmlFor="signature_name">Type your name to sign</Label>
+                    <Input
+                      id="signature_name"
+                      required
+                      maxLength={120}
+                      value={signatureName}
+                      onChange={(e) => {
+                        setSignatureName(e.target.value);
+                        // The panel described the last attempt; editing the form
+                        // under it would leave it claiming something it never saw.
+                        setSaveError(null);
+                      }}
+                      placeholder="Your full name"
+                      aria-describedby="code-of-conduct-undertaking code-of-conduct-signature-note"
+                      className="mt-1.5"
+                    />
+                    <p
+                      id="code-of-conduct-signature-note"
+                      className="mt-1.5 text-xs text-muted-foreground"
+                    >
+                      Typing your name and pressing the button below is your agreement to the
+                      statement above. It counts as an electronic signature dated{" "}
+                      {new Date().toLocaleDateString("en-AU")}.
+                    </p>
+                  </div>
 
-              <div>
-                <Label htmlFor="signature_name">Type your name to sign</Label>
-                <Input
-                  id="signature_name"
-                  required
-                  maxLength={120}
-                  value={signatureName}
-                  onChange={(e) => {
-                    setSignatureName(e.target.value);
-                    // The panel described the last attempt; editing the form
-                    // under it would leave it claiming something it never saw.
-                    setSaveError(null);
-                  }}
-                  placeholder="Your full name"
-                  className="mt-1.5"
-                />
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  By submitting this form you agree it counts as an electronic signature dated{" "}
-                  {new Date().toLocaleDateString("en-AU")}.
-                </p>
-              </div>
+                  {saveError && (
+                    <SaveFailure
+                      what="agreement"
+                      message={saveError}
+                      onRetry={() =>
+                        void onSubmit({
+                          preventDefault: () => {},
+                        } as React.FormEvent<HTMLFormElement>)
+                      }
+                      retrying={saving}
+                      keptOnDevice={false}
+                    />
+                  )}
 
-              {saveError && (
-                <SaveFailure
-                  what="agreement"
-                  message={saveError}
-                  onRetry={() =>
-                    void onSubmit({ preventDefault: () => {} } as React.FormEvent<HTMLFormElement>)
-                  }
-                  retrying={saving}
-                  keptOnDevice={false}
-                />
+                  <Button type="submit" size="lg" disabled={saving} className="w-full sm:w-auto">
+                    {saving
+                      ? "Saving..."
+                      : subjectName
+                        ? `Agree on behalf of ${subjectName}`
+                        : "Agree to the code of conduct"}
+                  </Button>
+                </form>
               )}
-
-              <Button type="submit" size="lg" disabled={saving} className="w-full sm:w-auto">
-                {saving
-                  ? "Saving..."
-                  : subjectName
-                    ? `Agree on behalf of ${subjectName}`
-                    : "Agree to the code of conduct"}
-              </Button>
-            </form>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </section>
     </SiteLayout>
   );

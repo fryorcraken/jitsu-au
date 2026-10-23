@@ -181,6 +181,30 @@ vi.mock("@/lib/waiver.functions", () => ({
   promoteWaiverTemplate: (...args: unknown[]) => promoteWaiverTemplateMock(...args),
 }));
 
+// The code-of-conduct store's own behaviour (numbering, draft-then-promote, the
+// replayed submission id) is pinned in code-of-conduct.functions.test.ts. What
+// the route owns, and what is pinned here, is the carry-over, the re-prompt
+// count, and which status each refusal becomes. Everything not named here is
+// the real module, so list_users still measures against the real standard.
+const listCodeOfConductVersionRowsMock = vi.fn();
+const listCodeOfConductVersionFlagsMock = vi.fn();
+const listCodeOfConductVersionSummariesMock = vi.fn();
+const loadCodeOfConductVersionMock = vi.fn();
+const saveCodeOfConductVersionMock = vi.fn();
+const promoteCodeOfConductVersionMock = vi.fn();
+const highestAcceptedVersionsMock = vi.fn();
+vi.mock("@/lib/code-of-conduct.functions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/code-of-conduct.functions")>()),
+  listCodeOfConductVersionRows: (...args: unknown[]) => listCodeOfConductVersionRowsMock(...args),
+  listCodeOfConductVersionFlags: (...args: unknown[]) => listCodeOfConductVersionFlagsMock(...args),
+  listCodeOfConductVersionSummaries: (...args: unknown[]) =>
+    listCodeOfConductVersionSummariesMock(...args),
+  loadCodeOfConductVersion: (...args: unknown[]) => loadCodeOfConductVersionMock(...args),
+  saveCodeOfConductVersion: (...args: unknown[]) => saveCodeOfConductVersionMock(...args),
+  promoteCodeOfConductVersion: (...args: unknown[]) => promoteCodeOfConductVersionMock(...args),
+  highestAcceptedVersions: (...args: unknown[]) => highestAcceptedVersionsMock(...args),
+}));
+
 const MINTED_TOKEN = "utsj_0123456789abcdef0123456789abcdef0123456789abcdef";
 const TOKEN_OWNER = "44444444-4444-4444-4444-444444444444";
 /**
@@ -777,8 +801,8 @@ describe("manager agent route: the waiver template", () => {
     reason: "not_found" | "invalid" | "not_published",
     version?: number,
   ) {
-    const { WaiverTemplateError } = await import("@/lib/waiver-template-editor");
-    return new WaiverTemplateError(message, reason, version);
+    const { DocumentVersionError } = await import("@/lib/document-versions");
+    return new DocumentVersionError(message, reason, version);
   }
 
   it("lists versions without their bodies, naming the live one", async () => {
@@ -1152,6 +1176,9 @@ describe("manager agent route: reading people", () => {
     code_of_conduct_acceptances: [
       { user_id: PERSON, version: 1, accepted_at: "2026-03-01T00:00:00Z", signature_name: "Ada L" },
     ],
+    code_of_conduct_versions: [
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: true },
+    ],
     ...over,
   });
 
@@ -1346,5 +1373,211 @@ describe("manager agent route: club settings", () => {
     });
     expect(res.status).toBe(400);
     expect(fake.upserts).toEqual([]);
+  });
+});
+
+describe("manager agent route: the code of conduct", () => {
+  const v = (version: number, over: Record<string, unknown> = {}) => ({
+    id: `id-${version}`,
+    version,
+    title: "UTS Jitsu Code of Conduct",
+    body_md: `# Version ${version}`,
+    asks_reagreement: false,
+    required_version: 1,
+    is_current: false,
+    first_published_at: "2026-10-01T00:00:00.000Z",
+    created_at: "2026-10-01T00:00:00.000Z",
+    ...over,
+  });
+  const LIVE = v(2, { is_current: true });
+
+  beforeEach(() => {
+    vi.resetModules();
+    currentAdmin = {};
+    for (const m of [
+      listCodeOfConductVersionRowsMock,
+      listCodeOfConductVersionFlagsMock,
+      listCodeOfConductVersionSummariesMock,
+      loadCodeOfConductVersionMock,
+      saveCodeOfConductVersionMock,
+      promoteCodeOfConductVersionMock,
+      highestAcceptedVersionsMock,
+    ])
+      m.mockReset();
+  });
+
+  async function refusal(
+    message: string,
+    reason: "not_found" | "invalid" | "not_published",
+    version?: number,
+  ) {
+    const { DocumentVersionError } = await import("@/lib/document-versions");
+    return new DocumentVersionError(message, reason, version);
+  }
+
+  it("lists versions without their text, with what the club asks of people", async () => {
+    // Version 3 was rolled away from: newer than the live one, but it was live.
+    listCodeOfConductVersionSummariesMock.mockResolvedValue([
+      v(3, { asks_reagreement: true, required_version: 3 }),
+      LIVE,
+      v(1, { asks_reagreement: true }),
+    ]);
+    const res = await post({ action: "list_code_of_conduct_versions", params: {} });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({ count: 3, live_version: 2, required_version: 1 });
+    expect(result.versions[0]).toMatchObject({ version: 3, status: "Previous" });
+    expect(result.versions[1]).toMatchObject({
+      version: 2,
+      status: "Live",
+      asks_reagreement: false,
+    });
+    expect(result.versions[2]).toMatchObject({ status: "Previous", asks_reagreement: true });
+    expect(result.versions[1]).not.toHaveProperty("body_md");
+    // The listing never reads any version's text.
+    expect(listCodeOfConductVersionRowsMock).not.toHaveBeenCalled();
+  });
+
+  it("says nobody can read it when nothing is live", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(null);
+    const res = await post({ action: "get_code_of_conduct", params: {} });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.message).toMatch(/nobody can read it/);
+  });
+
+  it("carries the text over when only asking everybody to agree again", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
+    // Two people up to date on 1 and 2, one already behind (nothing below 1).
+    highestAcceptedVersionsMock.mockResolvedValue([1, 2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: false,
+    });
+    const res = await post({ action: "save_code_of_conduct", params: { asks_reagreement: true } });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({
+      version: 3,
+      based_on: 2,
+      asks_reagreement: true,
+      reprompted: 2,
+    });
+    expect(saveCodeOfConductVersionMock.mock.calls[0][1]).toMatchObject({
+      title: LIVE.title,
+      body_md: LIVE.body_md,
+      asks_reagreement: true,
+    });
+  });
+
+  // A correction must not ask anybody anything, and must not spend a read on
+  // counting people it cannot affect.
+  it("re-prompts nobody for a correction", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: false,
+    });
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: { title: "Code", body_md: "# Fixed" },
+    });
+    const { result } = await res.json();
+    expect(result).toMatchObject({ asks_reagreement: false, reprompted: 0, based_on: null });
+  });
+
+  // With nothing live, a correction inherits the newest version's requirement,
+  // which can put people out of date without anybody asking. The reply has to
+  // say so rather than report the 0 a correction normally means.
+  it("counts who a correction re-prompts when nothing was live", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([
+      v(2, { asks_reagreement: true, required_version: 2 }),
+      v(1, { asks_reagreement: true }),
+    ]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 1, 2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: false,
+    });
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: { title: "Code", body_md: "# Fixed" },
+    });
+    expect((await res.json()).result).toMatchObject({ asks_reagreement: false, reprompted: 2 });
+  });
+
+  it("refuses a save that changes nothing", async () => {
+    const res = await post({ action: "save_code_of_conduct", params: {} });
+    expect(res.status).toBe(400);
+    expect(saveCodeOfConductVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a replayed save as already saved, re-prompting nobody new", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE]);
+    highestAcceptedVersionsMock.mockResolvedValue([2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: true,
+    });
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: {
+        asks_reagreement: true,
+        client_submission_id: "11111111-1111-4111-8111-111111111111",
+      },
+    });
+    expect((await res.json()).result).toMatchObject({ already_saved: true, reprompted: 0 });
+  });
+
+  it("reports a version written but not made live as a retryable 503", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE]);
+    highestAcceptedVersionsMock.mockResolvedValue([]);
+    saveCodeOfConductVersionMock.mockRejectedValue(
+      await refusal("Someone else changed it.", "not_published", 3),
+    );
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: { title: "Code", body_md: "# Fixed" },
+    });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("5");
+    const body = await res.json();
+    expect(body.error.code).toBe("code_of_conduct_not_published");
+    expect(body.error.details).toEqual({ version: 3, published: false });
+  });
+
+  it("rolls back, saying who is out of date afterwards", async () => {
+    // Version 2 did not ask, so it requires what version 1 did.
+    loadCodeOfConductVersionMock.mockResolvedValue(v(2, { required_version: 1 }));
+    promoteCodeOfConductVersionMock.mockResolvedValue({ version: 2 });
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 2 } });
+    expect((await res.json()).result).toEqual({
+      version: 2,
+      published: true,
+      required_version: 1,
+    });
+  });
+
+  it("changes nothing, and says so, for the version already live", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 2 } });
+    expect((await res.json()).result).toEqual({ version: 2, published: false });
+    expect(promoteCodeOfConductVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("404s a version that does not exist", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(null);
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 9 } });
+    expect(res.status).toBe(404);
   });
 });

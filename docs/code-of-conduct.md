@@ -10,29 +10,53 @@ The waiver is the document you **must** sign before you train. The code of
 conduct is the document the club wants signed **around the time you become a
 paying member**, and it never stops anybody training. It is one document for
 everybody, published on the public site so it can be read (and linked to) before
-anyone signs anything. Agreeing to it records a row: the version, the date, the
-name typed to sign, and the signer's address and browser context. Nothing is
-approved, nothing expires, and nothing is blocked by its absence.
+anyone signs anything. Managers edit it, in numbered versions with one live.
+Agreeing to it records a row: the version, the date, the name typed to sign, and
+the signer's address and browser context. Nothing is approved, nothing expires,
+and nothing is blocked by its absence.
 
 ## Rules
 
 1. **It is never a gate.** No screen, server function, or database constraint
    makes anything conditional on having signed it. If that ever changes, it stops
    being this feature.
-2. **The document is in the repo, not the database.** `src/lib/code-of-conduct.ts`
-   holds the text and `CODE_OF_CONDUCT_VERSION`. A manager cannot edit it from
-   the site, on purpose: house rules change by committee decision, and the review
-   that a pull request gives is worth more here than the speed a live editor gives
-   the waiver.
-3. **A bump asks everybody to read it again.** Raise the version when the wording
-   materially changes. Anyone whose latest acceptance is older then shows as out
-   of date, which is a prompt on their account page and a line on their manager
-   page, never a warning and never a block. Do not bump for a typo, and never
-   change a version's text without bumping: an acceptance stores a number, and
-   that number has to keep meaning the text people actually read.
+2. **Managers edit it, in numbered versions.** The text lives in
+   `code_of_conduct_versions`, with exactly one version live, and a manager
+   edits it at `/manager/code-of-conduct` or through the manager agent API
+   (`docs/manager-agent-api.md`), the same way the waiver template works. Every
+   save writes a **new** version and publishes it; no version's text is ever
+   changed in place, because an acceptance stores a number and that number has
+   to keep meaning the text people actually read. Any earlier version can be
+   made live again. (Before this the text lived in the app and was
+   changed by pull request; version 1 is that text, byte for byte.)
+3. **A version only asks everybody to read it again when the manager says so.**
+   Publishing carries a choice, "Ask everyone to agree again", **off by
+   default** and stored on the version (`asks_reagreement`). Each version also
+   records, when it is written, its **required version**: itself if it asked,
+   otherwise whatever the live version required at the time (or, if a failed
+   publish left nothing live, the newest version's). Anyone whose
+   highest agreement is older than the live version's required version shows as
+   out of date, which is a prompt on their account page and a line on their manager
+   page, never a warning and never a block. So:
+   - a typo fix or a clearer sentence is saved with it off, and nobody is
+     re-prompted, although the live version number moves;
+   - a change to the rules themselves is saved with it on, and the editor says
+     how many people that re-prompts **before** the click, then asks again in a
+     confirm;
+   - rolling back below a version that asked undoes the ask along with the
+     text, and it stays undone: a correction saved after the rollback inherits
+     the rolled-back-to version's requirement, not the abandoned one.
 4. **Nobody types who they are.** The name and email stored on an acceptance are
-   read off the person's profile and login by the server. The form collects two
-   things: the tick and the typed signature.
+   read off the person's profile and login by the server. The form collects one
+   thing: the typed signature. There is no tick box: the undertaking ("I have
+   read ... and I agree to follow both", or "... and I agree that Bea will
+   follow both" for a child) is printed above the signature field, and typing a
+   name and submitting is agreeing to it. That wording stays in code
+   (`src/lib/code-of-conduct.ts`), not in the editor: it names who is bound,
+   which is part of how signing works rather than house rules.
+   The page sends the version whose text it showed, and the server refuses it
+   once that version is no longer live, so an agreement is never filed against
+   words the person did not see.
 5. **Only an existing person can sign.** Unlike the waiver, signing this never
    creates a person record. Somebody the club does not hold has nothing to attach
    an agreement to, and is told to sign the waiver first.
@@ -130,6 +154,29 @@ the child never does. Teaching the token to reach a dependant through their
 guardian is the change that was ruled out. Nothing is lost by the wait: the code
 of conduct gates nothing.
 
+### What a manager edits
+
+`/manager/code-of-conduct` (Manager navigation, "Code of conduct"). Title and
+text, with a preview rendered by the same component the public page uses. The
+text is a small markdown subset, stated above the field: `#` and `##` headings,
+`- ` bullets, `**bold**`, bare `https://` links, and a blank line between
+paragraphs. It keeps its own small renderer (`parseCodeOfConductBlocks`) rather
+than the knowledge base's, so version 1 renders exactly as members read it.
+
+Saving writes a new version and makes it live. The "Ask everyone to agree
+again" choice sits right above the button and says in words what it will do
+("3 people who agreed to an earlier version will be asked to agree again", or
+that everybody stays up to date when it is off). The count is for the save as
+it stands, box ticked or not: with nothing live, even a correction can
+re-prompt people (rule 3), and the screen says so rather than promising
+otherwise. Any save that re-prompts somebody goes through a confirm saying the
+same; one that re-prompts nobody just happens, because it can be rolled back.
+The versions list shows which asked, and any version can be made live again,
+with a confirm saying who that re-prompts. A version that has been live is
+labelled "Previous" from then on, even when a rollback leaves it newer than the
+live one. Unsaved work is kept on the device, and a save is safe to retry: a
+retry never makes a version live behind somebody else's back.
+
 ### What a manager sees
 
 The person page (`/manager/users/:userId`) shows one read-only block: signed (with
@@ -148,14 +195,20 @@ front of the manager at exactly the moment they are setting that up.
 
 ## The public page
 
-`/code-of-conduct` is indexable and in the sitemap. A club that publishes the
+`/code-of-conduct` is indexable and in the sitemap. It renders the live version,
+read during server rendering so the page arrives with the rules in it. If that
+read fails, the page says so with a retry in place of the document, and shows no
+signing form under a document that is not there. A club that publishes the
 rules it trains by is worth finding, and there is nothing private on the page:
 the signing form appears only for someone the site can already identify. It is
 also linked from the site footer.
 
 ## Out of scope today
 
-- A manager-editable version of the document (see rule 2).
-- Any expiry or forced re-signing beyond the version prompt.
+- Editing the undertaking printed above the signature (see rule 4).
+- Emailing anybody when a version asks everyone to agree again. They see the
+  prompt the next time they open their account or membership page.
+- Any expiry or forced re-signing beyond the re-agreement prompt.
 - Signing on paper, or a manager recording an agreement on someone's behalf.
-- A PDF copy. The text of every version is in git, permanently.
+- A PDF copy. Every version's text is kept in `code_of_conduct_versions` and
+  never edited in place.

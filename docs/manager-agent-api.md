@@ -306,8 +306,8 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
 waiver_template_not_published` with a `Retry-After`, and it carries
   `error.details.version` when a version WAS written and is merely unpublished —
   the case where saving again would file a second numbered draft and publishing
-  that version finishes the job. `WaiverTemplateError` in
-  `src/lib/waiver-template-editor.ts` carries the reason (`not_found` |
+  that version finishes the job. `DocumentVersionError` in
+  `src/lib/document-versions.ts` carries the reason (`not_found` |
   `invalid` | `not_published`) that decides this; the editor screen shows the
   same message either way.
 
@@ -316,6 +316,36 @@ waiver_template_not_published` with a `Retry-After`, and it carries
   both the save and the publish refuse without it. That check now runs **before**
   the insert rather than only inside `promoteWaiverTemplate`, so a refused save
   no longer leaves an unwanted draft version behind in the editor's list.
+
+- `list_code_of_conduct_versions` / `get_code_of_conduct` /
+  `save_code_of_conduct` / `publish_code_of_conduct` — the club's code of
+  conduct, the agent's equivalent of `/manager/code-of-conduct`. Both go through
+  `listCodeOfConductVersionRows`, `loadCodeOfConductVersion`,
+  `saveCodeOfConductVersion` and `promoteCodeOfConductVersion` in
+  `src/lib/code-of-conduct.functions.ts`, and promotion through the same
+  `promoteDocumentVersion` the waiver uses, so the contract is the waiver
+  template's: version-keyed, saving publishes, omitted text carried over from
+  `base_version` with `based_on` naming it, and the same classified refusals
+  (`503 code_of_conduct_not_published` with `Retry-After` and
+  `error.details.version`). Two things are the code of conduct's own:
+  - **`asks_reagreement`** (default false) is stored on the version and decides
+    who is out of date (`docs/code-of-conduct.md`, rule 3). The save's reply
+    carries `reprompted`, the number of people it put out of date, counted on
+    every save (a correction made while nothing is live inherits the newest
+    version's requirement and can re-prompt people) and before the write, so a
+    failed count refuses the call rather than reporting a number nobody checked. A call with no new text is refused unless it asks,
+    which is how a rewrite published without asking gets its ask afterwards.
+  - **`client_submission_id`** makes a save safe to retry, as on
+    `create_item_invoice`: the same id comes back as the version it already
+    wrote, with `already_saved: true` and `reprompted: 0`. If that version is
+    not live (its first attempt lost the promotion, or somebody published or
+    rolled back since), the replay is refused as `503
+code_of_conduct_not_published` with its `version`, and nothing is made
+    live: promoting it on a retry could silently replace another manager's
+    version or undo a deliberate rollback.
+  - **`list_code_of_conduct_versions` reads no text.** It reports
+    `first_published_at`, which the `Previous` label uses so a version rolled
+    away from never reads as `Draft`.
 
 ### `file_waiver`: the parts that have bitten us
 
@@ -422,7 +452,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"22"`.
+test so the bump is a deliberate edit, and the current value is `"23"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

@@ -1,0 +1,209 @@
+// The code of conduct editor.
+//
+// Two things are pinned. The editor never opens blank over the live document
+// (saving from a failed load would publish an empty code of conduct). And the
+// re-agreement choice says, in numbers and before the click, who a save will
+// ask to agree again: off, nobody; on, everybody who is up to date.
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+
+const listCodeOfConductVersions = vi.fn();
+const saveCodeOfConduct = vi.fn();
+const setCurrentCodeOfConduct = vi.fn();
+
+vi.mock("@tanstack/react-router", () => ({
+  createFileRoute: () => (opts: Record<string, unknown>) => opts,
+  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  useNavigate: () => vi.fn(),
+}));
+vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
+vi.mock("@/lib/code-of-conduct.functions", () => ({
+  listCodeOfConductVersions: (...args: unknown[]) => listCodeOfConductVersions(...args),
+  saveCodeOfConduct: (...args: unknown[]) => saveCodeOfConduct(...args),
+  setCurrentCodeOfConduct: (...args: unknown[]) => setCurrentCodeOfConduct(...args),
+}));
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ user: { id: "manager-1" }, session: null, loading: false }),
+  useRoles: () => ({ roles: ["manager"], loading: false, isManager: true }),
+}));
+
+const { Route } = await import("./manager.code-of-conduct");
+const EditorPage = (Route as unknown as { component: () => ReactNode }).component;
+
+const v1 = {
+  id: "v1",
+  version: 1,
+  title: "UTS Jitsu Code of Conduct",
+  body_md: "# UTS Jitsu Code of Conduct\n\n- Bow when stepping onto the mat.",
+  asks_reagreement: true,
+  required_version: 1,
+  is_current: true,
+  first_published_at: "2026-08-01T00:00:00.000Z",
+  created_at: "2026-08-01T00:00:00.000Z",
+};
+
+beforeEach(() => {
+  listCodeOfConductVersions.mockReset();
+  saveCodeOfConduct.mockReset();
+  setCurrentCodeOfConduct.mockReset();
+  window.localStorage.clear();
+});
+
+describe("manager code of conduct editor", () => {
+  it("refuses to open a blank editor over the live document when the load fails", async () => {
+    listCodeOfConductVersions.mockRejectedValue(new Error("Failed to fetch"));
+    render(<EditorPage />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("would publish an empty code of conduct");
+    expect(screen.queryByLabelText(/^title$/i)).not.toBeInTheDocument();
+  });
+
+  it("opens on the live version, previewed the way members read it", async () => {
+    listCodeOfConductVersions.mockResolvedValue({ versions: [v1], highest_accepted: [1, 1] });
+    render(<EditorPage />);
+
+    expect(await screen.findByDisplayValue("UTS Jitsu Code of Conduct")).toBeInTheDocument();
+    expect(screen.getByText("Bow when stepping onto the mat.")).toBeInTheDocument();
+    // Nothing changed and nothing asked: there is no new version to write.
+    expect(screen.getByRole("button", { name: /save and publish/i })).toBeDisabled();
+  });
+
+  it("says a correction asks nobody to agree again", async () => {
+    listCodeOfConductVersions.mockResolvedValue({ versions: [v1], highest_accepted: [1, 1] });
+    render(<EditorPage />);
+    await screen.findByDisplayValue("UTS Jitsu Code of Conduct");
+
+    expect(screen.getByText(/everybody who has agreed stays up to date/i)).toBeInTheDocument();
+  });
+
+  it("says how many people asking will re-prompt, and asks before publishing", async () => {
+    listCodeOfConductVersions.mockResolvedValue({ versions: [v1], highest_accepted: [1, 1, 1] });
+    saveCodeOfConduct.mockResolvedValue({
+      ok: true,
+      id: "v2",
+      version: 2,
+      is_current: true,
+      already_saved: false,
+    });
+    render(<EditorPage />);
+    await screen.findByDisplayValue("UTS Jitsu Code of Conduct");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /ask everyone to agree again/i }));
+    expect(
+      screen.getByText("3 people who agreed to an earlier version will be asked to agree again."),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /save and publish/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("asks 3 people who agreed to an earlier version");
+    // Nothing is written until the manager says so.
+    expect(saveCodeOfConduct).not.toHaveBeenCalled();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: /publish and ask again/i }));
+    expect(saveCodeOfConduct).toHaveBeenCalledTimes(1);
+    expect(saveCodeOfConduct.mock.calls[0][0].data).toMatchObject({
+      asks_reagreement: true,
+      title: "UTS Jitsu Code of Conduct",
+    });
+    // A retry of this press must be recognisable as the same save.
+    expect(saveCodeOfConduct.mock.calls[0][0].data.client_submission_id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("saves a correction without a confirm, since it asks nobody anything", async () => {
+    listCodeOfConductVersions.mockResolvedValue({ versions: [v1], highest_accepted: [1] });
+    saveCodeOfConduct.mockResolvedValue({
+      ok: true,
+      id: "v2",
+      version: 2,
+      is_current: true,
+      already_saved: false,
+    });
+    render(<EditorPage />);
+    const title = await screen.findByDisplayValue("UTS Jitsu Code of Conduct");
+    await userEvent.type(title, "!");
+    await userEvent.click(screen.getByRole("button", { name: /save and publish/i }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(saveCodeOfConduct.mock.calls[0][0].data).toMatchObject({ asks_reagreement: false });
+  });
+
+  // A club with nothing stored has nothing to compare against: what is typed
+  // is the first version, and it has to be savable.
+  it("lets the first version be written and saved when there is none", async () => {
+    listCodeOfConductVersions.mockResolvedValue({ versions: [], highest_accepted: [] });
+    saveCodeOfConduct.mockResolvedValue({
+      ok: true,
+      id: "v1",
+      version: 1,
+      is_current: true,
+      already_saved: false,
+    });
+    render(<EditorPage />);
+    expect(await screen.findByText(/there is no version yet/i)).toBeInTheDocument();
+    const save = screen.getByRole("button", { name: /save and publish/i });
+    expect(save).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/^title$/i), "House rules");
+    await userEvent.type(screen.getByLabelText(/^text$/i), "Be kind.");
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    expect(saveCodeOfConduct).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a failed rollback on screen, with a retry, rather than in a toast", async () => {
+    const v2 = { ...v1, id: "v2", version: 2, asks_reagreement: false, body_md: "# Fixed" };
+    listCodeOfConductVersions.mockResolvedValue({
+      versions: [v2, { ...v1, is_current: false }],
+      highest_accepted: [1],
+    });
+    setCurrentCodeOfConduct.mockRejectedValue(
+      new Error("The club is now left with no live code of conduct."),
+    );
+    render(<EditorPage />);
+    await screen.findByDisplayValue("# Fixed");
+
+    await userEvent.click(screen.getByRole("button", { name: /version 1/i }));
+    await userEvent.click(screen.getByRole("button", { name: /make version 1 live/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Nobody is asked to agree again.");
+    await userEvent.click(within(dialog).getByRole("button", { name: /make it live/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("no live code of conduct");
+    expect(within(alert).getByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it("calls a version that was rolled away from Previous, not Draft", async () => {
+    const v2 = { ...v1, id: "v2", version: 2, is_current: false, required_version: 2 };
+    listCodeOfConductVersions.mockResolvedValue({ versions: [v2, v1], highest_accepted: [] });
+    render(<EditorPage />);
+    const row = await screen.findByRole("button", { name: /version 2/i });
+    expect(row).toHaveTextContent("Previous");
+    expect(row).not.toHaveTextContent("Draft");
+  });
+
+  // Nothing live: a correction inherits the newest version's requirement and
+  // can put people out of date. The screen must say so and ask, not promise
+  // that everybody stays up to date.
+  it("warns, and asks first, when a correction would re-prompt people", async () => {
+    const asked = { ...v1, id: "v2", version: 2, required_version: 2, is_current: false };
+    listCodeOfConductVersions.mockResolvedValue({
+      versions: [asked, { ...v1, is_current: false }],
+      highest_accepted: [1, 1],
+    });
+    render(<EditorPage />);
+    const title = await screen.findByDisplayValue("UTS Jitsu Code of Conduct");
+    await userEvent.type(title, "!");
+
+    expect(
+      screen.getByText("2 people who agreed to an earlier version will be asked to agree again."),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /save and publish/i }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("asks 2 people");
+    expect(saveCodeOfConduct).not.toHaveBeenCalled();
+  });
+});

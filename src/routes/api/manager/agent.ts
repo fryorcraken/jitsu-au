@@ -22,6 +22,9 @@ import {
   editInvoiceSchema,
   getAgentUserSchema,
   agentGetWaiverTemplateSchema,
+  agentGetCodeOfConductSchema,
+  agentPublishCodeOfConductSchema,
+  agentSaveCodeOfConductSchema,
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
   deleteKbSectionSchema,
@@ -51,6 +54,7 @@ import {
   classifyAction,
   diffInvoicePatch,
   invoiceEditAudit,
+  projectAgentCodeOfConductVersion,
   projectAgentKbArticle,
   projectAgentUser,
   projectAgentWaiverTemplate,
@@ -79,7 +83,21 @@ import type {
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
 import { ClubUserNotFoundError, loadClubUser } from "@/lib/club-user.functions";
-import { codeOfConductSummary } from "@/lib/code-of-conduct";
+import {
+  codeOfConductStandard,
+  codeOfConductSummary,
+  countReprompted,
+  standardAfterSaving,
+} from "@/lib/code-of-conduct";
+import {
+  highestAcceptedVersions,
+  listCodeOfConductVersionFlags,
+  listCodeOfConductVersionSummaries,
+  loadCodeOfConductStandard,
+  loadCodeOfConductVersion,
+  promoteCodeOfConductVersion,
+  saveCodeOfConductVersion,
+} from "@/lib/code-of-conduct.functions";
 import {
   deleteKbSection,
   listKbSections,
@@ -91,7 +109,7 @@ import {
   saveKbSection,
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
-import { WaiverTemplateError } from "@/lib/waiver-template-editor";
+import { DocumentVersionError } from "@/lib/document-versions";
 import {
   filePaperWaiver,
   listWaiverTemplateRows,
@@ -475,13 +493,23 @@ async function handleListUsers(params: unknown) {
   // the whole table: a response row cap would otherwise drop the OLDEST
   // acceptances and report somebody who signed long ago as unsigned.
   const ids = capped.map((u) => u.user_id).filter((id): id is string => Boolean(id));
-  const { data: acceptances, error: cocErr } = ids.length
-    ? await db
-        .from("code_of_conduct_acceptances")
-        .select("user_id, version, accepted_at, signature_name")
-        .in("user_id", ids)
-        .order("accepted_at", { ascending: false })
-    : { data: [], error: null };
+  // What the state is measured against: the live version, and the version it
+  // requires people to have agreed to.
+  const [standardRead, { data: acceptances, error: cocErr }] = await Promise.all([
+    loadCodeOfConductStandard(db).then(
+      (standard) => ({ standard, error: null }),
+      (e: unknown) => ({ standard: null, error: e instanceof Error ? e.message : String(e) }),
+    ),
+    ids.length
+      ? db
+          .from("code_of_conduct_acceptances")
+          .select("user_id, version, accepted_at, signature_name")
+          .in("user_id", ids)
+          .order("accepted_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (!standardRead.standard) throw new AgentError(500, "db_error", standardRead.error ?? "");
+  const standard = standardRead.standard;
   // Not degraded to "unsigned" the way the person page degrades it: that page
   // has a manager reading it and a server log behind it, and an agent has
   // neither. `unsigned` for a person who signed is a confident wrong answer.
@@ -503,7 +531,10 @@ async function handleListUsers(params: unknown) {
       ...u,
       // A lead has no person record and cannot sign, so it reads as unsigned,
       // which is true.
-      code_of_conduct: codeOfConductSummary(u.user_id ? acceptancesByUser.get(u.user_id) : null),
+      code_of_conduct: codeOfConductSummary(
+        u.user_id ? acceptancesByUser.get(u.user_id) : null,
+        standard,
+      ),
     })),
   };
 }
@@ -1141,7 +1172,7 @@ async function handleListWaiverTemplates() {
 const TEMPLATE_RETRY_AFTER_SECONDS = 5;
 
 /**
- * Turn a refused template change into the right status code.
+ * Turn a refused change to a versioned document into the right status code.
  *
  * The distinction that matters is retryable vs not. SKILL.md tells agents that a
  * 4xx means the request itself has to change, so reporting "nobody can sign
@@ -1150,13 +1181,17 @@ const TEMPLATE_RETRY_AFTER_SECONDS = 5;
  * version when one was written — repeating the save would file a second draft,
  * where publishing that version finishes the job.
  */
-function templateFailure(e: unknown, refusedCode: string): AgentError {
-  if (e instanceof WaiverTemplateError) {
+function templateFailure(
+  e: unknown,
+  refusedCode: string,
+  notPublishedCode = "waiver_template_not_published",
+): AgentError {
+  if (e instanceof DocumentVersionError) {
     if (e.reason === "not_found") return new AgentError(404, "not_found", e.message);
     if (e.reason === "invalid") return new AgentError(422, refusedCode, e.message);
     return new AgentError(
       503,
-      "waiver_template_not_published",
+      notPublishedCode,
       e.message,
       e.version === undefined ? undefined : { version: e.version, published: false },
       TEMPLATE_RETRY_AFTER_SECONDS,
@@ -1263,6 +1298,150 @@ async function handlePublishWaiverTemplate(params: unknown) {
     return { version, published: true as const };
   } catch (e) {
     throw templateFailure(e, "publish_waiver_template_failed");
+  }
+}
+
+// ---- The code of conduct: the same four actions as the waiver ----
+//
+// Version-keyed, saving publishes, an omitted field is carried over from
+// `base_version` (default the live one), and refusals are classified the same
+// way. What is the code of conduct's own is `asks_reagreement`, and the
+// `reprompted` count a save reports: how many people it put out of date.
+
+const NO_LIVE_CODE_OF_CONDUCT =
+  "There is no live code of conduct, so nobody can read it or agree to it. Make one live with publish_code_of_conduct.";
+
+/** Every stored version, which one is live, and what the club asks of people. */
+async function handleListCodeOfConductVersions() {
+  const db = await adminClient();
+  const versions = await listCodeOfConductVersionSummaries(db);
+  const standard = codeOfConductStandard(versions);
+  return {
+    count: versions.length,
+    // Null is not a tidy empty state: nobody can read or agree to the rules.
+    live_version: standard.current_version,
+    // Anyone whose highest agreement is below this is out of date.
+    required_version: standard.required_version,
+    versions: versions.map((v) => projectAgentCodeOfConductVersion(v, standard.current_version)),
+  };
+}
+
+async function handleGetCodeOfConduct(params: unknown) {
+  const input = agentGetCodeOfConductSchema.parse(params ?? {});
+  const db = await adminClient();
+  const found = await loadCodeOfConductVersion(db, input.version);
+  if (!found) {
+    throw new AgentError(
+      404,
+      "not_found",
+      input.version === undefined
+        ? NO_LIVE_CODE_OF_CONDUCT
+        : `No code of conduct version ${input.version}.`,
+    );
+  }
+  return {
+    code_of_conduct: {
+      version: found.version,
+      title: found.title,
+      body_md: found.body_md,
+      asks_reagreement: found.asks_reagreement,
+      is_current: found.is_current,
+      created_at: found.created_at,
+    },
+  };
+}
+
+async function handleSaveCodeOfConduct(params: unknown, actingAs: string) {
+  const input = agentSaveCodeOfConductSchema.parse(params ?? {});
+  const db = await adminClient();
+
+  // Read only when needed: a caller sending both title and body has described
+  // a whole version, and a club with nothing live must be able to publish its
+  // way out through this API.
+  const needsBase = input.title === undefined || input.body_md === undefined;
+  let base: Awaited<ReturnType<typeof loadCodeOfConductVersion>> = null;
+  if (needsBase || input.base_version !== undefined) {
+    base = await loadCodeOfConductVersion(db, input.base_version);
+    if (!base) {
+      throw new AgentError(
+        404,
+        "not_found",
+        input.base_version === undefined
+          ? `${NO_LIVE_CODE_OF_CONDUCT} To write one from scratch instead, send title and body_md together.`
+          : `No code of conduct version ${input.base_version}.`,
+      );
+    }
+  }
+
+  // Counted BEFORE the save, against the versions as they stand, so the reply
+  // can say how many people this put out of date. Counted on every save, not
+  // only one that asks: a save made while nothing is live inherits the newest
+  // version's requirement and can re-prompt people without asking anything. A
+  // failed count fails the call before anything is written rather than
+  // reporting a number nobody checked.
+  let reprompted: number;
+  try {
+    const [versions, highest] = await Promise.all([
+      listCodeOfConductVersionFlags(db),
+      highestAcceptedVersions(db),
+    ]);
+    reprompted = countReprompted(
+      highest,
+      codeOfConductStandard(versions),
+      standardAfterSaving(versions, input.asks_reagreement),
+    );
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    const saved = await saveCodeOfConductVersion(
+      db,
+      {
+        title: input.title ?? base!.title,
+        body_md: input.body_md ?? base!.body_md,
+        asks_reagreement: input.asks_reagreement,
+        client_submission_id: input.client_submission_id,
+      },
+      actingAs,
+    );
+    return {
+      version: saved.version,
+      based_on: base?.version ?? null,
+      is_current: saved.is_current,
+      asks_reagreement: input.asks_reagreement,
+      // True when this client_submission_id had already written a version:
+      // nothing new was written, and `reprompted` describes no new change.
+      already_saved: saved.already_saved,
+      reprompted: saved.already_saved ? 0 : reprompted,
+      url: "/code-of-conduct",
+    };
+  } catch (e) {
+    throw templateFailure(e, "save_code_of_conduct_failed", "code_of_conduct_not_published");
+  }
+}
+
+async function handlePublishCodeOfConduct(params: unknown) {
+  const input = agentPublishCodeOfConductSchema.parse(params);
+  const db = await adminClient();
+  const target = await loadCodeOfConductVersion(db, input.version);
+  if (!target) {
+    throw new AgentError(404, "not_found", `No code of conduct version ${input.version}.`);
+  }
+  // Read before promoting so the reply can say whether this call changed
+  // anything: a retry reporting "published" for a no-op reads as a second change.
+  if (target.is_current) return { version: target.version, published: false as const };
+  try {
+    const { version } = await promoteCodeOfConductVersion(db, target.id);
+    return {
+      version,
+      published: true as const,
+      // Who is now out of date is decided by this, so a rollback that undoes an
+      // ask says so here.
+      required_version: target.required_version,
+    };
+  } catch (e) {
+    throw templateFailure(e, "publish_code_of_conduct_failed", "code_of_conduct_not_published");
   }
 }
 
@@ -1510,6 +1689,14 @@ async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: s
       return handleSaveWaiverTemplate(params, actingAs);
     case "publish_waiver_template":
       return handlePublishWaiverTemplate(params);
+    case "list_code_of_conduct_versions":
+      return handleListCodeOfConductVersions();
+    case "get_code_of_conduct":
+      return handleGetCodeOfConduct(params);
+    case "save_code_of_conduct":
+      return handleSaveCodeOfConduct(params, actingAs);
+    case "publish_code_of_conduct":
+      return handlePublishCodeOfConduct(params);
     case "list_membership_plans":
       return handleListMembershipPlans();
     case "save_membership_plan":

@@ -17,6 +17,7 @@ import {
   normalizeEmail,
 } from "@/lib/validation";
 import { codeOfConductSummary } from "@/lib/code-of-conduct";
+import { loadCodeOfConductStandard } from "@/lib/code-of-conduct.functions";
 import type { MembershipClient } from "@/lib/membership-types";
 import { aggregateClubUsers, personLabelsById, type ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
@@ -77,6 +78,7 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
     { data: checkins, error: cErr },
     { count: checkinCount, error: ccErr },
     { data: codeOfConduct, error: cocErr },
+    { data: cocStandard, error: cocVersionsErr },
     { data: dependantProfiles, error: dErr },
   ] = await Promise.all([
     admin.from("profiles").select("*").eq("user_id", userId).maybeSingle(),
@@ -113,6 +115,15 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
       .eq("user_id", userId)
       .order("accepted_at", { ascending: false })
       .limit(20),
+    // What the club currently asks of everybody, which the state is measured
+    // against: the same read the member's screens and the agent's list_users
+    // make (`loadCodeOfConductStandard`), so the three cannot disagree about
+    // who is out of date. Shaped as a { data, error } like its neighbours, so a
+    // failure degrades this one section rather than the page.
+    loadCodeOfConductStandard(admin).then(
+      (data) => ({ data, error: null }),
+      (error: unknown) => ({ data: null, error }),
+    ),
     // The people on THIS person's account. Read here rather than after the
     // profile comes back because it is keyed on the id we were asked about,
     // not on anything the profile tells us -- so it costs no extra round trip.
@@ -217,6 +228,8 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
   // unreadable acceptance list is shown as "not signed yet" with a line in the
   // server log rather than an error page over a nice-to-know.
   if (cocErr) console.error("[getClubUser] code of conduct lookup failed:", cocErr);
+  if (cocVersionsErr)
+    console.error("[getClubUser] code of conduct versions lookup failed:", cocVersionsErr);
   const emails = (emailRows ?? []).map((e) => ({
     user_id: e.user_id,
     email: e.email,
@@ -353,7 +366,7 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
      */
     degraded: [
       ...(emailErr ? (["email"] as const) : []),
-      ...(cocErr ? (["code_of_conduct"] as const) : []),
+      ...(cocErr || cocVersionsErr ? (["code_of_conduct"] as const) : []),
       ...(guardianProfile.error ? (["guardian"] as const) : []),
       ...(eventsErr ? (["checkin_classes"] as const) : []),
       ...(approverProfiles.error || approverEmails.error ? (["waiver_approvers"] as const) : []),
@@ -502,7 +515,10 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
     // House rules, not a gate. Shown so a manager can nudge somebody about it
     // when they join as a paying member, which is when the club wants it
     // signed. Nothing here stops an approval or a check-in.
-    code_of_conduct: codeOfConductSummary(codeOfConduct),
+    code_of_conduct: codeOfConductSummary(
+      codeOfConduct,
+      cocStandard ?? { current_version: null, required_version: null },
+    ),
     // The frozen submission, in full: what a manager reads to decide whether
     // to approve. The PDF is fetched separately, as a short-lived signed URL.
     waivers: waiverRows.map((w) => ({

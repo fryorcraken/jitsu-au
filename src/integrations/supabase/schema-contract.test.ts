@@ -263,12 +263,49 @@ export type _CodeOfConductColumns = RequireColumns<
 
 /**
  * Exactly `number`, not `number | null`. Every screen compares this against
- * `CODE_OF_CONDUCT_VERSION` to decide whether somebody's agreement is current,
+ * the version the club last asked everybody to agree to, to decide whether
+ * somebody's agreement is current,
  * and a nullable widening would mean the NOT NULL was dropped live, quietly
  * turning "agreed to nothing in particular" into a valid acceptance.
  */
 export type _CodeOfConductVersionIsNumber = Expect<
   Equals<Tables["code_of_conduct_acceptances"]["Row"]["version"], number>
+>;
+
+// ---- code_of_conduct_versions: the document itself, one row per version ----
+export type _CodeOfConductVersionsColumns = RequireColumns<
+  Tables["code_of_conduct_versions"]["Row"],
+  | "id"
+  | "version"
+  | "title"
+  | "body_md"
+  | "asks_reagreement"
+  | "required_version"
+  | "is_current"
+  | "first_published_at"
+  | "client_submission_id"
+  | "created_by"
+  | "created_at"
+>;
+
+/**
+ * A plain boolean, never null. "Did publishing this version ask everybody to
+ * agree again?" has two answers, and a nullable widening would make a third
+ * that every reader of the standard (`codeOfConductStandard`) would have to
+ * guess at.
+ */
+export type _CodeOfConductAsksReagreementIsBoolean = Expect<
+  Equals<Tables["code_of_conduct_versions"]["Row"]["asks_reagreement"], boolean>
+>;
+
+/**
+ * Exactly `number`, never null. Every "is this person out of date?" answer is
+ * `accepted_version < required_version` on the live row (`codeOfConductStandard`),
+ * so a version without one would leave the club with no rule at all, and a
+ * nullable widening would mean the NOT NULL never reached production.
+ */
+export type _CodeOfConductRequiredVersionIsNumber = Expect<
+  Equals<Tables["code_of_conduct_versions"]["Row"]["required_version"], number>
 >;
 
 /**
