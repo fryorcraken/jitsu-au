@@ -151,7 +151,8 @@ describe("sendWaiverEmails", () => {
     const toManager = sendLovableEmail.mock.calls
       .map(([p]) => p)
       .find((p) => p.to === "manager-a@example.com");
-    expect(toManager.reply_to).toBe("sam@example.com, ada@example.com");
+    // Guardian first: it is the address kept if the service takes only one.
+    expect(toManager.reply_to).toBe("ada@example.com, sam@example.com");
   });
 
   it("lists one address once when the guardian's is the member's own", async () => {

@@ -224,10 +224,12 @@ export async function sendWaiverEmails({
   // Review prompt to each manager, replying to the address the member's copy
   // went to, plus the guardian's on a minor's own waiver. On a waiver signed
   // for a child on someone's account the copy went to the parent, never to the
-  // child's reserved address, so a reply reaches somebody.
+  // child's reserved address, so a reply reaches somebody. The guardian comes
+  // first: if the email service will only take one address, that is the one
+  // sendEmail keeps, and on a minor's waiver it is the adult's.
   const replyTo = [
     ...new Set(
-      [memberEmail, guardianEmail].filter((e): e is string => Boolean(e)).map(normalizeEmail),
+      [guardianEmail, memberEmail].filter((e): e is string => Boolean(e)).map(normalizeEmail),
     ),
   ];
   for (const to of notifyRecipients) {

@@ -76,14 +76,15 @@ describe("sendEmail", () => {
 
   it("does not resend after a failure that is not about the request's content", async () => {
     // A timeout, a 5xx or a 409 may mean the first attempt went out or is still
-    // going; a resend under a new key could then deliver it twice. A 401 or a
-    // 429 is the key or the rate, and a resend would only fail again.
+    // going; a resend under a new key could then deliver it twice. A 401, 403
+    // or 429 is the key or the rate, and a resend would only fail again.
     for (const failure of [
       new Error("network down"),
       { status: 503 },
       { status: 429 },
       { status: 409 },
       { status: 401 },
+      { status: 403 },
     ]) {
       sendLovableEmail.mockReset();
       sendLovableEmail.mockRejectedValue(failure);
@@ -95,11 +96,12 @@ describe("sendEmail", () => {
     }
   });
 
-  it("reports the first error when the one-address retry fails too", async () => {
+  it("reports the first error when the one-address retry is rejected too", async () => {
     // Rejected again with a single Reply-To, so that was never the problem:
     // whoever reads the log should see the original rejection.
     const first = Object.assign(new Error("recipient suppressed"), { status: 422 });
-    sendLovableEmail.mockRejectedValueOnce(first).mockRejectedValueOnce(new Error("again"));
+    const again = Object.assign(new Error("recipient suppressed"), { status: 422 });
+    sendLovableEmail.mockRejectedValueOnce(first).mockRejectedValueOnce(again);
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -107,6 +109,21 @@ describe("sendEmail", () => {
       sendEmail({ ...base, replyTo: ["teen@example.com", "parent@example.com"] }),
     ).rejects.toBe(first);
     expect(sendLovableEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the retry's own error when the retry fails for another reason", async () => {
+    // The two-address Reply-To WAS the problem and the retry then timed out:
+    // pointing the log back at the rejection would hide what actually failed.
+    const timeout = new Error("timed out");
+    sendLovableEmail
+      .mockRejectedValueOnce(Object.assign(new Error("bad reply_to"), { status: 422 }))
+      .mockRejectedValueOnce(timeout);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      sendEmail({ ...base, replyTo: ["teen@example.com", "parent@example.com"] }),
+    ).rejects.toBe(timeout);
   });
 
   it("does not resend a refused email that had only one Reply-To", async () => {

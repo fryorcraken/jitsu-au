@@ -313,11 +313,12 @@ The guardian signs at the end. On submit the signer immediately gets the signed 
 by email; managers are notified, by an email whose Reply-To is the address the
 copy went to, so pressing reply answers whoever received it: the signer, or the
 parent on a waiver signed for a child on their account. A minor signing for
-themselves is replied to at both their own address and their guardian's. Behind
-the scenes, for a new email: a locked login record is created (their email, no
-way to sign in) and their profile is seeded with name + phone. An existing
-person is left untouched. Either way the waiver row stores the full submission,
-and the person is now an applicant.
+themselves is replied to at both their own address and their guardian's (or,
+should the email service ever refuse two addresses, at the guardian's alone,
+and the server logs it). Behind the scenes, for a new email: a locked login
+record is created (their email, no way to sign in) and their profile is seeded
+with name + phone. An existing person is left untouched. Either way the waiver
+row stores the full submission, and the person is now an applicant.
 
 **For a child's waiver that happens twice over.** The address resolves to the
 guardian, creating their locked person record if this is their first child, and

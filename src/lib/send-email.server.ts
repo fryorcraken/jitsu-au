@@ -72,8 +72,9 @@ export async function sendEmail(opts: {
     // A Reply-To listing several addresses is ordinary email, but nothing
     // documents whether Lovable's send API accepts one. If it refuses, every
     // caller swallows the error, so the email would simply never arrive: a
-    // manager would not hear about a waiver at all. Losing the second address
-    // is far cheaper, so send once more with only the first. Only when the
+    // manager would not hear about a waiver at all. Losing the later addresses
+    // is far cheaper, so send once more with only the first (callers list the
+    // one that matters most first). Only when the
     // request was rejected as invalid: after a timeout the first attempt may
     // have gone out, and the retry's new idempotency key would deliver it twice.
     if (replyTo.length < 2 || !rejectedAsInvalid(e)) throw e;
@@ -81,10 +82,11 @@ export async function sendEmail(opts: {
     try {
       await send(replyTo.slice(0, 1), `${opts.idempotencyKey}-single-reply-to`);
     } catch (retryError) {
-      // Rejected again with one address, so the Reply-To was not the problem.
-      // The first error is the one that says what was.
+      // Rejected again with one address: the Reply-To was not the problem, and
+      // the first error is the one that says what was. Anything else (a
+      // timeout, a 5xx) is the retry's own failure, so report that.
       console.error("[send-email] retry with one Reply-To also failed", retryError);
-      throw e;
+      throw rejectedAsInvalid(retryError) ? e : retryError;
     }
   }
 }
