@@ -56,7 +56,6 @@ const INVOICE = {
   id: "inv-12",
   invoice_number: 12,
   payment_reference: "INV0012",
-  paid_reference: null,
   user_id: null,
   lines: [{ name: "Club gi", unit_price_cents: 8500, quantity: 1 }],
   total_cents: 8500,
