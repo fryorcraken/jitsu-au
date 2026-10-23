@@ -731,11 +731,13 @@ Non-production hosts (Lovable previews, branch deploys) are served a blanket
 ### The site's address
 
 The site is served from **`https://utsjitsu.com.au`**, and that is `SITE_ORIGIN`
-in `src/lib/seo.ts`: every canonical, the sitemap, and every link in every email
+in `src/lib/site-origin.ts`: every canonical, the sitemap, and every link in every email
 come from it (`SITE_HOST` is the same thing without the scheme, for copy). The
-one deliberate exception is the calendar subscription link on `/account`, which
-names the host the member is browsing on, so a local or preview stack hands out
-its own feed; in production that is the same host. `jitsu.au` (the address until October 2026) now
+two links a person carries out of the browser, the calendar subscription on
+`/account` and the endpoint in the manager agent prompt, go through
+`linkOrigin` in `src/lib/site-origin.ts`: on any of the club's hosts they get
+`SITE_ORIGIN`, and on a local or preview stack they name that stack, so it
+hands out links to itself. `jitsu.au` (the address until October 2026) now
 redirects there. Three rules follow, and the first one has already cost the club
 its nightly email once:
 

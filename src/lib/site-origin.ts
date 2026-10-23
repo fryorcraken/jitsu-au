@@ -46,3 +46,25 @@ export function isProductionHost(host: string | null | undefined): boolean {
   const name = host.trim().toLowerCase().split(":")[0];
   return PRODUCTION_HOSTS.includes(name);
 }
+
+/**
+ * The origin for a link somebody will use outside this browser tab (a
+ * calendar subscription, the manager agent's endpoint), given the origin the
+ * request came in on.
+ *
+ * On any of the club's own hosts that is SITE_ORIGIN, whichever one the
+ * person happens to be browsing: the others only redirect to it or duplicate
+ * it, and these links carry a token that a redirect to another host drops.
+ * Anywhere else (a Lovable preview, a branch deploy, localhost) it is that
+ * origin, so a test stack hands out links to itself rather than to the club.
+ */
+export function linkOrigin(requestOrigin: string | null | undefined): string {
+  if (!requestOrigin) return SITE_ORIGIN;
+  let url: URL;
+  try {
+    url = new URL(requestOrigin);
+  } catch {
+    return SITE_ORIGIN;
+  }
+  return isProductionHost(url.host) ? SITE_ORIGIN : url.origin;
+}
