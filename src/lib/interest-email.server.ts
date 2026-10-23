@@ -9,7 +9,7 @@ import * as React from "react";
 import { render } from "@react-email/render";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { sendEmail } from "@/lib/send-email.server";
+import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confirmation";
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
@@ -127,6 +127,8 @@ export async function sendInterestEmails({
       html: applicantHtml,
       text: applicantText,
       idempotencyKey: `interest-applicant-${registrationId}`,
+      // Nothing in this email offers a reply, so only the header needs it.
+      replyTo: await clubReplyTo(admin),
     });
     sent.push(email);
   } catch (e) {

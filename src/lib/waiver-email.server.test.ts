@@ -64,7 +64,7 @@ describe("sendWaiverEmails", () => {
       admin,
     });
 
-    expect(result).toEqual({ sent: [], skipped: true });
+    expect(result).toEqual({ sent: [], skipped: true, memberReplyTo: null });
     expect(from).not.toHaveBeenCalled();
   });
 

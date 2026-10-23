@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLUB_REPLY_TO_MAX,
+  DEPENDANT_EMAIL_DOMAIN,
+  clubReplyToSchema,
+  parseClubReplyTo,
+  saveClubSettingsSchema,
   agentGetWaiverTemplateSchema,
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
@@ -2885,4 +2890,59 @@ describe("manager agent waiver-template schemas", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+// The club's reply-to address. Whatever is typed here becomes the Reply-To on
+// every member email, so it is one address or nothing.
+describe("clubReplyToSchema", () => {
+  it("trims and lowercases one address", () => {
+    expect(clubReplyToSchema.parse("  Hello@Example.COM ")).toBe("hello@example.com");
+  });
+
+  it("accepts an empty value, which clears it back to unset", () => {
+    expect(clubReplyToSchema.parse("   ")).toBe("");
+  });
+
+  it.each(["hello", "hello@", "a@example.com, b@example.com", "a@example.com b@example.com"])(
+    "refuses %j, which is not one address",
+    (value) => {
+      expect(clubReplyToSchema.safeParse(value).success).toBe(false);
+    },
+  );
+
+  it("refuses an address longer than SMTP allows", () => {
+    const long = `${"a".repeat(CLUB_REPLY_TO_MAX)}@example.com`;
+    expect(clubReplyToSchema.safeParse(long).success).toBe(false);
+  });
+
+  it("refuses a dependant's reserved address, which nothing delivers to", () => {
+    const reserved = `00000000-0000-4000-8000-000000000000@${DEPENDANT_EMAIL_DOMAIN}`;
+    expect(clubReplyToSchema.safeParse(reserved).success).toBe(false);
+  });
+
+  it("is saved under its own key", () => {
+    expect(
+      saveClubSettingsSchema.parse({ key: "email_reply_to", value: " Hello@Example.com" }),
+    ).toEqual({ key: "email_reply_to", value: "hello@example.com" });
+    // A key's value has to pass that key's rules, not some other key's.
+    expect(
+      saveClubSettingsSchema.safeParse({ key: "email_reply_to", value: { bsb: "062000" } }).success,
+    ).toBe(false);
+    expect(saveClubSettingsSchema.safeParse({ key: "something_else", value: "x" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("parseClubReplyTo", () => {
+  it("reads back a stored address", () => {
+    expect(parseClubReplyTo("hello@example.com")).toBe("hello@example.com");
+  });
+
+  it.each([null, "", "  ", "not an address"])(
+    "reads %j as unset, so no email promises a reply that bounces",
+    (raw) => {
+      expect(parseClubReplyTo(raw)).toBeNull();
+    },
+  );
 });

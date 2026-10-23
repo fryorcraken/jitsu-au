@@ -33,7 +33,18 @@ const Row = ({ label, value, mono }: { label: string; value: string; mono?: bool
  * `details` null covers both "never published" and "could not read": either way
  * the email cannot name an account, and it says so rather than inventing one.
  */
-export const ClubAccountSection = ({ details }: { details: ClubPaymentDetails | null }) =>
+export const ClubAccountSection = ({
+  details,
+  replyTo,
+}: {
+  details: ClubPaymentDetails | null;
+  /**
+   * Where a reply goes, for the "not published yet" line. See
+   * `reply-or-reach-us.tsx`. Only ever rendered above an invoice footer that
+   * carries the full contact fallback.
+   */
+  replyTo: string | null;
+}) =>
   details ? (
     <Section style={instructionsBox}>
       {CLUB_ACCOUNT_FIELDS.map((field) => {
@@ -67,8 +78,13 @@ export const ClubAccountSection = ({ details }: { details: ClubPaymentDetails | 
   ) : (
     <Section style={instructionsBox}>
       <Text style={plainText}>
-        We have not published our account details yet. Reply to this email and we'll send them
-        straight over.
+        We have not published our account details yet.{" "}
+        {/* Both invoice emails end with the full "contact page, phone,
+            WhatsApp" line, so the fallback here points down at it rather than
+            printing the same three links twice in one email. */}
+        {replyTo
+          ? "Reply to this email and we'll send them straight over."
+          : "Get in touch using any of the ways below and we'll send them straight over."}
       </Text>
     </Section>
   );

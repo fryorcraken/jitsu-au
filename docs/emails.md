@@ -51,17 +51,52 @@ purpose, so it can still report how much was owed.
 ## Where a reply goes
 
 Mail comes from `noreply@`, which nobody reads, so a reply reaches a person only
-when the send sets `Reply-To`. The rule, stated at the top of
+when the send sets `Reply-To`. `sendEmail` takes a **required** `replyTo`, so
+every call site decides, and the rule is stated at the top of
 `send-email.server.ts`:
 
 - **A manager's copy of an email about a person** carries that person's address,
   because pressing Reply is how a manager answers them: the contact message, the
   new lead, the signed waiver (the guardian first, then the signer, for a
-  minor), the membership awaiting payment. Listed in the table below.
-- **An email to a member or visitor carries none.** A reply to an invoice, a
-  receipt or a waiver confirmation therefore reaches nobody today, even where the
-  email says "reply to this email". That is a known gap, not a decision to keep.
-- **Supabase Auth emails carry none**: the handler cannot set one.
+  minor), the membership awaiting payment. Listed in the manager table below.
+- **An email to a member or visitor** carries the club's **reply-to address**:
+  `email_reply_to` in `club_settings`, set by a manager in the "Replies to club
+  emails" card on `/manager/settings` (the agent API can read it but not change
+  it). The sender reads it once with `clubReplyTo(admin)`,
+  **before** rendering, and hands the same value to the template. Every line
+  that says "reply to this email" is rendered through `ReplyOrReachUs`
+  (`src/lib/email-templates/reply-or-reach-us.tsx`): with an address it prints
+  the reply sentence, and without one it points at the contact page, phone and
+  WhatsApp. So an email never promises a reply that reaches nobody, and the
+  header and the copy cannot disagree. A failed read of the setting sends the
+  email anyway, without a reply-to and with the fallback copy.
+- **The comment-reply email carries none.** Somebody pressing Reply on "X
+  replied to you" means to answer X, and the email cannot reach them; sending
+  that to the committee instead would put a message written for another member
+  in the club inbox without the writer knowing.
+- **Supabase Auth emails carry none**: the handler cannot set one. None of them
+  asks for a reply.
+
+The signing page's "your PDF is not ready" screen follows the same rule: it
+says "reply to your confirmation email" only when that email actually went out
+with the club's reply-to (`reply_to_confirmation` on the submit result), and
+links the contact page otherwise. The member's "how to pay" panel always points
+at the contact page.
+
+The club's address can be any address on any domain: only the `From` has to sit
+on the sending domain. A dependant's reserved address is refused.
+
+| Email to a member or visitor             | `Reply-To` | Has a "reply to this email" line              |
+| ---------------------------------------- | ---------- | --------------------------------------------- |
+| Contact acknowledgement                  | Club's     | The footer implies one only when it is set    |
+| Interest confirmation                    | Club's     | No                                            |
+| Waiver confirmation                      | Club's     | Yes, when the PDF failed                      |
+| Account activated                        | Club's     | No: always links the contact form             |
+| Membership invoice, item invoice         | Club's     | Yes, and in the "account not published" block |
+| Membership receipt, item invoice receipt | Club's     | Yes                                           |
+| Confirm your email address               | Club's     | No                                            |
+| Daily digest                             | Club's     | No                                            |
+| Comment reply                            | None       | No                                            |
 
 ## Who an email is addressed to
 

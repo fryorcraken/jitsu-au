@@ -29,6 +29,7 @@ const PROPS = {
   reference: "INV0007",
   details: DETAILS,
   membershipUrl: "https://jitsu.au/membership",
+  replyTo: null,
 };
 
 const visibleText = (html: string) =>
@@ -97,6 +98,7 @@ describe("ItemInvoicePaidEmail", () => {
           summary: "Club gi",
           amount: "$85",
           membershipUrl: "https://jitsu.au/membership",
+          replyTo: null,
         }),
       ),
     );

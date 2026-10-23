@@ -1046,3 +1046,74 @@ describe("manager agent route: item invoices", () => {
     expect((await res.json()).error.code).toBe("invalid_params");
   });
 });
+
+describe("manager agent route: club settings", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A fake `club_settings` store: reads by key, records every upsert. */
+  function fakeSettings(values: Record<string, string>, opts: { readFails?: boolean } = {}) {
+    const upserts: Record<string, unknown>[] = [];
+    return {
+      upserts,
+      db: {
+        from: (table: string) => {
+          if (table !== "club_settings") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => ({
+              eq: (_col: string, key: string) => ({
+                maybeSingle: () =>
+                  Promise.resolve(
+                    opts.readFails
+                      ? { data: null, error: { message: "connection reset" } }
+                      : ok(key in values ? { value: values[key] } : null),
+                  ),
+              }),
+            }),
+            upsert: (row: Record<string, unknown>) => {
+              upserts.push(row);
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      },
+    };
+  }
+
+  it("reads the reply-to address and the bank account", async () => {
+    currentAdmin = fakeSettings({ email_reply_to: "hello@example.com" }).db;
+    const res = await post({ action: "get_club_settings", params: {} });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.result).toMatchObject({
+      email_reply_to: "hello@example.com",
+      payment_details: null,
+    });
+  });
+
+  // "Could not read" must never come back as "nothing is set": a caller would
+  // then set an address over one that is perfectly fine.
+  it("answers a failed read with a retryable 503, not an empty answer", async () => {
+    currentAdmin = fakeSettings({}, { readFails: true }).db;
+    const res = await post({ action: "get_club_settings", params: {} });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("settings_unreadable");
+  });
+
+  // Both settings decide where members' replies and money go, so no token can
+  // change them: the action does not exist, and nothing is written.
+  it("has no way to change a club setting", async () => {
+    const fake = fakeSettings({});
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_club_settings",
+      params: { key: "email_reply_to", value: "someone@example.com" },
+    });
+    expect(res.status).toBe(400);
+    expect(fake.upserts).toEqual([]);
+  });
+});
