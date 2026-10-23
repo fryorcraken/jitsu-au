@@ -319,11 +319,24 @@ person's own.
 | `media_consent`                  | `boolean`     | yes  | Media/promotional-photo consent, live. Three-state: NULL = never asked, and NOT the same as `false`.                                                                            |
 | `media_consent_updated_at`       | `timestamptz` | yes  | When `media_consent` was last set by hand, by the member or a manager. NULL when it came from an approved waiver.                                                               |
 | `media_consent_updated_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who set it. Equal to `user_id` when the member did it themselves, else a manager; NULL from a waiver.                           |
+| `archived_at`                    | `timestamptz` | yes  | When a manager marked this person as having left the club. NULL = not archived. Reversible, deletes nothing, blocks nothing; see "Archiving" below.                             |
+| `archived_by`                    | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The manager who archived them. Only set while `archived_at` is (`profiles_archived_by_needs_archived_at`).                      |
 | `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                |
 | `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
+
+**Archiving.** `archived_at` is a fact beside the funnel phase, never a sixth
+phase: `deriveLifecycleStatus` does not read it, so nothing that filters on phase
+changes meaning. The constraint holds one direction only, because an archive
+date whose archiver has since been deleted is exactly what `SET NULL` produces.
+No client role can write either column: `profiles` holds no privilege for
+`anon` or `authenticated` at all, and `check-client-grants.py` reads column ACLs
+as well as table ones, so a later `GRANT UPDATE (archived_at)` would fail CI
+rather than hand a member their own restore button
+(`20261023100000_profile_archive.sql`). Why archiving is not erasure:
+`docs/erasing-personal-data.md`.
 
 **Households.** `guardian_user_id` is the ONLY thing that marks a dependant, and
 it is a real person record in this table — unlike `guardian_name` /

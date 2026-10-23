@@ -46,16 +46,23 @@ Usage
 
 GRANTS_CSV is a headerless three-column CSV of `table,grantee,privilege` from:
 
-    psql "$DB_URL" --csv --tuples-only -c \
-      "SELECT c.relname, r.rolname, a.privilege_type \
-         FROM pg_class c \
-         JOIN pg_namespace n ON n.oid = c.relnamespace \
-         CROSS JOIN LATERAL aclexplode(c.relacl) a \
-         JOIN pg_roles r ON r.oid = a.grantee \
-        WHERE n.nspname = 'public' AND c.relkind = 'r' \
-          AND r.rolname IN ('anon','authenticated')"
+    psql "$DB_URL" --csv --tuples-only -f client-grants.sql
 
-Read `pg_class.relacl`, NOT `information_schema.role_table_grants`, for two
+(`supabase/lint/client-grants.sql`, the one copy of the query; README.md and
+supabase-lint.yml both run that file.)
+
+A COLUMN grant comes back with the column in brackets after the table,
+`profiles(archived_at)`, and is matched against the expected file the same way
+(`profiles(archived_at):authenticated:UPDATE`). Table ACLs alone could not see
+one: `GRANT UPDATE (col) ON t TO authenticated` writes `pg_attribute.attacl` and
+leaves `pg_class.relacl` empty, so a table this check reported as fully closed
+could hand a member the one column that matters. `profiles.archived_at` is the
+case that made it worth closing: a member able to write it could restore
+themselves, or archive somebody else, through an owner-update RLS policy that
+exists today but is unreachable only because no grant reaches it.
+
+Read `pg_class.relacl` and `pg_attribute.attacl`, NOT
+`information_schema.role_table_grants`, for two
 reasons. The information_schema views only show grants where the current user is
 the grantor, the grantee, or a member of the grantee role, so the least-privilege
 reader role in README.md sees an empty set there — the check would pass while the
@@ -140,12 +147,14 @@ def selftest():
         "calendar_events,anon,SELECT\n"
         ",,\n"
         "profiles,anon,DELETE\n"
+        "profiles(archived_at),authenticated,UPDATE\n"
     )
     assert live == {
         ("user_roles", "authenticated", "SELECT"),
         ("user_roles", "authenticated", "INSERT"),
         ("calendar_events", "anon", "SELECT"),
         ("profiles", "anon", "DELETE"),
+        ("profiles(archived_at)", "authenticated", "UPDATE"),
     }, live
 
     expected = parse_expected(
@@ -160,10 +169,19 @@ def selftest():
     # user_roles is the real defect this guards: the migration granted SELECT
     # only, but Supabase's default INSERT survived and the table's manager RLS
     # policy made it a usable privilege-escalation path.
+    #
+    # The column grant is the other half: a table whose relacl is empty can
+    # still hand a client role one column, and that must fail like any other.
     assert unexpected(live, expected) == [
         ("profiles", "anon", "DELETE"),
+        ("profiles(archived_at)", "authenticated", "UPDATE"),
         ("user_roles", "authenticated", "INSERT"),
     ], unexpected(live, expected)
+
+    # A deliberate column grant is listed the way it is reported.
+    assert parse_expected("profiles(phone):authenticated:update\n") == {
+        ("profiles(phone)", "authenticated", "UPDATE")
+    }
 
     # A clean database has nothing unexpected.
     assert unexpected(expected, expected) == []
@@ -214,7 +232,7 @@ def main():
     # cannot see the ACL than a schema with no client grants at all — and it
     # would pass, silently, forever. `information_schema.role_table_grants` is
     # filtered to grants involving the current user, so a least-privilege reader
-    # sees nothing there; read pg_class.relacl instead (the query is in README.md).
+    # sees nothing there; read pg_class.relacl instead (client-grants.sql).
     if not live and expected:
         print(
             "The grant query came back empty while grants are expected — check the\n"
@@ -249,7 +267,10 @@ def main():
         "\n"
         "    REVOKE ALL ON public.<table> FROM anon, authenticated;\n"
         "\n"
-        "followed by only the privileges the browser client genuinely uses. If a grant\n"
+        "followed by only the privileges the browser client genuinely uses. A line\n"
+        "naming `table(column)` is a COLUMN grant, which REVOKE ALL on the table also\n"
+        "removes; `REVOKE <privilege> (<column>) ON public.<table> FROM <role>;` is the\n"
+        "narrow form. If a grant\n"
         "listed above is deliberate, add it to\n"
         f"{expected_display(expected_path)} with a note saying which client code needs it.\n"
         "See docs/database-changes.md.",

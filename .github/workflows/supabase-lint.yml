@@ -107,10 +107,12 @@ jobs:
       # Splinter lints 0026/0027 only ever test SELECT, and `supabase db lint`
       # does not look at ACLs at all.
       #
-      # Read pg_class.relacl, NOT information_schema.role_table_grants: the
-      # information_schema views hide grants the connecting role is not party to
-      # and omit MAINTAIN entirely. Same query supabase/lint/README.md gives for
-      # the by-hand live run, so the two results are directly comparable — a
+      # Read pg_class.relacl and pg_attribute.attacl, NOT
+      # information_schema.role_table_grants: the information_schema views hide
+      # grants the connecting role is not party to and omit MAINTAIN entirely.
+      # The column half catches `GRANT UPDATE (col)`, which leaves the table ACL
+      # empty. Same file supabase/lint/README.md runs for the by-hand live
+      # check, so the two results are directly comparable — a
       # difference between them is a live database that has drifted from its own
       # migrations, in either direction.
       #
@@ -132,14 +134,7 @@ jobs:
           set -o pipefail
           psql "$DB_URL" \
             -v ON_ERROR_STOP=1 --csv --tuples-only --quiet --pset pager=off \
-            -c "SELECT c.relname, r.rolname, a.privilege_type \
-                  FROM pg_class c \
-                  JOIN pg_namespace n ON n.oid = c.relnamespace \
-                  CROSS JOIN LATERAL aclexplode(c.relacl) a \
-                  JOIN pg_roles r ON r.oid = a.grantee \
-                 WHERE n.nspname = 'public' AND c.relkind = 'r' \
-                   AND r.rolname IN ('anon', 'authenticated') \
-                 ORDER BY 1, 2, 3" \
+            -f supabase/lint/client-grants.sql \
             -o "$RUNNER_TEMP/grants.csv"
           python3 supabase/lint/check-client-grants.py "$RUNNER_TEMP/grants.csv" \
             | tee -a "$GITHUB_STEP_SUMMARY"
