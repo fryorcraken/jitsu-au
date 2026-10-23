@@ -61,6 +61,7 @@ const INVOICE = {
   total_cents: 8500,
   paid_at: null,
   payment_method: null,
+  paid_reference: null,
   cancelled_at: null,
   created_by: null,
   client_submission_id: null,
@@ -228,6 +229,36 @@ describe("recordItemInvoicePayment", () => {
         ["is", "cancelled_at", null],
       ]),
     );
+  });
+
+  // A manager recording cash taken on Tuesday says so, and the receipt number
+  // goes with it. Both are written by the same claim that records the payment.
+  it("records the day the money arrived and what it was known by", async () => {
+    const { recordItemInvoicePayment } = await import("./item-invoices.functions");
+    const fake = fakeAdmin({});
+    await recordItemInvoicePayment(fake.admin as never, {
+      invoice: INVOICE,
+      method: "manual",
+      paidOn: "2026-10-01",
+      reference: "Receipt 42",
+    });
+    expect(fake.writes.find((w) => w.table === "item_invoices")?.patch).toEqual({
+      paid_at: "2026-10-01T02:00:00.000Z",
+      payment_method: "manual",
+      paid_reference: "Receipt 42",
+    });
+  });
+
+  it("stamps now and no reference when given neither", async () => {
+    const { recordItemInvoicePayment } = await import("./item-invoices.functions");
+    const fake = fakeAdmin({});
+    const before = Date.now();
+    await recordItemInvoicePayment(fake.admin as never, { invoice: INVOICE, method: "manual" });
+    const patch = fake.writes.find((w) => w.table === "item_invoices")?.patch as {
+      paid_at: string;
+    };
+    expect(Date.parse(patch.paid_at)).toBeGreaterThanOrEqual(before);
+    expect(patch).not.toHaveProperty("paid_reference");
   });
 });
 

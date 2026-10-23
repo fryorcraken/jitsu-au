@@ -75,7 +75,7 @@ describe("/manager/blog", () => {
 
     await userEvent.click(rowFor("Hello world").getByRole("button", { name: /copy link/i }));
 
-    expect(writeText).toHaveBeenCalledWith("https://jitsu.au/blog/2026-08-01-hello-world");
+    expect(writeText).toHaveBeenCalledWith("https://utsjitsu.com.au/blog/2026-08-01-hello-world");
   });
 
   it("names each button after its own post, so a screen reader can tell them apart", async () => {

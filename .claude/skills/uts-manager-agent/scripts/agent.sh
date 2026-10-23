@@ -8,7 +8,7 @@
 # Requires: UTS_MANAGER_API_URL, UTS_MANAGER_API_KEY (and jq for pretty output).
 set -euo pipefail
 
-: "${UTS_MANAGER_API_URL:?set UTS_MANAGER_API_URL, e.g. https://jitsu.au}"
+: "${UTS_MANAGER_API_URL:?set UTS_MANAGER_API_URL, e.g. https://utsjitsu.com.au}"
 : "${UTS_MANAGER_API_KEY:?set UTS_MANAGER_API_KEY (mint one at /manager/api-tokens)}"
 
 endpoint="${UTS_MANAGER_API_URL%/}/api/manager/agent"

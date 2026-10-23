@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
-import { buildPageMeta } from "@/lib/seo";
+import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 
 export const Route = createFileRoute("/first-class")({
@@ -27,7 +27,7 @@ export const Route = createFileRoute("/first-class")({
         "A step-by-step walkthrough of your first Japanese Jiu-Jitsu session in Ultimo: what to expect, what to bring and how the free trial works.",
       path: "/first-class",
     }),
-    links: [{ rel: "canonical", href: "https://jitsu.au/first-class" }],
+    links: [{ rel: "canonical", href: canonicalUrl("/first-class") }],
   }),
   component: FirstClass,
 });

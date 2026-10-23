@@ -681,7 +681,9 @@ dated plan is on sale at once.
 `plan_id → membership_plans(id)`, `status`
 (`pending|active|expired|cancelled`), `is_student`, `uts_student_number`,
 `price_cents`, `payment_reference` (indexed; per-member, not unique),
-`payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `starts_at`,
+`payment_method` (`bank_transfer|stripe|manual`), `paid_at`, `paid_reference`
+(what a hand-recorded payment was known by, such as a receipt number; null
+until paid, 1-200 chars, never the same thing as `payment_reference`), `starts_at`,
 `ends_at`, `sessions_remaining`, `session_date`, `notes`, `created_at`.
 `status` is about PERMISSION TO TRAIN, never money: `active` means authorised,
 and a membership is authorised the moment it is raised. `paid_at` is the money,
@@ -752,13 +754,16 @@ needs, so removing an item is a plain `DELETE`.
 `lines` (jsonb array of `{ name, unit_price_cents, quantity }`, 1 to 20 entries:
 a frozen copy, never a reference to `charge_items`), `total_cents` (> 0, the lines
 added up, stored so the bank match reads one number), `paid_at`,
-`payment_method` (`bank_transfer|manual`, null until paid), `cancelled_at`,
+`payment_method` (`bank_transfer|manual`, null until paid), `paid_reference`
+(as on `memberships`: a hand-recorded payment's receipt or reference, null until
+paid), `cancelled_at`,
 `created_by → auth.users(id)`, `client_submission_id` (nullable uuid, partial
 unique index; a retried raise finds the invoice it already made, as in
 "`client_submission_id`" below), `created_at`. CHECK: never both paid and
 cancelled. Unpaid means `paid_at IS NULL AND cancelled_at IS NULL`, and a partial
 index covers exactly that. `paid_at` is written only by
-`recordItemInvoicePayment`, guarded on the row still being unpaid.
+`recordItemInvoicePayment`, guarded on the row still being unpaid, and so is
+`paid_reference` (`20261023100000_paid_reference.sql`).
 
 ---
 
@@ -1627,9 +1632,10 @@ elsewhere in the product, so a manager confirms what goes before it goes (see
 
 Submitting also emails the sender an acknowledgement and every manager the
 message itself (`src/lib/contact-email.server.ts`, best-effort: a send failure
-is logged and never fails the submission). Before that existed nothing sent an
-email and nothing on the site read this table, so a message reached nobody at
-all.
+is logged and never fails the submission). The managers' copy carries the
+sender's address as its Reply-To, so pressing reply answers the sender. Before
+that existed nothing sent an email and nothing on the site read this table, so
+a message reached nobody at all.
 
 Which messages are "unread" is a single club-wide marker, not a column here:
 `club_settings.contact_messages_seen_at`, stamped when a manager opens the
