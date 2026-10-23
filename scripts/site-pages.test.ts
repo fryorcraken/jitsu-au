@@ -156,6 +156,7 @@ describe("signedInPaths, against the real src/routes tree", () => {
       "/manager/blog/new",
       "/manager/calendar",
       "/manager/check-in",
+      "/manager/code-of-conduct",
       "/manager/contact-messages",
       "/manager/items",
       "/manager/kb",

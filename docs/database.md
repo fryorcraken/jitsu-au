@@ -1183,15 +1183,16 @@ run through the service role.
 
 The product spec is `docs/code-of-conduct.md`. Three things about the shape:
 
-- **There is no template table.** The document lives in the repo
-  (`src/lib/code-of-conduct.ts`) and `CODE_OF_CONDUCT_VERSION` is bumped by hand.
-  House rules change by committee decision, and a git diff says more about what
-  changed than a row would. An acceptance older than the current version reads as
-  out of date, which is a prompt to re-read and never a block.
+- **`version` names a row of `code_of_conduct_versions`**, below: the exact
+  text the person was shown. Signing refuses any version but the live one, so a
+  manager publishing mid-read cannot have somebody's agreement filed against
+  words they never saw. An acceptance below the club's `required_version` reads
+  as out of date, which is a prompt to re-read and never a block.
 - **There is no PDF and no approval.** Nothing here gates anything: signing the
   code of conduct is not required before training, so there is no pending state
-  and no manager decision to record. The text of each version is in git, so
-  freezing a copy per acceptance would only duplicate it.
+  and no manager decision to record. Every version's text is kept in
+  `code_of_conduct_versions` and never edited in place, so freezing a copy per
+  acceptance would only duplicate it.
 - **`user_id` is NOT NULL**, unlike `email_verification_tokens.user_id`. A
   verification token can exist before its person does; the code of conduct is
   only ever signed by somebody the club already holds, and signing it never
@@ -1203,6 +1204,35 @@ somebody agreed to and when stays intact.
 **RLS:** enabled. Read policies for the owner and for managers as defence in
 depth; no client grants (`REVOKE ALL` from anon/authenticated), so every read and
 the insert run through the service role.
+
+### `code_of_conduct_versions` — the code of conduct itself, one row per version
+
+`id` PK, `version` (unique, > 0), `title`, `body_md` (a small markdown subset,
+`CODE_OF_CONDUCT_SYNTAX`), `asks_reagreement` (boolean, default false),
+`is_current`, `client_submission_id` (partial unique, for retry-safe saves),
+`created_by → auth.users(id) ON DELETE SET NULL`, `created_at`. A partial
+unique index on `is_current` allows exactly one live version, as on
+`waiver_templates`. Title and body carry the same length CHECKs as the editor
+and the agent API.
+
+Managers write it at `/manager/code-of-conduct` or through the manager agent
+API; both save through `saveCodeOfConductVersion`, which writes the next
+version as a draft and then promotes it (`promoteDocumentVersion`, shared with
+the waiver). A version is never edited in place: every save is a new number,
+so an acceptance's `version` always names the text that person read.
+
+`asks_reagreement` is what keeps a typo fix from re-prompting the club. The
+**required version** is the newest version at or below the live one with it
+set, and only an acceptance below that is out of date (`codeOfConductStandard`).
+Version 1 is seeded by its migration with the text members agreed to before the
+document moved here, byte for byte, with `asks_reagreement` set because it is
+the first.
+
+**RLS:** enabled, one manager-only policy as defence in depth, and **no client
+grants** (`REVOKE ALL` from anon/authenticated). Unlike `waiver_templates`,
+the public page does not read it as `anon`: `getPublishedCodeOfConduct` reads
+the live row on the service-role client and returns only what the page prints,
+so nothing about the table is reachable with the published anon key.
 
 ### `manager_api_tokens` — manager agent API credentials
 

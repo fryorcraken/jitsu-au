@@ -194,6 +194,7 @@ src/
       account.tsx         Member account page
       manager.waivers.tsx        Manager: list signed waivers
       manager.waiver-template.tsx Manager: edit waiver template
+      manager.code-of-conduct.tsx Manager: edit the code of conduct
     lovable/email/auth/   Lovable auth-email webhook + preview routes
     app.tsx               Installed-app launch screen (PWA start_url; see docs/pwa.md)
     index.tsx, about.tsx, classes.tsx, pricing.tsx, instructors.tsx,
@@ -395,9 +396,12 @@ Core tables:
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.
-- `code_of_conduct_acceptances` — who agreed to the club's house rules, and to
-  which version. The document itself lives in the repo (`src/lib/code-of-conduct.ts`),
-  not in a table: no template editor, no PDF, no approval. Signing it is never a
+- `code_of_conduct_versions` / `code_of_conduct_acceptances` — the club's
+  house rules, in numbered versions with one live (edited at
+  `/manager/code-of-conduct` or through the manager agent API, like the waiver
+  template), and who agreed to which version. A save only puts people out of
+  date when the manager asks everybody to agree again (`asks_reagreement`), so
+  a typo fix re-prompts nobody. No PDF, no approval, and signing it is never a
   gate on anything. Product flows: `docs/code-of-conduct.md`.
 - `kb_sections` / `kb_articles` / `kb_article_versions` / `kb_annotations` /
   `kb_article_reads` — the **knowledge base**: versioned markdown pages served at
