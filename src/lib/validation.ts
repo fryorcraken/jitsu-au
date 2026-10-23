@@ -989,7 +989,7 @@ export const agentPublishCodeOfConductSchema = z
 // Deliberately small next to `waiverSubmitSchema`. The signer is a person the
 // club already has on file, so nothing about them is retyped here: the name and
 // email stored on the acceptance are copied server-side from their profile and
-// login. What the form actually collects is agreement and a signature.
+// login. What the form actually collects is a signature, which is the agreement.
 //
 // `token` is the proof-of-click token from the "sign it later" email. Someone
 // who just signed a waiver is a locked applicant and cannot log in yet, so
@@ -999,10 +999,11 @@ export const agentPublishCodeOfConductSchema = z
 // revoked, or minted for an address the account no longer has.
 export const codeOfConductAcceptSchema = z.object({
   token: z.string().trim().max(120).optional().or(z.literal("")),
-  // Must be ticked. A code of conduct signed by someone who did not agree to it
-  // is not evidence of anything, so this is `z.literal(true)` rather than a
-  // boolean the server has to remember to check.
-  agree: z.literal(true),
+  // The agreement. There is no separate tick box: the page prints the
+  // undertaking above the signature field and says that typing a name and
+  // submitting is agreeing to it, so a signature that is not blank IS the
+  // agreement. (An `agree` field from a tab opened before the box was removed
+  // is stripped, not refused.)
   signature_name: z.string().trim().min(1).max(120),
   // Which version they actually read. The server refuses a version it does not
   // recognise rather than filing an agreement against unknown text, the same
