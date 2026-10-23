@@ -497,7 +497,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("21");
+    expect(AGENT_MANIFEST.version).toBe("22");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -541,6 +541,20 @@ describe("AGENT_MANIFEST", () => {
     // The trap worth naming, because a caller that falls into it reports a
     // parent as having no children rather than failing.
     expect(notes).toMatch(/status/);
+  });
+
+  // Fields a caching client is told to read have to be announced, the lesson of
+  // #112 pinned above. These are the ones "22" added.
+  it("announces get_user and the headline fields list_users now carries", () => {
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "22")!.notes.join(" ");
+    expect(notes).toMatch(/get_user/);
+    expect(notes).toMatch(/phone/);
+    expect(notes).toMatch(/email_confirmed_at/);
+    expect(notes).toMatch(/code_of_conduct/);
+    // What it deliberately does not report, so nobody goes looking for it.
+    expect(notes).toMatch(/signer_ip/);
+    const getUser = AGENT_MANIFEST.actions.find((a) => a.name === "get_user")!;
+    expect(getUser.params.map((p) => [p.name, p.required])).toEqual([["user_id", true]]);
   });
 
   it("documents the confirmation flags the schemas actually accept", () => {
