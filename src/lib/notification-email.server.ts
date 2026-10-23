@@ -34,6 +34,7 @@ import {
 } from "@/lib/notifications";
 import { greetingName, stableCode, type PersonNameParts } from "@/lib/validation";
 import { contactUserIdOf, deliveryEmailFor, loadHouseholdContacts } from "@/lib/household-email";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 // Sender configuration mirrors the auth-email webhook and every other email
 // this app sends.
@@ -41,7 +42,7 @@ const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
+const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 type AdminClient = SupabaseClient<Database>;

@@ -25,13 +25,14 @@ import {
 } from "@/lib/email-verification";
 import { VerifyEmail } from "@/lib/email-templates/verify-email";
 import { userIdByEmail } from "@/lib/supabase-rpc";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 // Mirror the sender configuration used by the other transactional senders.
 const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-export const SITE_URL = "https://jitsu.au";
+export const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 type AdminClient = SupabaseClient<Database>;

@@ -18,12 +18,13 @@ import { ItemInvoiceEmail, type ItemInvoiceEmailLine } from "@/lib/email-templat
 import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
 import { getManagerEmails } from "@/lib/waiver-email.server";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 const SITE_NAME = "UTS Jitsu";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
 const SENDER_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
+const SITE_URL = SITE_ORIGIN;
 const FROM = `${SITE_NAME} <noreply@${FROM_DOMAIN}>`;
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */

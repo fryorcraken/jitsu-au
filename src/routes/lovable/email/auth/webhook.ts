@@ -7,13 +7,14 @@ import { MagicLinkEmail } from "@/lib/email-templates/magic-link";
 import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 // Configuration
 const SITE_NAME = "UTS Jitsu";
 const SENDER_DOMAIN = "notify.jitsu.au";
 // Must match SENDER_DOMAIN so DKIM/SPF align under DMARC.
 const FROM_DOMAIN = "notify.jitsu.au";
-const SITE_URL = "https://jitsu.au";
+const SITE_URL = SITE_ORIGIN;
 
 // The SDK handler owns verification, dispatch, and retry semantics; this file
 // owns only the email decisions: subjects, templates, and per-type props.
