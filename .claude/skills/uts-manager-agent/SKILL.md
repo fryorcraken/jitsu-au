@@ -200,9 +200,10 @@ scripts/agent.sh get_user '{"user_id":"<uuid>"}'
 > neither.
 
 A person, not a lead: an id with no person record is `404 not_found`. A read
-that could not fill the address or the code of conduct is `500 db_error`
-rather than a `null` email or an `unsigned` the server never actually checked,
-so retry it.
+that could not fill any part of the answer (the address, the code of conduct,
+the guardian's name, a class name or a waiver approver's name) is
+`500 db_error` rather than a `null` email, an `unsigned` or an unknown name the
+server never actually checked, so retry it.
 
 Some things a manager does from the person page are deliberately **not**
 actions: approving a waiver, changing somebody's login email, resending the

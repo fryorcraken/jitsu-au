@@ -589,7 +589,52 @@ describe("loadClubUser", () => {
     expect(guessed.user.email).toBeNull();
     expect(guessed.code_of_conduct.state).toBe("unsigned");
     // ...and says so, which is what lets get_user refuse instead of guessing.
-    expect(guessed.degraded).toEqual(["email", "code_of_conduct"]);
+    // (The same RPC names the approver, so that falls over with it.)
+    expect(guessed.degraded).toEqual(["email", "code_of_conduct", "waiver_approvers"]);
+  });
+
+  it.each([
+    ["calendar_events", "checkin_classes"],
+    ["waivers-approver", "waiver_approvers"],
+  ])("lists a failed %s lookup as degraded rather than as an unknown name", async (what, flag) => {
+    // The approver lookup is a second `profiles` read, so fail it through its
+    // email half (the RPC is asked for the approver once the person's own
+    // address has come back).
+    const fake =
+      what === "calendar_events"
+        ? fakeReadAdmin(baseTables(), { emails: [ADA_EMAIL], fail: { calendar_events: "boom" } })
+        : fakeReadAdmin(baseTables(), { emails: [ADA_EMAIL] });
+    if (what !== "calendar_events") {
+      let calls = 0;
+      const rpc = fake.admin.rpc;
+      fake.admin.rpc = (fn, args) =>
+        ++calls === 2 ? Promise.resolve({ data: null, error: { message: "boom" } }) : rpc(fn, args);
+    }
+    const read = await loadClubUser(fake.admin as never, PERSON);
+    expect(read.degraded).toEqual([flag]);
+  });
+
+  it("lists a failed guardian lookup as degraded", async () => {
+    let profileReads = 0;
+    const fake = fakeReadAdmin(
+      baseTables({
+        profiles: [profileRow({ guardian_user_id: GUARDIAN, is_minor: true })],
+        waivers: [],
+      }),
+      { emails: [] },
+    );
+    const from = fake.admin.from;
+    // The guardian read is the third `profiles` read: the person, their
+    // dependants, then the guardian once the person has come back.
+    fake.admin.from = (table: string) => {
+      if (table === "profiles" && ++profileReads === 3) {
+        return fakeReadAdmin({}, { fail: { profiles: "boom" } }).admin.from("profiles");
+      }
+      return from(table);
+    };
+    const read = await loadClubUser(fake.admin as never, PERSON);
+    expect(read.household.guardian).toEqual({ user_id: GUARDIAN, name: null });
+    expect(read.degraded).toEqual(["guardian"]);
   });
 });
 

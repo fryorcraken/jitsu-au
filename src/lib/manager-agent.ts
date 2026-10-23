@@ -145,14 +145,24 @@ export const GET_USER_LEFT_OUT = {
  * real read.
  */
 export function projectAgentUser<
-  W extends { signer_ip: unknown; signer_meta: unknown },
-  R extends { degraded: unknown; waivers: W[] },
->(read: R) {
-  const { degraded: _degraded, waivers, ...rest } = read;
+  W extends Record<GetUserWaiverLeftOut, unknown>,
+  R extends Record<GetUserTopLeftOut, unknown> & { waivers: W[] },
+>(read: R): Omit<R, GetUserTopLeftOut | "waivers"> & { waivers: Omit<W, GetUserWaiverLeftOut>[] } {
+  // Driven by the list rather than restating it, so a name added there is
+  // withheld here: the list is the promise, and this is what keeps it.
   return {
-    ...rest,
-    waivers: waivers.map(({ signer_ip: _ip, signer_meta: _meta, ...waiver }) => waiver),
-  };
+    ...omit(read, GET_USER_LEFT_OUT.top),
+    waivers: read.waivers.map((w) => omit(w, GET_USER_LEFT_OUT.waiver)),
+  } as Omit<R, GetUserTopLeftOut | "waivers"> & { waivers: Omit<W, GetUserWaiverLeftOut>[] };
+}
+
+type GetUserTopLeftOut = (typeof GET_USER_LEFT_OUT.top)[number];
+type GetUserWaiverLeftOut = (typeof GET_USER_LEFT_OUT.waiver)[number];
+
+function omit<T extends object, K extends string>(value: T, keys: readonly K[]): Omit<T, K> {
+  const copy = { ...value } as Record<string, unknown>;
+  for (const k of keys) delete copy[k];
+  return copy as Omit<T, K>;
 }
 
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
@@ -198,7 +208,7 @@ export const AGENT_MANIFEST: {
       breaking: false,
       notes: [
         "New action get_user { user_id }: everything the manager person page shows about one person, read by the same function the page uses. user (name, email with email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, the newest membership's kind and status), profile (contact details, date of birth, address, emergency contact, medical notes, the guardian block, kit sizes, photo consent), household, memberships, checkins (attendance, newest first), code_of_conduct, and waivers (approval status, template_version, signed_at, has_pdf, approver). A waiver's signer_ip and signer_meta are deliberately left out.",
-        "get_user reports a person, not a lead: an id with no person record is 404 not_found. A read it could only half answer (the address or the code of conduct could not be read) is 500 db_error, never a null email or an `unsigned` it did not actually check.",
+        "get_user reports a person, not a lead: an id with no person record is 404 not_found. A read it could only half answer (the address, the code of conduct, the guardian's name, a class name or a waiver approver's name could not be read) is 500 db_error, never a null email, an `unsigned` or an unknown name it did not actually check.",
         "list_users rows carry phone, email_confirmed_at (null means the address is not verified; for a dependant it is the state of the guardian's address, like email itself) and code_of_conduct: { state: unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name }. The same object get_user and the person page report.",
       ],
     },
@@ -490,7 +500,7 @@ export const AGENT_MANIFEST: {
       name: "get_user",
       method: "POST",
       summary:
-        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at and checkin_count; list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at and approver). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill the address or the code of conduct is 500 db_error rather than a guess.",
+        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at and checkin_count; list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at and approver). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
       params: [
         {
           name: "user_id",
