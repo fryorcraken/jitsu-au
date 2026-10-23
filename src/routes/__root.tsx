@@ -13,7 +13,7 @@ import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { SOCIAL_IMAGE } from "../lib/seo";
+import { SOCIAL_IMAGE, canonicalUrl } from "../lib/seo";
 import { setUpServiceWorker } from "../lib/service-worker";
 import { reportsIdentity, resolveAuthRefresh } from "../lib/auth-events";
 import { clearCacheFor } from "../lib/local-cache";
@@ -115,7 +115,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "UTS Jitsu" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
-      { property: "og:url", content: "https://utsjitsu.com.au/" },
+      { property: "og:url", content: canonicalUrl("/") },
       { name: "twitter:card", content: "summary_large_image" },
       { property: "og:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       { name: "twitter:title", content: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },

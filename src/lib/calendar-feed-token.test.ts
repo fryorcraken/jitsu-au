@@ -45,7 +45,7 @@ describe("feedTokenVerdict", () => {
   // where the new one is.
   it("tells the holder of a replaced link what to do next", () => {
     expect(REPLACED_LINK_MESSAGE).toContain("replaced");
-    expect(REPLACED_LINK_MESSAGE).toContain("/account");
+    expect(REPLACED_LINK_MESSAGE).toContain("utsjitsu.com.au/account");
     // Copy voice: no em dashes (AGENTS.md).
     expect(REPLACED_LINK_MESSAGE).not.toContain("—");
   });

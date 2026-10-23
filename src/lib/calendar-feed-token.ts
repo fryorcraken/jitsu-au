@@ -10,6 +10,8 @@
 // on the site, and minting a fresh one is the only lever a member has if theirs
 // ends up somewhere it should not be. See docs/calendar.md.
 
+import { SITE_HOST } from "@/lib/seo";
+
 /** All the verdict reads off the row the feed route looked up by hash. */
 export type FeedTokenRow = { revoked_at: string | null };
 
@@ -23,8 +25,7 @@ export type FeedTokenVerdict<T> =
  * URL into a browser to find out what happened gets a straight answer, and so
  * does the manager they ask about it.
  */
-export const REPLACED_LINK_MESSAGE =
-  "This calendar link was replaced, so it has stopped updating. Sign in at utsjitsu.com.au/account, copy your new calendar link, and add that one to your calendar app.";
+export const REPLACED_LINK_MESSAGE = `This calendar link was replaced, so it has stopped updating. Sign in at ${SITE_HOST}/account, copy your new calendar link, and add that one to your calendar app.`;
 
 /** Deliberately the same words for "never existed" and "mistyped". */
 export const UNKNOWN_LINK_MESSAGE = "Calendar not found.";

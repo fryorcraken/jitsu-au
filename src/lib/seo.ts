@@ -32,6 +32,9 @@ import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
  */
 export const SITE_ORIGIN = "https://utsjitsu.com.au";
 
+/** The bare host, for copy that names the address a person types ("utsjitsu.com.au/account"). */
+export const SITE_HOST = new URL(SITE_ORIGIN).host;
+
 /**
  * Hosts that serve the real site. Anything else (a Lovable preview, a
  * Cloudflare *.workers.dev URL, a branch deploy) is the same content on a

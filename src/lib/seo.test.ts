@@ -551,6 +551,17 @@ describe("sitemap coverage of the route files", () => {
     }
   });
 
+  // The test above only reaches pages in the sitemap. A noindex page with a
+  // canonical (/waiver, /thank-you, /email-settings) is just as wrong pointing
+  // at a retired host, so every literal in every route file is held to it.
+  it("puts every canonical in the route files on SITE_ORIGIN, noindex pages included", () => {
+    const hrefs = routeFiles.flatMap(({ source }) =>
+      [...source.matchAll(/rel: "canonical", href: "([^"]+)"/g)].map((m) => m[1]),
+    );
+    expect(hrefs.length).toBeGreaterThan(PUBLIC_PAGES.length);
+    for (const href of hrefs) expect(href.startsWith(`${SITE_ORIGIN}/`), href).toBe(true);
+  });
+
   // PUBLIC_NOINDEX_PATHS is the one page list nothing can derive: a noindex
   // page is deliberately absent from the sitemap, and the test above fails if
   // it is added there. The end-to-end tour walks it, so a typo in it would
@@ -587,20 +598,25 @@ describe("sitemap coverage of the route files", () => {
 // `notify.jitsu.au`, calendar UIDs `<id>@jitsu.au`) are not links, so neither
 // pattern below matches them.
 describe("the old domain", () => {
-  const OLD_DOMAIN_LINK = [/https?:\/\/(www\.)?jitsu\.au\b/, /(^|[^\w.@-])jitsu\.au\//];
+  const OLD_DOMAIN_LINK = [/https?:\/\/(www\.)?jitsu\.au\b/, /(^|[^\w.@-])(www\.)?jitsu\.au\//];
 
   function sourceFiles(dir: string): string[] {
     const found: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) found.push(...sourceFiles(path));
-      else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) found.push(path);
+      else if (
+        /\.(tsx?|html|js|webmanifest)$/.test(entry.name) &&
+        !/\.test\.tsx?$/.test(entry.name)
+      )
+        found.push(path);
     }
     return found;
   }
 
-  it("is never linked from the app's source", () => {
-    const offenders = sourceFiles(join(import.meta.dirname, ".."))
+  it("is never linked from the app's source or the files served beside it", () => {
+    const root = join(import.meta.dirname, "..", "..");
+    const offenders = [...sourceFiles(join(root, "src")), ...sourceFiles(join(root, "public"))]
       .flatMap((file) =>
         readFileSync(file, "utf8")
           .split("\n")
@@ -615,6 +631,7 @@ describe("the old domain", () => {
     const caught = (text: string) => OLD_DOMAIN_LINK.some((pattern) => pattern.test(text));
     expect(caught('const SITE_URL = "https://jitsu.au";')).toBe(true);
     expect(caught("Sign in at jitsu.au/account")).toBe(true);
+    expect(caught("Sign in at www.jitsu.au/account")).toBe(true);
     expect(caught("https://utsjitsu.com.au/account")).toBe(false);
     expect(caught("x@dependant.jitsu.au")).toBe(false);
     expect(caught("noreply@notify.jitsu.au")).toBe(false);

@@ -7,6 +7,7 @@ import { MagicLinkEmail } from "@/lib/email-templates/magic-link";
 import { RecoveryEmail } from "@/lib/email-templates/recovery";
 import { EmailChangeEmail } from "@/lib/email-templates/email-change";
 import { ReauthenticationEmail } from "@/lib/email-templates/reauthentication";
+import { SITE_ORIGIN } from "@/lib/seo";
 
 // Templates have heterogeneous prop shapes; a shared prop type doesn't fit cleanly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,7 +29,7 @@ const ROOT_DOMAIN = "utsjitsu.com.au";
 // The sample email uses a fixed placeholder (RFC 6761 .test TLD) so the Go backend
 // can always find-and-replace it with the actual recipient when sending test emails,
 // even if the project's domain has changed since the template was scaffolded.
-const SAMPLE_PROJECT_URL = "https://utsjitsu.com.au";
+const SAMPLE_PROJECT_URL = SITE_ORIGIN;
 const SAMPLE_EMAIL = "user@example.test";
 const SAMPLE_DATA: Record<string, object> = {
   signup: {

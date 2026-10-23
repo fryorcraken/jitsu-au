@@ -35,6 +35,7 @@ import {
   type BlogPostStatus,
 } from "@/lib/validation";
 import { cn } from "@/lib/utils";
+import { SITE_HOST } from "@/lib/seo";
 import { useAuth } from "@/hooks/useAuth";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
@@ -366,7 +367,9 @@ export function BlogPostEditor({
           placeholder="Leave blank to generate one from the title"
           className="mt-1.5"
         />
-        <p className="mt-1 text-xs text-muted-foreground">utsjitsu.com.au/blog/{previewSlug}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {SITE_HOST}/blog/{previewSlug}
+        </p>
       </div>
       <div>
         <Label htmlFor="post-excerpt">Excerpt (shown on the blog list)</Label>
