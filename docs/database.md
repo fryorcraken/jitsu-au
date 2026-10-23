@@ -337,7 +337,9 @@ on 2026-09-01; its column ACLs are checked by the CI replay but have not yet
 been read live), and `check-client-grants.py` reads column and `PUBLIC` grants
 as well as table ones, so a later `GRANT UPDATE (archived_at)` fails CI. And the
 `profiles_guard_archive` trigger, which refuses any change to either column made
-as `anon` or `authenticated` whatever the grants say, for the grant made by hand
+for `anon` or `authenticated` (as the session role, or as the role in the
+request's JWT, which still names the caller inside a `SECURITY DEFINER`
+function) whatever the grants say, for the grant made by hand
 in the Lovable UI that no pull request ever shows
 (`20261023120000_profile_archive.sql`). Why archiving is not erasure:
 `docs/erasing-personal-data.md`.

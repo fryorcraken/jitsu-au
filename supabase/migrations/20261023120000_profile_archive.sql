@@ -39,7 +39,7 @@
 --      request that adds it.
 --   2. The trigger below, for the grant that never reaches a pull request: one
 --      made by hand in the Lovable UI produces no commit, so no CI sees it. It
---      refuses any change to these two columns made as anon or authenticated,
+--      refuses any change to these two columns made for anon or authenticated,
 --      whatever the grants and policies say, so the archive mark stays the
 --      server's to write even on the day the first lock is opened by mistake.
 --      Service-role server functions run as `service_role` and are unaffected.
@@ -70,27 +70,35 @@ COMMENT ON COLUMN public.profiles.archived_at IS
 COMMENT ON COLUMN public.profiles.archived_by IS
   'The manager who archived this person. NULL when not archived, or when that manager''s login has since been deleted (ON DELETE SET NULL).';
 
--- In `private` because nothing but the trigger calls it (docs/database.md,
--- "RLS-only helpers live in `private`"). Firing a trigger does not check
--- EXECUTE on its function, so the REVOKE costs the trigger nothing and leaves
--- the function callable by nobody else.
-CREATE OR REPLACE FUNCTION private.guard_profile_archive()
+-- "Made for anon or authenticated" is read two ways, because each alone has a
+-- hole. `current_user` catches a direct write over PostgREST. Inside a SECURITY
+-- DEFINER function, though, `current_user` is the function's owner, so a future
+-- definer RPC a member may call would slip past it; the role in the request's
+-- JWT is still the caller's there, so that is checked too. A write with no JWT
+-- (a migration, the SQL console, the auth service creating a profile) carries
+-- no claims and falls through to `current_user` alone.
+--
+-- An UPDATE that leaves both columns as they were is allowed, so a member's
+-- own edit to another column of an archived row is unaffected. An INSERT has
+-- nothing to compare against, so any value at all is refused.
+--
+-- In `public`, like `ensure_profile`, with EXECUTE revoked: a function that
+-- returns `trigger` cannot be called as an RPC, firing a trigger does not check
+-- EXECUTE, and `public` is the schema CI's plpgsql_check reads.
+CREATE OR REPLACE FUNCTION public.guard_profile_archive()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = ''
 AS $$
+DECLARE
+  jwt_role text := nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role';
 BEGIN
-  IF current_user NOT IN ('anon', 'authenticated') THEN
-    RETURN NEW;
-  END IF;
-
-  IF TG_OP = 'INSERT' THEN
-    IF NEW.archived_at IS NOT NULL OR NEW.archived_by IS NOT NULL THEN
-      RAISE EXCEPTION 'profiles.archived_at and archived_by are written by the club''s server only'
-        USING ERRCODE = '42501';
-    END IF;
-  ELSIF NEW.archived_at IS DISTINCT FROM OLD.archived_at
-     OR NEW.archived_by IS DISTINCT FROM OLD.archived_by THEN
+  IF (current_user IN ('anon', 'authenticated') OR jwt_role IN ('anon', 'authenticated'))
+     AND (
+       (TG_OP = 'INSERT' AND (NEW.archived_at IS NOT NULL OR NEW.archived_by IS NOT NULL))
+       OR (TG_OP = 'UPDATE' AND (NEW.archived_at IS DISTINCT FROM OLD.archived_at
+                                 OR NEW.archived_by IS DISTINCT FROM OLD.archived_by))
+     ) THEN
     RAISE EXCEPTION 'profiles.archived_at and archived_by are written by the club''s server only'
       USING ERRCODE = '42501';
   END IF;
@@ -99,11 +107,11 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION private.guard_profile_archive() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.guard_profile_archive() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS profiles_guard_archive ON public.profiles;
 CREATE TRIGGER profiles_guard_archive
   BEFORE INSERT OR UPDATE ON public.profiles
-  FOR EACH ROW EXECUTE FUNCTION private.guard_profile_archive();
+  FOR EACH ROW EXECUTE FUNCTION public.guard_profile_archive();
 
 NOTIFY pgrst, 'reload schema';
