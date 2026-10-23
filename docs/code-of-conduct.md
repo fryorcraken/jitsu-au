@@ -31,10 +31,11 @@ and nothing is blocked by its absence.
    changed by pull request; version 1 is that text, byte for byte.)
 3. **A version only asks everybody to read it again when the manager says so.**
    Publishing carries a choice, "Ask everyone to agree again", **off by
-   default** and stored on the version (`asks_reagreement`). The club's
-   **required version** is the newest version, at or below the live one, that
-   asked. Anyone whose highest agreement is older than that shows as out of
-   date, which is a prompt on their account page and a line on their manager
+   default** and stored on the version (`asks_reagreement`). Each version also
+   records, when it is written, its **required version**: itself if it asked,
+   otherwise whatever the live version required at the time. Anyone whose
+   highest agreement is older than the live version's required version shows as
+   out of date, which is a prompt on their account page and a line on their manager
    page, never a warning and never a block. So:
    - a typo fix or a clearer sentence is saved with it off, and nobody is
      re-prompted, although the live version number moves;
@@ -42,7 +43,8 @@ and nothing is blocked by its absence.
      how many people that re-prompts **before** the click, then asks again in a
      confirm;
    - rolling back below a version that asked undoes the ask along with the
-     text.
+     text, and it stays undone: a correction saved after the rollback inherits
+     the rolled-back-to version's requirement, not the abandoned one.
 4. **Nobody types who they are.** The name and email stored on an acceptance are
    read off the person's profile and login by the server. The form collects one
    thing: the typed signature. There is no tick box: the undertaking ("I have

@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 
 const listCodeOfConductVersions = vi.fn();
 const saveCodeOfConduct = vi.fn();
+const setCurrentCodeOfConduct = vi.fn();
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => opts,
@@ -22,7 +23,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: v
 vi.mock("@/lib/code-of-conduct.functions", () => ({
   listCodeOfConductVersions: (...args: unknown[]) => listCodeOfConductVersions(...args),
   saveCodeOfConduct: (...args: unknown[]) => saveCodeOfConduct(...args),
-  setCurrentCodeOfConduct: vi.fn(),
+  setCurrentCodeOfConduct: (...args: unknown[]) => setCurrentCodeOfConduct(...args),
 }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: { id: "manager-1" }, session: null, loading: false }),
@@ -38,6 +39,7 @@ const v1 = {
   title: "UTS Jitsu Code of Conduct",
   body_md: "# UTS Jitsu Code of Conduct\n\n- Bow when stepping onto the mat.",
   asks_reagreement: true,
+  required_version: 1,
   is_current: true,
   created_at: "2026-08-01T00:00:00.000Z",
 };
@@ -45,6 +47,7 @@ const v1 = {
 beforeEach(() => {
   listCodeOfConductVersions.mockReset();
   saveCodeOfConduct.mockReset();
+  setCurrentCodeOfConduct.mockReset();
   window.localStorage.clear();
 });
 
@@ -125,5 +128,51 @@ describe("manager code of conduct editor", () => {
 
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(saveCodeOfConduct.mock.calls[0][0].data).toMatchObject({ asks_reagreement: false });
+  });
+
+  // A club with nothing stored has nothing to compare against: what is typed
+  // is the first version, and it has to be savable.
+  it("lets the first version be written and saved when there is none", async () => {
+    listCodeOfConductVersions.mockResolvedValue({ versions: [], highest_accepted: [] });
+    saveCodeOfConduct.mockResolvedValue({
+      ok: true,
+      id: "v1",
+      version: 1,
+      is_current: true,
+      already_saved: false,
+    });
+    render(<EditorPage />);
+    expect(await screen.findByText(/there is no version yet/i)).toBeInTheDocument();
+    const save = screen.getByRole("button", { name: /save and publish/i });
+    expect(save).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/^title$/i), "House rules");
+    await userEvent.type(screen.getByLabelText(/^text$/i), "Be kind.");
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    expect(saveCodeOfConduct).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a failed rollback on screen, with a retry, rather than in a toast", async () => {
+    const v2 = { ...v1, id: "v2", version: 2, asks_reagreement: false, body_md: "# Fixed" };
+    listCodeOfConductVersions.mockResolvedValue({
+      versions: [v2, { ...v1, is_current: false }],
+      highest_accepted: [1],
+    });
+    setCurrentCodeOfConduct.mockRejectedValue(
+      new Error("The club is now left with no live code of conduct."),
+    );
+    render(<EditorPage />);
+    await screen.findByDisplayValue("# Fixed");
+
+    await userEvent.click(screen.getByRole("button", { name: /version 1/i }));
+    await userEvent.click(screen.getByRole("button", { name: /make version 1 live/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Nobody is asked to agree again.");
+    await userEvent.click(within(dialog).getByRole("button", { name: /make it live/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("no live code of conduct");
+    expect(within(alert).getByRole("button", { name: /try again/i })).toBeInTheDocument();
   });
 });

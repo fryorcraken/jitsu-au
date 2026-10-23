@@ -1,6 +1,7 @@
 // What is true of every document the club keeps in numbered versions, one of
-// them live: the waiver people sign, the code of conduct members agree to, and
-// the knowledge base's articles.
+// them live: the waiver people sign and the code of conduct members agree to.
+// The knowledge base's articles borrow the version label too, though they keep
+// their own per-article promotion (`kb-admin.ts`).
 //
 // Each of those has rules of its own (the waiver's acknowledgements, the code
 // of conduct's re-agreement choice), which stay in their own modules. What is

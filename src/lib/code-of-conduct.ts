@@ -155,10 +155,16 @@ export function parseCodeOfConductSpans(line: string): CodeOfConductSpan[] {
  */
 export type CodeOfConductState = "unsigned" | "signed" | "outdated";
 
-/** What the state is measured against: one fact per stored version. */
+/** What the state is measured against: these facts of each stored version. */
 export type CodeOfConductVersionFlags = {
   version: number;
   asks_reagreement: boolean;
+  /**
+   * The version anybody must have agreed to while this one is live: itself
+   * when it asked, otherwise what the live version required when it was saved.
+   * Fixed when the version is written (see `requiredVersionForSave`).
+   */
+  required_version: number;
   is_current: boolean;
 };
 
@@ -166,15 +172,16 @@ export type CodeOfConductVersionFlags = {
  * What the club currently asks of everybody.
  *
  * `current_version` is the live one: what the public page shows and what a
- * signature today agrees to. `required_version` is the newest version, at or
- * below the live one, whose publishing asked everybody to agree again. Anyone
- * whose highest agreement is at least that is up to date, whatever has been
- * published since: a typo fix (published without asking) moves the live
- * version and leaves everybody exactly where they were.
+ * signature today agrees to. `required_version` is what the live version
+ * requires. Anyone whose highest agreement is at least that is up to date: a
+ * typo fix (saved without asking) moves the live version and leaves everybody
+ * exactly where they were.
  *
- * "At or below the live one", so a rollback undoes the ask along with the
- * text. Rolling back from a rewritten version 5 that asked, to version 4, must
- * not leave the club asking people to agree to rules it no longer has.
+ * Read off the live row rather than worked out from the history, so a rollback
+ * undoes an ask for good. Rolling back from a rewritten version 5 that asked, to
+ * version 4, and then saving a typo fix as version 6, must not leave the club
+ * asking people to agree to the rules it rolled away from; "the newest version
+ * that asked" would, as soon as 6 passed 5.
  */
 export type CodeOfConductStandard = {
   current_version: number | null;
@@ -184,13 +191,24 @@ export type CodeOfConductStandard = {
 export function codeOfConductStandard(
   versions: readonly CodeOfConductVersionFlags[],
 ): CodeOfConductStandard {
-  const current = versions.find((v) => v.is_current)?.version ?? null;
-  if (current === null) return { current_version: null, required_version: null };
-  const asking = versions.filter((v) => v.asks_reagreement && v.version <= current);
-  return {
-    current_version: current,
-    required_version: asking.length ? Math.max(...asking.map((v) => v.version)) : null,
-  };
+  const live = versions.find((v) => v.is_current);
+  return live
+    ? { current_version: live.version, required_version: live.required_version }
+    : { current_version: null, required_version: null };
+}
+
+/**
+ * What a version about to be saved as `version` will require: itself when it
+ * asks everybody to agree again, otherwise whatever is required now. With
+ * nothing live there is nothing to inherit, so it is the baseline: itself.
+ */
+export function requiredVersionForSave(
+  version: number,
+  asksReagreement: boolean,
+  now: CodeOfConductStandard,
+): number {
+  if (asksReagreement || now.required_version === null) return version;
+  return now.required_version;
 }
 
 /**
@@ -285,22 +303,25 @@ export function countReprompted(
 }
 
 /**
- * The standard if a new version were saved now and made live. It gets the next
- * number, so if it asks it becomes the required version, and if it does not the
- * required version stays where it is.
+ * The standard if a new version were saved now and made live: the next number,
+ * requiring what `requiredVersionForSave` says it will.
  */
 export function standardAfterSaving(
   versions: readonly CodeOfConductVersionFlags[],
   asksReagreement: boolean,
 ): CodeOfConductStandard {
   const next = versions.reduce((n, v) => Math.max(n, v.version), 0) + 1;
-  return codeOfConductStandard([
-    ...versions.map((v) => ({ ...v, is_current: false })),
-    { version: next, asks_reagreement: asksReagreement, is_current: true },
-  ]);
+  return {
+    current_version: next,
+    required_version: requiredVersionForSave(
+      next,
+      asksReagreement,
+      codeOfConductStandard(versions),
+    ),
+  };
 }
 
-/** The standard if an existing version were made live instead. */
+/** The standard if an existing version were made live instead: what it requires. */
 export function standardAfterPublishing(
   versions: readonly CodeOfConductVersionFlags[],
   version: number,

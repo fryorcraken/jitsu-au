@@ -116,7 +116,9 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
       .limit(20),
     // What the club currently asks of everybody, which the state is measured
     // against (`codeOfConductStandard`). One small row per published version.
-    admin.from("code_of_conduct_versions").select("version, asks_reagreement, is_current"),
+    admin
+      .from("code_of_conduct_versions")
+      .select("version, asks_reagreement, required_version, is_current"),
     // The people on THIS person's account. Read here rather than after the
     // profile comes back because it is keyed on the id we were asked about,
     // not on anything the profile tells us -- so it costs no extra round trip.

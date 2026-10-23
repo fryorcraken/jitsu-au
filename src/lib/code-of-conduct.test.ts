@@ -5,6 +5,7 @@ import {
   codeOfConductState,
   codeOfConductSummary,
   countReprompted,
+  requiredVersionForSave,
   isSignableVersion,
   latestAcceptedVersion,
   parseCodeOfConductBlocks,
@@ -145,14 +146,15 @@ describe("isSignableVersion", () => {
 });
 
 describe("codeOfConductStandard", () => {
-  const v = (version: number, asks_reagreement: boolean, is_current = false) => ({
+  const v = (version: number, required_version: number, is_current = false) => ({
     version,
-    asks_reagreement,
+    asks_reagreement: required_version === version,
+    required_version,
     is_current,
   });
 
-  it("requires the newest version that asked, at or below the live one", () => {
-    expect(codeOfConductStandard([v(1, true), v(2, false), v(3, true, true)])).toEqual({
+  it("requires what the live version requires", () => {
+    expect(codeOfConductStandard([v(1, 1), v(2, 1), v(3, 3, true)])).toEqual({
       current_version: 3,
       required_version: 3,
     });
@@ -161,35 +163,45 @@ describe("codeOfConductStandard", () => {
   // The whole point of the choice: fixing a typo publishes a new version
   // without moving what anybody has to have agreed to.
   it("does not move the requirement for a version published without asking", () => {
-    expect(codeOfConductStandard([v(1, true), v(2, false, true)])).toEqual({
-      current_version: 2,
-      required_version: 1,
-    });
-  });
-
-  // A rollback undoes the ask along with the text.
-  it("ignores an ask on a version newer than the live one", () => {
-    expect(codeOfConductStandard([v(1, true), v(2, false, true), v(3, true)])).toEqual({
+    expect(codeOfConductStandard([v(1, 1), v(2, 1, true)])).toEqual({
       current_version: 2,
       required_version: 1,
     });
   });
 
   it("has nothing to measure against when nothing is live", () => {
-    expect(codeOfConductStandard([v(1, true)])).toEqual({
+    expect(codeOfConductStandard([v(1, 1)])).toEqual({
       current_version: null,
       required_version: null,
     });
   });
 });
 
+describe("requiredVersionForSave", () => {
+  const now = { current_version: 4, required_version: 2 };
+
+  it("requires itself when it asks", () => {
+    expect(requiredVersionForSave(5, true, now)).toBe(5);
+  });
+
+  it("keeps what is required now when it does not", () => {
+    expect(requiredVersionForSave(5, false, now)).toBe(2);
+  });
+
+  it("is the baseline when nothing is live to inherit from", () => {
+    expect(
+      requiredVersionForSave(1, false, { current_version: null, required_version: null }),
+    ).toBe(1);
+  });
+});
+
 describe("what a publish does to people", () => {
   const versions = [
-    { version: 1, asks_reagreement: true, is_current: false },
-    { version: 2, asks_reagreement: false, is_current: true },
+    { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+    { version: 2, asks_reagreement: false, required_version: 1, is_current: true },
   ];
   const now = codeOfConductStandard(versions);
-  // Three people agreed to 1, one to 2, and nobody else agreed to anything.
+  // Three people agreed to 1, one to 2.
   const highest = [1, 1, 1, 2];
 
   it("re-prompts nobody for a version saved without asking", () => {
@@ -204,8 +216,8 @@ describe("what a publish does to people", () => {
 
   it("does not count somebody who was already out of date", () => {
     const asked = [
-      { version: 1, asks_reagreement: true, is_current: false },
-      { version: 2, asks_reagreement: true, is_current: true },
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+      { version: 2, asks_reagreement: true, required_version: 2, is_current: true },
     ];
     const before = codeOfConductStandard(asked);
     expect(countReprompted([1, 2], before, standardAfterSaving(asked, true))).toBe(1);
@@ -213,13 +225,27 @@ describe("what a publish does to people", () => {
 
   it("re-prompts nobody when rolling back below the ask", () => {
     const asked = [
-      { version: 1, asks_reagreement: true, is_current: false },
-      { version: 2, asks_reagreement: true, is_current: true },
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+      { version: 2, asks_reagreement: true, required_version: 2, is_current: true },
     ];
     const before = codeOfConductStandard(asked);
     const after = standardAfterPublishing(asked, 1);
     expect(after).toEqual({ current_version: 1, required_version: 1 });
     expect(countReprompted([1, 2], before, after)).toBe(0);
+  });
+
+  // The failure a rule derived from "the newest version that asked" had: roll
+  // back from a rewrite that asked, save a typo fix, and the rolled-back ask
+  // came back the moment the typo fix's number passed it.
+  it("keeps a rolled-back ask undone when a correction is saved afterwards", () => {
+    const rolledBack = [
+      { version: 4, asks_reagreement: false, required_version: 1, is_current: true },
+      { version: 5, asks_reagreement: true, required_version: 5, is_current: false },
+    ];
+    const before = codeOfConductStandard(rolledBack);
+    const after = standardAfterSaving(rolledBack, false);
+    expect(after).toEqual({ current_version: 6, required_version: 1 });
+    expect(countReprompted([1, 4], before, after)).toBe(0);
   });
 });
 

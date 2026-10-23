@@ -54,13 +54,6 @@ import {
   promoteDocumentVersion,
   type VersionedDocument,
 } from "@/lib/document-version-store";
-
-/** The waiver, as the shared version store talks about it. */
-const WAIVER_DOCUMENT: VersionedDocument = {
-  table: "waiver_templates",
-  noun: "waiver",
-  withoutOne: "nobody can sign",
-};
 import type { DuplicateWaiverRef } from "@/lib/waiver-duplicates";
 import { userIdByEmail } from "@/lib/supabase-rpc";
 import { resolveWaiverContacts } from "@/lib/waiver-contacts";
@@ -74,6 +67,13 @@ import {
   resolveSubject,
 } from "@/lib/household";
 import { isManager } from "@/lib/require-manager";
+
+/** The waiver, as the shared version store talks about it. */
+const WAIVER_DOCUMENT: VersionedDocument = {
+  table: "waiver_templates",
+  noun: "waiver",
+  withoutOne: "nobody can sign",
+};
 
 const BUCKET = "waivers";
 const CLUB_NAME = "UTS Jitsu";

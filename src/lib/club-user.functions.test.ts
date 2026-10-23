@@ -459,8 +459,8 @@ function baseTables(over: Record<string, Row[]> = {}): Record<string, Row[]> {
     code_of_conduct_acceptances: [],
     // Version 1 asked everybody (it is the first); version 2 is a typo fix.
     code_of_conduct_versions: [
-      { version: 1, asks_reagreement: true, is_current: false },
-      { version: 2, asks_reagreement: false, is_current: true },
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+      { version: 2, asks_reagreement: false, required_version: 1, is_current: true },
     ],
     ...over,
   };
@@ -579,9 +579,9 @@ describe("loadClubUser", () => {
         baseTables({
           code_of_conduct_acceptances: signedV1,
           code_of_conduct_versions: [
-            { version: 1, asks_reagreement: true, is_current: false },
-            { version: 2, asks_reagreement: false, is_current: false },
-            { version: 3, asks_reagreement: true, is_current: true },
+            { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+            { version: 2, asks_reagreement: false, required_version: 1, is_current: false },
+            { version: 3, asks_reagreement: true, required_version: 3, is_current: true },
           ],
         }),
         { emails: [ADA_EMAIL] },

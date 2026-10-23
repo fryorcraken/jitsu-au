@@ -81,11 +81,11 @@ import {
   codeOfConductStandard,
   codeOfConductSummary,
   countReprompted,
-  standardAfterPublishing,
   standardAfterSaving,
 } from "@/lib/code-of-conduct";
 import {
   highestAcceptedVersions,
+  listCodeOfConductVersionFlags,
   listCodeOfConductVersionRows,
   loadCodeOfConductStandard,
   loadCodeOfConductVersion,
@@ -494,37 +494,43 @@ async function handleListUsers(params: unknown) {
   // unlimited, so a capped read could drop somebody's only agreement and report
   // them as unsigned. Ordered by id so the pages cannot overlap or skip.
   const ids = capped.map((u) => u.user_id).filter((id): id is string => Boolean(id));
-  // What the state is measured against: the live version and the newest one
-  // at or below it that asked everybody to agree again.
-  let standard: Awaited<ReturnType<typeof loadCodeOfConductStandard>>;
-  try {
-    standard = await loadCodeOfConductStandard(db);
-  } catch (e) {
-    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
-  }
-  const acceptances: {
-    user_id: string;
-    version: number;
-    accepted_at: string;
-    signature_name: string;
-  }[] = [];
-  const ACCEPTANCES_PAGE = 1000;
-  for (let from = 0; ids.length; from += ACCEPTANCES_PAGE) {
-    const { data, error: cocErr } = await db
-      .from("code_of_conduct_acceptances")
-      .select("user_id, version, accepted_at, signature_name")
-      .in("user_id", ids)
-      .order("id", { ascending: true })
-      .range(from, from + ACCEPTANCES_PAGE - 1);
-    // Not degraded to "unsigned" the way the person page degrades it: that page
-    // has a manager reading it and a server log behind it, and an agent has
-    // neither. `unsigned` for a person who signed is a confident wrong answer.
-    if (cocErr) throw new AgentError(500, "db_error", cocErr.message);
-    acceptances.push(...(data ?? []));
-    if (!data || data.length < ACCEPTANCES_PAGE) break;
-  }
-  // Newest first, which is the order `codeOfConductSummary` reads them in.
-  acceptances.sort((a, b) => Date.parse(b.accepted_at) - Date.parse(a.accepted_at));
+  const readAcceptances = async () => {
+    const rows: {
+      user_id: string;
+      version: number;
+      accepted_at: string;
+      signature_name: string;
+    }[] = [];
+    const ACCEPTANCES_PAGE = 1000;
+    for (let from = 0; ids.length; from += ACCEPTANCES_PAGE) {
+      const { data, error: cocErr } = await db
+        .from("code_of_conduct_acceptances")
+        .select("user_id, version, accepted_at, signature_name")
+        .in("user_id", ids)
+        .order("id", { ascending: true })
+        .range(from, from + ACCEPTANCES_PAGE - 1);
+      // Not degraded to "unsigned" the way the person page degrades it: that
+      // page has a manager reading it and a server log behind it, and an agent
+      // has neither. `unsigned` for a person who signed is a confident wrong
+      // answer.
+      if (cocErr) throw new AgentError(500, "db_error", cocErr.message);
+      rows.push(...(data ?? []));
+      if (!data || data.length < ACCEPTANCES_PAGE) break;
+    }
+    // Newest first, which is the order `codeOfConductSummary` reads them in.
+    return rows.sort((a, b) => Date.parse(b.accepted_at) - Date.parse(a.accepted_at));
+  };
+  // What the state is measured against: the live version, and the version it
+  // requires people to have agreed to. Read alongside the acceptances.
+  const [standardRead, acceptances] = await Promise.all([
+    loadCodeOfConductStandard(db).then(
+      (standard) => ({ standard, error: null }),
+      (e: unknown) => ({ standard: null, error: e instanceof Error ? e.message : String(e) }),
+    ),
+    readAcceptances(),
+  ]);
+  if (!standardRead.standard) throw new AgentError(500, "db_error", standardRead.error ?? "");
+  const standard = standardRead.standard;
   const acceptancesByUser = new Map<
     string,
     { version: number; accepted_at: string; signature_name: string }[]
@@ -1391,7 +1397,7 @@ async function handleSaveCodeOfConduct(params: unknown, actingAs: string) {
   if (input.asks_reagreement) {
     try {
       const [versions, highest] = await Promise.all([
-        listCodeOfConductVersionRows(db),
+        listCodeOfConductVersionFlags(db),
         highestAcceptedVersions(db),
       ]);
       reprompted = countReprompted(
@@ -1434,8 +1440,7 @@ async function handleSaveCodeOfConduct(params: unknown, actingAs: string) {
 async function handlePublishCodeOfConduct(params: unknown) {
   const input = agentPublishCodeOfConductSchema.parse(params);
   const db = await adminClient();
-  const versions = await listCodeOfConductVersionRows(db);
-  const target = versions.find((v) => v.version === input.version);
+  const target = await loadCodeOfConductVersion(db, input.version);
   if (!target) {
     throw new AgentError(404, "not_found", `No code of conduct version ${input.version}.`);
   }
@@ -1449,7 +1454,7 @@ async function handlePublishCodeOfConduct(params: unknown) {
       published: true as const,
       // Who is now out of date is decided by this, so a rollback that undoes an
       // ask says so here.
-      required_version: standardAfterPublishing(versions, version).required_version,
+      required_version: target.required_version,
     };
   } catch (e) {
     throw templateFailure(e, "publish_code_of_conduct_failed", "code_of_conduct_not_published");

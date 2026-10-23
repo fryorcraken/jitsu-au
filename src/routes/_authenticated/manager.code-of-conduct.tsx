@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
+import { SaveFailure } from "@/components/site/SaveFailure";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
 import { CodeOfConductDocument } from "@/components/site/CodeOfConductDocument";
 import { describeLoadError } from "@/lib/load-error";
@@ -87,6 +88,10 @@ function EditorPage() {
   // empty form would publish an empty code of conduct.
   const [loadError, setLoadError] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
+  // A failed "make live" stays on screen with its retry. It can be the one
+  // message that says the club has no live code of conduct at all, which is
+  // not something to leave to a toast that fades in four seconds.
+  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   const selected = versions.find((v) => v.id === selectedId) ?? null;
   const live = versions.find((v) => v.is_current) ?? null;
@@ -134,7 +139,11 @@ function EditorPage() {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  const textChanged = selected ? title !== selected.title || body !== selected.body_md : false;
+  // With nothing stored at all there is nothing to compare against, and what
+  // is typed is the first version.
+  const textChanged = selected
+    ? title !== selected.title || body !== selected.body_md
+    : Boolean(title.trim() || body.trim());
 
   // What a save or a rollback would do to people, in numbers, before the click.
   const flags = useMemo(
@@ -142,6 +151,7 @@ function EditorPage() {
       versions.map((v) => ({
         version: v.version,
         asks_reagreement: v.asks_reagreement,
+        required_version: v.required_version,
         is_current: v.is_current,
       })),
     [versions],
@@ -167,7 +177,9 @@ function EditorPage() {
     value: draftValue,
     baseline: draftBaseline,
     shape: DRAFT_SHAPE,
-    enabled: Boolean(selected),
+    // Held back until a version is open, so an offer is measured against it,
+    // or kept for the first version when there is none to open.
+    enabled: Boolean(selected) || (!loading && !loadError && versions.length === 0),
   });
 
   function restoreDraft() {
@@ -187,6 +199,7 @@ function EditorPage() {
 
   async function selectVersion(version: Version) {
     if (version.id === selectedId) return;
+    setPromoteError(null);
     if (textChanged && !(await confirm(discardUnsavedChanges("Opening another version")))) return;
     open(version);
   }
@@ -257,13 +270,20 @@ function EditorPage() {
       confirmLabel: "Make it live",
     });
     if (!ok) return;
+    await makeLive(selected);
+  }
+
+  async function makeLive(version: Version) {
     setPromoting(true);
+    setPromoteError(null);
     try {
-      await promote({ data: { id: selected.id } });
-      setVersions((prev) => prev.map((v) => ({ ...v, is_current: v.id === selected.id })));
-      toast.success(`Version ${selected.version} is now live`);
+      await promote({ data: { id: version.id } });
+      setVersions((prev) => prev.map((v) => ({ ...v, is_current: v.id === version.id })));
+      toast.success(`Version ${version.version} is now live`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not change the live version");
+      setPromoteError(
+        e instanceof Error && e.message ? e.message : "Could not change the live version.",
+      );
     } finally {
       setPromoting(false);
     }
@@ -428,6 +448,15 @@ function EditorPage() {
                     </span>
                   </button>
                 ))}
+                {promoteError && selected && (
+                  <SaveFailure
+                    what={`change to version ${selected.version}`}
+                    message={promoteError}
+                    retrying={promoting}
+                    onRetry={() => void makeLive(selected)}
+                    keptOnDevice={false}
+                  />
+                )}
                 {selected && !selected.is_current && (
                   <Button
                     type="button"

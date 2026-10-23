@@ -12,10 +12,18 @@
 -- is computed from it, so if every save re-prompted everybody a typo fix would
 -- ask the whole club to agree again. So each version records whether publishing
 -- it asked everyone to agree again (`asks_reagreement`, chosen by the manager,
--- off by default). A person is out of date only when the highest version they
--- agreed to is older than the newest version, at or below the live one, that
--- asked. Every save still gets its own number, so an acceptance's number keeps
--- naming the exact text that person read.
+-- off by default), and, fixed at the moment it is written, which version people
+-- must have agreed to while it is live (`required_version`): itself when it
+-- asked, otherwise whatever the live version required when it was saved. A
+-- person is out of date only when the highest version they agreed to is below
+-- the live version's `required_version`.
+--
+-- Stored rather than derived from the history on purpose. Rolling back from a
+-- rewrite that asked, then saving a typo fix, must not bring the rolled-back
+-- ask back; a rule computed from "the newest version that asked" would, the
+-- moment the typo fix's number passed the rewrite's. Every save still gets its
+-- own number, so an acceptance's number keeps naming the exact text that
+-- person read.
 --
 -- CLOSED to the client roles, unlike `waiver_templates`. The public
 -- /code-of-conduct page reads the live version through a server function on the
@@ -40,6 +48,9 @@ CREATE TABLE IF NOT EXISTS public.code_of_conduct_versions (
   -- Whether publishing this version asked everybody to agree again. Fixed when
   -- the version is written: a rollback publishes a version as it was.
   asks_reagreement BOOLEAN NOT NULL DEFAULT false,
+  -- The version anybody must have agreed to while this one is live. Itself
+  -- when it asked; otherwise inherited from the version live when it was saved.
+  required_version INTEGER NOT NULL,
   is_current BOOLEAN NOT NULL DEFAULT false,
   -- One per editor save, resent unchanged on every retry, so a save whose reply
   -- was lost finds the version it already wrote instead of writing a second.
@@ -50,7 +61,13 @@ CREATE TABLE IF NOT EXISTS public.code_of_conduct_versions (
   -- The same bounds as the editor and the agent API, so a write through either
   -- cannot store what the other would refuse.
   CONSTRAINT code_of_conduct_versions_title_length CHECK (char_length(btrim(title)) BETWEEN 1 AND 200),
-  CONSTRAINT code_of_conduct_versions_body_length CHECK (char_length(btrim(body_md)) BETWEEN 1 AND 50000)
+  CONSTRAINT code_of_conduct_versions_body_length CHECK (char_length(btrim(body_md)) BETWEEN 1 AND 50000),
+  -- Nobody can be asked to have agreed to a version newer than the one shown,
+  -- and a version that asked requires exactly itself.
+  CONSTRAINT code_of_conduct_versions_required_version CHECK (
+    required_version BETWEEN 1 AND version
+    AND (NOT asks_reagreement OR required_version = version)
+  )
 );
 
 -- Exactly one live version, the same partial unique index waiver_templates has.
@@ -65,15 +82,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS code_of_conduct_versions_client_submission_id_
 COMMENT ON TABLE public.code_of_conduct_versions IS
   'The club code of conduct, one row per saved version, exactly one live. '
   'code_of_conduct_acceptances.version names a row here. asks_reagreement marks '
-  'the versions that put everybody who agreed to an older one out of date.';
+  'the versions that put everybody who agreed to an older one out of date; '
+  'required_version is the version anybody must have agreed to while this one is live.';
 
 -- ---------- version 1: the text members have already agreed to ----------
 --
 -- Dollar-quoted so the text goes in exactly as written, apostrophes and line
 -- breaks included. ON CONFLICT so a replay is a no-op rather than an error.
--- It asks for agreement because it is the first: there is nothing older.
+-- It asks for agreement, and so requires itself, because it is the first:
+-- there is nothing older.
 
-INSERT INTO public.code_of_conduct_versions (version, title, body_md, asks_reagreement, is_current)
+INSERT INTO public.code_of_conduct_versions (version, title, body_md, asks_reagreement, required_version, is_current)
 VALUES (
   1,
   $coc$UTS Jitsu Code of Conduct$coc$,
@@ -156,6 +175,7 @@ Gradings:
 - Matters involving criminal conduct or child safety are referred to the relevant authorities.
 $coc$,
   true,
+  1,
   true
 )
 ON CONFLICT (version) DO NOTHING;
